@@ -18,6 +18,7 @@ def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, is_promp
     value_cache: [num_heads, head_size, block_size] * num_blocks
     slot_mapping: [num_tokens]
     """
+    htorch.hpu.synchronize()
     num_tokens = key.shape[0]
     block_size = key_cache.shape[-1]
     slot_mapping = slot_mapping.to(key.device)
