@@ -18,27 +18,26 @@ def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, is_promp
     value_cache: [num_heads, head_size, block_size] * num_blocks
     slot_mapping: [num_tokens]
     """
-    num_tokens = key.shape[0]
-    block_size = key_cache.shape[-1]
-    slot_mapping = slot_mapping.to(key.device)
+    block_size = key_cache.size(-1)
     block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-    if is_prompt:
-        for i in range(0, num_tokens, block_size):
-            key_cache.index_put_([block_indices[i]], key[i:i+block_size].transpose(0,1).transpose(1,2))
-            value_cache.index_put_([block_indices[i]], value[i:i+block_size].transpose(0,1).transpose(1,2))
-    else:
-        key_cache = key_cache.permute(0, 3, 1, 2)
-        value_cache = value_cache.permute(0, 3, 1, 2)
-        block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        block_offsets = torch.fmod(slot_mapping, block_size)
-        slot_indices = torch.stack([block_indices, block_offsets], dim=-1)
-        index = torch.tensor(0, device=key.device)
-        for i in range(num_tokens):
-            key_cache[slot_indices[i][0], slot_indices[i][1], :, :] = key[i]
-            value_cache[slot_indices[i][0], slot_indices[i][1], :, :] = value[i]
-            index.add_(1)
-        key_cache = key_cache.permute(0, 2, 3, 1)
-        value_cache = value_cache.permute(0, 2, 3, 1)
+    block_offsets = torch.fmod(slot_mapping, block_size)
+    MAX_SLOTS_IN_GRAPH = 16
+    slots_in_graph = 0
+
+    for idx, offset, k, v in zip(block_indices, block_offsets, key, value):
+        tmp_key = key_cache.index_select(0, idx)
+        tmp_key.index_copy_(-1, offset, k.view(1, *k.shape, 1))
+        key_cache.index_copy_(0, idx, tmp_key)
+
+        tmp_value = value_cache.index_select(0, idx)
+        tmp_value.index_copy_(-1, offset, v.view(1, *v.shape, 1))
+        value_cache.index_copy_(0, idx, tmp_value)
+
+        slots_in_graph += 1
+        if slots_in_graph % MAX_SLOTS_IN_GRAPH == 0:
+            htorch.core.mark_step()
+
+    htorch.core.mark_step()
 
 
 def swap_blocks(src, dst, block_mapping):
