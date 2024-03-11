@@ -10,34 +10,48 @@ import torch
 import habana_frameworks.torch as htorch
 
 
+def pad_to_full_block(data, block_size, pad_value):
+    seq_dim = 1
+    pad_shape = list(data.shape)
+    remainder = pad_shape[seq_dim] % block_size
+    if remainder == 0:
+        return data
+    pad_shape[seq_dim] = block_size - remainder
+    pad = torch.full(pad_shape, pad_value, dtype=data.dtype, device=data.device)
+    return torch.cat([data, pad], dim=seq_dim)
+
+
+def initialize_cache(data, indices, cache):
+    block_size = cache.size(-1)
+    data = data.unflatten(0, (-1, block_size)).permute(0, 2, 3, 1)
+    indices = indices.unflatten(0, (-1, block_size))[:,0]
+    cache.index_copy_(0, indices, data)
+
+
+def update_cache(data, indices, offsets, cache):
+    prev = cache.index_select(0, indices)
+    idx = offsets.view(-1, 1, 1, 1).expand(-1, data.size(1), data.size(2), -1)
+    prev.scatter_(-1, idx, data.unsqueeze(-1))
+    cache.index_copy_(0, indices, prev)
+
+
 def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, is_prompt=False):
-    """
-    key: [num_tokens, num_heads, head_size]
-    value: [num_tokens, num_heads, head_size]
-    key_cache: [num_heads, head_size, block_size] * num_blocks
-    value_cache: [num_heads, head_size, block_size] * num_blocks
-    slot_mapping: [num_tokens]
-    """
     block_size = key_cache.size(-1)
-    block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-    block_offsets = torch.fmod(slot_mapping, block_size)
-    MAX_SLOTS_IN_GRAPH = 16
-    slots_in_graph = 0
 
-    for idx, offset, k, v in zip(block_indices, block_offsets, key, value):
-        tmp_key = key_cache.index_select(0, idx)
-        tmp_key.index_copy_(-1, offset, k.view(1, *k.shape, 1))
-        key_cache.index_copy_(0, idx, tmp_key)
-
-        tmp_value = value_cache.index_select(0, idx)
-        tmp_value.index_copy_(-1, offset, v.view(1, *v.shape, 1))
-        value_cache.index_copy_(0, idx, tmp_value)
-
-        slots_in_graph += 1
-        if slots_in_graph % MAX_SLOTS_IN_GRAPH == 0:
-            htorch.core.mark_step()
-
-    htorch.core.mark_step()
+    if is_prompt:
+        block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+        batch_size, seq_length = block_indices.shape
+        key = pad_to_full_block(key.unflatten(0, (batch_size, seq_length)), block_size, 0).flatten(0, 1)
+        value = pad_to_full_block(value.unflatten(0, (batch_size, seq_length)), block_size, 0).flatten(0, 1)
+        block_indices = pad_to_full_block(block_indices, block_size, -1).flatten(0, 1)
+        initialize_cache(key, block_indices, key_cache)
+        initialize_cache(value, block_indices, value_cache)
+    else:
+        slot_mapping = slot_mapping.flatten()
+        block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+        block_offsets = torch.fmod(slot_mapping, block_size)
+        update_cache(key, block_indices, block_offsets, key_cache)
+        update_cache(value, block_indices, block_offsets, value_cache)
 
 
 def swap_blocks(src, dst, block_mapping):

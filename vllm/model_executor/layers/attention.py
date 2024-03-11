@@ -103,7 +103,8 @@ class PagedAttention(nn.Module):
                 value,
                 key_cache,
                 value_cache,
-                input_metadata.slot_mapping.flatten(),
+                input_metadata.slot_mapping,
+                input_metadata.is_prompt
             )
 
         if input_metadata.is_prompt:
