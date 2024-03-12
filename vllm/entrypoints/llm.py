@@ -12,6 +12,9 @@ from vllm.utils import is_hpu
 
 import torch
 
+if is_hpu():
+    import habana_frameworks.torch as htorch
+
 
 class LLM:
     """An LLM for generating texts from given prompts and sampling parameters.
@@ -211,7 +214,6 @@ class LLM:
                 prof.step()
         if profiling:
             if is_hpu():
-                import habana_frameworks.torch as htorch
                 htorch.hpu.synchronize()
             prof.stop()
         if use_tqdm:
