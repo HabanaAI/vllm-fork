@@ -30,19 +30,7 @@ def gelu_fast(output, input):
 
 
 def fetch_from_cache(cache, blocks):
-    _, seq_len = blocks.shape
-    return torch.cat([cache.index_select(0, blocks[:, i]) for i in range(seq_len)], dim=-1)
-
-
-def scaled_dot_product_attention(query, key, value, scale, mask):
-    bs = query.size(0)
-    min_inf = torch.finfo(query.dtype).min
-    value.masked_fill_(mask, min_inf)
-    return (torch.matmul(query, key)
-            .mul_(scale)
-            .masked_fill_(mask, min_inf)
-            .softmax(dim=-1)
-            .matmul(value.transpose(-1, -2)))
+    return [cache.index_select(0, blocks[:, i]) for i in range(blocks.size(1))]
 
 
 @hpu_utils.with_mark_steps
@@ -52,29 +40,36 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
     if attn_masks is not None:
         raise NotImplementedError
 
-    key = fetch_from_cache(key_cache, block_tables)
-    value = fetch_from_cache(value_cache, block_tables)
-    query = query.unsqueeze(-2)
-    batch_size, query_heads, head_dim, _ = query.shape
-    _, kv_heads, _, seq_len = key.shape
-
-    mask = (torch.arange(0, seq_len, dtype=torch.int32, device=key.device)
+    seq_len = block_tables.size(1)
+    batch_size, query_heads, _ = query.shape
+    _, kv_heads, _, _ = key_cache.shape
+    min_inf = torch.finfo(query.dtype).min
+    mask = (torch.arange(0, seq_len * block_size, dtype=torch.int32, device=key_cache.device)
             .view(1, -1)
-            .expand(batch_size, seq_len)
+            .expand(batch_size, -1)
             .ge(context_lens.view(-1, 1))
             .view(batch_size, 1, 1, -1))
-
+    query = query.unsqueeze(-2)
+    keys = fetch_from_cache(key_cache, block_tables)
     if query_heads != kv_heads:
-        attn_weights = scaled_dot_product_attention(
-            query.unflatten(1, (kv_heads, -1)),
-            key.unsqueeze(2),
-            value.unsqueeze(2),
-            scale,
-            mask.unsqueeze(2))
+        query = query.unflatten(1, (kv_heads, -1))
+        keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
+        mask = mask.unsqueeze(2)
+
+    attn_weights = [torch.matmul(query, k) for k in keys]
+    attn_weights = torch.cat(attn_weights, dim=-1)
+    attn_weights = attn_weights.mul_(scale)
+    attn_weights = attn_weights.masked_fill(mask, min_inf)
+    attn_weights = attn_weights.softmax(dim=-1)
+    attn_weights = attn_weights.split(block_size, dim=-1)
+
+    values = fetch_from_cache(value_cache, block_tables)
+    if query_heads != kv_heads:
+        values = [v.unflatten(1, (kv_heads, 1)) for v in values]
+    attn_weights = [torch.matmul(w, v.transpose(-1, -2)) for w, v in zip(attn_weights, values)]
+    attn_weights = sum(attn_weights).squeeze(-2)
+    if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
-    else:
-        attn_weights = scaled_dot_product_attention(query, key, value, scale, mask)
-    attn_weights = attn_weights.squeeze(-2)
 
     return attn_weights
 
