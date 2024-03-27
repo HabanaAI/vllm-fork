@@ -61,15 +61,13 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
     attn_weights = attn_weights.mul_(scale)
     attn_weights = attn_weights.masked_fill(mask, min_inf)
     attn_weights = attn_weights.softmax(dim=-1)
-    attn_weights = attn_weights.split(block_size, dim=-1)
 
-    values = fetch_from_cache(value_cache, block_tables)
-    mask = mask.split(block_size, dim=-1)
-    values = [v.masked_fill(m, 0) for v,m in zip(values, mask)]
+    values = torch.cat(fetch_from_cache(value_cache, block_tables), dim=-1)
+
     if query_heads != kv_heads:
-        values = [v.unflatten(1, (kv_heads, 1)) for v in values]
-    attn_weights = [torch.matmul(w, v.transpose(-1, -2)) for w, v in zip(attn_weights, values)]
-    attn_weights = sum(attn_weights).squeeze(-2)
+        values = values.unflatten(1, (kv_heads, 1))
+    values.masked_fill_(mask, -min_inf)
+    attn_weights = torch.matmul(attn_weights, values.transpose(-1, -2)).squeeze(-2)
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
 
