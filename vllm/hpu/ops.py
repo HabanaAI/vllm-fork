@@ -66,7 +66,6 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
 
     if query_heads != kv_heads:
         values = values.unflatten(1, (kv_heads, 1))
-    values.masked_fill_(mask, -min_inf)
     attn_weights = torch.matmul(attn_weights, values.transpose(-1, -2)).squeeze(-2)
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
