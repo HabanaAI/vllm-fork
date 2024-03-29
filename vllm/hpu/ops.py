@@ -5,13 +5,15 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import habana_frameworks.torch as htorch
 from typing import List, Optional, Tuple
-
 import vllm.hpu.utils as hpu_utils
+
+PA_SPLIT_VALUE = (os.environ.get('PA_SPLIT_VALUE', '1') == '1')
 
 
 def silu_and_mul(output, input):
@@ -57,18 +59,23 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
         mask = mask.unsqueeze(2)
 
     attn_weights = [torch.matmul(query, k) for k in keys]
-    attn_weights = torch.cat(attn_weights, dim=-1)
-    attn_weights = attn_weights.mul_(scale)
-    attn_weights = attn_weights.masked_fill(mask, min_inf)
-    attn_weights = attn_weights.softmax(dim=-1)
+    attn_weights = (torch.cat(attn_weights, dim=-1)
+                    .mul_(scale)
+                    .masked_fill(mask, min_inf)
+                    .softmax(dim=-1))
 
-    values = torch.cat(fetch_from_cache(value_cache, block_tables), dim=-1)
-
+    values = fetch_from_cache(value_cache, block_tables)
+    if PA_SPLIT_VALUE:
+        attn_weights = attn_weights.split(block_size, dim=-1)
+    else:
+        values = [torch.cat(values, dim=-1)]
+        attn_weights = [attn_weights]
     if query_heads != kv_heads:
-        values = values.unflatten(1, (kv_heads, 1))
-    attn_weights = torch.matmul(attn_weights, values.transpose(-1, -2)).squeeze(-2)
+        values = [v.unflatten(1, (kv_heads, 1)) for v in values]
+    attn_weights = [torch.matmul(a, v.transpose(-1, -2)).squeeze(-2) for a, v in zip(attn_weights, values)]
     if query_heads != kv_heads:
-        attn_weights = attn_weights.flatten(1, 2)
+        attn_weights = [a.flatten(1, 2) for a in attn_weights]
+    attn_weights = sum(attn_weights)
 
     return attn_weights
 
