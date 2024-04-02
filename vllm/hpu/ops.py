@@ -13,7 +13,7 @@ import habana_frameworks.torch as htorch
 from typing import List, Optional, Tuple
 import vllm.hpu.utils as hpu_utils
 
-PA_SPLIT_VALUE = (os.environ.get('PA_SPLIT_VALUE', '1') == '1')
+PA_SPLIT_VALUE = (os.environ.get('PA_SPLIT_VALUE', '0') == '1')
 
 
 def silu_and_mul(output, input):
