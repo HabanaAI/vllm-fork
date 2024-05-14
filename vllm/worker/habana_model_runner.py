@@ -8,22 +8,18 @@ from enum import IntEnum
 from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
 import os
-import contextlib
 import math
 import itertools
 import operator
-import numpy as np
 import torch
 import torch.nn as nn
 import habana_frameworks.torch as htorch
-from habana_frameworks.torch.hpu.metrics import metric_localcontext
 
 from vllm.attention import (AttentionMetadata, AttentionMetadataPerStage,
                             get_attn_backend)
 from vllm.config import (DeviceConfig, LoadConfig, LoRAConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, VisionLanguageConfig)
 from vllm.distributed import broadcast_tensor_dict
-from vllm.distributed.device_communicators import custom_all_reduce
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
@@ -46,12 +42,6 @@ def read_bucket_settings(phase, dim, **defaults):
     params = ['min', 'step', 'max']
     values = [os.environ.get(f'_VLLM_{phase}_{dim}_BUCKET_{p}'.upper(), defaults[p]) for p in params]
     return values
-
-
-_PROMPT_BS_BUCKET_CFG = read_bucket_settings('prompt', 'bs', min=1, step=32, max=64)
-_PROMPT_SEQ_BUCKET_CFG = read_bucket_settings('prompt', 'seq', min=128, step=128, max=1024)
-_DECODE_BS_BUCKET_CFG = read_bucket_settings('decode', 'bs', min=1, step=128, max=256)
-_DECODE_SEQ_BUCKET_CFG = read_bucket_settings('decode', 'seq', min=128, step=128, max=2048)
 
 
 def warmup_buckets(config):
@@ -165,8 +155,6 @@ class HabanaModelRunner:
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
 
-        # model_config can be None in tests/samplers/test_sampler.py.
-        # FIXME(woosuk): This is a hack to make the tests work. Refactor this.
         self.sliding_window = (model_config.get_sliding_window()
                                if model_config is not None else None)
         self.device_config = (device_config
@@ -223,6 +211,10 @@ class HabanaModelRunner:
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
+        self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=128, max=64)
+        self.decode_bs_bucket_cfg = read_bucket_settings('decode', 'bs', min=1, step=128, max=self.max_num_seqs)
+        self.prompt_seq_bucket_cfg = read_bucket_settings('prompt', 'seq', min=block_size, step=block_size, max=1024)
+        self.decode_seq_bucket_cfg = read_bucket_settings('decode', 'seq', min=block_size, step=block_size, max=2048)
 
     def _prepare_prompt(
         self,
@@ -291,8 +283,6 @@ class HabanaModelRunner:
 
             # actual prompt lens
             context_lens.append(context_len)
-            if context_len != 0:
-                import pdb; pdb.set_trace() # what happens if we hit that path??
             query_lens.append(seq_len - context_len)
 
             input_tokens.append(prompt_tokens)
@@ -362,28 +352,24 @@ class HabanaModelRunner:
         else:
             multi_modal_input = None
 
-        #target_batch_size = find_bucket(len(input_tokens), _PROMPT_BS_BUCKET_CFG)
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
-        max_prompt_len = max(find_bucket(max(seq_lens), _PROMPT_SEQ_BUCKET_CFG), self.block_size)
+        max_prompt_len = max(find_bucket(max(seq_lens), self.prompt_seq_bucket_cfg), self.block_size)
 
         input_tokens = make_tensor_with_pad(
-            #pad_to_batch_size(input_tokens, target_batch_size),
             input_tokens,
             max_prompt_len,
             pad=0,
             dtype=torch.long,
             device=self.device)
-        
+
         input_positions = make_tensor_with_pad(
-            #pad_to_batch_size(input_positions, target_batch_size),
             input_positions,
             max_prompt_len,
             pad=0,
             dtype=torch.long,
             device=self.device)
-        
+
         slot_mapping = make_tensor_with_pad(
-            #pad_to_batch_size(slot_mapping, target_batch_size),
             slot_mapping,
             max_prompt_len,
             pad=_PAD_SLOT_ID,
@@ -391,7 +377,6 @@ class HabanaModelRunner:
             device=self.device)
 
         block_tables = make_tensor_with_pad(
-            #pad_to_batch_size(prefix_block_tables, target_batch_size),
             prefix_block_tables,
             max_len=max_prompt_block_table_len,
             pad=0,
@@ -413,16 +398,16 @@ class HabanaModelRunner:
                                     dtype=torch.int32,
                                     device=self.device)
 
-        # FIXME: Fails on graph compilation. Need to investigate
-        #torch.cumsum(query_lens_tensor,
-        #             dim=0,
-        #             dtype=subquery_start_loc.dtype,
-        #             out=subquery_start_loc[1:])
+        torch.cumsum(query_lens_tensor,
+                     dim=0,
+                     dtype=subquery_start_loc.dtype,
+                     out=subquery_start_loc[1:])
 
-        #torch.cumsum(seq_lens_tensor,
-        #             dim=0,
-        #             dtype=seq_start_loc.dtype,
-        #             out=seq_start_loc[1:])
+        torch.cumsum(seq_lens_tensor,
+                     dim=0,
+                     dtype=seq_start_loc.dtype,
+                     out=seq_start_loc[1:])
+
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             seq_lens=seq_lens,
@@ -501,20 +486,7 @@ class HabanaModelRunner:
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
-        # vLLM uses cuda graph only for decoding requests.
-        # See `capture_model` API for more details.
-        # For decoding requests, batch_size == input_tokens.
-        #batch_size = len(input_tokens)
-        #target_batch_size = find_bucket(batch_size, _DECODE_BS_BUCKET_CFG)
         max_seq_len = max(seq_lens)
-        #bs_padding_needed = max(target_batch_size - batch_size, 0)
-        #input_tokens.extend([[0]] * bs_padding_needed)
-        #input_positions.extend([[0]] * bs_padding_needed)
-        #slot_mapping.extend([[_PAD_SLOT_ID]] * bs_padding_needed)
-        #meq_lens.extend([1] * bs_padding_needed)
-        #block_tables.extend([[]] * bs_padding_needed)
-        #lora_index_mapping.extend([0] * bs_padding_needed)
-
         input_tokens = torch.tensor(input_tokens,
                                     dtype=torch.long,
                                     device=self.device)
@@ -606,7 +578,7 @@ class HabanaModelRunner:
             num_prefill_tokens = len(input_tokens)
             num_decode_tokens = len(decode_input_tokens)
 
-            # NOTE(kzawora): Here we diverge from GPU code - we don't support mixed batches, so we either use decode or prefill inputs, without coalescing. 
+            # NOTE(kzawora): Here we diverge from GPU code - we don't support mixed batches, so we either use decode or prefill inputs, without coalescing.
             assert (num_prefills == 0 and num_decode_tokens > 0) or (num_prefills > 0 and num_decode_tokens == 0), "HPU does not support mixed batches!"
             if num_decode_tokens > 0:
                 input_tokens = decode_input_tokens
@@ -713,7 +685,6 @@ class HabanaModelRunner:
                 sampling_metadata, lora_requests, lora_mapping,
                 multi_modal_input)
 
-
     @torch.inference_mode()
     def execute_model(
         self,
@@ -722,7 +693,7 @@ class HabanaModelRunner:
     ) -> Optional[SamplerOutput]:
         is_prompt = seq_group_metadata_list[0].is_prompt
         real_batch_size = len(seq_group_metadata_list)
-        bucket_cfg = _PROMPT_BS_BUCKET_CFG if is_prompt else _DECODE_BS_BUCKET_CFG
+        bucket_cfg = self.prompt_bs_bucket_cfg if is_prompt else self.decode_bs_bucket_cfg
         batch_size_padding = find_bucket(real_batch_size, bucket_cfg) - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         seq_group_metadata_list.extend(seq_group_metadata_list[0] for _ in range(batch_size_padding))
@@ -788,22 +759,6 @@ class HabanaModelRunner:
     def profile_run(self) -> None:
         return
 
-    def remove_all_loras(self):
-        raise RuntimeError("LoRA is not supported on HPU.")
-
-    def set_active_loras(self, lora_requests: Set[LoRARequest],
-                         lora_mapping: LoRAMapping) -> None:
-        raise RuntimeError("LoRA is not supported on HPU.")
-
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise RuntimeError("LoRA is not supported on HPU.")
-
-    def remove_lora(self, lora_id: int) -> bool:
-        raise RuntimeError("LoRA is not supported on HPU.")
-
-    def list_loras(self) -> Set[int]:
-        raise RuntimeError("LoRA is not supported on HPU.")
-
     def warmup_scenario(self, batch_size, seq_len, is_prompt, kv_caches) -> None:
         seqs = [self.create_dummy_seq_group_metadata(i, seq_len, is_prompt) for i in range(batch_size)]
         self.execute_model(seqs, kv_caches)
@@ -813,8 +768,8 @@ class HabanaModelRunner:
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
         times = 1
         scenarios = []
-        scenarios.extend(itertools.product(warmup_buckets(_PROMPT_BS_BUCKET_CFG), warmup_buckets(_PROMPT_SEQ_BUCKET_CFG), [True]))
-        scenarios.extend(itertools.product(warmup_buckets(_DECODE_BS_BUCKET_CFG), warmup_buckets(_DECODE_SEQ_BUCKET_CFG), [False]))
+        scenarios.extend(itertools.product(warmup_buckets(self.decode_bs_bucket_cfg), warmup_buckets(self.decode_seq_bucket_cfg), [False]))
+        scenarios.extend(itertools.product(warmup_buckets(self.prompt_bs_bucket_cfg), warmup_buckets(self.prompt_seq_bucket_cfg), [True]))
         scenarios = [scenario for scenario in reversed(scenarios) for _ in range(times)]
 
         start_mem = HabanaMemoryProfiler.current_memory_usage()
@@ -828,289 +783,6 @@ class HabanaModelRunner:
         elapsed_time = end_time - start_time
         logger.info(f"Warmup finished in {elapsed_time:.0f} secs, allocated {format_bytes(end_mem - start_mem)} of device memory")
 
-            #total_valid_hpugraphs = len(valid_combinations)
-            #logger.info(f"Starting capture {total_valid_hpugraphs} valid HPUGraphs. Skipping capture of {total_combinations-total_valid_hpugraphs}/{total_combinations} graphs due to batch/context constraints.")
-            #logger.debug(f"Capture summary (row: batch_size; col: max_seq_len):")
-            #logger.debug(tabulate.tabulate(df, tablefmt='mixed_outline', headers='keys', showindex="always"))
-
-        #    graph_runner_name = "WIP"
-        #    graph_mem_usage_df = pd.DataFrame(index=list(reversed(sorted({b for b,c in valid_combinations}))), columns=list(reversed(sorted({c for b,c in valid_combinations}))))
-        #    pbar = tqdm.tqdm(valid_combinations)
-        #    log_graph_compilation_all = os.environ.get('VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL', '0') != '0'
-        #    log_graph_compilation = os.environ.get('VLLM_HPU_LOG_STEP_GRAPH_COMPILATION', '0') != '0' or log_graph_compilation_all
-        #
-        #    for idx, (batch_size, max_seq_len) in enumerate(pbar): 
-        #        block_count = math.ceil(max_seq_len / self.block_size)
-        #        # Create dummy attn_metadata.
-        #        decode_metadata = self.attn_backend.make_metadata(
-        #            is_prompt=False,
-        #            seq_lens=None,
-        #            seq_lens_tensor=context_lens[:batch_size],
-        #            max_query_len=None,
-        #            max_seq_len=block_count*self.block_size,
-        #            subquery_start_loc=None,
-        #            seq_start_loc=None,
-        #            context_lens_tensor=None, # NOTE(kzawora): this seems sus, shoudn't we have seq_lens tensor here?
-        #            block_tables=block_tables[:batch_size, :block_count],
-        #            use_cuda_graph=True,
-        #        )
-        #        attn_metadata = AttentionMetadata(
-        #            num_prefills=0,
-        #            num_prefill_tokens=0,
-        #            num_decode_tokens=batch_size,
-        #            slot_mapping=slot_mapping[:batch_size],
-        #            prefill_metadata=None,
-        #            decode_metadata=decode_metadata,
-        #            kv_cache_dtype=self.kv_cache_dtype,
-        #        )
-        #        desc = f'Capturing {graph_runner_name} for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}, allocated {format_bytes(local_start_mem - start_mem)} device memory in total ({format_bytes(HabanaMemoryProfiler.current_memory_usage())}/{format_bytes(HabanaMemoryProfiler.total_memory())} used)'
-        #        pbar.set_description(desc)
-        #        logger.debug(f"[{idx}/{total_valid_hpugraphs}] {desc}...")
-        #        profiling_ctx = contextlib.nullcontext() if not (log_graph_compilation_all or log_graph_compilation) else metric_localcontext("graph_compilation")
-        #        with profiling_ctx as gc_local_metric:
-        #            graph_runner.capture(
-        #                input_tokens[:batch_size],
-        #                input_positions[:batch_size],
-        #                kv_caches,
-        #                attn_metadata,
-        #            )
-        #        if (log_graph_compilation and gc_local_metric.stats()[0][1] > 0) or log_graph_compilation_all:
-        #            logger.info(f"VLLM_HPU_STEP_GRAPH_COMPILATION: {gc_local_metric.stats()}, {graph_runner_name}; batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}")
-        #        self.graph_runners[(batch_size, block_count)] = graph_runner
-        #        capture_end = time.time()
-        #        local_end_mem = HabanaMemoryProfiler.current_memory_usage()
-        #        mem_usage_str = format_bytes(local_end_mem - local_start_mem)
-        #        graph_mem_usage_df[max_seq_len][batch_size] = mem_usage_str
-        #        logger.debug(f"[{idx}/{total_valid_hpugraphs}] {desc}... done in {capture_end-capture_start:.2f} seconds! Took {mem_usage_str} of device memory ({format_bytes(HabanaMemoryProfiler.current_memory_usage())}/{format_bytes(HabanaMemoryProfiler.total_memory())} used)")
-
-
     @property
     def vocab_size(self) -> int:
         return self.model_config.get_vocab_size()
-
-
-class FakeHPUGraphRunner:
-
-    def __init__(self, model: nn.Module):
-        self.model = model
-
-    def capture(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-    ) -> None:
-        return
-    
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-    ) -> torch.Tensor:
-        return self.model(
-            input_ids,
-            positions,
-            kv_caches,
-            attn_metadata,
-        )
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-class FakeHPUGraphRunnerWithWarmup:
-
-    def __init__(self, model: nn.Module):
-        self.model = model
-
-    def capture(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-    ) -> None:
-        htorch.core.mark_step()
-        out = self.model(
-            input_ids,
-            positions,
-            kv_caches,
-            attn_metadata,
-        )
-        htorch.core.mark_step()
-        htorch.hpu.synchronize()
-        return
-    
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-    ) -> torch.Tensor:
-        htorch.core.mark_step()
-        out = self.model(
-            input_ids,
-            positions,
-            kv_caches,
-            attn_metadata,
-        )
-        htorch.core.mark_step()
-        return out
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-class HPUGraphRunner:
-
-    def __init__(self, model: nn.Module):
-        self.model = model
-        self.graph = None
-        self.input_buffers: Dict[str, torch.Tensor] = {}
-        self.output_buffers: Dict[str, torch.Tensor] = {}
-
-    def capture(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-    ) -> None:
-        assert self.graph is None
-        # Run the model once without capturing the graph.
-        # This is to make sure that the captured graph does not include the
-        # kernel launches for initial benchmarking (e.g., Triton autotune).
-        self.model(
-            input_ids,
-            positions,
-            kv_caches,
-            attn_metadata,
-        )
-        htorch.hpu.synchronize()
-
-        # Capture the graph.
-        # NOTE(woosuk): Python 3.8 does not support multi-line with statements.
-        # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
-        self.graph = htorch.hpu.HPUGraph()
-        with htorch.hpu.graph(self.graph):  # noqa: SIM117
-            hidden_states = self.model(
-                input_ids,
-                positions,
-                kv_caches,
-                attn_metadata,
-            )
-        torch.hpu.synchronize()
-
-        # Save the input and output buffers.
-        self.input_buffers = {
-            "input_ids": input_ids,
-            "positions": positions,
-            "kv_caches": kv_caches,
-            "slot_mapping": attn_metadata.slot_mapping,
-            "seq_lens_tensor": attn_metadata.decode_metadata.seq_lens_tensor,
-            "block_tables": attn_metadata.decode_metadata.block_tables,
-        }
-        self.output_buffers = {"hidden_states": hidden_states}
-        return
-
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-        **kwargs,
-    ) -> torch.Tensor:
-        # KV caches are fixed tensors, so we don't need to copy them.
-        del kv_caches
-
-        # Copy the input tensors to the input buffers.
-        self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
-        self.input_buffers["positions"].copy_(positions, non_blocking=True)
-        self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
-                                                 non_blocking=True)
-        self.input_buffers["seq_lens_tensor"].copy_(
-            attn_metadata.decode_metadata.seq_lens_tensor, non_blocking=True)
-        self.input_buffers["block_tables"].copy_(
-            attn_metadata.decode_metadata.block_tables, non_blocking=True)
-        # Run the graph.
-        self.graph.replay()
-
-        # Return the output tensor.
-        return self.output_buffers["hidden_states"]
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-class ExperimentalHPUGraphRunner:
-    def __init__(self, model: nn.Module):
-        self.model = model
-
-    def capture(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-    ) -> None:
-        class ModelWrapper(torch.nn.Module):
-            def __init__(self, model):
-                super().__init__()
-                self.model = model
-                self.attn_backend = get_attn_backend(torch.bfloat16)
-            def forward(self, input_ids, positions, kv_caches, slot_mapping, context_lens, block_tables):
-                wrapper_attn_metadata = self.attn_backend.make_metadata(
-                    is_prompt=attn_metadata.is_prompt,
-                    seq_lens=None,
-                    seq_lens_tensor=None, 
-                    num_prefill_tokens=0,
-                    num_generation_tokens=attn_metadata.num_generation_tokens,
-                    max_subquery_len=None,
-                    max_seq_len=attn_metadata.max_seq_len,
-                    max_prompt_len=None,
-                    subquery_start_loc=None,
-                    seq_start_loc=None,
-                    context_lens=context_lens,
-                    block_tables=block_tables,
-                    use_cuda_graph=True,
-                    kv_cache_dtype=attn_metadata.kv_cache_dtype,
-                )
-                return self.model(
-                    input_ids,
-                    positions,
-                    kv_caches,
-                    wrapper_attn_metadata
-                )
-        self.graph_model = htorch.hpu.wrap_in_hpu_graph(ModelWrapper(self.model))
-        out = self.graph_model(
-            input_ids,
-            positions,
-            kv_caches,
-            attn_metadata.slot_mapping,
-            attn_metadata.context_lens, 
-            attn_metadata.block_tables,
-        )
-        htorch.hpu.synchronize()
-        return
-    
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-    ) -> torch.Tensor:
-        out = self.graph_model(
-            input_ids,
-            positions,
-            kv_caches,
-            attn_metadata.slot_mapping,
-            attn_metadata.context_lens, 
-            attn_metadata.block_tables,
-        )
-        return out
-
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
