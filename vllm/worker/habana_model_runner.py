@@ -588,6 +588,14 @@ class HabanaModelRunner:
                 lora_prompt_mapping = decode_lora_prompt_mapping
                 lora_requests = decode_lora_requests
 
+            # FIXME: We need to adjust selected_token_indices to accomodate for padding
+            max_len = input_tokens.size(1)
+            paddings = [max_len - s for s in seq_lens]
+            paddings = [0] + paddings[:-1]
+            paddings = torch.tensor(paddings, dtype=sampling_metadata.selected_token_indices.dtype, device=sampling_metadata.selected_token_indices.device)
+            paddings = torch.cumsum(paddings, -1)
+            sampling_metadata.selected_token_indices.add_(paddings)
+
             if self.lora_config:
                 lora_mapping = LoRAMapping(
                     lora_index_mapping,
@@ -713,6 +721,7 @@ class HabanaModelRunner:
         if self.vision_language_config:
             execute_model_kwargs.update({"image_input": multi_modal_input})
 
+        htorch.core.mark_step()
         hidden_states = self.model(**execute_model_kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
 
