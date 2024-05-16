@@ -398,16 +398,6 @@ class HabanaModelRunner:
                                     dtype=torch.int32,
                                     device=self.device)
 
-        torch.cumsum(query_lens_tensor,
-                     dim=0,
-                     dtype=subquery_start_loc.dtype,
-                     out=subquery_start_loc[1:])
-
-        torch.cumsum(seq_lens_tensor,
-                     dim=0,
-                     dtype=seq_start_loc.dtype,
-                     out=seq_start_loc[1:])
-
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             seq_lens=seq_lens,
@@ -592,8 +582,8 @@ class HabanaModelRunner:
             max_len = input_tokens.size(1)
             paddings = [max_len - s for s in seq_lens]
             paddings = [0] + paddings[:-1]
+            paddings = list(itertools.accumulate(paddings))
             paddings = torch.tensor(paddings, dtype=sampling_metadata.selected_token_indices.dtype, device=sampling_metadata.selected_token_indices.device)
-            paddings = torch.cumsum(paddings, -1)
             sampling_metadata.selected_token_indices.add_(paddings)
 
             if self.lora_config:
@@ -770,7 +760,7 @@ class HabanaModelRunner:
 
     def warmup_scenario(self, batch_size, seq_len, is_prompt, kv_caches) -> None:
         seqs = [self.create_dummy_seq_group_metadata(i, seq_len, is_prompt) for i in range(batch_size)]
-        self.execute_model(seqs, kv_caches)
+        _ = self.execute_model(seqs, kv_caches)
         torch.hpu.synchronize()
 
     @torch.inference_mode()
