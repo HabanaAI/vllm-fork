@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Type
 
 import torch
+import math
 import vllm.hpu.xops as xops
 from vllm.hpu.attn_bias import (AttentionBias,
                                 BlockDiagonalCausalMask,
@@ -225,11 +226,20 @@ class HabanaAttentionImpl(AttentionImpl):
 
                 if prefill_meta.attn_bias is None:
                     if self.alibi_slopes is None:
-                        attn_bias = BlockDiagonalCausalMask.from_seqlens(
-                            [seq_len] * batch_size)
+                        lens = torch.tensor(attn_metadata.prefill_metadata.seq_lens, device=query.device, dtype=torch.int32)
+                        len_mask = (torch.arange(0, seq_len, device=query.device, dtype=torch.int32)
+                                    .view(1, seq_len)
+                                    .ge(lens.unsqueeze(-1))
+                                    .view(batch_size, 1, 1, seq_len))
+                        causal_mask = torch.triu(
+                            torch.ones((batch_size, 1, seq_len, seq_len), device=query.device, dtype=torch.bool),
+                            diagonal=1
+                        )
+                        mask = causal_mask.logical_or(len_mask)
+                        attn_bias = (torch.zeros_like(mask, dtype=query.dtype)
+                                     .masked_fill_(mask, -math.inf))
                         if self.sliding_window is not None:
-                            attn_bias = attn_bias.make_local_attention(
-                                self.sliding_window)
+                            raise NotImplementedError("Sliding window is not supported on HPU")
                         prefill_meta.attn_bias = attn_bias
                     else:
                         prefill_meta.attn_bias = _make_alibi_bias(
@@ -237,7 +247,7 @@ class HabanaAttentionImpl(AttentionImpl):
                             seq_len, query.dtype)
                 query_shape = (batch_size, seq_len, self.num_kv_heads, self.num_queries_per_kv, self.head_size) if self.num_kv_heads != self.num_heads else (batch_size, seq_len, self.num_heads, self.head_size)
                 kv_shape = (batch_size, seq_len_kv, self.num_kv_heads, self.num_queries_per_kv, self.head_size) if self.num_kv_heads != self.num_heads else (batch_size, seq_len_kv, self.num_kv_heads, self.head_size)
-                out = xops.memory_efficient_attention_forward(
+                out = xops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
                     value.view(kv_shape),

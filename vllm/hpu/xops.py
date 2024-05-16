@@ -17,6 +17,31 @@ except ImportError:
     print("Not using HPU fused scaled dot-product attention kernel.")
     FusedSDPA = None
 
+import vllm.hpu.utils
+
+
+@vllm.hpu.utils.with_mark_steps
+def prompt_attention(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_bias: Optional[torch.Tensor] = None,
+        p: float = 0.0,
+        scale: Optional[float] = None,
+) -> torch.Tensor:
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+    attn_weights = torch.matmul(query * scale, key.transpose(-1, -2))
+    if attn_weights is not None:
+        attn_weights.add_(attn_bias)
+    attn_weights = torch.softmax(attn_weights, dim=-1)
+    attn_weights = torch.matmul(attn_weights, value)
+    attn_weights = attn_weights.transpose(1, 2)
+    return attn_weights
+
+
+@vllm.hpu.utils.with_mark_steps
 def memory_efficient_attention_forward(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -27,8 +52,7 @@ def memory_efficient_attention_forward(
 ) -> torch.Tensor:
     assert attn_bias is not None, "Attention mask is required for prompt processing"
     dim = query.dim()
-    is_causal = isinstance(attn_bias, BlockDiagonalCausalMask)
-    if FusedSDPA and (is_causal or attn_bias is None):
+    if FusedSDPA:
         bs = query.shape[0]
         seq_len_q = query.shape[1]
         seq_len_kv = key.shape[1]
@@ -42,18 +66,17 @@ def memory_efficient_attention_forward(
             value = value.reshape(bs, seq_len_kv, heads, head_dim).permute(0, 2, 1, 3)
         elif dim == 5:
             # [bs, seq_len, heads, attn_groups, head_dim] -> [bs, heads, attn_groups, seq_len, head_dim]
-            query = query.reshape(bs, seq_len_q, heads, attn_groups, head_dim).permute(0, 2, 3, 1, 4) 
-            key = key.reshape(bs, seq_len_kv, heads, attn_groups, head_dim).permute(0, 2, 3, 1, 4) 
-            value = value.reshape(bs, seq_len_kv, heads, attn_groups, head_dim).permute(0, 2, 3, 1, 4) 
+            query = query.reshape(bs, seq_len_q, heads, attn_groups, head_dim).permute(0, 2, 3, 1, 4)
+            key = key.reshape(bs, seq_len_kv, heads, attn_groups, head_dim).permute(0, 2, 3, 1, 4)
+            value = value.reshape(bs, seq_len_kv, heads, attn_groups, head_dim).permute(0, 2, 3, 1, 4)
         else:
             raise ValueError(f"Unsupported attention dimension: {dim}")
 
         import habana_frameworks.torch.hpu as ht
         with ht.sdp_kernel(enable_recompute=False):  # (flash_attention_recompute and q_len == 1)):
             out = FusedSDPA.apply(
-                query, key, value, None, p, is_causal, scale
+                query, key, value, None, p, True, scale
             )
-        htorch.core.mark_step()
         if dim == 4:
             # [bs, heads, seq_len, head_dim] -> [bs, seq_len, heads, head_dim]
             out = out.permute(0, 2, 1, 3).reshape(bs, seq_len_q, heads, head_dim)
@@ -61,6 +84,6 @@ def memory_efficient_attention_forward(
             # [bs, heads, attn_groups, seq_len, head_dim] -> [bs, seq_len, heads, attn_groups, head_dim] 
             out = out.permute(0, 3, 1, 2, 4).reshape(bs, seq_len_q, heads, attn_groups, head_dim)
     else:
-       raise NotImplementedError(f'Only FusedSDPA causal or non-masked attention is supported.\nFusedSDPA support: {FusedSDPA is not None}\nis_causal: {is_causal}\nmask_present: {attn_bias is not None}')
+        raise NotImplementedError('Only FusedSDPA is supported')
 
     return out
