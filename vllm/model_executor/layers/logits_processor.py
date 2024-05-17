@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from vllm.distributed import tensor_model_parallel_gather, tensor_model_parallel_all_gather
+from vllm.hpu.ops import Matmul
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.utils import is_hpu
 
@@ -63,7 +64,11 @@ class LogitsProcessor(nn.Module):
     def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
                     embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
         # Get the logits for the next tokens.
-        logits = torch.matmul(hidden_states, embedding.t())
+        if is_hpu():
+            hpu_matmul = Matmul()
+            logits = hpu_matmul(hidden_states, embedding.t())
+        else:
+            logits = torch.matmul(hidden_states, embedding.t())
         if embedding_bias is not None:
             logits += embedding_bias
         # NOTE(kzawora): HPU PT bridge is missing support for single-rank gather. We'll use all-gather on Gaudi for now.
