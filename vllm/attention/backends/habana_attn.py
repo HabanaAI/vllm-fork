@@ -200,9 +200,7 @@ class HabanaAttentionImpl(AttentionImpl):
         if prefill_meta := attn_metadata.prefill_metadata:
             # Prompt run.
             if kv_cache is None or prefill_meta.block_tables.numel() == 0:
-                # normal attention.
-                # block tables are empty if the prompt does not have a cached
-                # prefix.
+                # TODO: move this outside of model
                 if prefill_meta.attn_bias is None:
                     if self.alibi_slopes is None:
                         lens = torch.tensor(attn_metadata.prefill_metadata.seq_lens, device=query.device, dtype=torch.int32)

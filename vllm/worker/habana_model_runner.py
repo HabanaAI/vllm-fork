@@ -2,17 +2,15 @@
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 ###############################################################################
 
-import contextlib
 import time
 from enum import IntEnum
-from typing import Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import List, NamedTuple, Optional, Set, Tuple, Dict
 
 import os
 import math
 import itertools
 import operator
 import torch
-import torch.nn as nn
 import habana_frameworks.torch as htorch
 
 from vllm.attention import (AttentionMetadata, AttentionMetadataPerStage,
@@ -26,11 +24,10 @@ from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.model_loader import get_model
-from vllm.sampling_params import SamplingParams, SamplingType
+from vllm.sampling_params import SamplingParams
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
-from vllm.utils import (HabanaMemoryProfiler, async_tensor_h2d,
-                        is_pin_memory_available, make_tensor_with_pad,
-                        maybe_expand_dim, pad_to_max_length, format_bytes)
+from vllm.utils import (HabanaMemoryProfiler, is_pin_memory_available,
+                        make_tensor_with_pad, format_bytes)
 
 logger = init_logger(__name__)
 
@@ -38,13 +35,17 @@ _PAD_SLOT_ID = 0
 LORA_WARMUP_RANK = 8
 
 
-def read_bucket_settings(phase, dim, **defaults):
+# Read bucketing configuration from env variables
+# phase is either 'prompt' or 'decode'
+# dim is either 'bs' or 'seq'
+# example env variable: VLLM_DECODE_BS_STEP=128
+def read_bucket_settings(phase: str, dim: str, **defaults: Dict):
     params = ['min', 'step', 'max']
-    values = [os.environ.get(f'_VLLM_{phase}_{dim}_BUCKET_{p}'.upper(), defaults[p]) for p in params]
+    values = [os.environ.get(f'VLLM_{phase}_{dim}_BUCKET_{p}'.upper(), defaults[p]) for p in params]
     return values
 
 
-def warmup_buckets(config):
+def warmup_buckets(config: Tuple[int, int, int]):
     bmin, bstep, bmax = config
     base = itertools.repeat(2)
     ramp_up = itertools.accumulate(base, func=operator.mul, initial=bmin)
@@ -53,7 +54,7 @@ def warmup_buckets(config):
     return list(ramp_up) + list(stable)
 
 
-def next_pow2(value):
+def next_pow2(value: int):
     res = 1
     while value > 1:
         value = (value + 1) // 2
@@ -61,11 +62,11 @@ def next_pow2(value):
     return res
 
 
-def round_up(value, k):
+def round_up(value: int, k: int):
     return (value + k - 1) // k * k
 
 
-def find_bucket(value, config):
+def find_bucket(value: int, config: Tuple[int, int, int]):
     bmin, bstep, bmax = config
     if value < bstep:
         result = min(next_pow2(value), bstep)
@@ -176,6 +177,7 @@ class HabanaModelRunner:
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
         self.block_size: int = None
+        self.excluded_from_warmup = []
 
     def load_model(self) -> None:
         with HabanaMemoryProfiler() as m:
@@ -211,10 +213,17 @@ class HabanaModelRunner:
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
-        self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=128, max=32)
+        self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=32, max=min(self.max_num_seqs, 64))
         self.decode_bs_bucket_cfg = read_bucket_settings('decode', 'bs', min=1, step=128, max=self.max_num_seqs)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt', 'seq', min=block_size, step=block_size, max=1024)
         self.decode_seq_bucket_cfg = read_bucket_settings('decode', 'seq', min=block_size, step=block_size, max=2048)
+        logger.info(f"Prompt bucket config (min, step, max_warmup) bs:{self.prompt_bs_bucket_cfg}, seq:{self.prompt_seq_bucket_cfg}")
+        logger.info(f"Decode bucket config (min, step, max_warmup) bs:{self.decode_bs_bucket_cfg}, seq:{self.decode_seq_bucket_cfg}")
+
+        # FIXME: exclude from warmup as it causes OOM on llama-70b
+        self.excluded_from_warmup = [
+            (64, 1024, True)
+        ]
 
     def _prepare_prompt(
         self,
@@ -355,33 +364,29 @@ class HabanaModelRunner:
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
         max_prompt_len = max(find_bucket(max(seq_lens), self.prompt_seq_bucket_cfg), self.block_size)
 
-        input_tokens = make_tensor_with_pad(
-            input_tokens,
-            max_prompt_len,
-            pad=0,
-            dtype=torch.long,
-            device=self.device)
+        input_tokens = make_tensor_with_pad(input_tokens,
+                                            max_prompt_len,
+                                            pad=0,
+                                            dtype=torch.long,
+                                            device=self.device)
 
-        input_positions = make_tensor_with_pad(
-            input_positions,
-            max_prompt_len,
-            pad=0,
-            dtype=torch.long,
-            device=self.device)
+        input_positions = make_tensor_with_pad(input_positions,
+                                               max_prompt_len,
+                                               pad=0,
+                                               dtype=torch.long,
+                                               device=self.device)
 
-        slot_mapping = make_tensor_with_pad(
-            slot_mapping,
-            max_prompt_len,
-            pad=_PAD_SLOT_ID,
-            dtype=torch.long,
-            device=self.device)
+        slot_mapping = make_tensor_with_pad(slot_mapping,
+                                            max_prompt_len,
+                                            pad=_PAD_SLOT_ID,
+                                            dtype=torch.long,
+                                            device=self.device)
 
-        block_tables = make_tensor_with_pad(
-            prefix_block_tables,
-            max_len=max_prompt_block_table_len,
-            pad=0,
-            dtype=torch.int,
-            device=self.device)
+        block_tables = make_tensor_with_pad(prefix_block_tables,
+                                            max_len=max_prompt_block_table_len,
+                                            pad=0,
+                                            dtype=torch.int,
+                                            device=self.device)
 
         # Query length can be shorter than key (i.e., prompt) when prefill
         # is chunked or prefix cached.
@@ -766,11 +771,11 @@ class HabanaModelRunner:
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        times = 1
+        times = 1  # TODO: this is will be updated once HPU graphs are reintroduced
         scenarios = []
         scenarios.extend(itertools.product(warmup_buckets(self.decode_bs_bucket_cfg), warmup_buckets(self.decode_seq_bucket_cfg), [False]))
         scenarios.extend(itertools.product(warmup_buckets(self.prompt_bs_bucket_cfg), warmup_buckets(self.prompt_seq_bucket_cfg), [True]))
-        scenarios = [scenario for scenario in reversed(scenarios) for _ in range(times)]
+        scenarios = [scenario for scenario in reversed(scenarios) for _ in range(times) if scenario not in self.excluded_from_warmup]
 
         start_mem = HabanaMemoryProfiler.current_memory_usage()
         start_time = time.perf_counter()
