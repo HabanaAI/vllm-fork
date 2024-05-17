@@ -211,7 +211,7 @@ class HabanaModelRunner:
 
     def set_block_size(self, block_size: int) -> None:
         self.block_size = block_size
-        self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=128, max=64)
+        self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=128, max=32)
         self.decode_bs_bucket_cfg = read_bucket_settings('decode', 'bs', min=1, step=128, max=self.max_num_seqs)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt', 'seq', min=block_size, step=block_size, max=1024)
         self.decode_seq_bucket_cfg = read_bucket_settings('decode', 'seq', min=block_size, step=block_size, max=2048)
@@ -689,12 +689,13 @@ class HabanaModelRunner:
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         kv_caches: List[torch.Tensor],
     ) -> Optional[SamplerOutput]:
-        is_prompt = seq_group_metadata_list[0].is_prompt
-        real_batch_size = len(seq_group_metadata_list)
-        bucket_cfg = self.prompt_bs_bucket_cfg if is_prompt else self.decode_bs_bucket_cfg
-        batch_size_padding = find_bucket(real_batch_size, bucket_cfg) - real_batch_size
-        seq_group_metadata_list = seq_group_metadata_list.copy()
-        seq_group_metadata_list.extend(seq_group_metadata_list[0] for _ in range(batch_size_padding))
+        if self.is_driver_worker:
+            is_prompt = seq_group_metadata_list[0].is_prompt
+            real_batch_size = len(seq_group_metadata_list)
+            bucket_cfg = self.prompt_bs_bucket_cfg if is_prompt else self.decode_bs_bucket_cfg
+            batch_size_padding = find_bucket(real_batch_size, bucket_cfg) - real_batch_size
+            seq_group_metadata_list = seq_group_metadata_list.copy()
+            seq_group_metadata_list.extend(seq_group_metadata_list[0] for _ in range(batch_size_padding))
         (input_tokens, input_positions, attn_metadata, sampling_metadata,
          lora_requests, lora_mapping, multi_modal_input
          ) = self.prepare_input_tensors(seq_group_metadata_list)
