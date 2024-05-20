@@ -31,7 +31,7 @@ def prompt_attention(
         value = value.unflatten(1, (kv_heads, 1))
         attn_bias = attn_bias.unsqueeze(2)
     attn_weights = torch.matmul(query * scale, key.transpose(-1, -2))
-    if attn_weights is not None:
+    if attn_bias is not None:
         attn_weights.add_(attn_bias)
     attn_weights = torch.softmax(attn_weights, dim=-1)
     attn_weights = torch.matmul(attn_weights, value)
