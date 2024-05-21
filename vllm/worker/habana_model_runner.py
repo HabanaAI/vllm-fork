@@ -15,7 +15,7 @@ import habana_frameworks.torch as htorch
 
 from vllm.attention import (AttentionMetadata, AttentionMetadataPerStage,
                             get_attn_backend)
-from vllm.config import (DeviceConfig, LoadConfig, LoRAConfig, ModelConfig,
+from vllm.config import (DeviceConfig, LoadConfig, CacheConfig, LoRAConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, VisionLanguageConfig)
 from vllm.distributed import broadcast_tensor_dict
 from vllm.logger import init_logger
@@ -144,6 +144,7 @@ class HabanaModelRunner:
         scheduler_config: SchedulerConfig,
         device_config: DeviceConfig,
         load_config: LoadConfig,
+        cache_config: CacheConfig,
         lora_config: Optional[LoRAConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
@@ -165,6 +166,7 @@ class HabanaModelRunner:
         self.max_num_seqs = self.scheduler_config.max_num_seqs
         self.max_model_len = self.scheduler_config.max_model_len
         self.max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
+        self.block_size = cache_config.block_size
 
         self.pin_memory = is_pin_memory_available()
         self.kv_cache_dtype = kv_cache_dtype
@@ -176,8 +178,9 @@ class HabanaModelRunner:
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
-        self.block_size: int = None
         self.excluded_from_warmup = []
+
+        self._setup_buckets()
 
     def load_model(self) -> None:
         with HabanaMemoryProfiler() as m:
@@ -211,12 +214,11 @@ class HabanaModelRunner:
                 self.model.embedding_padding_modules)
             self.model = self.lora_manager.create_lora_manager(self.model)
 
-    def set_block_size(self, block_size: int) -> None:
-        self.block_size = block_size
+    def _setup_buckets(self) -> None:
         self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=32, max=min(self.max_num_seqs, 64))
         self.decode_bs_bucket_cfg = read_bucket_settings('decode', 'bs', min=1, step=128, max=self.max_num_seqs)
-        self.prompt_seq_bucket_cfg = read_bucket_settings('prompt', 'seq', min=block_size, step=block_size, max=1024)
-        self.decode_seq_bucket_cfg = read_bucket_settings('decode', 'seq', min=block_size, step=block_size, max=2048)
+        self.prompt_seq_bucket_cfg = read_bucket_settings('prompt', 'seq', min=self.block_size, step=self.block_size, max=1024)
+        self.decode_seq_bucket_cfg = read_bucket_settings('decode', 'seq', min=self.block_size, step=self.block_size, max=2048)
         logger.info(f"Prompt bucket config (min, step, max_warmup) bs:{self.prompt_bs_bucket_cfg}, seq:{self.prompt_seq_bucket_cfg}")
         logger.info(f"Decode bucket config (min, step, max_warmup) bs:{self.decode_bs_bucket_cfg}, seq:{self.decode_seq_bucket_cfg}")
 
@@ -762,7 +764,10 @@ class HabanaModelRunner:
         )
 
     def profile_run(self) -> None:
-        return
+        num_layers = self.model_config.get_num_layers(self.parallel_config)
+        kv_caches = [None] * num_layers
+        seq_len = self.max_model_len // self.max_num_seqs
+        self.warmup_scenario(self.max_num_seqs, seq_len, True, kv_caches)
 
     def warmup_scenario(self, batch_size, seq_len, is_prompt, kv_caches) -> None:
         seqs = [self.create_dummy_seq_group_metadata(i, seq_len, is_prompt) for i in range(batch_size)]
