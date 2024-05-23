@@ -8,7 +8,6 @@
 import torch
 import torch.nn as nn
 import habana_frameworks.torch.utils.experimental as htexp
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 def get_device_type():
     return htexp._get_device_type()
@@ -39,12 +38,6 @@ def rotate_half(x):
     x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
-def _rotate_gptj(x: torch.Tensor) -> torch.Tensor:
-    x1 = x[..., ::2]
-    x2 = x[..., 1::2]
-    x = torch.stack((-x2, x1), dim=-1)
-    return x.flatten(-2)
-
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
     """Applies Rotary Position Embedding to the query and key tensors.
 
@@ -72,19 +65,15 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
-class HpuRotaryEmbedding(nn.Module):
-    def __init__(self, head_size, rotary_dim, max_position_embeddings=2048, base=10000, is_neox_style=True, device='hpu'):
-        super().__init__()
 
-        # Note: import RotaryPosEmbeddingHelperV2 from habana_frameworks.torch.hpex.kernels
-        # if gptj rotation is needed.
-        assert is_neox_style, "Only neox style rotary embed supported."
+class HpuRotaryEmbedding(nn.Module):
+    def __init__(self, head_size, rotary_dim, max_position_embeddings=2048, base=10000, is_neox_style=None, device='hpu'):
+        super().__init__()
 
         self.head_size = head_size
         self.dim = rotary_dim
         self.max_position_embeddings = max_position_embeddings
         self.base = base
-        self.is_neox_style = is_neox_style
         inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
@@ -103,45 +92,6 @@ class HpuRotaryEmbedding(nn.Module):
         self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
-    def _forward(
-        self,
-        positions: torch.Tensor,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        offsets: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """PyTorch-native implementation equivalent to forward()."""
-        seq_len = key.shape[-2]
-        query = query.view(*query.shape[:-1], -1, self.head_size)
-        key = key.view(*key.shape[:-1], -1, self.head_size)
-
-        query_rot = query[..., :self.dim]
-        key_rot = key[..., :self.dim]
-        if self.dim < self.head_size:
-            query_pass = query[..., self.dim:]
-            key_pass = key[..., self.dim:]
-
-        cos = self.cos_cached.to(positions.device)[torch.add(positions, offsets)
-                                     if offsets is not None else positions]
-        sin = self.sin_cached.to(positions.device)[torch.add(positions, offsets)
-                                     if offsets is not None else positions]
-        cos = cos.unsqueeze(-2)
-        sin = sin.unsqueeze(-2)
-
-        rotate_fn = rotate_half if self.is_neox_style else _rotate_gptj
-        query_rot = query_rot * cos + rotate_fn(query_rot) * sin
-        key_rot = key_rot * cos + rotate_fn(key_rot) * sin
-
-        if self.dim < self.head_size:
-            query = torch.cat((query_rot, query_pass), dim=-1)
-            key = torch.cat((key_rot, key_pass), dim=-1)
-        else:
-            query = query_rot
-            key = key_rot
-        query = query.flatten(-2)
-        key = key.flatten(-2)
-        return query, key
-
     def forward(self, positions: torch.Tensor, query: torch.Tensor, key: torch.Tensor):
         if query.dim() == 2:
             query = query.unsqueeze(0)
@@ -153,16 +103,9 @@ class HpuRotaryEmbedding(nn.Module):
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=query.device, dtype=query.dtype)
 
-        cos, sin = self.cos_cached.to(dtype=query.dtype), self.sin_cached.to(dtype=query.dtype)
+        cos, sin = self.cos_cached[:seq_len].to(dtype=query.dtype), self.sin_cached[:seq_len].to(dtype=query.dtype)
         query = query.reshape((query.shape[0], query.shape[1], query.shape[2] // self.head_size, self.head_size))
         key = key.reshape((key.shape[0], key.shape[1], key.shape[2] // self.head_size, self.head_size))
-
-        query_rot = query[..., :self.dim]
-        key_rot = key[..., :self.dim]
-        if self.dim < self.head_size:
-            query_pass = query[..., self.dim:]
-            key_pass = key[..., self.dim:]
-
         if query.device.type == "hpu" and FusedRoPE:
             if len(positions[0]) == 1:
                 cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
@@ -170,15 +113,7 @@ class HpuRotaryEmbedding(nn.Module):
             else:
                 cos = cos[positions].unsqueeze(2)
                 sin = sin[positions].unsqueeze(2)
-            query_rot, key_rot = FusedRoPE.apply(query_rot, cos, sin, 0), FusedRoPE.apply(key_rot, cos, sin, 0)
+            query, key = FusedRoPE.apply(query, cos, sin, 0), FusedRoPE.apply(key, cos, sin, 0)
         else:
-            query_rot, key_rot = apply_rotary_pos_emb(query_rot, key_rot, cos, sin, positions)
-
-        if self.dim < self.head_size:
-            query = torch.cat((query_rot, query_pass), dim=-1)
-            key = torch.cat((key_rot, key_pass), dim=-1)
-        else:
-            query = query_rot
-            key = key_rot
-
+            query, key = apply_rotary_pos_emb(query, key, cos, sin, positions)
         return query.reshape((query.shape[0], query.shape[1], query.shape[2] * query.shape[3])), key.reshape((key.shape[0], key.shape[1], key.shape[2] * key.shape[3]))

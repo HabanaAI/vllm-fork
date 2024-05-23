@@ -4,11 +4,8 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
+from vllm import _custom_ops as ops
 from vllm.utils import is_hpu
-if is_hpu():
-    from vllm.hpu import ops
-else:
-    from vllm._C import ops
 
 if is_hpu():
     try:
@@ -65,7 +62,7 @@ class RMSNorm(nn.Module):
                 residual += x.view(residual.shape)
                 # Note: FusedRMSNorm requires 3D tensors as inputs
                 x = FusedRMSNorm.apply(residual.float(), self.weight.float(), self.variance_epsilon)
-                return x.to(orig_dtype).view(orig_shape), residual.view(orig_shape)
+                return x.to(orig_dtype).view(orig_shape), residual
             ops.fused_add_rms_norm(
                 x,
                 residual,
@@ -85,3 +82,8 @@ class RMSNorm(nn.Module):
             self.variance_epsilon,
         )
         return out
+
+    def extra_repr(self) -> str:
+        s = f"hidden_size={self.weight.data.size(0)}"
+        s += f", eps={self.variance_epsilon}"
+        return s
