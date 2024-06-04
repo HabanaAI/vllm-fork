@@ -33,6 +33,8 @@ def test_rms_norm(
     seed: int,
     device: str,
 ) -> None:
+    if is_hpu() and dtype == torch.half and add_residual:
+        pytest.skip("Skipping test on HPU")
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)

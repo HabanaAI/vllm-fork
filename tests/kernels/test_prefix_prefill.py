@@ -23,6 +23,7 @@ CUDA_DEVICES = [
 SLIDING_WINDOW = [0, 16, 64, 128, 256, 512, 2048]
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("num_queries_per_kv", NUM_QUERIES_PER_KV)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)

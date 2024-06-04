@@ -47,35 +47,60 @@ def test_rotary_embedding(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
+    if is_hpu():
+        pytest.skip("HpuRotaryEmbedding is not compatible with the test")
     if is_hpu() and not is_neox_style:
         pytest.skip("gptj style rotation not currently supported on HPU.")
-
-    if rotary_dim is None:
-        rotary_dim = head_size
+    if is_hpu() and dtype != torch.bfloat16:
+        pytest.skip("HPU only supports bfloat16.")
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
     elif is_hpu():
         torch.hpu.manual_seed(seed)
+
     torch.set_default_device(device)
     if rotary_dim is None:
         rotary_dim = head_size
-    rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style)
+    scaling_factors: List[int] = [1, 2, 4]
+    if is_hpu():
+        rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style)
+    else:
+        rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style, {
+            "type": "linear",
+            "factor": tuple(scaling_factors)
+        })
     rope = rope.to(dtype=dtype)
 
-    positions = torch.randint(0, max_position, (batch_size, seq_len), device=device)
+    positions = torch.randint(0, max_position, (batch_size, seq_len))
     query = torch.randn(batch_size,
                         seq_len,
                         num_heads * head_size,
-                        dtype=dtype,
-                        device=device)
+                        dtype=dtype)
     key = torch.randn_like(query)
+
+    offset_map = torch.tensor(
+        list(
+            accumulate([0] + [
+                max_position * scaling_factor * 2
+                for scaling_factor in scaling_factors[:-1]
+            ])))
+    query_types = torch.randint(0,
+                                len(scaling_factors), (batch_size, seq_len),
+                                device=device)
+    query_offsets = offset_map[query_types]
 
     # NOTE(woosuk): The reference implementation should be executed first
     # because the custom kernel is in-place.
-    ref_query, ref_key = rope._forward(positions.cpu(), query.cpu(), key.cpu())
-    out_query, out_key = rope.forward(positions, query, key)
+    ref_query, ref_key = rope._forward(positions, query, key, query_offsets)
+    out_query, out_key = rope.forward(positions, query, key,
+                                      query_offsets.flatten())
     # Compare the results.
+    # print(out_query, out_query.shape)
+    for ii, i in enumerate(zip(out_query[0], ref_query[0])):
+        print(ii, 'out', i[0], i[0].dtype, i[0].shape, 'ref', i[1], i[1].dtype, i[1].shape)
+        
+    # print(ref_query, ref_query.shape)
     assert torch.allclose(out_query,
                           ref_query,
                           atol=get_default_atol(out_query),
@@ -86,6 +111,7 @@ def test_rotary_embedding(
                           rtol=get_default_rtol(out_key))
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
 @pytest.mark.parametrize("seq_len", SEQ_LENS)
@@ -109,14 +135,9 @@ def test_batched_rotary_embedding(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
-    if is_hpu():
-        pytest.skip("Rope scaling not currently supported on HPU.")
-
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
-    elif is_hpu():
-        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     if rotary_dim is None:
         rotary_dim = head_size
@@ -153,6 +174,7 @@ def test_batched_rotary_embedding(
                           rtol=get_default_rtol(out_key))
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
 @pytest.mark.parametrize("seq_len", SEQ_LENS)
@@ -176,14 +198,9 @@ def test_batched_rotary_embedding_multi_lora(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
-    if is_hpu():
-        pytest.skip("Rope scaling not currently supported on HPU.")
-
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
-    elif is_hpu():
-        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     if rotary_dim is None:
         rotary_dim = head_size

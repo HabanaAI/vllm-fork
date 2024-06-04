@@ -212,7 +212,6 @@ def test_paged_attention(
             max_seq_len,
             alibi_slopes,
             kv_cache_dtype,
-            kv_scale,
         )
     elif version == "v1":
         ops.paged_attention_v1(
@@ -344,6 +343,7 @@ def ref_multi_query_kv_attention(
 
 
 # TODO(woosuk): Add tests for USE_ALIBI=True.
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("num_seqs", NUM_PREFILL_SEQS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -359,15 +359,10 @@ def test_multi_query_kv_attention(
     seed: int,
     device: str,
 ) -> None:
-    if is_hpu():
-        pytest.skip("memory_efficient_attention_forward() works incorrectly on HPU")
-
     random.seed(seed)
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
-    elif is_hpu():
-        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     # MAX_SEQ_LEN sometimes causes OOM in the reference implementation.
     # As the xformers library is already tested with its own tests, we can use
