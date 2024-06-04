@@ -12,7 +12,6 @@ import itertools
 import operator
 import torch
 import habana_frameworks.torch as htorch
-import habana_quantization_toolkit
 
 from vllm.attention import (AttentionMetadata, AttentionMetadataPerStage,
                             get_attn_backend)
@@ -198,6 +197,7 @@ class HabanaModelRunner:
                 scheduler_config=self.scheduler_config,
             )
             if self.model_config.quantization == 'hqt':
+                import habana_quantization_toolkit
                 habana_quantization_toolkit.prep_model(self.model)
                 import habana_frameworks.torch.core as htcore
                 htcore.hpu_initialize(self.model, mark_only_scales_as_const=True)
@@ -699,6 +699,7 @@ class HabanaModelRunner:
                 multi_modal_input)
 
     def finish_measurement(self):
+        import habana_quantization_toolkit
         habana_quantization_toolkit.finish_measurements(self.model)
 
     @torch.inference_mode()
@@ -851,6 +852,7 @@ class HabanaModelRunner:
         if model_config := getattr(self, "model_config", None):
             if getattr(model_config, "quantization", None) == 'hqt':
                 print('hqt shutdown start')
+                import habana_quantization_toolkit
                 if habana_quantization_toolkit is not None:
                     habana_quantization_toolkit.finish_measurements(self.model)
                 print('hqt shutdown')

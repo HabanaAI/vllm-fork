@@ -146,6 +146,9 @@ class RayHabanaExecutor(DistributedGPUExecutor):
                           max_concurrent_workers=self.parallel_config.
                           max_parallel_loading_workers)
 
+    def finish_measurement(self):
+        self._run_workers("finish_measurement")
+
     def execute_model(
             self,
             execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
