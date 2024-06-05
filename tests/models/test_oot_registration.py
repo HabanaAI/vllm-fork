@@ -1,8 +1,10 @@
+import pytest
 import torch
 
 from vllm import LLM, ModelRegistry, SamplingParams
 from vllm.model_executor.models.opt import OPTForCausalLM
 from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.utils import is_hpu
 
 
 class MyOPTForCausalLM(OPTForCausalLM):
@@ -16,6 +18,7 @@ class MyOPTForCausalLM(OPTForCausalLM):
         return logits
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 def test_oot_registration():
     # register our dummy model
     ModelRegistry.register_model("OPTForCausalLM", MyOPTForCausalLM)
