@@ -209,7 +209,6 @@ def test_paged_attention(
             block_tables,
             seq_lens,
             block_size,
-            max_seq_len,
             alibi_slopes,
             kv_cache_dtype,
         )
