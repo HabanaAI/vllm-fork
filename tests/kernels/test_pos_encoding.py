@@ -24,6 +24,7 @@ else:
     ]
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
 @pytest.mark.parametrize("seq_len", SEQ_LENS)
@@ -47,17 +48,9 @@ def test_rotary_embedding(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
-    if is_hpu():
-        pytest.skip("HpuRotaryEmbedding is not compatible with the test")
-    if is_hpu() and not is_neox_style:
-        pytest.skip("gptj style rotation not currently supported on HPU.")
-    if is_hpu() and dtype != torch.bfloat16:
-        pytest.skip("HPU only supports bfloat16.")
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
-    elif is_hpu():
-        torch.hpu.manual_seed(seed)
 
     torch.set_default_device(device)
     if rotary_dim is None:
