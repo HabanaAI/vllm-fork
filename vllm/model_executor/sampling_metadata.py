@@ -501,19 +501,19 @@ class SamplingTensors:
         sample_indices_t = torch.tensor(
             sample_indices,
             device="cpu",
-            dtype=torch.int,
+            dtype=torch.long,
             pin_memory=pin_memory,
         )
         prompt_tensor = torch.tensor(
             prompt_padded_tokens,
             device="cpu",
-            dtype=torch.int,
+            dtype=torch.long,
             pin_memory=pin_memory,
         )
         output_tensor = torch.tensor(
             output_padded_tokens,
             device="cpu",
-            dtype=torch.int,
+            dtype=torch.long,
             pin_memory=pin_memory,
         )
         # need to transpose and make contiguous to
@@ -522,7 +522,7 @@ class SamplingTensors:
         sampling_seeds_t = torch.tensor(
             sampling_seeds,
             device="cpu",
-            dtype=torch.int,
+            dtype=torch.long,
             pin_memory=pin_memory,
         ).T.contiguous()
 
@@ -571,7 +571,7 @@ class SamplingTensors:
             else:
                 generator = random.Random(str((seed, ) + extra_entropy))
                 randint_fn = generator.randint
-            lo, hi = torch.iinfo(torch.int).min, torch.iinfo(torch.int).max
+            lo, hi = torch.iinfo(torch.long).min, torch.iinfo(torch.long).max
             # If the user/random sets seed = 0 but request should
             # have sampling, we need to change it to something
             # else. We use a constant in that case.
