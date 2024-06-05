@@ -230,6 +230,7 @@ def test_reshape_and_cache(
         assert torch.allclose(value_cache, cloned_value_cache)
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("num_tokens", NUM_TOKENS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -252,8 +253,6 @@ def test_reshape_and_cache_flash(
     device: str,
     kv_cache_dtype: str,
 ) -> None:
-    if is_hpu():
-        pytest.skip("TEST NOT SUPPORTED YET!")   # TODO: check compatibility with HPU
     if kv_cache_dtype == "fp8":
         pytest.skip()
     random.seed(seed)
