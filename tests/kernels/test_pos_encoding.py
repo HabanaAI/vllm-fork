@@ -48,21 +48,15 @@ def test_rotary_embedding(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
+    if rotary_dim is None:
+        rotary_dim = head_size
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
-
     torch.set_default_device(device)
     if rotary_dim is None:
         rotary_dim = head_size
-    scaling_factors: List[int] = [1, 2, 4]
-    if is_hpu():
-        rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style)
-    else:
-        rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style, {
-            "type": "linear",
-            "factor": tuple(scaling_factors)
-        })
+    rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style)
     rope = rope.to(dtype=dtype)
 
     positions = torch.randint(0, max_position, (batch_size, seq_len))
@@ -72,28 +66,11 @@ def test_rotary_embedding(
                         dtype=dtype)
     key = torch.randn_like(query)
 
-    offset_map = torch.tensor(
-        list(
-            accumulate([0] + [
-                max_position * scaling_factor * 2
-                for scaling_factor in scaling_factors[:-1]
-            ])))
-    query_types = torch.randint(0,
-                                len(scaling_factors), (batch_size, seq_len),
-                                device=device)
-    query_offsets = offset_map[query_types]
-
     # NOTE(woosuk): The reference implementation should be executed first
     # because the custom kernel is in-place.
-    ref_query, ref_key = rope._forward(positions, query, key, query_offsets)
-    out_query, out_key = rope.forward(positions, query, key,
-                                      query_offsets.flatten())
+    ref_query, ref_key = rope._forward(positions, query, key)
+    out_query, out_key = rope.forward(positions, query, key)
     # Compare the results.
-    # print(out_query, out_query.shape)
-    for ii, i in enumerate(zip(out_query[0], ref_query[0])):
-        print(ii, 'out', i[0], i[0].dtype, i[0].shape, 'ref', i[1], i[1].dtype, i[1].shape)
-        
-    # print(ref_query, ref_query.shape)
     assert torch.allclose(out_query,
                           ref_query,
                           atol=get_default_atol(out_query),
