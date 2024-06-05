@@ -81,6 +81,7 @@ def test_metric_counter_generation_tokens(
         f"metric: {metric_count!r}")
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["float"])
 @pytest.mark.parametrize(
@@ -145,6 +146,7 @@ async def test_async_engine_log_metrics_regression(
                    len(example_prompts))
 
 
+@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
 @pytest.mark.parametrize("max_tokens", [4])
