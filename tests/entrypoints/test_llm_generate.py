@@ -1,10 +1,8 @@
 import pytest
 
 from vllm import LLM, SamplingParams
-from vllm.utils import is_hpu
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 def test_multiple_sampling_params():
 
     llm = LLM(model="facebook/opt-125m",

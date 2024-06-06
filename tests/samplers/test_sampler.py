@@ -102,7 +102,6 @@ def test_sampler_all_greedy(seed: int, device: str):
     del model_runner
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("seed", RANDOM_SEEDS)
 @pytest.mark.parametrize("device", DEVICES)
 def test_sampler_all_random(seed: int, device: str):
@@ -181,7 +180,6 @@ def test_sampler_all_random_seed_deterministic(seed: int, device: str):
     del model_runner
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("seed", RANDOM_SEEDS)
 @pytest.mark.parametrize("device", DEVICES)
 def test_sampler_all_beam(seed: int, device: str):
@@ -204,7 +202,6 @@ def test_sampler_all_beam(seed: int, device: str):
     del model_runner
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("seed", RANDOM_SEEDS)
 @pytest.mark.parametrize("device", DEVICES)
 def test_sampler_min_tokens_penalty(seed: int, device: str):
@@ -597,7 +594,6 @@ def test_sampler_mixed(seed: int, device: str):
     del model_runner
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("seed", RANDOM_SEEDS)
 @pytest.mark.parametrize("device", DEVICES)
 def test_sampler_top_k_top_p(seed: int, device: str):

@@ -6,12 +6,10 @@ Run `pytest tests/samplers/test_ignore_eos.py`.
 import pytest
 
 from vllm import SamplingParams
-from vllm.utils import is_hpu
 
 MODELS = ["facebook/opt-125m"]
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
 @pytest.mark.parametrize("max_tokens", [1024])

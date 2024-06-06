@@ -110,7 +110,6 @@ def test_metric_set_tag_model_name(vllm_runner, model: str, dtype: str,
             f"actual: {metrics_tag_content!r}")
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
 @pytest.mark.parametrize("max_tokens", [4])
@@ -146,7 +145,6 @@ async def test_async_engine_log_metrics_regression(
                    len(example_prompts))
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
 @pytest.mark.parametrize("max_tokens", [4])

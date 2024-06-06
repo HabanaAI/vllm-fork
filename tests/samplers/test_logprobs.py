@@ -115,7 +115,6 @@ def test_get_prompt_logprobs(
             assert token_id in logprob_dict
 
 
-@pytest.mark.skipif(is_hpu(), reason="Skipping test on HPU")
 def test_max_logprobs():
     runner = VllmRunner("facebook/opt-125m", max_logprobs=1)
     vllm_sampling_params = SamplingParams(logprobs=1)
