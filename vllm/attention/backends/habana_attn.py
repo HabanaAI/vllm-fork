@@ -9,7 +9,8 @@ import os
 import torch
 import math
 from typing import Optional
-import vllm.hpu.utils
+from vllm.hpu import cache_ops
+from vllm.hpu.utils import VLLMKVCache
 from vllm.hpu.attn_bias import (AttentionBias,
                                 LowerTriangularMaskWithTensorBias)
 
@@ -151,7 +152,8 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
         self.qk_matmul = Matmul()
         self.softmax = Softmax()
         self.kv_matmul = Matmul()
-        self.key_value_cache = vllm.hpu.utils.VLLMKVCache()
+        self.key_cache = VLLMKVCache()
+        self.value_cache = VLLMKVCache()
         self.scale = float(scale)
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
@@ -196,9 +198,6 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
         attn_weights = attn_weights.transpose(1, 2)
         return attn_weights
 
-    def _fetch_from_cache(self, cache, blocks):
-        return [cache.index_select(0, blocks[:, i]) for i in range(blocks.size(1))]
-
     def paged_attention_v1(self, query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, kv_cache_dtype=None)  -> None:
         seq_len = block_tables.size(1)
         batch_size, query_heads, _ = query.shape
@@ -211,7 +210,7 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 .view(batch_size, 1, 1, -1))
 
         query = query.unsqueeze(-2)
-        keys = self._fetch_from_cache(key_cache, block_tables)
+        keys = self.key_cache.fetch_from_cache(key_cache, block_tables)
         if query_heads != kv_heads:
             query = query.unflatten(1, (kv_heads, -1))
             keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
@@ -222,7 +221,7 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                         .mul_(scale)
                         .masked_fill(mask, min_inf), dim=-1)
         
-        values = self._fetch_from_cache(value_cache, block_tables)
+        values = self.value_cache.fetch_from_cache(value_cache, block_tables)
         if PA_SPLIT_VALUE:
             attn_weights = attn_weights.split(block_size, dim=-1)
         else:
@@ -270,11 +269,10 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache, value_cache = self.key_value_cache(key, value, key_cache,
-                                                          value_cache,
-                                                          attn_metadata.slot_mapping,
-                                                          attn_metadata.kv_cache_dtype,
-                                                          attn_metadata.prefill_metadata is not None)
+            is_prompt = attn_metadata.prefill_metadata is not None
+            block_indices, block_shape, block_offset = cache_ops.prepare_to_cache(key_cache, attn_metadata.slot_mapping, is_prompt)
+            key_cache = self.key_cache(key, key_cache, block_indices, block_shape, block_offset, is_prompt)
+            value_cache = self.value_cache(value, value_cache, block_indices, block_shape, block_offset, is_prompt)
 
         if prefill_meta := attn_metadata.prefill_metadata:
             # Prompt run.

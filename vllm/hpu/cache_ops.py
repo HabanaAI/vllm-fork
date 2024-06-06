@@ -55,6 +55,35 @@ def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, dtype, i
         update_cache(value, block_indices, block_offsets, value_cache)
 
 
+def prepare_to_cache(cache, slot_mapping, is_prompt):
+    block_size = cache.size(-1)
+    assert slot_mapping.dim() == 2, 'This implementation requires unflattened slot_mapping!'
+
+    if is_prompt:
+        block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+        block_shape = block_indices.shape
+        block_indices = pad_to_full_block(block_indices, block_size, -1).flatten(0, 1)
+        block_offsets = None
+    else:
+        slot_mapping = slot_mapping.flatten()
+        block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+        block_shape = None
+        block_offsets = torch.fmod(slot_mapping, block_size)
+
+    return block_indices, block_shape, block_offsets
+
+
+def insert_or_update_cache(input, cache, block_indices, block_shape, block_offsets, is_prompt):
+    block_size = cache.size(-1)
+
+    if is_prompt:
+        batch_size, seq_length = block_shape
+        input = pad_to_full_block(input.unflatten(0, (batch_size, seq_length)), block_size, 0).flatten(0, 1)
+        initialize_cache(input, block_indices, cache)
+    else:
+        update_cache(input, block_indices, block_offsets, cache)
+
+
 def swap_blocks(src, dst, block_mapping):
     index_src = torch.zeros((1,), dtype=torch.int32, device=key_caches[0].device)
     index_dst = torch.zeros((1,), dtype=torch.int32, device=key_caches[0].device)
