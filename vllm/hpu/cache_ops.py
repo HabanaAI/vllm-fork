@@ -10,7 +10,7 @@ import torch
 import habana_frameworks.torch as htorch
 
 
-def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, dtype, is_prompt):
+def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, dtype, is_prompt=False):
     block_size = key_cache.size(1)
     slot_mapping = slot_mapping.flatten()
     indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
