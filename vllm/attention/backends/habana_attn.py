@@ -9,7 +9,7 @@ import os
 import torch
 import math
 from typing import Optional
-from vllm.hpu import cache_ops
+from vllm.hpu import cache_ops, xops
 from vllm.hpu.utils import VLLMKVCache
 from vllm.hpu.attn_bias import (AttentionBias,
                                 LowerTriangularMaskWithTensorBias)
@@ -170,72 +170,6 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
-    def prompt_attention(self,
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            attn_bias: Optional[torch.Tensor] = None,
-            p: float = 0.0,
-            scale: Optional[float] = None,
-    ) -> torch.Tensor:
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
-        query_heads = query.size(1)
-        kv_heads = key.size(1)
-        if query_heads != kv_heads:
-            query = query.unflatten(1, (kv_heads, -1))
-            key = key.unflatten(1, (kv_heads, 1))
-            value = value.unflatten(1, (kv_heads, 1))
-            attn_bias = attn_bias.unsqueeze(2)
-        attn_weights = self.qk_matmul(query * scale, key.transpose(-1, -2))
-        if attn_bias is not None:
-            attn_weights.add_(attn_bias)
-        attn_weights = self.softmax(attn_weights, dim=-1)
-        attn_weights = self.kv_matmul(attn_weights, value)
-        if query_heads != kv_heads:
-            attn_weights = attn_weights.flatten(1, 2)
-        attn_weights = attn_weights.transpose(1, 2)
-        return attn_weights
-
-    def paged_attention_v1(self, query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, kv_cache_dtype=None)  -> None:
-        seq_len = block_tables.size(1)
-        batch_size, query_heads, _ = query.shape
-        _, kv_heads, _, _ = key_cache.shape
-        min_inf = torch.finfo(query.dtype).min
-        mask = (torch.arange(0, seq_len * block_size, dtype=torch.int32, device=key_cache.device)
-                .view(1, -1)
-                .expand(batch_size, -1)
-                .ge(context_lens.view(-1, 1))
-                .view(batch_size, 1, 1, -1))
-
-        query = query.unsqueeze(-2)
-        keys = self.key_cache.fetch_from_cache(key_cache, block_tables)
-        if query_heads != kv_heads:
-            query = query.unflatten(1, (kv_heads, -1))
-            keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
-            mask = mask.unsqueeze(2)
-
-        attn_weights = [self.qk_matmul(query, k) for k in keys]
-        attn_weights = self.softmax(torch.cat(attn_weights, dim=-1)
-                        .mul_(scale)
-                        .masked_fill(mask, min_inf), dim=-1)
-        
-        values = self.value_cache.fetch_from_cache(value_cache, block_tables)
-        if PA_SPLIT_VALUE:
-            attn_weights = attn_weights.split(block_size, dim=-1)
-        else:
-            values = [torch.cat(values, dim=-1)]
-            attn_weights = [attn_weights]
-        if query_heads != kv_heads:
-            values = [v.unflatten(1, (kv_heads, 1)) for v in values]
-        attn_weights = [self.kv_matmul(a, v.transpose(-1, -2)).squeeze(-2) for a, v in zip(attn_weights, values)]
-        if query_heads != kv_heads:
-            attn_weights = [a.flatten(1, 2) for a in attn_weights]
-        attn_weights = sum(attn_weights)
-
-        return attn_weights
-
     def forward(
         self,
         query: torch.Tensor,
@@ -301,13 +235,16 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                             seq_len, query.dtype)
                 query_shape = (batch_size, seq_len, self.num_heads, self.head_size)
                 kv_shape = (batch_size, seq_len_kv, self.num_kv_heads, self.head_size)
-                out = self.prompt_attention(
+                out = xops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
                     value.view(kv_shape),
                     attn_bias=prefill_meta.attn_bias,
                     p=0.0,
                     scale=self.scale,
+                    qk_matmul_op=self.qk_matmul,
+                    softmax_op=self.softmax,
+                    kv_matmul_op=self.kv_matmul,
                 )
                 output = out.reshape(batch_size, seq_len, hidden_size)
             else:
@@ -327,19 +264,23 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 )
         if decode_meta := attn_metadata.decode_metadata:
             # Decoding run.
-            block_size = value_cache.shape[3]
-            output = self.paged_attention_v1(
+            output = HabanaPagedAttention.forward_decode(
                 query,
                 key_cache,
                 value_cache,
-                self.num_kv_heads,
-                self.scale,
                 decode_meta.block_tables,
                 decode_meta.seq_lens_tensor,
-                block_size,
                 decode_meta.max_seq_len,
-                self.alibi_slopes,
                 attn_metadata.kv_cache_dtype,
+                self.num_kv_heads,
+                self.scale,
+                self.alibi_slopes,
+                kv_scale,
+                self.qk_matmul,
+                self.softmax,
+                self.kv_matmul,
+                self.key_cache.fetch_from_cache,
+                self.value_cache.fetch_from_cache,
             )
 
         # Reshape the output tensor.

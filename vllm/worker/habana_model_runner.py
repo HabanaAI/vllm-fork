@@ -840,7 +840,7 @@ class HabanaModelRunner:
                 print(f"Failed on scenario {i+1}: batch_size={batch_size}, seq_len={seq_len}, is_prompt={is_prompt}")
                 counter = counter+1
 
-        print(f"FAILED scenarios={counter}")
+        print(f"Failed warm-up scenarios={counter}")
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_memory_usage()
         elapsed_time = end_time - start_time
