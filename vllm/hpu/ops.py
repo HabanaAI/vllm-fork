@@ -151,4 +151,7 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
         current_hidden_states_static = w_output * padded_weight
         final_hidden_states += current_hidden_states_static
 
+    if torch.distributed.get_world_size() <= 1:
+        htorch.core.mark_step()
+    
     return final_hidden_states.view(-1, D)
