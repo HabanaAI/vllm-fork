@@ -6,6 +6,7 @@
 ###############################################################################
 import os
 import torch
+import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 import habana_frameworks.torch as htorch
@@ -38,7 +39,6 @@ def fetch_from_cache(cache, blocks, permutations):
     return [cache.index_select(0, blocks[:, i]).permute(permutations) for i in range(blocks.size(1))]
 
 
-@hpu_utils.with_mark_steps
 def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, alibi_slopes, kv_cache_dtype=None) -> None:
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
@@ -74,6 +74,8 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
+    if torch.distributed.get_world_size() <= 1:
+        htorch.core.mark_step()
     return attn_weights.squeeze(-2)
 
 

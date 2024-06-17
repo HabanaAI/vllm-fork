@@ -8,10 +8,9 @@
 import torch
 from typing import Optional
 
-import vllm.hpu.utils
+import habana_frameworks.torch as htorch
 
 
-@vllm.hpu.utils.with_mark_steps
 def prompt_attention(
         query: torch.Tensor,
         key: torch.Tensor,
@@ -38,4 +37,6 @@ def prompt_attention(
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)
+    if torch.distributed.get_world_size() <= 1:
+        htorch.core.mark_step()
     return attn_weights
