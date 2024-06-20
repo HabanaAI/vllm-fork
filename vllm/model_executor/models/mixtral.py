@@ -51,10 +51,8 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.sequence import SamplerOutput
 from vllm.utils import print_warning_once, is_hpu
-
 if is_hpu():
-    from vllm.hpu.ops import static_fused_moe
-
+    from vllm.hpu.ops import StaticFusedMOE
 
 class MixtralMoE(nn.Module):
     """A tensor-parallel MoE implementation for Mixtral that shards each expert
@@ -82,6 +80,9 @@ class MixtralMoE(nn.Module):
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size // self.tp_size
         self.quant_config = quant_config
+
+        if is_hpu():
+            self.static_fused_moe = StaticFusedMOE(self.num_total_experts)
 
         # FIXME(pcmoritz): Make this more general to support different
         # quantization schemes
@@ -173,11 +174,16 @@ class MixtralMoE(nn.Module):
         shard = slice(tp_rank * shard_size, (tp_rank + 1) * shard_size)
         if weight_name.endswith("w1.weight"):
             param_data[expert_id, 0:shard_size, :] = loaded_weight[shard, :]
+            if is_hpu():
+                self.static_fused_moe.w13_list[expert_id].set_weight(param_data[expert_id])
         if weight_name.endswith("w3.weight"):
-            param_data[expert_id,
-                       shard_size:2 * shard_size, :] = loaded_weight[shard, :]
+            param_data[expert_id, shard_size:2 * shard_size, :] = loaded_weight[shard, :]
+            if is_hpu():
+                self.static_fused_moe.w13_list[expert_id].set_weight(param_data[expert_id])
         if weight_name.endswith("w2.weight"):
             param_data[expert_id, :, :] = loaded_weight[:, shard]
+            if is_hpu():
+                self.static_fused_moe.w2_list[expert_id].set_weight(param_data[expert_id])
         if "act_scale" in weight_name or "weight_scale" in weight_name:
             param_data[expert_id] = loaded_weight
 
@@ -232,11 +238,11 @@ class MixtralMoE(nn.Module):
         router_logits, _ = self.gate(hidden_states)
 
         if is_hpu():
-            final_hidden_states = static_fused_moe(hidden_states,
-                        self.w13_weight,
-                        self.w2_weight,
-                        router_logits,
-                        self.top_k)
+            final_hidden_states = self.static_fused_moe(hidden_states,
+                                                        self.w13_weight,
+                                                        self.w2_weight,
+                                                        router_logits,
+                                                        self.top_k)
         else:
             final_hidden_states = fused_moe(hidden_states,
                                             self.w13_weight,
