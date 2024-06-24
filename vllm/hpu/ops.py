@@ -40,6 +40,8 @@ def fetch_from_cache(cache, blocks, permutations):
 
 
 def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, alibi_slopes, kv_cache_dtype=None) -> None:
+    if torch.distributed.get_world_size() <= 1:
+        htorch.core.mark_step()
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
@@ -74,8 +76,6 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
-    if torch.distributed.get_world_size() <= 1:
-        htorch.core.mark_step()
     return attn_weights.squeeze(-2)
 
 
@@ -150,8 +150,4 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
         w_output = torch.matmul(w_output, w2[expert_idx].transpose(0, 1))
         current_hidden_states_static = w_output * padded_weight
         final_hidden_states += current_hidden_states_static
-
-    if torch.distributed.get_world_size() <= 1:
-        htorch.core.mark_step()
-    
     return final_hidden_states.view(-1, D)
