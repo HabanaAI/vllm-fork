@@ -19,8 +19,8 @@ def prompt_attention(
         p: float = 0.0,
         scale: Optional[float] = None,
 ) -> torch.Tensor:
-    if torch.distributed.get_world_size() <= 1:
-        htorch.core.mark_step()
+    # if torch.distributed.get_world_size() <= 1:
+    #     htorch.core.mark_step()
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
