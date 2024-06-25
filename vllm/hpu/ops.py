@@ -40,8 +40,8 @@ def fetch_from_cache(cache, blocks, permutations):
 
 
 def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, alibi_slopes, kv_cache_dtype=None) -> None:
-    # if torch.distributed.get_world_size() <= 1:
-    #     htorch.core.mark_step()
+    if torch.distributed.get_world_size() <= 1:
+        htorch.core.mark_step()
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
