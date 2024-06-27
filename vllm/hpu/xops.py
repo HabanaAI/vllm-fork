@@ -8,10 +8,9 @@
 import torch
 from typing import Optional
 
-import vllm.hpu.utils
+import habana_frameworks.torch as htorch
 
 
-@vllm.hpu.utils.with_mark_steps
 def prompt_attention(
         query: torch.Tensor,
         key: torch.Tensor,
@@ -20,6 +19,8 @@ def prompt_attention(
         p: float = 0.0,
         scale: Optional[float] = None,
 ) -> torch.Tensor:
+    if torch.distributed.get_world_size() <= 1:
+        htorch.core.mark_step()
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)

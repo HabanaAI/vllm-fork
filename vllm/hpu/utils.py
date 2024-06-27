@@ -5,18 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 
-import habana_frameworks.torch as htorch
-
-def with_mark_steps(fn):
-    def wrapped(*args, **kwargs):
-        htorch.core.mark_step()
-        result = fn(*args, **kwargs)
-        del args
-        del kwargs
-        htorch.core.mark_step()
-        return result
-    return wrapped
-
 
 def profile_reicpes(recipe_names):
     from pathlib import Path

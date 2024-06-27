@@ -6,6 +6,7 @@
 ###############################################################################
 import os
 import torch
+import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 import habana_frameworks.torch as htorch
@@ -38,8 +39,9 @@ def fetch_from_cache(cache, blocks, permutations):
     return [cache.index_select(0, blocks[:, i]).permute(permutations) for i in range(blocks.size(1))]
 
 
-@hpu_utils.with_mark_steps
 def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, alibi_slopes, kv_cache_dtype=None) -> None:
+    if torch.distributed.get_world_size() <= 1:
+        htorch.core.mark_step()
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
@@ -152,5 +154,4 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
         current_hidden_states_static = w_output * padded_weight
         final_hidden_states += current_hidden_states_static
         htorch.core.mark_step()
-
     return final_hidden_states.view(-1, D)
