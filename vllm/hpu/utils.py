@@ -127,3 +127,6 @@ class VLLMKVCache(torch.nn.Module):
 
     def fetch_from_cache(self, cache, blocks, permutations):
         return [cache.index_select(0, blocks[:, i]).permute(permutations) for i in range(blocks.size(1))]
+
+    def permute_cache(self, cache, permutations):
+        return [v.permute(permutations) for v in cache]

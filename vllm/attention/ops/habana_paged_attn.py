@@ -90,6 +90,7 @@ class HabanaPagedAttention:
         kv_op=torch.matmul,
         keys_fetch=ops.fetch_from_cache,
         values_fetch=ops.fetch_from_cache,
+        keys_permute=ops.permute_cache,
     ) -> torch.Tensor:
         block_size = value_cache.shape[1]
         return ops.paged_attention_v1(
@@ -108,6 +109,7 @@ class HabanaPagedAttention:
             kv_op,
             keys_fetch,
             values_fetch,
+            keys_permute,
         )
 
     @staticmethod

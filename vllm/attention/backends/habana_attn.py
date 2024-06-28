@@ -252,6 +252,7 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 self.kv_matmul,
                 self.key_cache.fetch_from_cache,
                 self.value_cache.fetch_from_cache,
+                self.key_cache.permute_cache,
             )
 
         # Reshape the output tensor.
