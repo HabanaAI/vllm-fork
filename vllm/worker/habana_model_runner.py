@@ -82,6 +82,56 @@ def setup_profiler():
         with_stack=True)
     return profiler
 
+def pt_profiler(schedule):
+    DEVICE = 'hpu'
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE == 'hpu' else [])
+    #from habana_frameworks.torch.activity_profiler import DebugActivity
+    #debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
+
+    profiler = torch.profiler.profile(
+        schedule=schedule,
+        activities=activities,
+        #debug_activities=debug_activities,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('.', use_gzip=True),
+        record_shapes=False,
+        with_stack=True)
+    return profiler
+
+
+def hltv_profiler(schedule):
+    import sys
+    PT_TOOLS_PATH = '/software/users/madamczyk/pt-tools/'
+    sys.path.append(PT_TOOLS_PATH)
+    from topologies import SynapseProfilerApi, TraceType
+    api = SynapseProfilerApi()
+    class SynapseProfiler:
+        def check(self):
+            if schedule(self.cur_step) == torch.profiler.ProfilerAction.RECORD_AND_SAVE:
+                api.profiler_start(TraceType.TraceAll, 0)
+        def start(self):
+            self.cur_step = 0
+            self.check()
+        def step(self):
+            self.cur_step = self.cur_step + 1
+            self.check()
+        def stop(self):
+            api.profiler_stop(TraceType.TraceAll, 0)
+            api.profiler_get_trace_json(TraceType.TraceAll, 0)
+    return SynapseProfiler()
+
+
+def setup_profiler():
+    PROF_WAIT = 0
+    PROF_WARMUP = 2
+    PROF_ACTIVE = 1
+    prof_type = os.environ.get('VLLM_PT_PROFILE_METHOD', 'pt')
+    assert prof_type in ['pt', 'hltv']
+    method = pt_profiler if prof_type == 'pt' else hltv_profiler
+    print('METHOD', prof_type)
+    schedule = torch.profiler.schedule(wait=PROF_WAIT, warmup=PROF_WARMUP, active=PROF_ACTIVE, repeat=1)
+    return method(schedule)
+
 
 # Read bucketing configuration from env variables
 # phase is either 'prompt' or 'decode'
