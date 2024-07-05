@@ -602,9 +602,9 @@ class HabanaModelRunner:
                 generation_token = seq_data.get_last_token_id()
                 input_tokens.append(generation_token)
 
-                seq_len = ((seq_data.get_num_computed_tokens() + 1)
-                           if self.scheduler_config.enable_delayed_sampling else seq_data.get_len())
-                position = seq_len - 1
+                seq_len = seq_data.get_len()
+                position = (seq_data.get_num_computed_tokens()
+                            if self.scheduler_config.enable_delayed_sampling else (seq_len - 1))
                 input_positions.append([position])
 
                 seq_len = seq_len if self.sliding_window is None else min(
@@ -640,12 +640,14 @@ class HabanaModelRunner:
 
 
         #with torch.autograd.profiler.record_function("create lists"):
-        blocks_used = list(itertools.chain(round_up(s, self.block_size) // self.block_size for s in seq_lens))
+        blocks_used = [len(bt) for bt in block_tables]
         block_list = list(itertools.chain(*block_tables))
         block_mapping = [[i] * bu for i, bu in enumerate(blocks_used)]
         block_mapping = list(itertools.chain(*block_mapping))
-        block_usage = [split_to_blocks(sl, self.block_size) for sl in seq_lens]
+        #print(blocks_used, seq_lens)
+        block_usage = [split_to_blocks(sl+1, self.block_size) for sl in seq_lens]
         block_usage = list(itertools.chain(*block_usage))
+        #print(block_list)
         #print(blocks_used)
         #print(block_usage)
 
@@ -1071,7 +1073,7 @@ class HabanaModelRunner:
             # FIXME: seq_len is actually number of blocks
             blocks = [seq_len // batch_size for _ in range(batch_size)]
             blocks[0] += seq_len % batch_size
-            seqs = [self.create_dummy_seq_group_metadata(i, b * self.block_size, is_prompt) for i, b in enumerate(blocks)]
+            seqs = [self.create_dummy_seq_group_metadata(i, b * self.block_size - 1, is_prompt) for i, b in enumerate(blocks)]
         torch.hpu.synchronize()
         profiler = None
         if profile and self.is_driver_worker:
