@@ -81,7 +81,7 @@ def flat_pa(query,
 
     attn = qk_matmul_op(query, key) + block_bias
     attn = block_softmax(batch_size, attn, block_mapping)
-    attn = attn @ value
+    attn = kv_matmul_op(attn, value)
     attn = block2batch(attn, block_mapping)
     attn = attn.squeeze(-2)
     if kv_heads != q_heads:
