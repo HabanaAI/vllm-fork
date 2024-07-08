@@ -689,29 +689,20 @@ class HabanaModelRunner:
                                     device=self.device)
 
 
-        #with torch.autograd.profiler.record_function("create lists"):
         blocks_used = [len(bt) for bt in block_tables]
         block_list = list(itertools.chain(*block_tables))
         block_mapping = [[i] * bu for i, bu in enumerate(blocks_used)]
         block_mapping = list(itertools.chain(*block_mapping))
-        #print(blocks_used, seq_lens)
-        block_usage = [split_to_blocks(sl+1, self.block_size) for sl in seq_lens]
+        block_usage = [split_to_blocks(sl, self.block_size) for sl in seq_lens]
         block_usage = list(itertools.chain(*block_usage))
-        #print(block_list)
-        #print(blocks_used)
-        #print(block_usage)
 
-        #with torch.autograd.profiler.record_function("pad lists"):
         block_bucket_size = self.decode_block_bucket_cfg[1]
         block_list = pad_list(block_list, block_bucket_size, _PAD_SLOT_ID)
         block_mapping = pad_list(block_mapping, block_bucket_size, 0)
         block_usage = pad_list(block_usage, block_bucket_size, 0)
 
-        #with torch.autograd.profiler.record_function("t:block_list"):
         block_list = torch.tensor(block_list, dtype=torch.int, device=self.device)
-        #with torch.autograd.profiler.record_function("t:block_mapping"):
         block_mapping = torch.tensor(block_mapping, dtype=torch.int, device=self.device)
-        #with torch.autograd.profiler.record_function("t:block_usage"):
         block_usage = torch.tensor(block_usage, dtype=torch.bfloat16, device=self.device)
 
         attn_metadata = self.attn_backend.make_metadata(
@@ -999,8 +990,6 @@ class HabanaModelRunner:
             model_event_name = f"model_{'prompt' if is_prompt else 'decode'}_bs{batch_size}_seq{seq_len}_graphs{'T' if use_graphs else 'F'}"
         else:
             model_event_name = 'model_executable'
-        #free_mem = format_bytes(HabanaMemoryProfiler.current_free_device_memory())
-        #print(model_event_name, free_mem, count_hpu_graphs(), use_graphs)
         with self.profiler.record_event('internal', model_event_name):
             hidden_states = self.model.forward(**execute_model_kwargs, selected_token_indices=sampling_metadata.selected_token_indices)
 
