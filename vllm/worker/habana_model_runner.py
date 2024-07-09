@@ -52,18 +52,6 @@ def subtuple(obj: object, typename: str, to_copy: List[str], to_override: Dict[s
     return _TYPE_CACHE[typename](**values)
 
 
-def split_to_blocks(length, block_size):
-    while length > 0:
-        chunk = min(length, block_size)
-        length -= chunk
-        yield chunk
-
-
-def count_hpu_graphs():
-    import glob
-    return len(glob.glob('.graph_dumps/*PreGraph*'))
-
-
 def setup_profiler():
     DEVICE='hpu'
     STEPS=3
