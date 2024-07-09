@@ -135,7 +135,7 @@ def setup_profiler():
 
 # Read bucketing configuration from env variables
 # phase is either 'prompt' or 'decode'
-# dim is either 'bs' or 'blocks'
+# dim is either 'bs' or 'block'
 # param is either 'min', 'step' or 'max'
 # example env variable: VLLM_DECODE_BS_BUCKET_STEP=128
 def read_bucket_settings(phase: str, dim: str, **defaults: Dict):
@@ -435,7 +435,7 @@ class HabanaModelRunner:
 
     def _setup_buckets(self) -> None:
         align_bs = lambda x: min(self.max_num_seqs, x)
-        blocks_step = 16
+        blocks_step = 128
         max_prompt_seq = 1024
         max_decode_seq = 2048
         self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=align_bs(32), max=align_bs(64))
