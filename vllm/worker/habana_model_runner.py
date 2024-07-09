@@ -201,8 +201,9 @@ def pad_list(l, k, v):
 
 
 class HpuModelAdapter():
-    def __init__(self, model):
+    def __init__(self, model, block_size):
         self.model = model
+        self.block_size = block_size
 
     def _set_attn_bias(self, metadata, batch_size, seq_len, device, dtype):
         seq_lens_t = metadata.seq_lens_tensor
@@ -219,8 +220,8 @@ class HpuModelAdapter():
                         .masked_fill_(mask, -math.inf))
         return metadata._replace(attn_bias=attn_bias)
 
-    def _set_block_mapping(self, metadata, batch_size, block_size, device, dtype):
-        mask = torch.arange(0, block_size, device=device, dtype=torch.int32).unsqueeze(0)
+    def _set_block_mapping(self, metadata, batch_size, device, dtype):
+        mask = torch.arange(0, self.block_size, device=device, dtype=torch.int32).unsqueeze(0)
         mask = mask >= metadata.block_usage.unsqueeze(-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype)
                         .masked_fill_(mask, -math.inf))
@@ -228,11 +229,11 @@ class HpuModelAdapter():
         metadata = metadata._replace(block_mapping=block_mapping, attn_bias=attn_bias)
         return metadata
 
-    def _update_metadata(self, attn_metadata, batch_size, seq_len, block_size, device, dtype):
+    def _update_metadata(self, attn_metadata, batch_size, seq_len, device, dtype):
         if (meta := attn_metadata.prefill_metadata) is not None:
             return attn_metadata._replace(prefill_metadata=self._set_attn_bias(meta, batch_size, seq_len, device, dtype))
         if (meta := attn_metadata.decode_metadata) is not None:
-            return attn_metadata._replace(decode_metadata=self._set_block_mapping(meta, batch_size, block_size, device, dtype))
+            return attn_metadata._replace(decode_metadata=self._set_block_mapping(meta, batch_size, device, dtype))
         return attn_metadata
 
     def forward(self, *args, **kwargs):
@@ -241,7 +242,7 @@ class HpuModelAdapter():
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
         input_ids = kwargs['input_ids']
-        kwargs['attn_metadata'] = self._update_metadata(kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1), 128, input_ids.device, torch.bfloat16)
+        kwargs['attn_metadata'] = self._update_metadata(kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1), input_ids.device, torch.bfloat16)
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -397,10 +398,7 @@ class HabanaModelRunner:
                 self.model.sampler.include_gpu_probs_tensor = True
                 self.model.sampler.sample_token_positions_only = True
 
-            # FIXME: Running with disable_tensor_cache=True causes RuntimeErrors. This needs to be debugged
-            with HabanaMemoryProfiler() as m_wrap:
-                self.model = _maybe_wrap_in_hpu_graph(self.model)
-            logger.info(f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}")
+            self.model = _maybe_wrap_in_hpu_graph(HpuModelAdapter(self.model, self.block_size))
         self.model_memory_usage = m.consumed_device_memory
         logger.info(f"Loading model weights took in total {m.get_summary_string()}")
 
@@ -1229,8 +1227,8 @@ class HabanaModelRunner:
 
 def _maybe_wrap_in_hpu_graph(model):
     return htorch.hpu.wrap_in_hpu_graph(
-        HpuModelAdapter(model), disable_tensor_cache=True
-    ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(model)
+        model, disable_tensor_cache=True
+    ) if htorch.utils.internal.is_lazy() else model
 
 
 class HabanaProfilerCounterHelper():
