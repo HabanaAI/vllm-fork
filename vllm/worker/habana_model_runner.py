@@ -129,7 +129,11 @@ def setup_profiler():
 # example env variable: VLLM_DECODE_BS_BUCKET_STEP=128
 def read_bucket_settings(phase: str, dim: str, **defaults: Dict):
     params = ['min', 'step', 'max']
-    values = [int(os.environ.get(f'VLLM_{phase}_{dim}_BUCKET_{p}'.upper(), defaults[p])) for p in params]
+    env_vars = [f'VLLM_{phase}_{dim}_BUCKET_{p}'.upper() for p in params]
+    defaults = [defaults[p] for p in params]
+    values = [int(os.environ.get(e, d)) for e, d in zip(env_vars, defaults)]
+    for e, v, d in zip(env_vars, values, defaults):
+        logger.info(f'{e}={v} (default:{d})')
     return values
 
 
