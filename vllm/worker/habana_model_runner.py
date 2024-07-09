@@ -10,6 +10,7 @@ from typing import List, NamedTuple, Optional, Set, Tuple, Dict
 import collections
 import gc
 import os
+import sys
 import math
 import itertools
 import operator
@@ -70,6 +71,7 @@ def setup_profiler():
         with_stack=True)
     return profiler
 
+
 def pt_profiler(schedule):
     DEVICE = 'hpu'
     activities = [torch.profiler.ProfilerActivity.CPU]
@@ -88,9 +90,9 @@ def pt_profiler(schedule):
 
 
 def hltv_profiler(schedule):
-    import sys
-    PT_TOOLS_PATH = '/software/users/madamczyk/pt-tools/'
-    sys.path.append(PT_TOOLS_PATH)
+    pt_tools_path = os.environ.get('PT_TOOLS_PATH', None)
+    assert pt_tools_path is not None, "Need to specify PT_TOOLS_PATH to use hltv profiling method"
+    sys.path.append(pt_tools_path)
     from topologies import SynapseProfilerApi, TraceType
     api = SynapseProfilerApi()
     class SynapseProfiler:
@@ -110,14 +112,13 @@ def hltv_profiler(schedule):
 
 
 def setup_profiler():
-    PROF_WAIT = 0
-    PROF_WARMUP = 2
-    PROF_ACTIVE = 1
+    prof_wait = 0
+    prof_warmup = 2
+    prof_active = 1
     prof_type = os.environ.get('VLLM_PT_PROFILE_METHOD', 'pt')
     assert prof_type in ['pt', 'hltv']
     method = pt_profiler if prof_type == 'pt' else hltv_profiler
-    print('METHOD', prof_type)
-    schedule = torch.profiler.schedule(wait=PROF_WAIT, warmup=PROF_WARMUP, active=PROF_ACTIVE, repeat=1)
+    schedule = torch.profiler.schedule(wait=prof_wait, warmup=prof_warmup, active=prof_active, repeat=1)
     return method(schedule)
 
 
@@ -226,10 +227,9 @@ class HpuModelAdapter():
     def _update_metadata(self, attn_metadata, batch_size, seq_len, block_size, device, dtype):
         if (meta := attn_metadata.prefill_metadata) is not None:
             return attn_metadata._replace(prefill_metadata=self._set_attn_bias(meta, batch_size, seq_len, device, dtype))
-        elif (meta := attn_metadata.decode_metadata) is not None:
+        if (meta := attn_metadata.decode_metadata) is not None:
             return attn_metadata._replace(decode_metadata=self._set_block_mapping(meta, batch_size, block_size, device, dtype))
-        else:
-            return attn_metadata
+        return attn_metadata
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
