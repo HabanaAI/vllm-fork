@@ -441,7 +441,7 @@ class HabanaModelRunner:
         self.prompt_bs_bucket_cfg = read_bucket_settings('prompt', 'bs', min=1, step=align_bs(32), max=align_bs(64))
         self.decode_bs_bucket_cfg = read_bucket_settings('decode', 'bs', min=align_bs(32), step=align_bs(32), max=self.max_num_seqs)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt', 'seq', min=self.block_size, step=self.block_size, max=max_prompt_seq)
-        self.decode_block_bucket_cfg = read_bucket_settings('decode', 'block', min=blocks_step, step=blocks_step, max=self.max_num_seqs * max_decode_seq // self.block_size)
+        self.decode_block_bucket_cfg = read_bucket_settings('decode', 'block', min=blocks_step, step=blocks_step, max=max(blocks_step, self.max_num_seqs * max_decode_seq // self.block_size))
         self.graphed_buckets = set()
         logger.info(f"Prompt bucket config (min, step, max_warmup) bs:{self.prompt_bs_bucket_cfg}, seq:{self.prompt_seq_bucket_cfg}")
         logger.info(f"Decode bucket config (min, step, max_warmup) bs:{self.decode_bs_bucket_cfg}, seq:{self.decode_block_bucket_cfg}")
