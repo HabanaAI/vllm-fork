@@ -675,25 +675,20 @@ class HabanaModelRunner:
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
-        #with torch.autograd.profiler.record_function("t:input_tokens"):
         input_tokens = torch.tensor(input_tokens,
                                     dtype=torch.long,
                                     device=self.device).unsqueeze(-1)
-        #with torch.autograd.profiler.record_function("t:input_positions"):
         input_positions = torch.tensor(input_positions,
                                     dtype=torch.long,
                                     device=self.device)
-        #with torch.autograd.profiler.record_function("t:slot_mapping"):
-        slot_mapping = torch.tensor(slot_mapping,
-                                    dtype=torch.long,
-                                    device=self.device)
-
 
         blocks_used = [len(bt) for bt in block_tables]
         block_list = list(itertools.chain(*block_tables))
         block_mapping = [[i] * bu for i, bu in enumerate(blocks_used)]
         block_mapping = list(itertools.chain(*block_mapping))
-        block_usage = [split_to_blocks(sl, self.block_size) for sl in seq_lens]
+
+        last_block = [sl % self.block_size for sl in itertools.chain(*slot_mapping)]
+        block_usage = [[self.block_size] * (bu - 1) + [lb] for bu, lb in zip(blocks_used, last_block)]
         block_usage = list(itertools.chain(*block_usage))
 
         block_bucket_size = self.decode_block_bucket_cfg[1]
@@ -704,6 +699,10 @@ class HabanaModelRunner:
         block_list = torch.tensor(block_list, dtype=torch.int, device=self.device)
         block_mapping = torch.tensor(block_mapping, dtype=torch.int, device=self.device)
         block_usage = torch.tensor(block_usage, dtype=torch.bfloat16, device=self.device)
+
+        slot_mapping = torch.tensor(slot_mapping,
+                                    dtype=torch.long,
+                                    device=self.device)
 
         attn_metadata = self.attn_backend.make_metadata(
             block_list=block_list,
