@@ -501,8 +501,10 @@ class CudaMemoryProfiler:
 
 class HabanaMemoryProfiler:
 
-    def __init__(self, device=None):
+    def __init__(self, device=None, gc_collect_at_enter=True, gc_collect_at_exit=True):
         self.device = device
+        self.gc_collect_at_enter = gc_collect_at_enter
+        self.gc_collect_at_exit = gc_collect_at_exit
 
     def current_device_memory_usage() -> float:
         # Return the device memory usage in bytes.
@@ -538,16 +540,18 @@ class HabanaMemoryProfiler:
                 f"{format_bytes(self.consumed_host_memory)} of host memory ({format_bytes(self.final_host_memory)}/{format_bytes(HabanaMemoryProfiler.total_host_memory())} used)")
 
     def __enter__(self):
-        # Force garbage collection
-        gc.collect()
+        if self.gc_collect_at_enter:
+            # Force garbage collection
+            gc.collect()
         self.initial_device_memory = HabanaMemoryProfiler.current_device_memory_usage()
         self.initial_host_memory = HabanaMemoryProfiler.current_host_memory_usage()
         # This allows us to call methods of the context manager if needed
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Force garbage collection
-        gc.collect()
+        if self.gc_collect_at_exit:
+            # Force garbage collection
+            gc.collect()
         self.final_device_memory = HabanaMemoryProfiler.current_device_memory_usage()
         self.final_host_memory = HabanaMemoryProfiler.current_host_memory_usage()
         self.consumed_device_memory = self.final_device_memory - self.initial_device_memory

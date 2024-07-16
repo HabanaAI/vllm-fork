@@ -1194,7 +1194,10 @@ class HabanaModelRunner:
                 continue
             self.graphed_buckets.add((batch_size, seq_len, is_prompt))
             self.log_warmup(phase, idx, num_candidates, batch_size, seq_len)
-            with HabanaMemoryProfiler() as mem_prof:
+            # warmup scenario already performs gc.collect()
+            # disabling gc.collect() at enter and exit reduces number
+            # of collects from 3 to 1
+            with HabanaMemoryProfiler(gc_collect_at_enter=False, gc_collect_at_exit=False) as mem_prof:
                 self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
             used_mem = align_workers(mem_prof.consumed_device_memory, torch.distributed.ReduceOp.MAX)
             available_mem -= used_mem
