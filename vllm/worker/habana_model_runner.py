@@ -334,6 +334,15 @@ class BatchType(IntEnum):
     MIXED = 2
 
 
+# For debug purposes
+def make_gc_callback(profiler):
+    def gc_callback(phase, info):
+        if phase == 'start' and info['generation'] == 2:
+            profiler.start('external', 'gc_gen2')
+        if phase == 'stop' and info['generation'] == 2:
+            profiler.end()
+    return gc_callback
+
 class HabanaModelRunner:
 
     def __init__(
@@ -387,6 +396,21 @@ class HabanaModelRunner:
 
         self._setup_buckets()
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true'
+
+        # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
+        # for comprehensive description of gc generations.
+        # We can either use VLLM_GC_THR_GEN[0-2] (this has higher priority)
+        # to set particular generation threshold or use simpler
+        # VLLM_GC_THR_MULTIPLIER to multiply default values.
+        default_gc_thrs = list(gc.get_threshold())
+        requested_gc_thrs = [None] * len(default_gc_thrs)
+        for i in range(len(default_gc_thrs)):
+            requested_gc_thrs[i] = int(os.environ.get(f'VLLM_GC_THR_GEN{i}', default_gc_thrs[i]))
+        if requested_gc_thrs == default_gc_thrs:
+            gc_thr_multiplier = int(os.environ.get('VLLM_GC_THR_MULTIPLIER', 2))
+            requested_gc_thrs = [t * gc_thr_multiplier for t in default_gc_thrs]
+        gc.set_threshold(*requested_gc_thrs)
+        logger.info(f'Garbage collector thresholds were set to: {gc.get_threshold()}')
 
     def load_model(self) -> None:
         with HabanaMemoryProfiler() as m:
@@ -1247,6 +1271,9 @@ class HabanaModelRunner:
         elapsed_time = end_time - start_time
         logger.info(f"Warmup finished in {elapsed_time:.0f} secs, allocated {format_bytes(end_mem - start_mem)} of device memory")
         self.profiler.end()
+
+        gc.callbacks.append(make_gc_callback(self.profiler))
+        logger.info('Garbage collector traces are now enabled')
 
     def shutdown_hqt(self):
         print('hqt shutdown')
