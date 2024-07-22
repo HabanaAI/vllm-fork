@@ -356,7 +356,7 @@ class LlamaForCausalLM(nn.Module):
 
         logit_scale = getattr(config, "logit_scale", 1.0)
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size, config.vocab_size,
-                                                logit_scale, False, self.lm_head)
+                                                logit_scale, False)
         self.sampler = Sampler()
 
     def forward(
@@ -373,7 +373,7 @@ class LlamaForCausalLM(nn.Module):
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         logits = self.logits_processor(self.lm_head.weight, hidden_states,
-                                       sampling_metadata)
+                                       sampling_metadata, None, self.lm_head)
         return logits
 
     def sample(

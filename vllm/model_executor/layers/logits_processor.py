@@ -8,7 +8,6 @@ from vllm.distributed import tensor_model_parallel_gather, tensor_model_parallel
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.utils import is_hpu
 
-
 class LogitsProcessor(nn.Module):
     """Process logits and apply logits processors from sampling metadata.
 
@@ -22,8 +21,7 @@ class LogitsProcessor(nn.Module):
                  vocab_size: int,
                  org_vocab_size: Optional[int] = None,
                  scale: Optional[float] = 1.0,
-                 logits_as_input: bool = False,
-                 lm_head: nn.Module = None) -> None:
+                 logits_as_input: bool = False) -> None:
         """
         Args:
             scale: A scaling factor to apply to the logits.
@@ -35,7 +33,6 @@ class LogitsProcessor(nn.Module):
         self.logits_as_input = logits_as_input
         # original vocabulary size (without LoRA).
         self.org_vocab_size = org_vocab_size or vocab_size
-        self.lm_head_linear = lm_head
 
     def forward(
         self,
@@ -43,6 +40,7 @@ class LogitsProcessor(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
+        lm_head: Optional[nn.Module] = None,
     ) -> torch.Tensor:
         if self.logits_as_input:
             logits = hidden_states
@@ -51,9 +49,9 @@ class LogitsProcessor(nn.Module):
                                                  sampling_metadata)
 
             # Get the logits for the next tokens.
-            logits = self._get_logits(hidden_states, embedding, embedding_bias)
+            logits = self._get_logits(hidden_states, embedding, embedding_bias, lm_head)
 
-        # NOTE(kzawora): allgather on HPU will cause logits to be not None, 
+        # NOTE(kzawora): allgather on HPU will cause logits to be not None,
         # and we need to guard against applying logits processors on non-driver worker
         if logits is not None and sampling_metadata.seq_groups is not None:
             logits *= self.scale
@@ -64,10 +62,11 @@ class LogitsProcessor(nn.Module):
         return logits
 
     def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
-                    embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
+                    embedding_bias: Optional[torch.Tensor],
+                    lm_head: Optional[nn.Module] = None) -> torch.Tensor:
         # Get the logits for the next tokens.
-        if self.lm_head_linear:
-            logits = self.lm_head_linear(hidden_states, embedding)
+        if lm_head is not None:
+            logits = lm_head(hidden_states)
         else:
             logits = torch.matmul(hidden_states, embedding.t())
 

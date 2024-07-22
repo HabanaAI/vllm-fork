@@ -151,5 +151,5 @@ class ParallelLMHead(VocabParallelEmbedding):
             self.register_parameter("bias", None)
 
     # during quantization forward is patched with quantized version
-    def forward(self, hidden_states: torch.Tensor, embedding: torch.Tensor):
-        return torch.matmul(hidden_states, embedding.t())
+    def forward(self, hidden_states: torch.Tensor):
+        return torch.matmul(hidden_states, self.weight.t())
