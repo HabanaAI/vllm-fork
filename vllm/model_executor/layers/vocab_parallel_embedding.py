@@ -150,6 +150,6 @@ class ParallelLMHead(VocabParallelEmbedding):
         else:
             self.register_parameter("bias", None)
 
-    def forward(self, input_):
-        del input_
-        raise RuntimeError("LMHead's weights should be used in the sampler.")
+    # during quantization forward is patched with quantized version
+    def forward(self, hidden_states: torch.Tensor, embedding: torch.Tensor):
+        return torch.matmul(hidden_states, embedding.t())

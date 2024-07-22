@@ -8,14 +8,6 @@ from vllm.distributed import tensor_model_parallel_gather, tensor_model_parallel
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.utils import is_hpu
 
-class LmHeadLinear(nn.Module):
-    def __init__(self, lm_head_weight: Optional[torch.Tensor] = None) -> None:
-        super().__init__()
-        self.weight = lm_head_weight
-
-    def forward(self, hidden_states: torch.Tensor, embedding: torch.Tensor):
-        return torch.matmul(hidden_states, embedding.t())
-
 
 class LogitsProcessor(nn.Module):
     """Process logits and apply logits processors from sampling metadata.
@@ -31,7 +23,7 @@ class LogitsProcessor(nn.Module):
                  org_vocab_size: Optional[int] = None,
                  scale: Optional[float] = 1.0,
                  logits_as_input: bool = False,
-                 lm_head_weight: Optional[torch.Tensor] = None) -> None:
+                 lm_head: nn.Module = None) -> None:
         """
         Args:
             scale: A scaling factor to apply to the logits.
@@ -43,7 +35,7 @@ class LogitsProcessor(nn.Module):
         self.logits_as_input = logits_as_input
         # original vocabulary size (without LoRA).
         self.org_vocab_size = org_vocab_size or vocab_size
-        self.lm_head_linear = LmHeadLinear(lm_head_weight)
+        self.lm_head_linear = lm_head
 
     def forward(
         self,
@@ -74,8 +66,11 @@ class LogitsProcessor(nn.Module):
     def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
                     embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
         # Get the logits for the next tokens.
-         # logits = torch.matmul(hidden_states, embedding.t())
-        logits = self.lm_head_linear(hidden_states, embedding)
+        if self.lm_head_linear:
+            logits = self.lm_head_linear(hidden_states, embedding)
+        else:
+            logits = torch.matmul(hidden_states, embedding.t())
+
         if embedding_bias is not None:
             logits += embedding_bias
         # NOTE(kzawora): HPU PT bridge is missing support for single-rank gather. We'll use all-gather on Gaudi for now.
