@@ -127,3 +127,14 @@ class VLLMKVCache(torch.nn.Module):
 
     def fetch_from_cache(self, cache, blocks):
         return cache.index_select(0, blocks)
+
+
+class VLLMB2B(torch.nn.Module):
+    def __init__(self, transpose):
+        super(VLLMB2B, self).__init__()
+        self.transpose = transpose
+
+    def forward(self, block_mapping, tensor):
+        shape = tuple(tensor.shape)
+        b_m = block_mapping.t() if self.transpose else block_mapping
+        return (b_m @ tensor.view(shape[0], -1)).view(-1, *shape[1:])

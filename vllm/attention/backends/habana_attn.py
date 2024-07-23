@@ -9,7 +9,7 @@ import os
 import torch
 import math
 from vllm.hpu import cache_ops, xops
-from vllm.hpu.utils import Matmul, Softmax, VLLMKVCache
+from vllm.hpu.utils import Matmul, Softmax, VLLMKVCache, VLLMB2B
 from vllm.hpu.attn_bias import (AttentionBias,
                                 LowerTriangularMaskWithTensorBias)
 
@@ -100,6 +100,8 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
         self.kv_matmul = Matmul()
         self.key_cache = VLLMKVCache()
         self.value_cache = VLLMKVCache()
+        self.batch2block = VLLMB2B(False)
+        self.block2batch = VLLMB2B(True)
         self.scale = float(scale)
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
@@ -193,43 +195,10 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 qk_matmul_op=self.qk_matmul,
                 kv_matmul_op=self.kv_matmul,
                 keys_fetch_func=self.key_cache.fetch_from_cache,
-                values_fetch_func=self.value_cache.fetch_from_cache)
+                values_fetch_func=self.value_cache.fetch_from_cache,
+                batch2block_op=self.batch2block,
+                block2batch_op=self.block2batch,
+            )
 
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
-
-
-def _make_alibi_bias(
-    alibi_slopes: torch.Tensor,
-    num_kv_heads: int,
-    dtype: torch.dtype,
-    seq_lens: List[int],
-) -> LowerTriangularMaskWithTensorBias:
-    attn_biases = []
-    for seq_len in seq_lens:
-        bias = torch.arange(seq_len, dtype=dtype)
-        # NOTE(zhuohan): HF uses
-        #     `bias = bias[None, :].repeat(seq_len, 1)`
-        # here. We find that both biases give the same results, but
-        # the bias below more accurately follows the original ALiBi
-        # paper.
-        # Calculate a matrix where each element represents ith element- jth
-        # element.
-        bias = bias[None, :] - bias[:, None]
-
-        padded_len = (seq_len + 7) // 8 * 8
-        num_heads = alibi_slopes.shape[0]
-        bias = torch.empty(
-            1,  # batch size
-            num_heads,
-            seq_len,
-            padded_len,
-            device=alibi_slopes.device,
-            dtype=dtype,
-        )[:, :, :, :seq_len].copy_(bias)
-        bias.mul_(alibi_slopes[:, None, None])
-        if num_heads != num_kv_heads:
-            bias = bias.unflatten(1, (num_kv_heads, num_heads // num_kv_heads))
-        attn_biases.append(LowerTriangularMaskWithTensorBias(bias))
-
-    return attn_biases

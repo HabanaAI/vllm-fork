@@ -31,22 +31,22 @@ def gelu_fast(output, input):
     raise NotImplementedError
 
 
-def batch2block(tensor, block_mapping):
+def batch2block(block_mapping, tensor):
     shape = tuple(tensor.shape)
     return (block_mapping @ tensor.view(shape[0], -1)).view(-1, *shape[1:])
 
 
-def block2batch(tensor, block_mapping):
+def block2batch(block_mapping, tensor):
     shape = tuple(tensor.shape)
     return (block_mapping.t() @ tensor.view(shape[0], -1)).view(-1, *shape[1:])
 
 
-def block_softmax(batch_size, attn, block_mapping):
+def block_softmax(attn, block_mapping):
     attn.sub_(10.0)
     attn = attn.exp_()
     sums = attn.sum(dim=-1).unsqueeze(-1)
-    sums = block2batch(sums, block_mapping)
-    sums = batch2block(sums, block_mapping)
+    sums = block2batch(block_mapping, sums)
+    sums = batch2block(block_mapping, sums)
     sums.add_(1.0e-12)
     attn.div_(sums)
     return attn
@@ -62,12 +62,13 @@ def flat_pa(query,
             qk_matmul_op,
             kv_matmul_op,
             keys_fetch_func,
-            values_fetch_func):
-    batch_size = query.size(0)
+            values_fetch_func,
+            batch2block_op,
+            block2batch_op):
     q_heads = query.size(1)
     kv_heads = key_cache.size(2)
 
-    query = batch2block(scale * query, block_mapping).unsqueeze(-2)
+    query = batch2block_op(block_mapping, scale * query).unsqueeze(-2)
     key = keys_fetch_func(key_cache, block_list).transpose(1, 2)
     value = values_fetch_func(value_cache, block_list).transpose(1, 2)
     block_bias = block_bias.view(key.size(0), 1, 1, -1)
@@ -82,9 +83,9 @@ def flat_pa(query,
         key = key.transpose(2, 3)
 
     attn = qk_matmul_op(query, key) + block_bias
-    attn = block_softmax(batch_size, attn, block_mapping)
+    attn = block_softmax(attn, block_mapping)
     attn = kv_matmul_op(attn, value)
-    attn = block2batch(attn, block_mapping)
+    attn = block2batch_op(block_mapping, attn)
     attn = attn.squeeze(-2)
     if kv_heads != q_heads:
         attn = attn.flatten(1, 2)
