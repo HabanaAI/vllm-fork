@@ -390,6 +390,7 @@ class HabanaModelRunner:
         self.seen_configs = set()
 
         self._setup_buckets()
+        self._init_warmup_blacklist()
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true'
 
     def load_model(self) -> None:
@@ -462,6 +463,28 @@ class HabanaModelRunner:
         self.graphed_buckets = set()
         logger.info(f"Prompt bucket config (min, step, max_warmup) bs:{self.prompt_bs_bucket_cfg}, seq:{self.prompt_seq_bucket_cfg}")
         logger.info(f"Decode bucket config (min, step, max_warmup) bs:{self.decode_bs_bucket_cfg}, seq:{self.decode_block_bucket_cfg}")
+
+    def _init_warmup_blacklist(self) -> None:
+        config_file = os.environ.get('VLLM_WARMUP_BLACKLIST_CONFIG', None)
+        if config_file and os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                warmup_blacklist = f.readlines()
+                self.warmup_blacklist = [line.strip() for line in warmup_blacklist]
+        else:
+            self.warmup_blacklist = []
+
+    def _apply_warmup_blacklist(self, buckets, is_prompt, is_graph):
+        if not self.warmup_blacklist:
+            return buckets
+
+        filtered_buckets = []
+        for bs, seq_len in buckets:
+            config = f'warmup_{"prompt" if is_prompt else "decode"}_bs{bs}_seq{seq_len}_graphs{"T" if is_graph else "F"}'
+            if config not in self.warmup_blacklist:
+                filtered_buckets.append((bs, seq_len))
+            else:
+                logger.info(f'Config={config} was removed from warmup buckets')
+        return filtered_buckets
 
     def _prepare_prompt(
         self,
@@ -1167,11 +1190,13 @@ class HabanaModelRunner:
         logger.info(f"[Warmup][{phase}][{i+1}/{max_i}] batch_size:{batch_size} seq_len:{seq_len} free_mem:{free_mem}")
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
+        buckets = self._apply_warmup_blacklist(buckets, is_prompt, is_graph=False)
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i, len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
 
     def warmup_graphs(self, strategy, buckets, is_prompt, kv_caches, available_mem):
+        buckets = self._apply_warmup_blacklist(buckets, is_prompt, is_graph=True)
         total_batch_seq = 0.001
         total_mem = 0
         idx = 0
