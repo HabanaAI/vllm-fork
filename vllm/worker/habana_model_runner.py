@@ -429,6 +429,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
 
+            if self.scheduler_config.enable_delayed_sampling:
+                self.model.sampler.include_gpu_probs_tensor = True
+                self.model.sampler.sample_token_positions_only = True
+
             # FIXME: Running with disable_tensor_cache=True causes
             # RuntimeErrors. This needs to be debugged
             with HabanaMemoryProfiler() as m_wrap:
@@ -749,7 +753,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 input_tokens.append([generation_token])
 
                 seq_len = seq_data.get_len()
-                position = seq_len - 1
+                position = (seq_data.get_num_computed_tokens()
+                            if self.scheduler_config.enable_delayed_sampling else (seq_len - 1))
                 input_positions.append([position])
 
                 seq_len = seq_len if self.sliding_window is None else min(
