@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
-_PAD_SLOT_ID = 0
+_PAD_SLOT_ID = torch.iinfo(torch.int).max
 LORA_WARMUP_RANK = 8
 _TYPE_CACHE = {}
 
