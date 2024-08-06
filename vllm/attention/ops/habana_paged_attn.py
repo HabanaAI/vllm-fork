@@ -108,15 +108,21 @@ class HabanaPagedAttention:
         key_cache: torch.Tensor,
         value_cache: torch.Tensor,
         block_tables: torch.Tensor,
-        subquery_start_loc: torch.Tensor,
-        seq_lens_tensor: torch.Tensor,
-        context_lens: torch.Tensor,
-        max_query_len: int,
-        alibi_slopes: Optional[torch.Tensor],
-        sliding_window: Optional[int],
+        context_lens_tensor: torch.Tensor,
+        attn_bias: torch.Tensor,
+        scale: float,
     ) -> torch.Tensor:
-        raise NotImplementedError(
-            "forward_prefix is not implemented for HabanaPagedAttention")
+        return ops.prompt_attention_with_prefix(
+            query, 
+            key,
+            value,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lens_tensor,
+            attn_bias,
+            scale,
+        )
 
     @staticmethod
     def swap_blocks(

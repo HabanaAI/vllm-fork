@@ -228,6 +228,19 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                                        num_slots_available, indices, offsets)
 
         if attn_metadata.is_prompt:
+            # TODO: move this outside of model
+            assert attn_metadata.attn_bias is not None, \
+                    'attn_bias must be set before calling model.forward!'
+            attn_bias = attn_metadata.attn_bias
+            if self.alibi_slopes != None and self.position_bias != None:
+                attn_bias.add_(self.position_bias[:, :,
+                                                    -attn_bias.size(2):,
+                                                    -attn_bias.size(3):])
+            query_shape = (batch_size, seq_len, self.num_heads,
+                            self.head_size)
+            kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
+                        self.head_size)
+
             # Prompt run.
             if kv_cache is None or attn_metadata.block_tables.numel() == 0:
                 if not self.prefill_usefusedsdpa:
@@ -243,10 +256,6 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 else:
                     attn_bias = None
 
-                query_shape = (batch_size, seq_len, self.num_heads,
-                               self.head_size)
-                kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
-                            self.head_size)
                 out = ops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
@@ -262,19 +271,18 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 output = out.reshape(batch_size, seq_len, hidden_size)
             else:
                 # prefix-enabled attention
-                output = HabanaPagedAttention.forward_prefix(
-                    query,
-                    key,
-                    value,
+                out = HabanaPagedAttention.forward_prefix(
+                    query.view(query_shape),
+                    key.view(kv_shape),
+                    value.view(kv_shape),
                     key_cache,
                     value_cache,
                     attn_metadata.block_tables,
-                    attn_metadata.subquery_start_loc,
-                    attn_metadata.seq_lens_tensor,
                     attn_metadata.context_lens_tensor,
-                    attn_metadata.max_query_len,
-                    self.alibi_slopes,
+                    attn_bias,
+                    self.scale,
                 )
+                output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
             output = HabanaPagedAttention.forward_decode(
