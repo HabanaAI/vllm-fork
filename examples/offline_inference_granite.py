@@ -5,6 +5,7 @@ import time
 
 import torch
 
+import os
 
 random.seed(42)
 
@@ -29,6 +30,16 @@ def generate_random_coding_question():
     ]
     return random.choice(questions)
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def get_conversation():
     assistant_adjectives = ['an enthusiastic', 'a knowledgeable', 'a curious', 'a patient', 'an insightful', 'a clever']
     assistants = ['coder', 'developer', 'programmer', 'software engineer', 'tech enthusiast', 'Python expert']
@@ -52,6 +63,8 @@ def main():
     parser.add_argument('--temperature', type=float, default=0.0)
     parser.add_argument('--max-tokens', type=int, default=4096)
     parser.add_argument('--warmup', type=int, default=0, help='Number of warmup iterations to skip')
+    parser.add_argument('--fp8', type=str2bool, nargs='?', const=True, default=False, help='Boolean flag to enable fp8')
+    parser.add_argument('--measure', type=str2bool, nargs='?', const=True, default=False, help='Boolean flag to enable fp8 measurements')
 
     args = parser.parse_args()
 
@@ -72,8 +85,27 @@ def main():
     # Create a sampling params object.
     sampling_params = SamplingParams(max_tokens=max_tokens, temperature=temperature)
 
-    # Create an LLM.
-    llm = LLM(model=model_path, enforce_eager=enforce_eager, swap_space=0, dtype=torch.bfloat16, tensor_parallel_size=world_size, block_size=block_size, max_num_seqs=batch_size, gpu_memory_utilization=gpu_mem_utilization, max_seq_len_to_capture=max_seq_len_to_capture, max_model_len=max_seq_len_to_capture)
+    os.environ['EXPERIMENTAL_WEIGHT_SHARING'] = "0"
+    os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = "true"
+
+    if args.measure:
+        print("Starting the measurements:")
+        os.environ.setdefault('QUANT_CONFIG', "./test_jsons/test_measure.json")
+        llm = LLM(model=model_path, enforce_eager=enforce_eager, swap_space=0, dtype=torch.bfloat16, tensor_parallel_size=world_size, block_size=block_size,
+                    max_num_seqs=batch_size, gpu_memory_utilization=gpu_mem_utilization, max_seq_len_to_capture=max_seq_len_to_capture, max_model_len=max_seq_len_to_capture,
+                    quantization="inc")
+    elif args.fp8:
+        print("Running in fp8:")
+        os.environ.setdefault('QUANT_CONFIG', "./test_jsons/test_hw_quant.json")
+        llm = LLM(model=model_path, enforce_eager=enforce_eager, swap_space=0, dtype=torch.bfloat16, tensor_parallel_size=world_size, block_size=block_size,
+                  max_num_seqs=batch_size, gpu_memory_utilization=gpu_mem_utilization, max_seq_len_to_capture=max_seq_len_to_capture, max_model_len=max_seq_len_to_capture,
+                  quantization="inc",  kv_cache_dtype="hf8", weights_load_device="cpu")
+    else:
+        # Create an LLM.
+        print("Running in bf16:")
+        llm = LLM(model=model_path, enforce_eager=enforce_eager, swap_space=0, dtype=torch.bfloat16, tensor_parallel_size=world_size, block_size=block_size,
+                max_num_seqs=batch_size, gpu_memory_utilization=gpu_mem_utilization, max_seq_len_to_capture=max_seq_len_to_capture, max_model_len=max_seq_len_to_capture)
+
     chat_template = load_chat_template(provided_chat_template)
     tokenizer = llm.llm_engine.get_tokenizer()
     conversations = [get_conversation() for _ in range(batch_size)]
