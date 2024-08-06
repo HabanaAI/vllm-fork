@@ -132,6 +132,9 @@ def main():
         outputs = llm.generate(prompts, sampling_params)
     end = time.time()
 
+    if args.measure:
+        llm.finish_measurements()
+
     # Print the outputs.
     total_time = end - start
     num_tokens = 0
