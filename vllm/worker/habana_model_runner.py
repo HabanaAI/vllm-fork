@@ -1013,7 +1013,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # FIXME: We need to adjust selected_token_indices to accommodate
         # for padding
         max_len = input_tokens.size(1)
-        paddings = [max_len - s for s in seq_lens]
+        paddings = [max_len - q for q in query_lens]
         paddings = [0] + paddings[:-1]
         paddings = list(itertools.accumulate(paddings))
         paddings_prompt_logprobs = []
