@@ -44,17 +44,17 @@ class HabanaAttentionBackend(AttentionBackend):
     def swap_blocks(
         src_kv_cache: torch.Tensor,
         dst_kv_cache: torch.Tensor,
-        src_to_dst: Dict[int, int],
+        src_to_dsts: torch.Tensor,
     ) -> None:
         HabanaPagedAttention.swap_blocks(src_kv_cache, dst_kv_cache,
-                                         src_to_dst)
+                                         src_to_dsts)
 
     @staticmethod
     def copy_blocks(
         kv_caches: List[torch.Tensor],
-        src_to_dists: Dict[int, List[int]],
+        src_to_dsts: torch.Tensor,
     ) -> None:
-        HabanaPagedAttention.copy_blocks(kv_caches, src_to_dists)
+        HabanaPagedAttention.copy_blocks(kv_caches, src_to_dsts)
 
 
 @dataclass
