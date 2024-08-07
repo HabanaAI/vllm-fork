@@ -1108,8 +1108,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'block_tables', 'seq_lens_tensor', 'context_lens_tensor','attn_bias', 'slot_mapping',
-            'is_prompt'
+            'block_tables', 'seq_lens_tensor', 'context_lens_tensor',
+            'attn_bias', 'slot_mapping', 'is_prompt'
         ])
         return attention_metadata
 

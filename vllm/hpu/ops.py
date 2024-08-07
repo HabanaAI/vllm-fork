@@ -247,26 +247,22 @@ def prompt_attention_with_prefix(
     batch_size, seq_len, query_heads, _ = query.shape
     _, block_size, kv_heads, _ = key_cache.shape
     max_num_blocks = block_tables.size(-1)
-    max_num_cached_tokens = max_num_blocks*block_size
+    max_num_cached_tokens = max_num_blocks * block_size
 
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
 
     query.mul_(scale)
-    past_mask = (torch.arange(
-        0, 
-        max_num_cached_tokens, 
-        dtype=torch.int32, 
-        device=key_cache.device)
-        .view(1, -1)
-        .expand(batch_size, -1)
-        .ge(context_lens_tensor.view(-1, 1))
-        .view(batch_size, 1, -1)
-        .expand(batch_size, seq_len, -1)
-        .view(batch_size, 1, seq_len, -1)
-    )
-
+    past_mask = (torch.arange(0,
+                              max_num_cached_tokens,
+                              dtype=torch.int32,
+                              device=key_cache.device).view(1, -1).expand(
+                                  batch_size,
+                                  -1).ge(context_lens_tensor.view(-1, 1)).view(
+                                      batch_size, 1,
+                                      -1).expand(batch_size, seq_len, -1).view(
+                                          batch_size, 1, seq_len, -1))
 
     past_keys = fetch_from_cache(key_cache, block_tables, (0, 2, 3, 1))
 
@@ -277,13 +273,12 @@ def prompt_attention_with_prefix(
         past_keys = [k.unflatten(1, (kv_heads, 1)) for k in past_keys]
         attn_bias = attn_bias.unsqueeze(2)
         past_mask = past_mask.unsqueeze(2)
-    
-    
+
     # calculate attention weights for precomputed(prefix) keys
-    past_attn_weights = [torch.matmul(query, k) for k in past_keys]    
+    past_attn_weights = [torch.matmul(query, k) for k in past_keys]
     past_attn_weights = torch.concat(past_attn_weights, dim=-1)
     past_attn_weights.masked_fill_(past_mask, -float("inf"))
-    
+
     # calculate attention weights for current keys
     cur_attn_weights = torch.matmul(query, key.transpose(-1, -2))
     cur_attn_weights.add_(attn_bias)
@@ -295,7 +290,7 @@ def prompt_attention_with_prefix(
     past_values = fetch_from_cache(value_cache, block_tables, (0, 2, 1, 3))
     if query_heads != kv_heads:
         past_values = [v.unflatten(1, (kv_heads, 1)) for v in past_values]
-    
+
     value = torch.concat(past_values + [value], dim=-2)
     attn_weights = torch.matmul(attn_weights, value)
 

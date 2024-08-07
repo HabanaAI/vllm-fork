@@ -95,7 +95,8 @@ class HpuRotaryEmbedding(nn.Module):
                                     dtype=query.dtype)
 
         cos, sin = self.cos_cached[:max_position].to(
-            dtype=query.dtype), self.sin_cached[:max_position].to(dtype=query.dtype)
+            dtype=query.dtype), self.sin_cached[:max_position].to(
+                dtype=query.dtype)
         query = query.reshape(
             (query.shape[0], query.shape[1], query.shape[2] // self.head_size,
              self.head_size))

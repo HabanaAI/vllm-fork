@@ -113,7 +113,7 @@ class HabanaPagedAttention:
         scale: float,
     ) -> torch.Tensor:
         return ops.prompt_attention_with_prefix(
-            query, 
+            query,
             key,
             value,
             key_cache,
