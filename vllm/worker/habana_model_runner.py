@@ -21,7 +21,7 @@ from vllm.attention import (AttentionMetadata, AttentionMetadataPerStage,
                             get_attn_backend)
 from vllm.config import (DeviceConfig, LoadConfig, CacheConfig, LoRAConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, VisionLanguageConfig)
-from vllm.distributed import broadcast_tensor_dict
+from vllm.distributed import broadcast_tensor_dict, get_tensor_model_parallel_world_size
 from vllm.distributed.parallel_state import get_cpu_world_group
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
@@ -1019,6 +1019,12 @@ class HabanaModelRunner:
             model_event_name = f"model_{'prompt' if is_prompt else 'decode'}_bs{batch_size}_seq{seq_len}_graphs{'T' if use_graphs else 'F'}"
         else:
             model_event_name = 'model_executable'
+        
+        if not self.scheduler_config.enable_delayed_sampling and htorch.utils.internal.is_lazy():
+            tp_size = get_tensor_model_parallel_world_size()
+            if tp_size > 1:
+                execute_model_kwargs["input_ids"] = execute_model_kwargs["input_ids"].clone()
+
         with self.profiler.record_event('internal', model_event_name):
             hidden_states = self.model.forward(**execute_model_kwargs, selected_token_indices=sampling_metadata.selected_token_indices)
 
