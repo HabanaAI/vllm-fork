@@ -99,7 +99,7 @@ def main():
         os.environ.setdefault('QUANT_CONFIG', "./test_jsons/test_hw_quant.json")
         llm = LLM(model=model_path, enforce_eager=enforce_eager, swap_space=0, dtype=torch.bfloat16, tensor_parallel_size=world_size, block_size=block_size,
                   max_num_seqs=batch_size, gpu_memory_utilization=gpu_mem_utilization, max_seq_len_to_capture=max_seq_len_to_capture, max_model_len=max_seq_len_to_capture,
-                  quantization="inc",  kv_cache_dtype="hf8", weights_load_device="cpu")
+                  quantization="inc",  kv_cache_dtype="fp8_inc", weights_load_device="cpu")
     else:
         # Create an LLM.
         print("Running in bf16:")
