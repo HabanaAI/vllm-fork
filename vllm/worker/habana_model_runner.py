@@ -212,14 +212,10 @@ def pad_list(l, k, v):
     return l + [v] * padding
 
 
-def precompute_indices_and_offsets(block_size, slot_mapping, is_prompt):
+def precompute_indices_and_offsets(block_size, slot_mapping):
     slot_mapping = slot_mapping.flatten()
     indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-    if is_prompt:
-        indices = indices.unflatten(0, (-1, block_size))[:, 0]
-        offsets = None
-    else:
-        offsets = torch.fmod(slot_mapping, block_size)
+    offsets = torch.fmod(slot_mapping, block_size)
     return indices, offsets
 
 
@@ -618,7 +614,7 @@ class HabanaModelRunner:
                                        dtype=torch.long,
                                        device=self.device)
 
-        block_indices, block_offsets = precompute_indices_and_offsets(self.block_size, slot_mapping, True)
+        block_indices, block_offsets = precompute_indices_and_offsets(self.block_size, slot_mapping)
 
         attn_metadata = self.attn_backend.make_metadata(
             block_list=None,
@@ -725,7 +721,7 @@ class HabanaModelRunner:
                                     dtype=torch.long,
                                     device=self.device)
 
-        block_indices, block_offsets = precompute_indices_and_offsets(self.block_size, slot_mapping, False)
+        block_indices, block_offsets = precompute_indices_and_offsets(self.block_size, slot_mapping)
 
         attn_metadata = self.attn_backend.make_metadata(
             block_list=block_list,

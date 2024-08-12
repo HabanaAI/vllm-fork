@@ -7,15 +7,11 @@
 
 from typing import Tuple
 import torch
-import os
 import habana_frameworks.torch as htorch
 
 
 def insert_or_update_cache(input, cache, block_indices, block_offsets):
-    if block_offsets is None:
-        cache.index_copy_(0, block_indices, input)
-    else:
-        cache.index_put_((block_indices, block_offsets), input)
+    cache.index_put_((block_indices, block_offsets), input)
 
 
 def swap_blocks(src, dst, block_mapping):
