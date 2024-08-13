@@ -90,9 +90,6 @@ class HabanaExecutor(ExecutorBase):
         msg = f"init_cache_engine took {cache_init_m.get_summary_string()}"
         logger.info(msg)
 
-    def finish_measurements(self):
-        self.driver_worker.finish_measurements()
-
     def execute_model(
             self,
             execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:

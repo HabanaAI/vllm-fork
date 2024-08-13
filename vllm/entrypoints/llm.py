@@ -173,9 +173,6 @@ class LLM:
             self.llm_engine.tokenizer.tokenizer = get_cached_tokenizer(
                 tokenizer)
 
-    def finish_measurements(self):
-        self.llm_engine.finish_measurements()
-
     @overload  # LEGACY: single (prompt + optional token ids)
     def generate(
         self,

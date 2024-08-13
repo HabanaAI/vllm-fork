@@ -1503,4 +1503,5 @@ class HabanaModelRunner(
             print('inc shutdown')
 
     def __del__(self):
+        self.finish_measurements()
         self.shutdown_inc()
