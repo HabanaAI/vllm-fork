@@ -55,11 +55,21 @@ class SchedulingBudget:
     _request_ids_num_curr_seqs: Set[str] = field(default_factory=set)
     _num_batched_tokens: int = 0
     _num_curr_seqs: int = 0
+    _num_new_seqs: int = 0
+    _max_curr_seqs_len: int = 0
 
     def can_schedule(self, *, num_new_tokens: int, num_new_seqs: int):
         assert num_new_tokens != 0
         assert num_new_seqs != 0
         return (self.num_batched_tokens + num_new_tokens <= self.token_budget
+                and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs)
+
+    def can_schedule_padded_prefill(self, *, num_new_tokens: int, num_new_seqs: int, block_size: int):
+        assert num_new_tokens != 0
+        assert num_new_seqs != 0
+        if num_new_tokens > self.max_curr_seqs_len:
+            self._max_curr_seqs_len = (num_new_tokens + block_size - 1) // block_size * block_size
+        return ((self.num_new_seqs + num_new_seqs) * self.max_curr_seqs_len <= self.token_budget
                 and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs)
 
     def remaining_token_budget(self):
@@ -85,6 +95,14 @@ class SchedulingBudget:
         self._request_ids_num_curr_seqs.add(req_id)
         self._num_curr_seqs += num_curr_seqs
 
+    def add_new_seqs(self, req_id: str, num_curr_seqs: int):
+        if req_id in self._request_ids_num_curr_seqs:
+            return
+
+        self._request_ids_num_curr_seqs.add(req_id)
+        self._num_curr_seqs += num_curr_seqs
+        self._num_new_seqs += num_curr_seqs
+
     def subtract_num_seqs(self, req_id: str, num_curr_seqs: int):
         if req_id in self._request_ids_num_curr_seqs:
             self._request_ids_num_curr_seqs.remove(req_id)
@@ -98,6 +116,13 @@ class SchedulingBudget:
     def num_curr_seqs(self):
         return self._num_curr_seqs
 
+    @property
+    def num_new_seqs(self):
+        return self._num_new_seqs
+
+    @property
+    def max_curr_seqs_len(self):
+        return self._max_curr_seqs_len
 
 @dataclass
 class ScheduledSequenceGroup:
@@ -736,8 +761,9 @@ class Scheduler:
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
             if (num_new_tokens == 0
-                    or not budget.can_schedule(num_new_tokens=num_new_tokens,
-                                               num_new_seqs=num_new_seqs)):
+                    or not budget.can_schedule_padded_prefill(num_new_tokens=num_new_tokens,
+                                                                num_new_seqs=num_new_seqs,
+                                                                block_size=self.cache_config.block_size)):
                 break
 
             # Can schedule this request.
@@ -749,7 +775,7 @@ class Scheduler:
                 ScheduledSequenceGroup(seq_group=seq_group,
                                        token_chunk_size=num_new_tokens))
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
-            budget.add_num_seqs(seq_group.request_id, num_new_seqs)
+            budget.add_new_seqs(seq_group.request_id, num_new_seqs)
 
         # Queue requests that couldn't be scheduled.
         waiting_queue.extendleft(leftover_waiting_sequences)

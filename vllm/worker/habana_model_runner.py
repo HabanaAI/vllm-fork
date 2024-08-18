@@ -100,6 +100,13 @@ def warmup_buckets(bs_bucket_config, seq_bucket_config):
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
 
 
+def warmup_buckets_with_cap(bs_bucket_config, seq_bucket_config, token_cap):
+    buckets = itertools.product(warmup_range(bs_bucket_config),
+                                warmup_range(seq_bucket_config))
+    filtered_buckets = [bucket for bucket in buckets if bucket[0] * bucket[1] <= token_cap]
+    return list(sorted(filtered_buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
+
+
 def next_pow2(value: int):
     res = 1
     while value > 1:
@@ -489,33 +496,32 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.prompt_bs_bucket_cfg = read_bucket_settings('prompt',
                                                          'bs',
                                                          min=1,
-                                                         step=32,
-                                                         max=min(
-                                                             self.max_num_seqs,
-                                                             64))
+                                                         step=1,
+                                                         max=self.max_num_batched_tokens // self.block_size)
         self.decode_bs_bucket_cfg = read_bucket_settings('decode',
                                                          'bs',
                                                          min=1,
-                                                         step=128,
+                                                         step=1,
                                                          max=self.max_num_seqs)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
                                                           'seq',
                                                           min=self.block_size,
                                                           step=self.block_size,
-                                                          max=1024)
+                                                          max=self.max_model_len)
         self.decode_seq_bucket_cfg = read_bucket_settings('decode',
                                                           'seq',
                                                           min=self.block_size,
                                                           step=self.block_size,
-                                                          max=2048)
+                                                          max=self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
 
         msg = ("Prompt bucket config (min, step, max_warmup) "
                f"bs:{self.prompt_bs_bucket_cfg}, "
                f"seq:{self.prompt_seq_bucket_cfg}")
         logger.info(msg)
-        self.prompt_buckets = warmup_buckets(self.prompt_bs_bucket_cfg,
-                                             self.prompt_seq_bucket_cfg)
+        self.prompt_buckets = warmup_buckets_with_cap(self.prompt_bs_bucket_cfg,
+                                                        self.prompt_seq_bucket_cfg,
+                                                        self.max_num_batched_tokens)
 
         msg = (f"Generated {len(self.prompt_buckets)} "
                f"prompt buckets: {list(sorted(self.prompt_buckets))}")
@@ -1053,7 +1059,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         max_batch_size = self.prompt_bs_bucket_cfg[-1]
-        max_seq_len = self.prompt_seq_bucket_cfg[-1]
+        max_seq_len = self.block_size
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches)
 
