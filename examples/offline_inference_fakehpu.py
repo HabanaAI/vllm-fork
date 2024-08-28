@@ -1,4 +1,6 @@
-from vllm import LLM, SamplingParams
+from vllm import LLM, SamplingParams, CpuMigration
+
+CpuMigration()
 
 # Sample prompts.
 prompts = [

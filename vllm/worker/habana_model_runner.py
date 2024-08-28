@@ -1054,13 +1054,11 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.create_dummy_seq_group_metadata(i, seq_len, is_prompt)
             for i in range(batch_size)
         ]
-        if not is_fake_hpu():
-            torch.hpu.synchronize()
+        torch.hpu.synchronize()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches)
-            if not is_fake_hpu():
-                torch.hpu.synchronize()
+            torch.hpu.synchronize()
         self.profiler.end()
         gc.collect()
 
@@ -1414,8 +1412,7 @@ class HabanaModelRunner(
         if multi_modal_input is not None:
             execute_model_kwargs.update(multi_modal_input)
 
-        if not is_fake_hpu():
-            htorch.core.mark_step()
+        htorch.core.mark_step()
         if self.is_driver_worker:
             model_event_name = ("model_"
                                 f"{'prompt' if is_prompt else 'decode'}_"
@@ -1457,8 +1454,7 @@ class HabanaModelRunner(
                 sampling_metadata=sampling_metadata,
             )
         output.outputs = output.outputs[:real_batch_size]
-        if not is_fake_hpu():
-            htorch.core.mark_step()
+        htorch.core.mark_step()
 
         if self.is_driver_worker and self.profiler.enabled:
             # Stop recording 'execute_model' event

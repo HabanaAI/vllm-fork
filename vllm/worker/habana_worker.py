@@ -194,8 +194,7 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
-            if not is_fake_hpu():
-                torch.hpu.synchronize()
+            torch.hpu.synchronize()
         msg = ("Initializing cache engine "
                f"took {m.get_summary_string()}")
         logger.info(msg)

@@ -11,6 +11,7 @@ from vllm.outputs import (CompletionOutput, EmbeddingOutput,
                           EmbeddingRequestOutput, RequestOutput)
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
+from vllm.cpu_migration import CpuMigration
 
 from .version import __commit__, __version__
 
@@ -33,4 +34,5 @@ __all__ = [
     "AsyncEngineArgs",
     "initialize_ray_cluster",
     "PoolingParams",
+    "CpuMigration",
 ]
