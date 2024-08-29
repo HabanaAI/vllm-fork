@@ -29,6 +29,8 @@ USE_RAY_COMPILED_DAG = envs.VLLM_USE_RAY_COMPILED_DAG
 class RayHabanaExecutor(DistributedGPUExecutor):
 
     uses_ray: bool = True
+    
+    
 
     def _init_executor(self) -> None:
         self.forward_dag: Optional["ray.dag.CompiledDAG"] = None
@@ -76,6 +78,12 @@ class RayHabanaExecutor(DistributedGPUExecutor):
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
         num_gpus = 1
+        
+        def retain_envs(var_name):
+            retain_var_list = ['RAY_DEDUP_LOGS', 'GLOO_SOCKET_IFNAME', 'VLLM_SKIP_WARMUP']
+            return ('HPU' in var_name or var_name in retain_var_list)
+                
+                
 
         # The driver dummy worker does not actually use any resources.
         # It holds the resource for the driver worker.
@@ -94,12 +102,15 @@ class RayHabanaExecutor(DistributedGPUExecutor):
                 placement_group_capture_child_tasks=True,
                 placement_group_bundle_index=bundle_id,
             )
+            
+            runtime_env_vars = {k:v for k, v in os.environ.items() if retain_envs(k)}
 
             worker = ray.remote(
                 num_cpus=0,
                 num_gpus=0,
                 resources={'HPU': num_gpus},
                 scheduling_strategy=scheduling_strategy,
+                runtime_env={"env_vars": runtime_env_vars},
                 **ray_remote_kwargs,
             )(RayWorkerWrapper).remote(**worker_wrapper_kwargs)
 
@@ -115,7 +126,11 @@ class RayHabanaExecutor(DistributedGPUExecutor):
                         **worker_wrapper_kwargs)
                 else:
                     # Else, added to the list of workers.
-                    self.workers.append(worker)
+                    #self.workers.append(worker)
+                    if worker_ip == driver_ip:
+                            self.workers.insert(0, worker)
+                    else:
+                            self.workers.append(worker)
 
         if not self.use_ray_spmd_worker and self.driver_dummy_worker is None:
             raise ValueError(
