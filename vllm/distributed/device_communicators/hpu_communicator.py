@@ -3,11 +3,9 @@ import torch.distributed as dist
 from torch.distributed import ProcessGroup
 
 from vllm.platforms import current_platform
-from vllm.utils import is_fake_hpu
 
-if current_platform.is_hpu() and not is_fake_hpu():
-    import habana_frameworks.torch as htorch  # noqa: F401
-
+if current_platform.is_hpu():
+    import habana_frameworks.torch as htorch  # noqa: F401)
 
 class HpuCommunicator:
 

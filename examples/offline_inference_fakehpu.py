@@ -1,6 +1,12 @@
 from vllm import LLM, SamplingParams, CpuMigration
+import argparse
 
-CpuMigration()
+parser = argparse.ArgumentParser()
+parser.add_argument('--fake_hpu', action='store_true')
+args = parser.parse_args()
+
+if args.fake_hpu:
+    CpuMigration()
 
 # Sample prompts.
 prompts = [

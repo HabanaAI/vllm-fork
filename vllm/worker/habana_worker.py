@@ -7,8 +7,9 @@ import os
 from typing import List, Optional, Set, Tuple
 
 from vllm.utils import HabanaMemoryProfiler, format_bytes, is_fake_hpu
+from vllm.platforms import current_platform
 
-if not is_fake_hpu():
+if current_platform.is_hpu():
     import habana_frameworks.torch as htorch  # noqa:F401
 
 import torch

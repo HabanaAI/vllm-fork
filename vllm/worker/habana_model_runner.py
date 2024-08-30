@@ -16,6 +16,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 
 from vllm.utils import (HabanaMemoryProfiler, format_bytes, is_fake_hpu,
                         is_pin_memory_available, make_tensor_with_pad)
+from vllm.platforms import current_platform
 
 if not is_fake_hpu():
     import habana_frameworks.torch as htorch
@@ -154,7 +155,7 @@ class HpuModelAdapter():
 
     def __init__(self, model, enforce_eager):
         self.model = model
-        if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
+        if not is_fake_hpu()  and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
             self.model = torch.compile(self.model,
                                        backend='hpu_backend',
@@ -1437,8 +1438,7 @@ class HabanaModelRunner(
             sampling_metadata.selected_token_indices = None
             logits = self.model.compute_logits(hidden_states,
                                                sampling_metadata)
-        if not is_fake_hpu():
-            htorch.core.mark_step()
+        htorch.core.mark_step()
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []

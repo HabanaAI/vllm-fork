@@ -7,9 +7,9 @@
 
 from functools import wraps
 
-from vllm.utils import is_fake_hpu
+from vllm.platforms import current_platform
 
-if not is_fake_hpu():
+if current_platform.is_hpu():
     import habana_frameworks.torch as htorch
 
 
