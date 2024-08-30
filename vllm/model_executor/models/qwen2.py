@@ -45,6 +45,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
+from vllm.platforms import current_platform
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors, SamplerOutput
 
@@ -259,6 +260,11 @@ class Qwen2Model(nn.Module):
             hidden_states = inputs_embeds
         else:
             hidden_states = self.embed_tokens(input_ids)
+
+        if current_platform.is_hpu():
+            import habana_frameworks.torch as htorch
+            htorch.core.mark_step()
+
         residual = None
         for i in range(len(self.layers)):
             layer = self.layers[i]
@@ -269,6 +275,9 @@ class Qwen2Model(nn.Module):
                 attn_metadata,
                 residual,
             )
+            if current_platform.is_hpu():
+                htorch.core.mark_step()
+
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
