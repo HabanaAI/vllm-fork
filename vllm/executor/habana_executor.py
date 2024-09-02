@@ -90,6 +90,9 @@ class HabanaExecutor(ExecutorBase):
         msg = f"init_cache_engine took {cache_init_m.get_summary_string()}"
         logger.info(msg)
 
+    def finish_measurements(self):
+        self.driver_worker.finish_measurements()
+
     def execute_model(
             self,
             execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
@@ -151,34 +154,47 @@ class HabanaExecutor(ExecutorBase):
         return output
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        assert lora_request.lora_int_id > 0, "lora_id must be greater than 0."
+        return self.driver_worker.add_lora(lora_request)
 
     def remove_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
-
-    def list_loras(self) -> Set[int]:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        assert lora_id > 0, "lora_id must be greater than 0."
+        return self.driver_worker.remove_lora(lora_id)
 
     def pin_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        assert lora_id > 0, "lora_id must be greater than 0."
+        return self.driver_worker.pin_lora(lora_id)
+
+    def list_loras(self) -> Set[int]:
+        return self.driver_worker.list_loras()
 
     def add_prompt_adapter(
             self, prompt_adapter_request: PromptAdapterRequest) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
 
     def remove_prompt_adapter(self, prompt_adapter_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
 
     def pin_prompt_adapter(self, prompt_adapter_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
 
     def list_prompt_adapters(self) -> Set[int]:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
 
     def check_health(self) -> None:
         # GPUExecutor will always be healthy as long as
         # it's running.
         return
+
+    def shutdown(self) -> None:
+        self.driver_worker.shutdown_inc()
+
+    def __del__(self):
+        self.shutdown()
 
 
 class HabanaExecutorAsync(HabanaExecutor, ExecutorAsyncBase):

@@ -95,6 +95,16 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
         # Initialize gpu_cache as embedding models don't initialize kv_caches
         self.hpu_cache: Optional[List[List[torch.tensor]]] = None
 
+    def _set_env_vars(self):
+        local_rank = self.local_rank
+        if self.parallel_config.world_size == 1:
+            local_rank = -1
+        import os
+        os.environ["LOCAL_RANK"] = str(local_rank)
+        os.environ["ID"] = str(local_rank)
+        os.environ["WORLD_SIZE"] = str(self.parallel_config.world_size)
+        os.environ["RANK"] = str(self.rank)
+
     def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
@@ -105,6 +115,8 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
+        if self.model_config.quantization == 'inc':
+            self._set_env_vars()
         init_worker_distributed_environment(self.parallel_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
@@ -173,9 +185,8 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
-        # NOTE(kzawora): Restore this once LoRA support is added
-        # if self.model_runner.lora_manager:
-        #     self.model_runner.remove_all_loras()
+        if self.model_runner.lora_manager:
+            self.model_runner.remove_all_loras()
 
         gc.collect()
         return num_hpu_blocks, num_cpu_blocks
@@ -221,6 +232,9 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
+
+    def finish_measurements(self):
+        self.model_runner.finish_measurements()
 
     @property
     def do_metadata_broadcast(self) -> bool:
@@ -275,29 +289,39 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
             self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        return self.model_runner.add_lora(lora_request)
 
     def remove_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
-
-    def list_loras(self) -> Set[int]:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        return self.model_runner.remove_lora(lora_id)
 
     def pin_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        return self.model_runner.pin_lora(lora_id)
+
+    def list_loras(self) -> Set[int]:
+        return self.model_runner.list_loras()
 
     def add_prompt_adapter(
             self, prompt_adapter_request: PromptAdapterRequest) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
 
     def remove_prompt_adapter(self, prompt_adapter_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
 
     def pin_prompt_adapter(self, prompt_adapter_id: int) -> bool:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
 
     def list_prompt_adapters(self) -> Set[int]:
-        raise NotImplementedError("LoRA is not implemented for HPU backend.")
+        raise NotImplementedError(
+            "Prompt Adapter is not implemented for HPU backend.")
+
+    def shutdown_inc(self):
+        self.model_runner.shutdown_inc()
+
+    def __del__(self):
+        self.shutdown_inc()
 
     @property
     def max_model_len(self) -> int:

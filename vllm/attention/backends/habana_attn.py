@@ -2,6 +2,7 @@
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 ###############################################################################
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
@@ -12,6 +13,8 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionMetadata, AttentionType)
 from vllm.attention.ops.habana_paged_attn import (HabanaPagedAttention,
                                                   HabanaPagedAttentionMetadata)
+from vllm.hpu import cache_ops
+from vllm.hpu.utils import Matmul, Softmax, VLLMKVCache
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -108,7 +111,7 @@ class HabanaAttentionMetadata(AttentionMetadata, HabanaPagedAttentionMetadata):
         self.attn_bias: Optional[torch.Tensor] = None
 
 
-class HabanaAttentionImpl(AttentionImpl):
+class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
     |<--------------- num_prefill_tokens ----------------->|
@@ -137,10 +140,16 @@ class HabanaAttentionImpl(AttentionImpl):
         blocksparse_params: Optional[Dict[str, Any]] = None,
         max_seq_len: int = 4096,
     ) -> None:
+        super(AttentionImpl, self).__init__()
         self.kv_cache_dtype = kv_cache_dtype
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
+        self.matmul_qk = Matmul()
+        self.softmax = Softmax()
+        self.matmul_av = Matmul()
+        self.k_cache = VLLMKVCache()
+        self.v_cache = VLLMKVCache()
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
         self.position_bias = None
@@ -157,6 +166,12 @@ class HabanaAttentionImpl(AttentionImpl):
             self.alibi_slopes = alibi_slopes_tensor
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
+
+        self.prefill_usefusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
+                                              '0').lower() in ['1', 'true']
+        if self.prefill_usefusedsdpa:
+            assert alibi_slopes is None, \
+                'Prefill with FusedSDPA not supported with alibi slopes!'
 
         suppored_head_sizes = HabanaPagedAttention.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
@@ -204,22 +219,29 @@ class HabanaAttentionImpl(AttentionImpl):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            HabanaPagedAttention.write_to_paged_cache(
-                key, value, key_cache, value_cache, attn_metadata.slot_mapping,
-                self.kv_cache_dtype, attn_metadata.is_prompt)
+            num_kv_cache_passes, num_slots_available, indices, offsets = \
+                cache_ops.prepare_to_cache(key_cache,
+                                           attn_metadata.slot_mapping)
+            key_cache = self.k_cache(key, key_cache, num_kv_cache_passes,
+                                     num_slots_available, indices, offsets)
+            value_cache = self.v_cache(value, value_cache, num_kv_cache_passes,
+                                       num_slots_available, indices, offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
             if kv_cache is None or attn_metadata.block_tables.numel() == 0:
-                # TODO: move this outside of model
-                assert attn_metadata.attn_bias is not None, \
-                       'attn_bias must be set before calling model.forward!'
-                attn_bias = attn_metadata.attn_bias
-                if self.alibi_slopes is not None and \
-                   self.position_bias is not None:
-                    attn_bias.add_(self.position_bias[:, :,
-                                                      -attn_bias.size(2):,
-                                                      -attn_bias.size(3):])
+                if not self.prefill_usefusedsdpa:
+                    # TODO: move this outside of model
+                    assert attn_metadata.attn_bias is not None, \
+                        'attn_bias must be set before calling model.forward!'
+                    attn_bias = attn_metadata.attn_bias
+                    if self.alibi_slopes is not None and \
+                        self.position_bias is not None:
+                        attn_bias.add_(self.position_bias[:, :,
+                                                          -attn_bias.size(2):,
+                                                          -attn_bias.size(3):])
+                else:
+                    attn_bias = None
 
                 query_shape = (batch_size, seq_len, self.num_heads,
                                self.head_size)
@@ -232,6 +254,10 @@ class HabanaAttentionImpl(AttentionImpl):
                     attn_bias=attn_bias,
                     p=0.0,
                     scale=self.scale,
+                    matmul_qk_op=self.matmul_qk,
+                    softmax_op=self.softmax,
+                    matmul_av_op=self.matmul_av,
+                    valid_seq_lengths=attn_metadata.seq_lens_tensor,
                 )
                 output = out.reshape(batch_size, seq_len, hidden_size)
             else:
@@ -255,7 +281,8 @@ class HabanaAttentionImpl(AttentionImpl):
                 query, key_cache, value_cache, attn_metadata.block_tables,
                 attn_metadata.seq_lens_tensor, self.kv_cache_dtype,
                 self.num_kv_heads, self.scale, self.position_bias, k_scale,
-                v_scale)
+                v_scale, self.matmul_qk, self.softmax, self.matmul_av,
+                self.k_cache, self.v_cache)
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
