@@ -7,9 +7,9 @@
 import os
 from typing import Optional
 
-from vllm.platforms import current_platform
+from vllm.utils import is_fake_hpu
 
-if current_platform.is_hpu():
+if not is_fake_hpu():
     import habana_frameworks.torch as htorch
 
 import torch

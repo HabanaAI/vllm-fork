@@ -16,7 +16,6 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 
 from vllm.utils import (HabanaMemoryProfiler, format_bytes, is_fake_hpu,
                         is_pin_memory_available, make_tensor_with_pad)
-from vllm.platforms import current_platform
 
 if not is_fake_hpu():
     import habana_frameworks.torch as htorch
