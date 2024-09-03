@@ -107,11 +107,14 @@ class HpuRotaryEmbedding(nn.Module):
         else:
             cos = cos[positions].unsqueeze(2)
             sin = sin[positions].unsqueeze(2)
+        # for some models whose rotary dim is not equal to head dim,
+        # we need to repeat the sin and cos to match the head dim
+        # models are chatglm, gpt-j, gpt-neox
         if self.dim != self.head_size:
             assert (self.head_size % self.dim) == 0
             num = self.head_size // self.dim
-            sin = sin.repeat(1,1,1,num)
-            cos = cos.repeat(1,1,1,num)
+            sin = sin.repeat(1, 1, 1, num)
+            cos = cos.repeat(1, 1, 1, num)
         query, key = FusedRoPE.apply(query, cos, sin,
                                      0), FusedRoPE.apply(key, cos, sin, 0)
         return query.reshape(
