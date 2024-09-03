@@ -5,10 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 
-from vllm.utils import is_fake_hpu
-
-if not is_fake_hpu():
-    import habana_frameworks.torch as htorch
+import habana_frameworks.torch as htorch
 import torch
 
 

@@ -220,8 +220,9 @@ def is_fake_hpu() -> bool:
 @lru_cache(maxsize=None)
 def _is_habana_frameworks_installed() -> bool:
     from importlib import util
+    if os.environ.get('VLLM_USE_FAKE_HPU', '0') == 1:
+        return False
     return util.find_spec('habana_frameworks') is not None
-
 
 @lru_cache(maxsize=None)
 def _is_built_for_hpu() -> bool:

@@ -17,8 +17,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 from vllm.utils import (HabanaMemoryProfiler, format_bytes, is_fake_hpu,
                         is_pin_memory_available, make_tensor_with_pad)
 
-if not is_fake_hpu():
-    import habana_frameworks.torch as htorch
+import habana_frameworks.torch as htorch
 
 import torch
 
@@ -1330,8 +1329,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.warmup_all_buckets(self.prompt_buckets, True, kv_caches)
         self.warmup_all_buckets(self.decode_buckets, False, kv_caches)
 
-        if not is_fake_hpu(
-        ) and not self.enforce_eager and htorch.utils.internal.is_lazy():
+        if not self.enforce_eager and htorch.utils.internal.is_lazy():
             assert self.mem_margin is not None, \
                 ("HabanaWorker.determine_num_available_blocks needs "
                 "to be called before warming up the model.")

@@ -4,8 +4,8 @@ from torch.distributed import ProcessGroup
 
 from vllm.platforms import current_platform
 
-if current_platform.is_hpu():
-    import habana_frameworks.torch as htorch  # noqa: F401)
+
+import habana_frameworks.torch as htorch  # noqa: F401)
 
 class HpuCommunicator:
 
