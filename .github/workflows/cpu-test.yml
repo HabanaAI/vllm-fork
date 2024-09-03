@@ -31,4 +31,4 @@ jobs:
         VLLM_TARGET_DEVICE=hpu python setup.py develop
     - name: cpu-test
       run: |
-        VLLM_SKIP_WARMUP=true VLLM_PROMPT_SEQ_BUCKET_MAX=128 python examples/offline_inference_fakehpu.py --fake_hpu
+        VLLM_SKIP_WARMUP=true VLLM_PROMPT_SEQ_BUCKET_MAX=128 VLLM_USE_FAKE_HPU=1  python examples/offline_inference_fakehpu.py --fake_hpu
