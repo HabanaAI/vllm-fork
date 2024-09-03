@@ -2,6 +2,7 @@
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 ###############################################################################
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
@@ -122,6 +123,12 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
+        self.prefill_usefusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
+                                              '0').lower() in ['1', 'true']
+        if self.prefill_usefusedsdpa:
+            assert alibi_slopes is None, \
+                'Prefill with FusedSDPA not supported with alibi slopes!'
+
         suppored_head_sizes = HabanaPagedAttention.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
             raise ValueError(
@@ -174,14 +181,17 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
 
         if attn_metadata.is_prompt:
             # Prompt run.
-            assert attn_metadata.attn_bias is not None, \
-                       'attn_bias must be set before calling model.forward!'
-            attn_bias = attn_metadata.attn_bias
-            if self.alibi_slopes is not None and \
-                self.position_bias is not None:
-                attn_bias.add_(self.position_bias[:, :,
-                                                    -attn_bias.size(2):,
-                                                    -attn_bias.size(3):])
+            if not self.prefill_usefusedsdpa:
+                assert attn_metadata.attn_bias is not None, \
+                           'attn_bias must be set before calling model.forward!'
+                attn_bias = attn_metadata.attn_bias
+                if self.alibi_slopes is not None and \
+                    self.position_bias is not None:
+                    attn_bias.add_(self.position_bias[:, :,
+                                                        -attn_bias.size(2):,
+                                                        -attn_bias.size(3):])
+            else:
+                attn_bias = None
 
             query_shape = (batch_size, seq_len, self.num_heads,
                         self.head_size)
@@ -197,6 +207,7 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
                 qk_matmul_op=self.qk_matmul,
                 softmax_op=self.softmax,
                 av_matmul_op=self.av_matmul,
+                valid_seq_lengths=attn_metadata.seq_lens_tensor,
             )
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:

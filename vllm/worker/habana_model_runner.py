@@ -161,6 +161,9 @@ class HpuModelAdapter():
 
     def __init__(self, model, block_size, enforce_eager):
         self.model = model
+        self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
+                                               '0').lower() in ['1', 'true']
+
         self.block_size = block_size
         if not htorch.utils.internal.is_lazy() and not enforce_eager:
             self.model = torch.compile(self.model,
@@ -168,7 +171,11 @@ class HpuModelAdapter():
                                        dynamic=False)
 
     def _set_attn_bias(self, metadata, batch_size, seq_len, device, dtype):
-        seq_lens_t = metadata.seq_lens_tensor
+        prefill_metadata = metadata
+        if prefill_metadata is None or self.prefill_use_fusedsdpa:
+            return metadata
+
+        seq_lens_t = prefill_metadata.seq_lens_tensor
         len_mask = (torch.arange(0, seq_len, device=device, dtype=torch.int32)
                     .view(1, seq_len)
                     .ge(seq_lens_t.unsqueeze(-1))
@@ -180,7 +187,8 @@ class HpuModelAdapter():
         mask = causal_mask.logical_or(len_mask)
         attn_bias = (torch.zeros_like(mask, dtype=dtype)
                         .masked_fill_(mask, -math.inf))
-        return metadata._replace(attn_bias=attn_bias)
+        metadata = prefill_metadata._replace(attn_bias=attn_bias)
+        return metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
         mask = torch.arange(0, self.block_size, device=device, dtype=torch.int32).unsqueeze(0)
@@ -611,7 +619,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # actual prompt lens
             context_lens.append(context_len)
             query_lens.append(seq_len - context_len)
-
             input_tokens.append(prompt_tokens)
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
@@ -679,7 +686,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_prompt_len = max(
             find_bucket(max(seq_lens), self.prompt_seq_bucket_cfg),
             self.block_size)
-
         input_tokens = make_tensor_with_pad(input_tokens,
                                             max_len=max_prompt_len,
                                             pad=0,
