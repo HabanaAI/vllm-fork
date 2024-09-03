@@ -13,8 +13,8 @@ core.mark_step = lambda: print('calling mark_step')
 import habana_frameworks.torch as htorch
 import torch
 
-# torch.hpu = sys.modules['torch.hpu'] = types.ModuleType('torch.hpu')
-# torch.hpu.synchronize = lambda: print('calling synchronize')
+torch.hpu = sys.modules['torch.hpu'] = types.ModuleType('torch.hpu')
+torch.hpu.synchronize = lambda: print('calling synchronize')
 
 class CpuMigration:
     def __init__(self):
