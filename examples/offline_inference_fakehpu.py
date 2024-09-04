@@ -1,9 +1,10 @@
-from vllm import LLM, SamplingParams, CpuMigration
-import argparse
 from os import environ
 
-if environ.get('VLLM_USE_FAKE_HPU', '0') == 1:
-    CpuMigration()
+if environ.get('VLLM_USE_FAKE_HPU', '0') == '1':
+    from vllm.utils import migrate_to_cpu
+    print("CHECK1")
+    migrate_to_cpu()
+    print("CHECK2")
 
 # Sample prompts.
 prompts = [
@@ -20,6 +21,8 @@ ref_answers = [
     "Germany", "Paris", "United States", "Poland", "Poland", "Israel",
     "California", "Wales"
 ]
+
+from vllm import LLM, SamplingParams
 # Create a sampling params object.
 sampling_params = SamplingParams(temperature=0, n=1, use_beam_search=False)
 

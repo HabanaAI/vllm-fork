@@ -220,7 +220,7 @@ def is_fake_hpu() -> bool:
 @lru_cache(maxsize=None)
 def _is_habana_frameworks_installed() -> bool:
     from importlib import util
-    if os.environ.get('VLLM_USE_FAKE_HPU', '0') == 1:
+    if os.environ.get('VLLM_USE_FAKE_HPU', '0') == '1':
         return False
     return util.find_spec('habana_frameworks') is not None
 
@@ -1115,3 +1115,44 @@ async def _run_task_with_lock(task: Callable, lock: asyncio.Lock, *args,
     """Utility function to run async task in a lock"""
     async with lock:
         return await task(*args, **kwargs)
+
+def _create_dummy_modules():
+    import types
+    import importlib
+
+    habana_frameworks = types.ModuleType('habana_frameworks')
+    spec = importlib.util.spec_from_loader('habana_frameworks', loader=None)
+    habana_frameworks.__spec__ = spec
+    sys.modules['habana_frameworks'] = habana_frameworks
+    sys.modules['habana_frameworks.torch'] = habana_frameworks.torch = types.ModuleType('habana_frameworks.torch')
+    sys.modules['habana_frameworks.torch.core'] = habana_frameworks.torch.core = types.ModuleType('habana_frameworks.torch.core')
+    
+    sys.modules['habana_frameworks.torch.utils'] = habana_frameworks.torch.utils = types.ModuleType('habana_frameworks.torch.utils')
+    sys.modules['habana_frameworks.torch.utils.internal'] = habana_frameworks.torch.utils.internal = types.ModuleType('habana_frameworks.torch.utils.internal')
+
+    sys.modules['torch.hpu'] = torch.hpu = types.ModuleType('torch.hpu')
+
+    habana_frameworks.torch.core.mark_step = lambda: print('calling mark_step')
+    habana_frameworks.torch.utils.internal.is_lazy = lambda: print('calling is_lazy') 
+    torch.hpu.synchronize = lambda: print('calling synchronize')
+
+def _do_nothing():
+    pass
+
+def _return_false():
+    return False
+
+def _migrate_to_cpu():
+    import habana_frameworks.torch as htorch
+    
+    print(sys.modules['torch'].__spec__)
+    print(sys.modules['habana_frameworks'].__spec__)
+
+    htorch.core.mark_step = _do_nothing
+    htorch.utils.internal.is_lazy = _return_false
+    torch.hpu.synchronize = _do_nothing
+
+def migrate_to_cpu():
+    _create_dummy_modules()
+    _migrate_to_cpu()
+
