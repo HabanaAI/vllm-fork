@@ -39,6 +39,7 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "fp8": torch.uint8,
     "fp8_e4m3": torch.uint8,
     "fp8_e5m2": torch.uint8,
+    "fp8_inc": torch.float8_e4m3fn,
 }
 
 TORCH_DTYPE_TO_NUMPY_DTYPE = {
@@ -993,6 +994,12 @@ def cuda_device_count_stateless() -> int:
     # This can be removed and simply replaced with torch.cuda.get_device_count
     # after https://github.com/pytorch/pytorch/pull/122815 is released.
     return _cuda_device_count_stateless(envs.CUDA_VISIBLE_DEVICES)
+
+
+def get_device() -> str:
+    if is_hpu():
+        return "hpu"
+    return "cuda"
 
 
 def error_on_invalid_device_count_status():
