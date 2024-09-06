@@ -88,29 +88,16 @@ class HpuRotaryEmbedding(nn.Module):
         if positions.dim() == 1:
             positions = positions.unsqueeze(0)
 
-        max_position = torch.max(positions).item()
-        if max_position > self.max_seq_len_cached:
-            self._set_cos_sin_cache(seq_len=max_position,
-                                    device=query.device,
-                                    dtype=query.dtype)
-
-        cos, sin = self.cos_cached[:max_position].to(
-            dtype=query.dtype), self.sin_cached[:max_position].to(
-                dtype=query.dtype)
         query = query.reshape(
             (query.shape[0], query.shape[1], query.shape[2] // self.head_size,
              self.head_size))
         key = key.reshape((key.shape[0], key.shape[1],
                            key.shape[2] // self.head_size, self.head_size))
 
-        if len(positions[0]) == 1:
-            cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
-            sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
-        else:
-            cos = cos[positions].unsqueeze(2)
-            sin = sin[positions].unsqueeze(2)
-        query, key = FusedRoPE.apply(query, cos, sin,
-                                     0), FusedRoPE.apply(key, cos, sin, 0)
+        cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+        sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+        query = FusedRoPE.apply(query, cos, sin, 0)
+        key = FusedRoPE.apply(key, cos, sin, 0)
         return query.reshape(
             (query.shape[0], query.shape[1],
              query.shape[2] * query.shape[3])), key.reshape(
