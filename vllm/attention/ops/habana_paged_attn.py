@@ -3,7 +3,7 @@
 ###############################################################################
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -108,35 +108,41 @@ class HabanaPagedAttention:
         key_cache: torch.Tensor,
         value_cache: torch.Tensor,
         block_tables: torch.Tensor,
-        subquery_start_loc: torch.Tensor,
-        seq_lens_tensor: torch.Tensor,
-        context_lens: torch.Tensor,
-        max_query_len: int,
-        alibi_slopes: Optional[torch.Tensor],
-        sliding_window: Optional[int],
+        context_lens_tensor: torch.Tensor,
+        attn_bias: torch.Tensor,
+        scale: float,
     ) -> torch.Tensor:
-        raise NotImplementedError(
-            "forward_prefix is not implemented for HabanaPagedAttention")
+        return ops.prompt_attention_with_prefix(
+            query,
+            key,
+            value,
+            key_cache,
+            value_cache,
+            block_tables,
+            context_lens_tensor,
+            attn_bias,
+            scale,
+        )
 
     @staticmethod
     def swap_blocks(
-        src_kv_cache: torch.Tensor,
-        dst_kv_cache: torch.Tensor,
-        src_to_dst: Dict[int, int],
+        src_kv_cache: Tuple[torch.Tensor, torch.Tensor],
+        dst_kv_cache: Tuple[torch.Tensor, torch.Tensor],
+        src_to_dsts: torch.Tensor,
     ) -> None:
         src_key_cache = src_kv_cache[0]
         dst_key_cache = dst_kv_cache[0]
-        cache_ops.swap_blocks(src_key_cache, dst_key_cache, src_to_dst)
+        cache_ops.swap_blocks(src_key_cache, dst_key_cache, src_to_dsts)
 
         src_value_cache = src_kv_cache[1]
         dst_value_cache = dst_kv_cache[1]
-        cache_ops.swap_blocks(src_value_cache, dst_value_cache, src_to_dst)
+        cache_ops.swap_blocks(src_value_cache, dst_value_cache, src_to_dsts)
 
     @staticmethod
     def copy_blocks(
-        kv_caches: List[torch.Tensor],
-        src_to_dists: Dict[int, List[int]],
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        src_to_dsts: torch.Tensor,
     ) -> None:
         key_caches = [kv_cache[0] for kv_cache in kv_caches]
         value_caches = [kv_cache[1] for kv_cache in kv_caches]
-        cache_ops.copy_blocks(key_caches, value_caches, src_to_dists)
+        cache_ops.copy_blocks(key_caches, value_caches, src_to_dsts)

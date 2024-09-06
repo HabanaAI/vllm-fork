@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
-_PAD_SLOT_ID = 0
+_PAD_SLOT_ID = torch.iinfo(torch.int).max
 LORA_WARMUP_RANK = 8
 _TYPE_CACHE = {}
 
@@ -202,14 +202,18 @@ class HpuModelAdapter():
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
-        prefill_metadata = attn_metadata
-        if prefill_metadata is None or self.prefill_use_fusedsdpa:
+        if (attn_metadata is None or self.prefill_use_fusedsdpa 
+            or not attn_metadata.is_prompt):
             return attn_metadata
 
+        prefill_metadata = attn_metadata
+
         seq_lens_t = prefill_metadata.seq_lens_tensor
+        context_lens_t = prefill_metadata.context_lens_tensor
+        query_lens_t = seq_lens_t - context_lens_t
         len_mask = (torch.arange(0, seq_len, device=device,
                                  dtype=torch.int32).view(1, seq_len).ge(
-                                     seq_lens_t.unsqueeze(-1)).view(
+                                     query_lens_t.unsqueeze(-1)).view(
                                          batch_size, 1, 1, seq_len))
         causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),
                                             device=device,
@@ -743,7 +747,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
         max_prompt_len = max(
-            find_bucket(max(seq_lens), self.prompt_seq_bucket_cfg),
+            find_bucket(max_query_len, self.prompt_seq_bucket_cfg),
             self.block_size)
 
         lora_mask: torch.Tensor = None
@@ -1077,7 +1081,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # FIXME: We need to adjust selected_token_indices to accommodate
         # for padding
         max_len = input_tokens.size(1)
-        paddings = [max_len - s for s in seq_lens]
+        paddings = [max_len - q for q in query_lens]
         paddings = [0] + paddings[:-1]
         paddings = list(itertools.accumulate(paddings))
         paddings_prompt_logprobs = []
@@ -1174,8 +1178,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'block_tables', 'seq_lens_tensor', 'attn_bias', 'slot_mapping',
-            'is_prompt'
+            'block_tables', 'seq_lens_tensor', 'context_lens_tensor',
+            'attn_bias', 'slot_mapping', 'is_prompt'
         ])
         return attention_metadata
 

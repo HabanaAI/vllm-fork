@@ -75,33 +75,29 @@ def insert_or_update_cache(input, cache, num_kv_cache_passes,
 
 
 def swap_blocks(src, dst, block_mapping):
-    index_src = torch.zeros((1, ), dtype=torch.int32, device=src.device)
-    index_dst = torch.zeros((1, ), dtype=torch.int32, device=dst.device)
-    for src_idx, dst_idx in block_mapping.items():
-        index_src[0] = src_idx
-        index_dst[0] = dst_idx
-        dst.index_put_([index_dst], src.index_select(0, index_src))
-    if dst.device.type == 'hpu':
-        htorch.core.mark_step()
-        torch.hpu.synchronize()
+    if block_mapping.numel() == 0:
+        return
+
+    block_mapping = block_mapping.transpose(0, 1)
+    src_indices = block_mapping[0]
+    dst_indices = block_mapping[1]
+
+    dst.index_put_(dst_indices, src.index_select(0, src_indices))
+
+    htorch.core.mark_step()
+    torch.hpu.synchronize()
 
 
 def copy_blocks(key_caches, value_caches, block_mapping):
-    index_src = torch.zeros((1, ),
-                            dtype=torch.int32,
-                            device=key_caches[0].device)
-    index_dst = torch.zeros((1, ),
-                            dtype=torch.int32,
-                            device=key_caches[0].device)
-    for src, dsts in block_mapping.items():
-        index_src[0] = src
-        for dst in dsts:
-            index_dst[0] = dst
-            for key_cache in key_caches:
-                key_cache.index_copy_(0, index_dst,
-                                      key_cache.index_select(0, index_src))
-            for value_cache in value_caches:
-                value_cache.index_copy_(0, index_dst,
-                                        value_cache.index_select(0, index_src))
-        if key_caches[0].device.type == 'hpu':
-            htorch.core.mark_step()
+    if block_mapping.numel() == 0:
+        return
+
+    block_mapping = block_mapping.transpose(0, 1)
+    src = block_mapping[0]
+    dst = block_mapping[1]
+
+    for key_cache, value_cache in zip(key_caches, value_caches):
+        key_cache.index_copy_(0, dst, key_cache.index_select(0, src))
+        value_cache.index_copy_(0, dst, value_cache.index_select(0, src))
+
+    htorch.core.mark_step()
