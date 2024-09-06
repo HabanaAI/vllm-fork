@@ -197,11 +197,12 @@ class HpuModelAdapter():
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
-        prefill_metadata = attn_metadata
-        if prefill_metadata is None or self.prefill_use_fusedsdpa:
+        if (attn_metadata is None or self.prefill_use_fusedsdpa 
+            or not attn_metadata.is_prompt):
             return attn_metadata
 
         prefill_metadata = attn_metadata
+
         seq_lens_t = prefill_metadata.seq_lens_tensor
         context_lens_t = prefill_metadata.context_lens_tensor
         query_lens_t = seq_lens_t - context_lens_t
