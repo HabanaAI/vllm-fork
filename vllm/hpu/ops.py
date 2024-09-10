@@ -40,7 +40,7 @@ def block2batch(tensor, block_mapping):
 
 
 def block_softmax(batch_size, attn, block_mapping):
-    attn.sub_(10.0)
+    attn.sub_(attn.max())
     attn = attn.exp_()
     sums = attn.sum(dim=-1).unsqueeze(-1)
     sums = block2batch(sums, block_mapping)
