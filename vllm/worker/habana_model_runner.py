@@ -1153,20 +1153,21 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata
 
-        return self._model_input_cls(input_tokens=input_tokens,
-                                     seq_lens=seq_lens,
-                                     query_lens=query_lens,
-                                     input_positions=input_positions,
-                                     attn_metadata=attn_metadata,
-                                     lora_requests=lora_requests,
-                                     lora_mapping=lora_mapping,
-                                     multi_modal_kwargs=multi_modal_input,
-                                     real_batch_size=real_batch_size,
-                                     batch_size_padded=batch_size_padded,
-                                     lora_mask=lora_mask,
-                                     lora_logits_mask=lora_logits_mask,
-                                     seq_group_metadata_list=seq_group_metadata_list), \
-                                        sampling_metadata
+        return self._model_input_cls(
+            input_tokens=input_tokens,
+            seq_lens=seq_lens,
+            query_lens=query_lens,
+            input_positions=input_positions,
+            attn_metadata=attn_metadata,
+            lora_requests=lora_requests,
+            lora_mapping=lora_mapping,
+            multi_modal_kwargs=multi_modal_input,
+            real_batch_size=real_batch_size,
+            batch_size_padded=batch_size_padded,
+            lora_mask=lora_mask,
+            lora_logits_mask=lora_logits_mask,
+            seq_group_metadata_list=seq_group_metadata_list), \
+            sampling_metadata
 
     def _seq_len(self, attn_metadata):
         if attn_metadata.num_prefills != 0:
