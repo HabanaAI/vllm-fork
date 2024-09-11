@@ -24,6 +24,7 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, MultiModalConfig, ParallelConfig,
                          SchedulerConfig)
+from vllm.distributed import broadcast_tensor_dict
 from vllm.distributed.parallel_state import get_world_group
 from vllm.hpu.ops import LoraMask as LoraMask
 from vllm.logger import init_logger
@@ -1733,8 +1734,9 @@ class HabanaModelRunner(
 
         htorch.core.mark_step()
 
+        input_ids = None
         # Sample the next token based on previous logits if any.
-        if self.scheduler_config.enable_delayed_sampling and not is_prompt:
+        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker and not is_prompt:
             logits_ids_list = []
             logits_tensor = None
             logits_tensor_list = []
@@ -1778,7 +1780,17 @@ class HabanaModelRunner(
                     sampling_metadata=sampling_metadata,
                 )
 
-            execute_model_kwargs["input_ids"] = output.sampled_token_ids
+            #TODO: check why broadcast failed for float tensor use dict instead
+            model_kwargs = { }
+            model_kwargs["input_ids"] =  output.sampled_token_ids
+            broadcast_tensor_dict(model_kwargs, src=0)
+            input_ids = output.sampled_token_ids
+        elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
+            model_kwargs = broadcast_tensor_dict(src=0)
+            input_ids = model_kwargs["input_ids"]
+
+        if input_ids is not None:
+            execute_model_kwargs["input_ids"] = input_ids
             htorch.core.mark_step()
 
         if self.is_driver_worker:
@@ -1809,7 +1821,7 @@ class HabanaModelRunner(
                 lora_logits_mask.index_select(
                     0, sampling_metadata.selected_token_indices))
 
-        if self.scheduler_config.enable_delayed_sampling:
+        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker:
             if not is_prompt:
                 htorch.core.mark_step()
                 # Only after dispatching next model.forward() read and update
@@ -1859,7 +1871,8 @@ class HabanaModelRunner(
                                                sampling_metadata)
 
         if (self.scheduler_config.enable_delayed_sampling
-                and model_input.seq_group_metadata_list is not None):
+                and model_input.seq_group_metadata_list is not None
+                and self.is_driver_worker):
             for idx, seq_group_metadata in enumerate(
                     model_input.seq_group_metadata_list):
                 assert len(seq_group_metadata.seq_data) == 1
