@@ -1559,29 +1559,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     decode_strategy, self.decode_buckets, False, kv_caches,
                     decode_available_memory)
 
-                # Not all prompt buckets were captured, but all decode buckets
-                # were captured and we have some free graph-allocated space
-                # left. Let's try to use it for capturing more prompt buckets.
-                if (mem_post_decode + mem_post_prompt < graph_free_mem
-                        and not prompt_captured_all and decode_captured_all):
-                    mem_post_prompt, _, prompt_captured_all = (
-                        self.warmup_graphs(
-                            prompt_strategy, self.prompt_buckets, True,
-                            kv_caches,
-                            graph_free_mem - mem_post_prompt - mem_post_decode,
-                            mem_post_prompt, prompt_batch_seq))
-
-                # Not all decode buckets were captured, but all prompt buckets
-                # were captured and we have some free graph-allocated space
-                # left. Let's try to use it for capturing more decode buckets.
-                if mem_post_decode + mem_post_prompt < graph_free_mem \
-                    and not decode_captured_all \
-                        and prompt_captured_all:
-                    mem_post_decode, _, _ = self.warmup_graphs(
-                        decode_strategy, self.decode_buckets, False, kv_caches,
-                        graph_free_mem - mem_post_prompt - mem_post_decode,
-                        mem_post_decode, decode_batch_seq)
-
                 self.log_graph_warmup_summary(self.prompt_buckets, True,
                                               mem_post_prompt)
                 self.log_graph_warmup_summary(self.decode_buckets, False,
