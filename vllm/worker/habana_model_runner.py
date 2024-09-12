@@ -1736,7 +1736,8 @@ class HabanaModelRunner(
 
         input_ids = None
         # Sample the next token based on previous logits if any.
-        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker and not is_prompt:
+        if self.scheduler_config.enable_delayed_sampling \
+                and self.is_driver_worker and not is_prompt:
             logits_ids_list = []
             logits_tensor = None
             logits_tensor_list = []
@@ -1781,8 +1782,8 @@ class HabanaModelRunner(
                 )
 
             #TODO: check why broadcast failed for float tensor use dict instead
-            model_kwargs = { }
-            model_kwargs["input_ids"] =  output.sampled_token_ids
+            model_kwargs = {}
+            model_kwargs["input_ids"] = output.sampled_token_ids
             broadcast_tensor_dict(model_kwargs, src=0)
             input_ids = output.sampled_token_ids
         elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
@@ -1821,16 +1822,17 @@ class HabanaModelRunner(
                 lora_logits_mask.index_select(
                     0, sampling_metadata.selected_token_indices))
 
-        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker:
+        if self.scheduler_config.enable_delayed_sampling \
+                and self.is_driver_worker:
             if not is_prompt:
                 htorch.core.mark_step()
                 # Only after dispatching next model.forward() read and update
                 # the previous token ids to return
                 sampled_token_ids = output.sampled_token_ids.tolist()
-                for seq_group_output in output.outputs[:real_batch_size]:
+                for i, seq_group_output in enumerate(
+                        output.outputs[:real_batch_size]):
                     for sample in seq_group_output.samples:
-                        sample.output_token = sampled_token_ids[
-                            sample.output_token][0]
+                        sample.output_token = sampled_token_ids[i][0]
                 output = output
             else:
                 # For prompts compose empty output
