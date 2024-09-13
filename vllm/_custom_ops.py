@@ -1,17 +1,35 @@
 import contextlib
 import functools
 from typing import List, Optional, Tuple, Type
-
+import subprocess, os
 import torch
 
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
-try:
-    import vllm._C
-except ImportError as e:
-    logger.warning("Failed to import from vllm._C with %r", e)
+def _is_hpu() -> bool:
+    is_hpu_available = True
+    try:
+        subprocess.run(["hl-smi"], capture_output=True, check=True)
+    except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
+        if not os.path.exists('/dev/accel/accel0') and not os.path.exists(
+                '/dev/accel/accel_controlD0'):
+            # last resort...
+            try:
+                output = subprocess.check_output(
+                    'lsmod | grep habanalabs | wc -l', shell=True)
+                is_hpu_available = int(output) > 0
+            except (ValueError, FileNotFoundError, PermissionError,
+                    subprocess.CalledProcessError):
+                is_hpu_available = False
+    return is_hpu_available
+
+if not _is_hpu():
+    try:
+        import vllm._C
+    except ImportError as e:
+        logger.warning("Failed to import from vllm._C with %r", e)
 
 with contextlib.suppress(ImportError):
     import vllm._moe_C
