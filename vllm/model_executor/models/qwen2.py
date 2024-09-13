@@ -49,7 +49,7 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors, SamplerOutput
 
 from .interfaces import SupportsLoRA
-from vllm.utils import is_hip, is_hpu
+from vllm.utils import is_hpu
 
 
 class Qwen2MLP(nn.Module):
