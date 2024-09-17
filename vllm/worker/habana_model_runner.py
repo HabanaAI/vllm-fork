@@ -25,7 +25,7 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, MultiModalConfig, ParallelConfig,
                          SchedulerConfig)
 from vllm.distributed.parallel_state import get_world_group
-from vllm.hpu.ops import LoraMask as LoraMask
+from vllm.hpu.ops import LoraMask
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
@@ -810,48 +810,35 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             find_bucket(max(seq_lens), self.prompt_seq_bucket_cfg),
             self.block_size)
 
-        lora_mask: torch.Tensor = None
-        lora_logits_mask: torch.Tensor = None
-        counter = 0
         if self.lora_config:
-            lora_mask = torch.zeros(
-                len(seq_group_metadata_list) * max_prompt_len,
-                (self.lora_config.max_loras) * self.lora_config.max_lora_rank,
-                dtype=self.lora_config.lora_dtype)
-            lora_logits_mask = torch.zeros(len(seq_group_metadata_list),
-                                           (self.lora_config.max_loras) *
-                                           self.lora_config.max_lora_rank,
-                                           dtype=self.lora_config.lora_dtype)
+            lora_int_ids = torch.tensor(
+                [item.lora_int_id for item in seq_group_metadata_list],
+                device=self.device)
 
-            ones = torch.ones(max_prompt_len,
-                              self.lora_config.max_lora_rank,
-                              dtype=self.lora_config.lora_dtype)
-            logit_ones = torch.ones(1,
-                                    self.lora_config.max_lora_rank,
-                                    dtype=self.lora_config.lora_dtype)
+            lora_logits_mask = LoraMask.createLoraMask(
+                lora_int_ids, len(seq_group_metadata_list), 1,
+                self.lora_config.max_loras, self.lora_config.max_lora_rank,
+                self.lora_config.lora_dtype)
+
+            lora_mask = lora_logits_mask.view(
+                len(seq_group_metadata_list), 1,
+                -1).expand(len(seq_group_metadata_list), max_prompt_len,
+                           -1).reshape(
+                               len(seq_group_metadata_list) * max_prompt_len,
+                               -1)
+
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
                                                    context_lens):
             lora_id = seq_group_metadata.lora_int_id
 
             if lora_id > 0:
                 lora_requests.add(seq_group_metadata.lora_request)
-                start_row = counter * max_prompt_len
-                end_row = start_row + max_prompt_len
-                start_col = (lora_id - 1) * self.lora_config.max_lora_rank
-                end_col = start_col + self.lora_config.max_lora_rank
-                lora_mask[start_row:end_row, start_col:end_col] = ones
-                lora_logits_mask[counter, start_col:end_col] = logit_ones
-            counter = counter + 1
 
             lora_index_mapping += [lora_id] * (max_prompt_len - context_len)
             lora_prompt_mapping.extend(
                 [lora_id] *
                 (max_prompt_len - context_len
                  if seq_group_metadata.sampling_params.prompt_logprobs else 1))
-
-        if lora_mask is not None:
-            lora_mask = lora_mask.to('hpu')
-            lora_logits_mask = lora_logits_mask.to('hpu')
 
         input_tokens = make_tensor_with_pad(input_tokens,
                                             max_len=max_prompt_len,
@@ -920,18 +907,17 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if len(seq_group_metadata_list) == 0:
             return PrepareDecodeMetadata.empty()
-        lora_mask: torch.Tensor = None
-        lora_logits_mask: torch.Tensor = None
-        counter = 0
 
         if self.lora_config:
-            lora_mask = torch.zeros(len(seq_group_metadata_list),
-                                    (self.lora_config.max_loras) *
-                                    self.lora_config.max_lora_rank,
-                                    dtype=self.lora_config.lora_dtype)
-            ones = torch.ones(1,
-                              self.lora_config.max_lora_rank,
-                              dtype=self.lora_config.lora_dtype)
+            lora_int_ids = torch.tensor(
+                [item.lora_int_id for item in seq_group_metadata_list],
+                device=self.device)
+            lora_mask = LoraMask.createLoraMask(lora_int_ids,
+                                                len(seq_group_metadata_list),
+                                                1, self.lora_config.max_loras,
+                                                self.lora_config.max_lora_rank,
+                                                self.lora_config.lora_dtype)
+            lora_logits_mask = lora_mask
 
         dummy_slots = itertools.cycle(
             range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
@@ -945,10 +931,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if lora_id > 0:
                 lora_requests.add(seq_group_metadata.lora_request)
-                start_pos = (lora_id - 1) * self.lora_config.max_lora_rank
-                end_pos = start_pos + self.lora_config.max_lora_rank
-                lora_mask[counter, start_pos:end_pos] = ones
-            counter = counter + 1
 
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
@@ -980,9 +962,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
-        if lora_mask is not None:
-            lora_mask = lora_mask.to('hpu')
-            lora_logits_mask = lora_mask
         input_tokens = torch.tensor(input_tokens,
                                     dtype=torch.long,
                                     device=self.device)

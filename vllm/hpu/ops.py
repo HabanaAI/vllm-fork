@@ -161,6 +161,20 @@ class LoraMask:
     lora_mask = None
 
     @staticmethod
+    def createLoraMask(indices, batch_size, seq_len, max_loras, max_lora_rank,
+                       lora_dtype):
+        indices = indices.view(-1, 1)
+        mask = torch.arange((max_loras + 1) * max_lora_rank,
+                            device=indices.device)
+        mask = mask.view(1, -1)
+        mask = ((mask >= ((indices - 1) * max_lora_rank)) *
+                (mask < (indices * max_lora_rank))).to(dtype=lora_dtype)
+        mask = mask.view(batch_size, 1,
+                         -1).expand(batch_size, seq_len,
+                                    -1).reshape(batch_size * seq_len, -1)
+        return mask
+
+    @staticmethod
     def setLoraMask(mask):
         LoraMask.lora_mask = mask
 
