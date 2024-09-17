@@ -90,6 +90,11 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
         self.cache_engine: List[CacheEngine]
         # Initialize gpu_cache as embedding models don't initialize kv_caches
         self.hpu_cache: Optional[List[List[torch.tensor]]] = None
+        if self.parallel_config.world_size > 8:
+            from habana_frameworks.torch.distributed.hccl import initialize_distributed_hpu
+            if 'HABANA_VISIBLE_MODULES' in os.environ:
+                os.environ.pop('HABANA_VISIBLE_MODULES')
+            initialize_distributed_hpu(self.parallel_config.world_size, self.rank, self.local_rank)
 
     def _set_env_vars(self):
         local_rank = self.local_rank
