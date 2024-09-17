@@ -83,7 +83,7 @@ Unsupported Features
 -  Beam search
 -  LoRA adapters
 -  Attention with Linear Biases (ALiBi)
--  Quantization (AWQ, FP8 E5M2, FP8 E4M3)
+-  Quantization (AWQ)
 -  Prefill chunking (mixed-batch inferencing)
 
 Supported Configurations
