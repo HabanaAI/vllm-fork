@@ -877,6 +877,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_usage=None,
             block_indices=block_indices,
             block_offsets=block_offsets,
+            block_scales=None,
             attn_bias=None,
             seq_lens_tensor=seq_lens_tensor,
             num_prefills=real_num_seqs,
@@ -972,7 +973,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_decode_tokens = sum(seq_lens)
 
         blocks_used = [len(bt) for bt in block_tables if bt]
-        block_list = list(itertools.chain(*block_tables))
+        block_list = []
+        block_scales = []
+        for i, bt in enumerate(block_tables):
+            block_list.extend(bt)
+            blocks_in_group = len(bt)
+            if blocks_in_group > 0:
+                scale = 1.0 / blocks_in_group
+                block_scales.extend([scale] * blocks_in_group)
+
         block_mapping_nested: List[List[int]] = [
             [i] * b_u for i, b_u in enumerate(blocks_used)
         ]
@@ -988,9 +997,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         block_bucket_size = find_bucket(len(block_list),
                                         self.decode_block_bucket_cfg)
-        block_list = pad_list(block_list, block_bucket_size, _PAD_SLOT_ID)
-        block_mapping = pad_list(block_mapping, block_bucket_size, 0)
-        block_usage = pad_list(block_usage, block_bucket_size, 0)
+        block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
+        block_mapping = pad_list(block_mapping, block_bucket_size, -1)
+        block_usage = pad_list(block_usage, block_bucket_size, 1)
+        block_scales = pad_list(block_scales, block_bucket_size, 0.0)
 
         block_list = torch.tensor(block_list,
                                   dtype=torch.int,
@@ -1008,6 +1018,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         block_indices, block_offsets = precompute_indices_and_offsets(
             self.block_size, slot_mapping, False)
+        block_scales = torch.tensor(block_scales, dtype=torch.bfloat16, device=self.device)
+
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             block_list=block_list,
@@ -1015,6 +1027,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_usage=block_usage,
             block_indices=block_indices,
             block_offsets=block_offsets,
+            block_scales=block_scales,
             attn_bias=None,
             seq_lens_tensor=None,
             num_prefills=0,
@@ -1226,7 +1239,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
             'attn_bias', 'seq_lens_tensor', 'block_list', 'block_mapping',
             'block_usage', 'slot_mapping', 'is_prompt', 'block_indices',
-            'block_offsets'
+            'block_offsets', 'block_scales'
         ])
         return attention_metadata
 
