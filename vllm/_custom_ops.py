@@ -1,7 +1,6 @@
 import contextlib
 import functools
 from typing import List, Optional, Tuple, Type
-import subprocess, os
 import torch
 import habana_frameworks.torch.hpu as hthpu
 from vllm.logger import init_logger
