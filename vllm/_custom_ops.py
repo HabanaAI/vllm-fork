@@ -2,12 +2,14 @@ import contextlib
 import functools
 from typing import List, Optional, Tuple, Type
 import torch
-import habana_frameworks.torch.hpu as hthpu
+
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
-if not hthpu.is_available():
+try:
+    import habana_frameworks.torch.hpu as hthpu
+except ImportError as e:
     try:
         import vllm._C
     except ImportError as e:
