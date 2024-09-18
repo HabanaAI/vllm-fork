@@ -3,29 +3,12 @@ import functools
 from typing import List, Optional, Tuple, Type
 import subprocess, os
 import torch
-
+import habana_frameworks.torch.hpu as hthpu
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
 
-def _is_hpu() -> bool:
-    is_hpu_available = True
-    try:
-        subprocess.run(["hl-smi"], capture_output=True, check=True)
-    except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
-        if not os.path.exists('/dev/accel/accel0') and not os.path.exists(
-                '/dev/accel/accel_controlD0'):
-            # last resort...
-            try:
-                output = subprocess.check_output(
-                    'lsmod | grep habanalabs | wc -l', shell=True)
-                is_hpu_available = int(output) > 0
-            except (ValueError, FileNotFoundError, PermissionError,
-                    subprocess.CalledProcessError):
-                is_hpu_available = False
-    return is_hpu_available
-
-if not _is_hpu():
+if not hthpu.is_available():
     try:
         import vllm._C
     except ImportError as e:
