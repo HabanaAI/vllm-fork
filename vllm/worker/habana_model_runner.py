@@ -969,9 +969,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 seq_lens.append(seq_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
-                block_number = _PAD_BLOCK_ID if len(
-                    block_table) == 0 else block_table[position //
-                                                       self.block_size]
+                if len(block_table) == 0:
+                    block_number = _PAD_BLOCK_ID
+                else:
+                    block_number = block_table[position // self.block_size]
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:
