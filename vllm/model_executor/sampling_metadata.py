@@ -217,8 +217,14 @@ def _prepare_seq_groups(
 
         if seq_group_metadata.is_prompt:
             if sampling_params.seed is not None:
-                seq_group_metadata.state.generator = torch.Generator(
-                    device=device).manual_seed(sampling_params.seed)
+                if torch.device(device).type == 'hpu':
+                    import habana_frameworks.torch.hpu.random as htrandom
+                    seq_group_metadata.state.generator = \
+                        htrandom.default_generators[
+                        0].manual_seed(sampling_params.seed)
+                else:
+                    seq_group_metadata.state.generator = torch.Generator(
+                        device=device).manual_seed(sampling_params.seed)
 
             num_prompts += 1
             num_prefill_sample = len(seq_ids)
