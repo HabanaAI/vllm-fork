@@ -790,6 +790,7 @@ class SchedulerConfig:
     def __init__(self,
                  max_num_batched_tokens: Optional[int],
                  max_num_seqs: int,
+                 max_num_prefill_seqs: Optional[int],
                  max_model_len: int,
                  use_v2_block_manager: bool = False,
                  num_lookahead_slots: int = 0,
@@ -818,6 +819,8 @@ class SchedulerConfig:
                 self.max_num_batched_tokens)
 
         self.max_num_seqs = max_num_seqs
+        self.max_num_prefill_seqs = max_num_seqs \
+            if max_num_prefill_seqs is None else max_num_prefill_seqs
         self.max_model_len = max_model_len
         self.use_v2_block_manager = use_v2_block_manager
         self.num_lookahead_slots = num_lookahead_slots
@@ -843,7 +846,11 @@ class SchedulerConfig:
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
                 "be greater than or equal to max_num_seqs "
                 f"({self.max_num_seqs}).")
-
+        if self.max_num_seqs < self.max_num_prefill_seqs:
+            raise ValueError(
+                f"max_num_seqs ({self.max_num_seqs}) must "
+                "be greater than or equal to max_num_prefill_seqs "
+                f"({self.max_num_prefill_seqs}).")
         if self.num_lookahead_slots < 0:
             raise ValueError(
                 "num_lookahead_slots "

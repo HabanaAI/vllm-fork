@@ -64,6 +64,7 @@ class EngineArgs:
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
+    max_num_prefill_seqs: Optional[int] = None
     max_logprobs: int = 20  # Default value for OpenAI Chat Completions API
     disable_log_stats: bool = False
     revision: Optional[str] = None
@@ -367,6 +368,13 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.max_num_seqs,
                             help='Maximum number of sequences per iteration.')
+        parser.add_argument(
+            '--max-num-prefill-seqs',
+            type=int,
+            default=EngineArgs.max_num_prefill_seqs,
+            help=('Maximum number of sequences per prefill iteration. '
+                  'Must be <= than max_num_seqs. '
+                  'Defaults to max_num_seqs.'))
         parser.add_argument(
             '--max-logprobs',
             type=int,
@@ -815,6 +823,7 @@ class EngineArgs:
         scheduler_config = SchedulerConfig(
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
+            max_num_prefill_seqs=self.max_num_prefill_seqs,
             max_model_len=model_config.max_model_len,
             use_v2_block_manager=self.use_v2_block_manager,
             num_lookahead_slots=(self.num_lookahead_slots
