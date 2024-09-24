@@ -839,10 +839,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 lora_logits_mask[counter, start_col:end_col] = logit_ones
             counter = counter + 1
 
-            lora_index_mapping += [lora_id] * (max_prompt_len - context_len)
+            lora_index_mapping += [lora_id] * max_prompt_len
             lora_prompt_mapping.extend(
                 [lora_id] *
-                (max_prompt_len - context_len
+                (max_prompt_len
                  if seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if lora_mask is not None:
