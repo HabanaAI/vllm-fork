@@ -161,7 +161,11 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
 
         cache_block_size = self.get_cache_block_size_bytes()
         graph_reserved_mem = (float(
+<<<<<<< HEAD
             os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.1'))
+=======
+            os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.4'))
+>>>>>>> parent of 8a90083a (add bucket profiling)
                               if not self.model_config.enforce_eager else 0)
         graph_headroom = 1 - graph_reserved_mem
         available_hpu_memory = free_hpu_memory * \

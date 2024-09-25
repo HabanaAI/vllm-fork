@@ -1334,8 +1334,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         seq_len,
                         is_prompt,
                         kv_caches,
-                        is_pt_profiler_run=False,
-                        is_lora_profile_run=False) -> None:
+                        is_profile_run=False,
+                        override_n_runs=None) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -1367,8 +1367,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(max_num_seqs)
                 ]
         self.profiler.start('internal', scenario_name)
-        times = 3 if use_graphs or is_pt_profiler_run else 1
-        if self.lora_config and not is_lora_profile_run:
+        times = 3 if use_graphs or is_profile_run else 1
+        if override_n_runs is not None:
+            times = override_n_runs
+        if self.lora_config and not is_profile_run:
             lora_mapping = LoRAMapping(
                 [0] * batch_size * seq_len,
                 [0] * batch_size * seq_len,
@@ -1399,7 +1401,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             ]
         torch.hpu.synchronize()
         profiler = None
-        if is_pt_profiler_run and self.is_driver_worker:
+        fwd_times = []
+        if is_profile_run and self.is_driver_worker:
             profiler = setup_profiler()
             profiler.start()
         for _ in range(times):
