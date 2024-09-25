@@ -76,6 +76,7 @@ Supported Features
 -  Tensor parallelism support for multi-card inference
 -  Inference with `HPU Graphs <https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html>`__
    for accelerating low-batch latency and throughput
+-  INC quantization
 
 Unsupported Features
 ====================
@@ -83,7 +84,7 @@ Unsupported Features
 -  Beam search
 -  LoRA adapters
 -  Attention with Linear Biases (ALiBi)
--  Quantization (AWQ, FP8 E5M2, FP8 E4M3)
+-  AWQ quantization
 -  Prefill chunking (mixed-batch inferencing)
 
 Supported Configurations
@@ -128,10 +129,10 @@ Gaudi2 devices. Configurations that are not listed may or may not work.
    with tensor parallelism on 2x HPU, BF16 datatype with random or greedy sampling
 
 Performance Tuning
-================
+==================
 
 Execution modes
-------------
+---------------
 
 Currently in vLLM for HPU we support four execution modes, depending on selected HPU PyTorch Bridge backend (via ``PT_HPU_LAZY_MODE`` environment variable), and ``--enforce-eager`` flag.  
 
@@ -160,7 +161,7 @@ Currently in vLLM for HPU we support four execution modes, depending on selected
 
 
 Bucketing mechanism
-------------
+-------------------
 
 Intel Gaudi accelerators work best when operating on models with fixed tensor shapes. `Intel Gaudi Graph Compiler <https://docs.habana.ai/en/latest/Gaudi_Overview/Intel_Gaudi_Software_Suite.html#graph-compiler-and-runtime>`__ is responsible for generating optimized binary code that implements the given model topology on Gaudi. In its default configuration, the produced binary code may be heavily dependent on input and output tensor shapes, and can require graph recompilation when encountering differently shaped tensors within the same topology. While the resulting binaries utilize Gaudi efficiently, the compilation itself may introduce a noticeable overhead in end-to-end execution.
 In a dynamic inference serving scenario, there is a need to minimize the number of graph compilations and reduce the risk of graph compilation occurring during server runtime. Currently it is achieved by "bucketing" model's forward pass across two dimensions - ``batch_size`` and ``sequence_length``. 
@@ -233,7 +234,7 @@ This example uses the same buckets as in *Bucketing mechanism* section. Each out
    Compiling all the buckets might take some time and can be turned off with ``VLLM_SKIP_WARMUP=true`` environment variable. Keep in mind that if you do that, you may face graph compilations once executing a given bucket for the first time. It is fine to disable warmup for development, but it's highly recommended to enable it in deployment.
 
 HPU Graph capture
-------------
+-----------------
 
 `HPU Graphs <https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html>`__ are currently the most performant execution method of vLLM on Intel Gaudi. When HPU Graphs are enabled, execution graphs will be traced (recorded) ahead of time (after performing warmup), to be later replayed during inference, significantly reducing host overheads. Recording can take large amounts of memory, which needs to be taken into account when allocating KV cache. Enabling HPU Graphs will impact the number of available KV cache blocks, but vLLM provides user-configurable variables to control memory management.
 
@@ -243,7 +244,7 @@ Before KV cache gets allocated, model weights are loaded onto the device, and a 
 Only after that, ``gpu_memory_utilization`` flag is utilized - at its default value,  will mark 90% of free device memory at that point as usable.
 Next, KV cache gets allocated, model is warmed up, and HPU Graphs are captured. 
 Environment variable ``VLLM_GRAPH_RESERVED_MEM`` defines the ratio of memory reserved for HPU Graphs capture. 
-With its default value (``VLLM_GRAPH_RESERVED_MEM=0.4``), 40% of usable memory will be reserved for graph capture (later referred to as "usable graph memory"), and the remaining 60% will be utilized for KV cache. 
+With its default value (``VLLM_GRAPH_RESERVED_MEM=0.1``), 10% of usable memory will be reserved for graph capture (later referred to as "usable graph memory"), and the remaining 90% will be utilized for KV cache. 
 Environment variable ``VLLM_GRAPH_PROMPT_RATIO`` determines the ratio of usable graph memory reserved for prefill and decode graphs. By default (``VLLM_GRAPH_PROMPT_RATIO=0.5``), both stages have equal memory constraints. 
 Lower value corresponds to less usable graph memory reserved for prefill stage, e.g. ``VLLM_GRAPH_PROMPT_RATIO=0.2`` will reserve 20% of usable graph memory for prefill graphs, and 80% of usable graph memory for decode graphs. 
 
@@ -297,7 +298,7 @@ Each described step is logged by vLLM server, as follows (negative values corres
 
 
 Recommended vLLM Parameters
-------------
+---------------------------
 
 -  We recommend running inference on Gaudi 2 with ``block_size`` of 128
    for BF16 data type. Using default values (16, 32) might lead to
@@ -309,7 +310,7 @@ Recommended vLLM Parameters
    If you encounter out-of-memory issues, see troubleshooting section.
 
 Environment variables
-------------
+---------------------
 
 **Diagnostic and profiling knobs:**
 
@@ -322,7 +323,7 @@ Environment variables
 **Performance tuning knobs:**
 
 -   ``VLLM_SKIP_WARMUP``: if ``true``, warmup will be skipped, ``false`` by default
--   ``VLLM_GRAPH_RESERVED_MEM``: percentage of memory dedicated for HPUGraph capture, ``0.4`` by default
+-   ``VLLM_GRAPH_RESERVED_MEM``: percentage of memory dedicated for HPUGraph capture, ``0.1`` by default
 -   ``VLLM_GRAPH_PROMPT_RATIO``: percentage of reserved graph memory dedicated for prompt graphs, ``0.5`` by default
 -   ``VLLM_GRAPH_PROMPT_STRATEGY``: strategy determining order of prompt graph capture, ``min_tokens`` or ``max_bs``, ``min_tokens`` by default
 -   ``VLLM_GRAPH_DECODE_STRATEGY``: strategy determining order of decode graph capture, ``min_tokens`` or ``max_bs``, ``max_bs`` by default
