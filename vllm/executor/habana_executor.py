@@ -195,6 +195,9 @@ class HabanaExecutor(ExecutorBase):
     def shutdown(self) -> None:
         self.driver_worker.shutdown_inc()
 
+    def __del__(self):
+        self.shutdown()
+
 
 class HabanaExecutorAsync(HabanaExecutor, ExecutorAsyncBase):
 
