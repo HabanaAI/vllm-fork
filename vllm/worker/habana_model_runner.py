@@ -417,6 +417,7 @@ class ModelInputForHPU(ModelRunnerInputBase):
     virtual_engine: int = 0
     lora_mask: Optional[torch.Tensor] = None
     lora_logits_mask: Optional[torch.Tensor] = None
+    async_callback: Optional[Callable] = None
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
@@ -1920,6 +1921,9 @@ class HabanaModelRunner(
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []
+        
+        if model_input.async_callback is not None:
+            model_input.async_callback()
 
         # Sample the next token.
         with self.profiler.record_event(
