@@ -561,6 +561,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
+        self.inc_initialized_successfully = False
 
         # Profiler stats
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
@@ -597,8 +598,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
-        if self.model_config.quantization == 'inc':
-            htcore.hpu_set_env()
+        htcore.hpu_set_env()
         with HabanaMemoryProfiler() as m:
             with HabanaMemoryProfiler() as m_getmodel:
                 self.model = get_model(model_config=self.model_config,
@@ -643,6 +643,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.model = convert(self.model, config)
                     htcore.hpu_initialize(self.model,
                                           mark_only_scales_as_const=True)
+                self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
             elif not is_fake_hpu():
@@ -679,7 +680,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.lora_config and \
             max_bucket_cfg > self.max_num_batched_tokens // self.block_size:
             max_bucket_cfg = self.max_num_batched_tokens // self.block_size
-        blocks_step = 128
         #FIXME: The default values should be max_model_len
         max_prompt_seq = 1024
         max_decode_seq = 2048
@@ -691,7 +691,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max=align_bs(max_bucket_cfg))
         self.decode_bs_bucket_cfg = read_bucket_settings('decode',
                                                          'bs',
-                                                         min=align_bs(32),
+                                                         min=1,
                                                          step=align_bs(32),
                                                          max=self.max_num_seqs)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
@@ -702,9 +702,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.decode_block_bucket_cfg = read_bucket_settings(
             'decode',
             'block',
-            min=blocks_step,
-            step=blocks_step,
-            max=max(blocks_step,
+            min=self.block_size,
+            step=self.block_size,
+            max=max(self.block_size,
                     self.max_num_seqs * max_decode_seq // self.block_size))
         self.graphed_buckets: Set[Any] = set()
 
@@ -1571,6 +1571,17 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     len(self.decode_buckets),
                     list(sorted(self.decode_buckets)))
 
+        if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
+            cache_size_limit = len(self.prompt_buckets) + len(
+                self.decode_buckets) + 1
+            torch._dynamo.config.cache_size_limit = max(
+                cache_size_limit, torch._dynamo.config.cache_size_limit)
+            # Multiply by 8 to follow the original default ratio between
+            # the cache_size_limit and accumulated_cache_size_limit
+            torch._dynamo.config.accumulated_cache_size_limit = max(
+                cache_size_limit * 8,
+                torch._dynamo.config.accumulated_cache_size_limit)
+
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
         start_time = time.perf_counter()
 
@@ -1601,7 +1612,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 graph_free_mem = align_workers(graph_free_mem,
                                                torch.distributed.ReduceOp.MIN)
                 prompt_graph_mem_ratio = float(
-                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.5'))
+                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
                 prompt_available_memory = (prompt_graph_mem_ratio *
                                            graph_free_mem)
                 decode_available_memory = (graph_free_mem -
@@ -1799,6 +1810,7 @@ class HabanaModelRunner(
                 attn_backend=self.attn_backend,
             ))
 
+    @torch.inference_mode()
     def prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -1958,14 +1970,18 @@ class HabanaModelRunner(
         return [output]
 
     def shutdown_inc(self):
-        print('inc shutdown')
-        if (model_config := getattr(self, "model_config", None)) and \
-                         getattr(model_config, "quantization", None) == 'inc':
-            print('inc shutdown start')
+        can_finalize_inc = False
+        from contextlib import suppress
+        with suppress(AttributeError):
+            can_finalize_inc = (self.model_config.quantization == 'inc') and \
+                (self.model.model is not None) and \
+                self.inc_initialized_successfully and \
+                not getattr(self, "_is_inc_finalized", False)
+        if can_finalize_inc:
             from neural_compressor.torch.quantization import (
                 finalize_calibration)
             finalize_calibration(self.model.model)
-            print('inc shutdown')
+            self._is_inc_finalized = True
 
     def __del__(self):
         self.shutdown_inc()
