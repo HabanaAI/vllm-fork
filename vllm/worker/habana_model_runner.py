@@ -1937,14 +1937,6 @@ class HabanaModelRunner(
             )
 
         if self.lora_config:
-            from vllm.lora.layers import VocabParallelEmbeddingWithLoRA
-            modules = unwrap_model(self.model.model)
-            for module in modules:
-                if isinstance(module, VocabParallelEmbeddingWithLoRA):
-                    for i in range(0, len(module.indices_len)):
-                        module.indices_len[
-                            i] = sampling_metadata.selected_token_indices.numel(
-                            )
             lora_logits_mask: torch.Tensor = model_input.lora_logits_mask
             LoraMask.setLoraMask(
                 lora_logits_mask.index_select(
