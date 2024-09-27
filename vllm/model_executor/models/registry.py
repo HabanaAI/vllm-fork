@@ -295,6 +295,7 @@ class ModelRegistry:
 
     @staticmethod
     def is_multimodal_model(architectures: Union[str, List[str]]) -> bool:
+        return False
         if isinstance(architectures, str):
             architectures = [architectures]
         if not architectures:

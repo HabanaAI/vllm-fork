@@ -925,6 +925,7 @@ def get_rope(
                                             max_position,
                                             base,
                                             is_neox_style,
+                                            dtype=dtype,
                                             RoPEFallback=RotaryEmbedding)
         else:
             rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position,

@@ -32,6 +32,9 @@ from vllm.platforms import current_platform
 
 if current_platform.is_hpu():
     from vllm_hpu_extension.punica_hpu import GaudiPunicaWrapper
+    from vllm_hpu_extension.rotary_embed import (
+        HpuLinearScalingRotaryEmbedding as LinearScalingRotaryEmbedding)
+    from vllm_hpu_extension.rotary_embed import HpuRotaryEmbedding
 
 if TYPE_CHECKING:
     pass
@@ -1293,12 +1296,8 @@ class LinearScalingRotaryEmbeddingWithLora(BaseLayerWithLoRA):
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self.base_layer(
-            positions,
-            query,
-            key,
-            offsets=self.punica_wrapper.long_lora_indices,
-        )
+        offsets = self.punica_wrapper.long_lora_indices.reshape_as(positions)
+        return self.base_layer(positions, query, key, offsets=offsets)
 
     @property
     def scaling_factor_to_offset(self) -> Dict[float, int]:
@@ -1313,8 +1312,11 @@ class LinearScalingRotaryEmbeddingWithLora(BaseLayerWithLoRA):
         model_config: Optional[PretrainedConfig],
     ) -> bool:
         """Returns True if the layer can be replaced by this LoRA layer."""
-        return (type(source_layer) is LinearScalingRotaryEmbedding
-                or type(source_layer) is RotaryEmbedding)
+        if current_platform.is_hpu():
+            return type(source_layer) is HpuRotaryEmbedding
+        else:
+            return (type(source_layer) is LinearScalingRotaryEmbedding
+                    or type(source_layer) is RotaryEmbedding)
 
     def extra_repr(self) -> str:
         return self.base_layer.extra_repr()
