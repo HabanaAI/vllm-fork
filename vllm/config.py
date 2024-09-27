@@ -351,7 +351,8 @@ class ModelConfig:
 
         if device_config.device_type not in ("cuda", "tpu", "hpu"):
             logger.warning(
-                "Async output processing is only supported for CUDA, TPU and HPU. "
+                "Async output processing is only supported for CUDA, TPU "
+                "and HPU. "
                 "Disabling it for other platforms.")
             self.use_async_output_proc = False
             return

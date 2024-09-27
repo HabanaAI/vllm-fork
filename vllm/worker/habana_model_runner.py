@@ -1921,7 +1921,7 @@ class HabanaModelRunner(
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []
-        
+
         if model_input.async_callback is not None:
             model_input.async_callback()
 
