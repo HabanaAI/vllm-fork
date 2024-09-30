@@ -62,6 +62,7 @@ following:
 $ git clone https://github.com/HabanaAI/vllm-fork.git
 $ cd vllm-fork
 $ git checkout habana_main
+$ git tag v0.6.2.post1
 $ pip install -e .
 ```
 
