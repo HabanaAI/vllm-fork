@@ -422,8 +422,6 @@ class ModelInputForHPU(ModelRunnerInputBase):
     batch_size_padded: Optional[int] = None
     virtual_engine: int = 0
     lora_ids: Optional[List[int]] = None
-    lora_mask: Optional[torch.Tensor] = None
-    lora_logits_mask: Optional[torch.Tensor] = None
     async_callback: Optional[Callable] = None
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
@@ -1795,6 +1793,17 @@ class HabanaModelRunner(
 
     def create_lora_mask(self, input_tokens: torch.Tensor, lora_ids: List[int],
                          is_prompt: bool):
+        '''
+        This is a helper function to create the mask for lora computations.
+        Lora Mask is needed to ensure we match the correct lora weights for the
+        for the request.
+        For Prompt phase we have 
+        lora_mask with shape (batch_size * seq_len, max_loras * max_rank)
+        lora_logits_mask with shape (batch_size, max_loras * max_rank)
+        For Decode phase we have both
+        lora_mask and lora_logits_mask with shape
+        (batch_size, max_loras * max_rank)
+        '''
         lora_mask: torch.Tensor = None
         lora_logits_mask: torch.Tensor = None
         lora_index = 0
@@ -1865,19 +1874,12 @@ class HabanaModelRunner(
             raise ValueError(
                 "num_steps > 1 is not supported in HabanaModelRunner")
 
-        lora_mask: torch.Tensor = None
-        lora_logits_mask: torch.Tensor = None
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
-            assert model_input.attn_metadata is not None
-            assert model_input.input_tokens is not None
-            assert model_input.lora_ids is not None
             self.set_active_loras(model_input.lora_requests,
                                   model_input.lora_mapping)
-            lora_mask, lora_logits_mask = self.create_lora_mask(
-                model_input.input_tokens, model_input.lora_ids,
-                model_input.attn_metadata.is_prompt)
+
         input_tokens = model_input.input_tokens
         input_positions = model_input.input_positions
         attn_metadata = model_input.attn_metadata
@@ -1894,6 +1896,14 @@ class HabanaModelRunner(
         seq_len = self._seq_len(attn_metadata)
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+
+        lora_mask: torch.Tensor = None
+        lora_logits_mask: torch.Tensor = None
+        if self.lora_config:
+            assert model_input.lora_ids is not None
+            lora_mask, lora_logits_mask = self.create_lora_mask(
+                input_tokens, model_input.lora_ids, attn_metadata.is_prompt)
+
         execute_model_kwargs = {
             "input_ids": input_tokens,
             "positions": input_positions,
