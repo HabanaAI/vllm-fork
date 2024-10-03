@@ -21,6 +21,15 @@ from vllm.worker.worker_base import WorkerWrapperBase
 logger = init_logger(__name__)
 
 
+def create_worker(worker_module_name, worker_class_name, **kwargs):
+    wrapper = WorkerWrapperBase(
+        worker_module_name=worker_module_name,
+        worker_class_name=worker_class_name,
+    )
+    wrapper.init_worker(**kwargs)
+    return wrapper.worker
+
+
 class HabanaExecutor(ExecutorBase):
 
     uses_ray: bool = False
