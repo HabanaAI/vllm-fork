@@ -16,6 +16,7 @@ from vllm.engine.llm_engine import LLMEngine, SchedulerOutputState
 from vllm.engine.metrics_types import StatLoggerBase
 from vllm.executor.executor_base import ExecutorAsyncBase
 from vllm.executor.gpu_executor import GPUExecutorAsync
+from vllm.executor.hpu_executor import HPUExecutorAsync
 from vllm.executor.ray_utils import initialize_ray_cluster
 from vllm.inputs import PromptType
 from vllm.logger import init_logger
@@ -616,6 +617,14 @@ class AsyncLLMEngine:
         elif engine_config.device_config.device_type == "cpu":
             from vllm.executor.cpu_executor import CPUExecutorAsync
             executor_class = CPUExecutorAsync
+        elif engine_config.device_config.device_type == "hpu":
+            if distributed_executor_backend == "ray":
+                initialize_ray_cluster(engine_config.parallel_config)
+                from vllm.executor.ray_hpu_executor import RayHPUExecutorAsync
+                executor_class = RayHPUExecutorAsync
+            else:
+                from vllm.executor.hpu_executor import HPUExecutorAsync
+                executor_class = HPUExecutorAsync
         elif engine_config.device_config.device_type == "openvino":
             assert distributed_executor_backend is None, (
                 "Distributed execution is not supported with "
@@ -1195,7 +1204,8 @@ class AsyncLLMEngine:
     async def start_profile(self) -> None:
         # using type instead of isinstance to check to avoid capturing
         # inherited classes
-        if type(self.engine.model_executor) == GPUExecutorAsync:  # noqa: E721
+        if type(self.engine.model_executor) == GPUExecutorAsync or \
+            type(self.engine.model_executor) == HPUExecutorAsync:  # noqa: E721
             self.engine.model_executor.start_profile()
         else:
             self.engine.model_executor._run_workers("start_profile")
@@ -1203,7 +1213,8 @@ class AsyncLLMEngine:
     async def stop_profile(self) -> None:
         # using type instead of isinstance to check to avoid capturing
         # inherited classes
-        if type(self.engine.model_executor) == GPUExecutorAsync:  # noqa: E721
+        if type(self.engine.model_executor) == GPUExecutorAsync or \
+            type(self.engine.model_executor) == HPUExecutorAsync:  # noqa: E721
             self.engine.model_executor.stop_profile()
         else:
             self.engine.model_executor._run_workers("stop_profile")
