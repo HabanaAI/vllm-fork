@@ -9,7 +9,7 @@ logger = init_logger(__name__)
 
 try:
     import habana_frameworks.torch.hpu as hthpu
-except ImportError as e:
+except ImportError:
     try:
         import vllm._C
     except ImportError as e:
