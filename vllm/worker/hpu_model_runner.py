@@ -590,7 +590,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                           'false').lower() == 'true'
 
     def load_model(self) -> None:
-        import habana_frameworks.torch.core as htcore  
+        import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
            self.model_config.quantization == 'fp8':
             htcore.hpu_set_env()
