@@ -7,6 +7,7 @@ import torch
 from vllm.model_executor.layers.spec_decode_base_sampler import (
     SpecDecodeBaseSampler)
 from vllm.utils import is_pin_memory_available
+from vllm.platforms import current_platform
 
 
 class SpecDecodeWorkerMetrics(
@@ -77,12 +78,19 @@ class AsyncMetricsCollector:
         self._rejsample_metrics_collect_interval_s = collect_interval_s
         self._last_metrics_collect_time = self._timer()
 
-    def init_gpu_tensors(self, rank: int) -> None:
+    def init_tensors(self, rank: int, device: str) -> None:
         self._rank = rank
-        self._copy_stream = torch.cuda.Stream()
+        if 'hpu' == device.type:
+            import habana_frameworks.torch as htorch
+            self._copy_stream = htorch.hpu.Stream()
+        else:
+            self._copy_stream = torch.cuda.Stream()
 
     def maybe_collect_rejsample_metrics(
             self, k: int) -> Optional[SpecDecodeWorkerMetrics]:
+
+        if not current_platform.is_cuda_alike():
+            return None
 
         # If a copy was initiated in the previous call, collect and return.
         if self._in_flight_copy is not None:
