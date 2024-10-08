@@ -7,10 +7,14 @@ from vllm.model_executor.layers.sampler import SamplerOutput
 
 try:
     from vllm.attention.backends.flash_attn import FlashAttentionMetadata
-except ModuleNotFoundError:
-    # vllm_flash_attn is not installed, use the identical ROCm FA metadata
-    from vllm.attention.backends.rocm_flash_attn import (
-        ROCmFlashAttentionMetadata as FlashAttentionMetadata)
+except:
+    try:
+        # vllm_flash_attn is not installed, use the identical ROCm FA metadata
+        from vllm.attention.backends.rocm_flash_attn import (
+            ROCmFlashAttentionMetadata as FlashAttentionMetadata)
+    except:
+        pass
+
 
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ObservabilityConfig, ParallelConfig,
