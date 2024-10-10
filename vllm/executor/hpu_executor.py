@@ -48,16 +48,23 @@ class HPUExecutor(ExecutorBase):
             distributed_init_method=distributed_init_method,
             lora_config=self.lora_config,
             is_driver_worker=rank == 0,
+            speculative_config=self.speculative_config,
         )
 
     def _create_worker(self,
                        local_rank: int = 0,
                        rank: int = 0,
                        distributed_init_method: Optional[str] = None):
-        wrapper = WorkerWrapperBase(
-            worker_module_name="vllm.worker.hpu_worker",
-            worker_class_name="HPUWorker",
-        )
+        if self.speculative_config is None:
+            wrapper = WorkerWrapperBase(
+                worker_module_name="vllm.worker.hpu_worker",
+                worker_class_name="HPUWorker",
+            )
+        else:
+            wrapper = WorkerWrapperBase(
+                worker_module_name="vllm.spec_decode.spec_decode_worker",
+                worker_class_name="create_spec_worker",
+            )
         wrapper.init_worker(**self._get_worker_kwargs(local_rank, rank,
                                                       distributed_init_method))
         return wrapper.worker
@@ -197,7 +204,8 @@ class HPUExecutor(ExecutorBase):
         self.driver_worker.stop_profile()
 
     def shutdown(self) -> None:
-        self.driver_worker.shutdown_inc()
+        if hasattr(self.driver_worker, 'shutdown_inc'):
+            self.driver_worker.shutdown_inc()
 
 
 class HPUExecutorAsync(HPUExecutor, ExecutorAsyncBase):
