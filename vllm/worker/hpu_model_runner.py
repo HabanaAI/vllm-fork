@@ -298,9 +298,21 @@ class HpuModelAdapter():
         mask = mask >= metadata.block_usage.unsqueeze(-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
-        block_mapping = torch.nn.functional.one_hot(
-            metadata.block_mapping.to(torch.long),
-            num_classes=batch_size).to(dtype)
+        if 'cpu' in str(device).lower():
+            # Unfortunately one_hot on CPU doesn't handle
+            # out of bounds classes. We need to mask those
+            # values manually
+            oob_values = metadata.block_mapping.lt(0)
+            block_mapping = metadata.block_mapping.masked_fill(oob_values, 0)
+            block_mapping = torch.nn.functional.one_hot(
+                block_mapping,
+                num_classes=batch_size)
+            block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
+        else:
+            block_mapping = torch.nn.functional.one_hot(
+                metadata.block_mapping,
+                num_classes=batch_size)
+        block_mapping = block_mapping.to(dtype)
         metadata = metadata._replace(block_mapping=block_mapping,
                                      attn_bias=attn_bias)
         return metadata
@@ -1006,7 +1018,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                   dtype=torch.int,
                                   device=self.device)
         block_mapping = torch.tensor(block_mapping,
-                                     dtype=torch.int,
+                                     dtype=torch.long,
                                      device=self.device)
         block_usage = torch.tensor(block_usage,
                                    dtype=self.model_config.dtype,
