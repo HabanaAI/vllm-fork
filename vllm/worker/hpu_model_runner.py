@@ -1779,10 +1779,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)
 
-    def finish_measurements(self):
-        from neural_compressor.torch.quantization import finalize_calibration
-        finalize_calibration(self.model.model)
-
     def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
         cfg = (batch_size, seq_len, is_prompt)
         seen = cfg in self.seen_configs
@@ -1993,6 +1989,3 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 finalize_calibration)
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
-
-    def __del__(self):
-        self.shutdown_inc()
