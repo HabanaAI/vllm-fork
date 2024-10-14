@@ -22,7 +22,7 @@ Requirements
 
 
 Quick start using Dockerfile
-----------------------------
+============================
 .. code:: console
 
    $ docker build -f Dockerfile.hpu -t vllm-hpu-env  .
