@@ -8,8 +8,8 @@ Requirements and Installation
 
 Please follow the instructions provided in the `Gaudi Installation
 Guide <https://docs.habana.ai/en/latest/Installation_Guide/index.html>`__
-to set up the environment. To achieve the best performance, please
-follow the methods outlined in the `Optimizing Training Platform
+to set up the execution environment. To achieve the best performance,
+please follow the methods outlined in the `Optimizing Training Platform
 Guide <https://docs.habana.ai/en/latest/PyTorch/Model_Optimization_PyTorch/Optimization_in_Training_Platform.html>`__.
 
 Requirements
