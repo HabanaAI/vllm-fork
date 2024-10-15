@@ -11,6 +11,8 @@ ENV PT_HPU_ENABLE_LAZY_COLLECTIVES=true
 
 RUN VLLM_TARGET_DEVICE=hpu \
     CMAKE_BUILD_TYPE=Release \
+    CFLAGS="-march=haswell" \
+    CXXFLAGS="$CLAGS $CXXFLAGS" \
     python3 setup.py install
 
 WORKDIR /workspace/
