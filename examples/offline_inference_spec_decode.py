@@ -56,11 +56,9 @@ if __name__ == "__main__":
     del llm
     gc.collect()
     print("================= Summary =====================")
-    print("input is ", prompts)
-    print()
+    print("input is ", prompts, "\n")
     print("Non Spec Decode - latency_per_token is ", latency_per_token_non_spec)
-    print("Generated Text is :", ret_non_spec)
-    print()
+    print("Generated Text is :", ret_non_spec, "\n")
     print("Spec Decode - latency_per_token is ", latency_per_token_spec)
     print("Generated Text is :", ret_spec)
     
