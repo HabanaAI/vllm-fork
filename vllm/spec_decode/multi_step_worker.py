@@ -5,6 +5,7 @@ from typing import Dict, List, Set, Tuple
 import torch
 
 from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.platforms import current_platform
 from vllm.sequence import (ExecuteModelRequest, HiddenStates, SequenceData,
                            SequenceGroupMetadata)
 from vllm.spec_decode.draft_model_runner import TP1DraftModelRunner
@@ -12,8 +13,8 @@ from vllm.spec_decode.interfaces import (SpeculativeProposals,
                                          SpeculativeProposer)
 from vllm.spec_decode.proposer_worker_base import ProposerWorkerBase
 from vllm.spec_decode.top1_proposer import Top1Proposer
-from vllm.platforms import current_platform
 from vllm.utils import is_neuron, is_openvino, is_xpu
+
 if is_neuron():
     from vllm.worker.neuron_worker import NeuronWorker as WorkerBaseCls
 elif current_platform.is_hpu():

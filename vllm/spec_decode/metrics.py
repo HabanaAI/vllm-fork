@@ -6,8 +6,8 @@ import torch
 
 from vllm.model_executor.layers.spec_decode_base_sampler import (
     SpecDecodeBaseSampler)
-from vllm.utils import is_pin_memory_available
 from vllm.platforms import current_platform
+from vllm.utils import is_pin_memory_available
 
 
 class SpecDecodeWorkerMetrics(
@@ -78,9 +78,9 @@ class AsyncMetricsCollector:
         self._rejsample_metrics_collect_interval_s = collect_interval_s
         self._last_metrics_collect_time = self._timer()
 
-    def init_tensors(self, rank: int, device: str) -> None:
+    def init_tensors(self, rank: int, device: torch.device) -> None:
         self._rank = rank
-        if 'hpu' == device.type:
+        if device.type == 'hpu':
             import habana_frameworks.torch as htorch
             self._copy_stream = htorch.hpu.Stream()
         else:

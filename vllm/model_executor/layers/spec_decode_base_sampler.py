@@ -30,7 +30,9 @@ class SpecDecodeBaseSampler(nn.Module):
         self.num_emitted_tokens: Optional[torch.Tensor] = None
         self.num_draft_tokens: int = 0
 
-    def init_tensors(self, device: Union[int, str], device_type: str = 'cuda') -> None:
+    def init_tensors(self,
+                     device: Union[int, str],
+                     device_type: str = 'cuda') -> None:
         assert self.num_accepted_tokens is None
         if isinstance(device, int):
             device = f"{device_type}:{device}"

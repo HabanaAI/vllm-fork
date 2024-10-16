@@ -1,5 +1,6 @@
 from vllm.config import DeviceConfig
 
+
 def init_worker(*args, **kwargs):
     device_config: DeviceConfig = kwargs.get("device_config")
     if device_config.device_type == 'neuron':

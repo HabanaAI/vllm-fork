@@ -26,7 +26,7 @@ class HPUAttentionBackend(AttentionBackend):
     @staticmethod
     def get_name() -> str:
         return "hpu-attn"
-    
+
     @staticmethod
     def get_impl_cls() -> Type["HPUAttentionImpl"]:
         return HPUAttentionImpl

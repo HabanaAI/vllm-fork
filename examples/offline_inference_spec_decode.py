@@ -15,7 +15,8 @@ def time_generation(llm: LLM, prompts: List[str],
     start = time.time()
     outputs = llm.generate(prompts, sampling_params)
     end = time.time()
-    latency_per_token = (end - start) / sum([len(o.outputs[0].token_ids) for o in outputs])
+    latency_per_token = (end - start) / sum(
+        [len(o.outputs[0].token_ids) for o in outputs])
     # Print the outputs.
     ret = []
     for output in outputs:
@@ -36,7 +37,8 @@ if __name__ == "__main__":
     print("==============Without speculation==================")
     llm = LLM(model="facebook/opt-6.7b")
 
-    ret_non_spec,latency_per_token_non_spec = time_generation(llm, prompts, sampling_params)
+    ret_non_spec, latency_per_token_non_spec = time_generation(
+        llm, prompts, sampling_params)
 
     del llm
     gc.collect()
@@ -46,19 +48,20 @@ if __name__ == "__main__":
     llm = LLM(
         model="facebook/opt-6.7b",
         speculative_model="facebook/opt-125m",
-        num_speculative_tokens = 5,
+        num_speculative_tokens=5,
         # These are currently required for MLPSpeculator decoding
         use_v2_block_manager=True,
     )
 
-    ret_spec,latency_per_token_spec = time_generation(llm, prompts, sampling_params)
+    ret_spec, latency_per_token_spec = time_generation(llm, prompts,
+                                                       sampling_params)
 
     del llm
     gc.collect()
     print("================= Summary =====================")
     print("input is ", prompts, "\n")
-    print("Non Spec Decode - latency_per_token is ", latency_per_token_non_spec)
+    print("Non Spec Decode - latency_per_token is ",
+          latency_per_token_non_spec)
     print("Generated Text is :", ret_non_spec, "\n")
     print("Spec Decode - latency_per_token is ", latency_per_token_spec)
     print("Generated Text is :", ret_spec)
-    
