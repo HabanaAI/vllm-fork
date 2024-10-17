@@ -247,7 +247,7 @@ class LLMEngine:
             "enforce_eager=%s, kv_cache_dtype=%s, "
             "quantization_param_path=%s, device_config=%s, "
             "decoding_config=%r, observability_config=%r, "
-            "seed=%d, served_model_name=%s, use_v2_block_manager=%s, "
+            "seed=%d, served_model_name=%s, "
             "num_scheduler_steps=%d, chunked_prefill_enabled=%s "
             "multi_step_stream_outputs=%s, enable_prefix_caching=%s, "
             "use_async_output_proc=%s, use_cached_outputs=%s, "
@@ -280,7 +280,6 @@ class LLMEngine:
             observability_config,
             model_config.seed,
             model_config.served_model_name,
-            scheduler_config.use_v2_block_manager,
             scheduler_config.num_scheduler_steps,
             scheduler_config.chunked_prefill_enabled,
             scheduler_config.multi_step_stream_outputs,
@@ -525,6 +524,14 @@ class LLMEngine:
         elif engine_config.device_config.device_type == "cpu":
             from vllm.executor.cpu_executor import CPUExecutor
             executor_class = CPUExecutor
+        elif engine_config.device_config.device_type == "hpu":
+            if distributed_executor_backend == "ray":
+                initialize_ray_cluster(engine_config.parallel_config)
+                from vllm.executor.ray_hpu_executor import RayHPUExecutor
+                executor_class = RayHPUExecutor
+            else:
+                from vllm.executor.hpu_executor import HPUExecutor
+                executor_class = HPUExecutor
         elif engine_config.device_config.device_type == "openvino":
             from vllm.executor.openvino_executor import OpenVINOExecutor
             executor_class = OpenVINOExecutor

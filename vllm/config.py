@@ -376,9 +376,10 @@ class ModelConfig:
 
         # Reminder: Please update docs/source/serving/compatibility_matrix.rst
         # If the feature combo become valid
-        if device_config.device_type not in ("cuda", "tpu", "xpu"):
+        if device_config.device_type not in ("cuda", "tpu", "xpu", "hpu"):
             logger.warning(
-                "Async output processing is only supported for CUDA, TPU, XPU. "
+                "Async output processing is only supported for CUDA, TPU, XPU "
+                "and HPU."
                 "Disabling it for other platforms.")
             self.use_async_output_proc = False
             return
@@ -774,7 +775,6 @@ class LoadConfig:
         ignore_patterns: The list of patterns to ignore when loading the model.
             Default to "original/**/*" to avoid repeated loading of llama's 
             checkpoints.
-
     """
 
     load_format: Union[str, LoadFormat, "BaseModelLoader"] = LoadFormat.AUTO
@@ -877,6 +877,13 @@ class ParallelConfig:
                 raise ValueError(
                     "TPU backend only supports Ray for distributed inference.")
 
+        if current_platform.is_hpu() and self.world_size > 1:
+            if self.distributed_executor_backend is None:
+                self.distributed_executor_backend = "ray"
+            if self.distributed_executor_backend != "ray":
+                raise ValueError(
+                    "HPU backend only supports Ray for distributed inference.")
+
         if self.distributed_executor_backend is None and self.world_size > 1:
             # We use multiprocessing by default if world_size fits on the
             # current node and we aren't in a ray placement group.
@@ -949,7 +956,6 @@ class SchedulerConfig:
             iteration.
         max_model_len: Maximum length of a sequence (including prompt
             and generated text).
-        use_v2_block_manager: Whether to use the BlockSpaceManagerV2 or not.
         num_lookahead_slots: The number of slots to allocate per sequence per
             step, beyond the known token ids. This is used in speculative
             decoding to store KV activations of tokens which may or may not be
@@ -976,7 +982,6 @@ class SchedulerConfig:
                  max_num_batched_tokens: Optional[int],
                  max_num_seqs: int,
                  max_model_len: int,
-                 use_v2_block_manager: bool = True,
                  num_lookahead_slots: int = 0,
                  delay_factor: float = 0.0,
                  enable_chunked_prefill: bool = False,
@@ -1026,7 +1031,6 @@ class SchedulerConfig:
 
         self.max_num_seqs = max_num_seqs
         self.max_model_len = max_model_len
-        self.use_v2_block_manager = use_v2_block_manager
         self.num_lookahead_slots = num_lookahead_slots
         self.delay_factor = delay_factor
         self.chunked_prefill_enabled = enable_chunked_prefill
@@ -1067,18 +1071,6 @@ class SchedulerConfig:
                 f"({self.num_scheduler_steps}) must be greater than or "
                 "equal to 1.")
 
-        if (not self.use_v2_block_manager \
-            and not envs.VLLM_ALLOW_DEPRECATED_BLOCK_MANAGER_V1):
-            raise ValueError(
-                "The use of BlockSpaceManagerV1 is deprecated and will "
-                "be removed in a future release. Please switch to "
-                "BlockSpaceManagerV2 by setting --use-v2-block-manager to "
-                "True. If you wish to suppress this error temporarily, "
-                "you can set the environment variable "
-                "`VLLM_ALLOW_DEPRECATED_BLOCK_MANAGER_V1=1. If your use "
-                "case is not supported in BlockSpaceManagerV2, please "
-                "file an issue with detailed information.")
-
     @property
     def is_multi_step(self) -> bool:
         return self.num_scheduler_steps > 1
@@ -1094,6 +1086,8 @@ class DeviceConfig:
                 self.device_type = "cuda"
             elif is_neuron():
                 self.device_type = "neuron"
+            elif current_platform.is_hpu():
+                self.device_type = "hpu"
             elif is_openvino():
                 self.device_type = "openvino"
             elif current_platform.is_tpu():
@@ -1137,7 +1131,6 @@ class SpeculativeConfig:
         speculative_disable_mqa_scorer: Optional[bool],
         speculative_max_model_len: Optional[int],
         enable_chunked_prefill: bool,
-        use_v2_block_manager: bool,
         disable_log_stats: bool,
         speculative_disable_by_batch_size: Optional[int],
         ngram_prompt_lookup_max: Optional[int],
@@ -1178,9 +1171,6 @@ class SpeculativeConfig:
             enable_chunked_prefill (bool): Whether vLLM is configured to use
                 chunked prefill or not. Used for raising an error since its not
                 yet compatible with spec decode.
-            use_v2_block_manager (bool): Whether vLLM is configured to use the
-                v2 block manager or not. Used for raising an error since the v2
-                block manager is required with spec decode.
             speculative_disable_by_batch_size (Optional[int]): Disable
                 speculative decoding for new incoming requests when the number
                 of enqueue requests  is larger than this value, if provided.
@@ -1230,11 +1220,6 @@ class SpeculativeConfig:
             raise ValueError(
                 "Speculative decoding and chunked prefill are "
                 f"currently mutually exclusive ({enable_chunked_prefill=}).")
-
-        if not use_v2_block_manager:
-            raise ValueError(
-                "Speculative decoding requires usage of the V2 "
-                "block manager. Enable it with --use-v2-block-manager.")
 
         # TODO: The user should be able to specify revision/max model len
         # for the draft model. It is not currently supported.
@@ -1668,6 +1653,13 @@ def _get_and_verify_dtype(
                     torch_dtype = torch.float16
             else:
                 torch_dtype = config_dtype
+
+            if current_platform.is_hpu() and config_dtype == torch.float16:
+                logger.info(
+                    "For HPU, we cast models to bfloat16 instead of"
+                    "using float16 by default. Please specify `dtype` if you "
+                    "want to use float16.")
+                torch_dtype = torch.bfloat16
         else:
             if dtype not in _STR_DTYPE_TO_TORCH_DTYPE:
                 raise ValueError(f"Unknown dtype: {dtype}")

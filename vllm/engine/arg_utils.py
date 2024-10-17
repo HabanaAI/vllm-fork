@@ -16,6 +16,7 @@ from vllm.config import (CacheConfig, ConfigFormat, DecodingConfig,
 from vllm.executor.executor_base import ExecutorBase
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
+from vllm.platforms import current_platform
 from vllm.transformers_utils.utils import check_gguf_file
 from vllm.utils import FlexibleArgumentParser
 
@@ -34,6 +35,7 @@ DEVICE_OPTIONS = [
     "openvino",
     "tpu",
     "xpu",
+    "hpu",
 ]
 
 
@@ -104,7 +106,9 @@ class EngineArgs:
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
-    block_size: int = 16
+    # NOTE(kzawora): default block size for Gaudi should be 128
+    # smaller sizes still work, but very inefficiently
+    block_size: int = 16 if not current_platform.is_hpu() else 128
     enable_prefix_caching: bool = False
     disable_sliding_window: bool = False
     use_v2_block_manager: bool = True
@@ -361,7 +365,7 @@ class EngineArgs:
         parser.add_argument('--block-size',
                             type=int,
                             default=EngineArgs.block_size,
-                            choices=[8, 16, 32],
+                            choices=[8, 16, 32, 64, 128],
                             help='Token block size for contiguous chunks of '
                             'tokens. This is ignored on neuron devices and '
                             'set to max-model-len')
@@ -373,12 +377,13 @@ class EngineArgs:
                             action='store_true',
                             help='Disables sliding window, '
                             'capping to sliding window size')
-        parser.add_argument(
-            '--use-v2-block-manager',
-            default=EngineArgs.use_v2_block_manager,
-            action='store_true',
-            help='Use BlockSpaceMangerV2. By default this is set to True. '
-            'Set to False to use BlockSpaceManagerV1')
+        parser.add_argument('--use-v2-block-manager',
+                            action='store_true',
+                            help='[DEPRECATED] block manager v1 has been '
+                            'removed and SelfAttnBlockSpaceManager (i.e. '
+                            'block manager v2) is now the default. '
+                            'Setting this flag to True or False'
+                            ' has no effect on vLLM behavior.')
         parser.add_argument(
             '--num-lookahead-slots',
             type=int,
@@ -969,12 +974,6 @@ class EngineArgs:
                 "in low performance due to small KV cache space. Consider "
                 "setting --max-model-len to a smaller value.", max_model_len)
 
-        if self.num_scheduler_steps > 1 and not self.use_v2_block_manager:
-            self.use_v2_block_manager = True
-            logger.warning(
-                "Enabled BlockSpaceManagerV2 because it is "
-                "required for multi-step (--num-scheduler-steps > 1)")
-
         speculative_config = SpeculativeConfig.maybe_create_spec_config(
             target_model_config=model_config,
             target_parallel_config=parallel_config,
@@ -990,7 +989,6 @@ class EngineArgs:
             speculative_disable_by_batch_size,
             speculative_max_model_len=self.speculative_max_model_len,
             enable_chunked_prefill=self.enable_chunked_prefill,
-            use_v2_block_manager=self.use_v2_block_manager,
             disable_log_stats=self.disable_log_stats,
             ngram_prompt_lookup_max=self.ngram_prompt_lookup_max,
             ngram_prompt_lookup_min=self.ngram_prompt_lookup_min,
@@ -1021,11 +1019,20 @@ class EngineArgs:
             if speculative_config is None \
             else speculative_config.num_lookahead_slots
 
+        if not self.use_v2_block_manager:
+            logger.warning(
+                "[DEPRECATED] Block manager v1 has been removed, "
+                "and setting --use-v2-block-manager to True or False has "
+                "no effect on vLLM behavior. Please remove "
+                "--use-v2-block-manager in your engine argument. "
+                "If your use case is not supported by "
+                "SelfAttnBlockSpaceManager (i.e. block manager v2),"
+                " please file an issue with detailed information.")
+
         scheduler_config = SchedulerConfig(
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
             max_model_len=model_config.max_model_len,
-            use_v2_block_manager=self.use_v2_block_manager,
             num_lookahead_slots=num_lookahead_slots,
             delay_factor=self.scheduler_delay_factor,
             enable_chunked_prefill=self.enable_chunked_prefill,
@@ -1036,8 +1043,7 @@ class EngineArgs:
             multi_step_stream_outputs=self.multi_step_stream_outputs,
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
                              and parallel_config.use_ray),
-            policy=self.scheduling_policy,
-        )
+            policy=self.scheduling_policy)
         lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,
             max_loras=self.max_loras,
@@ -1080,13 +1086,6 @@ class EngineArgs:
             collect_model_execute_time="worker" in detailed_trace_modules
             or "all" in detailed_trace_modules,
         )
-
-        if (model_config.get_sliding_window() is not None
-                and scheduler_config.chunked_prefill_enabled
-                and not scheduler_config.use_v2_block_manager):
-            raise ValueError(
-                "Chunked prefill is not supported with sliding window. "
-                "Set --disable-sliding-window to disable sliding window.")
 
         return EngineConfig(
             model_config=model_config,
