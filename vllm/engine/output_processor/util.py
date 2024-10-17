@@ -17,6 +17,9 @@ def create_output_by_sequence_group(
     ]
     for step in outputs:
         for i, sequence_group_output in enumerate(step):
+            # hpu may padding on batch size dim.
+            if i >= num_seq_groups:
+                break
             output_by_sequence_group[i].append(sequence_group_output)
 
     return output_by_sequence_group
