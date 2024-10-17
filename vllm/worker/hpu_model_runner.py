@@ -629,9 +629,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.lora_manager = LRUCacheWorkerLoRAManager(
                     self.scheduler_config.max_num_seqs,
                     self.scheduler_config.max_num_batched_tokens,
-                    self.vocab_size, self.lora_config, self.device,
+                    self.vocab_size,
+                    self.lora_config,
+                    self.device,
                     self.model.embedding_modules,
-                    self.model.embedding_padding_modules)
+                    self.model.embedding_padding_modules,
+                    max_position_embeddings=self.model.config.
+                    max_position_embeddings,
+                )
                 self.model = self.lora_manager.create_lora_manager(self.model)
 
             if self.model_config.quantization == 'inc':

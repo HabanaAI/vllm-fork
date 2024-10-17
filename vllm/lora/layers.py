@@ -32,6 +32,8 @@ from vllm.platforms import current_platform
 
 if current_platform.is_hpu():
     from vllm_hpu_extension.punica_hpu import GaudiPunicaWrapper
+    from vllm_hpu_extension.rotary_embed import (
+        HpuLinearScalingRotaryEmbedding, HpuRotaryEmbedding)
 
 if TYPE_CHECKING:
     pass
@@ -1265,18 +1267,29 @@ class LinearScalingRotaryEmbeddingWithLora(BaseLayerWithLoRA):
         scaling_factors = (list(lora_config.long_lora_scaling_factors)
                            if lora_config.long_lora_scaling_factors else [])
         base_scaling_factor = (self.base_layer.scaling_factor if isinstance(
-            self.base_layer, LinearScalingRotaryEmbedding) else 1.0)
+            self.base_layer, (LinearScalingRotaryEmbedding,
+                              HpuLinearScalingRotaryEmbedding)) else 1.0)
         scaling_factors = sorted(
             list(set([base_scaling_factor] + scaling_factors)))
-        self.base_layer = LinearScalingRotaryEmbedding(
-            self.base_layer.head_size,
-            self.base_layer.rotary_dim,
-            self.base_layer.max_position_embeddings,
-            self.base_layer.base,
-            self.base_layer.is_neox_style,
-            scaling_factors,
-            self.base_layer.dtype,
-        )
+        if current_platform.is_hpu():
+            self.base_layer = HpuLinearScalingRotaryEmbedding(
+                self.base_layer.head_size,
+                self.base_layer.rotary_dim,
+                self.base_layer.max_position_embeddings,
+                self.base_layer.base,
+                self.base_layer.is_neox_style,
+                scaling_factors,
+            )
+        else:
+            self.base_layer = LinearScalingRotaryEmbedding(
+                self.base_layer.head_size,
+                self.base_layer.rotary_dim,
+                self.base_layer.max_position_embeddings,
+                self.base_layer.base,
+                self.base_layer.is_neox_style,
+                scaling_factors,
+                self.base_layer.dtype,
+            )
 
     def reset_lora(self, index: int):
         ...
@@ -1296,12 +1309,8 @@ class LinearScalingRotaryEmbeddingWithLora(BaseLayerWithLoRA):
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self.base_layer(
-            positions,
-            query,
-            key,
-            offsets=self.punica_wrapper.long_lora_indices,
-        )
+        offsets = self.punica_wrapper.long_lora_indices.reshape_as(positions)
+        return self.base_layer(positions, query, key, offsets=offsets)
 
     @property
     def scaling_factor_to_offset(self) -> Dict[float, int]:
@@ -1316,8 +1325,12 @@ class LinearScalingRotaryEmbeddingWithLora(BaseLayerWithLoRA):
         model_config: Optional[PretrainedConfig],
     ) -> bool:
         """Returns True if the layer can be replaced by this LoRA layer."""
-        return (type(source_layer) is LinearScalingRotaryEmbedding
-                or type(source_layer) is RotaryEmbedding)
+        if current_platform.is_hpu():
+            return (type(source_layer) is HpuLinearScalingRotaryEmbedding
+                    or type(source_layer) is HpuRotaryEmbedding)
+        else:
+            return (type(source_layer) is LinearScalingRotaryEmbedding
+                    or type(source_layer) is RotaryEmbedding)
 
     def extra_repr(self) -> str:
         return self.base_layer.extra_repr()
