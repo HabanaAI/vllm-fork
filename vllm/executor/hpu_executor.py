@@ -48,16 +48,23 @@ class HPUExecutor(ExecutorBase):
             distributed_init_method=distributed_init_method,
             lora_config=self.lora_config,
             is_driver_worker=rank == 0,
+            speculative_config=self.speculative_config,
         )
 
     def _create_worker(self,
                        local_rank: int = 0,
                        rank: int = 0,
                        distributed_init_method: Optional[str] = None):
-        wrapper = WorkerWrapperBase(
-            worker_module_name="vllm.worker.hpu_worker",
-            worker_class_name="HPUWorker",
-        )
+        if self.speculative_config is None:
+            wrapper = WorkerWrapperBase(
+                worker_module_name="vllm.worker.hpu_worker",
+                worker_class_name="HPUWorker",
+            )
+        else:
+            wrapper = WorkerWrapperBase(
+                worker_module_name="vllm.spec_decode.spec_decode_worker",
+                worker_class_name="create_spec_worker",
+            )
         wrapper.init_worker(**self._get_worker_kwargs(local_rank, rank,
                                                       distributed_init_method))
         return wrapper.worker
@@ -137,13 +144,13 @@ class HPUExecutor(ExecutorBase):
             with gc_ctx as gc_local_metric, \
                 cpu_fallback_ctx as cpu_fallback_local_metric:
                 output = self.driver_worker.execute_model(execute_model_req)
-            if (log_graph_compilation and gc_local_metric.stats()[0][1] > 0
-                ) or log_graph_compilation_all:
+            if (log_graph_compilation and gc_local_metric.stats()[0][1]
+                    > 0) or log_graph_compilation_all:
                 msg = ("VLLM_HPU_STEP_GRAPH_COMPILATION: "
                        f"{gc_local_metric.stats()}, {input_stats}")
                 logger.warning(msg)
-            if (log_cpu_fallbacks and cpu_fallback_local_metric.stats()[0][1] >
-                    0) or log_cpu_fallbacks_all:
+            if (log_cpu_fallbacks and cpu_fallback_local_metric.stats()[0][1]
+                    > 0) or log_cpu_fallbacks_all:
                 msg = ("VLLM_HPU_STEP_CPU_FALLBACK: "
                        f"{cpu_fallback_local_metric.stats()}, {input_stats}")
                 logger.warning(msg)
@@ -197,7 +204,8 @@ class HPUExecutor(ExecutorBase):
         self.driver_worker.stop_profile()
 
     def shutdown(self) -> None:
-        self.driver_worker.shutdown_inc()
+        if hasattr(self.driver_worker, 'shutdown_inc'):
+            self.driver_worker.shutdown_inc()
 
 
 class HPUExecutorAsync(HPUExecutor, ExecutorAsyncBase):
