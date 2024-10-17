@@ -22,3 +22,8 @@ stages:
       - name: gsm8k_large_g2_tp4
         flavor: g2.m
         command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large.txt -t 4
+  - name: test_mmlu_llama3
+    steps:
+      - name: mmlu_llama3
+        flavor: g3.s
+        command: cd .jenkins/lm-eval-harness && bash run-lm-eval-mmlu.sh -m Meta-Llama-3-8B-Instruct.yaml -t 1
