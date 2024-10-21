@@ -21,8 +21,9 @@ try:
         from vllm.attention.backends.rocm_flash_attn import (
             ROCmFlashAttentionMetadata as FlashAttentionMetadata)
 except Exception as e:
-    logger.warning("Draft model speculative decoding currently only supports"
-                   "CUDA and ROCm flash attention backend.", e)
+    logger.warning(
+        "Draft model speculative decoding currently only supports"
+        "CUDA and ROCm flash attention backend.", e)
 
 # A flag to enable debug prints for the updated input tensors
 # before each step.
