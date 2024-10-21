@@ -907,6 +907,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_indices=block_indices,
             block_offsets=block_offsets,
             block_scales=None,
+            block_groups=None,
             attn_bias=None,
             seq_lens_tensor=seq_lens_tensor,
             num_prefills=real_num_seqs,
@@ -1028,6 +1029,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             len(block_list),
             self.bucketing_global_state.decode_block_bucket_cfg)
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
+        block_groups = pad_list(block_mapping, block_bucket_size, input_tokens.size(0))
         block_mapping = pad_list(block_mapping, block_bucket_size, -1)
         block_usage = pad_list(block_usage, block_bucket_size, 1)
         block_scales = pad_list(block_scales, block_bucket_size, 0.0)
@@ -1036,6 +1038,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                   dtype=torch.int,
                                   device=self.device)
         block_mapping = torch.tensor(block_mapping,
+                                     dtype=torch.long,
+                                     device=self.device)
+        block_groups = torch.tensor(block_groups,
                                      dtype=torch.long,
                                      device=self.device)
         block_usage = torch.tensor(block_usage,
@@ -1060,6 +1065,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_indices=block_indices,
             block_offsets=block_offsets,
             block_scales=block_scales,
+            block_groups=block_groups,
             attn_bias=None,
             seq_lens_tensor=None,
             num_prefills=0,
@@ -1271,7 +1277,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
             'attn_bias', 'seq_lens_tensor', 'block_list', 'block_mapping',
             'block_usage', 'slot_mapping', 'is_prompt', 'block_indices',
-            'block_offsets', 'block_scales'
+            'block_offsets', 'block_scales', 'block_groups'
         ])
         return attention_metadata
 
