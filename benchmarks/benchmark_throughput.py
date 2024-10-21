@@ -560,7 +560,7 @@ if __name__ == "__main__":
     parser.add_argument("--weights-load-device",
                         type=str,
                         default=None,
-                        choices=["cuda", "neuron", "hpu", "cpu"],
+                        choices=DEVICE_OPTIONS,
                         help='Device on which weights are loaded.')
     parser.add_argument("--use-padding-aware-scheduling",
                         action='store_true',
