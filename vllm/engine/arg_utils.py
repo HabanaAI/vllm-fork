@@ -114,6 +114,7 @@ class EngineArgs:
     disable_sliding_window: bool = False
     use_v2_block_manager: bool = True
     use_padding_aware_scheduling: bool = False
+    max_padding_ratio: Optional[float] = None
     swap_space: float = 4  # GiB
     cpu_offload_gb: float = 0  # GiB
     gpu_memory_utilization: float = 0.90
@@ -400,6 +401,15 @@ class EngineArgs:
             help=('Use padding-aware scheduling. If True, the scheduler '
                   'will consider padded tokens in prefill. '
                   'By default this is set to False. '))
+        parser.add_argument(
+            '--max-padding-ratio',
+            default=EngineArgs.max_padding_ratio,
+            action='store_true',
+            help=('Prevents scheduling batches with large paddings.'
+                  '0.2 means that up to 20% tokens in batch can be dedicated'
+                  'to padding, and the remaining 80% must be usable data'
+                  'Requires padding-aware scheduling. '
+                  'Must be in range (0, 1). Not set by default'))
         parser.add_argument(
             '--num-lookahead-slots',
             type=int,
@@ -1066,7 +1076,8 @@ class EngineArgs:
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
                              and parallel_config.use_ray),
             policy=self.scheduling_policy,
-            use_padding_aware_scheduling=self.use_padding_aware_scheduling)
+            use_padding_aware_scheduling=self.use_padding_aware_scheduling,
+            max_padding_ratio=self.max_padding_ratio)
         lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,
             max_loras=self.max_loras,

@@ -968,6 +968,11 @@ class SchedulerConfig:
         policy: The scheduling policy to use. "fcfs" (default) or "priority".
         use_padding_aware_scheduling: If True, scheduler will consider padded
             tokens in prefill.
+        max_padding_ratio: Prevents scheduling batches with large paddings. 
+            0.2 means that up to 20% tokens in batch can be dedicated
+            to padding, and the remaining 80% must be usable data
+            Requires padding-aware scheduling.
+            Must be in range (0, 1). Not set by default
     """
 
     def __init__(self,
@@ -986,7 +991,8 @@ class SchedulerConfig:
                  multi_step_stream_outputs: bool = False,
                  send_delta_data: bool = False,
                  policy: str = "fcfs",
-                 use_padding_aware_scheduling=False) -> None:
+                 use_padding_aware_scheduling=False,
+                 max_padding_ratio=None) -> None:
         if max_num_batched_tokens is None:
             if enable_chunked_prefill:
                 if num_scheduler_steps > 1:
@@ -1038,6 +1044,7 @@ class SchedulerConfig:
         self.send_delta_data = send_delta_data
         self.policy = policy
         self.use_padding_aware_scheduling = use_padding_aware_scheduling
+        self.max_padding_ratio = max_padding_ratio
         self._verify_args()
 
     def _verify_args(self) -> None:
@@ -1071,6 +1078,10 @@ class SchedulerConfig:
         if self.max_num_prefill_seqs is not None \
             and not self.use_padding_aware_scheduling:
             raise ValueError("max_num_prefill_seqs can be only "
+                             "used with padding-aware-scheduling. ")
+        if self.max_padding_ratio is not None \
+            and not self.use_padding_aware_scheduling:
+            raise ValueError("max_padding_ratio can be only "
                              "used with padding-aware-scheduling. ")
         if self.use_padding_aware_scheduling and self.chunked_prefill_enabled:
             raise ValueError("Padding-aware scheduling currently "
