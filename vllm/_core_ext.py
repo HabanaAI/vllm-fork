@@ -131,10 +131,37 @@ if TYPE_CHECKING or not core_C_available:
                 not self._finite_values_only
 
         def __str__(self) -> str:
-            raise NotImplementedError
+            """
+            naming generally follows: https://github.com/jax-ml/ml_dtypes
+            for floating point types (leading f) the scheme is:
+            `float<size_bits>_e<exponent_bits>m<mantissa_bits>[flags]`
+            flags:
+            - no-flags: means it follows IEEE 754 conventions
+            - f: means finite values only (no infinities)
+            - n: means nans are supported (non-standard encoding)
+            for integer types the scheme is:
+            `[u]int<size_bits>[b<bias>]`
+            - if bias is not present it means its zero
+            """
+            if self.is_floating_point():
+                ret = "float" + str(self.size_bits) + "_e" + str(
+                    self.exponent) + "m" + str(self.mantissa)
+
+                if not self.is_ieee_754():
+                    if self._finite_values_only:
+                        ret = ret + "f"
+                    if self.nan_repr != NanRepr.NONE:
+                        ret = ret + "n"
+
+                return ret
+            else:
+                ret = ("int" if self.is_signed() else "uint") + str(self.size_bits)
+                if self.has_bias():
+                    ret = ret + "b" + str(self.bias)
+                return ret
 
         def __repr__(self) -> str:
-            raise NotImplementedError
+            return "ScalarType." + self.__str__()
 
         # __len__ needs to be defined (and has to throw TypeError) for pytorch's
         # opcheck to work.
