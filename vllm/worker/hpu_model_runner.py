@@ -1029,7 +1029,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             len(block_list),
             self.bucketing_global_state.decode_block_bucket_cfg)
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
-        block_groups = pad_list(block_mapping, block_bucket_size, input_tokens.size(0))
+        block_groups = pad_list(block_mapping, block_bucket_size,
+                                len(block_tables))
         block_mapping = pad_list(block_mapping, block_bucket_size, -1)
         block_usage = pad_list(block_usage, block_bucket_size, 1)
         block_scales = pad_list(block_scales, block_bucket_size, 0.0)
@@ -1041,8 +1042,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      dtype=torch.long,
                                      device=self.device)
         block_groups = torch.tensor(block_groups,
-                                     dtype=torch.long,
-                                     device=self.device)
+                                    dtype=torch.long,
+                                    device=self.device)
         block_usage = torch.tensor(block_usage,
                                    dtype=self.model_config.dtype,
                                    device=self.device)
