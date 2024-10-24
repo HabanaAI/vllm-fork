@@ -168,6 +168,25 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                          topk=top_k,
                          gating_output=router_logits,
                          renormalize=renormalize)
+    def forward_native(self,
+                    layer: torch.nn.Module,
+                    x: torch.Tensor,
+                    use_grouped_topk: bool,
+                    top_k: int,
+                    router_logits: torch.Tensor,
+                    renormalize: bool,
+                    topk_group: Optional[int] = None,
+                    num_expert_group: Optional[int] = None,
+                    custom_routing_function: Optional[Callable] = None):
+        return self.forward_hpu(layer=layer,
+                                x=x,
+                                use_grouped_topk=use_grouped_topk,
+                                top_k=top_k,
+                                router_logits=router_logits,
+                                renormalize=renormalize,
+                                topk_group=topk_group,
+                                num_expert_group=num_expert_group,
+                                custom_routing_function=custom_routing_function)
 
 
 class FusedMoE(torch.nn.Module):
