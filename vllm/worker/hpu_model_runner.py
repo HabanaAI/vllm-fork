@@ -1235,6 +1235,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata
 
+        self.profiler.end() # better use with self.profiler.record_event
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
@@ -2014,7 +2015,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         if self.is_driver_worker and self.profiler.enabled:
             # Stop recording 'execute_model' event
-            self.profiler.end()
             event_end = self.profiler.get_timestamp_us()
             counters = self.profiler_counter_helper.get_counter_dict(
                 cache_config=self.cache_config,
