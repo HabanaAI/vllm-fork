@@ -9,6 +9,8 @@ from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (PyObjectCache, async_tensor_h2d,
                         is_pin_memory_available, make_tensor_with_pad)
+from vllm.platforms import current_platform
+
 
 _SAMPLING_EPS = 1e-5
 
@@ -266,8 +268,14 @@ def _prepare_seq_groups(
 
         if seq_group_metadata.is_prompt:
             if sampling_params.seed is not None:
-                generator = torch.Generator(device=device).manual_seed(
-                    sampling_params.seed)
+                if current_platform.is_hpu():
+                    import habana_frameworks.torch.hpu.random as htrandom
+                    generator = \
+                        htrandom.default_generators[
+                        0].manual_seed(sampling_params.seed)
+                else:
+                    generator = torch.Generator(
+                        device=device).manual_seed(sampling_params.seed)
                 if generators is not None:
                     generators[seq_group_metadata.request_id] = generator
 
