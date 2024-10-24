@@ -40,8 +40,9 @@ from vllm.model_executor.model_loader import get_model
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalInputs)
 from vllm.sampling_params import SamplingParams
-from vllm.sequence import (IntermediateTensors, SequenceData,
-                           SequenceGroupMetadata)
+from vllm.sequence import (IntermediateTensors, SequenceData, SequenceOutput,
+                           CompletionSequenceGroupOutput,
+                           SequenceGroupMetadata, Logprob)
 from vllm.utils import (is_fake_hpu, is_pin_memory_available,
                         make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
@@ -452,6 +453,8 @@ class ModelInputForHPU(ModelRunnerInputBase):
     virtual_engine: int = 0
     lora_ids: Optional[List[int]] = None
     async_callback: Optional[Callable] = None
+    is_first_multi_step: bool = True
+    is_last_step: bool = True
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
@@ -464,6 +467,8 @@ class ModelInputForHPU(ModelRunnerInputBase):
             "batch_size_padded": self.batch_size_padded,
             "virtual_engine": self.virtual_engine,
             "lora_ids": self.lora_ids,
+            "is_first_multi_step": self.is_first_multi_step,
+            "is_last_step": self.is_last_step,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
         return tensor_dict
@@ -594,6 +599,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_global_state = HPUBucketingGlobalState()
         self._setup_buckets()
         self._set_gc_threshold()
+
+        # For multi-step scheduling
+        self.cached_step_outputs: List[torch.Tensor] = []
 
     def _set_gc_threshold(self) -> None:
         # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -942,6 +950,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         lora_prompt_mapping: List[List[int]] = []
         lora_requests: Set[LoRARequest] = set()
 
+        # import pdb; pdb.set_trace()
+        # if len(seq_group_metadata_list) > 0:
+        #     print()
+        #     print(f"block_tables: {seq_group_metadata_list[0].block_tables}")
+        #     print()
+        # import pdb; pdb.set_trace()
+        # from vllm import debugger; debugger.set_trace()
+
         if len(seq_group_metadata_list) == 0:
             return PrepareDecodeMetadata.empty()
         lora_ids: List[int] = []
@@ -974,6 +990,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 seq_lens.append(seq_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
+                num_fully_occupied_blocks = position // self.block_size
+                block_table = block_table[:num_fully_occupied_blocks + 1]
+
                 if len(block_table) == 0:
                     block_number = _PAD_BLOCK_ID
                 else:
@@ -1047,6 +1066,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = torch.tensor(block_usage,
                                    dtype=self.model_config.dtype,
                                    device=self.device)
+        # print("PREPARE DECODE")
+        # print(f"block_usage: {block_usage}")
+        # print(f"block_mapping: {block_mapping}")
+        # print("/PREPARE DECODE")
 
         slot_mapping = torch.tensor(slot_mapping,
                                     dtype=torch.long,
@@ -1917,114 +1940,400 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         num_steps: int = 1,
         warmup_mode=False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        if num_steps > 1:
-            raise ValueError(
-                "num_steps > 1 is not supported in HPUModelRunner")
+        if not model_input.is_first_multi_step:
+            if not model_input.is_last_step:
+                # print("not first or last multistep")
+                return []
+            # print("last step")
+            output = self._decode_sampler_outputs(model_input)
+        if model_input.is_first_multi_step:
+            # print("first step")
+            if self.lora_config:
+                assert model_input.lora_requests is not None
+                assert model_input.lora_mapping is not None
+                self.set_active_loras(model_input.lora_requests,
+                                    model_input.lora_mapping)
+            input_tokens = model_input.input_tokens
+            input_positions = model_input.input_positions
+            attn_metadata = model_input.attn_metadata
+            sampling_metadata = model_input.sampling_metadata
+            real_batch_size = model_input.real_batch_size
+            batch_size_padded = model_input.batch_size_padded
+            assert input_tokens is not None
+            assert input_positions is not None
+            assert sampling_metadata is not None
+            assert attn_metadata is not None
+            is_prompt = attn_metadata.is_prompt
+            assert is_prompt is not None
+            batch_size = input_tokens.size(0)
+            seq_len = self._seq_len(attn_metadata)
+            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+            self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
 
-        if self.lora_config:
-            assert model_input.lora_requests is not None
-            assert model_input.lora_mapping is not None
-            self.set_active_loras(model_input.lora_requests,
-                                  model_input.lora_mapping)
-        input_tokens = model_input.input_tokens
-        input_positions = model_input.input_positions
-        attn_metadata = model_input.attn_metadata
-        sampling_metadata = model_input.sampling_metadata
-        real_batch_size = model_input.real_batch_size
-        batch_size_padded = model_input.batch_size_padded
-        assert input_tokens is not None
-        assert input_positions is not None
-        assert sampling_metadata is not None
-        assert attn_metadata is not None
-        is_prompt = attn_metadata.is_prompt
-        assert is_prompt is not None
-        batch_size = input_tokens.size(0)
-        seq_len = self._seq_len(attn_metadata)
-        use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
-        self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+            lora_mask: torch.Tensor = None
+            lora_logits_mask: torch.Tensor = None
+            if self.lora_config:
+                assert model_input.lora_ids is not None
+                lora_mask, lora_logits_mask = self.create_lora_mask(
+                    input_tokens, model_input.lora_ids, attn_metadata.is_prompt)
 
-        lora_mask: torch.Tensor = None
-        lora_logits_mask: torch.Tensor = None
-        if self.lora_config:
-            assert model_input.lora_ids is not None
-            lora_mask, lora_logits_mask = self.create_lora_mask(
-                input_tokens, model_input.lora_ids, attn_metadata.is_prompt)
+            execute_model_kwargs = {
+                "input_ids": input_tokens,
+                "positions": input_positions,
+                "kv_caches": kv_caches,
+                "attn_metadata": self.trim_attn_metadata(attn_metadata),
+                "intermediate_tensors": intermediate_tensors,
+                "lora_mask": lora_mask,
+                **(model_input.multi_modal_kwargs or {}),
+            }
+            if htorch.utils.internal.is_lazy():
+                execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
 
-        execute_model_kwargs = {
-            "input_ids": input_tokens,
-            "positions": input_positions,
-            "kv_caches": kv_caches,
-            "attn_metadata": self.trim_attn_metadata(attn_metadata),
-            "intermediate_tensors": intermediate_tensors,
-            "lora_mask": lora_mask,
-            **(model_input.multi_modal_kwargs or {}),
-        }
-        if htorch.utils.internal.is_lazy():
-            execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
+            htorch.core.mark_step()
+            if self.is_driver_worker:
+                model_event_name = ("model_"
+                                    f"{'prompt' if is_prompt else 'decode'}_"
+                                    f"bs{batch_size}_"
+                                    f"seq{seq_len}_"
+                                    f"graphs{'T' if use_graphs else 'F'}")
+            else:
+                model_event_name = 'model_executable'
+            # make sure we skip the sampler on the lask rank and only pythonize
+            # if CPU is ahead.
+            if num_steps > 1:
+                sampling_metadata.skip_sampler_cpu_output = True
+                self.model.model.sampler.include_gpu_probs_tensor = True
+            for i in range(num_steps):
+                if not is_prompt:
+                #     import pdb; pdb.set_trace()
+                    from vllm import debugger; debugger.set_trace()
+                with self.profiler.record_event('internal', model_event_name):
+                    hidden_states = self.model.forward(
+                        **execute_model_kwargs,
+                        selected_token_indices=sampling_metadata.selected_token_indices
+                    )
 
-        htorch.core.mark_step()
-        if self.is_driver_worker:
-            model_event_name = ("model_"
-                                f"{'prompt' if is_prompt else 'decode'}_"
-                                f"bs{batch_size}_"
-                                f"seq{seq_len}_"
-                                f"graphs{'T' if use_graphs else 'F'}")
+                if self.lora_config:
+                    LoraMask.setLoraMask(
+                        lora_logits_mask.index_select(
+                            0, sampling_metadata.selected_token_indices))
+
+                # Compute the logits.
+                with self.profiler.record_event(
+                        'internal', ('compute_logits_'
+                                    f'{"prompt" if is_prompt else "decode"}_bs'
+                                    f'{batch_size}_'
+                                    f'seq{seq_len}')):
+                    # TODO: maybe this condition doesn't make sense, need to understand if it's necessary
+                    if num_steps == 1:
+                        sampling_metadata.selected_token_indices = None
+                    logits = self.model.compute_logits(hidden_states,
+                                                    sampling_metadata)
+                htorch.core.mark_step()
+                # Only perform sampling in the driver worker.
+                if not self.is_driver_worker:
+                    return []
+
+                if model_input.async_callback is not None:
+                    model_input.async_callback()
+                # Sample the next token.
+                with self.profiler.record_event(
+                        'internal', ('sample_'
+                                    f'{"prompt" if is_prompt else "decode"}_'
+                                    f'bs{batch_size}_'
+                                    f'seq{seq_len}')):
+                    output = self.model.sample(
+                        logits=logits,
+                        sampling_metadata=sampling_metadata,
+                    )
+                    if num_steps > 1:
+                        output = output.sampled_token_ids
+                        self.cached_step_outputs.append(output)
+                htorch.core.mark_step()
+                if i < num_steps - 1:
+                    if i == 0:
+                        import copy
+                        ctx = model_input.async_callback.keywords["ctx"]
+                        seq_group_metadata_list = ctx.seq_group_metadata_list
+                        seq_group_metadata_list = copy.deepcopy(seq_group_metadata_list)
+                    for j, seq_group_metadata in enumerate(seq_group_metadata_list):
+                        for data in seq_group_metadata.seq_data.values():
+                            max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
+                            if len(data.output_token_ids) < max_output_len - 1:
+                                # pass
+                                # import pdb; pdb.set_trace()
+                                # output_cpu = tuple(output.cpu().numpy().flatten())
+                                dummy_token = (540,)
+                                data.output_token_ids += (dummy_token)  # tu się dodają tokeny
+                                # data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
+                                # data.update_num_computed_tokens(1)
+                            else:
+                                if num_steps == 1:
+                                    return [output]
+                                else:
+                                    return []
+                    #############################################################
+                    # input_tokens: List[List[int]] = []
+                    input_positions: List[List[int]] = []
+                    slot_mapping: List[List[int]] = []
+                    seq_lens: List[int] = []
+                    block_tables: List[List[int]] = []
+                    lora_index_mapping: List[List[int]] = []
+                    lora_prompt_mapping: List[List[int]] = []
+                    lora_requests: Set[LoRARequest] = set()
+
+                    # import pdb; pdb.set_trace()
+                    # if len(seq_group_metadata_list) > 0:
+                    #     print()
+                    #     print(f"block_tables: {seq_group_metadata_list[0].block_tables}")
+                    #     print()
+                    # import pdb; pdb.set_trace()
+                    # from vllm import debugger; debugger.set_trace()
+
+                    if len(seq_group_metadata_list) == 0:
+                        return PrepareDecodeMetadata.empty()
+                    lora_ids: List[int] = []
+
+                    dummy_slots = itertools.cycle(
+                        range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
+
+                    for seq_group_metadata in seq_group_metadata_list:
+                        assert not seq_group_metadata.is_prompt
+                        assert seq_group_metadata.token_chunk_size == 1
+
+                        seq_ids = list(seq_group_metadata.seq_data.keys())
+                        lora_id = seq_group_metadata.lora_int_id
+                        lora_ids.append(lora_id)
+
+                        if lora_id > 0:
+                            lora_requests.add(seq_group_metadata.lora_request)
+
+                        for seq_id in seq_ids:
+                            seq_data = seq_group_metadata.seq_data[seq_id]
+                            # print()
+                            # print()
+                            # print(seq_data)
+                            # print()
+                            # print()
+                            # import pdb; pdb.set_trace()
+                            # generation_token = seq_data.get_last_token_id()
+                            # import pdb; pdb.set_trace()
+                            # input_tokens.append([generation_token])
+
+                            seq_len = seq_data.get_len()
+                            position = seq_len - 1
+                            input_positions.append([position])
+
+                            seq_len = seq_len if self.sliding_window is None else min(
+                                seq_len, self.sliding_window)
+                            seq_lens.append(seq_len)
+
+                            block_table = seq_group_metadata.block_tables[seq_id]
+                            num_fully_occupied_blocks = position // self.block_size
+                            block_table = block_table[:num_fully_occupied_blocks + 1]
+
+                            if len(block_table) == 0:
+                                block_number = _PAD_BLOCK_ID
+                            else:
+                                block_number = block_table[position // self.block_size]
+                            if block_number == _PAD_BLOCK_ID:
+                                slot = next(dummy_slots)
+                            else:
+                                block_offset = position % self.block_size
+                                slot = block_number * self.block_size + block_offset
+                            slot_mapping.append([slot])
+                            lora_index_mapping.append(lora_id)
+                            lora_prompt_mapping.append(lora_id)
+
+                            if self.sliding_window is not None:
+                                sliding_window_blocks = (self.sliding_window //
+                                                        self.block_size)
+                                block_table = block_table[-sliding_window_blocks:]
+                            block_tables.append(block_table)
+
+                    # import pdb; pdb.set_trace()
+                    # input_tokens = torch.tensor(input_tokens,
+                    #                             dtype=torch.long,
+                    #                             device=self.device)
+                    input_tokens = output[:len(seq_group_metadata_list)]
+                    input_positions = torch.tensor(input_positions,
+                                                dtype=torch.long,
+                                                device=self.device)
+                    # print()
+                    # print(f"input_positions: {input_positions}")
+                    # print()
+                    # print(f"output: {output}")
+                    # print()
+                    # print(f"inp shape: {input_tokens.shape}")
+                    # print(f"out shape: {output.shape}")
+                    # print()
+                    # if input_tokens.shape != output[:len(seq_group_metadata_list)].shape:
+                    #     # import pdb; pdb.set_trace()
+                    #     print()
+                    #     print(f"inp: {input_tokens}")
+                    #     print(f"out: {output}")
+                    #     print()
+                    # input_positions = execute_model_kwargs['positions']+1
+
+                    num_decode_tokens = sum(seq_lens)
+
+                    blocks_used = [len(bt) for bt in block_tables if bt]
+                    block_list = []
+                    block_scales = []
+                    for i, bt in enumerate(block_tables):
+                        block_list.extend(bt)
+                        blocks_in_group = len(bt)
+                        if blocks_in_group > 0:
+                            scale = 1.0 / blocks_in_group
+                            block_scales.extend([scale] * blocks_in_group)
+
+                    block_mapping_nested: List[List[int]] = [
+                        [i] * b_u for i, b_u in enumerate(blocks_used)
+                    ]
+                    block_mapping: List[int] = list(
+                        itertools.chain.from_iterable(block_mapping_nested))
+
+                    last_block = [
+                        sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping)
+                    ]
+                    block_usage = [[self.block_size] * (b_u - 1) + [lb]
+                                for b_u, lb in zip(blocks_used, last_block)]
+                    block_usage = list(itertools.chain(*block_usage))
+
+                    block_bucket_size = find_bucket(
+                        len(block_list),
+                        self.bucketing_global_state.decode_block_bucket_cfg)
+                    block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
+                    block_mapping = pad_list(block_mapping, block_bucket_size, -1)
+                    block_usage = pad_list(block_usage, block_bucket_size, 1)
+                    block_scales = pad_list(block_scales, block_bucket_size, 0.0)
+
+                    block_list = torch.tensor(block_list,
+                                            dtype=torch.int,
+                                            device=self.device)
+                    block_mapping = torch.tensor(block_mapping,
+                                                dtype=torch.long,
+                                                device=self.device)
+                    block_usage = torch.tensor(block_usage,
+                                            dtype=self.model_config.dtype,
+                                            device=self.device)
+                    # print("PREPARE DECODE")
+                    # print(f"block_usage: {block_usage}")
+                    # print(f"block_mapping: {block_mapping}")
+                    # print("/PREPARE DECODE")
+
+                    slot_mapping = torch.tensor(slot_mapping,
+                                                dtype=torch.long,
+                                                device=self.device)
+
+                    block_indices, block_offsets = precompute_indices_and_offsets(
+                        self.block_size, slot_mapping, False)
+                    block_scales = torch.tensor(block_scales,
+                                                dtype=self.model_config.dtype,
+                                                device=self.device)
+
+                    attn_metadata = self.attn_backend.make_metadata(
+                        is_prompt=False,
+                        block_list=block_list,
+                        block_mapping=block_mapping,
+                        block_usage=block_usage,
+                        block_indices=block_indices,
+                        block_offsets=block_offsets,
+                        block_scales=block_scales,
+                        attn_bias=None,
+                        seq_lens_tensor=None,
+                        num_prefills=0,
+                        num_prefill_tokens=0,
+                        num_decode_tokens=num_decode_tokens,
+                        slot_mapping=slot_mapping,
+                    )
+                    result = PrepareDecodeMetadata(input_tokens=input_tokens,
+                                                input_positions=input_positions,
+                                                attn_metadata=attn_metadata,
+                                                lora_index_mapping=lora_index_mapping,
+                                                lora_prompt_mapping=lora_prompt_mapping,
+                                                lora_requests=lora_requests,
+                                                slot_mapping=slot_mapping,
+                                                lora_ids=lora_ids)
+                    # result = self._prepare_decode(seq_group_metadata_list)
+                    #############################################################
+                    execute_model_kwargs.update({"input_ids": result.input_tokens,
+                                                #  "positions": execute_model_kwargs['positions'] + 1, # this way we have errors on 1024 queries and num steps 8 for some reason...
+                                                 "positions": result.input_positions,
+                                                 "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
+                    # print(execute_model_kwargs['attn_metadata'].block_usage)
+                    # print(execute_model_kwargs['attn_metadata'].block_mapping)
+                    # print()
+                    
+
+            if self.is_driver_worker and self.profiler.enabled:
+                # Stop recording 'execute_model' event
+                self.profiler.end()
+                event_end = self.profiler.get_timestamp_us()
+                counters = self.profiler_counter_helper.get_counter_dict(
+                    cache_config=self.cache_config,
+                    duration=event_end - self.event_start,
+                    seq_len=seq_len,
+                    batch_size_padded=batch_size_padded,
+                    real_batch_size=real_batch_size,
+                    is_prompt=is_prompt)
+                self.profiler.record_counter(self.event_start, counters)
+            if num_steps == 1:
+                return [output]
+            else:
+                return []
+        return output if type(output) is list else [output]
+
+    def _decode_sampler_outputs(self, model_input):
+        use_async_out_proc = model_input.async_callback is not None
+        sampler_outputs = []
+        num_outputs = len(self.cached_step_outputs)
+        for i in range(num_outputs):
+            next_token_ids = self.cached_step_outputs.pop(0)
+            next_token_ids = next_token_ids.cpu().tolist()
+            sampler_output = self._make_decode_output(next_token_ids,
+                                                      model_input.sampling_metadata.seq_groups)
+            sampler_outputs.append(sampler_output)
+
+            if i < num_outputs - 1 and use_async_out_proc:
+                assert model_input.async_callback is not None
+                ctx = model_input.async_callback.keywords[  # type: ignore
+                    "ctx"]
+                ctx.append_output(
+                    outputs=[sampler_output],
+                    seq_group_metadata_list=ctx.seq_group_metadata_list,
+                    scheduler_outputs=ctx.scheduler_outputs,
+                    is_async=False,
+                    is_last_step=False,
+                    is_first_step_output=False)  # nie wiem co to robi
+                    # is_first_step_output=i == 0)
+                model_input.async_callback()
+
+        if use_async_out_proc:
+            return [sampler_outputs[-1]]
         else:
-            model_event_name = 'model_executable'
-        with self.profiler.record_event('internal', model_event_name):
-            hidden_states = self.model.forward(
-                **execute_model_kwargs,
-                selected_token_indices=sampling_metadata.selected_token_indices
-            )
+            return sampler_outputs
 
-        if self.lora_config:
-            LoraMask.setLoraMask(
-                lora_logits_mask.index_select(
-                    0, sampling_metadata.selected_token_indices))
-
-        # Compute the logits.
-        with self.profiler.record_event(
-                'internal', ('compute_logits_'
-                             f'{"prompt" if is_prompt else "decode"}_bs'
-                             f'{batch_size}_'
-                             f'seq{seq_len}')):
-            sampling_metadata.selected_token_indices = None
-            logits = self.model.compute_logits(hidden_states,
-                                               sampling_metadata)
-        htorch.core.mark_step()
-        # Only perform sampling in the driver worker.
-        if not self.is_driver_worker:
-            return []
-
-        if model_input.async_callback is not None:
-            model_input.async_callback()
-
-        # Sample the next token.
-        with self.profiler.record_event(
-                'internal', ('sample_'
-                             f'{"prompt" if is_prompt else "decode"}_'
-                             f'bs{batch_size}_'
-                             f'seq{seq_len}')):
-            output = self.model.sample(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
-        output.outputs = output.outputs[:real_batch_size]
-        htorch.core.mark_step()
-
-        if self.is_driver_worker and self.profiler.enabled:
-            # Stop recording 'execute_model' event
-            self.profiler.end()
-            event_end = self.profiler.get_timestamp_us()
-            counters = self.profiler_counter_helper.get_counter_dict(
-                cache_config=self.cache_config,
-                duration=event_end - self.event_start,
-                seq_len=seq_len,
-                batch_size_padded=batch_size_padded,
-                real_batch_size=real_batch_size,
-                is_prompt=is_prompt)
-            self.profiler.record_counter(self.event_start, counters)
-        return [output]
+    def _make_decode_output(
+        self,
+        next_token_ids: List[List[int]],
+        seq_groups: List[List[int]],
+    ) -> SamplerOutput:
+        zero_logprob = Logprob(0.0)
+        sampler_outputs = []
+        batch_idx = 0
+        for seq_group in seq_groups:
+            seq_ids = seq_group.seq_ids
+            seq_outputs = []
+            for seq_id in seq_ids:
+                next_token_id = next_token_ids[batch_idx][0]
+                seq_outputs.append(
+                    SequenceOutput(seq_id, next_token_id,
+                                {next_token_id: zero_logprob}))
+                batch_idx += 1
+            sampler_outputs.append(CompletionSequenceGroupOutput(
+                seq_outputs, None))
+        return SamplerOutput(sampler_outputs)
 
     def shutdown_inc(self):
         can_finalize_inc = False
