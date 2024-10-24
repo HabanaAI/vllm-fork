@@ -266,8 +266,10 @@ def _prepare_seq_groups(
 
         if seq_group_metadata.is_prompt:
             if sampling_params.seed is not None:
-                generator = torch.Generator(device=device).manual_seed(
-                    sampling_params.seed)
+                import habana_frameworks.torch.hpu.random as htrandom
+                generator = \
+                    htrandom.default_generators[
+                    0].manual_seed(sampling_params.seed)
                 if generators is not None:
                     generators[seq_group_metadata.request_id] = generator
 
