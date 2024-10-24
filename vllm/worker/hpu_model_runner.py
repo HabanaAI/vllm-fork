@@ -918,6 +918,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         block_indices, block_offsets = precompute_indices_and_offsets(
             self.block_size, slot_mapping, True)
+
+        max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
+        block_tables = make_tensor_with_pad(prefix_block_tables,
+                                            max_len=max_prompt_block_table_len,
+                                            pad=0,
+                                            dtype=torch.int,
+                                            device=self.device)
+
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             block_list=None,
@@ -933,6 +941,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=sum_query_len,
             num_decode_tokens=0,
             slot_mapping=slot_mapping,
+            block_tables=block_tables,
         )
         multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list)
 
@@ -1077,6 +1086,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     dtype=self.model_config.dtype,
                                     device=self.device)
 
+        seq_lens_tensor = torch.tensor(seq_lens,
+                                       dtype=torch.int,
+                                       device=self.device)
+        max_block_table_len = max(
+            len(block_table) for block_table in block_tables)
+        block_tables = make_tensor_with_pad(
+            block_tables,
+            max_len=max_block_table_len,
+            pad=0,
+            dtype=torch.int,
+            device=self.device,
+        )
+
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             block_list=block_list,
@@ -1087,11 +1109,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_scales=block_scales,
             block_groups=block_groups,
             attn_bias=None,
-            seq_lens_tensor=None,
+            seq_lens_tensor=seq_lens_tensor,
             num_prefills=0,
             num_prefill_tokens=0,
             num_decode_tokens=num_decode_tokens,
             slot_mapping=slot_mapping,
+            block_tables=block_tables,
         )
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
@@ -1295,9 +1318,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'attn_bias', 'seq_lens_tensor', 'block_list', 'block_mapping',
-            'block_usage', 'slot_mapping', 'is_prompt', 'block_indices',
-            'block_offsets', 'block_scales', 'block_groups'
+            'attn_bias',
+            'seq_lens_tensor',
+            'block_list',
+            'block_mapping',
+            'block_usage',
+            'slot_mapping',
+            'is_prompt',
+            'block_indices',
+            'block_offsets',
+            'block_scales',
+            'block_groups',
+            'block_tables',
         ])
         return attention_metadata
 
@@ -1389,13 +1421,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 for i in range(batch_size)
             ]
         else:
-            # FIXME: seq_len is actually number of blocks
-            blocks = [seq_len // batch_size for _ in range(batch_size)]
-            blocks[0] += seq_len % batch_size
+            # seq_len should be a multiple of block size
+            blocks = [seq_len // self.block_size for _ in range(batch_size)]
             seqs = [
                 self.create_dummy_seq_group_metadata(
                     i,
-                    b * self.block_size - 1,
+                    b * self.block_size,
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None)

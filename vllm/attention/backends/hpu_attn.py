@@ -116,6 +116,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             alibi_slopes_tensor = torch.tensor(alibi_slopes,
                                                dtype=torch.bfloat16)
             self.alibi_slopes = alibi_slopes_tensor
+        self.max_seq_len = max_seq_len
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
@@ -215,20 +216,47 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
-            output = HPUPagedAttention.forward_decode(
-                query=query,
-                key_cache=key_cache,
-                value_cache=value_cache,
-                block_list=attn_metadata.block_list,
-                block_mapping=attn_metadata.block_mapping,
-                block_bias=attn_metadata.attn_bias,
-                block_scales=attn_metadata.block_scales,
-                block_groups=attn_metadata.block_groups,
-                scale=self.scale,
-                matmul_qk_op=self.matmul_qk,
-                matmul_av_op=self.matmul_av,
-                keys_fetch_func=self.k_cache.fetch_from_cache,
-                values_fetch_func=self.v_cache.fetch_from_cache)
+            if self.alibi_slopes is not None:
+                self.position_bias = None
+                attn_bias = attn_metadata.attn_bias
+                self.position_bias = _make_alibi_bias(self.alibi_slopes,
+                                                    self.num_kv_heads,
+                                                    attn_bias.dtype,
+                                                    self.max_seq_len if self.max_seq_len is not None else attn_bias.shape[-1] * attn_metadata.block_tables.shape[-1])
+
+                output = HPUPagedAttention.paged_attention_v1(
+                    query=query,
+                    key_cache=key_cache,
+                    value_cache=value_cache,
+                    head_mapping=self.num_kv_heads,
+                    block_tables=attn_metadata.block_tables,
+                    context_lens=attn_metadata.seq_lens_tensor,
+                    kv_cache_dtype=attn_bias.dtype,
+                    scale=self.scale,
+                    alibi_slopes=self.position_bias,
+                    matmul_qk_op=self.matmul_qk,
+                    softmax_op=self.softmax,
+                    matmul_av_op=self.matmul_av,
+                    keys_fetch_func=self.k_cache.fetch_from_cache,
+                    values_fetch_func=self.v_cache.fetch_from_cache,
+                )
+            else:
+                output = HPUPagedAttention.flat_pa(
+                    query=query,
+                    key_cache=key_cache,
+                    value_cache=value_cache,
+                    block_list=attn_metadata.block_list,
+                    block_mapping=attn_metadata.block_mapping,
+                    block_bias=attn_metadata.attn_bias,
+                    block_scales=attn_metadata.block_scales,
+                    block_groups=attn_metadata.block_groups,
+                    scale=self.scale,
+                    matmul_qk_op=self.matmul_qk,
+                    matmul_av_op=self.matmul_av,
+                    keys_fetch_func=self.k_cache.fetch_from_cache,
+                    values_fetch_func=self.v_cache.fetch_from_cache,
+                )
+
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 

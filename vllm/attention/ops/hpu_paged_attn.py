@@ -22,6 +22,7 @@ class HPUPagedAttentionMetadata:
     block_offsets: Optional[torch.Tensor]
     block_scales: Optional[torch.Tensor]
     block_groups: Optional[torch.Tensor]
+    block_tables: Optional[torch.Tensor]
 
 
 class HPUPagedAttention:
@@ -59,7 +60,11 @@ class HPUPagedAttention:
                                     slot_mapping, kv_cache_dtype, is_prompt)
 
     @staticmethod
-    def forward_decode(**kwargs) -> torch.Tensor:
+    def paged_attention_v1(**kwargs) -> torch.Tensor:
+        return ops.paged_attention_v1(**kwargs)
+    
+    @staticmethod
+    def flat_pa(**kwargs) -> torch.Tensor:
         return ops.flat_pa(**kwargs)
 
     @staticmethod
