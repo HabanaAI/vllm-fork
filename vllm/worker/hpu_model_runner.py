@@ -24,7 +24,7 @@ import torch
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
-
+from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ObservabilityConfig, ParallelConfig,
@@ -405,6 +405,7 @@ class PrepareDecodeMetadata(NamedTuple):
     lora_requests: Set[LoRARequest]
     slot_mapping: List[List[int]]
     lora_ids: List[int]
+    seq_lens: List[int]
 
     @classmethod
     def empty(cls):
@@ -415,7 +416,8 @@ class PrepareDecodeMetadata(NamedTuple):
                                      lora_prompt_mapping=[],
                                      lora_requests=set(),
                                      slot_mapping=[],
-                                     lora_ids=[])
+                                     lora_ids=[],
+                                     seq_lens=[])
 
 
 # How batches are constructed.
@@ -594,6 +596,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_global_state = HPUBucketingGlobalState()
         self._setup_buckets()
         self._set_gc_threshold()
+
+    def save_sharded_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
+        from vllm.model_executor.model_loader.loader import ShardedStateLoader
+        ShardedStateLoader.save_model(
+            self.model,
+            path,
+            pattern=pattern,
+            max_size=max_size,
+        )
+
+    def save_tensorized_model(
+        self,
+        tensorizer_config: TensorizerConfig,
+    ) -> None:
+        from vllm.model_executor.model_loader.loader import TensorizerLoader
+        TensorizerLoader.save_model(
+            self.model,
+            tensorizer_config=tensorizer_config,
+        )
 
     def _set_gc_threshold(self) -> None:
         # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -1051,6 +1077,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         slot_mapping = torch.tensor(slot_mapping,
                                     dtype=torch.long,
                                     device=self.device)
+        seq_lens_tensor = torch.tensor(seq_lens,
+                                       dtype=torch.long,
+                                       device=self.device)
 
         block_indices, block_offsets = precompute_indices_and_offsets(
             self.block_size, slot_mapping, False)
@@ -1068,7 +1097,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_scales=block_scales,
             block_groups=block_groups,
             attn_bias=None,
-            seq_lens_tensor=None,
+            seq_lens_tensor=seq_lens_tensor,
             num_prefills=0,
             num_prefill_tokens=0,
             num_decode_tokens=num_decode_tokens,
@@ -1081,7 +1110,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_prompt_mapping=lora_prompt_mapping,
                                      lora_requests=lora_requests,
                                      slot_mapping=slot_mapping,
-                                     lora_ids=lora_ids)
+                                     lora_ids=lora_ids,
+                                     seq_lens=seq_lens)
 
     def prepare_input_tensors(
         self,
@@ -1131,7 +1161,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_tokens,
             input_positions,
             prefill_attn_metadata,
-            seq_lens,
+            prefill_seq_lens,
             query_lens,
             lora_index_mapping,
             lora_prompt_mapping,
@@ -1149,16 +1179,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_lora_requests,
             decode_slot_mapping,
             decode_lora_ids,
+            decode_seq_lens,
         ) = self._prepare_decode(decode_reqs)
+        seq_lens = prefill_seq_lens if len(
+            decode_reqs) == 0 else decode_seq_lens
         sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
                                                      seq_lens, query_lens,
                                                      self.device,
                                                      self.pin_memory)
+        query_lens = query_lens if len(decode_reqs) == 0 else decode_seq_lens
 
         if not self.scheduler_config.chunked_prefill_enabled:
             assert (len(prefill_reqs) and len(decode_reqs)) == 0
 
-        num_prefills = len(seq_lens)
+        num_prefills = len(prefill_seq_lens)
         num_prefill_tokens = len(input_tokens)
         num_decode_tokens = len(decode_input_tokens)
 
@@ -1180,14 +1214,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # FIXME: We need to adjust selected_token_indices to accommodate
         # for padding
         max_len = input_tokens.size(1)
-        paddings = [max_len - s for s in seq_lens]
+        paddings = [max_len - s for s in prefill_seq_lens]
         paddings = [0] + paddings[:-1]
         paddings = list(itertools.accumulate(paddings))
         paddings_prompt_logprobs = []
         for i, seq_group_metadata in enumerate(seq_group_metadata_list):
             if seq_group_metadata.sampling_params.prompt_logprobs is not None \
                               and seq_group_metadata.is_prompt:
-                paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
+                paddings_prompt_logprobs += ([paddings[i]] *
+                                             prefill_seq_lens[i])
         paddings = torch.tensor(
             paddings_prompt_logprobs if paddings_prompt_logprobs else paddings,
             dtype=sampling_metadata.selected_token_indices.dtype,
@@ -1920,7 +1955,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         if num_steps > 1:
             raise ValueError(
                 "num_steps > 1 is not supported in HPUModelRunner")
-
+        self.model.model.sampler.include_gpu_probs_tensor = True
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
@@ -1988,9 +2023,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                              f'{"prompt" if is_prompt else "decode"}_bs'
                              f'{batch_size}_'
                              f'seq{seq_len}')):
+            tmp = sampling_metadata.selected_token_indices
             sampling_metadata.selected_token_indices = None
             logits = self.model.compute_logits(hidden_states,
                                                sampling_metadata)
+            sampling_metadata.selected_token_indices = tmp
+
         htorch.core.mark_step()
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
