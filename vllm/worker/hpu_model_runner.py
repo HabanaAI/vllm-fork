@@ -282,6 +282,7 @@ class HpuModelAdapter():
                                                '0').lower() in ['1', 'true']
         self.block_size = block_size
         self.dtype = dtype
+        self.enforce_eager = enforce_eager
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
             self.model = torch.compile(self.model,
@@ -317,14 +318,15 @@ class HpuModelAdapter():
         mask = mask >= metadata.block_usage.unsqueeze(-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
-        if is_fake_hpu():
-            # Unfortunately one_hot on CPU doesn't handle
-            # out of bounds classes. We need to mask those
-            # values manually
-            oob_values = metadata.block_mapping.lt(0)
-            block_mapping = metadata.block_mapping.masked_fill(oob_values, 0)
+        if is_fake_hpu() or (not htorch.utils.internal.is_lazy()
+                             and not self.enforce_eager):
+            # Unfortunately one_hot on CPU or in torch compile mode
+            # doesn't handle out of bounds classes.
+            # We need to mask those values manually
+            block_mapping = torch.nn.functional.relu(metadata.block_mapping)
             block_mapping = torch.nn.functional.one_hot(block_mapping,
                                                         num_classes=batch_size)
+            oob_values = metadata.block_mapping.lt(0)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
         else:
             block_mapping = torch.nn.functional.one_hot(metadata.block_mapping,
