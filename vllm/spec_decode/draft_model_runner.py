@@ -4,26 +4,39 @@ import torch
 
 from vllm.forward_context import set_forward_context
 from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.platforms import current_platform
+
+if current_platform.is_cuda_alike():
+    try:
+        try:
+            from vllm.attention.backends.flash_attn import (
+                FlashAttentionMetadata)
+        except (ModuleNotFoundError, ImportError):
+            # vllm_flash_attn is not installed, try the ROCm FA metadata
+            from vllm.attention.backends.rocm_flash_attn import (
+                ROCmFlashAttentionMetadata as FlashAttentionMetadata)
+    except (ModuleNotFoundError, ImportError, AssertionError) as err:
+        raise RuntimeError(
+            "Draft model speculative decoding currently only supports"
+            "CUDA and ROCm and HPU attention backend.") from err
+elif current_platform.is_hpu():
+    from vllm.attention.backends.hpu_attn import (HPUAttentionMetadata as
+                                                  FlashAttentionMetadata)
+else:
+    raise RuntimeError(
+        "Draft model speculative decoding currently only supports"
+        "CUDA and ROCm and HPU attention backend.")
+
+from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
+                         ModelConfig, ObservabilityConfig, ParallelConfig,
+                         PromptAdapterConfig, SchedulerConfig)
 from vllm.logger import init_logger
-from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.multimodal import MultiModalInputs
 from vllm.sequence import ExecuteModelRequest, IntermediateTensors
 from vllm.worker.model_runner import (ModelInputForGPUWithSamplingMetadata,
                                       ModelRunner)
 
 logger = init_logger(__name__)
-
-try:
-    try:
-        from vllm.attention.backends.flash_attn import FlashAttentionMetadata
-    except (ModuleNotFoundError, ImportError):
-        # vllm_flash_attn is not installed, try the ROCm FA metadata
-        from vllm.attention.backends.rocm_flash_attn import (
-            ROCmFlashAttentionMetadata as FlashAttentionMetadata)
-except Exception as e:
-    logger.warning(
-        "Draft model speculative decoding currently only supports"
-        "CUDA and ROCm flash attention backend.", e)
 
 # A flag to enable debug prints for the updated input tensors
 # before each step.

@@ -77,7 +77,6 @@ class SpecDecodeBaseSampler(nn.Module):
             tensor is [batch_size, k + num_bonus_tokens]
         """
         batch_size, k = substitute_token_ids.shape
-        # TODO: HPU has an issue when handling squeeze with all dim as 1
         bonus_token_ids = bonus_token_ids.squeeze(-1)
         # Determine the index of the first False value for each row.
         limits = (accepted == 0).max(1).indices
