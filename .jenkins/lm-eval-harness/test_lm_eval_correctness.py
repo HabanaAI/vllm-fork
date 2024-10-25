@@ -39,7 +39,7 @@ def fail_on_exit():
     os._exit(1)
 
 
-def launch_lm_eval(eval_config):
+def launch_lm_eval(eval_config, is_fp8=False):
     trust_remote_code = eval_config.get('trust_remote_code', False)
     dtype = eval_config.get('dtype', 'bfloat16')
     max_num_seqs = eval_config.get('max_num_seqs', 128)
@@ -50,6 +50,10 @@ def launch_lm_eval(eval_config):
                  f"max_model_len=4096," \
                  f"max_num_seqs={max_num_seqs}," \
                  f"trust_remote_code={trust_remote_code}"
+    if is_fp8:
+        model_args += "quantization=inc," \
+            "kv_cache_dtype=fp8_inc", \
+            "weights_load_device=cpu"
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
         kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']
@@ -140,16 +144,19 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
         platform = get_current_gaudi_platform()
         testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
                     f'tp{TP_SIZE}')
+        record_xml_attribute("name", testname)
+        
+        # Set up environment for FP8 inference
         print(
-            f"TASK_STR: {tasks_str}\tPLATFORM: {platform}\tTESTNAME: {testname}"
+            f"EVAL_CONFIG: {eval_config}, TEST_DATA_FILE: {TEST_DATA_FILE}"
         )
+        is_fp8 = False
         if platform in ["Gaudi2", "Gaud3"]:
             setup_fp8(TEST_DATA_FILE, platform)
-        record_xml_attribute("name", testname)
-
+            is_fp8 = True
         # Launch eval requests.
         start_time = time.perf_counter()
-        results = launch_lm_eval(eval_config)
+        results = launch_lm_eval(eval_config, is_fp8)
         total_time = time.perf_counter() - start_time
 
         tokenizer = vllm.transformers_utils.tokenizer.get_tokenizer(
