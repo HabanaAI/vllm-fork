@@ -1333,7 +1333,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         max_seq_len = self.bucketing_global_state.prompt_seq_bucket_cfg[-1]
-        max_batch_size = self.max_num_batched_tokens // max_seq_len
+        max_batch_size = min(self.max_num_batched_tokens // max_seq_len,
+                             self.scheduler_config.max_num_seqs)
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
@@ -1352,7 +1353,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                          f"bs{batch_size}_"
                          f"seq{seq_len}_"
                          f"graphs{'T' if use_graphs else 'F'}")
-        max_num_seqs = self.scheduler_config.max_num_seqs
         # This represents the maximum number of different requests
         # that will have unique loras, an therefore the max amount of memory
         # consumption create dummy lora request copies from the lora request
@@ -1374,7 +1374,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     dummy_lora_requests.append(dummy_lora_request)
                 dummy_lora_requests_per_seq = [
                     dummy_lora_requests[idx % len(dummy_lora_requests)]
-                    for idx in range(max_num_seqs)
+                    for idx in range(batch_size)
                 ]
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
