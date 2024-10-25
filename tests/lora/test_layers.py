@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import patch
 
+import habana_frameworks.torch.core as htcore
 import pytest
 import torch
 import torch.nn.functional as F
-import habana_frameworks.torch.core as htcore
-
-from vllm.config import LoRAConfig
 from vllm_hpu_extension.ops import LoraMask
 from vllm_hpu_extension.punica_hpu import GaudiPunicaWrapper
+
+from vllm.config import LoRAConfig
 from vllm.lora.fully_sharded_layers import (
     ColumnParallelLinearWithShardedLoRA,
     MergedColumnParallelLinearWithShardedLoRA,
@@ -42,8 +42,8 @@ from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding, get_masked_input_and_mask)
 from vllm.model_executor.utils import set_random_seed
-from vllm.utils import seed_everything
 from vllm.platforms import current_platform
+from vllm.utils import seed_everything
 
 from .utils import DummyLoRAManager
 
@@ -242,7 +242,7 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
             layer=lora_embedding,
             layer_weights=embedding.weight.T,
         )
-        
+
         htcore.mark_step()
         inputs, index_mapping, prompt_mapping = create_random_inputs(
             active_lora_ids=list(lora_dict.keys()),
@@ -250,10 +250,11 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
             input_size=(200, ),
             input_range=(1, vocab_size),
         )
-        
+
         indices_list = [id_to_index.index(value) for value in index_mapping]
         indices = torch.tensor(indices_list)
-        mask = createLoraMask(indices, indices.shape[0], 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, indices.shape[0], 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -294,8 +295,9 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
             input_size=(200, ),
             input_range=(1, vocab_size),
         )
-        indices = torch.full((len(inputs)*len(inputs[0]), ), 0, device="hpu")
-        mask = createLoraMask(indices, indices.shape[0], 1, 8, 8, torch.bfloat16)
+        indices = torch.full((len(inputs) * len(inputs[0]), ), 0, device="hpu")
+        mask = createLoraMask(indices, indices.shape[0], 1, 8, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -385,7 +387,8 @@ def test_embeddings_with_new_embeddings(dist_init, num_loras, device,
         )
         indices_list = [id_to_index.index(value) for value in index_mapping]
         indices = torch.tensor(indices_list)
-        mask = createLoraMask(indices, indices.shape[0], 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, indices.shape[0], 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -443,8 +446,9 @@ def test_embeddings_with_new_embeddings(dist_init, num_loras, device,
             input_size=(200, ),
             input_range=(1, vocab_size),
         )
-        indices = torch.full((len(inputs)*len(inputs[0]), ), 0, device="hpu")
-        mask = createLoraMask(indices, indices.shape[0], 1, 8, 8, torch.bfloat16)
+        indices = torch.full((len(inputs) * len(inputs[0]), ), 0, device="hpu")
+        mask = createLoraMask(indices, indices.shape[0], 1, 8, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         original_inputs = deepcopy(inputs)
@@ -524,7 +528,8 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
         )
         indices_list = [id_to_index.index(value) for value in index_mapping]
         indices = torch.tensor(indices_list)
-        mask = createLoraMask(indices, indices.shape[0], 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, indices.shape[0], 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -576,8 +581,9 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
             input_range=(0, 1),
             input_type=torch.bfloat16,
         )
-        indices = torch.full((len(inputs)*len(inputs[0]), ), 0, device="hpu")
-        mask = createLoraMask(indices, indices.shape[0], 1, 8, 8, torch.bfloat16)
+        indices = torch.full((len(inputs) * len(inputs[0]), ), 0, device="hpu")
+        mask = createLoraMask(indices, indices.shape[0], 1, 8, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -657,7 +663,8 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
         )
         indices_list = [id_to_index.index(value) for value in index_mapping]
         indices = torch.tensor(indices_list)
-        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -701,7 +708,8 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
             input_type=torch.bfloat16,
         )
         indices = torch.full((len(inputs), ), 0, device="hpu")
-        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -722,8 +730,7 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
 
 
 @torch.inference_mode()
-# @pytest.mark.skip(
-#     reason="Fails when fully_shard is True.")
+# @pytest.mark.skip(reason="Fails when fully_shard is True.")
 @pytest.mark.parametrize("num_loras", [1, 2, 4, 8])
 @pytest.mark.parametrize("orientation", ["row", "column"])
 @pytest.mark.parametrize("fully_shard", [True, False])
@@ -732,9 +739,9 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
 def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
                          device, stage) -> None:
 
-    if(fully_shard == True):
+    if ('fully_shard' == True):
         pytest.skip("Skipping the test when fully_shard is True")
-        
+
     torch.set_default_device(torch.device("hpu"))
     if current_platform.is_hpu():
         punica_wrapper = GaudiPunicaWrapper(8192, 256, device="hpu")
@@ -789,7 +796,8 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
         )
         indices_list = [id_to_index.index(value) for value in index_mapping]
         indices = torch.tensor(indices_list)
-        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -833,7 +841,8 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
             input_type=torch.bfloat16,
         )
         indices = torch.full((len(inputs), ), 0, device="hpu")
-        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -854,8 +863,7 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
 
 
 @torch.inference_mode()
-# @pytest.mark.skip(
-#     reason="Fails when fully_shard is True.")
+# @pytest.mark.skip(reason="Fails when fully_shard is True.")
 @pytest.mark.parametrize("num_loras", [1, 2, 4, 8])
 @pytest.mark.parametrize("repeats", [1, 2, 3])
 @pytest.mark.parametrize("fully_shard", [True, False])
@@ -864,13 +872,13 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
 def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
                                 device, stage) -> None:
 
-    if(fully_shard == True):
+    if ('fully_shard' == True):
         pytest.skip("Skipping the test when fully_shard is True")
 
     torch.set_default_device(torch.device("hpu"))
     if current_platform.is_hpu():
         punica_wrapper = GaudiPunicaWrapper(8192, 256, device="hpu")
-    else: 
+    else:
         punica_wrapper = PunicaWrapper(8192, 256, device)
     max_loras = 8
     lora_config = LoRAConfig(max_loras=max_loras,
@@ -943,7 +951,8 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
         )
         indices_list = [id_to_index.index(value) for value in index_mapping]
         indices = torch.tensor(indices_list)
-        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -989,7 +998,8 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
             input_type=torch.bfloat16,
         )
         indices = torch.full((len(inputs), ), 0, device="hpu")
-        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8, torch.bfloat16)
+        mask = createLoraMask(indices, len(inputs), 1, max_loras, 8,
+                              torch.bfloat16)
         LoraMask.setLoraMask(mask)
 
         lora_mapping = LoRAMapping(index_mapping,
@@ -1050,28 +1060,30 @@ def test_rotary_embedding_long_context(dist_init, num_loras, device,
     num_heads = 7
 
     # Verify lora is equivalent to linear scaling rotary embedding.
-    rope = get_rope(
-        head_size,
-        rotary_dim,
-        max_position,
-        base,
-        is_neox_style,
-        dtype = torch.bfloat16
-    )
+    rope = get_rope(head_size,
+                    rotary_dim,
+                    max_position,
+                    base,
+                    is_neox_style,
+                    dtype=torch.bfloat16)
     lora_rope = LinearScalingRotaryEmbeddingWithLora(rope)
     lora_rope.set_mapping(punica_wrapper)
     lora_rope.create_lora_weights(max_loras, lora_config)
-    linear_rope = get_rope(head_size, rotary_dim, max_position, base,
+    linear_rope = get_rope(head_size,
+                           rotary_dim,
+                           max_position,
+                           base,
                            is_neox_style, {
                                "type": "linear",
                                "factor": scaling_factors
-                           }, dtype=torch.bfloat16)
+                           },
+                           dtype=torch.bfloat16)
     #linear_rope = linear_rope.to(dtype=dtype)
     id_to_index = get_random_id_to_index(num_loras, max_loras)
     _, index_mapping, prompt_mapping = create_random_inputs(
         active_lora_ids=[0],
         num_inputs=batch_size,
-        input_size=(seq_len, max_position),
+        input_size=(1, max_position),
         input_range=(0, lora_config.lora_extra_vocab_size),
         input_type=torch.bfloat16,
     )
