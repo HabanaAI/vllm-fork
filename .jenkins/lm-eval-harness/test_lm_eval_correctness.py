@@ -132,6 +132,7 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
         platform = get_current_gaudi_platform()
         testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
                     f'tp{TP_SIZE}')
+        print(f"TASK_STR: {tasks_str}\nPLATFORM: {platform}\nTESTNAME: {testname}")
         record_xml_attribute("name", testname)
 
         # Launch eval requests.
