@@ -27,6 +27,12 @@ TEST_DATA_FILE = os.environ.get(
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
 
+def setup_fp8(model_path, device_type):
+    flavor = f"g{device_type[-1]}"
+    normalized_model_name = Path(model_path).parts[-1].lower()
+    os.environ["QUANT_CONFIG"] = f"/software/data/vllm-benchmarks/inc/{normalized_model_name}/maxabs_quant_{flavor}.json"
+
+
 def fail_on_exit():
     os._exit(1)
 
@@ -132,7 +138,9 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
         platform = get_current_gaudi_platform()
         testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
                     f'tp{TP_SIZE}')
-        print(f"TASK_STR: {tasks_str}\nPLATFORM: {platform}\nTESTNAME: {testname}")
+        print(f"TASK_STR: {tasks_str}\tPLATFORM: {platform}\tTESTNAME: {testname}")
+        if platform in ["Gaudi2", "Gaud3"]:
+            setup_fp8(TEST_DATA_FILE, platform)
         record_xml_attribute("name", testname)
 
         # Launch eval requests.
