@@ -50,10 +50,12 @@ def launch_lm_eval(eval_config, is_fp8=False):
                  f"max_model_len=4096," \
                  f"max_num_seqs={max_num_seqs}," \
                  f"trust_remote_code={trust_remote_code}"
+    print(f"MODEL_ARGS: {model_args}\tTYPE: {type(model_args)}")
     if is_fp8:
-        model_args += "quantization=inc," \
-            "kv_cache_dtype=fp8_inc", \
+        model_args += ",quantization=inc," \
+            "kv_cache_dtype=fp8_inc,", \
             "weights_load_device=cpu"
+        print(f"FP8_MODEL_ARGS: {model_args}\tTYPE: {type(model_args)}")
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
         kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']
@@ -145,18 +147,14 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
         testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
                     f'tp{TP_SIZE}')
         record_xml_attribute("name", testname)
-        
+
         # Set up environment for FP8 inference
-        print(
-            f"EVAL_CONFIG: {eval_config}, TEST_DATA_FILE: {TEST_DATA_FILE}"
-        )
-        is_fp8 = False
-        if platform in ["Gaudi2", "Gaud3"]:
+        print(f"EVAL_CONFIG: {eval_config}, TEST_DATA_FILE: {TEST_DATA_FILE}")
+        if eval_config.get("fp8"):
             setup_fp8(TEST_DATA_FILE, platform)
-            is_fp8 = True
         # Launch eval requests.
         start_time = time.perf_counter()
-        results = launch_lm_eval(eval_config, is_fp8)
+        results = launch_lm_eval(eval_config, eval_config.get("fp8"))
         total_time = time.perf_counter() - start_time
 
         tokenizer = vllm.transformers_utils.tokenizer.get_tokenizer(
