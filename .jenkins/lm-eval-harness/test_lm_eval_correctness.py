@@ -52,9 +52,11 @@ def launch_lm_eval(eval_config, is_fp8=False):
                  f"trust_remote_code={trust_remote_code}"
     print(f"MODEL_ARGS: {model_args}\tTYPE: {type(model_args)}")
     if is_fp8:
-        model_args += ",quantization=inc," \
-            "kv_cache_dtype=fp8_inc,", \
+        tmp_args = ",quantization=inc," \
+            "kv_cache_dtype=fp8_inc," \
             "weights_load_device=cpu"
+        print(f"TMP_ARGS: {tmp_args}\tTYPE: {type(tmp_args)}")
+        model_args += tmp_args
         print(f"FP8_MODEL_ARGS: {model_args}\tTYPE: {type(model_args)}")
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
