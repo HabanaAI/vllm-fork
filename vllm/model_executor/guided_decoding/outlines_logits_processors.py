@@ -34,6 +34,7 @@ from transformers import PreTrainedTokenizerBase
 # so we use a simpler implementation
 def _cached(fn):
     cache = {}
+
     def cached_fn(*args):
         if args in cache:
             result = cache[args]
@@ -41,7 +42,9 @@ def _cached(fn):
             result = fn(*args)
             cache[args] = result
         return result
+
     return cached_fn
+
 
 class BaseLogitsProcessor:
 
