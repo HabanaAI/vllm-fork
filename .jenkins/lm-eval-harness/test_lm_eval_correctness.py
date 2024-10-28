@@ -148,7 +148,7 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
 
         # Set up environment for FP8 inference
         if eval_config.get("fp8"):
-            setup_fp8(TEST_DATA_FILE, platform)
+            setup_fp8(eval_config["model_name"], platform)
         # Launch eval requests.
         start_time = time.perf_counter()
         results = launch_lm_eval(eval_config, eval_config.get("fp8"))
