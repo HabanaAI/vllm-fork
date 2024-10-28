@@ -282,7 +282,6 @@ class HpuModelAdapter():
                                                '0').lower() in ['1', 'true']
         self.block_size = block_size
         self.dtype = dtype
-        self.enforce_eager = enforce_eager
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
             self.model = torch.compile(self.model,
