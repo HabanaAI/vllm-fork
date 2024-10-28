@@ -321,8 +321,8 @@ class HpuModelAdapter():
         if is_fake_hpu() or (not htorch.utils.internal.is_lazy()
                              and not self.enforce_eager):
             # Unfortunately one_hot on CPU or in torch compile mode
-            # doesn't handle out of bounds classes.
-            # We need to mask those values manually
+            # doesn't handle out of bounds classes,
+            # so we convert all negative values to 0
             block_mapping = torch.nn.functional.relu(metadata.block_mapping)
             block_mapping = torch.nn.functional.one_hot(block_mapping,
                                                         num_classes=batch_size)
