@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from unittest.mock import patch
 
+import habana_frameworks.torch.core as htcore
 import pytest
 import torch
 import torch.nn.functional as F
-import habana_frameworks.torch.core as htcore
-
-from vllm.config import LoRAConfig
 from vllm_hpu_extension.ops import LoraMask
 from vllm_hpu_extension.punica_hpu import GaudiPunicaWrapper
+
+from vllm.config import LoRAConfig
 from vllm.lora.fully_sharded_layers import (
     ColumnParallelLinearWithShardedLoRA,
     MergedColumnParallelLinearWithShardedLoRA,
@@ -42,8 +42,8 @@ from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding, get_masked_input_and_mask)
 from vllm.model_executor.utils import set_random_seed
-from vllm.utils import seed_everything
 from vllm.platforms import current_platform
+from vllm.utils import seed_everything
 
 from .utils import DummyLoRAManager
 
