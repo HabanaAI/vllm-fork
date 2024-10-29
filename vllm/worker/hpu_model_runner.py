@@ -60,8 +60,8 @@ logger = init_logger(__name__)
 _TYPE_CACHE = {}
 # These values are assumed to be zero in several places.
 # Use caution when updating them!
-_PAD_SLOT_ID = torch.iinfo(torch.int).max - 256
-_PAD_BLOCK_ID = torch.iinfo(torch.int).max
+_PAD_SLOT_ID = 0
+_PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
