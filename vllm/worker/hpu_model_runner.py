@@ -37,6 +37,7 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.model_loader import get_model
+from vllm.model_executor.models import supports_multimodal
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalInputs)
 from vllm.sampling_params import SamplingParams
@@ -202,8 +203,6 @@ def generate_decode_buckets(bs_bucket_config, blocks_bucket_config,
     last_bucket = round_up(max_blocks, bstep)
     for bs in bs_buckets:
         for blocks in block_buckets:
-            if blocks < bs:
-                continue
             if blocks > last_bucket:
                 break
             buckets.append((bs, blocks))
@@ -669,12 +668,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 assert hasattr(
                     self.model, "embedding_padding_modules"
                 ), "Model does not have embedding_padding_modules"
+
+                if supports_multimodal(self.model):
+                    logger.warning(
+                        "Regarding multimodal models, vLLM currently "
+                        "only supports adding LoRA to language model.")
+                # It's necessary to distinguish between the
+                # max_position_embeddings of VLMs and LLMs.
+                if hasattr(self.model.config, "max_position_embeddings"):
+                    max_pos_embeddings = (
+                        self.model.config.max_position_embeddings)
+                else:
+                    max_pos_embeddings = (
+                        self.model.config.text_config.max_position_embeddings)
+
                 self.lora_manager = LRUCacheWorkerLoRAManager(
                     self.scheduler_config.max_num_seqs,
                     self.scheduler_config.max_num_batched_tokens,
-                    self.vocab_size, self.lora_config, self.device,
+                    self.vocab_size,
+                    self.lora_config,
+                    self.device,
                     self.model.embedding_modules,
-                    self.model.embedding_padding_modules)
+                    self.model.embedding_padding_modules,
+                    max_position_embeddings=max_pos_embeddings,
+                )
                 self.model = self.lora_manager.create_lora_manager(self.model)
 
             if self.model_config.quantization == 'inc':
@@ -953,6 +970,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_indices=block_indices,
             block_offsets=block_offsets,
             block_scales=None,
+            block_groups=None,
             attn_bias=None,
             seq_lens_tensor=seq_lens_tensor,
             context_lens_tensor=context_lens_tensor,
@@ -1075,6 +1093,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             len(block_list),
             self.bucketing_global_state.decode_block_bucket_cfg)
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
+        block_groups = pad_list(block_mapping, block_bucket_size,
+                                len(block_tables))
         block_mapping = pad_list(block_mapping, block_bucket_size, -1)
         block_usage = pad_list(block_usage, block_bucket_size, 1)
         block_scales = pad_list(block_scales, block_bucket_size, 0.0)
@@ -1085,6 +1105,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_mapping = torch.tensor(block_mapping,
                                      dtype=torch.long,
                                      device=self.device)
+        block_groups = torch.tensor(block_groups,
+                                    dtype=torch.long,
+                                    device=self.device)
         block_usage = torch.tensor(block_usage,
                                    dtype=self.model_config.dtype,
                                    device=self.device)
@@ -1107,6 +1130,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_indices=block_indices,
             block_offsets=block_offsets,
             block_scales=block_scales,
+            block_groups=block_groups,
             attn_bias=None,
             seq_lens_tensor=None,
             context_lens_tensor=None,
@@ -1317,9 +1341,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'attn_bias', 'seq_lens_tensor', 'context_lens_tensor',
-            'block_list', 'block_mapping', 'block_usage', 'slot_mapping',
-            'is_prompt', 'block_indices', 'block_offsets', 'block_scales'
+            'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
+            'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt', 
+            'block_indices', 'block_offsets', 'block_scales', 'block_groups'
         ])
         return attention_metadata
 
@@ -1354,10 +1378,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
-        max_batch_size = self.bucketing_global_state.prompt_bs_bucket_cfg[-1]
-        max_seq_len = min(
-            self.bucketing_global_state.prompt_seq_bucket_cfg[-1],
-            self.max_num_batched_tokens // max_batch_size)
+        max_seq_len = self.bucketing_global_state.prompt_seq_bucket_cfg[-1]
+        max_batch_size = min(self.max_num_batched_tokens // max_seq_len,
+                             self.scheduler_config.max_num_seqs)
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
@@ -1376,7 +1399,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                          f"bs{batch_size}_"
                          f"seq{seq_len}_"
                          f"graphs{'T' if use_graphs else 'F'}")
-        max_num_seqs = self.scheduler_config.max_num_seqs
         # This represents the maximum number of different requests
         # that will have unique loras, an therefore the max amount of memory
         # consumption create dummy lora request copies from the lora request
@@ -1398,16 +1420,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     dummy_lora_requests.append(dummy_lora_request)
                 dummy_lora_requests_per_seq = [
                     dummy_lora_requests[idx % len(dummy_lora_requests)]
-                    for idx in range(max_num_seqs)
+                    for idx in range(batch_size)
                 ]
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
-        if self.lora_config and not is_lora_profile_run:
-            lora_mapping = LoRAMapping(
-                **dict(index_mapping=[0] * batch_size * seq_len,
-                       prompt_mapping=[0] * batch_size * seq_len,
-                       is_prefill=is_prompt))
-            self.set_active_loras(set(), lora_mapping)
         if is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
