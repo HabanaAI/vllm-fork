@@ -13,7 +13,7 @@ try:
         try:
             from vllm.attention.backends.rocm_flash_attn import (
                 ROCmFlashAttentionMetadata as FlashAttentionMetadata)
-        except:
+        except (ModuleNotFoundError, ImportError, AssertionError):
             from vllm.attention.backends.hpu_attn import (
                 HPUPagedAttentionMetadata as FlashAttentionMetadata)
 except (ModuleNotFoundError, ImportError, AssertionError) as err:
