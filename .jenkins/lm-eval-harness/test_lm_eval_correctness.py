@@ -39,7 +39,7 @@ def fail_on_exit():
     os._exit(1)
 
 
-def launch_lm_eval(eval_config, is_fp8=False):
+def launch_lm_eval(eval_config):
     trust_remote_code = eval_config.get('trust_remote_code', False)
     dtype = eval_config.get('dtype', 'bfloat16')
     max_num_seqs = eval_config.get('max_num_seqs', 128)
@@ -50,7 +50,7 @@ def launch_lm_eval(eval_config, is_fp8=False):
                  f"max_model_len=4096," \
                  f"max_num_seqs={max_num_seqs}," \
                  f"trust_remote_code={trust_remote_code}"
-    if is_fp8:
+    if eval_config.get("fp8"):
         model_args += ",quantization=inc," \
             "kv_cache_dtype=fp8_inc," \
             "weights_load_device=cpu"
@@ -151,7 +151,7 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
             setup_fp8(eval_config["model_name"], platform)
         # Launch eval requests.
         start_time = time.perf_counter()
-        results = launch_lm_eval(eval_config, eval_config.get("fp8"))
+        results = launch_lm_eval(eval_config)
         total_time = time.perf_counter() - start_time
 
         tokenizer = vllm.transformers_utils.tokenizer.get_tokenizer(
