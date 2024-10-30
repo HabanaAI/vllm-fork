@@ -268,7 +268,8 @@ class Sampler(nn.Module):
         if do_top_p_top_k and flashinfer_top_k_top_p_sampling is None:
             # If we have a scalar p and k, we can use the optimized version.
             if self._scalar_p_and_k.any():
-                logits = self._apply_top_k_top_p_opt(logits, self._top_p_scalar.item(),
+                logits = self._apply_top_k_top_p_opt(logits,
+                                                     self._top_p_scalar.item(),
                                                      self._top_k_scalar.item())
             else:
                 logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
