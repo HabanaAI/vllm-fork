@@ -16,6 +16,7 @@ from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
 from vllm.logger import init_logger
+from vllm.utils import is_fake_hpu
 
 logger = init_logger(__name__)
 
@@ -120,8 +121,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
-        self.prefill_usefusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
-                                              '0').lower() in ['1', 'true']
+        self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
+                                               '1').lower() in ['1', 'true'] \
+                                               and not is_fake_hpu()
         if self.prefill_usefusedsdpa:
             assert alibi_slopes is None, \
                 'Prefill with FusedSDPA not supported with alibi slopes!'
