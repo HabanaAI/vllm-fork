@@ -57,6 +57,7 @@ def launch_lm_eval(eval_config):
     if eval_config.get("num_scheduled_steps"):
         model_args += \
             f",num_scheduled_steps={eval_config.get('num_scheduled_steps')}"
+        print(f"MODEL_ARGS: {model_args}")
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
         kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']
