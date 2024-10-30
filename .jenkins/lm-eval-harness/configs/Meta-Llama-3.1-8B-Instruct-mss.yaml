@@ -13,4 +13,4 @@ num_fewshot: 8
 dtype: "bfloat16"
 fewshot_as_multiturn: true
 apply_chat_template: true
-num_scheduler_steps: 1
+num_scheduler_steps: 10
