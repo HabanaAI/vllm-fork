@@ -2115,7 +2115,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
-            cache_orig_output_token_ids = []
+            cache_orig_output_token_ids: List[Dict] = []
             for i in range(num_steps):
                 if i != 0 and not self.is_driver_worker:
                     broadcast_data = broadcast_tensor_dict(src=0)
@@ -2181,10 +2181,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             "ctx"]
                         seq_group_metadata_list = ctx.seq_group_metadata_list
                         # Cache the original output token ids
-                        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                        for i, seq_group_metadata in enumerate(
+                                seq_group_metadata_list):
                             cache_orig_output_token_ids.append({})
-                            for seq_id, data in seq_group_metadata.seq_data.items():
-                                cache_orig_output_token_ids[i][seq_id] = copy.deepcopy(data.output_token_ids)
+                            for j, data in seq_group_metadata.seq_data.items():
+                                cache_orig_output_token_ids[i][j] = \
+                                    copy.deepcopy(data.output_token_ids)
                     for seq_group_metadata in seq_group_metadata_list:
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[
@@ -2220,9 +2222,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 else:
                     if len(cache_orig_output_token_ids) > 0:
                         # Reuse the original output token ids
-                        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-                            for seq_id, data in seq_group_metadata.seq_data.items():
-                                data.output_token_ids = cache_orig_output_token_ids[i][seq_id]
+                        for i, seq_group_metadata in enumerate(
+                                seq_group_metadata_list):
+                            for j, data in seq_group_metadata.seq_data.items():
+                                data.output_token_ids = \
+                                    cache_orig_output_token_ids[i][j]
 
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
