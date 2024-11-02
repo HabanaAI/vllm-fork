@@ -2115,7 +2115,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
-            cache_orig_output_token_ids: List[Dict] = []
+            cache_orig_output_tokens_len: List[Dict] = []
             for i in range(num_steps):
                 if i != 0 and not self.is_driver_worker:
                     broadcast_data = broadcast_tensor_dict(src=0)
@@ -2176,22 +2176,22 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 htorch.core.mark_step()
                 if i < num_steps - 1:
                     if i == 0:
-                        import copy
                         ctx = model_input.async_callback.keywords[  # type: ignore
                             "ctx"]
                         seq_group_metadata_list = ctx.seq_group_metadata_list
                         # Cache the original output token ids
                         for i, seq_group_metadata in enumerate(
                                 seq_group_metadata_list):
-                            cache_orig_output_token_ids.append({})
+                            cache_orig_output_tokens_len.append({})
                             for j, data in seq_group_metadata.seq_data.items():
-                                cache_orig_output_token_ids[i][j] = \
-                                    copy.deepcopy(data.output_token_ids)
+                                cache_orig_output_tokens_len[i][j] = \
+                                    len(data.output_token_ids)
                     for seq_group_metadata in seq_group_metadata_list:
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[
                                 0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
+                                # add a place holder for prepare_decode
                                 # arbitrary value, this could be any token
                                 dummy_token = (540, )
                                 data.output_token_ids += (dummy_token)
@@ -2220,13 +2220,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     }
                     broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
                 else:
-                    if len(cache_orig_output_token_ids) > 0:
+                    if len(cache_orig_output_tokens_len) > 0:
                         # Reuse the original output token ids
                         for i, seq_group_metadata in enumerate(
                                 seq_group_metadata_list):
                             for j, data in seq_group_metadata.seq_data.items():
+                                orig_output_tokens_len = \
+                                    cache_orig_output_tokens_len[i][j]
                                 data.output_token_ids = \
-                                    cache_orig_output_token_ids[i][j]
+                                    data.output_token_ids[:orig_output_tokens_len]
 
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
