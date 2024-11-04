@@ -155,7 +155,8 @@ if TYPE_CHECKING or not core_C_available:
 
                 return ret
             else:
-                ret = ("int" if self.is_signed() else "uint") + str(self.size_bits)
+                ret = ("int" if self.is_signed() else "uint") + str(
+                    self.size_bits)
                 if self.has_bias():
                     ret = ret + "b" + str(self.bias)
                 return ret
