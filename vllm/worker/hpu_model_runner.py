@@ -2191,6 +2191,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 if num_steps == 1:
                                     return [output]
                                 else:
+                                    try_revert_dummy_output_tokens()
                                     return []
 
                     result = self._prepare_decode(seq_group_metadata_list,
@@ -2221,7 +2222,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if num_steps == 1:
                 return [output]
             else:
-                try_revert_dummy_output_tokens()
                 return []
         return output if type(output) is list else [output]
 
