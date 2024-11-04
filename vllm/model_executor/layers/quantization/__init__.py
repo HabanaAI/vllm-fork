@@ -2,6 +2,7 @@ from typing import Dict, Type
 
 from vllm.model_executor.layers.quantization.aqlm import AQLMConfig
 from vllm.model_executor.layers.quantization.awq import AWQConfig
+from vllm.model_executor.layers.quantization.awq_hpu import AWQHPUConfig
 from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinConfig
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
@@ -33,6 +34,7 @@ from vllm.model_executor.layers.quantization.tpu_int8 import Int8TpuConfig
 QUANTIZATION_METHODS: Dict[str, Type[QuantizationConfig]] = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
+    "awq_hpu": AWQHPUConfig,
     "deepspeedfp": DeepSpeedFPConfig,
     "tpu_int8": Int8TpuConfig,
     "fp8": Fp8Config,
