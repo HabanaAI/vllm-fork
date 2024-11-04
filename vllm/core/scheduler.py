@@ -105,6 +105,7 @@ class SchedulingBudget:
 @dataclass
 class PaddingAwareSchedulingBudget(SchedulingBudget):
     max_num_prefill_seqs: Optional[int] = None
+    max_padding_ratio: Optional[int] = None
     _prefill_request_ids_max_seq_lens: Dict[str,
                                             int] = field(default_factory=dict)
     _max_seq_len: int = 0
@@ -179,6 +180,14 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         if self.max_num_prefill_seqs is not None and result:
             result = self._num_curr_prefill_seqs + num_new_seqs \
                 <= self.max_num_prefill_seqs
+        if self._num_curr_prefill_seqs != 0 and self.max_padding_ratio is not None and result:
+            num_tokens = self.num_batched_tokens + num_new_tokens
+            padding_ratio = 1 - num_tokens / num_new_padded_tokens
+            result = padding_ratio < self.max_padding_ratio
+            if not result:
+                print(
+                    f"[PaddingAwareSchedulerDebug] CANNOT schedule, exceeded max padding ratio {self.max_padding_ratio} (num_tokens = {num_tokens}, num_padded_tokens = {num_new_padded_tokens}, ratio = {padding_ratio:.2f})"  # noqa: E501
+                )
         return result
 
     @property
@@ -1099,8 +1108,9 @@ class Scheduler:
             budget = PaddingAwareSchedulingBudget(
                 token_budget=self.scheduler_config.max_num_batched_tokens,
                 max_num_seqs=self.scheduler_config.max_num_seqs,
-                max_num_prefill_seqs=self.scheduler_config.max_num_prefill_seqs
-            )
+                max_num_prefill_seqs=self.scheduler_config.
+                max_num_prefill_seqs,
+                max_padding_ratio=self.scheduler_config.max_padding_ratio)
         else:
             budget = SchedulingBudget(
                 token_budget=self.scheduler_config.max_num_batched_tokens,
