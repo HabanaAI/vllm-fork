@@ -2116,7 +2116,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
             for i in range(num_steps):
-                torch.hpu.synchronize()
                 if i != 0 and not self.is_driver_worker:
                     broadcast_data = broadcast_tensor_dict(src=0)
                     if 'early_exit' in broadcast_data and broadcast_data[
@@ -2154,7 +2153,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
                 htorch.core.mark_step()
-                torch.hpu.synchronize()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
@@ -2209,12 +2207,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         "attn_metadata":
                         self.trim_attn_metadata(result.attn_metadata)
                     })
-                    execute_model_kwargs_update = {
+                    model_kwargs_broadcast_data = {
                         "input_ids": result.input_tokens,
                         "positions": result.input_positions,
                         "attn_metadata": vars(result.attn_metadata)
                     }
-                    broadcast_tensor_dict(execute_model_kwargs_update, src=0)
+                    broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
 
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
