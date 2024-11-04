@@ -12,6 +12,10 @@ from vllm.scalar_type import ScalarType
 
 logger = init_logger(__name__)
 
+if current_platform.is_hpu():
+    import habana_frameworks.torch.core as htcore
+    convert_from_uint4 = torch.ops.hpu.convert_from_uint4
+
 if not current_platform.is_tpu() and not current_platform.is_hpu():
     try:
         import vllm._C
@@ -228,6 +232,17 @@ def awq_gemm(input: torch.Tensor, qweight: torch.Tensor, qzeros: torch.Tensor,
             awq_gemm_triton)
         return awq_gemm_triton(input, qweight, qzeros, scales, split_k_iters)
     return torch.ops._C.awq_gemm(input, qweight, qzeros, scales, split_k_iters)
+
+
+
+def awq_hpu_gemm(input: torch.Tensor, qweight: torch.Tensor,
+                  qzeros: torch.Tensor, scales: torch.Tensor,
+                  ) -> torch.Tensor:
+
+    weight = convert_from_uint4(qweight, scales, qzeros,
+                                input.dtype)
+    return torch.matmul(input, weight)
+
 
 
 # gptq
