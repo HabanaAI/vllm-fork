@@ -10,7 +10,7 @@ from vllm.entrypoints.openai.protocol import (ErrorResponse,
                                               UnloadLoraAdapterRequest)
 from vllm.entrypoints.openai.serving_engine import BaseModelPath, OpenAIServing
 
-MODEL_NAME = "meta-llama/Llama-2-7b"
+MODEL_NAME = "/mnt/weka/data/pytorch/llama2/Llama-2-7b"
 BASE_MODEL_PATHS = [BaseModelPath(name=MODEL_NAME, model_path=MODEL_NAME)]
 LORA_LOADING_SUCCESS_MESSAGE = (
     "Success: LoRA adapter '{lora_name}' added successfully.")

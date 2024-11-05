@@ -54,7 +54,7 @@ def test_spec_decode_xfail_chunked_prefill(test_llm_generator):
 @pytest.mark.parametrize(
     "common_llm_kwargs",
     [{
-        "model": "meta-llama/Llama-2-7b-chat-hf",
+        "model": "/mnt/weka/data/pytorch/llama2/Llama-2-7b-chat-hf",
         "speculative_model": "JackFram/llama-68m",
         "num_speculative_tokens": 5,
 

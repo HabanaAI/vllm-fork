@@ -103,7 +103,7 @@ class PPTestSettings:
 # yapf: disable
 GENERATION_MODEL_SETTINGS = {
     # [DETAILED TESTS]
-    "meta-llama/Meta-Llama-3-8B": PPTestSettings.detailed(),
+    "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B": PPTestSettings.detailed(),
     # [FAST TESTS]
     # Uses Llama
     # "BAAI/AquilaChat-7B": PPTestSettings.fast(),
@@ -197,7 +197,7 @@ CONDITIONAL_GENERATION_MODEL_SETTINGS = {  # type: ignore[var-annotated]
 # NOTE: You can update this on your local machine to run specific tests
 TEST_MODELS = [
     # [LANGUAGE GENERATION]
-    "meta-llama/Meta-Llama-3-8B",
+    "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B",
     "ibm/PowerLM-3b",
     # [LANGUAGE EMBEDDING]
     "intfloat/e5-mistral-7b-instruct",

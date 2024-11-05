@@ -26,7 +26,7 @@ text_only_prompts = [
 ]
 
 models = [
-    "meta-llama/Llama-3.2-11B-Vision-Instruct",
+    "/mnt/weka/data/pytorch/llama3.2/Llama-3.2-11B-Vision-Instruct",
 ]
 
 

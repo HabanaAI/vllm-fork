@@ -13,7 +13,7 @@ from ..utils import compare_all_settings
 @pytest.mark.parametrize(
     "model, model_args, pp_size, tp_size, attn_backend, method, fullgraph",
     [
-        ("meta-llama/Meta-Llama-3-8B", [], 2, 2, "FLASH_ATTN", "generate",
+        ("/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B", [], 2, 2, "FLASH_ATTN", "generate",
          True),
         ("nm-testing/Meta-Llama-3-8B-Instruct-W8A8-Dyn-Per-Token-2048-Samples",
          ["--quantization", "compressed-tensors"

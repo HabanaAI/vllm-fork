@@ -55,7 +55,7 @@ CONFIGS: Dict[str, ServerConfig] = {
     },
     "llama": {
         "model":
-        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct",
         "arguments": [
             "--tool-call-parser", "llama3_json", "--chat-template",
             str(VLLM_PATH / "examples/tool_chat_template_llama3.1_json.jinja")
@@ -65,7 +65,7 @@ CONFIGS: Dict[str, ServerConfig] = {
     },
     "llama3.2": {
         "model":
-        "meta-llama/Llama-3.2-3B-Instruct",
+        "/mnt/weka/data/pytorch/llama3.2/Llama-3.2-3B-Instruct",
         "arguments": [
             "--tool-call-parser", "llama3_json", "--chat-template",
             str(VLLM_PATH / "examples/tool_chat_template_llama3.2_json.jinja")

@@ -27,8 +27,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
         ("fp8_e5m2", "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
          "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct", None),
         # Test FP16 checkpoint w. fp8_e4m3 kv-cache scaling factors in json.
-        ("fp8_e4m3", "meta-llama/Llama-2-7b-chat-hf",
-         "meta-llama/Llama-2-7b-chat-hf",
+        ("fp8_e4m3", "/mnt/weka/data/pytorch/llama2/Llama-2-7b-chat-hf",
+         "/mnt/weka/data/pytorch/llama2/Llama-2-7b-chat-hf",
          "./tests/fp8_kv/llama2-7b-fp8-kv/kv_cache_scales.json")
     ])
 # Due to low-precision numerical divergence, we only test logprob of 4 tokens

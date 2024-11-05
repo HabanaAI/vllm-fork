@@ -109,7 +109,7 @@ def lora_llm(long_context_infos):
     ]
 
     llm = vllm.LLM(
-        "meta-llama/Llama-2-13b-chat-hf",
+        "/mnt/weka/data/pytorch/llama2/Llama-2-13b-chat-hf",
         enable_lora=True,
         max_num_seqs=16,
         max_loras=2,

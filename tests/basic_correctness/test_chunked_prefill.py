@@ -213,7 +213,7 @@ def test_with_prefix_caching(
     Checks exact match decode with and without prefix caching
     with chunked prefill enabled.
     """
-    model = "meta-llama/Llama-2-7b-chat-hf"
+    model = "/mnt/weka/data/pytorch/llama2/Llama-2-7b-chat-hf"
     # The common prompt has 142 tokens with Llama-2 tokenizer.
     common_prompt = "You are a helpful AI assistant " * 20
     unique_prompts = [

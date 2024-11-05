@@ -19,10 +19,10 @@ MAX_MODEL_LEN = 1024
 
 # FIXME: Move this to confest
 MODELS = [
-    ("meta-llama/Llama-3.2-1B-Instruct",
+    ("/mnt/weka/data/pytorch/llama3.2/Llama-3.2-1B-Instruct",
      hf_hub_download("bartowski/Llama-3.2-1B-Instruct-GGUF",
                      filename="Llama-3.2-1B-Instruct-Q4_K_M.gguf")),
-    ("meta-llama/Llama-3.2-1B-Instruct",
+    ("/mnt/weka/data/pytorch/llama3.2/Llama-3.2-1B-Instruct",
      hf_hub_download("bartowski/Llama-3.2-1B-Instruct-GGUF",
                      filename="Llama-3.2-1B-Instruct-IQ4_XS.gguf")),
     ("Qwen/Qwen2-1.5B-Instruct",

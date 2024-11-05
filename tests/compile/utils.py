@@ -20,7 +20,7 @@ TEST_MODELS = [
     ("nm-testing/Meta-Llama-3-8B-Instruct-W8A8-Dyn-Per-Token-2048-Samples", {
         "quantization": "compressed-tensors"
     }),
-    ("meta-llama/Meta-Llama-3-8B", {}),
+    ("/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3-8B", {}),
 ]
 
 # TODO: enable in pytorch 2.5
