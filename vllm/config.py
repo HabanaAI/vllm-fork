@@ -973,7 +973,6 @@ class SchedulerConfig:
     def __init__(self,
                  max_num_batched_tokens: Optional[int],
                  max_num_seqs: int,
-                 max_num_prefill_seqs: Optional[int],
                  max_model_len: int,
                  use_v2_block_manager: bool = True,
                  num_lookahead_slots: int = 0,
@@ -986,6 +985,7 @@ class SchedulerConfig:
                  multi_step_stream_outputs: bool = False,
                  send_delta_data: bool = False,
                  policy: str = "fcfs",
+                 max_num_prefill_seqs: Optional[int] = None,
                  use_padding_aware_scheduling=False) -> None:
         if max_num_batched_tokens is None:
             if enable_chunked_prefill:
