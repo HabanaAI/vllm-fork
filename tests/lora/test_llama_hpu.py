@@ -5,7 +5,7 @@ from conftest import cleanup
 import vllm
 from vllm.lora.request import LoRARequest
 
-MODEL_PATH = "meta-llama/Llama-2-7b-hf"
+MODEL_PATH = "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/"
 
 
 def do_sample(llm: vllm.LLM, lora_path: str, lora_id: int) -> List[str]:

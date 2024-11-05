@@ -108,7 +108,7 @@ def test_multiple_sampling_params(llm: LLM):
 
 def test_chat():
 
-    llm = LLM(model="meta-llama/Meta-Llama-3-8B-Instruct")
+    llm = LLM(model="/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct")
 
     prompt1 = "Explain the concept of entropy."
     messages = [
@@ -127,7 +127,7 @@ def test_chat():
 
 def test_multi_chat():
 
-    llm = LLM(model="meta-llama/Meta-Llama-3-8B-Instruct")
+    llm = LLM(model="/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct")
 
     prompt1 = "Explain the concept of entropy."
     prompt2 = "Explain what among us is."

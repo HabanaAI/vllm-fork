@@ -9,7 +9,7 @@ from vllm import SamplingParams
 
 # We also test with llama because it has generation_config to specify EOS
 # (past regression).
-MODELS = ["facebook/opt-125m", "meta-llama/Llama-2-7b-hf"]
+MODELS = ["facebook/opt-125m", "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/"]
 
 
 @pytest.mark.parametrize("model", MODELS)

@@ -8,7 +8,7 @@ from vllm.transformers_utils.tokenizer import get_tokenizer
 
 
 def test_get_llama3_eos_token():
-    model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
+    model_name = "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct"
 
     tokenizer = get_tokenizer(model_name)
     assert tokenizer.eos_token_id == 128009

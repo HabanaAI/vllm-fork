@@ -75,7 +75,7 @@ CONFIGS: Dict[str, ServerConfig] = {
     },
     "mistral": {
         "model":
-        "mistralai/Mistral-7B-Instruct-v0.3",
+        "/mnt/weka/data/pytorch/mistral/Mistral-7B-Instruct-v0.3",
         "arguments": [
             "--tool-call-parser", "mistral", "--chat-template",
             str(VLLM_PATH / "examples/tool_chat_template_mistral.jinja"),

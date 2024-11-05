@@ -19,7 +19,7 @@ from ..utils import multi_gpu_test
 
 MODELS = [
     "facebook/opt-125m",
-    "meta-llama/Llama-2-7b-hf",
+    "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/",
 ]
 
 TARGET_TEST_SUITE = os.environ.get("TARGET_TEST_SUITE", "L4")
@@ -79,8 +79,8 @@ def test_models(
     "test_suite", [
         ("facebook/opt-125m", "ray", "", "L4"),
         ("facebook/opt-125m", "mp", "", "L4"),
-        ("meta-llama/Llama-2-7b-hf", "ray", "", "L4"),
-        ("meta-llama/Llama-2-7b-hf", "mp", "", "L4"),
+        ("/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/", "ray", "", "L4"),
+        ("/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/", "mp", "", "L4"),
         ("facebook/opt-125m", "ray", "", "A100"),
         ("facebook/opt-125m", "mp", "", "A100"),
         ("facebook/opt-125m", "mp", "FLASHINFER", "A100"),
@@ -99,7 +99,7 @@ def test_models_distributed(
     if test_suite != TARGET_TEST_SUITE:
         pytest.skip(f"Skip test for {test_suite}")
 
-    if model == "meta-llama/Llama-2-7b-hf" and distributed_executor_backend == "ray" and attention_backend == "" and test_suite == "L4":  # noqa
+    if model == "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/" and distributed_executor_backend == "ray" and attention_backend == "" and test_suite == "L4":  # noqa
         # test ray adag
         os.environ['VLLM_USE_RAY_SPMD_WORKER'] = "1"
         os.environ['VLLM_USE_RAY_COMPILED_DAG'] = "1"

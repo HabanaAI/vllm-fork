@@ -69,8 +69,8 @@ def test_rope_customization():
     LONGCHAT_ROPE_SCALING = {"type": "linear", "factor": 8.0}
 
     llama_model_config = ModelConfig(
-        "meta-llama/Meta-Llama-3-8B-Instruct",
-        "meta-llama/Meta-Llama-3-8B-Instruct",
+        "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
+        "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
         tokenizer_mode="auto",
         trust_remote_code=False,
         dtype="float16",
@@ -81,8 +81,8 @@ def test_rope_customization():
     assert llama_model_config.max_model_len == 8192
 
     llama_model_config = ModelConfig(
-        "meta-llama/Meta-Llama-3-8B-Instruct",
-        "meta-llama/Meta-Llama-3-8B-Instruct",
+        "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
+        "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
         tokenizer_mode="auto",
         trust_remote_code=False,
         dtype="float16",

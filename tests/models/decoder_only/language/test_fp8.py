@@ -21,11 +21,11 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
     "kv_cache_dtype,base_model,test_model,scale_path",
     [
         # Test FP8 checkpoint w. fp8_e4m3 kv-cache scaling factors.
-        ("fp8_e4m3", "meta-llama/Meta-Llama-3-8B-Instruct",
+        ("fp8_e4m3", "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
          "nm-testing/Meta-Llama-3-8B-Instruct-FP8-KV", None),
         # Test FP16 checkpoint w. fp8_e5m2 kv-cache.
-        ("fp8_e5m2", "meta-llama/Meta-Llama-3-8B-Instruct",
-         "meta-llama/Meta-Llama-3-8B-Instruct", None),
+        ("fp8_e5m2", "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
+         "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct", None),
         # Test FP16 checkpoint w. fp8_e4m3 kv-cache scaling factors in json.
         ("fp8_e4m3", "meta-llama/Llama-2-7b-chat-hf",
          "meta-llama/Llama-2-7b-chat-hf",

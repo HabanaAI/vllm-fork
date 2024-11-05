@@ -4,7 +4,7 @@ import pytest
 
 from vllm import CompletionOutput, LLMEngine, SamplingParams
 
-MODEL = "meta-llama/llama-2-7b-hf"
+MODEL = "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/"
 MAX_TOKENS = 200
 
 IS_ASYNC = False

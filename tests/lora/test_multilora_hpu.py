@@ -91,7 +91,7 @@ expected_output = [
 
 def _test_llama_multilora(sql_lora_files, tp_size):
     """Main function that sets up and runs the prompt processing."""
-    engine_args = EngineArgs(model="meta-llama/Llama-2-7b-hf",
+    engine_args = EngineArgs(model="/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/",
                              enable_lora=True,
                              max_loras=2,
                              max_lora_rank=8,

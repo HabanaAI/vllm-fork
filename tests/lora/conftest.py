@@ -274,10 +274,10 @@ def llama_2_7b_engine_extra_embeddings():
     if current_platform.is_hpu():
         with patch("vllm.worker.hpu_model_runner.get_model",
                    get_model_patched):
-            engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
+            engine = vllm.LLM("/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/", enable_lora=False)
     else:
         with patch("vllm.worker.model_runner.get_model", get_model_patched):
-            engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
+            engine = vllm.LLM("/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/", enable_lora=False)
 
     yield engine.llm_engine
     del engine

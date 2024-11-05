@@ -10,7 +10,7 @@ from ...utils import check_logprobs_close
 
 MODELS = [
     "mistralai/Mistral-7B-Instruct-v0.1",
-    "mistralai/Mistral-7B-Instruct-v0.3",
+    "/mnt/weka/data/pytorch/mistral/Mistral-7B-Instruct-v0.3",
     # Mistral-Nemo is to big for CI, but passes locally
     # "mistralai/Mistral-Nemo-Instruct-2407"
 ]
