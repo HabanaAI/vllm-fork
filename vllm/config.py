@@ -940,9 +940,6 @@ class SchedulerConfig:
             a single iteration.
         max_num_seqs: Maximum number of sequences to be processed in a single
             iteration.
-        max_num_prefill_seqs: Maximum number of prefill sequences to be
-             processed in a single iteration. Used only with padding-aware 
-             scheduling.
         max_model_len: Maximum length of a sequence (including prompt
             and generated text).
         use_v2_block_manager: Whether to use the BlockSpaceManagerV2 or not.
@@ -966,6 +963,9 @@ class SchedulerConfig:
             when SPMD worker architecture is enabled. I.e.,
             VLLM_USE_RAY_SPMD_WORKER=1
         policy: The scheduling policy to use. "fcfs" (default) or "priority".
+        max_num_prefill_seqs: Maximum number of prefill sequences to be
+             processed in a single iteration. Used only with padding-aware 
+             scheduling.
         use_padding_aware_scheduling: If True, scheduler will consider padded
             tokens in prefill.
     """
