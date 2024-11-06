@@ -389,7 +389,8 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
-    ) -> Tuple["SamplingTensors", bool, bool, bool, Optional[int]]:
+    ) -> Tuple["SamplingTensors", bool, bool, bool, Optional[int],
+               Optional[float]]:
         prompt_tokens: List[array] = []
         output_tokens: List[array] = []
         top_ks: List[int] = []
@@ -478,6 +479,8 @@ class SamplingTensors:
 
         top_k_scalar = top_ks[0] if do_top_p_top_k and all(
             k == top_ks[0] for k in top_ks) else None
+        top_p_scalar = top_ps[0] if do_top_p_top_k and all(
+            p == top_ps[0] for p in top_ps) else None
 
         sampling_tensors = SamplingTensors.from_lists(
             temperatures,
@@ -494,7 +497,7 @@ class SamplingTensors:
             dtype,
         )
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
-                top_k_scalar)
+                top_k_scalar, top_p_scalar)
 
     @classmethod
     def from_lists(

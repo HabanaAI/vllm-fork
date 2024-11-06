@@ -197,7 +197,7 @@ class Sampler(nn.Module):
 
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
-         top_k_scalar) = SamplingTensors.from_sampling_metadata(
+         top_k_scalar, top_p_scalar) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         self._sampling_tensors = sampling_tensors
@@ -205,6 +205,7 @@ class Sampler(nn.Module):
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
         self._top_k_scalar = top_k_scalar
+        self._top_p_scalar = top_p_scalar
 
         self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
 
@@ -266,10 +267,10 @@ class Sampler(nn.Module):
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k and flashinfer_top_k_top_p_sampling is None:
-            # If we have a scalar k, we can use the optimized version.
-            if self._top_k_scalar is not None:
+            # If we have a scalar p and k, we can use the optimized version.
+            if self._top_k_scalar and self._top_p_scalar:
                 logits = self._apply_top_k_top_p_opt(logits,
-                                                     sampling_tensors.top_ps,
+                                                     self._top_p_scalar,
                                                      self._top_k_scalar)
             else:
                 logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
@@ -394,7 +395,7 @@ class ApplyToppTopkScalar:
     def __init__(self, increment: int):
         self._increment = increment
 
-    def __call__(self, logits: torch.Tensor, p: torch.Tensor, k: int):
+    def __call__(self, logits: torch.Tensor, p: float, k: int):
         if k > ApplyToppTopkScalar._padded_k:
             ApplyToppTopkScalar._padded_k = min(k + self._increment,
                                                 logits.shape[1])
@@ -447,7 +448,7 @@ class ApplyToppTopkScalar:
 
         probs_sort = vals.softmax(dim=-1)
         probs_sum = probs_sort.cumsum(dim=-1)
-        top_p_mask = probs_sum <= (1 - p.unsqueeze(dim=1))
+        top_p_mask = probs_sum <= (1 - p)
         top_p_mask[:, -1] = False
         vals.masked_fill_(top_p_mask, -float("inf"))
 
