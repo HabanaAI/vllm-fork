@@ -1,24 +1,23 @@
-from vllm.config import DeviceConfig
+from vllm.platforms import current_platform
 
 
 def init_worker(*args, **kwargs):
-    device_config: DeviceConfig = kwargs.get("device_config")
-    if device_config.device_type == 'neuron':
+    if current_platform.is_neuron():
         from vllm.worker.neuron_worker import NeuronWorker
         return NeuronWorker(*args, **kwargs)
-    elif device_config.device_type == 'tpu':
+    elif current_platform.is_tpu():
         from vllm.worker.tpu_worker import TPUWorker
         return TPUWorker(*args, **kwargs)
-    elif device_config.device_type == 'cpu':
+    elif current_platform.is_cpu():
         from vllm.worker.cpu_worker import CPUWorker
         return CPUWorker(*args, **kwargs)
-    elif device_config.device_type == 'hpu':
+    elif current_platform.is_hpu():
         from vllm.worker.hpu_worker import HPUWorker
         return HPUWorker(*args, **kwargs)
-    elif device_config.device_type == 'openvino':
+    elif current_platform.is_openvino():
         from vllm.worker.openvino_worker import OpenVINOWorker
         return OpenVINOWorker(*args, **kwargs)
-    elif device_config.device_type == 'xpu':
+    elif current_platform.is_xpu():
         from vllm.worker.xpu_worker import XPUWorker
         return XPUWorker(*args, **kwargs)
     else:

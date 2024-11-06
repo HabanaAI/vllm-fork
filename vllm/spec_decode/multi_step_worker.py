@@ -13,19 +13,18 @@ from vllm.spec_decode.interfaces import (SpeculativeProposals,
                                          SpeculativeProposer)
 from vllm.spec_decode.proposer_worker_base import ProposerWorkerBase
 from vllm.spec_decode.top1_proposer import Top1Proposer
-from vllm.utils import is_neuron, is_openvino, is_xpu
 
-if is_neuron():
+if current_platform.is_neuron():
     from vllm.worker.neuron_worker import NeuronWorker as WorkerBaseCls
 elif current_platform.is_hpu():
     from vllm.worker.hpu_worker import HPUWorker as WorkerBaseCls
-elif is_openvino:
+elif current_platform.is_openvino:
     from vllm.worker.openvino_worker import OpenVINOWorker as WorkerBaseCls
 elif current_platform.is_cpu():
     from vllm.worker.cpu_worker import CPUWorker as WorkerBaseCls
 elif current_platform.is_tpu():
     from vllm.worker.tpu_worker import TPUWorker as WorkerBaseCls
-elif is_xpu():
+elif current_platform.is_xpu():
     from vllm.worker.xpu_worker import XPUWorker as WorkerBaseCls
 else:
     from vllm.worker.worker import Worker as WorkerBaseCls

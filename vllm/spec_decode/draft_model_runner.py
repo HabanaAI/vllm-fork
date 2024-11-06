@@ -21,9 +21,6 @@ except (ModuleNotFoundError, ImportError, AssertionError) as err:
         "Draft model speculative decoding currently only supports"
         "CUDA and ROCm and HPU attention backend.") from err
 
-from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
-                         ModelConfig, ObservabilityConfig, ParallelConfig,
-                         PromptAdapterConfig, SchedulerConfig)
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalInputs
 from vllm.sequence import ExecuteModelRequest, IntermediateTensors
