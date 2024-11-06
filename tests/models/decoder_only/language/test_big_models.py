@@ -11,7 +11,7 @@ from vllm.platforms import current_platform
 from ...utils import check_outputs_equal
 
 MODELS = [
-    "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/",
+    "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf",
     # "mistralai/Mistral-7B-v0.1",  # Tested by test_mistral.py
     # "Deci/DeciLM-7b",  # Broken
     # "tiiuae/falcon-7b",  # Broken

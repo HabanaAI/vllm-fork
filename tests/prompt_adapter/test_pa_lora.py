@@ -4,7 +4,7 @@ from vllm import EngineArgs, LLMEngine, SamplingParams
 from vllm.lora.request import LoRARequest
 from vllm.prompt_adapter.request import PromptAdapterRequest
 
-MODEL_PATH = "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/"
+MODEL_PATH = "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf"
 pa_path = snapshot_download(repo_id="swapnilbp/llama_tweet_ptune")
 lora_path = snapshot_download(repo_id="yard1/llama-2-7b-sql-lora-test")
 

@@ -16,7 +16,7 @@ from ..utils import check_deprecated_block_manager_usage, multi_gpu_test
 
 MODELS = [
     "facebook/opt-125m",
-    "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/",
+    "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf",
 ]
 
 
@@ -84,7 +84,7 @@ def test_models_distributed(
     model: str,
     distributed_executor_backend: str,
 ) -> None:
-    if (model == "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/"
+    if (model == "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf"
             and distributed_executor_backend == "ray"):
         # test ray adag
         os.environ['VLLM_USE_RAY_SPMD_WORKER'] = "1"

@@ -14,8 +14,8 @@ from vllm.worker.worker import Worker
 def test_worker_apply_lora(sql_lora_files):
     worker = Worker(
         model_config=ModelConfig(
-            "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/",
-            "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/",
+            "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf",
+            "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf",
             tokenizer_mode="auto",
             trust_remote_code=False,
             seed=0,

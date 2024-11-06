@@ -46,7 +46,7 @@ def test_filter_subtensors():
 @pytest.fixture(scope="module")
 def llama_2_7b_files():
     with TemporaryDirectory() as cache_dir:
-        input_dir = snapshot_download("/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf/",
+        input_dir = snapshot_download("/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf",
                                       cache_dir=cache_dir,
                                       ignore_patterns="*.bin*")
         yield input_dir
