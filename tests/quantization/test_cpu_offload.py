@@ -12,10 +12,11 @@ from ..utils import compare_two_settings
                     reason="fp8 is not supported on this GPU type.")
 def test_cpu_offload_fp8():
     # Test quantization of an unquantized checkpoint
-    compare_two_settings("/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
-                         ["--quantization", "fp8"],
-                         ["--quantization", "fp8", "--cpu-offload-gb", "2"],
-                         max_wait_seconds=480)
+    compare_two_settings(
+        "/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B-Instruct",
+        ["--quantization", "fp8"],
+        ["--quantization", "fp8", "--cpu-offload-gb", "2"],
+        max_wait_seconds=480)
     # Test loading a quantized checkpoint
     compare_two_settings("neuralmagic/Meta-Llama-3-8B-Instruct-FP8", [],
                          ["--cpu-offload-gb", "2"],

@@ -84,7 +84,8 @@ def test_models(
         ("facebook/opt-125m", "ray", "", "A100"),
         ("facebook/opt-125m", "mp", "", "A100"),
         ("facebook/opt-125m", "mp", "FLASHINFER", "A100"),
-        ("/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B", "ray", "FLASHINFER", "A100"),
+        ("/mnt/weka/data/pytorch/llama3/Meta-Llama-3-8B", "ray", "FLASHINFER",
+         "A100"),
     ])
 def test_models_distributed(
     hf_runner,

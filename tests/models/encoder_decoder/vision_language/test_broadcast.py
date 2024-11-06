@@ -16,7 +16,8 @@ def test_models(hf_runner, vllm_runner, image_assets,
     num_logprobs = 5
     tensor_parallel_size = 2
 
-    if model.startswith("/mnt/weka/data/pytorch/llama3.2/Llama-3.2-11B-Vision-Instruct"):
+    if model.startswith(
+            "/mnt/weka/data/pytorch/llama3.2/Llama-3.2-11B-Vision-Instruct"):
         from .test_mllama import models, run_test
     else:
         raise NotImplementedError(f"Unsupported model: {model}")
