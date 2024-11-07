@@ -76,6 +76,7 @@ To build and install vLLM from source, run:
 
    $ git clone https://github.com/vllm-project/vllm.git
    $ cd vllm
+   $ pip install -r requirements-hpu.txt
    $ python setup.py develop
 
 
@@ -86,6 +87,7 @@ Currently, the latest features and performance optimizations are developed in Ga
    $ git clone https://github.com/HabanaAI/vllm-fork.git
    $ cd vllm-fork
    $ git checkout habana_main
+   $ pip install -r requirements-hpu.txt
    $ python setup.py develop
 
 
