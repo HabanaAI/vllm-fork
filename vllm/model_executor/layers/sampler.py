@@ -385,12 +385,12 @@ class ApplyToppTopkScalar:
     This is a class instead of a function, just to keep track of
     the monotonic non-decreasing state _padded_k
 
-    To disable the duplicates that are outside of kth border,
-    set VLLM_HANDLE_TOPK_DUPLICATES to false.
+    To enable the duplicates that are outside of kth border,
+    set VLLM_HANDLE_TOPK_DUPLICATES to 1 or true.
     """
     _padded_k = 0
     _handle_duplicates = os.getenv('VLLM_HANDLE_TOPK_DUPLICATES',
-                                   '1').lower() in ['1', 'true']
+                                   '0').lower() in ['1', 'true']
 
     def __init__(self, increment: int):
         self._increment = increment
