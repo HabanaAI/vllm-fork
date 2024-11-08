@@ -6,6 +6,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 QUANTIZATION_METHODS: List[str] = [
     "aqlm",
     "awq",
+    "awq_hpu",
     "deepspeedfp",
     "tpu_int8",
     "fp8",
