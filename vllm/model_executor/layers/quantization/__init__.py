@@ -17,7 +17,6 @@ from vllm.model_executor.layers.quantization.fbgemm_fp8 import FBGEMMFp8Config
 from vllm.model_executor.layers.quantization.fp8 import Fp8Config
 from vllm.model_executor.layers.quantization.gguf import GGUFConfig
 from vllm.model_executor.layers.quantization.gptq import GPTQConfig
-from vllm.model_executor.layers.quantization.gptq_hpu import GPTQHPUConfig
 from vllm.model_executor.layers.quantization.gptq_marlin import (
     GPTQMarlinConfig)
 from vllm.model_executor.layers.quantization.gptq_marlin_24 import (
@@ -30,6 +29,10 @@ from vllm.model_executor.layers.quantization.neuron_quant import (
     NeuronQuantConfig)
 from vllm.model_executor.layers.quantization.qqq import QQQConfig
 from vllm.model_executor.layers.quantization.tpu_int8 import Int8TpuConfig
+from vllm.platforms import current_platform
+if current_platform.is_hpu():
+    from vllm_hpu_extension.gptq_hpu import GPTQHPUConfig
+
 
 QUANTIZATION_METHODS: Dict[str, Type[QuantizationConfig]] = {
     "aqlm": AQLMConfig,
