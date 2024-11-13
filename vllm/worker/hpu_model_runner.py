@@ -22,7 +22,7 @@ import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 from vllm_hpu_extension.ops import LoraMask as LoraMask
-from vllm_hpu_extension.ops import block2batch, batch2block
+from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 
@@ -360,8 +360,8 @@ class HpuModelAdapter():
                                                         num_classes=batch_size)
         else:
             # Unfortunately one_hot on CPU/torch.compile mode/eager mode
-            # doesn't handle out of bounds classes,
-            # so we convert all negative values to 0 (block_mapping) or bs (block_groups)
+            # doesn't handle out of bounds classes so we need to convert
+            # all negative values to 0 (block_mapping) or bs (block_groups)
             block_groups = metadata.block_groups.to(torch.long)
             block_mapping = torch.nn.functional.relu(block_groups)
             block_mapping = torch.nn.functional.one_hot(block_mapping,
@@ -1135,6 +1135,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = find_bucket(
                 max(block_list) + 1,
                 self.bucketing_global_state.decode_block_bucket_cfg)
+            indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
                 indices[bid] = i
