@@ -1127,7 +1127,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
 
-        pad_fn = None
+        padding_fn = None
         if self.use_contiguous_pa:
             block_bucket_size = find_bucket(
                 max(block_list) + 1,
@@ -1144,9 +1144,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
-        block_list = pad_fn(block_list, _PAD_BLOCK_ID)
-        block_groups = pad_fn(block_groups, -1)
-        block_usage = pad_fn(block_usage, 1)
+        block_list = padding_fn(block_list, _PAD_BLOCK_ID)
+        block_groups = padding_fn(block_groups, -1)
+        block_usage = padding_fn(block_usage, 1)
 
         block_list = torch.tensor(block_list,
                                   dtype=torch.int,
