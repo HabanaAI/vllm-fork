@@ -361,12 +361,15 @@ class HpuModelAdapter():
         else:
             # Unfortunately one_hot on CPU/torch.compile mode/eager mode
             # doesn't handle out of bounds classes,
-            # so we convert all negative values to 0.
-            block_mapping = torch.nn.functional.relu(metadata.block_groups)
+            # so we convert all negative values to 0 (block_mapping) or bs (block_groups)
+            block_groups = metadata.block_groups.to(torch.long)
+            block_mapping = torch.nn.functional.relu(block_groups)
             block_mapping = torch.nn.functional.one_hot(block_mapping,
                                                         num_classes=batch_size)
-            oob_values = metadata.block_groups.lt(0)
+            oob_values = block_groups.lt(0)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
+            block_groups.masked_fill_(oob_values, batch_size)
+            metadata = metadata._replace(block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
         metadata = metadata._replace(block_mapping=block_mapping,
                                      attn_bias=attn_bias)
