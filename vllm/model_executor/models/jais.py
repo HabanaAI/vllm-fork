@@ -19,7 +19,8 @@
 """Inference-only Jais model compatible with HuggingFace weights."""
 
 import math
-from typing import Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Iterable, List, Optional, Set, Tuple, Union
+
 
 import torch
 from torch import nn
@@ -76,6 +77,7 @@ class JAISAttention(nn.Module):
         config: JAISConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        prev_attn: Optional[Any] = None,
     ):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -114,7 +116,11 @@ class JAISAttention(nn.Module):
                               scale=self.scale,
                               alibi_slopes=alibi_slopes,
                               cache_config=cache_config,
-                              quant_config=quant_config)
+                              quant_config=quant_config,
+                              logits_soft_cap=config.max_position_embeddings,
+                              tp_rank=tp_rank,
+                              prev_attn=None if prev_attn is None else prev_attn.attn,
+                            )
 
     def forward(
         self,
@@ -178,6 +184,7 @@ class JAISBlock(nn.Module):
         config: JAISConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        prev_layer: Optional[Any] = None,
     ):
         super().__init__()
         hidden_size = config.hidden_size
@@ -185,7 +192,9 @@ class JAISBlock(nn.Module):
                      hidden_size)
 
         self.ln_1 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-        self.attn = JAISAttention(config, cache_config, quant_config)
+        self.attn = JAISAttention(config, cache_config, quant_config,
+                                  prev_attn=None if prev_layer is None else prev_layer.self_attn,
+                                 )
         self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         self.mlp = JAISMLP(inner_dim, config, quant_config)
 
@@ -239,10 +248,13 @@ class JAISModel(nn.Module):
 
         self.start_layer, self.end_layer, self.h = make_layers(
             config.num_hidden_layers,
-            lambda prefix: JAISBlock(config=config,
-                                     cache_config=cache_config,
-                                     quant_config=quant_config),
+            lambda prefix, prev_layer: JAISBlock(config=config,
+                                                 cache_config=cache_config,
+                                                 quant_config=quant_config,
+                                                 prev_layer=prev_layer,
+                                                ),
             prefix=f"{prefix}.h",
+            use_layer_sharing=True,
         )
 
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
@@ -297,6 +309,7 @@ class JAISLMHeadModel(nn.Module, SupportsPP):
         quant_config = vllm_config.quant_config
         self.config = config
         self.quant_config = quant_config
+        self.use_alibi = config.position_embedding_type == "alibi"
         self.transformer = JAISModel(vllm_config=vllm_config,
                                      prefix=maybe_prefix(
                                          prefix, "transformer"))

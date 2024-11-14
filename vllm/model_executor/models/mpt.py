@@ -1,6 +1,6 @@
 # Adapted from https://huggingface.co/mosaicml/mpt-7b/tree/main
 import math
-from typing import Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -50,6 +50,7 @@ class MPTAttention(nn.Module):
         config: MPTConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        prev_attn: Optional[Any] = None,
     ):
         super().__init__()
         self.d_model = config.d_model
@@ -58,6 +59,7 @@ class MPTAttention(nn.Module):
         self.clip_qkv = config.attn_config["clip_qkv"]
         self.qk_ln = config.attn_config["qk_ln"]
         self.alibi_bias_max = config.attn_config["alibi_bias_max"]
+        self.max_seq_len = config.max_seq_len
         if "kv_n_heads" in config.attn_config:
             self.total_num_kv_heads = config.attn_config['kv_n_heads']
         else:
@@ -115,7 +117,11 @@ class MPTAttention(nn.Module):
                               alibi_slopes=alibi_slopes,
                               num_kv_heads=self.num_kv_heads,
                               cache_config=cache_config,
-                              quant_config=quant_config)
+                              quant_config=quant_config,
+                              logits_soft_cap=self.max_seq_len,
+                              tp_rank=tp_rank,
+                              prev_attn=None if prev_attn is None else prev_attn.attn,
+                            )
 
     def forward(
         self,
@@ -176,11 +182,12 @@ class MPTBlock(nn.Module):
         config: MPTConfig,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        prev_layer: Optional[Any] = None
     ):
         super().__init__()
         hidden_size = config.d_model
         self.norm_1 = nn.LayerNorm(hidden_size)
-        self.attn = MPTAttention(config, cache_config, quant_config)
+        self.attn = MPTAttention(config, cache_config, quant_config, prev_attn=None if prev_layer is None else prev_layer.attn)
         self.norm_2 = nn.LayerNorm(hidden_size)
         self.ffn = MPTMLP(config, quant_config)
 
@@ -224,8 +231,10 @@ class MPTModel(nn.Module):
         )
         self.start_layer, self.end_layer, self.blocks = make_layers(
             config.n_layers,
-            lambda prefix: MPTBlock(config, cache_config, quant_config),
-            prefix=f"{prefix}.blocks")
+            lambda prefix, prev_layer: MPTBlock(config, cache_config, quant_config, prev_layer),
+            prefix=f"{prefix}.blocks",
+            use_layer_sharing=True,
+        )
         self.norm_f = nn.LayerNorm(config.d_model)
         if config.no_bias:
             for module in self.modules():
@@ -281,7 +290,7 @@ class MPTForCausalLM(nn.Module, SupportsPP):
         self.config = config
         assert config.tie_word_embeddings
         self.quant_config = quant_config
-
+        self.use_alibi = config.attn_config['alibi']
         self.transformer = MPTModel(vllm_config=vllm_config,
                                     prefix=maybe_prefix(prefix, "transformer"))
         self.lm_head = self.transformer.wte
