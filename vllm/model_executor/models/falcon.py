@@ -85,6 +85,7 @@ class FalconAttention(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
+        prev_attn: Optional[nn.Module] = None,
     ):
         super().__init__()
 
@@ -155,12 +156,15 @@ class FalconAttention(nn.Module):
                 max_position=max_position_embeddings,
                 base=rope_theta,
             )
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  self.inv_norm_factor,
-                                  num_kv_heads=self.num_kv_heads,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                self.inv_norm_factor,
+                num_kv_heads=self.num_kv_heads,
+                quant_config=quant_config,
+                logits_soft_cap=max_position_embeddings,
+                prefix=f"{prefix}.attn",
+            )
         elif self.use_alibi:
             tp_rank = get_tensor_model_parallel_rank()
             head_start = tp_rank * self.num_heads
@@ -168,21 +172,28 @@ class FalconAttention(nn.Module):
             alibi_slopes = (_get_alibi_slopes(self.total_num_heads) *
                             self.inv_norm_factor)
             alibi_slopes = alibi_slopes[head_start:head_end].tolist()
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  self.inv_norm_factor,
-                                  num_kv_heads=self.num_kv_heads,
-                                  alibi_slopes=alibi_slopes,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            prev_attn = None if prev_attn is None else prev_attn.attn
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                self.inv_norm_factor,
+                num_kv_heads=self.num_kv_heads,
+                alibi_slopes=alibi_slopes,
+                quant_config=quant_config,
+                tp_rank=tp_rank,
+                prefix=f"{prefix}.attn",
+                prev_attn=prev_attn,
+            )
         else:
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  scale=self.inv_norm_factor,
-                                  num_kv_heads=self.num_kv_heads,
-                                  cache_config=cache_config,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                scale=self.inv_norm_factor,
+                num_kv_heads=self.num_kv_heads,
+                cache_config=cache_config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.attn",
+            )
 
     def forward(
         self,
@@ -246,15 +257,19 @@ class FalconDecoderLayer(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
+        prev_layer: Optional[nn.Module] = None,
     ):
         super().__init__()
         hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
+        prev_attn = None if prev_layer is None else prev_layer.self_attention
         self.self_attention = FalconAttention(
             config,
             cache_config,
             quant_config,
-            prefix=f"{prefix}.self_attention")
+            prefix=f"{prefix}.self_attention",
+            prev_attn=prev_attn,
+        )
         self.mlp = FalconMLP(config, quant_config)
         self.config = config
 
@@ -354,7 +369,6 @@ class FalconModel(nn.Module):
         self.config = config
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
-        self.use_alibi = config.alibi
 
         # Embedding + LN Embedding
         self.word_embeddings = VocabParallelEmbedding(
@@ -365,9 +379,16 @@ class FalconModel(nn.Module):
         # Transformer blocks
         self.start_layer, self.end_layer, self.h = make_layers(
             config.num_hidden_layers,
-            lambda prefix: FalconDecoderLayer(
-                config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.h")
+            lambda prefix, prev_layer: FalconDecoderLayer(
+                config,
+                cache_config,
+                quant_config,
+                prefix=prefix,
+                prev_layer=prev_layer,
+            ),
+            prefix=f"{prefix}.h",
+            use_layer_sharing=True,
+        )
 
         # Final Layer Norm
         self.ln_f = LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
@@ -419,6 +440,7 @@ class FalconForCausalLM(nn.Module, SupportsPP):
         quant_config = vllm_config.quant_config
         self.config = config
         self.quant_config = quant_config
+        self.use_alibi = config.alibi
         self.transformer = FalconModel(vllm_config=vllm_config,
                                        prefix=maybe_prefix(
                                            prefix, "transformer"))

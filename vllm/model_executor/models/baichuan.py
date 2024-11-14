@@ -117,6 +117,7 @@ class BaiChuanAttention(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
+        prev_attn: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -127,7 +128,7 @@ class BaiChuanAttention(nn.Module):
         self.num_heads = (self.total_num_heads //
                           tensor_model_parallel_world_size)
         self.head_dim = hidden_size // self.total_num_heads
-        self.postion_embedding = position_embedding
+        self.position_embedding = position_embedding
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
@@ -147,20 +148,26 @@ class BaiChuanAttention(nn.Module):
             quant_config=quant_config,
         )
         # Create the alibi slopes and slice them.
-        if self.postion_embedding == "ALIBI":
+        if self.position_embedding == "ALIBI":
             tp_rank = get_tensor_model_parallel_rank()
             head_start = tp_rank * self.num_heads
             head_end = (tp_rank + 1) * self.num_heads
             alibi_slopes = _get_alibi_slopes(self.total_num_heads)
             alibi_slopes = alibi_slopes[head_start:head_end].tolist()
+            prev_attn = None if prev_attn is None else prev_attn.attn
 
             scaling = self.head_dim**-0.5
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  scaling,
-                                  alibi_slopes=alibi_slopes,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                scaling,
+                alibi_slopes=alibi_slopes,
+                quant_config=quant_config,
+                logits_soft_cap=self.max_position_embeddings,
+                tp_rank=tp_rank,
+                prefix=f"{prefix}.attn",
+                prev_attn=prev_attn,
+            )
         else:
             self.rotary_emb = get_rope(
                 self.head_dim,
@@ -169,12 +176,14 @@ class BaiChuanAttention(nn.Module):
                 base=self.rope_theta,
             )
             self.scaling = self.head_dim**-0.5
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  self.scaling,
-                                  cache_config=cache_config,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                self.scaling,
+                cache_config=cache_config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.attn",
+            )
 
     def forward(
         self,
@@ -185,7 +194,7 @@ class BaiChuanAttention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.W_pack(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
-        if self.postion_embedding != "ALIBI":
+        if self.position_embedding != "ALIBI":
             q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
@@ -194,17 +203,21 @@ class BaiChuanAttention(nn.Module):
 
 class BaiChuanDecoderLayer(nn.Module):
 
-    def __init__(self,
-                 config: PretrainedConfig,
-                 position_embedding: str,
-                 cache_config: Optional[CacheConfig] = None,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+    def __init__(
+        self,
+        config: PretrainedConfig,
+        position_embedding: str,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+        prev_layer: Optional[nn.Module] = None,
+    ):
         super().__init__()
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
+        prev_attn = None if prev_layer is None else prev_layer.self_attn
         self.self_attn = BaiChuanAttention(
             hidden_size=self.hidden_size,
             num_heads=config.num_attention_heads,
@@ -214,6 +227,7 @@ class BaiChuanDecoderLayer(nn.Module):
             cache_config=cache_config,
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
+            prev_attn=prev_attn,
         )
         self.mlp = BaiChuanMLP(
             hidden_size=self.hidden_size,
@@ -280,12 +294,16 @@ class BaiChuanModel(nn.Module):
         )
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            lambda prefix: BaiChuanDecoderLayer(config,
-                                                position_embedding,
-                                                cache_config,
-                                                quant_config,
-                                                prefix=prefix),
+            lambda prefix, prev_layer: BaiChuanDecoderLayer(
+                config,
+                position_embedding,
+                cache_config,
+                quant_config,
+                prefix=prefix,
+                prev_layer=prev_layer,
+            ),
             prefix=f"{prefix}.layers",
+            use_layer_sharing=True,
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.make_empty_intermediate_tensors = (
@@ -372,6 +390,7 @@ class BaiChuanBaseForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self.lora_config = lora_config
 
         self.quant_config = quant_config
+        self.use_alibi = position_embedding == "ALIBI"
         self.model = BaiChuanModel(vllm_config=vllm_config,
                                    prefix=prefix,
                                    position_embedding=position_embedding)

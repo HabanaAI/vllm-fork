@@ -390,6 +390,7 @@ class TorchSDPABackendImpl(AttentionImpl[TorchSDPAMetadata]):
         kv_cache_dtype: str,
         blocksparse_params: Optional[Dict[str, Any]] = None,
         logits_soft_cap: Optional[float] = None,
+        **kwargs,
     ) -> None:
         if blocksparse_params is not None:
             raise ValueError(

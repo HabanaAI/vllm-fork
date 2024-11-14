@@ -736,6 +736,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
 
+            self.use_alibi = hasattr(self.model,
+                                     "use_alibi") and self.model.use_alibi
             hidden_layer_markstep_interval = int(
                 os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
             model_config = getattr(self.model, "config", None)
@@ -978,10 +980,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_list=prefix_block_list_tensor,
             block_mapping=None,
             block_usage=None,
+            # Set by later "precompute_indices_and_offsets" function call
             block_indices=None,
+            # Set by later "precompute_indices_and_offsets" function call
             block_offsets=None,
+            # Set by later "_set_block_scales" function call
             block_scales=None,
             block_groups=None,
+            # Set by later "_set_attn_bias" function call
             attn_bias=None,
             seq_lens=seq_lens,
             seq_lens_tensor=seq_lens_tensor,
@@ -990,8 +996,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=num_prefill_tokens,
             num_decode_tokens=0,
             slot_mapping=slot_mapping,
-            multi_modal_placeholder_index_maps=
-            None  # FIXME(kzawora): mutli-modality will not work here
+            alibi_blocks=None,
+            # FIXME(kzawora): mutli-modality will not work here
+            multi_modal_placeholder_index_maps=None,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         for t in multi_modal_kwargs:
@@ -1130,6 +1137,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
 
+        alibi_blocks = None
+        if self.use_alibi:
+            alibi_blocks = self._compute_alibi_block(block_tables, seq_lens,
+                                                     len(block_groups))
+            alibi_blocks = alibi_blocks.to(  # type: ignore
+                self.device, non_blocking=True)
+
         block_list = torch.tensor(block_list, dtype=torch.int, device='cpu')
         block_groups = torch.tensor(block_groups,
                                     dtype=torch.int,
@@ -1157,12 +1171,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             block_list=block_list,
+            # Set by later "_set_block_mapping" function call
             block_mapping=None,
             block_usage=block_usage,
+            # Set by later "precompute_indices_and_offsets" function call
             block_indices=None,
+            # Set by later "precompute_indices_and_offsets" function call
             block_offsets=None,
+            # Set by later "_set_block_scales" function call
             block_scales=None,
             block_groups=block_groups,
+            # Set by later "_set_block_mapping" function call
             attn_bias=None,
             seq_lens_tensor=None,
             context_lens_tensor=None,
@@ -1170,7 +1189,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=0,
             num_decode_tokens=num_decode_tokens,
             slot_mapping=slot_mapping,
-            multi_modal_placeholder_index_maps=None)
+            alibi_blocks=alibi_blocks,
+            multi_modal_placeholder_index_maps=None,
+        )
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -1179,6 +1200,63 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_requests=lora_requests,
                                      slot_mapping=slot_mapping,
                                      lora_ids=lora_ids)
+
+    def _compute_alibi_block(self, block_tables, seq_lens, num_blocks):
+        """
+        Compute the ALiBi offsets for each block during decoding.
+
+        For each block in each sequence, this function assigns position-based
+        offsets according to ALiBi logic. It returns a tensor that captures
+        these offsets for all sequences and blocks, which is then used for
+        decode-time ALiBi bias creation.
+
+        Args:
+            block_tables:
+                A list of lists, where each inner list contains block indices
+                assigned to a particular sequence.
+            seq_lens:
+                A list of sequence lengths corresponding to each sequence.
+            num_blocks:
+                The total number of blocks across all sequences for which
+                ALiBi offsets need to be computed.
+
+        Returns:
+            A torch.Tensor of shape [num_blocks, block_size], containing ALiBi
+            offsets for each block.
+        """
+        # Create intermediary and output structures
+        max_block_table_len = max(
+            len(block_table) for block_table in block_tables)
+        alibi_offsets = torch.arange(-max_block_table_len * self.block_size +
+                                     1,
+                                     1,
+                                     dtype=torch.long,
+                                     device='cpu')
+        alibi_blocks = torch.zeros((num_blocks, self.block_size),
+                                   dtype=torch.long,
+                                   device='cpu')
+
+        # Assign biases per token
+        for batch_idx in range(len(block_tables)):
+            seq_len = seq_lens[batch_idx]
+            for seq_idx in range(len(block_tables[batch_idx])):
+                block_idx = block_tables[batch_idx][seq_idx]
+
+                # Calculate the number of valid positions in the current block
+                valid_length = seq_len - seq_idx * self.block_size
+                if valid_length > 0:
+                    current_block_length = min(valid_length, self.block_size)
+                    offset_end = current_block_length - valid_length
+                    if offset_end == 0:
+                        alibi_blocks[
+                            block_idx][:current_block_length] = alibi_offsets[
+                                -valid_length:]
+                    else:
+                        alibi_blocks[
+                            block_idx][:current_block_length] = alibi_offsets[
+                                -valid_length:offset_end]
+
+        return alibi_blocks
 
     def prepare_input_tensors(
         self,
@@ -1384,6 +1462,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_offsets',
             'block_scales',
             'block_groups',
+            'alibi_blocks',
         ])
         return attention_metadata
 
@@ -1392,18 +1471,31 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         seq_len,
                                         is_prompt,
                                         lora_request=None,
-                                        temperature=0):
+                                        temperature=0,
+                                        last_block_assigned=0):
         sampling_params = SamplingParams(temperature=temperature)
         num_blocks = math.ceil(seq_len / self.block_size)
-        seq_len = max(seq_len, 1)
+        # FIXME(Tanner):
+        # When num_scheduler_steps>1 an additional
+        # token gets appended to dummy groups at some point
+        # This causes an RTE during warmup. Hence, subtracting 1 from seq_len.
+        seq_len = max(seq_len - 1, 1)
+        block_tables: Optional[dict[Any, Any]] = None
         if is_prompt:
             input_len = seq_len
             output_len = 0
-            block_tables = None
         else:
             input_len = seq_len - 1
             output_len = 1
-            block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
+            # NOTE(Tanner):
+            # ALiBI biases fail if block_tables for
+            # dummy sequences are all zeros.
+            # By default "_PAD_BLOCK_ID" is "0" and this
+            # is not a realistic value for block tables.
+            block_tables = {group_id: []}
+            for block_idx in range(num_blocks):
+                last_block_assigned += 1
+                block_tables[group_id] += [last_block_assigned]
         prompt_token_ids = [0] * input_len
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
@@ -1477,18 +1569,31 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     temperature=temperature) for i in range(batch_size)
             ]
         else:
-            # FIXME: seq_len is actually number of blocks
-            blocks = [seq_len // batch_size for _ in range(batch_size)]
-            blocks[0] += seq_len % batch_size
-            seqs = [
-                self.create_dummy_seq_group_metadata(
-                    i,
-                    b * self.block_size - 1,
-                    is_prompt,
-                    lora_request=dummy_lora_requests_per_seq[i]
-                    if dummy_lora_requests_per_seq else None,
-                    temperature=temperature) for i, b in enumerate(blocks)
+            # NOTE(Tanner):
+            # seq_len is num blocks
+            # Here we assign as many blocks to each sequence as we can
+            blocks_per_seq = (seq_len - 1) // batch_size
+            extra_blocks = (seq_len - 1) % batch_size
+            blocks = [
+                blocks_per_seq + (1 if i < extra_blocks else 0)
+                for i in range(batch_size)
             ]
+            seqs = []
+            last_block_assigned = 0
+            for i, b in enumerate(blocks):
+                seqs += [
+                    self.create_dummy_seq_group_metadata(
+                        i,
+                        b * self.block_size,
+                        is_prompt,
+                        lora_request=dummy_lora_requests_per_seq[i]
+                        if dummy_lora_requests_per_seq else None,
+                        temperature=temperature,
+                        last_block_assigned=last_block_assigned,
+                    )
+                ]
+                if len(seqs[-1].block_tables[i]) > 0:
+                    last_block_assigned = seqs[-1].block_tables[i][-1]
         torch.hpu.synchronize()
         profiler = None
         if is_pt_profiler_run and self.is_driver_worker:
@@ -1955,7 +2060,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         This is a helper function to create the mask for lora computations.
         Lora Mask is needed to ensure we match the correct lora weights for the
         for the request.
-        For Prompt phase we have 
+        For Prompt phase we have
         lora_mask with shape (batch_size * seq_len, max_loras * max_rank)
         lora_logits_mask with shape (batch_size, max_loras * max_rank)
         For Decode phase we have both

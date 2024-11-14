@@ -79,6 +79,7 @@ class BloomAttention(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
+        prev_attn: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -110,15 +111,20 @@ class BloomAttention(nn.Module):
         head_end = (tp_rank + 1) * self.num_heads
         alibi_slopes = _get_alibi_slopes(self.total_num_heads)
         alibi_slopes = alibi_slopes[head_start:head_end].tolist()
+        prev_attn = None if prev_attn is None else prev_attn.attn
 
         scaling = self.head_dim**-0.5
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              scaling,
-                              alibi_slopes=alibi_slopes,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn")
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            scaling,
+            alibi_slopes=alibi_slopes,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            tp_rank=tp_rank,
+            prefix=f"{prefix}.attn",
+            prev_attn=prev_attn,
+        )
 
     def forward(
         self,
@@ -171,16 +177,21 @@ class BloomBlock(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
+        prev_layer: Optional[nn.Module] = None,
     ):
         super().__init__()
         hidden_size = config.hidden_size
+        prev_attn = None if prev_layer is None else prev_layer.self_attention
 
         self.input_layernorm = nn.LayerNorm(hidden_size,
                                             eps=config.layer_norm_epsilon)
-        self.self_attention = BloomAttention(config,
-                                             cache_config,
-                                             quant_config,
-                                             prefix=f"{prefix}.self_attention")
+        self.self_attention = BloomAttention(
+            config,
+            cache_config,
+            quant_config,
+            prefix=f"{prefix}.self_attention",
+            prev_attn=prev_attn,
+        )
         self.post_attention_layernorm = nn.LayerNorm(
             hidden_size, eps=config.layer_norm_epsilon)
         self.mlp = BloomMLP(config, quant_config)
@@ -247,9 +258,14 @@ class BloomModel(nn.Module):
         # Transformer blocks
         self.start_layer, self.end_layer, self.h = make_layers(
             config.num_hidden_layers,
-            lambda prefix: BloomBlock(
-                config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.h")
+            lambda prefix, prev_layer: BloomBlock(config,
+                                                  cache_config,
+                                                  quant_config,
+                                                  prefix=prefix,
+                                                  prev_layer=prev_layer),
+            prefix=f"{prefix}.h",
+            use_layer_sharing=True,
+        )
 
         # Final Layer Norm
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
@@ -299,6 +315,7 @@ class BloomForCausalLM(nn.Module, SupportsPP):
         quant_config = vllm_config.quant_config
         self.config = config
         self.quant_config = quant_config
+        self.use_alibi = True
         self.transformer = BloomModel(vllm_config=vllm_config,
                                       prefix=maybe_prefix(
                                           prefix, "transformer"))

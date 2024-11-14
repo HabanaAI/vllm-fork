@@ -51,6 +51,7 @@ class MPTAttention(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
+        prev_attn: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.d_model = config.d_model
@@ -59,6 +60,7 @@ class MPTAttention(nn.Module):
         self.clip_qkv = config.attn_config["clip_qkv"]
         self.qk_ln = config.attn_config["qk_ln"]
         self.alibi_bias_max = config.attn_config["alibi_bias_max"]
+        self.max_seq_len = config.max_seq_len
         if "kv_n_heads" in config.attn_config:
             self.total_num_kv_heads = config.attn_config['kv_n_heads']
         else:
@@ -107,17 +109,23 @@ class MPTAttention(nn.Module):
         alibi_slopes = _get_alibi_slopes(self.total_num_heads,
                                          self.alibi_bias_max)
         alibi_slopes = alibi_slopes[head_start:head_end].tolist()
+        prev_attn = None if prev_attn is None else prev_attn.attn
 
         self.head_dim = self.d_model // self.total_num_heads
         scaling = self.head_dim**-0.5
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              scaling,
-                              alibi_slopes=alibi_slopes,
-                              num_kv_heads=self.num_kv_heads,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn")
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            scaling,
+            alibi_slopes=alibi_slopes,
+            num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            logits_soft_cap=self.max_seq_len,
+            tp_rank=tp_rank,
+            prefix=f"{prefix}.attn",
+            prev_attn=prev_attn,
+        )
 
     def forward(
         self,
@@ -173,20 +181,23 @@ class MPTMLP(nn.Module):
 
 class MPTBlock(nn.Module):
 
-    def __init__(
-        self,
-        config: MPTConfig,
-        cache_config: Optional[CacheConfig] = None,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ):
+    def __init__(self,
+                 config: MPTConfig,
+                 cache_config: Optional[CacheConfig] = None,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = "",
+                 prev_layer: Optional[nn.Module] = None):
         super().__init__()
         hidden_size = config.d_model
         self.norm_1 = nn.LayerNorm(hidden_size)
-        self.attn = MPTAttention(config,
-                                 cache_config,
-                                 quant_config,
-                                 prefix=f"{prefix}.attn")
+        prev_attn = None if prev_layer is None else prev_layer.attn
+        self.attn = MPTAttention(
+            config,
+            cache_config,
+            quant_config,
+            prefix=f"{prefix}.attn",
+            prev_attn=prev_attn,
+        )
         self.norm_2 = nn.LayerNorm(hidden_size)
         self.ffn = MPTMLP(config, quant_config)
 
@@ -230,9 +241,14 @@ class MPTModel(nn.Module):
         )
         self.start_layer, self.end_layer, self.blocks = make_layers(
             config.n_layers,
-            lambda prefix: MPTBlock(
-                config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.blocks")
+            lambda prefix, prev_layer: MPTBlock(config,
+                                                cache_config,
+                                                quant_config,
+                                                prefix=prefix,
+                                                prev_layer=prev_layer),
+            prefix=f"{prefix}.blocks",
+            use_layer_sharing=True,
+        )
         self.norm_f = nn.LayerNorm(config.d_model)
         if config.no_bias:
             for module in self.modules():
@@ -288,7 +304,7 @@ class MPTForCausalLM(nn.Module, SupportsPP):
         self.config = config
         assert config.tie_word_embeddings
         self.quant_config = quant_config
-
+        self.use_alibi = config.attn_config['alibi']
         self.transformer = MPTModel(vllm_config=vllm_config,
                                     prefix=maybe_prefix(prefix, "transformer"))
         self.lm_head = self.transformer.wte
