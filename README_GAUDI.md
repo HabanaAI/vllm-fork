@@ -292,7 +292,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 
 Once you've completed the model calibration process and collected the measurements, you can run FP8 inference with vLLM using the following command:
 ```bash
-export QUANT_CONFIG=/path/to/quant/config/maxabs_measure_g3.json
+export QUANT_CONFIG=/path/to/quant/config/inc/meta-llama-3.1-405b-instruct/maxabs_measure_g3.json
 vllm serve meta-llama/Llama-3.1-405B-Instruct --quantization inc --kv-cache-dtype fp8_inc --weights-load-device cpu --tensor_paralel_size 8
 ```
 
