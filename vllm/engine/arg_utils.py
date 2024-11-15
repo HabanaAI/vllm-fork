@@ -14,6 +14,7 @@ from vllm.config import (CacheConfig, ConfigFormat, DecodingConfig,
                          PromptAdapterConfig, SchedulerConfig,
                          SpeculativeConfig, TaskOption, TokenizerPoolConfig,
                          VllmConfig)
+from vllm.core.scheduler import PaddingMethods
 from vllm.executor.executor_base import ExecutorBase
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
@@ -119,13 +120,14 @@ class EngineArgs:
     enable_prefix_caching: bool = False
     disable_sliding_window: bool = False
     use_v2_block_manager: bool = True
-    use_padding_aware_scheduling: bool = False
     swap_space: float = 4  # GiB
     cpu_offload_gb: float = 0  # GiB
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
+    use_padding_aware_scheduling: bool = False
     max_num_prefill_seqs: Optional[int] = None
+    scheduler_padding_method: Optional[str] = None
     max_logprobs: int = 20  # Default value for OpenAI Chat Completions API
     disable_log_stats: bool = False
     revision: Optional[str] = None
@@ -431,13 +433,6 @@ class EngineArgs:
                             'Setting this flag to True or False'
                             ' has no effect on vLLM behavior.')
         parser.add_argument(
-            '--use-padding-aware-scheduling',
-            default=EngineArgs.use_padding_aware_scheduling,
-            action='store_true',
-            help=('Use padding-aware scheduling. If True, the scheduler '
-                  'will consider padded tokens in prefill. '
-                  'By default this is set to False. '))
-        parser.add_argument(
             '--num-lookahead-slots',
             type=int,
             default=EngineArgs.num_lookahead_slots,
@@ -496,12 +491,31 @@ class EngineArgs:
                             default=EngineArgs.max_num_seqs,
                             help='Maximum number of sequences per iteration.')
         parser.add_argument(
+            '--use-padding-aware-scheduling',
+            default=EngineArgs.use_padding_aware_scheduling,
+            action='store_true',
+            help=('Use padding-aware scheduling. If True, the scheduler '
+                  'will consider padded tokens in prefill. '
+                  'By default this is set to False. '))
+        parser.add_argument(
             '--max-num-prefill-seqs',
             type=int,
             default=EngineArgs.max_num_prefill_seqs,
             help=('Maximum number of prefill sequences per '
                   'iteration. Can be used only with padding-aware '
-                  'scheduling. Must be <= max_num_seqs.'))
+                  'scheduling. Must be <= max_num_seqs. '
+                  'Defaults to max_num_seqs if padding-aware '
+                  'scheduling is enabled, is None otherwise.'))
+        parser.add_argument(
+            '--scheduler-padding-method',
+            type=int,
+            default=EngineArgs.scheduler_padding_method,
+            help=("Padding function for determining effective "
+                  "token budget in padding-aware scheduling. ",
+                  "Requires enabling padding-aware scheduling. "
+                  "Defaults to auto if padding-aware scheduling is "
+                  "enabled, is None otherwise."),
+            choices=PaddingMethods.valid_choices())
         parser.add_argument(
             '--max-logprobs',
             type=int,
@@ -1153,7 +1167,6 @@ class EngineArgs:
             task=model_config.task,
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
-            max_num_prefill_seqs=self.max_num_prefill_seqs,
             max_model_len=model_config.max_model_len,
             num_lookahead_slots=num_lookahead_slots,
             delay_factor=self.scheduler_delay_factor,
@@ -1165,7 +1178,9 @@ class EngineArgs:
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
                              and parallel_config.use_ray),
             policy=self.scheduling_policy,
-            use_padding_aware_scheduling=self.use_padding_aware_scheduling)
+            use_padding_aware_scheduling=self.use_padding_aware_scheduling,
+            max_num_prefill_seqs=self.max_num_prefill_seqs,
+            padding_method=self.scheduler_padding_method)
         lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,
             max_loras=self.max_loras,

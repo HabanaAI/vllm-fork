@@ -103,18 +103,41 @@ class SchedulingBudget:
         return self._num_curr_seqs
 
 
-@dataclass
-class PaddingAwareSchedulingBudget(SchedulingBudget):
-    max_num_prefill_seqs: Optional[int] = None
-    _prefill_request_ids_max_seq_lens: Dict[str,
-                                            int] = field(default_factory=dict)
-    _max_seq_len: int = 0
-    _num_curr_prefill_seqs: int = 0
+class PaddingMethods:
 
-    def _generic_padding_fn(self, batch_size, max_seq_len) -> int:
+    @staticmethod
+    def method_map():
+        return {
+            'generic': PaddingMethods._generic_padding,
+            'hpu': PaddingMethods._hpu_padding
+        }
+
+    @staticmethod
+    def valid_choices():
+        return ['auto', *PaddingMethods.method_map().keys()]
+
+    @staticmethod
+    def _auto_select_padding_method():
+        method_map = PaddingMethods.method_map()
+        if current_platform.is_hpu():
+            return method_map['hpu']
+        return method_map['generic']
+
+    @staticmethod
+    def select_padding_method(padding_method):
+        assert padding_method in PaddingMethods.valid_choices(
+        ), f"Padding method {padding_method} was not found"
+        method_map = PaddingMethods.method_map()
+        if padding_method == 'auto' or padding_method is None:
+            return PaddingMethods._auto_select_padding_method()
+        return method_map[padding_method]
+
+    @staticmethod
+    def _generic_padding(batch_size, max_seq_len) -> int:
         return batch_size * max_seq_len
 
-    def _hpu_padding_fn(self, batch_size, max_seq_len):
+    @staticmethod
+    def _hpu_padding(batch_size, max_seq_len):
         from vllm.worker.hpu_model_runner import (HPUBucketingGlobalState,
                                                   find_bucket)
         padded_bs = batch_size
@@ -136,10 +159,19 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
                            "Using unpadded sequence length.")
         return padded_bs * padded_seq
 
-    def _padding_fn_selector(self):
-        if current_platform.is_hpu():
-            return self._hpu_padding_fn
-        return self._generic_padding_fn
+
+@dataclass
+class PaddingAwareSchedulingBudget(SchedulingBudget):
+    max_num_prefill_seqs: Optional[int] = None
+    padding_method: Optional[str] = None
+    _prefill_request_ids_max_seq_lens: Dict[str,
+                                            int] = field(default_factory=dict)
+    _max_seq_len: int = 0
+    _num_curr_prefill_seqs: int = 0
+
+    def __post_init__(self):
+        self._padding_method = PaddingMethods.select_padding_method(
+            self.padding_method)
 
     def _maybe_update_max_seq_len(self,
                                   new_seq_max_seq_len: Optional[int] = None):
@@ -149,6 +181,9 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
             return
         self._max_seq_len = max(
             self._prefill_request_ids_max_seq_lens.values())
+        self._num_padded_batched_tokens = self._padding_method(
+            batch_size=self._num_curr_prefill_seqs,
+            max_seq_len=self._max_seq_len)
 
     def add_prefill_seqs(self, req_id, num_curr_prefill_seqs, max_seq_len):
         self._prefill_request_ids_max_seq_lens[req_id] = max_seq_len
@@ -162,6 +197,12 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
             if popped_seq_len == self._max_seq_len:
                 self._maybe_update_max_seq_len()
 
+    def subtract_num_batched_tokens(self, req_id: str,
+                                    num_batched_tokens: int):
+        if req_id in self._request_ids_num_batched_tokens:
+            self._request_ids_num_batched_tokens.remove(req_id)
+            self._num_batched_tokens -= num_batched_tokens
+
     def can_schedule(self,
                      *args,
                      num_new_tokens: int,
@@ -174,8 +215,8 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
             return can_parent_schedule
         new_batch_size = self._num_curr_prefill_seqs + num_new_seqs
         new_max_seq_len = max(max(self._max_seq_len, max_seq_len), 1)
-        padding_fn = self._padding_fn_selector()
-        num_new_padded_tokens = padding_fn(new_batch_size, new_max_seq_len)
+        num_new_padded_tokens = self._padding_method(new_batch_size,
+                                                     new_max_seq_len)
         result = num_new_padded_tokens <= self.token_budget
         if self.max_num_prefill_seqs is not None and result:
             result = self._num_curr_prefill_seqs + num_new_seqs \
@@ -189,6 +230,10 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
     @property
     def num_curr_prefill_seqs(self):
         return self._num_curr_prefill_seqs
+
+    @property
+    def num_padded_batched_tokens(self):
+        return self._num_padded_batched_tokens
 
 
 @dataclass
@@ -1097,8 +1142,9 @@ class Scheduler:
             budget = PaddingAwareSchedulingBudget(
                 token_budget=self.scheduler_config.max_num_batched_tokens,
                 max_num_seqs=self.scheduler_config.max_num_seqs,
-                max_num_prefill_seqs=self.scheduler_config.max_num_prefill_seqs
-            )
+                max_num_prefill_seqs=self.scheduler_config.
+                max_num_prefill_seqs,
+                padding_method=self.scheduler_config.padding_method)
         else:
             budget = SchedulingBudget(
                 token_budget=self.scheduler_config.max_num_batched_tokens,

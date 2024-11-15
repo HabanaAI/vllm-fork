@@ -1067,11 +1067,16 @@ class SchedulerConfig:
             when SPMD worker architecture is enabled. I.e.,
             VLLM_USE_RAY_SPMD_WORKER=1
         policy: The scheduling policy to use. "fcfs" (default) or "priority".
+        use_padding_aware_scheduling: If True, scheduler will consider padded
+            tokens in prefill. Defaults to False.
         max_num_prefill_seqs: Maximum number of prefill sequences to be
              processed in a single iteration. Used only with padding-aware 
-             scheduling.
-        use_padding_aware_scheduling: If True, scheduler will consider padded
-            tokens in prefill.
+             scheduling. Defaults to max_num_seqs if padding-aware scheduling 
+             is enabled, is None otherwise.
+        padding_method: Padding method for prefills used in padding-aware 
+            scheduling. Requires enabling padding-aware scheduling.
+            Defaults to 'auto' if padding-aware scheduling is enabled,
+            is None otherwise.
     """
 
     def __init__(self,
@@ -1088,8 +1093,9 @@ class SchedulerConfig:
                  multi_step_stream_outputs: bool = False,
                  send_delta_data: bool = False,
                  policy: str = "fcfs",
+                 use_padding_aware_scheduling: bool = False,
                  max_num_prefill_seqs: Optional[int] = None,
-                 use_padding_aware_scheduling=False) -> None:
+                 padding_method: Optional[str] = None) -> None:
         if max_num_batched_tokens is None:
             if enable_chunked_prefill:
                 if num_scheduler_steps > 1:
@@ -1127,9 +1133,13 @@ class SchedulerConfig:
                 "Chunked prefill is enabled with max_num_batched_tokens=%d.",
                 self.max_num_batched_tokens)
 
+        if use_padding_aware_scheduling:
+            max_num_prefill_seqs = max_num_prefill_seqs \
+                if max_num_prefill_seqs else max_num_seqs
+            padding_method = padding_method if padding_method else 'auto'
+
         self.task: Final = task
         self.max_num_seqs = max_num_seqs
-        self.max_num_prefill_seqs = max_num_prefill_seqs
         self.max_model_len = max_model_len
         self.num_lookahead_slots = num_lookahead_slots
         self.delay_factor = delay_factor
@@ -1140,6 +1150,8 @@ class SchedulerConfig:
         self.send_delta_data = send_delta_data
         self.policy = policy
         self.use_padding_aware_scheduling = use_padding_aware_scheduling
+        self.max_num_prefill_seqs = max_num_prefill_seqs
+        self.padding_method = padding_method
         self._verify_args()
 
     def _verify_args(self) -> None:
@@ -1170,6 +1182,14 @@ class SchedulerConfig:
                 "num_scheduler_steps "
                 f"({self.num_scheduler_steps}) must be greater than or "
                 "equal to 1.")
+        if self.max_num_prefill_seqs is not None \
+            and not self.use_padding_aware_scheduling:
+            raise ValueError("max_num_prefill_seqs can be only "
+                             "used with padding-aware-scheduling. ")
+        if self.padding_method is not None \
+            and not self.use_padding_aware_scheduling:
+            raise ValueError("padding_method can be only "
+                             "used with padding-aware-scheduling. ")
         if self.max_num_prefill_seqs is not None \
             and not self.use_padding_aware_scheduling:
             raise ValueError("max_num_prefill_seqs can be only "
