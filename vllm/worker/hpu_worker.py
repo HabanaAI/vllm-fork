@@ -71,6 +71,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 not in ["medusa", "mlp_speculator", "eagle"]) \
                     else {"return_hidden_states": True}
 
+        # use VLLM_CONTIGUOUS_PA=false for speculative decoding
+        # otherwise, result is faulty
+        if speculative_config is not None:
+            os.environ["VLLM_CONTIGUOUS_PA"] = "false"
+
         ModelRunnerClass: Type[HPUModelRunner] = HPUModelRunner
         if model_runner_cls is not None:
             ModelRunnerClass = model_runner_cls
