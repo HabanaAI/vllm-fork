@@ -346,9 +346,9 @@ class DefaultModelLoader(BaseModelLoader):
             if model_config.quantization is None and loaded_weights is not None:
                 weights_not_loaded = weights_to_load - loaded_weights
                 if weights_not_loaded:
-                    raise ValueError(
-                        "Following weights were not initialized from "
-                        f"checkpoint: {weights_not_loaded}")
+                    logger.warning(
+                        "Following weights were not initialized from ",
+                        "checkpoint:", weights_not_loaded)
 
             for _, module in model.named_modules():
                 quant_method = getattr(module, "quant_method", None)
