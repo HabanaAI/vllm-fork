@@ -765,12 +765,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
 
-            hidden_layer_markstep = int(
+            hidden_layer_markstep_interval = int(
                 os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
             hideen_layer_suffix = os.getenv('VLLM_CONFIG_HIDDEN_LAYERS_SUFFIX',
-                                            'DecodeLayer')
+                                            'DecoderLayer')
             modify_decoder_layer(self.model, hideen_layer_suffix,
-                                 hidden_layer_markstep)
+                                 hidden_layer_markstep_interval)
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
