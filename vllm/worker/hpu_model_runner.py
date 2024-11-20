@@ -277,19 +277,18 @@ def gather_list(input, indices, v):
 def flatten(in_list):
     return list(itertools.chain(*in_list))
 
-
-def modify_decoder_layer(module: torch.nn.Module, suffix="DecoderLayer"):
-    if module.__class__.__name__.endswith(suffix):
-
-        def forward_hook(module, args, output):
-            htorch.core.mark_step()
-            return output
-
-        module.register_forward_hook(forward_hook)
+def modify_decoder_layer(module: torch.nn.Module,  n=1, counter=[0], suffix="DecoderLayer"):
+    def forward_hook(module, args, output):
+        htorch.core.mark_step()
+        return output
 
     for child_name, child_module in module.named_children():
-        modify_decoder_layer(child_module)
-
+        if child_module.__class__.__name__.endswith(suffix):
+            counter[0] += 1
+            if counter[0] % n == 0:
+                child_module.register_forward_hook(forward_hook)
+        else:
+            modify_decoder_layer(child_module,  n, counter)
 
 class HpuModelAdapter:
 
@@ -756,7 +755,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             elif not is_fake_hpu():
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
-            modify_decoder_layer(self.model)
+            decoder_hidden_layers = int(
+                os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
+            modify_decoder_layer(self.model, decoder_hidden_layers)
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
