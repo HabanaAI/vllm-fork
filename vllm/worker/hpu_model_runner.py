@@ -277,10 +277,18 @@ def gather_list(input, indices, v):
 def flatten(in_list):
     return list(itertools.chain(*in_list))
 
-def modify_decoder_layer(module: torch.nn.Module,  n=1, counter=[0], suffix="DecoderLayer"):
+
+def modify_decoder_layer(module: torch.nn.Module,
+                         n=1,
+                         counter=None,
+                         suffix="DecoderLayer"):
+
     def forward_hook(module, args, output):
         htorch.core.mark_step()
         return output
+
+    if counter is None:
+        counter = [0]
 
     for child_name, child_module in module.named_children():
         if child_module.__class__.__name__.endswith(suffix):
@@ -288,7 +296,8 @@ def modify_decoder_layer(module: torch.nn.Module,  n=1, counter=[0], suffix="Dec
             if counter[0] % n == 0:
                 child_module.register_forward_hook(forward_hook)
         else:
-            modify_decoder_layer(child_module,  n, counter)
+            modify_decoder_layer(child_module, n, counter)
+
 
 class HpuModelAdapter:
 
