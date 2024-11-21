@@ -98,8 +98,10 @@ def align_workers(value, op):
 
 def setup_profiler():
     schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1)
-    activities = [torch.profiler.ProfilerActivity.CPU,
-                  torch.profiler.ProfilerActivity.HPU]
+    activities = [
+        torch.profiler.ProfilerActivity.CPU,
+        torch.profiler.ProfilerActivity.HPU
+    ]
     profiler = torch.profiler.profile(
         schedule=schedule,
         activities=activities,
@@ -1264,10 +1266,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
-        max_batch_size = self.bucketing_ctx.get_max_prompt_batch_size_from_config()
-        max_seq_len = min(
-            self.bucketing_ctx.get_max_prompt_seq_len_from_config(),
-            self.max_num_batched_tokens // max_batch_size)
+        max_batch_size, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
+        max_seq_len = min(max_seq_len,
+                          self.max_num_batched_tokens // max_batch_size)
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
