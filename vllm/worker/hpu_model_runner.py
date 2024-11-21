@@ -227,10 +227,11 @@ def round_up(value: int, k: int):
 
 
 def find_bucket(value: int, config: Tuple[int, int, int]):
-    bmin, bstep, _ = config
+    bmin, bstep, bmax = config
     next_step = round_up(value, bstep)
     next_pow = next_pow2(value, bmin)
-    return max(bmin, min(next_step, next_pow))
+    b = max(bmin, min(next_step, next_pow))
+    return min(b, bmax)
 
 
 def align_workers(value, op):
@@ -808,8 +809,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block',
             min=self.block_size,
             step=self.block_size,
-            max=max(self.block_size,
-                    self.max_num_seqs * max_decode_seq // self.block_size))
+            max=min(max(self.block_size,
+                        self.max_num_seqs * max_decode_seq // self.block_size),
+                    self.cache_config.num_gpu_blocks)
+            )
+
         self.graphed_buckets: Set[Any] = set()
 
         msg = ("Prompt bucket config (min, step, max_warmup) "
@@ -1154,8 +1158,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = find_bucket(
                 block_bucket_size,
                 self.bucketing_global_state.decode_block_bucket_cfg)
-            block_bucket_size = min(block_bucket_size,
-                                    self.cache_config.num_gpu_blocks)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -1166,8 +1168,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = find_bucket(
                 len(block_list),
                 self.bucketing_global_state.decode_block_bucket_cfg)
-            block_bucket_size = min(block_bucket_size,
-                                    self.cache_config.num_gpu_blocks)
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
