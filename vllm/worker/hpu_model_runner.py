@@ -1154,6 +1154,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = find_bucket(
                 block_bucket_size,
                 self.bucketing_global_state.decode_block_bucket_cfg)
+            block_bucket_size = min(block_bucket_size,
+                                    self.cache_config.num_gpu_blocks)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -2118,6 +2120,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
 
+            #print([sampling_metadata.seq_groups[seq].sampling_params.temperature for seq in range(len(sampling_metadata.seq_groups))])
+            #print(sampling_metadata.categorized_sample_indices)
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -2252,6 +2256,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 broadcast_tensor_dict({'early_exit': True},
                                                       src=0)
                                 if num_steps == 1:
+                                    print(output)
+                                    breakpoint()
                                     return [output]
                                 else:
                                     try_revert_dummy_output_tokens()
@@ -2295,6 +2301,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if model_input.is_prompt:
                         output.prefill_hidden_states = hidden_states
                     output.hidden_states = hidden_states
+                for i, out in enumerate(output):
+                    if out.samples[0].parent_seq_id == 1203:
+                        print(out)
+                        print(torch.topk(logits[i], 10))
                 return [output] if self.is_driver_worker else []
             else:
                 return []
