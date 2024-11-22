@@ -25,14 +25,14 @@ from typing_extensions import assert_never
 
 import vllm.envs as envs
 from vllm.config import ModelConfig
-from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.engine.multiprocessing.client import MQLLMEngineClient
-from vllm.engine.multiprocessing.engine import run_mp_engine
+from vllm.engine.mm_arg_utils import MMAsyncEngineArgs
+from vllm.engine.multiprocessing.mm_client import MMLLMEngineClient
+from vllm.engine.multiprocessing.mm_engine import run_mm_engine
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.chat_utils import load_chat_template
 from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.logger import RequestLogger
-from vllm.entrypoints.openai.cli_args import (make_arg_parser,
+from vllm.entrypoints.openai.cli_args import (make_mm_arg_parser,
                                               validate_parsed_serve_args)
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -109,7 +109,7 @@ async def build_async_engine_client(
 
     # Context manager to handle engine_client lifecycle
     # Ensures everything is shutdown and cleaned up on error/exit
-    engine_args = AsyncEngineArgs.from_cli_args(args)
+    engine_args = MMAsyncEngineArgs.from_cli_args(args)
 
     async with build_async_engine_client_from_engine_args(
             engine_args, args.disable_frontend_multiprocessing) as engine:
@@ -118,7 +118,7 @@ async def build_async_engine_client(
 
 @asynccontextmanager
 async def build_async_engine_client_from_engine_args(
-    engine_args: AsyncEngineArgs,
+    engine_args: MMAsyncEngineArgs,
     disable_frontend_multiprocessing: bool = False,
 ) -> AsyncIterator[EngineClient]:
     """
@@ -128,19 +128,19 @@ async def build_async_engine_client_from_engine_args(
 
     Returns the Client or None if the creation failed.
     """
-
     # Fall back
     # TODO: fill out feature matrix.
-    if (MQLLMEngineClient.is_unsupported_config(engine_args)
+    if (MMLLMEngineClient.is_unsupported_config(engine_args)
             or envs.VLLM_USE_V1 or disable_frontend_multiprocessing):
 
-        engine_config = engine_args.create_engine_config()
+        engine_configs = engine_args.create_engine_configs()
+        engine_config = engine_configs[0]
         uses_ray = getattr(AsyncLLMEngine._get_executor_cls(engine_config),
                            "uses_ray", False)
 
         build_engine = partial(AsyncLLMEngine.from_engine_args,
                                engine_args=engine_args,
-                               engine_config=engine_config,
+                               engine_config=engine_configs,
                                usage_context=UsageContext.OPENAI_API_SERVER)
         if uses_ray:
             # Must run in main thread with ray for its signal handlers to work
@@ -185,7 +185,7 @@ async def build_async_engine_client_from_engine_args(
         # not actually result in an exitcode being reported. As a result
         # we use a shared variable to communicate the information.
         engine_alive = multiprocessing.Value('b', True, lock=False)
-        engine_process = context.Process(target=run_mp_engine,
+        engine_process = context.Process(target=run_mm_engine,
                                          args=(engine_args,
                                                UsageContext.OPENAI_API_SERVER,
                                                ipc_path, engine_alive))
@@ -195,8 +195,8 @@ async def build_async_engine_client_from_engine_args(
         logger.info("Started engine process with PID %d", engine_pid)
 
         # Build RPCClient, which conforms to EngineClient Protocol.
-        engine_config = engine_args.create_engine_config()
-        build_client = partial(MQLLMEngineClient, ipc_path, engine_config,
+        engine_configs = engine_args.create_engine_configs()
+        build_client = partial(MMLLMEngineClient, ipc_path, engine_configs,
                                engine_pid)
         mq_engine_client = await asyncio.get_running_loop().run_in_executor(
             None, build_client)
@@ -514,8 +514,12 @@ def init_app_state(
 ) -> None:
     if args.served_model_name is not None:
         served_model_names = args.served_model_name
+        args.models = [args.model]
+    elif args.models is not None:
+        served_model_names = args.models
     else:
         served_model_names = [args.model]
+        args.models = [args.model]
 
     if args.disable_log_requests:
         request_logger = None
@@ -523,8 +527,8 @@ def init_app_state(
         request_logger = RequestLogger(max_log_len=args.max_log_len)
 
     base_model_paths = [
-        BaseModelPath(name=name, model_path=args.model)
-        for name in served_model_names
+        BaseModelPath(name=name, model_path=path)
+        for name, path in zip(served_model_names, args.models)
     ]
 
     state.engine_client = engine_client
@@ -643,7 +647,7 @@ if __name__ == "__main__":
     # This section should be in sync with vllm/scripts.py for CLI entrypoints.
     parser = FlexibleArgumentParser(
         description="vLLM OpenAI-Compatible RESTful API server.")
-    parser = make_arg_parser(parser)
+    parser = make_mm_arg_parser(parser)
     args = parser.parse_args()
     validate_parsed_serve_args(args)
 
