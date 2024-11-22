@@ -97,6 +97,7 @@ class HPUBucketingContext(metaclass=Singleton):
         self.block_size = block_size
         self.max_num_batched_tokens = max_num_batched_tokens
         self._setup_buckets()
+        self.num_hpu_blocks = None
 
     def _setup_buckets(self) -> None:
         align_bs = lambda x: min(self.max_num_seqs, x)
@@ -175,8 +176,10 @@ class HPUBucketingContext(metaclass=Singleton):
         return find_bucket(seq_len, self.global_state.prompt_seq_bucket_cfg)
 
     def get_padded_decode_num_blocks(self, num_blocks):
-        return find_bucket(num_blocks,
-                           self.global_state.decode_block_bucket_cfg)
+        assert (self.num_hpu_blocks is not None, "num_hpu_blocks is not set")
+        bucket_size = find_bucket(num_blocks,
+                                  self.global_state.decode_block_bucket_cfg)
+        return min(bucket_size, self.num_hpu_blocks)
 
     def get_padded_batch_size(self, batch_size, is_prompt):
         if is_prompt:
@@ -711,7 +714,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     Helper class for shared methods between GPU model runners.
     """
     _model_input_cls: Type[TModelInputForHPU]
-    bucketing_global_state: HPUBucketingGlobalState
 
     def __init__(
         self,
