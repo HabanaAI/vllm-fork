@@ -203,6 +203,9 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
+        self.model_runner.bucketing_global_state.decode_block_bucket_cfg[
+            -1] = num_hpu_blocks
+
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
 

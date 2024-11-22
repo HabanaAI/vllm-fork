@@ -809,10 +809,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block',
             min=self.block_size,
             step=self.block_size,
-            max=min(max(self.block_size,
-                        self.max_num_seqs * max_decode_seq // self.block_size),
-                    self.cache_config.num_gpu_blocks)
-            )
+            max=max(self.block_size,
+                    self.max_num_seqs * max_decode_seq // self.block_size))
 
         self.graphed_buckets: Set[Any] = set()
 
