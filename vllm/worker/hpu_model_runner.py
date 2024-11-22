@@ -278,6 +278,18 @@ def flatten(in_list):
     return list(itertools.chain(*in_list))
 
 
+def get_decoder_layer_suffix(model_type):
+    # This sets the suffix for the hidden layer name which is controlled by VLLM_CONFIG_HIDDEN_LAYERS.
+    # The default suffix is "DecoderLayer," which is applicable for most language models such as LLaMA, Qwen, and BART.
+    # If the model's decoder layer name differs from the default, it will need to be specified here.
+    # For example, for the GPT-BigCode model, this value should be set to "BigCodeBlock".
+    decoder_layer_table = {
+        "gpt_bigcode": "BigCodeBlock",
+    }
+
+    return decoder_layer_table.get(model_type, "DecoderLayer")
+
+
 def modify_decoder_layer(module: torch.nn.Module,
                          suffix="DecoderLayer",
                          n=1,
@@ -767,10 +779,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             hidden_layer_markstep_interval = int(
                 os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
-            hideen_layer_suffix = os.getenv('VLLM_CONFIG_HIDDEN_LAYERS_SUFFIX',
-                                            'DecoderLayer')
-            modify_decoder_layer(self.model, hideen_layer_suffix,
-                                 hidden_layer_markstep_interval)
+            modify_decoder_layer(
+                self.model,
+                get_decoder_layer_suffix(self.model.config.model_type),
+                hidden_layer_markstep_interval)
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
