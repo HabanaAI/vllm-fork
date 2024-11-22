@@ -31,6 +31,7 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed import broadcast_tensor_dict
+from vllm.distributed import get_pp_group
 from vllm.distributed.parallel_state import get_world_group
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
@@ -418,6 +419,9 @@ class HpuModelAdapter:
 
     def sample(self, *args, **kwargs):
         return self.model.sample(*args, **kwargs)
+
+    def make_empty_intermediate_tensors(self, *args, **kwargs):
+        return self.model.make_empty_intermediate_tensors(*args, **kwargs)
 
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
@@ -1670,7 +1674,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
-                self.execute_model(inputs, kv_caches, warmup_mode=True)
+                intermediate_tensors = None
+                if not get_pp_group().is_first_rank:
+                    intermediate_tensors = self.model.make_empty_intermediate_tensors(
+                        batch_size=batch_size,
+                        dtype=self.model_config.dtype,
+                        device=self.device)
+                self.execute_model(inputs, kv_caches, intermediate_tensors=intermediate_tensors, warmup_mode=True)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,

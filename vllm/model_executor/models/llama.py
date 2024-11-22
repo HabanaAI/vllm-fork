@@ -337,7 +337,7 @@ class LlamaModel(nn.Module):
 
         self.make_empty_intermediate_tensors = (
             make_empty_intermediate_tensors_factory(
-                ["hidden_states", "residual"], config.hidden_size))
+                ["hidden_states", "residual"], 128, config.hidden_size))
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
