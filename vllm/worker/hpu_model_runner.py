@@ -321,11 +321,10 @@ def round_up(value: int, k: int):
 
 
 def find_bucket(value: int, config: Tuple[int, int, int]):
-    bmin, bstep, bmax = config
+    bmin, bstep, _ = config
     next_step = round_up(value, bstep)
     next_pow = next_pow2(value, bmin)
-    b = max(bmin, min(next_step, next_pow))
-    return min(b, bmax)
+    return max(bmin, min(next_step, next_pow))
 
 
 def subtuple(obj: object,
