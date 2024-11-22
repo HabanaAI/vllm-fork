@@ -1225,6 +1225,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
 
+        if self.bucketing_ctx.num_hpu_blocks is None:
+            self.bucketing_ctx.num_hpu_blocks = self.cache_config.num_gpu_blocks
+
         padding_fn = None
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
