@@ -194,6 +194,7 @@ class EngineArgs:
     override_neuron_config: Optional[Dict[str, Any]] = None
     override_pooler_config: Optional[PoolerConfig] = None
     compilation_config: Optional[CompilationConfig] = None
+    worker_cls: str = "auto"
 
     def __post_init__(self):
         if not self.tokenizer:
@@ -911,6 +912,12 @@ class EngineArgs:
                             'compilers, using -O without space is also '
                             'supported. -O3 is equivalent to -O 3.')
 
+        parser.add_argument(
+            '--worker-cls',
+            type=str,
+            default="auto",
+            help='The worker class to use for distributed execution.')
+
         return parser
 
     @classmethod
@@ -1026,7 +1033,9 @@ class EngineArgs:
                 self.tokenizer_pool_extra_config,
             ),
             ray_workers_use_nsight=self.ray_workers_use_nsight,
-            distributed_executor_backend=self.distributed_executor_backend)
+            distributed_executor_backend=self.distributed_executor_backend,
+            worker_cls=self.worker_cls,
+        )
 
         max_model_len = model_config.max_model_len
         use_long_context = max_model_len > 32768
