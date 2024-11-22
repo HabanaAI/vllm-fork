@@ -176,7 +176,7 @@ class HPUBucketingContext(metaclass=Singleton):
         return find_bucket(seq_len, self.global_state.prompt_seq_bucket_cfg)
 
     def get_padded_decode_num_blocks(self, num_blocks):
-        assert (self.num_hpu_blocks is not None, "num_hpu_blocks is not set")
+        assert self.num_hpu_blocks is not None, "num_hpu_blocks is not set"
         bucket_size = find_bucket(num_blocks,
                                   self.global_state.decode_block_bucket_cfg)
         return min(bucket_size, self.num_hpu_blocks)
