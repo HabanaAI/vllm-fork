@@ -279,10 +279,11 @@ def flatten(in_list):
 
 
 def get_decoder_layer_suffix(model_type):
-    # This sets the suffix for the hidden layer name which is controlled by VLLM_CONFIG_HIDDEN_LAYERS.
-    # The default suffix is "DecoderLayer," which is applicable for most language models such as LLaMA, Qwen, and BART.
-    # If the model's decoder layer name differs from the default, it will need to be specified here.
-    # For example, for the GPT-BigCode model, this value should be set to "BigCodeBlock".
+    # This sets the suffix for the hidden layer name, which is controlled by
+    # VLLM_CONFIG_HIDDEN_LAYERS. The default suffix is "DecoderLayer," which is
+    # applicable for most language models such as LLaMA, Qwen, and BART. If the
+    # model's decoder layer name differs from the default, it will need to
+    # be specified here.
     decoder_layer_table = {
         "gpt_bigcode": "BigCodeBlock",
     }
