@@ -711,6 +711,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     Helper class for shared methods between GPU model runners.
     """
     _model_input_cls: Type[TModelInputForHPU]
+    bucketing_global_state: HPUBucketingGlobalState
 
     def __init__(
         self,
