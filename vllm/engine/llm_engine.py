@@ -255,7 +255,7 @@ class LLMEngine:
             "download_dir=%r, load_format=%s, tensor_parallel_size=%d, "
             "pipeline_parallel_size=%d, "
             "disable_custom_all_reduce=%s, quantization=%s, "
-            "enforce_eager=%s, kv_cache_dtype=%s, "
+            "weights_load_device=%s, enforce_eager=%s, kv_cache_dtype=%s, "
             "quantization_param_path=%s, device_config=%s, "
             "decoding_config=%r, observability_config=%r, "
             "seed=%d, served_model_name=%s, "
@@ -282,6 +282,7 @@ class LLMEngine:
             self.parallel_config.pipeline_parallel_size,
             self.parallel_config.disable_custom_all_reduce,
             self.model_config.quantization,
+            self.load_config.device,
             self.model_config.enforce_eager,
             self.cache_config.cache_dtype,
             self.model_config.quantization_param_path,
