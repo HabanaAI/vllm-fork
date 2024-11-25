@@ -26,6 +26,7 @@ class HPUExecutor(ExecutorBase):
     def _init_executor(self) -> None:
         """Initialize the worker and load the model."""
         self._init_worker()
+        self.shutdown_inc = True
 
     def _get_worker_kwargs(
             self,
@@ -80,9 +81,6 @@ class HPUExecutor(ExecutorBase):
             self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
         msg = f"init_cache_engine took {cache_init_m.get_summary_string()}"
         logger.info(msg)
-
-    def finish_measurements(self):
-        self.driver_worker.finish_measurements()
 
     def execute_model(
             self,
@@ -188,7 +186,10 @@ class HPUExecutor(ExecutorBase):
         self.driver_worker.stop_profile()
 
     def shutdown(self) -> None:
-        self.driver_worker.shutdown_inc()
+        if getattr(self, 'shutdown_inc', False):
+            if hasattr(self.driver_worker, 'shutdown_inc'):
+                self.driver_worker.shutdown_inc()
+            self.shutdown_inc = False
 
 
 class HPUExecutorAsync(HPUExecutor, ExecutorAsyncBase):
