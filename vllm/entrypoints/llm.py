@@ -52,6 +52,8 @@ from vllm.utils import Counter, Device, deprecate_kwargs, is_list_of
 if TYPE_CHECKING:
     from vllm.v1.metrics.reader import Metric
 
+from torch import profiler
+
 logger = init_logger(__name__)
 
 _R = TypeVar("_R", default=Any)
@@ -389,6 +391,7 @@ class LLM:
         guided_options_request: Optional[Union[LLMGuidedOptions,
                                                GuidedDecodingRequest]] = None,
         priority: Optional[list[int]] = None,
+        profiling : bool = False,
     ) -> list[RequestOutput]:
         """Generates the completions for the input prompts.
 
@@ -469,7 +472,7 @@ class LLM:
             priority=priority,
         )
 
-        outputs = self._run_engine(use_tqdm=use_tqdm)
+        outputs = self._run_engine(use_tqdm=use_tqdm, profiling=profiling)
         return self.engine_class.validate_outputs(outputs, RequestOutput)
 
     def collective_rpc(self,
@@ -1476,7 +1479,7 @@ class LLM:
         return params
 
     def _run_engine(
-            self, *, use_tqdm: bool
+            self, *, use_tqdm: bool, profiling : bool = False,
     ) -> list[Union[RequestOutput, PoolingRequestOutput]]:
         # Initialize tqdm.
         if use_tqdm:
@@ -1493,8 +1496,20 @@ class LLM:
         outputs: list[Union[RequestOutput, PoolingRequestOutput]] = []
         total_in_toks = 0
         total_out_toks = 0
+
+        if profiling == True:
+            print("=== Initializing profiler ====")
+            lprofiler = profiler.profile(
+                schedule=profiler.schedule(wait=0, warmup=1, active=4, repeat=1),
+                activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.HPU],
+                on_trace_ready=profiler.tensorboard_trace_handler('vllm_logs', use_gzip=True), with_stack=True, with_modules=False, record_shapes=False, profile_memory=False)
+            lprofiler.start()
+
+
         while self.llm_engine.has_unfinished_requests():
             step_outputs = self.llm_engine.step()
+            if profiling == True:
+                lprofiler.step()
             for output in step_outputs:
                 if output.finished:
                     outputs.append(output)
@@ -1516,6 +1531,8 @@ class LLM:
                         else:
                             pbar.update(1)
 
+        if profiling == True:
+            lprofiler.stop()
         if use_tqdm:
             pbar.close()
 
