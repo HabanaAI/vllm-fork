@@ -589,7 +589,7 @@ def get_env_info():
     vllm_version = get_vllm_version()
     vllm_build_flags = summarize_vllm_build_flags()
     gpu_topo = get_gpu_topo(run_lambda)
-    hpu_info=get_hpu_info()
+    hpu_info = get_hpu_info()
 
     return SystemEnv(
         torch_version=version_str,
