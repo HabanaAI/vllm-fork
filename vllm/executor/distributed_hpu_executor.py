@@ -62,7 +62,7 @@ class DistributedHPUExecutor(HPUExecutor):
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-        with HPUMemoryProfiler() as cache_init_m:
+        with HabanaMemoryProfiler() as cache_init_m:
             self._run_workers("initialize_cache",
                               num_gpu_blocks=num_gpu_blocks, 
                               num_cpu_blocks=num_cpu_blocks)

@@ -591,10 +591,11 @@ def is_pp_missing_parameter(name: str, model: torch.nn.Module) -> bool:
         for missing_layer_name in get_pp_missing_layer_names(model))
 
 
-def make_empty_intermediate_tensors_factory(keys: List[str], context_size: int, hidden_size: int):
+def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
 
     def make_empty_intermediate_tensors(
         batch_size: int,
+        context_size: int,
         dtype: torch.dtype,
         device: torch.device,
     ) -> IntermediateTensors:
