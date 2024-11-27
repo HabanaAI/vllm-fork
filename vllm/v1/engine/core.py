@@ -18,7 +18,7 @@ from vllm.v1.core.scheduler import Scheduler
 from vllm.v1.engine import (EngineCoreOutput, EngineCoreOutputs,
                             EngineCoreRequest, EngineCoreRequestType)
 from vllm.v1.engine.mm_input_mapper import MMInputMapper
-from vllm.v1.executor.gpu_executor import GPUExecutor
+#from vllm.v1.executor.gpu_executor import GPUExecutor
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.serial_utils import PickleEncoder
 from vllm.version import __version__ as VLLM_VERSION
@@ -36,17 +36,17 @@ class EngineCore:
     def __init__(
         self,
         vllm_config: VllmConfig,
-        executor_class: Type[GPUExecutor],
+        executor_class: Type[Any],
         usage_context: UsageContext,
     ):
         # Override the configs for V1.
         # FIXME
-        if usage_context == UsageContext.LLM_CLASS:
-            vllm_config.scheduler_config.max_num_seqs = 1024
-            vllm_config.scheduler_config.max_num_batched_tokens = 8192
-        elif usage_context == UsageContext.OPENAI_API_SERVER:
-            vllm_config.scheduler_config.max_num_seqs = 1024
-            vllm_config.scheduler_config.max_num_batched_tokens = 2048
+        #if usage_context == UsageContext.LLM_CLASS:
+        #    vllm_config.scheduler_config.max_num_seqs = 1024
+        #    vllm_config.scheduler_config.max_num_batched_tokens = 8192
+        #elif usage_context == UsageContext.OPENAI_API_SERVER:
+        #    vllm_config.scheduler_config.max_num_seqs = 1024
+        #    vllm_config.scheduler_config.max_num_batched_tokens = 2048
 
         # TODO (ywang96): Enable APC by default when VLM supports it.
         if not vllm_config.model_config.is_multimodal_model:
@@ -135,7 +135,7 @@ class EngineCoreProc(EngineCore):
     def __init__(
         self,
         vllm_config: VllmConfig,
-        executor_class: Type[GPUExecutor],
+        executor_class: Type[Any],
         usage_context: UsageContext,
         input_path: str,
         output_path: str,
@@ -220,7 +220,7 @@ class EngineCoreProc(EngineCore):
     @staticmethod
     def make_engine_core_process(
         vllm_config: VllmConfig,
-        executor_class: Type[GPUExecutor],
+        executor_class: Type[Any],
         usage_context: UsageContext,
         input_path: str,
         output_path: str,

@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Dict, List, Mapping, Optional, Type, Union
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Type, Union
 
 from vllm.config import ModelConfig, VllmConfig
 from vllm.engine.arg_utils import AsyncEngineArgs
@@ -20,7 +20,7 @@ from vllm.v1.engine.async_stream import AsyncStream
 from vllm.v1.engine.core_client import EngineCoreClient
 from vllm.v1.engine.detokenizer import Detokenizer
 from vllm.v1.engine.processor import Processor
-from vllm.v1.executor.gpu_executor import GPUExecutor
+from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -30,7 +30,7 @@ class AsyncLLM(EngineClient):
     def __init__(
         self,
         vllm_config: VllmConfig,
-        executor_class: Type[GPUExecutor],
+        executor_class: Type[Any],
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
@@ -121,6 +121,10 @@ class AsyncLLM(EngineClient):
 
     @classmethod
     def _get_executor_cls(cls, vllm_config: VllmConfig):
+        if current_platform.is_hpu():
+            from vllm.v1.executor.hpu_executor import HPUExecutor
+            return HPUExecutor
+        from vllm.v1.executor.gpu_executor import GPUExecutor
         return GPUExecutor
 
     async def add_request(

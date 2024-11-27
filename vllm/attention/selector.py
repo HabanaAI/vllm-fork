@@ -24,6 +24,7 @@ class _Backend(enum.Enum):
     OPENVINO = enum.auto()
     FLASHINFER = enum.auto()
     HPU_ATTN = enum.auto()
+    HPU_ATTN_V1 = enum.auto()
     PALLAS = enum.auto()
     IPEX = enum.auto()
     NO_ATTENTION = enum.auto()
@@ -174,6 +175,10 @@ def _cached_get_attn_backend(
         logger.info("Using HPUAttention backend.")
         from vllm.attention.backends.hpu_attn import HPUAttentionBackend
         return HPUAttentionBackend
+    elif backend == _Backend.HPU_ATTN_V1:
+        logger.info("Using HPUAttentionV1 backend.")
+        from vllm.v1.attention.backends.hpu_attn import HPUAttentionBackendV1
+        return HPUAttentionBackendV1
     elif backend == _Backend.PALLAS:
         logger.info("Using Pallas backend.")
         from vllm.attention.backends.pallas import PallasAttentionBackend
@@ -249,6 +254,10 @@ def which_attn_to_use(head_size: int,
         return _Backend.ROCM_FLASH
 
     if current_platform.is_hpu():
+        if selected_backend != _Backend.HPU_ATTN and selected_backend != _Backend.HPU_ATTN_V1:
+            logger.info("Cannot use %s backend on HPU.", selected_backend)
+        if use_v1:
+            return _Backend.HPU_ATTN_V1
         return _Backend.HPU_ATTN
 
     if use_v1:

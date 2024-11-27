@@ -537,7 +537,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self._set_gc_threshold()
         self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
-                                                'true').lower() == 'true'
+                                                'false').lower() == 'true'
         # For multi-step scheduling
         self.cached_step_outputs: List[torch.Tensor] = []
 

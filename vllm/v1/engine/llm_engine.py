@@ -1,4 +1,4 @@
-from typing import Dict, List, Mapping, Optional, Type, Union
+from typing import Any, Dict, List, Mapping, Optional, Type, Union
 
 from vllm.config import VllmConfig
 from vllm.engine.arg_utils import EngineArgs
@@ -9,6 +9,7 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.outputs import RequestOutput
+from vllm.platforms import current_platform
 from vllm.pooling_params import PoolingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import SamplingParams
@@ -17,7 +18,6 @@ from vllm.usage.usage_lib import UsageContext
 from vllm.v1.engine.core_client import EngineCoreClient
 from vllm.v1.engine.detokenizer import Detokenizer
 from vllm.v1.engine.processor import Processor
-from vllm.v1.executor.gpu_executor import GPUExecutor
 
 logger = init_logger(__name__)
 
@@ -28,7 +28,7 @@ class LLMEngine:
     def __init__(
         self,
         vllm_config: VllmConfig,
-        executor_class: Type[GPUExecutor],
+        executor_class: Type[Any],
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
@@ -99,6 +99,10 @@ class LLMEngine:
 
     @classmethod
     def _get_executor_cls(cls, vllm_config: VllmConfig):
+        if current_platform.is_hpu():
+            from vllm.v1.executor.hpu_executor import HPUExecutor
+            return HPUExecutor
+        from vllm.v1.executor.gpu_executor import GPUExecutor
         return GPUExecutor
 
     def stop_remote_worker_execution_loop(self) -> None:
