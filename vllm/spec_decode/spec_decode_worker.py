@@ -20,6 +20,10 @@ from vllm.sequence import (VLLM_INVALID_TOKEN_ID,
                            HiddenStates, SequenceGroupMetadata,
                            get_all_seq_ids_and_request_ids)
 from vllm.spec_decode.batch_expansion import BatchExpansionTop1Scorer
+
+if current_platform.is_cuda_alike():
+    from vllm.spec_decode.draft_model_runner import TP1DraftModelRunner
+
 from vllm.spec_decode.interfaces import (SpeculativeProposals,
                                          SpeculativeScorer, SpeculativeScores)
 from vllm.spec_decode.medusa_worker import MedusaWorker
@@ -36,14 +40,8 @@ from vllm.spec_decode.util import (Timer, create_logprobs_output,
                                    get_all_num_logprobs,
                                    get_sampled_token_logprobs, nvtx_range,
                                    split_batch_by_proposal_len)
-from vllm.worker.selector import init_worker
-from vllm.worker.worker import Worker
-from vllm.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
-
-if current_platform.is_hpu():
-    from vllm.spec_decode.hpu_draft_model_runner import HPUTP1DraftModelRunner
-else:
-    from vllm.spec_decode.draft_model_runner import TP1DraftModelRunner
+from vllm.worker.worker_base import (LoraNotSupportedWorkerBase, WorkerBase,
+                                     WorkerWrapperBase)
 
 logger = init_logger(__name__)
 
@@ -59,7 +57,11 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
     draft_worker_kwargs = kwargs.copy()
 
     kwargs["model_runner_cls"] = TargetModelRunner
-    target_worker = init_worker(*args, **kwargs)
+    target_worker_config = copy.deepcopy(vllm_config)
+    target_worker_config.parallel_config.worker_cls =\
+        target_worker_config.parallel_config.sd_worker_cls
+    target_worker = WorkerWrapperBase(vllm_config=target_worker_config)
+    target_worker.init_worker(*args, **kwargs)
     # Set the disable_logprobs variable in the TargetModelRunner instance
     # as per its value specified in the SpeculativeConfig.
     target_worker.model_runner.disable_logprobs =\
@@ -71,6 +73,8 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
         draft_worker_config.model_config,
         vllm_config.load_config,
     )
+    speculative_config.draft_parallel_config.worker_cls =\
+        draft_worker_config.parallel_config.sd_worker_cls
     draft_worker_config.parallel_config = speculative_config.draft_parallel_config  # noqa
     # TODO allow draft-model specific load config.
 
@@ -131,7 +135,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
     @classmethod
     def create_worker(
         cls,
-        scorer_worker: Worker,
+        scorer_worker: WorkerBase,
         draft_worker_kwargs: Dict[str, Any],
         disable_mqa_scorer: bool,
         disable_by_batch_size: Optional[int],
@@ -151,6 +155,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         draft_parallel_config: ParallelConfig = draft_worker_kwargs[
             'vllm_config'].parallel_config
         if ngram_prompt_lookup_max > 0:
+            draft_worker_kwargs[
+                "device_type"] = scorer_worker.device_config.device.type
             proposer_worker = NGramWorker(**draft_worker_kwargs)
             proposer_worker.set_ngram_window_size(ngram_prompt_lookup_min,
                                                   ngram_prompt_lookup_max)
@@ -320,8 +326,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.scorer_worker.load_model()
         self.proposer_worker.load_model()
 
-        self._metrics.init_tensors(self.rank, device=self.device)
-        self.spec_decode_sampler.init_tensors(device=self.device)
+        self._metrics.init_tensors(self.rank, device_type=self.device)
+        self.spec_decode_sampler.init_tensors(self.rank,
+                                              device_type=self.device)
 
         scorer_cls: Type[SpeculativeScorer]
         if self.disable_mqa_scorer:
@@ -1125,11 +1132,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         raise NotImplementedError
 
     def start_profile(self):
-        if isinstance(self.scorer_worker, Worker):
+        if isinstance(self.scorer_worker, WorkerBase):
             self.scorer_worker.start_profile()
 
     def stop_profile(self):
-        if isinstance(self.scorer_worker, Worker):
+        if isinstance(self.scorer_worker, WorkerBase):
             self.scorer_worker.stop_profile()
 
 
