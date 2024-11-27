@@ -1605,7 +1605,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
-
+        
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
         return
@@ -1683,6 +1683,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
                 intermediate_tensors = None
+                #seq_id = list(seqs.seq_data.keys())[0]
+                #seq_data = seqs.seq_data[seq_id]
+                #context_size = seq_data.get_num_computed_tokens()
                 if not get_pp_group().is_first_rank:
                     intermediate_tensors = self.model.make_empty_intermediate_tensors(
                         batch_size=batch_size,
