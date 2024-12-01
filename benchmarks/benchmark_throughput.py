@@ -151,7 +151,7 @@ def run_vllm(
 
     if not use_beam_search:
         start = time.perf_counter()
-        llm.generate(prompts, sampling_params, use_tqdm=True)
+        outputs = llm.generate(prompts, sampling_params, use_tqdm=True)
         end = time.perf_counter()
     else:
         prompts = [request.prompt for request in requests]
@@ -168,6 +168,13 @@ def run_vllm(
                 ignore_eos=True,
             ))
         end = time.perf_counter()
+    if outputs:
+        for output in outputs:
+           print('=================================================')
+           print(f'TEST ACC: request id = {output.request_id}')
+           print(f'TEST ACC: prompt = {output.prompt}')
+           print(f'TEST ACC: response = {output.outputs[0].text}')
+           print('=================================================\n\n')
     return end - start
 
 
@@ -208,9 +215,14 @@ async def run_vllm_async(
             generator = llm.generate(prompt, sp, request_id=f"test{i}")
             generators.append(generator)
         all_gens = merge_async_iterators(*generators)
-        async for i, res in all_gens:
-            pass
         end = time.perf_counter()
+        async for i, res in all_gens:
+            if res.finished:
+                print('=================================================')
+                print(f'TEST ACC: request id = {res.request_id}\n')
+                print(f'TEST ACC: prompt = {res.prompt}\n')
+                print(f'TEST ACC: response = {res.outputs[0].text}')
+                print('=================================================\n\n')
         return end - start
 
 
