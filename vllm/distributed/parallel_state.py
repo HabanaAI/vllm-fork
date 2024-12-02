@@ -521,13 +521,15 @@ class GroupCoordinator:
         size_tensor = torch.tensor([object_tensor.numel()],
                                    dtype=torch.long,
                                    device="cpu")
-
+        
+        print(f'\n\n\n SENDING SIZE TENSOR: {size_tensor} from {self.rank} to {self.ranks[dst]}\n\n\n')
         # Send object size
 
         torch.distributed.send(size_tensor,
                                dst=self.ranks[dst],
                                group=self.cpu_group)
 
+        print(f'\n\n\n SENDING OBJECT: {object_tensor} from {self.rank} to {self.ranks[dst]}\n\n\n')
         # Send object
         torch.distributed.send(object_tensor,
                                dst=self.ranks[dst],
