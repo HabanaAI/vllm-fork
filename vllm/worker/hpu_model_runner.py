@@ -164,11 +164,12 @@ def modify_decoder_layer(module: torch.nn.Module,
         else:
             modify_decoder_layer(child_module, suffix, n, counter)
 
+
 def get_names_for_rope(model: torch.nn.Module):
     """Dynamically get layer names needed for cos and sin preparation for rope.
 
     Every model can have a different naming convention for it's layers.
-    This function dynamically retrieves layer names needed to access a rope layer.
+    This function dynamically retrieves layer names to access rope layer.
     If there's no rope layer, the function returns None.
 
     This function assumes the following layer type layout:
@@ -177,18 +178,31 @@ def get_names_for_rope(model: torch.nn.Module):
     for child_name, child_module in model.named_children():
         if child_module.__class__.__name__.endswith("Model"):
             model_name = child_name
-            for model_child_name, model_child_module in child_module.named_children():
+            for model_child_name, model_child_module \
+                in child_module.named_children(
+            ):
                 if model_child_module.__class__.__name__ == "ModuleList":
                     layers_name = model_child_name
-                    for layers_child_name, layers_child_module in model_child_module[0].named_children():
-                        if layers_child_module.__class__.__name__.endswith("Attention"):
+                    for layers_child_name, layers_child_module \
+                        in model_child_module[
+                            0].named_children():
+                        if layers_child_module.__class__.__name__.endswith(
+                                "Attention"):
                             attn_name = layers_child_name
                             attn_module = layers_child_module
-                            for attn_child_name, attn_child_module in attn_module.named_children():
-                                if attn_child_module.__class__.__name__ == "RotaryEmbedding":
+                            for attn_child_name, attn_child_module \
+                                in attn_module.named_children():
+                                if (attn_child_module.__class__.__name__ ==
+                                        "RotaryEmbedding"):
                                     rope_name = attn_child_name
-                                    return {'model_name': model_name, 'layers_name': layers_name, 'attn_name': attn_name, 'rope_name': rope_name}
+                                    return {
+                                        'model_name': model_name,
+                                        'layers_name': layers_name,
+                                        'attn_name': attn_name,
+                                        'rope_name': rope_name
+                                    }
                             return None
+
 
 class HpuModelAdapter:
 
