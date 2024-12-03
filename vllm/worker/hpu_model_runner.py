@@ -175,33 +175,27 @@ def get_names_for_rope(model: torch.nn.Module):
     This function assumes the following layer type layout:
     Model -> ModuleList -> Attention -> RotaryEmbedding
     """
-    for child_name, child_module in model.named_children():
-        if child_module.__class__.__name__.endswith("Model"):
-            model_name = child_name
-            for model_child_name, model_child_module \
-                in child_module.named_children(
-            ):
-                if model_child_module.__class__.__name__ == "ModuleList":
-                    layers_name = model_child_name
-                    for layers_child_name, layers_child_module \
-                        in model_child_module[
-                            0].named_children():
-                        if layers_child_module.__class__.__name__.endswith(
-                                "Attention"):
-                            attn_name = layers_child_name
-                            attn_module = layers_child_module
-                            for attn_child_name, attn_child_module \
-                                in attn_module.named_children():
-                                if (attn_child_module.__class__.__name__ ==
-                                        "RotaryEmbedding"):
-                                    rope_name = attn_child_name
-                                    return {
-                                        'model_name': model_name,
-                                        'layers_name': layers_name,
-                                        'attn_name': attn_name,
-                                        'rope_name': rope_name
-                                    }
-                            return None
+
+    def get_child(parent, suffix, is_list=False):
+        parent = parent[0] if is_list else parent
+        for child_name, child_module in parent.named_children():
+            if child_module.__class__.__name__.endswith(suffix):
+                return child_name, child_module
+
+    model_name, model_module = get_child(model, "Model")
+    layers_name, layers_module = get_child(model_module, "ModuleList")
+    attn_name, attn_module = get_child(layers_module,
+                                       "Attention",
+                                       is_list=True)
+    rope_name, _ = get_child(attn_module, "RotaryEmbedding")
+
+    if rope_name is not None:
+        return {
+            'model_name': model_name,
+            'layers_name': layers_name,
+            'attn_name': attn_name,
+            'rope_name': rope_name
+        }
 
 
 class HpuModelAdapter:
@@ -320,6 +314,19 @@ class HpuModelAdapter:
                                                       attn_metadata.is_prompt)
         return attn_metadata
 
+    def _prepare_cos_sin(self, positions):
+        model_name = self.layer_names['model_name']
+        layers_name = self.layer_names['layers_name']
+        attn_name = self.layer_names['attn_name']
+        rope_name = self.layer_names['rope_name']
+
+        base_model = getattr(self.model, model_name)
+        first_model_layer = getattr(base_model, layers_name)[0]
+        attention_layer = getattr(first_model_layer, attn_name)
+        rope = getattr(attention_layer, rope_name)
+
+        rope.prepare_cos_sin(positions)
+
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
@@ -331,7 +338,7 @@ class HpuModelAdapter:
             input_ids.device, self.dtype)
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None:
-            prepare_cos_sin(kwargs['positions'], self.model, self.layer_names)
+            self._prepare_cos_sin(kwargs['positions'])
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -1799,19 +1806,6 @@ def unwrap_model(model):
         model = list(vars(model)['_modules'].values())[0]
         modules = list(vars(model)['_modules'].values())
         return modules
-
-
-def prepare_cos_sin(positions, model, names):
-    model_name = names['model_name']
-    layers_name = names['layers_name']
-    attn_name = names['attn_name']
-    rope_name = names['rope_name']
-
-    base_model = getattr(model, model_name)
-    first_model_layer = getattr(base_model, layers_name)[0]
-    attention_layer = getattr(first_model_layer, attn_name)
-    rope = getattr(attention_layer, rope_name)
-    rope.prepare_cos_sin(positions)
 
 
 class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
