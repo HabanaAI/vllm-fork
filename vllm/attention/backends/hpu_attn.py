@@ -198,6 +198,11 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                                      attn_bias.shape[-1])
                     attn_bias = attn_bias.tile((1, self.num_kv_heads, 1, 1))
                     attn_bias.add_(position_bias)
+                # update attn_bias to None if Any inf or nan exists
+                attn_bias_inf = not torch.all(torch.isinf(attn_bias) == False)
+                attn_bias_nan = not torch.all(torch.isnan(attn_bias) == False)
+                if attn_bias_inf or attn_bias_nan:
+                    attn_bias = None
 
                 out = ops.prompt_attention(
                     query.view(query_shape),
