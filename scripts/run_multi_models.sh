@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# VLLM_SKIP_WARMUP=true python3 -m \
+# VLLM_CONTIGUOUS_PA=false VLLM_SKIP_WARMUP=true python3 -m \
 #     vllm.entrypoints.openai.mm_api_server \
 #     --models mistralai/Mistral-7B-Instruct-v0.3 meta-llama/Llama-3.1-8B-Instruct \
 #     --port 8080 --device hpu --dtype bfloat16 \
