@@ -164,6 +164,27 @@ def modify_decoder_layer(module: torch.nn.Module,
         else:
             modify_decoder_layer(child_module, suffix, n, counter)
 
+def get_rope_path(model: torch.nn.Module):
+    """Get dynamic rope path.
+    Every model can have a different naming convention for it's layers.
+    This function dynamically retrieves layer names needed to access a rope layer.
+    If there's no rope layer, the function returns None.
+    """
+    for child_name, child_module in model.named_children():
+        if child_module.__class__.__name__.endswith("Model"):
+            model_name = child_name
+            for model_child_name, model_child_module in child_module.named_children():
+                if model_child_module.__class__.__name__ == "ModuleList":
+                    layers_name = model_child_name
+                    for layers_child_name, layers_child_module in model_child_module[0].named_children():
+                        if layers_child_module.__class__.__name__.endswith("Attention"):
+                            attn_name = layers_child_name
+                            attn_module = layers_child_module
+                            for attn_child_name, attn_child_module in attn_module.named_children():
+                                if attn_child_module.__class__.__name__ == "RotaryEmbedding":
+                                    rope_name = attn_child_name
+                                    return model_name, layers_name, attn_name, rope_name
+                            return None
 
 class HpuModelAdapter:
 
@@ -642,6 +663,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.model,
                 get_decoder_layer_suffix(self.model.config.model_type),
                 hidden_layer_markstep_interval)
+            names = get_rope_path(self.model)
+            if names is not None:
+                self.has_rope = True
+                self.model_name, self.layers_name, self.attn_name, self.rope_name = names
+            else:
+                self.has_rope = False
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
@@ -1764,6 +1791,20 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     _model_input_cls: Type[ModelInputForHPUWithSamplingMetadata] = (
         ModelInputForHPUWithSamplingMetadata)
 
+    def _prepare_cos_sin(self, positions):
+        base_model = getattr(self.model.model, self.model_name)
+        first_model_layer = getattr(base_model, self.layers_name)[0]
+        attention_layer = getattr(first_model_layer, self.attn_name)
+        rope = getattr(attention_layer, self.rope_name)
+        cos, sin = rope.prepare_cos_sin(positions)
+        for layer in getattr(getattr(self.model.model, self.model_name), self.layers_name)[1:]:
+            getattr(getattr(layer, self.attn_name), self.rope_name).register_buffer("cos",
+                                                        cos,
+                                                        persistent=False)
+            getattr(getattr(layer, self.attn_name), self.rope_name).register_buffer("sin",
+                                                        sin,
+                                                        persistent=False)
+
     def make_model_input_from_broadcasted_tensor_dict(
         self,
         tensor_dict: Dict[str, Any],
@@ -1998,6 +2039,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             broadcast_data["attn_metadata"])
                     })
                 with self.profiler.record_event('internal', model_event_name):
+                    if self.has_rope:
+                        self._prepare_cos_sin(execute_model_kwargs['positions'])
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
