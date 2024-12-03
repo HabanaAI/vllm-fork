@@ -164,11 +164,15 @@ def modify_decoder_layer(module: torch.nn.Module,
         else:
             modify_decoder_layer(child_module, suffix, n, counter)
 
-def get_rope_path(model: torch.nn.Module):
-    """Get dynamic rope path.
+def get_names_for_rope(model: torch.nn.Module):
+    """Dynamically get layer names needed for cos and sin preparation for rope.
+
     Every model can have a different naming convention for it's layers.
     This function dynamically retrieves layer names needed to access a rope layer.
     If there's no rope layer, the function returns None.
+
+    This function assumes the following layer type layout:
+    Model -> ModuleList -> Attention -> RotaryEmbedding
     """
     for child_name, child_module in model.named_children():
         if child_module.__class__.__name__.endswith("Model"):
@@ -183,15 +187,16 @@ def get_rope_path(model: torch.nn.Module):
                             for attn_child_name, attn_child_module in attn_module.named_children():
                                 if attn_child_module.__class__.__name__ == "RotaryEmbedding":
                                     rope_name = attn_child_name
-                                    return model_name, layers_name, attn_name, rope_name
+                                    return {'model_name': model_name, 'layers_name': layers_name, 'attn_name': attn_name, 'rope_name': rope_name}
                             return None
 
 class HpuModelAdapter:
 
-    def __init__(self, model, block_size, dtype, enforce_eager):
+    def __init__(self, model, block_size, dtype, enforce_eager, layer_names):
         self.model = model
         self.block_size = block_size
         self.dtype = dtype
+        self.layer_names = layer_names
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
             self.model = torch.compile(self.model,
@@ -311,6 +316,8 @@ class HpuModelAdapter:
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
+        if self.layer_names is not None:
+            prepare_cos_sin(kwargs['positions'], self.model, self.layer_names)
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -663,12 +670,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.model,
                 get_decoder_layer_suffix(self.model.config.model_type),
                 hidden_layer_markstep_interval)
-            names = get_rope_path(self.model)
-            if names is not None:
-                self.has_rope = True
-                self.model_name, self.layers_name, self.attn_name, self.rope_name = names
-            else:
-                self.has_rope = False
+            names_for_rope = get_names_for_rope(self.model)
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
@@ -676,7 +678,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.model,
                     self.block_size,
                     dtype=self.model_config.dtype,
-                    enforce_eager=self.enforce_eager)
+                    enforce_eager=self.enforce_eager,
+                    layer_names=names_for_rope)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
 
@@ -1784,26 +1787,31 @@ def unwrap_model(model):
         return modules
 
 
+def prepare_cos_sin(positions, model, names):
+    model_name = names['model_name']
+    layers_name = names['layers_name']
+    attn_name = names['attn_name']
+    rope_name = names['rope_name']
+
+    base_model = getattr(model, model_name)
+    first_model_layer = getattr(base_model, layers_name)[0]
+    attention_layer = getattr(first_model_layer, attn_name)
+    rope = getattr(attention_layer, rope_name)
+    cos, sin = rope.prepare_cos_sin(positions)
+    # for layer in getattr(getattr(model, model_name), layers_name)[1:]:
+    #     getattr(getattr(layer, attn_name), rope_name).register_buffer("cos",
+    #                                                 cos,
+    #                                                 persistent=False)
+    #     getattr(getattr(layer, attn_name), rope_name).register_buffer("sin",
+    #                                                 sin,
+    #                                                 persistent=False)
+
 class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     """
     GPU model runner with sampling step.
     """
     _model_input_cls: Type[ModelInputForHPUWithSamplingMetadata] = (
         ModelInputForHPUWithSamplingMetadata)
-
-    def _prepare_cos_sin(self, positions):
-        base_model = getattr(self.model.model, self.model_name)
-        first_model_layer = getattr(base_model, self.layers_name)[0]
-        attention_layer = getattr(first_model_layer, self.attn_name)
-        rope = getattr(attention_layer, self.rope_name)
-        cos, sin = rope.prepare_cos_sin(positions)
-        for layer in getattr(getattr(self.model.model, self.model_name), self.layers_name)[1:]:
-            getattr(getattr(layer, self.attn_name), self.rope_name).register_buffer("cos",
-                                                        cos,
-                                                        persistent=False)
-            getattr(getattr(layer, self.attn_name), self.rope_name).register_buffer("sin",
-                                                        sin,
-                                                        persistent=False)
 
     def make_model_input_from_broadcasted_tensor_dict(
         self,
@@ -2039,8 +2047,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             broadcast_data["attn_metadata"])
                     })
                 with self.profiler.record_event('internal', model_event_name):
-                    if self.has_rope:
-                        self._prepare_cos_sin(execute_model_kwargs['positions'])
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
