@@ -153,7 +153,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         engine_prompt,
                         sampling_params,
                         request_id_item,
-                        request.model,
+                        model = request.model,
                         lora_request=lora_request,
                         prompt_adapter_request=prompt_adapter_request,
                         trace_headers=trace_headers,
