@@ -1797,14 +1797,8 @@ def prepare_cos_sin(positions, model, names):
     first_model_layer = getattr(base_model, layers_name)[0]
     attention_layer = getattr(first_model_layer, attn_name)
     rope = getattr(attention_layer, rope_name)
-    cos, sin = rope.prepare_cos_sin(positions)
-    # for layer in getattr(getattr(model, model_name), layers_name)[1:]:
-    #     getattr(getattr(layer, attn_name), rope_name).register_buffer("cos",
-    #                                                 cos,
-    #                                                 persistent=False)
-    #     getattr(getattr(layer, attn_name), rope_name).register_buffer("sin",
-    #                                                 sin,
-    #                                                 persistent=False)
+    rope.prepare_cos_sin(positions)
+
 
 class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     """
