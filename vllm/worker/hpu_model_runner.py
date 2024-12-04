@@ -177,10 +177,13 @@ def get_names_for_rope(model: torch.nn.Module):
     """
 
     def get_child(parent, suffix, is_list=False):
+        if parent is None:
+            return None, None
         parent = parent[0] if is_list else parent
         for child_name, child_module in parent.named_children():
             if child_module.__class__.__name__.endswith(suffix):
                 return child_name, child_module
+        return None, None
 
     model_name, model_module = get_child(model, "Model")
     layers_name, layers_module = get_child(model_module, "ModuleList")
