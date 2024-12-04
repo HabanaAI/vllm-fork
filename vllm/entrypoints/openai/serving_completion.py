@@ -90,6 +90,7 @@ class OpenAIServingCompletion(OpenAIServing):
             return self.create_error_response(
                 "suffix is not currently supported")
 
+        model_name = request.model
         request_id = f"cmpl-{self._base_request_id(raw_request)}"
         created_time = int(time.time())
 
@@ -103,7 +104,12 @@ class OpenAIServingCompletion(OpenAIServing):
                 prompt_adapter_request,
             ) = self._maybe_get_adapters(request)
 
-            tokenizer = await self.engine_client.get_tokenizer(lora_request)
+            if hasattr(self.engine_client, 'get_tokenizer_mm'):
+                tokenizer = await self.engine_client.get_tokenizer_mm(
+                    request.model, lora_request)
+            else:
+                tokenizer = await self.engine_client.get_tokenizer(lora_request
+                                                                   )
 
             request_prompts, engine_prompts = await self._preprocess_completion(
                 request,
@@ -163,6 +169,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         engine_prompt,
                         sampling_params,
                         request_id_item,
+                        model=request.model,
                         lora_request=lora_request,
                         prompt_adapter_request=prompt_adapter_request,
                         trace_headers=trace_headers,

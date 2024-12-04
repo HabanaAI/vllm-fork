@@ -170,6 +170,14 @@ class ChatCompletionNamedToolChoiceParam(OpenAIBaseModel):
     type: Literal["function"] = "function"
 
 
+class ModelInfo(OpenAIBaseModel):
+    id: str
+
+
+class ModelConfigRequest(OpenAIBaseModel):
+    models: Optional[List[ModelInfo]] = None
+
+
 class LogitsProcessorConstructor(BaseModel):
     qualname: str
     args: Optional[list[Any]] = None

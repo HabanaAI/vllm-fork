@@ -149,7 +149,12 @@ class OpenAIServingChat(OpenAIServing):
 
             model_name = self._get_model_name(request.model, lora_request)
 
-            tokenizer = await self.engine_client.get_tokenizer(lora_request)
+            if hasattr(self.engine_client, 'get_tokenizer_mm'):
+                tokenizer = await self.engine_client.get_tokenizer_mm(
+                    request.model, lora_request)
+            else:
+                tokenizer = await self.engine_client.get_tokenizer(lora_request
+                                                                   )
 
             tool_parser = self.tool_parser
 
@@ -241,6 +246,7 @@ class OpenAIServingChat(OpenAIServing):
                         engine_prompt,
                         sampling_params,
                         request_id,
+                        model=request.model,
                         lora_request=lora_request,
                         trace_headers=trace_headers,
                         prompt_adapter_request=prompt_adapter_request,
@@ -400,6 +406,7 @@ class OpenAIServingChat(OpenAIServing):
         tokenizer: AnyTokenizer,
         request_metadata: RequestResponseMetadata,
     ) -> AsyncGenerator[str, None]:
+        model_name = request.model
         created_time = int(time.time())
         chunk_object_type: Final = "chat.completion.chunk"
         first_iteration = True
@@ -897,6 +904,7 @@ class OpenAIServingChat(OpenAIServing):
         request_metadata: RequestResponseMetadata,
     ) -> Union[ErrorResponse, ChatCompletionResponse]:
 
+        model_name = request.model
         created_time = int(time.time())
         final_res: Optional[RequestOutput] = None
 

@@ -11,6 +11,7 @@ from pydantic import Field
 from starlette.datastructures import Headers
 
 from vllm.config import ModelConfig
+from vllm.engine.multiprocessing.mm_engine import RPCModelResponse
 from vllm.engine.protocol import EngineClient
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -27,12 +28,14 @@ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               DetokenizeRequest,
                                               EmbeddingChatRequest,
                                               EmbeddingCompletionRequest,
-                                              ErrorResponse, RerankRequest,
-                                              ScoreRequest,
+                                              ErrorResponse,
+                                              ModelConfigRequest,
+                                              RerankRequest, ScoreRequest,
                                               TokenizeChatRequest,
                                               TokenizeCompletionRequest,
                                               TranscriptionRequest)
-from vllm.entrypoints.openai.serving_models import OpenAIServingModels
+from vllm.entrypoints.openai.serving_models import (BaseModelPath,
+                                                    OpenAIServingModels)
 from vllm.entrypoints.openai.tool_parsers import ToolParser
 # yapf: enable
 from vllm.inputs import TokensPrompt
@@ -98,6 +101,28 @@ class OpenAIServing:
         self._tokenize_prompt_input_or_inputs_async = make_async(
             self._tokenize_prompt_input_or_inputs,
             executor=self._tokenizer_executor)
+
+    async def update_model_config(self, request: ModelConfigRequest) -> str:
+        models = [model.id for model in request.models]
+        request_id = f"mdlcfg-{random_uuid()}"
+        ret = await self.engine_client.update_model_config(request_id, models)
+        if isinstance(ret, RPCModelResponse):
+            new_models = ret.new_models
+            closed_models = ret.closed_models
+
+            to_delete = []
+            for model in closed_models:
+                for i, base_model in enumerate(self.base_model_paths):
+                    if base_model.name == model:
+                        to_delete.append(i)
+            for i in to_delete:
+                del self.base_model_paths[i]
+            for model in new_models:
+                self.models.base_model_paths.append(
+                    BaseModelPath(name=model, model_path=model))
+
+            ret = ret.text
+        return ret
 
     def create_error_response(
             self,

@@ -32,6 +32,7 @@ class RPCProcessRequest:
     prompt: PromptType
     params: Union[SamplingParams, PoolingParams]
     request_id: str
+    model: Optional[str] = None
     lora_request: Optional[LoRARequest] = None
     trace_headers: Optional[Mapping[str, str]] = None
     prompt_adapter_request: Optional[PromptAdapterRequest] = None
@@ -43,6 +44,7 @@ class RPCProcessRequest:
         prompt: PromptType,
         params: Union[SamplingParams, PoolingParams],
         request_id: str,
+        model: Optional[str] = None,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
@@ -58,6 +60,7 @@ class RPCProcessRequest:
         inputs: PromptType,
         params: Union[SamplingParams, PoolingParams],
         request_id: str,
+        model: Optional[str] = None,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
@@ -74,6 +77,7 @@ class RPCProcessRequest:
             prompt: Optional[PromptType] = None,
             params: Optional[Union[SamplingParams, PoolingParams]] = None,
             request_id: Optional[str] = None,
+            model: Optional[str] = None,
             lora_request: Optional[LoRARequest] = None,
             trace_headers: Optional[Mapping[str, str]] = None,
             prompt_adapter_request: Optional[PromptAdapterRequest] = None,
@@ -91,6 +95,7 @@ class RPCProcessRequest:
         self.prompt = prompt
         self.params = params
         self.request_id = request_id
+        self.model = model
         self.lora_request = lora_request
         self.trace_headers = trace_headers
         self.prompt_adapter_request = prompt_adapter_request
