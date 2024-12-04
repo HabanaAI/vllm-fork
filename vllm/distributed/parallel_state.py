@@ -522,14 +522,14 @@ class GroupCoordinator:
                                    dtype=torch.long,
                                    device="cpu")
         
-        print(f'\n\n\n SENDING SIZE TENSOR: {size_tensor} from {self.rank} to {self.ranks[dst]}\n\n\n')
+        print(f'SENDING SIZE TENSOR: {size_tensor} from {self.rank} to {self.ranks[dst]}')
         # Send object size
 
         torch.distributed.send(size_tensor,
                                dst=self.ranks[dst],
                                group=self.cpu_group)
 
-        print(f'\n\n\n SENDING OBJECT: {object_tensor} from {self.rank} to {self.ranks[dst]}\n\n\n')
+        print(f'SENDING OBJECT: {object_tensor} from {self.rank} to {self.ranks[dst]}')
         # Send object
         torch.distributed.send(object_tensor,
                                dst=self.ranks[dst],
@@ -568,7 +568,7 @@ class GroupCoordinator:
             "Received object sender rank does not match the size sender rank.")
 
         obj = pickle.loads(object_tensor.numpy().tobytes())
-
+        print(f'worker {self.rank} received obj {obj}')
         return obj
 
     def broadcast_tensor_dict(

@@ -389,9 +389,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         #print(f'\n\n\n CHECKPOINT RANK {get_pp_group().rank}\n\n\n')
         print(f'CHECK 1 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
         start_time = time.perf_counter()
-        print(f'execute_model_req: {execute_model_req}')
+        #print(f'execute_model_req: {execute_model_req}')
         inputs = self.prepare_input(execute_model_req)
-        print(f'inputs: {inputs}')
+        #print(f'inputs: {inputs}')
         if inputs is None:
             print(f' worker {get_pp_group().rank} has no inputs')
             return None
@@ -437,7 +437,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 output.tensors["model_execute_time"] = torch.tensor(
                     model_execute_time + orig_model_execute_time)
-            print(f'\n\n\n WORKER {get_pp_group().rank} sending tensor_dict \n\n\n')
+            print(f'WORKER {get_pp_group().rank} sending tensor_dict: {output.tensors}')
             get_pp_group().send_tensor_dict(output.tensors,
                                             all_gather_group=get_tp_group())
             return [None]
