@@ -11,6 +11,6 @@ jobs:
     steps:
         - name: Trigger Jenkins Tests
           run: |
-            curl -XPOST -H "Content-Type: application/json" \
+            curl -s -XPOST -H "Content-Type: application/json" \
             "${{ secrets.WEBHOOK_URL }}" \
-            -d '${{ toJson(github) }}'          
+            -d @"$GITHUB_EVENT_PATH"         
