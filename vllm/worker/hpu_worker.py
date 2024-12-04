@@ -60,8 +60,9 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
-        if self.is_driver_worker:
-            assert self.rank == 0, "The driver worker must have rank 0."
+        if self.parallel_config and self.is_driver_worker:
+            assert self.rank % self.parallel_config.tensor_parallel_size == 0, \
+            "The driver worker must have rank 0."
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -396,7 +397,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
     @property
     def do_metadata_broadcast(self) -> bool: 
-        return self.parallel_config.tensor_parallel_size > 1 or self.parallel_config.pipeline_parallel_size > 1
+        return self.parallel_config.tensor_parallel_size > 1
 
     @property
     def kv_cache(self) -> Optional[List[List[torch.Tensor]]]:
