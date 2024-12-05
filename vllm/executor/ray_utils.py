@@ -75,10 +75,7 @@ try:
             # TODO(swang): This is needed right now because Ray aDAG executes
             # on a background thread, so we need to reset torch's current
             # device.
-            import torch
-            if not self.compiled_dag_cuda_device_set:
-                torch.cuda.set_device(self.worker.device)
-                self.compiled_dag_cuda_device_set = True
+          
 
             output = self.worker._execute_model_spmd(execute_model_req,
                                                      intermediate_tensors)

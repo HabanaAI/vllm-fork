@@ -4,7 +4,7 @@
 
 import gc
 import os
-from typing import List, Optional, Set, Tuple, Type
+from typing import List, Optional, Set, Tuple, Type, Dict
 
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
@@ -19,17 +19,19 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.prompt_adapter.request import PromptAdapterRequest
-from vllm.sequence import ExecuteModelRequest
+from vllm.sequence import (ExecuteModelRequest, IntermediateTensors,
+                           SequenceGroupMetadata, SequenceGroupMetadataDelta)
 from vllm.utils import hpu_backend_string, hpu_device_string, is_fake_hpu
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.hpu_model_runner import HPUModelRunner
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
+from vllm.worker.worker import Worker
 
 logger = init_logger(__name__)
 
 
-class HPUWorker(LocalOrDistributedWorkerBase):
+class HPUWorker(Worker):
     """A worker class that executes (a partition of) the model on a HPU.
 
     Each worker is associated with a single HPU. The worker is responsible for
@@ -89,6 +91,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.hpu_cache: Optional[List[List[torch.tensor]]] = None
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
+        self._seq_group_metadata_cache: Dict[str, SequenceGroupMetadata] = {}
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
             logger.info("Profiling enabled. Traces will be saved to: %s",

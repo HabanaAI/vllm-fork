@@ -41,7 +41,7 @@ do
     export LM_EVAL_TEST_DATA_FILE=$PWD/configs/${MODEL_CONFIG}
     export LM_EVAL_TP_SIZE=$TP_SIZE
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
-    export VLLM_SKIP_WARMUP=true
+    export VLLM_SKIP_WARMUP=false
     RANDOM_SUFFIX=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 4; echo)
     JUNIT_SUFFIX=""
     if [[ -n "$TEST_RESULTS_DIR" ]]; then
