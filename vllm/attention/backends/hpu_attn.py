@@ -141,9 +141,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
                                                '1').lower() in ['1', 'true'] \
                                                and not is_fake_hpu()
-        if self.prefill_use_fusedsdpa:
-            assert alibi_slopes is None, \
-                'Prefill with FusedSDPA not supported with alibi slopes!'
 
         suppored_head_sizes = HPUPagedAttention.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
@@ -207,7 +204,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
                         self.head_size)
             if attn_metadata is None or attn_metadata.block_list is None:
-                if not self.prefill_use_fusedsdpa:
+                if (not self.prefill_use_fusedsdpa
+                        or self.alibi_slopes is not None):
                     # TODO: move this outside of model
                     assert attn_metadata.attn_bias is not None, \
                             'attn_bias must be set before calling model.forward'

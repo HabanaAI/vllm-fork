@@ -208,9 +208,6 @@ class HpuModelAdapter:
 
     def __init__(self, model, block_size, dtype, enforce_eager, layer_names):
         self.model = model
-        self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
-                                               '1').lower() in ['1', 'true'] \
-                                                and not is_fake_hpu()
         self.block_size = block_size
         self.dtype = dtype
         self.layer_names = layer_names
@@ -249,8 +246,7 @@ class HpuModelAdapter:
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
-        if (attn_metadata is None or self.prefill_use_fusedsdpa
-                or not attn_metadata.is_prompt):
+        if (attn_metadata is None or not attn_metadata.is_prompt):
             return attn_metadata
 
         prefill_metadata = attn_metadata
