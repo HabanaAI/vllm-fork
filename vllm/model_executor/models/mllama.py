@@ -32,9 +32,8 @@ from transformers.models.mllama.processing_mllama import (
 
 import vllm.distributed.parallel_state as ps
 from vllm.attention import Attention, AttentionMetadata, AttentionType
-from vllm.attention.backends.flash_attn import FlashAttentionMetadata
-from vllm.attention.backends.xformers import XFormersMetadata
 from vllm.attention.ops.paged_attn import PagedAttention
+from vllm.attention.selector import _Backend
 from vllm.config import VllmConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.inputs import (INPUT_REGISTRY, DummyData, EncoderDecoderInputs,
@@ -52,6 +51,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.platforms import current_platform
 from vllm.sequence import SequenceData
 from vllm.utils import is_list_of
 
@@ -63,6 +63,8 @@ from .utils import maybe_prefix
 logger = init_logger(__name__)
 MLLAMA_IMAGE_TOKEN_ID = 128256
 MLLAMA_IMAGE_TOKEN = "<|image|>"
+
+is_hpu = current_platform.is_hpu()
 
 
 class MllamaImagePixelInputs(TypedDict):
@@ -828,7 +830,8 @@ class MllamaTextCrossAttention(nn.Module):
     ) -> torch.Tensor:
         # Skip writing kv-cache for the initial profiling run.
         if len(kv_cache.shape) > 1:
-            if isinstance(attn_metadata, FlashAttentionMetadata):
+            if self.attn.backend in (_Backend.FLASH_ATTN,
+                                     _Backend.FLASH_ATTN_VLLM_V1):
                 cached_k = torch.cat([k[s:e] for s, e in kv_range_for_decode])
                 cached_v = torch.cat([v[s:e] for s, e in kv_range_for_decode])
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
@@ -842,7 +845,7 @@ class MllamaTextCrossAttention(nn.Module):
                     1.0,
                     1.0,
                 )
-            elif isinstance(attn_metadata, XFormersMetadata):
+            elif self.attn.backend in (_Backend.XFORMERS, _Backend.TORCH_SDPA):
                 key_cache, value_cache = PagedAttention.split_kv_cache(
                     kv_cache, self.num_local_key_value_heads, self.head_dim)
                 cached_k = torch.cat([k[s:e] for s, e in kv_range_for_decode])
@@ -852,9 +855,9 @@ class MllamaTextCrossAttention(nn.Module):
                     attn_metadata.cross_slot_mapping, "auto", 1.0, 1.0)
             else:
                 raise ValueError(
-                    f"Unsupported AttentionMetadata {type(attn_metadata)} "
-                    f"class found. Expected the AttentionMetadata to "
-                    f"be either XFormersMetadata or FlashAttentionMetadata.")
+                    f"Unsupported Attention backend {self.attn.backend} "
+                    "enum found. Expected the Attention backend to be "
+                    "FLASH_ATTN, FLASH_ATTN_VLLM_V1, XFORMERS or TORCH_SDPA.")
 
         # We have to call torch.sdpa for prefill when using a
         # custom cross-attention mask. Because the mask is not a
@@ -947,6 +950,14 @@ class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
             kv_cache=kv_cache,
             attn_metadata=attn_metadata,
         )
+        # the rank of full_text_row_masked_out_mask is 2, not match with
+        # the hidden_states, so expand its rank to 3.
+        # TODO: Change input_tokens tensor at the beginning of model execution
+        # to 2D tensor to align with public vllm input_tokens shape. But this
+        # will face the graph building failure issue, still need to investigate.
+        if len(hidden_states.shape) == 3:
+            full_text_row_masked_out_mask = full_text_row_masked_out_mask.view(
+                hidden_states.size(0), -1, 1)
         hidden_states = full_text_row_masked_out_mask * hidden_states
         hidden_states = residual + self.cross_attn_attn_gate.tanh(
         ) * hidden_states
@@ -1016,6 +1027,11 @@ class MllamaTextModel(nn.Module):
         inputs_embeds = self.embed_tokens(input_ids)
         hidden_states = inputs_embeds
 
+        if is_hpu:
+            for idx, decoder_layer in enumerate(self.layers):
+                if isinstance(decoder_layer, LlamaDecoderLayer):
+                    self.layers[idx].self_attn.rotary_emb.prepare_cos_sin(
+                        positions)
         for idx, decoder_layer in enumerate(self.layers):
             if isinstance(decoder_layer, MllamaCrossAttentionDecoderLayer):
                 if not skip_cross_attention:
