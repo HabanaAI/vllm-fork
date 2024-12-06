@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional, Tuple, Union
 import torch
 
 from vllm.triton_utils import HAS_TRITON
+from vllm.utils import get_device
 
 if HAS_TRITON:
     from vllm.lora.ops.bgmv_expand import bgmv_expand
@@ -62,6 +63,7 @@ def convert_mapping(
     max_loras: int,
     vocab_size: int,
     extra_vocab_size: int,
+    device: torch.device,
     long_lora_context: Optional["LongContextLoRAContext"] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
            Optional[torch.Tensor], List[int]]:
@@ -102,10 +104,15 @@ def convert_mapping(
     embedding_indices = index_mapping_indices.copy()
     lora_indices = index_mapping_indices.copy()
     long_lora_offsets: Optional[torch.Tensor] = None
+
+    from vllm.platforms import current_platform
     if long_lora_context:
-        long_lora_offsets = torch.zeros(len(index_mapping_indices),
-                                        device="cuda",
-                                        dtype=torch.long)
+        if current_platform.is_hpu():
+            long_lora_offsets_list: List[int] = []
+        else:
+            long_lora_offsets = torch.zeros(len(index_mapping_indices),
+                                            device=get_device(),
+                                            dtype=torch.long)
     prompt_mapping: List[int] = [
         lora_index_to_id.index(x) if x > 0 else -1
         for x in mapping.prompt_mapping
@@ -118,10 +125,18 @@ def convert_mapping(
         embedding_indices[i] = lora_idx if index_mapping_indices[i] > 0 else 0
         lora_indices[i] = lora_idx
         if long_lora_context:
-            assert long_lora_offsets is not None
             lora_offset: int = long_lora_context.offsets_by_lora_id.get(
                 index_mapping_indices[i], 0)
-            long_lora_offsets[i] = lora_offset
+            if current_platform.is_hpu():
+                long_lora_offsets_list.append(lora_offset)
+            else:
+                assert long_lora_offsets is not None
+                long_lora_offsets[i] = lora_offset
+
+    if long_lora_context and current_platform.is_hpu():
+        long_lora_offsets = torch.tensor(long_lora_offsets_list,
+                                         device=get_device(),
+                                         dtype=torch.long)
 
     indices_list: List[Union[List[int], torch.Tensor]] = [
         index_mapping_indices,
@@ -131,9 +146,9 @@ def convert_mapping(
     if long_lora_context:
         assert long_lora_offsets is not None
         indices_list.append(long_lora_offsets)
-    indices = torch.tensor(indices_list, dtype=torch.long, device="cuda")
+    indices = torch.tensor(indices_list, dtype=torch.long, device=get_device())
     prompt_mapping_tensor = torch.tensor(prompt_mapping,
-                                         device="cuda",
+                                         device=get_device(),
                                          dtype=torch.long)
     embeddings_indices = torch.stack([
         indices[2] * extra_vocab_size,
@@ -145,8 +160,9 @@ def convert_mapping(
     sampler_indices_padded = sampler_indices.clone()
     sampler_indices_padded[sampler_indices_padded == -1] = max_loras - 1
     sampler_indices_padded = torch.arange(
-        0, len(sampler_indices_padded), device="cuda", dtype=torch.long) + (
-            sampler_indices_padded * len(sampler_indices_padded))
+        0, len(sampler_indices_padded), device=get_device(),
+        dtype=torch.long) + (sampler_indices_padded *
+                             len(sampler_indices_padded))
     long_lora_indices = None
     long_lora_indices_len: Optional[int] = None
     if long_lora_context:
@@ -183,7 +199,7 @@ class PunicaWrapper:
     """
 
     def __init__(self, max_num_batched_tokens: int, max_batches: int,
-                 device: str):
+                 device: Union[torch.device, str]):
         self._token_lora_indices = torch.empty(max_num_batched_tokens,
                                                dtype=torch.long,
                                                device=device)
@@ -215,6 +231,7 @@ class PunicaWrapper:
         self._lora_indices_per_batch = torch.empty(max_batches,
                                                    dtype=torch.long,
                                                    device=device)
+        self.device: torch.device = device
         self.max_length: int = 0
         self.token_nums: int = 0
         self.batch_size: int = -1
@@ -263,6 +280,7 @@ class PunicaWrapper:
             max_loras,
             vocab_size,
             extra_vocab_size,
+            self.device,
             long_lora_context,
         )
         self._token_lora_indices[:base_indices.shape[0]].copy_(base_indices)

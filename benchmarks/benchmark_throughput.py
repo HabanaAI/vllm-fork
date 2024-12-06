@@ -176,6 +176,10 @@ async def run_vllm_async(
     n: int,
     engine_args: AsyncEngineArgs,
     disable_frontend_multiprocessing: bool = False,
+    weights_load_device: str = None,
+    use_padding_aware_scheduling: bool = False,
+    max_num_seqs: int = 256,
+    max_num_prefill_seqs: int = None,
 ) -> float:
     from vllm import SamplingParams
 

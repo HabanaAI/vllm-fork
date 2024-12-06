@@ -4,6 +4,8 @@ import contextlib
 import datetime
 import enum
 import gc
+import getpass
+import importlib.util
 import inspect
 import ipaddress
 import os
@@ -88,9 +90,6 @@ STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER = ("Prompt adapters are not "
                                        "currently supported with encoder/"
                                        "decoder models.")
 
-STR_NOT_IMPL_ENC_DEC_CPU = ("CPU is not currently supported with "
-                            "encoder/decoder models.")
-
 # Efficiently import all enc/dec error strings
 # rather than having to import all of the above
 STR_NOT_IMPL_ENC_DEC_ERR_STRS = {
@@ -105,7 +104,6 @@ STR_NOT_IMPL_ENC_DEC_ERR_STRS = {
     "STR_NOT_IMPL_ENC_DEC_SPEC_DEC": STR_NOT_IMPL_ENC_DEC_SPEC_DEC,
     "STR_NOT_IMPL_ENC_DEC_BACKEND": STR_NOT_IMPL_ENC_DEC_BACKEND,
     "STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER": STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER,
-    "STR_NOT_IMPL_ENC_DEC_CPU": STR_NOT_IMPL_ENC_DEC_CPU
 }
 
 # Constants related to forcing the attention backend selection
@@ -137,6 +135,7 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "fp8": torch.uint8,
     "fp8_e4m3": torch.uint8,
     "fp8_e5m2": torch.uint8,
+    "fp8_inc": torch.float8_e4m3fn,
 }
 
 TORCH_DTYPE_TO_NUMPY_DTYPE = {
@@ -312,6 +311,23 @@ class PyObjectCache:
         """Makes all cached-objects available for the next scheduler iteration.
         """
         self._index = 0
+
+
+@lru_cache(maxsize=None)
+def is_fake_hpu() -> bool:
+    return os.environ.get('VLLM_USE_FAKE_HPU', '0') != '0'
+
+
+@lru_cache(maxsize=None)
+def hpu_device_string():
+    device_string = 'hpu' if not is_fake_hpu() else 'cpu'
+    return device_string
+
+
+@lru_cache(maxsize=None)
+def hpu_backend_string():
+    backend_string = 'hccl' if not is_fake_hpu() else 'gloo'
+    return backend_string
 
 
 @lru_cache(maxsize=None)
@@ -713,6 +729,12 @@ def print_warning_once(msg: str) -> None:
     logger.warning(msg, stacklevel=2)
 
 
+def get_device() -> str:
+    if current_platform.is_hpu():
+        return "hpu"
+    return "cuda"
+
+
 @lru_cache(maxsize=None)
 def is_pin_memory_available() -> bool:
 
@@ -971,6 +993,8 @@ def enable_trace_function_call_for_thread() -> None:
 
     if envs.VLLM_TRACE_FUNCTION:
         tmp_dir = tempfile.gettempdir()
+        # add username to tmp_dir to avoid permission issues
+        tmp_dir = os.path.join(tmp_dir, getpass.getuser())
         filename = (f"VLLM_TRACE_FUNCTION_for_process_{os.getpid()}"
                     f"_thread_{threading.get_ident()}_"
                     f"at_{datetime.datetime.now()}.log").replace(" ", "_")
@@ -1477,6 +1501,32 @@ class AtomicCounter:
         return self._value
 
 
+def migrate_to_cpu():
+    import importlib
+    from unittest.mock import MagicMock
+
+    torch.hpu = MagicMock(name="torch.hpu")
+
+    # Adding dummy submodules to habana_frameworks.torch for cpu-test,
+    # functions from dummy modules will do nothing by default
+    spec = importlib.util.spec_from_loader('habana_frameworks', loader=None)
+    sys.modules['habana_frameworks'] = MagicMock()
+    sys.modules['habana_frameworks'].__spec__ = spec
+
+    builtin_import = __builtins__['__import__']  # type: ignore
+
+    def import_wrapper(name, *args, **kwargs):
+        if 'habana_frameworks' in name:
+            sys.modules[name] = MagicMock()
+        return builtin_import(name, *args, **kwargs)
+
+    __builtins__['__import__'] = import_wrapper
+
+    # In case you want to mock a function to actually do something
+    import habana_frameworks.torch as htorch
+    htorch.utils.internal.is_lazy.return_value = False
+
+
 # Adapted from: https://stackoverflow.com/a/47212782/5082708
 class LazyDict(Mapping, Generic[T]):
 
@@ -1540,6 +1590,25 @@ def is_in_doc_build() -> bool:
         return False
 
 
+def import_from_path(module_name: str, file_path: Union[str, os.PathLike]):
+    """
+    Import a Python file according to its file path.
+
+    Based on the official recipe:
+    https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
+    """
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{module_name}'")
+
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 # create a library to hold the custom op
 vllm_lib = Library("vllm", "FRAGMENT")  # noqa
 
@@ -1581,3 +1650,12 @@ def direct_register_custom_op(
     my_lib.impl(op_name, op_func, "CUDA")
     if fake_impl is not None:
         my_lib._register_fake(op_name, fake_impl)
+
+
+def resolve_obj_by_qualname(qualname: str) -> Any:
+    """
+    Resolve an object by its fully qualified name.
+    """
+    module_name, obj_name = qualname.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, obj_name)

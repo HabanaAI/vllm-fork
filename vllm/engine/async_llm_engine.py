@@ -17,8 +17,10 @@ from vllm.engine.metrics_types import StatLoggerBase
 from vllm.engine.protocol import EngineClient
 from vllm.executor.executor_base import ExecutorAsyncBase
 from vllm.executor.gpu_executor import GPUExecutorAsync
+from vllm.executor.hpu_executor import HPUExecutorAsync
 from vllm.executor.ray_utils import initialize_ray_cluster
 from vllm.inputs import PromptType
+from vllm.inputs.preprocess import InputPreprocessor
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.guided_decoding import (
@@ -628,6 +630,10 @@ class AsyncLLMEngine(EngineClient):
             from vllm.executor.cpu_executor import CPUExecutorAsync
             executor_class = CPUExecutorAsync
         elif engine_config.device_config.device_type == "hpu":
+            if distributed_executor_backend == "mp":
+                from vllm.executor.multiproc_hpu_executor import (
+                    MultiprocessingHPUExecutorAsync)
+                executor_class = MultiprocessingHPUExecutorAsync
             if distributed_executor_backend == "ray":
                 initialize_ray_cluster(engine_config.parallel_config)
                 from vllm.executor.ray_hpu_executor import RayHPUExecutorAsync
@@ -728,6 +734,9 @@ class AsyncLLMEngine(EngineClient):
     def _error_callback(self, exc: Exception) -> None:
         self.set_errored(exc)
         self._request_tracker.propagate_exception(exc)
+
+    async def get_input_preprocessor(self) -> InputPreprocessor:
+        return self.engine.input_preprocessor
 
     async def get_tokenizer(
         self,
@@ -1215,7 +1224,8 @@ class AsyncLLMEngine(EngineClient):
     async def start_profile(self) -> None:
         # using type instead of isinstance to check to avoid capturing
         # inherited classes
-        if type(self.engine.model_executor) == GPUExecutorAsync:  # noqa: E721
+        if type(self.engine.model_executor) == GPUExecutorAsync or \
+            type(self.engine.model_executor) == HPUExecutorAsync:  # noqa: E721
             self.engine.model_executor.start_profile()
         else:
             self.engine.model_executor._run_workers("start_profile")
@@ -1223,7 +1233,8 @@ class AsyncLLMEngine(EngineClient):
     async def stop_profile(self) -> None:
         # using type instead of isinstance to check to avoid capturing
         # inherited classes
-        if type(self.engine.model_executor) == GPUExecutorAsync:  # noqa: E721
+        if type(self.engine.model_executor) == GPUExecutorAsync or \
+            type(self.engine.model_executor) == HPUExecutorAsync:  # noqa: E721
             self.engine.model_executor.stop_profile()
         else:
             self.engine.model_executor._run_workers("stop_profile")

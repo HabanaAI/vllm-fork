@@ -45,9 +45,6 @@ class CompressedTensorsConfig(QuantizationConfig):
     def get_linear_method(self) -> "CompressedTensorsLinearMethod":
         return CompressedTensorsLinearMethod(self)
 
-    def get_scaled_act_names(self) -> List[str]:
-        return []
-
     def get_supported_act_dtypes(cls) -> List[torch.dtype]:
         return [torch.float16, torch.bfloat16]
 
@@ -255,8 +252,10 @@ class CompressedTensorsConfig(QuantizationConfig):
 
         if is_activation_quantization_format(self.quant_format):
             if self._is_fp8_w8a8(weight_quant, input_quant):
-                is_fp8_w8a8_supported = self._check_scheme_supported(
-                    CompressedTensorsW8A8Fp8.get_min_capability(), error=False)
+                is_fp8_w8a8_supported = current_platform.is_hpu() or \
+                    self._check_scheme_supported(
+                    CompressedTensorsW8A8Fp8.get_min_capability(),
+                    error=False)
                 if is_fp8_w8a8_supported:
                     return CompressedTensorsW8A8Fp8(
                         strategy=weight_quant.strategy,
@@ -331,7 +330,8 @@ class CompressedTensorsConfig(QuantizationConfig):
 
         # Raise error if device does not support the scheme
         # (e.g. fp8 needs ada lovelace)
-        self._check_scheme_supported(scheme.get_min_capability())
+        if not current_platform.is_hpu():
+            self._check_scheme_supported(scheme.get_min_capability())
 
         return scheme
 

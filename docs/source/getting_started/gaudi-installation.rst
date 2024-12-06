@@ -30,7 +30,7 @@ Quick start using Dockerfile
 
 
 .. tip::
-   If you're observing the following error: ``docker: Error response from daemon: Unknown runtime specified habana.``, please refer to "Install Using Containers" section of `Intel Gaudi Software Stack and Driver Installation <https://docs.habana.ai/en/v1.18.0/Installation_Guide/Bare_Metal_Fresh_OS.html>`__. Make sure you have ``habana-container-runtime`` package installed and that ``habana`` container runtime is registered.
+   If you're observing the following error: ``docker: Error response from daemon: Unknown runtime specified habana.``, please refer to "Install optional packages" section of `Install Driver and Software <https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html#install-driver-and-software>`__ and "Configure Container Runtime" section of `Docker Installation <https://docs.habana.ai/en/latest/Installation_Guide/Installation_Methods/Docker_Installation.html#configure-container-runtime>`__. Make sure you have ``habanalabs-container-runtime`` package installed and that ``habana`` container runtime is registered.
 
 
 Build from source
@@ -48,8 +48,7 @@ To verify that the Intel Gaudi software was correctly installed, run:
    $ pip list | grep habana # verify that habana-torch-plugin, habana-torch-dataloader, habana-pyhlml and habana-media-loader are installed
    $ pip list | grep neural # verify that neural_compressor is installed
 
-Refer to `Intel Gaudi Software Stack
-Verification <https://docs.habana.ai/en/latest/Installation_Guide/SW_Verification.html#platform-upgrade>`__
+Refer to `System Verification and Final Tests <https://docs.habana.ai/en/latest/Installation_Guide/System_Verification_and_Final_Tests.html>`__
 for more details.
 
 Run Docker Image
@@ -57,7 +56,7 @@ Run Docker Image
 
 It is highly recommended to use the latest Docker image from Intel Gaudi
 vault. Refer to the `Intel Gaudi
-documentation <https://docs.habana.ai/en/latest/Installation_Guide/Bare_Metal_Fresh_OS.html#pull-prebuilt-containers>`__
+documentation <https://docs.habana.ai/en/latest/Installation_Guide/Installation_Methods/Docker_Installation.html#use-intel-gaudi-containers>`__
 for more details.
 
 Use the following commands to run a Docker image:
@@ -76,6 +75,7 @@ To build and install vLLM from source, run:
 
    $ git clone https://github.com/vllm-project/vllm.git
    $ cd vllm
+   $ pip install -r requirements-hpu.txt
    $ python setup.py develop
 
 
@@ -86,6 +86,7 @@ Currently, the latest features and performance optimizations are developed in Ga
    $ git clone https://github.com/HabanaAI/vllm-fork.git
    $ cd vllm-fork
    $ git checkout habana_main
+   $ pip install -r requirements-hpu.txt
    $ python setup.py develop
 
 
@@ -105,13 +106,14 @@ Supported Features
 -  Inference with `HPU Graphs <https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html>`__
    for accelerating low-batch latency and throughput
 -  Attention with Linear Biases (ALiBi)
+-  INC quantization
 
 Unsupported Features
 ====================
 
 -  Beam search
 -  LoRA adapters
--  Quantization
+-  AWQ quantization
 -  Prefill chunking (mixed-batch inferencing)
 
 Supported Configurations
@@ -150,6 +152,10 @@ Gaudi2 devices. Configurations that are not listed may or may not work.
    with tensor parallelism on 8x HPU, BF16 datatype with random or greedy sampling
 -  `meta-llama/Meta-Llama-3.1-70B-Instruct <https://huggingface.co/meta-llama/Meta-Llama-3.1-70B-Instruct>`__
    with tensor parallelism on 8x HPU, BF16 datatype with random or greedy sampling
+-  `mistralai/Mistral-7B-Instruct-v0.3 <https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3>`__
+   on single HPU or with tensor parallelism on 2x HPU, BF16 datatype with random or greedy sampling
+-  `mistralai/Mixtral-8x7B-Instruct-v0.1 <https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1>`__
+   with tensor parallelism on 2x HPU, BF16 datatype with random or greedy sampling
 
 Performance Tuning
 ==================
@@ -372,7 +378,8 @@ Environment variables
          - sequence length min (``VLLM_DECODE_BLOCK_BUCKET_MIN``): ``block_size``
          - sequence length step (``VLLM_DECODE_BLOCK_BUCKET_STEP``): ``block_size``
          - sequence length max (``VLLM_DECODE_BLOCK_BUCKET_MAX``): ``max(128, (max_num_seqs*max_model_len)/block_size)``
-
+-  ``VLLM_HANDLE_TOPK_DUPLICATES``: if ``true``, will handle duplicates that are outside of top-k, ``false`` by default
+-  ``VLLM_CONFIG_HIDDEN_LAYERS``: configure how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. The default is 1. It helps with throughput improvement under inter-token latency limitation for some models.
 
 Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM execution:  
 
