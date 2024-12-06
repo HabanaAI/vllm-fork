@@ -1967,8 +1967,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             print(f'DEBUG real_batch_size: {real_batch_size}')
             print(f'DEBUG batch_size_padded: {batch_size_padded}')
             print(f'DEBUG model_input: {model_input}')
-            time.sleep(5)
-            exit()
 
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
