@@ -18,7 +18,7 @@
 # limitations under the License.
 """Inference-only BaiChuan model compatible with HuggingFace weights."""
 import math
-from typing import Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 from torch import nn
@@ -116,6 +116,7 @@ class BaiChuanAttention(nn.Module):
         max_position_embeddings: int = 8192,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
+        prev_attn: Optional[Any] = None,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -126,7 +127,7 @@ class BaiChuanAttention(nn.Module):
         self.num_heads = (self.total_num_heads //
                           tensor_model_parallel_world_size)
         self.head_dim = hidden_size // self.total_num_heads
-        self.postion_embedding = position_embedding
+        self.position_embedding = position_embedding
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
 
@@ -146,7 +147,7 @@ class BaiChuanAttention(nn.Module):
             quant_config=quant_config,
         )
         # Create the alibi slopes and slice them.
-        if self.postion_embedding == "ALIBI":
+        if self.position_embedding == "ALIBI":
             tp_rank = get_tensor_model_parallel_rank()
             head_start = tp_rank * self.num_heads
             head_end = (tp_rank + 1) * self.num_heads
@@ -158,7 +159,11 @@ class BaiChuanAttention(nn.Module):
                                   self.head_dim,
                                   scaling,
                                   alibi_slopes=alibi_slopes,
-                                  quant_config=quant_config)
+                                  quant_config=quant_config,
+                                  logits_soft_cap=self.max_position_embeddings,
+                                  tp_rank=tp_rank,
+                                  prev_attn=None if prev_attn is None else prev_attn.attn,
+                                )
         else:
             self.rotary_emb = get_rope(
                 self.head_dim,
@@ -182,7 +187,7 @@ class BaiChuanAttention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.W_pack(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
-        if self.postion_embedding != "ALIBI":
+        if self.position_embedding != "ALIBI":
             q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
@@ -195,7 +200,8 @@ class BaiChuanDecoderLayer(nn.Module):
                  config: PretrainedConfig,
                  position_embedding: str,
                  cache_config: Optional[CacheConfig] = None,
-                 quant_config: Optional[QuantizationConfig] = None):
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prev_layer: Optional[Any] = None):
         super().__init__()
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
@@ -209,6 +215,7 @@ class BaiChuanDecoderLayer(nn.Module):
             max_position_embeddings=max_position_embeddings,
             cache_config=cache_config,
             quant_config=quant_config,
+            prev_attn=None if prev_layer is None else prev_layer.self_attn,
         )
         self.mlp = BaiChuanMLP(
             hidden_size=self.hidden_size,
@@ -275,9 +282,10 @@ class BaiChuanModel(nn.Module):
         )
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            lambda prefix: BaiChuanDecoderLayer(config, position_embedding,
-                                                cache_config, quant_config),
+            lambda prefix, prev_layer: BaiChuanDecoderLayer(config, position_embedding,
+                                                cache_config, quant_config, prev_layer),
             prefix=f"{prefix}.layers",
+            use_layer_sharing=True,
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.make_empty_intermediate_tensors = (
@@ -357,6 +365,7 @@ class BaiChuanBaseForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self.lora_config = lora_config
 
         self.quant_config = quant_config
+        self.use_alibi = position_embedding == "ALIBI"
         self.model = BaiChuanModel(vllm_config=vllm_config,
                                    prefix=prefix,
                                    position_embedding=position_embedding)
