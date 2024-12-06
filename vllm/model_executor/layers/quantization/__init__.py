@@ -29,10 +29,15 @@ from vllm.model_executor.layers.quantization.neuron_quant import (
     NeuronQuantConfig)
 from vllm.model_executor.layers.quantization.qqq import QQQConfig
 from vllm.model_executor.layers.quantization.tpu_int8 import Int8TpuConfig
+from vllm.platforms import current_platform
+if current_platform.is_hpu():
+    from vllm_hpu_extension.awq_hpu import AWQHPUConfig
+
 
 QUANTIZATION_METHODS: Dict[str, Type[QuantizationConfig]] = {
     "aqlm": AQLMConfig,
     "awq": AWQConfig,
+    "awq_hpu": AWQHPUConfig,
     "deepspeedfp": DeepSpeedFPConfig,
     "tpu_int8": Int8TpuConfig,
     "fp8": Fp8Config,
