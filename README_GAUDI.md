@@ -11,7 +11,7 @@ Please follow the instructions provided in the [Gaudi Installation Guide](https:
 - OS: Ubuntu 22.04 LTS
 - Python: 3.10
 - Intel Gaudi accelerator
-- Intel Gaudi software version 1.18.0
+- Intel Gaudi software version 1.19.0
 
 ## Quick start using Dockerfile
 ```
@@ -44,18 +44,44 @@ It is highly recommended to use the latest Docker image from Intel Gaudi vault. 
 Use the following commands to run a Docker image:
 
 ```{.console}
-$ docker pull vault.habana.ai/gaudi-docker/1.18.0/ubuntu22.04/habanalabs/pytorch-installer-2.4.0:latest
-$ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.18.0/ubuntu22.04/habanalabs/pytorch-installer-2.4.0:latest
+$ docker pull vault.habana.ai/gaudi-docker/1.19.0/ubuntu22.04/habanalabs/pytorch-installer-2.5.1:latest
+$ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.19.0/ubuntu22.04/habanalabs/pytorch-installer-2.5.1:latest
 ```
 
-### Build and Install vLLM-fork
+### Build and Install vLLM
 
-Currently, the latest features and performance optimizations are developed in Gaudi's [vLLM-fork](https://github.com/HabanaAI/vllm-fork) and we periodically upstream them to vLLM main repo. To install latest [HabanaAI/vLLM-fork](https://github.com/HabanaAI/vllm-fork), run the following:
+Currently, we are providing multiple repositories which can be used to install vLLM with Intel® Gaudi®, pick one option:
+
+#### 1. Build and Install the stable version
+
+Periodically, we are releasing vLLM to allign with Intel® Gaudi® software releases. The stable version is released with a tag, and supports fully validated features and performance optimizations in Gaudi's [vLLM-fork](https://github.com/HabanaAI/vllm-fork). To install the stable release from [HabanaAI/vLLM-fork](https://github.com/HabanaAI/vllm-fork), run the following:
+
+```{.console}
+$ git clone https://github.com/HabanaAI/vllm-fork.git
+$ cd vllm-fork
+$ git checkout v1.19.0
+$ pip install -r requirements-hpu.txt
+$ python setup.py develop
+```
+
+#### 2. Build and Install the latest from vLLM-fork
+
+The latest features and performance optimizations are developed in Gaudi's [vLLM-fork](https://github.com/HabanaAI/vllm-fork) and we periodically upstream them to vLLM main repository. To install latest [HabanaAI/vLLM-fork](https://github.com/HabanaAI/vllm-fork), run the following:
 
 ```{.console}
 $ git clone https://github.com/HabanaAI/vllm-fork.git
 $ cd vllm-fork
 $ git checkout habana_main
+$ pip install -r requirements-hpu.txt
+$ python setup.py develop
+```
+#### 3. Build and Install from vLLM main source
+
+If you prefer to build and install directly from the main vLLM source, where periodically we are upstreaming new features, run the following:
+
+```{.console}
+$ git clone https://github.com/vllm-project/vllm.git
+$ cd vllm
 $ pip install -r requirements-hpu.txt
 $ python setup.py develop
 ```
@@ -71,11 +97,11 @@ $ python setup.py develop
 - Inference with [HPU Graphs](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html) for accelerating low-batch latency and throughput
 - Attention with Linear Biases (ALiBi)
 - INC quantization
+- LoRA adapters
 
 # Unsupported Features
 
 - Beam search
-- LoRA adapters
 - AWQ quantization
 - Prefill chunking (mixed-batch inferencing)
 
@@ -112,7 +138,7 @@ Currently in vLLM for HPU we support four execution modes, depending on selected
 | 1                  | 1               | PyTorch lazy mode  |
 
 > [!WARNING] 
-> In 1.18.0, all modes utilizing `PT_HPU_LAZY_MODE=0` are highly experimental and should be only used for validating functional correctness. Their performance will be improved in the next releases. For obtaining the best performance in 1.18.0, please use HPU Graphs, or PyTorch lazy mode.
+> In 1.19.0, all modes utilizing `PT_HPU_LAZY_MODE=0` are highly experimental and should be only used for validating functional correctness. Their performance will be improved in the next releases. For obtaining the best performance in 1.19.0, please use HPU Graphs, or PyTorch lazy mode.
 
 ## Bucketing mechanism
 
