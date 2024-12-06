@@ -383,7 +383,10 @@ def get_gaudi_sw_version():
     if output.returncode == 0 and output.stdout:
         return output.stdout.split("\n")[2].replace(
             " ", "").split(":")[1][:-1].split("-")[0]
-    return "0.0.0"  # when hl-smi is not available
+    if "HABANA_SOFTWARE_VERSION" in os.environ: # TODO: get this from base image
+        print("Habana Software Version: " + os.environ["HABANA_SOFTWARE_VERSION"])
+        return os.environ["HABANA_SOFTWARE_VERSION"]
+    return "0.0.0" # when hl-smi is not available and no ENV set
 
 
 def get_vllm_version() -> str:
