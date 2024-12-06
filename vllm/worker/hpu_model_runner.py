@@ -1960,6 +1960,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
             self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+            print(f'DEBUG attn_metadata: {attn_metadata}')
+            print(f'DEBUG input_tokens: {input_tokens}')
+            print(f'DEBUG input_positions: {input_positions}')
+            print(f'DEBUG sampling_metadata: {sampling_metadata}')
+            print(f'DEBUG real_batch_size: {real_batch_size}')
+            print(f'DEBUG batch_size_padded: {batch_size_padded}')
+            print(f'DEBUG model_input: {model_input}')
+            time.sleep(5)
+            exit()
 
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
