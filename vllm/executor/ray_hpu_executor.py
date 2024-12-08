@@ -67,20 +67,22 @@ class RayHPUExecutor(DistributedGPUExecutor):
         self.output_decoder = msgspec.msgpack.Decoder(
             Optional[List[SamplerOutput]])
 
-        self.shutdown_inc = True
+        self.terminate_ray = True
 
     def shutdown(self) -> None:
-        if getattr(self, 'shutdown_inc', False):
-            self._run_workers("shutdown_inc")
-            self.shutdown_inc = False
-        for worker in self.workers:
-            worker.__ray_terminate__.remote()
+        if getattr(self, 'terminate_ray', False):
+            for worker in self.workers:
+                worker.__ray_terminate__.remote()
+            self.terminate_ray = False
         if hasattr(self, "forward_dag") and self.forward_dag is not None:
             self.forward_dag.teardown()
             import ray
             for worker in self.workers:
                 ray.kill(worker)
             self.forward_dag = None
+
+    def shutdown_inc(self):
+        self._run_workers("shutdown_inc")
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
@@ -441,9 +443,6 @@ class RayHPUExecutor(DistributedGPUExecutor):
 
         return forward_dag.experimental_compile(enable_asyncio=enable_asyncio)
 
-    def __del__(self):
-        self.shutdown()
-
 
 class RayHPUExecutorAsync(RayHPUExecutor, DistributedGPUExecutorAsync):
 
@@ -514,6 +513,3 @@ class RayHPUExecutorAsync(RayHPUExecutor, DistributedGPUExecutorAsync):
             for worker in self.non_driver_workers
         ]
         return await asyncio.gather(*coros)
-
-    def __del__(self):
-        self.shutdown()
