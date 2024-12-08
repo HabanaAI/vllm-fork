@@ -185,11 +185,8 @@ class HPUExecutor(ExecutorBase):
     def stop_profile(self) -> None:
         self.driver_worker.stop_profile()
 
-    def shutdown(self) -> None:
-        if getattr(self, 'shutdown_inc', False):
-            if hasattr(self.driver_worker, 'shutdown_inc'):
-                self.driver_worker.shutdown_inc()
-            self.shutdown_inc = False
+    def shutdown_inc(self) -> None:
+        self.driver_worker.shutdown_inc()
 
 
 class HPUExecutorAsync(HPUExecutor, ExecutorAsyncBase):
