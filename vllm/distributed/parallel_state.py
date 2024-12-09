@@ -248,7 +248,7 @@ class GroupCoordinator:
             HpuCommunicator)
         self.hpu_communicator: Optional[HpuCommunicator]
         if use_hpu_communicator and self.world_size > 1:
-            self.hpu_communicator = HpuCommunicator(group=self.device_group)
+            self.hpu_communicator = HpuCommunicator(group=self.device_group, rank_in_group=self.rank_in_group)
 
         from vllm.distributed.device_communicators.xpu_communicator import (
             XpuCommunicator)
@@ -711,6 +711,10 @@ class GroupCoordinator:
         # Bypass the function if we are using only 1 GPU.
         if not torch.distributed.is_initialized() or self.world_size == 1:
             return tensor_dict
+        
+        if self.hpu_communicator is not None and \
+            not self.hpu_communicator.disabled:
+            return self.hpu_communicator.send_tensor_dict(tensor_dict, dst, all_gather_group)
 
         all_gather_size = (1 if all_gather_group is None else
                            all_gather_group.world_size)
@@ -750,6 +754,7 @@ class GroupCoordinator:
                                        group=metadata_group)
             else:
                 # use group for GPU tensors
+                print(f'worker {self.rank} sending: {tensor} to: {self.ranks[dst]} group: {group}')
                 torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=group)

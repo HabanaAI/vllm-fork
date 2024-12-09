@@ -85,6 +85,7 @@ class MultiprocessingHPUExecutor(DistributedHPUExecutor):
             self.worker_monitor.start()
         # Set up signal handlers to shutdown the executor cleanly
         # sometimes gc does not work well
+        '''
         # Use weakref to avoid holding a reference to self
         ref = weakref.ref(self)
         def shutdown(signum, frame):
@@ -93,6 +94,7 @@ class MultiprocessingHPUExecutor(DistributedHPUExecutor):
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, shutdown)
             signal.signal(signal.SIGTERM, shutdown)
+        '''
         self.driver_worker = self._create_worker(
             distributed_init_method=distributed_init_method)
         self._run_workers("init_device")
@@ -110,10 +112,12 @@ class MultiprocessingHPUExecutor(DistributedHPUExecutor):
         assert world_size <= hpu_device_count, (
             f"please ensure that world_size ({world_size}) "
             f"is less than than max local gpu count ({hpu_device_count})")
+    
     def shutdown(self):
         if (worker_monitor := getattr(self, "worker_monitor",
                                       None)) is not None:
             worker_monitor.close()
+    
     def _driver_execute_model(
         self, execute_model_req: Optional[ExecuteModelRequest]
     ) -> Optional[List[SamplerOutput]]:
@@ -122,6 +126,7 @@ class MultiprocessingHPUExecutor(DistributedHPUExecutor):
         loop running in each of the remote workers.
         """
         return self.driver_worker.execute_model(execute_model_req)
+    
     def _run_workers(
         self,
         method: str,
@@ -166,18 +171,23 @@ class MultiprocessingHPUExecutor(DistributedHPUExecutor):
         async_run_remote_workers_only to complete."""
         for result in parallel_worker_tasks:
             result.get()
+
+
 class MultiprocessingHPUExecutorAsync(MultiprocessingHPUExecutor,
                                          DistributedHPUExecutorAsync):
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.driver_exec_model = make_async(self.driver_worker.execute_model)
         self.pp_locks: Optional[List[asyncio.Lock]] = None
+    
     async def _driver_execute_model_async(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None
     ) -> List[SamplerOutput]:
         if not self.tp_driver_workers:
             return await self.driver_exec_model(execute_model_req)
+        
         if self.pp_locks is None:
             # This locks each pipeline parallel stage so multiple virtual
             # engines can't execute on the same stage at the same time
@@ -187,6 +197,7 @@ class MultiprocessingHPUExecutorAsync(MultiprocessingHPUExecutor,
                 asyncio.Lock()
                 for _ in range(self.parallel_config.pipeline_parallel_size)
             ]
+        
         tasks = [
             asyncio.create_task(
                 _run_task_with_lock(self.driver_exec_model, self.pp_locks[0],
@@ -200,8 +211,10 @@ class MultiprocessingHPUExecutorAsync(MultiprocessingHPUExecutor,
                                         self.pp_locks[pp_rank],
                                         "execute_model", execute_model_req)))
         results = await asyncio.gather(*tasks)
+        
         # Only the last PP stage has the final results.
         return results[-1]
+    
     async def _start_worker_execution_loop(self):
         coros = [
             worker.execute_method_async("start_worker_execution_loop")
