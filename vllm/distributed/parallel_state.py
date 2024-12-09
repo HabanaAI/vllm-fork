@@ -248,7 +248,7 @@ class GroupCoordinator:
             HpuCommunicator)
         self.hpu_communicator: Optional[HpuCommunicator]
         if use_hpu_communicator and self.world_size > 1:
-            self.hpu_communicator = HpuCommunicator(group=self.device_group, rank_in_group=self.rank_in_group)
+            self.hpu_communicator = HpuCommunicator(group=self.device_group, rank_in_group=self.rank_in_group, ranks=self.ranks, cpu_group=self.cpu_group)
 
         from vllm.distributed.device_communicators.xpu_communicator import (
             XpuCommunicator)
