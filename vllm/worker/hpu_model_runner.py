@@ -31,7 +31,7 @@ from vllm.distributed import broadcast_tensor_dict
 from vllm.distributed.parallel_state import get_world_group
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
-from vllm.lora.layers import LoRAMapping
+from vllm.lora.layers import LoRAMapping, LinearScalingRotaryEmbeddingWithLora
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
@@ -169,7 +169,7 @@ def modify_decoder_layer(module: torch.nn.Module,
             modify_decoder_layer(child_module, suffix, n, counter)
 
 
-def get_names_for_rope(model: torch.nn.Module):
+def get_names_for_rope(model: torch.nn.Module, lora_config):
     """Dynamically get layer names needed for cos and sin preparation for rope.
 
     Every model can have a different naming convention for it's layers.
@@ -194,7 +194,11 @@ def get_names_for_rope(model: torch.nn.Module):
     attn_name, attn_module = get_child(layers_module,
                                        "Attention",
                                        is_list=True)
-    rope_name, _ = get_child(attn_module, "RotaryEmbedding")
+    if lora_config and lora_config.long_lora_scaling_factors:
+        rope_class_name = "LinearScalingRotaryEmbeddingWithLora"
+    else:
+        rope_class_name = "RotaryEmbedding"
+    rope_name, _ = get_child(attn_module, rope_class_name)
 
     if rope_name is not None:
         return {
@@ -359,11 +363,19 @@ class HpuModelAdapter:
         rope_name = self.layer_names['rope_name']
 
         base_model = getattr(self.model, model_name)
-        first_model_layer = getattr(base_model, layers_name)[0]
-        attention_layer = getattr(first_model_layer, attn_name)
+        model_layers = getattr(base_model, layers_name)
+        attention_layer = getattr(model_layers[0], attn_name)
         rope = getattr(attention_layer, rope_name)
 
-        rope.prepare_cos_sin(positions)
+
+        if isinstance(rope, LinearScalingRotaryEmbeddingWithLora):
+            for _layer in model_layers:
+                attention_layer = getattr(_layer, attn_name)
+                rope = getattr(attention_layer, rope_name)
+                rope.base_layer.prepare_cos_sin(positions)
+        else:
+            rope.prepare_cos_sin(positions)
+
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -741,7 +753,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 get_decoder_layer_suffix(model_config.model_type if
                                          model_config is not None else None),
                 hidden_layer_markstep_interval)
-            names_for_rope = get_names_for_rope(self.model)
+            names_for_rope = get_names_for_rope(self.model, self.lora_config)
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
