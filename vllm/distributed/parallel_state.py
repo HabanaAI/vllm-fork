@@ -524,7 +524,7 @@ class GroupCoordinator:
                                    dtype=torch.long,
                                    device="cpu")
         
-        print(f'SENDING SIZE TENSOR OF SHAPE: {size_tensor.shape} from {self.rank} to {self.ranks[dst]}')
+        #print(f'SENDING SIZE TENSOR OF SHAPE: {size_tensor.shape} from {self.rank} to {self.ranks[dst]}')
         # Send object size
         htorch.core.mark_step()
         torch.hpu.synchronize()
@@ -533,7 +533,7 @@ class GroupCoordinator:
                                group=self.cpu_group)
         htorch.core.mark_step()
 
-        print(f'SENDING OBJECT OF SHAPE: {object_tensor.shape} from {self.rank} to {self.ranks[dst]}')
+        #print(f'SENDING OBJECT OF SHAPE: {object_tensor.shape} from {self.rank} to {self.ranks[dst]}')
         # Send object
         htorch.core.mark_step()
         torch.hpu.synchronize()
@@ -562,7 +562,7 @@ class GroupCoordinator:
                                            src=self.ranks[src],
                                            group=self.cpu_group)
         htorch.core.mark_step()
-        print(f'RECV SIZE TENSOR OF SHAPE: {size_tensor.shape} from {self.ranks[src]}')
+        #print(f'RECV SIZE TENSOR OF SHAPE: {size_tensor.shape} from {self.ranks[src]}')
 
         # Tensor to receive serialized objects into.
         object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -575,13 +575,13 @@ class GroupCoordinator:
                                              src=self.ranks[src],
                                              group=self.cpu_group)
         htorch.core.mark_step()
-        print(f'RECV OBJ TENSOR OF SHAPE: {object_tensor.shape} from {self.ranks[src]}')
+        #print(f'RECV OBJ TENSOR OF SHAPE: {object_tensor.shape} from {self.ranks[src]}')
 
         assert rank_object == rank_size, (
             "Received object sender rank does not match the size sender rank.")
 
         obj = pickle.loads(object_tensor.numpy().tobytes())
-        print(f'worker {self.rank} received obj {obj}')
+        #print(f'worker {self.rank} received obj {obj}')
         return obj
 
     def broadcast_tensor_dict(
@@ -703,6 +703,7 @@ class GroupCoordinator:
         # `send_object_list` has serialization & deserialization,
         # all happening on CPU. Therefore, we can use the CPU group.
         self.send_object(metadata_list, dst=dst)
+        #print(f'TENSOR LIST TO SEND: {tensor_list}')
         for tensor in tensor_list:
             if tensor.numel() == 0:
                 # Skip sending empty tensors.
@@ -712,7 +713,8 @@ class GroupCoordinator:
             if (all_gather_group is not None
                     and tensor.numel() % all_gather_size == 0):
                 tensor = tensor.reshape(all_gather_size, -1)[all_gather_rank]
-
+            
+            #print(f'SHAPE OF TENSOR BEING SENT: {tensor.shape}')
             if tensor.is_cpu:
                 # use metadata_group for CPU tensors
                 htorch.core.mark_step()
@@ -725,8 +727,10 @@ class GroupCoordinator:
                 # use group for GPU tensors
                 htorch.core.mark_step()
                 torch.hpu.synchronize()
-                print(f'sending TENSOR WITH SHAPE: {tensor.shape}, TO: {self.ranks[dst]}')
-                torch.distributed.send(tensor,
+                #print(f'sending TENSOR WITH SHAPE: {tensor.shape}, TO: {self.ranks[dst]}')
+                _tmp_tensor = torch.empty_like(tensor)
+                _tmp_tensor.copy_(tensor)
+                torch.distributed.send(_tmp_tensor,
                                        dst=self.ranks[dst],
                                        group=group)
                 htorch.core.mark_step()
@@ -791,7 +795,7 @@ class GroupCoordinator:
                                            src=self.ranks[src],
                                            group=group)
                     htorch.core.mark_step()
-                print(f'RECV TENSOR OF SHAPE: {tensor.shape} from {self.ranks[src]}')
+                #print(f'RECV TENSOR OF SHAPE: {tensor.shape} from {self.ranks[src]} group: {group}')
                 if use_all_gather:
                     # do the allgather
                     tensor = all_gather_group.all_gather(  # type: ignore
