@@ -3,7 +3,11 @@
 ###############################################################################
 
 import gc
+import gzip
+import json
 import os
+import queue
+import time
 from typing import List, Optional, Set, Tuple, Type
 
 import habana_frameworks.torch as htorch  # noqa:F401
@@ -20,9 +24,9 @@ from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import ExecuteModelRequest
+from vllm.utils import hpu_backend_string, hpu_device_string, is_fake_hpu
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.hpu_model_runner import HPUModelRunner
-from vllm.worker.model_runner_base import ModelRunnerBase
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
 
@@ -44,7 +48,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         rank: int,
         distributed_init_method: str,
         is_driver_worker: bool = False,
-        model_runner_cls: Optional[Type[ModelRunnerBase]] = None,
+        model_runner_cls: Optional[Type[HPUModelRunner]] = None,
     ) -> None:
         WorkerBase.__init__(self, vllm_config=vllm_config)
         self.parallel_config.rank = rank
@@ -60,8 +64,26 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             from vllm.utils import init_cached_hf_modules
             init_cached_hf_modules()
 
-        self.model_runner: HPUModelRunner = HPUModelRunner(
-            vllm_config=vllm_config, is_driver_worker=is_driver_worker)
+        # Return hidden states from target model if the draft model is an
+        # mlp_speculator
+        speculative_config = self.speculative_config
+        model_config = self.model_config
+        speculative_args = {} if speculative_config is None \
+            or (speculative_config.draft_model_config.model ==
+                model_config.model) \
+            or (speculative_config.draft_model_config.hf_config.model_type
+                not in ["medusa", "mlp_speculator", "eagle"]) \
+                    else {"return_hidden_states": True}
+
+        ModelRunnerClass: Type[HPUModelRunner] = HPUModelRunner
+        self.model_runner: HPUModelRunner = ModelRunnerClass(
+            vllm_config=vllm_config,
+            kv_cache_dtype=self.cache_config.cache_dtype,
+            is_driver_worker=is_driver_worker,
+            **speculative_args,
+        )
+        if model_runner_cls is not None:
+            self.model_runner = model_runner_cls(self.model_runner)
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
         self.cache_engine: List[HPUCacheEngine]
@@ -73,21 +95,82 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
             logger.info("Profiling enabled. Traces will be saved to: %s",
                         torch_profiler_trace_dir)
+
+            if os.getenv('VLLM_PROFILER_ENABLED') == 'full':
+                fn = self.full_trace_handler
+                with_stack = False
+            else:
+                fn = torch.profiler.tensorboard_trace_handler
+                with_stack = True
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
                     torch.profiler.ProfilerActivity.HPU,
                 ],
-                with_stack=True,
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                with_stack=with_stack,
+                on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+
+    def full_trace_handler(self, dir_name, use_gzip=False):
+
+        def handler_fn(prof) -> None:
+            if not os.path.isdir(dir_name):
+                try:
+                    os.makedirs(dir_name, exist_ok=True)
+                except Exception as e:
+                    raise RuntimeError("Can't create directory: " +
+                                       dir_name) from e
+            file_name = f"vllm.{time.time_ns()}.pt.trace.json"
+            file_path = os.path.join(dir_name, file_name)
+            prof.export_chrome_trace(file_path)
+            with open(file_path) as f:
+                pytorch_trace = json.load(f)
+            os.remove(file_path)
+            base = pytorch_trace['baseTimeNanoseconds'] / 1000
+            events = self.model_runner.profiler.profiling_trace_events
+            while True:
+                try:
+                    event_str = events.get_nowait()
+                    event = json.loads(event_str[:-1])
+                    event['ts'] = event['ts'] - base
+                    pytorch_trace['traceEvents'].append(event)
+                except queue.Empty:
+                    break
+
+            pytorch_trace['traceEvents'].append({
+                "args": {
+                    "name": "vLLM"
+                },
+                "name": "process_name",
+                "ph": "M",
+                "pid": 1,
+                "tid": 0,
+                "ts": 0.0
+            })
+            if use_gzip:
+                file_path = file_path + ".gz"
+                with gzip.open(file_path, 'wt', encoding="ascii") as zipfile:
+                    json.dump(pytorch_trace, zipfile)
+            else:
+                with open(file_path, "w") as outfile:
+                    outfile.write(json.dumps(pytorch_trace))
+            logger.info("Saved full profiling to %s", file_path)
+
+        return handler_fn
 
     def start_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
-        self.profiler.start()
+        high_level_profiler = self.model_runner.profiler
+        with high_level_profiler.record_event('internal', 'start_profiler'):
+            # Clean up the queue
+            while True:
+                try:
+                    high_level_profiler.profiling_trace_events.get_nowait()
+                except queue.Empty:
+                    break
+            self.profiler.start()
 
     def stop_profile(self):
         if self.profiler is None:
@@ -108,6 +191,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
             torch.hpu.set_device(self.device)
+        elif self.device_config.device_type == "cpu":
+            self.device = torch.device("cpu")
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
@@ -141,6 +226,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
+        if is_fake_hpu():
+            cache_block_size = self.get_cache_block_size_bytes()
+            fake_hpu_cache_alloc = 4 * 2**30  # take 4 GiB flat on fake hpu
+            num_fake_hpu_blocks = fake_hpu_cache_alloc // cache_block_size
+            self.model_runner.bucketing_ctx.num_hpu_blocks = num_fake_hpu_blocks
+            return num_fake_hpu_blocks, 0
         with HabanaMemoryProfiler() as m:
             self.model_runner.profile_run()
             torch.hpu.synchronize()
@@ -176,6 +267,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                              cache_block_size)
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
+
+        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
@@ -224,9 +317,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
-
-    def finish_measurements(self):
-        self.model_runner.finish_measurements()
 
     @property
     def do_metadata_broadcast(self) -> bool:
@@ -335,11 +425,12 @@ def init_worker_distributed_environment(
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    backend = hpu_backend_string()
     init_distributed_environment(parallel_config.world_size,
                                  rank,
                                  distributed_init_method,
                                  local_rank,
-                                 backend='hccl')
+                                 backend=backend)
 
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
@@ -356,15 +447,17 @@ def init_worker_distributed_environment(
             "distributed_init_method must be set if torch.distributed "
             "is not already initialized")
     else:
+        backend = hpu_backend_string()
         torch.distributed.init_process_group(
-            backend="hccl",
+            backend=backend,
             world_size=parallel_config.world_size,
             rank=rank,
             init_method=distributed_init_method,
         )
 
     # A small all_reduce for warmup & checking conformance.
-    dummy_tensor_hpu = torch.ones(1).to('hpu')
+    device = hpu_device_string()
+    dummy_tensor_hpu = torch.ones(1).to(device)
     torch.distributed.all_reduce(dummy_tensor_hpu)
     assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
@@ -398,12 +491,14 @@ class HPUCacheEngine(CacheEngine):
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_kv_heads, self.head_size)
         kv_cache: List[Tuple[torch.Tensor, torch.Tensor]] = []
+        dtype = self.dtype
+        if device != 'hpu' and not is_fake_hpu() \
+          and self.dtype == torch.float8_e4m3fn:
+            dtype = torch.uint8
         for _ in range(self.num_attention_layers):
-            key_cache = torch.zeros(kv_cache_shape,
-                                    dtype=self.dtype,
-                                    device=device)
+            key_cache = torch.zeros(kv_cache_shape, dtype=dtype, device=device)
             value_cache = torch.zeros(kv_cache_shape,
-                                      dtype=self.dtype,
+                                      dtype=dtype,
                                       device=device)
             kv_layer = (key_cache, value_cache)
             kv_cache.append(kv_layer)

@@ -7,8 +7,12 @@ from vllm.platforms import current_platform
 
 # Input scaling factors are no longer optional in _scaled_mm starting
 # from pytorch 2.5. Allocating a dummy tensor to pass as input_scale
-TORCH_DEVICE_IDENTITY = torch.ones(1).cuda() \
-            if current_platform.is_rocm() else None
+TORCH_DEVICE_IDENTITY = torch.ones(1, dtype=torch.float32)
+
+if current_platform.is_hpu():
+    import habana_frameworks.torch.utils.experimental as htexp
+    from vllm_hpu_extension.ops import scaled_fp8_quant
+    ops.scaled_fp8_quant = scaled_fp8_quant
 
 
 def cutlass_fp8_supported() -> bool:
@@ -25,7 +29,15 @@ def cutlass_fp8_supported() -> bool:
 def per_tensor_dequantize(
         tensor: torch.Tensor, inv_scale: Union[float,
                                                torch.Tensor]) -> torch.Tensor:
-    fake_qweight = tensor.to(torch.float16)
+    dtype = torch.float16
+    device = tensor.device
+    if current_platform.is_hpu():
+        dtype = torch.bfloat16
+        if htexp._get_device_type() == htexp.synDeviceType.synDeviceGaudi2:
+            #dequant on cpu to avoid nan on gaudi2
+            tensor = tensor.to('cpu')
+
+    fake_qweight = tensor.to(dtype).to(device)
     dq_weight = fake_qweight * inv_scale
     return dq_weight
 
@@ -58,7 +70,10 @@ def requantize_with_max_scale(
         logical_widths: List[int]) -> Tuple[torch.Tensor, torch.Tensor]:
     # Max scale to be used for requanitzation.
     max_w_scale = weight_scale.max()
-
+    if current_platform.is_hpu() and htexp._get_device_type(
+    ) == htexp.synDeviceType.synDeviceGaudi2:
+        max_w_scale = max_w_scale * (torch.finfo(torch.float8_e4m3fn).max /
+                                     torch.finfo(torch.float8_e4m3fnuz).max)
     # QKV / MLP is fused in the on disk checkpoint if any of the
     # weight scales are still set to the default since we initialize
     # N weight scales for N shards but we only load 1 weight scale
@@ -126,7 +141,7 @@ def apply_fp8_linear(
         qinput, x_scale = ops.scaled_fp8_quant(
             input_2d,
             input_scale,
-            num_token_padding=17,
+            batch_dim_padding=17,
             use_per_token_if_dynamic=use_per_token_if_dynamic)
 
         per_tensor_weights = (weight_scale.numel() == 1)
@@ -134,12 +149,20 @@ def apply_fp8_linear(
 
         if per_tensor_weights and per_tensor_activations:
             # Fused GEMM_DQ
-            output = torch._scaled_mm(qinput,
-                                      weight,
-                                      out_dtype=input.dtype,
-                                      scale_a=x_scale,
-                                      scale_b=weight_scale,
-                                      bias=bias)
+            if current_platform.is_hpu():
+                #hpu does not support torch._scaled_mm (SW-197036)
+                output = torch.ops.hpu.fp8_gemm_v2(qinput, False, weight,
+                                                   False, None, input.dtype,
+                                                   x_scale, weight_scale, None,
+                                                   False)
+            else:
+                output = torch._scaled_mm(qinput,
+                                          weight,
+                                          out_dtype=input.dtype,
+                                          scale_a=x_scale,
+                                          scale_b=weight_scale,
+                                          bias=bias)
+
             # A fix for discrepancy in scaled_mm which returns tuple
             # for torch < 2.5 and a single value in torch >= 2.5
             if type(output) is tuple and len(output) == 2:
@@ -166,8 +189,7 @@ def apply_fp8_linear(
 
             # Making sure the dummy tensor is on the same device as the weight
             global TORCH_DEVICE_IDENTITY
-            if (TORCH_DEVICE_IDENTITY is not None
-                    and TORCH_DEVICE_IDENTITY.device != weight.device):
+            if TORCH_DEVICE_IDENTITY.device != weight.device:
                 TORCH_DEVICE_IDENTITY = TORCH_DEVICE_IDENTITY.to(weight.device)
 
             # GEMM
@@ -213,13 +235,16 @@ def apply_int8_linear(
                                                symmetric=symmetric)
 
     if x_zp is not None:
+        # Currently, static is always per-tensor and dynamic is per-token
+        static = input_zero_point is not None
+        azp = None if static else x_zp
         return ops.cutlass_scaled_mm_azp(x_q,
                                          weight,
                                          scale_a=x_scale,
                                          scale_b=weight_scale,
                                          out_dtype=input.dtype,
                                          azp_adj=azp_adj,
-                                         azp=x_zp,
+                                         azp=azp,
                                          bias=bias)
     return ops.cutlass_scaled_mm(x_q,
                                  weight,

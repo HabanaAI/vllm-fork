@@ -10,7 +10,7 @@ from vllm.executor.msgspec_utils import decode_hook, encode_hook
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.sequence import ExecuteModelRequest, IntermediateTensors
-from vllm.utils import get_ip
+from vllm.utils import get_ip, hpu_device_string
 from vllm.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
@@ -234,7 +234,7 @@ def initialize_ray_cluster(
     if current_platform.is_rocm() or current_platform.is_xpu():
         # Try to connect existing ray instance and create a new one if not found
         try:
-            ray.init("auto")
+            ray.init("auto", ignore_reinit_error=True)
         except ConnectionError:
             logger.warning(
                 "No existing RAY instance detected. "
@@ -253,7 +253,7 @@ def initialize_ray_cluster(
     if current_platform.is_tpu():
         device_str = "TPU"
     elif current_platform.is_hpu():
-        device_str = 'HPU'
+        device_str = hpu_device_string().upper()
     # Create placement group for worker processes
     current_placement_group = ray.util.get_current_placement_group()
     if current_placement_group:

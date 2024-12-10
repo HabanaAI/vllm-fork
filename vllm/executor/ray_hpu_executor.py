@@ -17,7 +17,7 @@ from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import ExecuteModelRequest
 from vllm.utils import (_run_task_with_lock, get_distributed_init_method,
                         get_ip, get_open_port, get_vllm_instance_id,
-                        make_async)
+                        is_fake_hpu, make_async)
 from vllm.worker.worker_base import WorkerBase
 
 if ray is not None:
@@ -70,7 +70,13 @@ class RayHPUExecutor(DistributedGPUExecutor):
         self.output_decoder = msgspec.msgpack.Decoder(
             Optional[List[SamplerOutput]])
 
+        self.terminate_ray = True
+
     def shutdown(self) -> None:
+        if getattr(self, 'terminate_ray', False):
+            for worker in self.workers:
+                worker.__ray_terminate__.remote()
+            self.terminate_ray = False
         if hasattr(self, "forward_dag") and self.forward_dag is not None:
             self.forward_dag.teardown()
             import ray
@@ -78,8 +84,8 @@ class RayHPUExecutor(DistributedGPUExecutor):
                 ray.kill(worker)
             self.forward_dag = None
 
-    def finish_measurements(self):
-        self._run_workers("finish_measurements")
+    def shutdown_inc(self):
+        self._run_workers("shutdown_inc")
 
     def _get_worker_module_and_class(
         self
@@ -87,8 +93,8 @@ class RayHPUExecutor(DistributedGPUExecutor):
                                            Type[WorkerBase]]]]:  # noqa: F821
         worker_class_fn = None
         if self.scheduler_config.is_multi_step:
-            raise NotImplementedError(
-                "Multi-step execution is not implemented for HPU")
+            worker_module_name = "vllm.worker.multi_step_hpu_worker"
+            worker_class_name = "MultiStepHPUWorker"
         elif self.speculative_config:
             raise NotImplementedError(
                 "Speculative decoding is not implemented for HPU")
@@ -128,23 +134,24 @@ class RayHPUExecutor(DistributedGPUExecutor):
 
         # Create the workers.
         driver_ip = get_ip()
-        worker_wrapper_kwargs = self._get_worker_wrapper_args()
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
-            if not bundle.get("HPU", 0):
+            resource_name = "HPU" if not is_fake_hpu() else "CPU"
+            if not bundle.get(resource_name, 0):
                 continue
             scheduling_strategy = PlacementGroupSchedulingStrategy(
                 placement_group=placement_group,
                 placement_group_capture_child_tasks=True,
                 placement_group_bundle_index=bundle_id,
             )
-
+            resources = {'HPU': num_gpus} if not is_fake_hpu() else {}
+            num_cpus = 0 if not is_fake_hpu() else num_gpus
             worker = ray.remote(
-                num_cpus=0,
+                num_cpus=num_cpus,
                 num_gpus=0,
-                resources={'HPU': num_gpus},
+                resources=resources,
                 scheduling_strategy=scheduling_strategy,
                 **ray_remote_kwargs,
-            )(RayWorkerWrapper).remote(**worker_wrapper_kwargs)
+            )(RayWorkerWrapper).remote(vllm_config=self.vllm_config)
 
             if self.use_ray_spmd_worker:
                 self.workers.append(worker)
@@ -155,7 +162,7 @@ class RayHPUExecutor(DistributedGPUExecutor):
                     # as the resource holder for the driver process.
                     self.driver_dummy_worker = worker
                     self.driver_worker = RayWorkerWrapper(
-                        **worker_wrapper_kwargs)
+                        vllm_config=self.vllm_config)
                 else:
                     # Else, added to the list of workers.
                     self.workers.append(worker)
@@ -222,8 +229,8 @@ class RayHPUExecutor(DistributedGPUExecutor):
                 f"Every node should have a unique IP address. Got {n_nodes}"
                 f" nodes with node ids {list(node_workers.keys())} and "
                 f"{n_ips} unique IP addresses {all_ips}. Please check your"
-                " network configuration. If you set `VLLM_HOST_IP` or "
-                "`HOST_IP` environment variable, make sure it is unique for"
+                " network configuration. If you set `VLLM_HOST_IP` "
+                "environment variable, make sure it is unique for"
                 " each node.")
 
         VLLM_INSTANCE_ID = get_vllm_instance_id()
@@ -476,9 +483,6 @@ class RayHPUExecutor(DistributedGPUExecutor):
 
         return forward_dag.experimental_compile(enable_asyncio=enable_asyncio)
 
-    def __del__(self):
-        self.shutdown()
-
 
 class RayHPUExecutorAsync(RayHPUExecutor, DistributedGPUExecutorAsync):
 
@@ -549,6 +553,3 @@ class RayHPUExecutorAsync(RayHPUExecutor, DistributedGPUExecutorAsync):
             for worker in self.non_driver_workers
         ]
         return await asyncio.gather(*coros)
-
-    def __del__(self):
-        self.shutdown()
