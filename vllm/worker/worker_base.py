@@ -315,7 +315,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         #print(f'\n\n\n CHECKPOINT RANK {get_pp_group().rank}\n\n\n')
-        print(f'CHECK 1 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
+        #print(f'CHECK 1 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
         start_time = time.perf_counter()
         #print(f'execute_model_req: {execute_model_req}')
         inputs = self.prepare_input(execute_model_req)
@@ -323,7 +323,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         if inputs is None:
             print(f' worker {get_pp_group().rank} has no inputs')
             return None
-        print(f'CHECK 2 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
+        #print(f'CHECK 2 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
         model_input, worker_input, kwargs = inputs
         num_steps = worker_input.num_steps
 
@@ -332,17 +332,18 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # If there is no input, we don't need to execute the model.
         if worker_input.num_seq_groups == 0:
             return []
-        print(f'CHECK 3 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
+        #print(f'CHECK 3 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
         intermediate_tensors = None
         orig_model_execute_time = 0.0
         #print(f'\n\n\n CHECKPOINT RANK {get_pp_group().rank}\n\n\n')
         #print(f'\n\n\n {get_pp_group().is_first_rank} \n\n\n')
-        print(f'CHECK 4 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
+        #print(f'CHECK 4 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
         if not get_pp_group().is_first_rank:
             #print(f'\n\n\n WORKER RANK {get_pp_group().rank} in receive\n\n\n')
             intermediate_tensors = IntermediateTensors(
                 get_pp_group().recv_tensor_dict(
                     all_gather_group=get_tp_group()))
+            #print(f'WORKER {get_pp_group().rank} received tensor dict: {intermediate_tensors}')
             if (self.observability_config is not None
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
@@ -364,7 +365,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 output.tensors["model_execute_time"] = torch.tensor(
                     model_execute_time + orig_model_execute_time)
-            print(f'WORKER {get_pp_group().rank} sending tensor_dict: {output.tensors}')
+            #print(f'WORKER {get_pp_group().rank} sending tensor_dict: {output.tensors}')
+            #for t in output.tensors:
+                #print(f'{t}')
             get_pp_group().send_tensor_dict(output.tensors,
                                             all_gather_group=get_tp_group())
             return [None]
