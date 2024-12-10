@@ -527,6 +527,7 @@ class GroupCoordinator:
         print(f'SENDING SIZE TENSOR: {size_tensor} from {self.rank} to {self.ranks[dst]}')
         # Send object size
         htorch.core.mark_step()
+        torch.hpu.synchronize()
         torch.distributed.send(size_tensor,
                                dst=self.ranks[dst],
                                group=self.cpu_group)
@@ -535,6 +536,7 @@ class GroupCoordinator:
         print(f'SENDING OBJECT: {object_tensor} from {self.rank} to {self.ranks[dst]}')
         # Send object
         htorch.core.mark_step()
+        torch.hpu.synchronize()
         torch.distributed.send(object_tensor,
                                dst=self.ranks[dst],
                                group=self.cpu_group)
@@ -712,6 +714,7 @@ class GroupCoordinator:
             if tensor.is_cpu:
                 # use metadata_group for CPU tensors
                 htorch.core.mark_step()
+                torch.hpu.synchronize()
                 torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=metadata_group)
@@ -719,6 +722,7 @@ class GroupCoordinator:
             else:
                 # use group for GPU tensors
                 htorch.core.mark_step()
+                torch.hpu.synchronize()
                 torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=group)
