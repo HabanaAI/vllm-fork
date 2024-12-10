@@ -31,7 +31,7 @@ from vllm.distributed import broadcast_tensor_dict
 from vllm.distributed.parallel_state import get_world_group
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
-from vllm.lora.layers import LoRAMapping, LinearScalingRotaryEmbeddingWithLora
+from vllm.lora.layers import LinearScalingRotaryEmbeddingWithLora, LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
@@ -367,7 +367,6 @@ class HpuModelAdapter:
         attention_layer = getattr(model_layers[0], attn_name)
         rope = getattr(attention_layer, rope_name)
 
-
         if isinstance(rope, LinearScalingRotaryEmbeddingWithLora):
             for _layer in model_layers:
                 attention_layer = getattr(_layer, attn_name)
@@ -375,7 +374,6 @@ class HpuModelAdapter:
                 rope.base_layer.prepare_cos_sin(positions)
         else:
             rope.prepare_cos_sin(positions)
-
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
