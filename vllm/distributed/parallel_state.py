@@ -44,6 +44,8 @@ from vllm.utils import direct_register_custom_op, supports_custom_op
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
+if current_platform.is_hpu():
+    import habana_frameworks.torch as htorch
 
 @dataclass
 class GraphCaptureContext:
@@ -524,16 +526,19 @@ class GroupCoordinator:
         
         print(f'SENDING SIZE TENSOR: {size_tensor} from {self.rank} to {self.ranks[dst]}')
         # Send object size
-
+        htorch.core.mark_step()
         torch.distributed.send(size_tensor,
                                dst=self.ranks[dst],
                                group=self.cpu_group)
+        htorch.core.mark_step()
 
         print(f'SENDING OBJECT: {object_tensor} from {self.rank} to {self.ranks[dst]}')
         # Send object
+        htorch.core.mark_step()
         torch.distributed.send(object_tensor,
                                dst=self.ranks[dst],
                                group=self.cpu_group)
+        htorch.core.mark_step()
 
         return None
 
@@ -550,9 +555,11 @@ class GroupCoordinator:
         size_tensor = torch.empty(1, dtype=torch.long, device="cpu")
 
         # Receive object size
+        htorch.core.mark_step()
         rank_size = torch.distributed.recv(size_tensor,
                                            src=self.ranks[src],
                                            group=self.cpu_group)
+        htorch.core.mark_step()
 
         # Tensor to receive serialized objects into.
         object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -560,9 +567,11 @@ class GroupCoordinator:
             dtype=torch.uint8,
             device="cpu")
 
+        htorch.core.mark_step()
         rank_object = torch.distributed.recv(object_tensor,
                                              src=self.ranks[src],
                                              group=self.cpu_group)
+        htorch.core.mark_step()
 
         assert rank_object == rank_size, (
             "Received object sender rank does not match the size sender rank.")
@@ -702,14 +711,18 @@ class GroupCoordinator:
 
             if tensor.is_cpu:
                 # use metadata_group for CPU tensors
+                htorch.core.mark_step()
                 torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=metadata_group)
+                htorch.core.mark_step()
             else:
                 # use group for GPU tensors
+                htorch.core.mark_step()
                 torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=group)
+                htorch.core.mark_step()
         return None
 
     def recv_tensor_dict(
@@ -759,14 +772,18 @@ class GroupCoordinator:
 
                 if tensor.is_cpu:
                     # use metadata_group for CPU tensors
+                    htorch.core.mark_step()
                     torch.distributed.recv(tensor,
                                            src=self.ranks[src],
                                            group=metadata_group)
+                    htorch.core.mark_step()
                 else:
                     # use group for GPU tensors
+                    htorch.core.mark_step()
                     torch.distributed.recv(tensor,
                                            src=self.ranks[src],
                                            group=group)
+                    htorch.core.mark_step()
                 if use_all_gather:
                     # do the allgather
                     tensor = all_gather_group.all_gather(  # type: ignore
