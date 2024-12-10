@@ -332,6 +332,10 @@ class HPUEncoderDecoderModelRunner(
             attn_metadata.cross_block_groups = block_groups
             attn_metadata.cross_block_usage = block_usage
 
+        # add padding to align with language model shapes
+        padding_len = model_input.batch_size_padded - len(encoder_seq_lens)
+        encoder_seq_lens.extend([encoder_seq_lens[0]] * padding_len)
+
         encoder_seq_lens_tensor = self._list_to_int32_tensor(encoder_seq_lens)
         attn_metadata.encoder_seq_lens = encoder_seq_lens
         attn_metadata.encoder_seq_lens_tensor = encoder_seq_lens_tensor
