@@ -1579,7 +1579,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         compile_only_mode_context = functools.partial(bc.env_setting,
                                                       "PT_COMPILE_ONLY_MODE",
-                                                      True)
+                                                      htorch.utils.internal.is_lazy())
         can_use_compile_only_mode = True
         try:
             with compile_only_mode_context():
