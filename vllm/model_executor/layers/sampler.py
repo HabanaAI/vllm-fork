@@ -405,10 +405,10 @@ class ApplyToppTopkScalar:
         self._increment = increment
 
     def __call__(self, logits: torch.Tensor, p: float, k: int):
-        if k==1 and not ApplyToppTopkScalar._handle_duplicates:
+        if k == 1 and not ApplyToppTopkScalar._handle_duplicates:
             new_logits = torch.full(logits.shape,
-                            -float("inf"),
-                            device=logits.device)
+                                    -float("inf"),
+                                    device=logits.device)
             vals, idx = torch.max(logits, keepdim=True, dim=1)
             new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
             return new_logits
