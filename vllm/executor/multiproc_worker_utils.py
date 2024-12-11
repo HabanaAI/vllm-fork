@@ -220,7 +220,6 @@ def _run_worker_process(
             task_id, method, args, kwargs = items
             try:
                 executor = getattr(worker, method)
-                print("\n\n\n EXECUTOR = ", executor)
                 output = executor(*args, **kwargs)
             except SystemExit:
                 raise

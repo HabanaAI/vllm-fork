@@ -338,6 +338,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         #print(f'\n\n\n CHECKPOINT RANK {get_pp_group().rank}\n\n\n')
         #print(f'\n\n\n {get_pp_group().is_first_rank} \n\n\n')
         #print(f'CHECK 4 -> is_first_rank {get_pp_group().is_first_rank}, is_last_rank {get_pp_group().is_last_rank}')
+        #print(f'self observability config = {self.observability_config}')
         if not get_pp_group().is_first_rank:
             #print(f'\n\n\n WORKER RANK {get_pp_group().rank} in receive\n\n\n')
             intermediate_tensors = IntermediateTensors(
@@ -348,6 +349,11 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
                     "model_execute_time", torch.tensor(0)).item()
+
+        print("PARAMETERS FOR MODEL_RUNNER.EXECUTE_MODEL")
+        print(f'model_input = {model_input}')
+        print(f'intermediate tensors = {intermediate_tensors}')
+        print(f'num_steps = {num_steps}')
 
         output = self.model_runner.execute_model(
             model_input=model_input,
@@ -379,6 +385,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                                         model_execute_time)
 
         # output is List[SamplerOutput]
+        print(f'output = {output}')
         return output
 
     def _execute_model_spmd(
