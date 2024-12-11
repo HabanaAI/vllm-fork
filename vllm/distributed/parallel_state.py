@@ -727,7 +727,7 @@ class GroupCoordinator:
                 # use group for GPU tensors
                 htorch.core.mark_step()
                 torch.hpu.synchronize()
-                #print(f'sending TENSOR WITH SHAPE: {tensor.shape}, TO: {self.ranks[dst]}')
+                #print(f'sending TENSOR: {tensor}, TO: {self.ranks[dst]}')
                 _tmp_tensor = torch.empty_like(tensor)
                 _tmp_tensor.copy_(tensor)
                 torch.distributed.send(_tmp_tensor,
@@ -795,7 +795,7 @@ class GroupCoordinator:
                                            src=self.ranks[src],
                                            group=group)
                     htorch.core.mark_step()
-                #print(f'RECV TENSOR OF SHAPE: {tensor.shape} from {self.ranks[src]} group: {group}')
+                #print(f'RECV TENSOR: {tensor} from {self.ranks[src]}')
                 if use_all_gather:
                     # do the allgather
                     tensor = all_gather_group.all_gather(  # type: ignore

@@ -392,6 +392,7 @@ class HpuModelAdapter:
                 a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
+        print("\n\n\n IN FORWARD PASS RIGHT NOW \n\n\n")
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
@@ -2222,6 +2223,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        print(f'\n\n\n INTERMEDIATE TENSORS AS INPUT FOR MODEL RUNNER EXECUTE MODEL = {intermediate_tensors} \n\n\n')
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
@@ -2328,17 +2330,20 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
+
+                print(f'EXECUTE_MODEL_KWARGS = {execute_model_kwargs["input_ids"]}')
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
                         selected_token_indices)
-                
+                print(f'HIDDEN STATES CHECK = {hidden_states}') 
                 if self.lora_config:
                     LoraMask.setLoraMask(
                         lora_logits_mask.index_select(
                             0, sampling_metadata.selected_token_indices))
-
+                
+                print(f'MODEL RUNNER HIDDEN STATES = {hidden_states}')
                 if not get_pp_group().is_last_rank:
                     return hidden_states
 
@@ -2354,6 +2359,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits = self.model.compute_logits(hidden_states,
                                                             sampling_metadata)
                 htorch.core.mark_step()
+                print(f'\n\n\n LAST RANK LOGITS = {logits} \n\n\n')
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
