@@ -11,6 +11,7 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.outputs import RequestOutput
+from vllm.platforms import current_platform
 from vllm.pooling_params import PoolingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import SamplingParams
@@ -106,13 +107,26 @@ class LLMEngine:
     def _get_executor_cls(cls, vllm_config: VllmConfig):
         distributed_executor_backend = (
             vllm_config.parallel_config.distributed_executor_backend)
-        if distributed_executor_backend == "mp":
-            from vllm.v1.executor.multiproc_executor import MultiprocExecutor
-            executor_class = MultiprocExecutor
-        else:
-            assert (distributed_executor_backend is None)
-            from vllm.v1.executor.uniproc_executor import UniprocExecutor
-            executor_class = UniprocExecutor
+        executor_class: Type[Executor]
+        if current_platform.is_cuda_alike():
+            if distributed_executor_backend == "mp":
+                from vllm.v1.executor.multiproc_executor import (
+                    MultiprocExecutor)
+                executor_class = MultiprocExecutor
+            else:
+                assert (distributed_executor_backend is None)
+                from vllm.v1.executor.uniproc_executor import UniprocExecutor
+                executor_class = UniprocExecutor
+        elif current_platform.is_hpu():
+            if distributed_executor_backend == "mp":
+                from vllm.v1.executor.multiproc_hpu_executor import (
+                    MultiprocHPUExecutor)
+                executor_class = MultiprocHPUExecutor
+            else:
+                assert (distributed_executor_backend is None)
+                from vllm.v1.executor.uniproc_hpu_executor import (
+                    UniprocHPUExecutor)
+                executor_class = UniprocHPUExecutor
 
         return executor_class
 
