@@ -20,6 +20,7 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 from vllm.model_executor.model_loader import get_model
+from vllm.platforms import current_platform
 
 
 class ContextIDInfo(TypedDict):
@@ -64,12 +65,13 @@ def cleanup_fixture(should_do_global_cleanup_after_test: bool):
 @pytest.fixture
 def dist_init():
     temp_file = tempfile.mkstemp()[1]
+    backend_type = "hccl" if current_platform.is_hpu() else "nccl"
     init_distributed_environment(
         world_size=1,
         rank=0,
         distributed_init_method=f"file://{temp_file}",
         local_rank=0,
-        backend="nccl",
+        backend=backend_type,
     )
     initialize_model_parallel(1, 1)
     yield
@@ -150,6 +152,11 @@ def sql_lora_huggingface_id():
 @pytest.fixture(scope="session")
 def sql_lora_files(sql_lora_huggingface_id):
     return snapshot_download(repo_id=sql_lora_huggingface_id)
+
+
+@pytest.fixture(scope="session")
+def lora_bias_files():
+    return snapshot_download(repo_id="followumesh/granite-3b-lora8-bias")
 
 
 @pytest.fixture(scope="session")
@@ -253,8 +260,14 @@ def llama_2_7b_engine_extra_embeddings():
                                                        max_lora_rank=8)
         return get_model_old(**kwargs)
 
-    with patch("vllm.worker.model_runner.get_model", get_model_patched):
-        engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
+    if current_platform.is_hpu():
+        with patch("vllm.worker.hpu_model_runner.get_model",
+                   get_model_patched):
+            engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
+    else:
+        with patch("vllm.worker.model_runner.get_model", get_model_patched):
+            engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
+
     yield engine.llm_engine
     del engine
     cleanup_dist_env_and_memory(shutdown_ray=True)

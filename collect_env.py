@@ -1,16 +1,18 @@
 # ruff: noqa
 # code borrowed from https://github.com/pytorch/pytorch/blob/main/torch/utils/collect_env.py
 
-# Unlike the rest of the PyTorch this file must be python2 compliant.
-# This script outputs relevant system environment info
-# Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
 import datetime
 import locale
 import os
 import re
 import subprocess
 import sys
+# Unlike the rest of the PyTorch this file must be python2 compliant.
+# This script outputs relevant system environment info
+# Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
 from collections import namedtuple
+
+from vllm.envs import environment_variables
 
 try:
     import torch
@@ -37,6 +39,8 @@ SystemEnv = namedtuple(
         'cuda_module_loading',
         'nvidia_driver_version',
         'nvidia_gpu_models',
+        'habana_hpu_models',
+        'habana_driver_version',
         'cudnn_version',
         'pip_version',  # 'pip' or 'pip3'
         'pip_packages',
@@ -52,6 +56,7 @@ SystemEnv = namedtuple(
         'vllm_version',  # vllm specific field
         'vllm_build_flags',  # vllm specific field
         'gpu_topo',  # vllm specific field
+        'env_vars',
     ])
 
 DEFAULT_CONDA_PATTERNS = {
@@ -249,6 +254,37 @@ def get_nvidia_smi():
                 smi = '"{}"'.format(candidate_smi)
                 break
     return smi
+
+
+def get_hpu_info():
+    try:
+        command = ["hl-smi", "-q", "-d", "PRODUCT"]
+        lines = subprocess.Popen(command, stdout=subprocess.PIPE, universal_newlines=True).stdout.readlines()
+        lines = [l.strip('\t') for l in lines]
+        hpu_count = None
+        hpu_model = None
+        hpu_driver = None
+        model_re = re.compile(r'Product Name.+?: (.+)')
+        count_re = re.compile(r'Attached AIPs.+?: (\d+)')
+        driver_re = re.compile(r'Driver Version.+?: (.+)')
+        for line in lines:            
+            if hpu_c := count_re.match(line):
+                hpu_count = hpu_c.group(1)
+
+            if hpu_m := model_re.match(line):
+                hpu_model = hpu_m.group(1)
+
+            if hpu_d := driver_re.match(line):
+                hpu_driver = hpu_d.group(1)
+
+            if hpu_model and hpu_count and hpu_driver:
+                break
+
+        if hpu_model is None:
+            return ('N/A', hpu_driver)
+        return (f'{hpu_count}x {hpu_model}', hpu_driver)
+    except:
+        return ('N/A', 'N/A')
 
 
 def get_rocm_version(run_lambda):
@@ -512,6 +548,22 @@ def is_xnnpack_available():
     else:
         return "N/A"
 
+def get_env_vars():
+    env_vars = ''
+    secret_terms=('secret', 'token', 'api', 'access', 'password')
+    report_prefix = ("TORCH", "NCCL", "PYTORCH",
+                     "CUDA", "CUBLAS", "CUDNN",
+                     "OMP_", "MKL_",
+                     "NVIDIA")
+    for k, v in os.environ.items():
+        if any(term in k.lower() for term in secret_terms):
+            continue
+        if k in environment_variables:
+            env_vars = env_vars + "{}={}".format(k, v) + "\n"
+        if k.startswith(report_prefix):
+            env_vars = env_vars + "{}={}".format(k, v) + "\n"
+
+    return env_vars
 
 def get_env_info():
     run_lambda = run
@@ -549,6 +601,7 @@ def get_env_info():
     vllm_version = get_vllm_version()
     vllm_build_flags = summarize_vllm_build_flags()
     gpu_topo = get_gpu_topo(run_lambda)
+    hpu_info = get_hpu_info()
 
     return SystemEnv(
         torch_version=version_str,
@@ -564,6 +617,8 @@ def get_env_info():
         nvidia_gpu_models=get_gpu_info(run_lambda),
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
+        habana_hpu_models=hpu_info[0],
+        habana_driver_version=hpu_info[1],
         hip_compiled_version=hip_compiled_version,
         hip_runtime_version=hip_runtime_version,
         miopen_runtime_version=miopen_runtime_version,
@@ -583,6 +638,7 @@ def get_env_info():
         vllm_version=vllm_version,
         vllm_build_flags=vllm_build_flags,
         gpu_topo=gpu_topo,
+        env_vars=get_env_vars(),
     )
 
 
@@ -606,6 +662,8 @@ CUDA_MODULE_LOADING set to: {cuda_module_loading}
 GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
+HPU devices: {habana_hpu_models}
+HPU driver version: {habana_driver_version}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
@@ -631,6 +689,8 @@ vLLM Build Flags:
 {vllm_build_flags}
 GPU Topology:
 {gpu_topo}
+
+{env_vars}
 """.strip()
 
 

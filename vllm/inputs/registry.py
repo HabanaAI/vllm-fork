@@ -5,14 +5,17 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, Mapping, NamedTuple,
                     Optional, Protocol, Type, cast)
 
 from torch import nn
-from transformers import PretrainedConfig
-from typing_extensions import TypeVar
+from transformers import PretrainedConfig, ProcessorMixin
+from typing_extensions import TypeVar, assert_never
 
 from vllm.logger import init_logger
-from vllm.utils import (get_allowed_kwarg_only_overrides, print_warning_once,
-                        resolve_mm_processor_kwargs)
+from vllm.transformers_utils.processor import cached_get_processor
+from vllm.transformers_utils.tokenizer import AnyTokenizer
+from vllm.utils import (ClassRegistry, get_allowed_kwarg_only_overrides,
+                        print_warning_once, resolve_mm_processor_kwargs)
 
-from .data import ProcessorInputs
+from .data import ProcessorInputs, SingletonInputs
+from .parse import is_encoder_decoder_inputs
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig
@@ -61,6 +64,19 @@ class InputContext:
         return self.model_config.hf_image_processor_config
 
 
+@dataclass(frozen=True)
+class InputProcessingContext(InputContext):
+    tokenizer: AnyTokenizer
+    """The tokenizer used to tokenize the inputs."""
+
+    def get_hf_processor(self, **kwargs) -> ProcessorMixin:
+        return cached_get_processor(
+            self.model_config.tokenizer,
+            tokenizer=self.tokenizer,  # Override the tokenizer with ours
+            trust_remote_code=self.model_config.trust_remote_code,
+            **kwargs)
+
+
 N = TypeVar("N", bound=Type[nn.Module])
 
 
@@ -94,7 +110,7 @@ class DummyDataFactory(Protocol):
         ...
 
 
-class _MultiModalCounts(UserDict):
+class _MultiModalCounts(UserDict[str, int]):
     """
     Wraps `mm_counts` for a more informative error message
     when attempting to access a plugin that does not exist.
@@ -120,12 +136,12 @@ class InputRegistry:
     """
 
     def __init__(self) -> None:
-        self._dummy_factories_by_model_type: Dict[Type[nn.Module],
-                                                  DummyDataFactory] = {}
-        self._dummy_encoder_factories_by_model_type: Dict[
-            Type[nn.Module], DummyDataFactory] = {}
-        self._input_processors_by_model_type: Dict[Type[nn.Module],
-                                                   InputProcessor] = {}
+        self._dummy_factories_by_model_type = \
+            ClassRegistry[nn.Module, DummyDataFactory]()
+        self._dummy_encoder_factories_by_model_type = \
+            ClassRegistry[nn.Module, DummyDataFactory]()
+        self._input_processors_by_model_type = \
+            ClassRegistry[nn.Module, InputProcessor]()
 
     def _default_dummy_data_factory(
         self,
@@ -216,19 +232,35 @@ class InputRegistry:
         """
         # Avoid circular import
         from vllm.model_executor.model_loader import get_model_architecture
+        from vllm.multimodal import MultiModalKwargs
+        from vllm.multimodal.utils import cached_get_tokenizer
 
-        model_cls, _ = get_model_architecture(model_config)
-        if is_encoder_data:
-            dummy_factory = self._get_dummy_encoder_data_factory(model_cls)
+        if mm_registry.has_processor(model_config):
+            tokenizer = cached_get_tokenizer(
+                model_config.tokenizer,
+                trust_remote_code=model_config.trust_remote_code,
+            )
+            processor = mm_registry.create_processor(model_config, tokenizer)
+
+            mm_counts = mm_registry.get_mm_limits_per_prompt(model_config)
+            mm_max_tokens = mm_registry.get_max_tokens_by_modality(
+                model_config)
+
+            dummy_data = processor.get_dummy_data(seq_len, mm_counts,
+                                                  mm_max_tokens)
         else:
-            dummy_factory = self._get_dummy_data_factory(model_cls)
-        mm_counts = mm_registry.get_mm_limits_per_prompt(model_config)
-        mm_processor_kwargs = get_allowed_kwarg_only_overrides(
-            dummy_factory, overrides=model_config.mm_processor_kwargs)
+            model_cls, _ = get_model_architecture(model_config)
+            if is_encoder_data:
+                dummy_factory = self._get_dummy_encoder_data_factory(model_cls)
+            else:
+                dummy_factory = self._get_dummy_data_factory(model_cls)
+            mm_counts = mm_registry.get_mm_limits_per_prompt(model_config)
+            mm_processor_kwargs = get_allowed_kwarg_only_overrides(
+                dummy_factory, overrides=model_config.mm_processor_kwargs)
 
-        dummy_data = dummy_factory(InputContext(model_config), seq_len,
-                                   _MultiModalCounts(mm_counts),
-                                   **mm_processor_kwargs)
+            dummy_data = dummy_factory(InputContext(model_config), seq_len,
+                                       _MultiModalCounts(mm_counts),
+                                       **mm_processor_kwargs)
 
         # Having more tokens is over-conservative but otherwise fine
         num_tokens = dummy_data.seq_data.prompt_token_ids
@@ -241,7 +273,9 @@ class InputRegistry:
                 raise AssertionError(
                     f"Expected at least {seq_len} dummy tokens for profiling, "
                     f"but found {len(num_tokens)} tokens instead.")
-        if dummy_data.multi_modal_data is not None:
+
+        if (dummy_data.multi_modal_data is not None and
+                not isinstance(dummy_data.multi_modal_data, MultiModalKwargs)):
             for k, v in dummy_data.multi_modal_data.items():
                 num_items = len(v) if isinstance(v, list) else 1
                 num_expected = mm_counts[k]
@@ -287,6 +321,21 @@ class InputRegistry:
         return self._input_processors_by_model_type \
             .get(model_cls, self._default_input_processor)
 
+    def _ensure_mm_kwargs(
+        self,
+        inputs: SingletonInputs,
+        mm_processor_kwargs: Dict[str, Any],
+    ):
+        if inputs["type"] == "token":
+            # In case the input processor for that model fails to set it
+            if "mm_processor_kwargs" not in inputs:
+                inputs["mm_processor_kwargs"] = mm_processor_kwargs
+        elif inputs["type"] == "multimodal":
+            # Be more strict in V2
+            assert "mm_kwargs" in inputs
+        else:
+            assert_never(inputs["type"])
+
     def process_input(self, model_config: "ModelConfig",
                       inputs: ProcessorInputs) -> ProcessorInputs:
         """
@@ -312,8 +361,21 @@ class InputRegistry:
             processor,
         )
 
-        return processor(InputContext(model_config), inputs,
-                         **mm_processor_kwargs)
+        processed_inputs = processor(
+            InputContext(model_config),
+            inputs,
+            **mm_processor_kwargs,
+        )
+
+        if is_encoder_decoder_inputs(processed_inputs):
+            self._ensure_mm_kwargs(processed_inputs["encoder"],
+                                   mm_processor_kwargs)
+            self._ensure_mm_kwargs(processed_inputs["decoder"],
+                                   mm_processor_kwargs)
+        else:
+            self._ensure_mm_kwargs(processed_inputs, mm_processor_kwargs)
+
+        return processed_inputs
 
     def create_input_processor(self, model_config: "ModelConfig"):
         """

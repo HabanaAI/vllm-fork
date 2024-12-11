@@ -27,6 +27,9 @@ import torch
 import torch.nn as nn
 
 from vllm.model_executor.custom_op import CustomOp
+from vllm.platforms import current_platform
+
+is_hpu = current_platform.is_hpu()
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
@@ -96,6 +99,32 @@ class RotaryEmbedding(CustomOp):
         cache = cache.to(dtype)
         self.cos_sin_cache: torch.Tensor
         self.register_buffer("cos_sin_cache", cache, persistent=False)
+
+    def prepare_cos_sin(self,
+                        positions: torch.Tensor,
+                        offsets: Optional[torch.Tensor] = None):
+        if offsets is not None:
+            offsets = offsets.view(positions.shape[0], -1)
+            positions = positions + offsets
+        positions = positions.flatten()
+        num_tokens = positions.shape[0]
+        cos_sin = self.cos_sin_cache.index_select(0, positions).view(
+            num_tokens, 1, -1)
+        cos, sin = cos_sin.chunk(2, dim=-1)
+        if self.is_neox_style:
+            cos = torch.cat((cos, cos), dim=-1)
+            sin = torch.cat((sin, sin), dim=-1)
+        else:
+            sin = torch.repeat_interleave(sin,
+                                          2,
+                                          dim=-1,
+                                          output_size=cos_sin.shape[-1])
+            cos = torch.repeat_interleave(cos,
+                                          2,
+                                          dim=-1,
+                                          output_size=cos_sin.shape[-1])
+        self.register_buffer("cos", cos, persistent=False)
+        self.register_buffer("sin", sin, persistent=False)
 
     def _compute_inv_freq(self, base: Union[int, float]) -> torch.Tensor:
         """Compute the inverse frequency."""
@@ -203,13 +232,9 @@ class RotaryEmbedding(CustomOp):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         from habana_frameworks.torch.hpex.kernels import (
             RotaryPosEmbeddingMode, apply_rotary_pos_emb)
-        positions = positions.flatten()
-        if offsets is not None:
-            positions = positions + offsets
-        num_tokens = positions.shape[0]
-        cos_sin = self.cos_sin_cache.index_select(0, positions).view(
-            num_tokens, 1, -1)
-        cos, sin = cos_sin.chunk(2, dim=-1)
+        if self.sin is None:
+            self.prepare_cos_sin(positions, offsets)
+        num_tokens = positions.shape[0] * positions.shape[1]
         # HPU RoPE kernel requires hidden dimension for cos and sin to be equal
         # to query hidden dimension, so the original tensors need to be
         # expanded
@@ -220,19 +245,10 @@ class RotaryEmbedding(CustomOp):
         rope_mode: RotaryPosEmbeddingMode
         if self.is_neox_style:
             rope_mode = RotaryPosEmbeddingMode.BLOCKWISE
-            cos = torch.cat((cos, cos), dim=-1)
-            sin = torch.cat((sin, sin), dim=-1)
         else:
             rope_mode = RotaryPosEmbeddingMode.PAIRWISE
-            sin = torch.repeat_interleave(sin,
-                                          2,
-                                          dim=-1,
-                                          output_size=cos_sin.shape[-1])
-            cos = torch.repeat_interleave(cos,
-                                          2,
-                                          dim=-1,
-                                          output_size=cos_sin.shape[-1])
-
+        sin = self.sin
+        cos = self.cos
         query_shape = query.shape
         query = query.view(num_tokens, -1, self.head_size)
         query_rot = query[..., :self.rotary_dim]
@@ -651,9 +667,12 @@ class DeepseekScalingRotaryEmbedding(RotaryEmbedding):
                          is_neox_style, dtype)
 
     def _compute_inv_freq(self, scaling_factor: float) -> torch.Tensor:
-        pos_freqs = self.base**(torch.arange(
-            0, self.rotary_dim, 2, dtype=torch.float, device="cuda") /
-                                self.rotary_dim)
+        pos_freqs = self.base**(
+            torch.arange(0,
+                         self.rotary_dim,
+                         2,
+                         dtype=torch.float,
+                         device="hpu" if is_hpu else "cuda") / self.rotary_dim)
         inv_freq_extrapolation = 1.0 / pos_freqs
         inv_freq_interpolation = 1.0 / (scaling_factor * pos_freqs)
 
@@ -671,7 +690,7 @@ class DeepseekScalingRotaryEmbedding(RotaryEmbedding):
     def _compute_cos_sin_cache(self) -> torch.Tensor:
         inv_freq = self._compute_inv_freq(self.scaling_factor)
         t = torch.arange(self.max_position_embeddings * self.scaling_factor,
-                         device="cuda",
+                         device="hpu" if is_hpu else "cuda",
                          dtype=torch.float32)
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
         cos = (freqs.cos() * self.mscale)
@@ -847,6 +866,7 @@ class MRotaryEmbedding(RotaryEmbedding):
         vision_end_token_id: int,
         spatial_merge_size: int,
         context_len: int = 0,
+        seq_len: Optional[int] = None,
     ) -> Tuple[List[List[int]], int]:
         """Get mrope input positions and delta value."""
 
@@ -921,9 +941,9 @@ class MRotaryEmbedding(RotaryEmbedding):
                 torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
 
         llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
-        llm_positions = llm_positions[:, context_len:]
         mrope_position_delta = (llm_positions.max() + 1 -
                                 len(input_tokens)).item()
+        llm_positions = llm_positions[:, context_len:seq_len]
 
         return llm_positions.tolist(), mrope_position_delta
 
