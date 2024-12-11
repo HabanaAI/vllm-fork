@@ -363,16 +363,11 @@ class HpuModelAdapter:
         rope_name = self.layer_names['rope_name']
 
         base_model = getattr(self.model, model_name)
-        model_layers = getattr(base_model, layers_name)
-        attention_layer = getattr(model_layers[0], attn_name)
+        first_model_layer = getattr(base_model, layers_name)[0]
+        attention_layer = getattr(first_model_layer, attn_name)
         rope = getattr(attention_layer, rope_name)
 
-        if isinstance(rope, LinearScalingRotaryEmbeddingWithLora):
-            for _layer in model_layers:
-                attention_layer = getattr(_layer, attn_name)
-                rope = getattr(attention_layer, rope_name)
-                rope.base_layer.prepare_cos_sin(positions)
-        else:
+        if not isinstance(rope, LinearScalingRotaryEmbeddingWithLora):
             rope.prepare_cos_sin(positions)
 
     def forward(self, *args, **kwargs):
