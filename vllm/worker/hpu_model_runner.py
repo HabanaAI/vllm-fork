@@ -392,9 +392,10 @@ class HpuModelAdapter:
                 a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
-        print(f'intermediate_tensors right after entering forward = {kwargs["intermediate_tensors"]}!!!!!!')
+        if not get_pp_group().is_first_rank:
+            for key, tensor in kwargs['intermediate_tensors'].tensors.items():
+                kwargs['intermediate_tensors'][key] = torch.empty_like(tensor).copy_(tensor)
         kwargs = kwargs.copy()
-        print(f'intermediate_tensors right after entering forward = {kwargs["intermediate_tensors"]}')
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
@@ -1684,24 +1685,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_single_step:
-                '''
-                intermediate_tensors = None
-                #seq_id = list(seqs.seq_data.keys())[0]
-                #seq_data = seqs.seq_data[seq_id]
-                #context_size = seq_data.get_num_computed_tokens()
-                
-                if not get_pp_group().is_first_rank:
-                    intermediate_tensors = self.model.make_empty_intermediate_tensors(
-                        batch_size=batch_size,
-                        context_size=self._seq_len(inputs.attn_metadata) if is_prompt else 1,
-                        dtype=self.model_config.dtype,
-                        device=self.device)
-                print("\n\n\n")
-                print("self._seq_len = ", self._seq_len(inputs.attn_metadata))
-                print("seq len(seqs) = ", len(seqs))
-                print("seq_len = ", seq_len)
-                print("batch_size = ", batch_size)
-                '''
                 intermediate_tensors = None
 
                 if not get_pp_group().is_first_rank:
@@ -2232,8 +2215,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        print('now in hpu_model_runner execute_model')
-        print(f'and intermediate_tensors are: {intermediate_tensors}')
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
@@ -2273,14 +2254,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
-            '''
-            if not get_pp_group().is_first_rank:
-                    intermediate_tensors = self.model.make_empty_intermediate_tensors(
-                        batch_size=batch_size,
-                        context_size=seq_len if is_prompt else 1,
-                        dtype=self.model_config.dtype,
-                        device=self.device)
-            '''    
+            
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -2342,14 +2316,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     })
 
                 with self.profiler.record_event('internal', model_event_name):
-                    #print({k: v for k, v in execute_model_kwargs.items() if k != 'kv_caches'})
-                    print(f'intermediate_tensors before forward: {execute_model_kwargs["intermediate_tensors"]}')
-                    print(self.model)
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
                         selected_token_indices)
-                    print(f'hidden_states after forward: {hidden_states}')
                 if self.lora_config:
                     LoraMask.setLoraMask(
                         lora_logits_mask.index_select(
