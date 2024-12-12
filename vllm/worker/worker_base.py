@@ -422,11 +422,11 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
                     "model_execute_time", torch.tensor(0)).item()
 
-        print("PARAMETERS FOR MODEL_RUNNER.EXECUTE_MODEL")
-        print(f'model_input = {model_input}')
-        print(f'intermediate tensors = {intermediate_tensors}')
-        print(f'num_steps = {num_steps}')
-
+        #print("PARAMETERS FOR MODEL_RUNNER.EXECUTE_MODEL")
+        #print(f'model_input = {model_input}')
+        #print(f'intermediate tensors = {intermediate_tensors}')
+        #print(f'num_steps = {num_steps}')
+        print(f'worker {get_pp_group().rank} received intermediate_tensors: {intermediate_tensors}')
         output = self.model_runner.execute_model(
             model_input=model_input,
             kv_caches=self.kv_cache[worker_input.virtual_engine]
@@ -458,7 +458,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                                         model_execute_time)
 
         # output is List[SamplerOutput]
-        print(f'output = {output}')
+        #print(f'output = {output}')
         return output
 
     def _execute_model_spmd(

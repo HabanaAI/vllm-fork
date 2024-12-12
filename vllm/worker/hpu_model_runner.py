@@ -392,8 +392,9 @@ class HpuModelAdapter:
                 a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
-        print("\n\n\n IN FORWARD PASS RIGHT NOW \n\n\n")
+        print(f'intermediate_tensors right after entering forward = {kwargs["intermediate_tensors"]}!!!!!!')
         kwargs = kwargs.copy()
+        print(f'intermediate_tensors right after entering forward = {kwargs["intermediate_tensors"]}')
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
@@ -1701,7 +1702,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 print("seq_len = ", seq_len)
                 print("batch_size = ", batch_size)
                 '''
-                self.execute_model(inputs, kv_caches, warmup_mode=True)
+                intermediate_tensors = None
+
+                if not get_pp_group().is_first_rank:
+                    intermediate_tensors = self.model.make_empty_intermediate_tensors(
+                        batch_size=batch_size,
+                        context_size=seq_len if is_prompt else 1,
+                        dtype=self.model_config.dtype,
+                        device=self.device)
+                self.execute_model(inputs, kv_caches, intermediate_tensors=intermediate_tensors,  warmup_mode=True)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
@@ -2223,7 +2232,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        print(f'\n\n\n INTERMEDIATE TENSORS AS INPUT FOR MODEL RUNNER EXECUTE MODEL = {intermediate_tensors} \n\n\n')
+        print('now in hpu_model_runner execute_model')
+        print(f'and intermediate_tensors are: {intermediate_tensors}')
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
@@ -2263,14 +2273,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
-        
+            '''
             if not get_pp_group().is_first_rank:
                     intermediate_tensors = self.model.make_empty_intermediate_tensors(
                         batch_size=batch_size,
                         context_size=seq_len if is_prompt else 1,
                         dtype=self.model_config.dtype,
                         device=self.device)
-            
+            '''    
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -2331,19 +2341,20 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             broadcast_data["attn_metadata"])
                     })
 
-                print(f'EXECUTE_MODEL_KWARGS = {execute_model_kwargs["input_ids"]}')
                 with self.profiler.record_event('internal', model_event_name):
+                    #print({k: v for k, v in execute_model_kwargs.items() if k != 'kv_caches'})
+                    print(f'intermediate_tensors before forward: {execute_model_kwargs["intermediate_tensors"]}')
+                    print(self.model)
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
                         selected_token_indices)
-                print(f'HIDDEN STATES CHECK = {hidden_states}') 
+                    print(f'hidden_states after forward: {hidden_states}')
                 if self.lora_config:
                     LoraMask.setLoraMask(
                         lora_logits_mask.index_select(
                             0, sampling_metadata.selected_token_indices))
                 
-                print(f'MODEL RUNNER HIDDEN STATES = {hidden_states}')
                 if not get_pp_group().is_last_rank:
                     return hidden_states
 
@@ -2359,7 +2370,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits = self.model.compute_logits(hidden_states,
                                                             sampling_metadata)
                 htorch.core.mark_step()
-                print(f'\n\n\n LAST RANK LOGITS = {logits} \n\n\n')
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
