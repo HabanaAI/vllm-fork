@@ -336,7 +336,7 @@ class HPUEncoderDecoderModelRunner(
         real_batch_size = len(seq_group_metadata_list)
         batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
             real_batch_size, is_prompt)
-        batch_size_padding = batch_size_padded - len(encoder_seq_lens)
+        batch_size_padding = batch_size_padded - real_batch_size
         if batch_size_padding > 0:
             encoder_seq_lens.extend(encoder_seq_lens[0]
                                     for _ in range(batch_size_padding))
