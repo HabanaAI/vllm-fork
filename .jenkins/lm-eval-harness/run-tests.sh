@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -x
-
 usage() {
     echo``
     echo "Runs lm eval harness on GSM8k using vllm and compares to "
