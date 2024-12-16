@@ -180,7 +180,6 @@ def modify_model_layers(module: torch.nn.Module,
         else:
             modify_model_layers(child_module, suffix_list, n, counter)
 
-
 def get_path_to_rope(model: torch.nn.Module):
     """Dynamically get the path to the RotaryEmbedding layer in the model.
     This function will recursively search through the module hierarchy to find
@@ -199,7 +198,7 @@ def get_path_to_rope(model: torch.nn.Module):
             for child_name, child_module in parent.named_children():
                 # If the current child is of type RotaryEmbedding,
                 # return the full path
-                if child_module.__class__.__name__.endswith("RotaryEmbedding"):
+                if child_module.__class__.__name__.endswith("RotaryEmbedding"):    
                     return path + [child_name]
                 # Otherwise, recurse into this child to check its children
                 result = find_rope_layer(child_module, path + [child_name])
@@ -212,7 +211,6 @@ def get_path_to_rope(model: torch.nn.Module):
 
     # Return the result if found, otherwise None
     return path_to_rope
-
 
 class HpuModelAdapter:
 
@@ -370,8 +368,10 @@ class HpuModelAdapter:
         current_module = self.model  # Start from the top level of the model
 
         for layer in self.layer_names:
-            if layer.isdigit():  # Check if the layer is an index
-                layer = int(layer)
+            # If the current layer is a string, it's a name (for named_children)
+            if layer.isdigit(
+            ):  # Check if the layer is an index (numeric as string)
+                layer = int(layer)  # Convert to integer if it's an index
 
             # Check if the current layer is a name in a module
             if isinstance(
@@ -384,8 +384,7 @@ class HpuModelAdapter:
 
         # At the end, we should be at the RotaryEmbedding layer.
         if hasattr(current_module, 'prepare_cos_sin'):
-            current_module.prepare_cos_sin(
-                positions, recompute_cos_sin=self.recompute_cos_sin)
+            current_module.prepare_cos_sin(positions)
         else:
             raise AttributeError(
                 "The module at the end of the path does not have \
