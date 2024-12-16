@@ -53,7 +53,7 @@ do
         JUNIT_FAMILY="-o junit_family=xunit1"
         JUNIT_XML="--junitxml=${LOG_PATH}"
     fi
-    pytest -s test_lm_eval_correctness.py $JUNIT_FAMILY $JUNIT_XML || LOCAL_SUCCESS=$?
+    pytest -s test_lm_eval_correctness.py "$JUNIT_FAMILY" "$JUNIT_XML" || LOCAL_SUCCESS=$?
 
     if [[ $LOCAL_SUCCESS == 0 ]]; then
         echo "=== PASSED MODEL: ${MODEL_CONFIG} ==="
