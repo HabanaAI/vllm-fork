@@ -32,7 +32,7 @@ def setup_fp8(model_path, device_type):
     normalized_model_name = Path(model_path).parts[-1].lower()
     os.environ[
         "QUANT_CONFIG"] = \
-            f"/software/data/vllm-benchmarks/inc/maxabs_quant_unit.json"
+            "/software/data/vllm-benchmarks/inc/maxabs_quant_unit.json"
 
 
 def fail_on_exit():
