@@ -30,7 +30,7 @@ TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 def setup_fp8():
     os.environ[
         "QUANT_CONFIG"] = \
-            "/software/data/vllm-benchmarks/inc/maxabs_quant_unit.json"
+            "inc_unit_scales_config.json"
 
 
 def fail_on_exit():
