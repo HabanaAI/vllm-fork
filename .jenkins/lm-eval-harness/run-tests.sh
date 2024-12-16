@@ -48,6 +48,7 @@ do
     JUNIT_SUFFIX=""
     if [[ -n "$TEST_RESULTS_DIR" ]]; then
         LOG_DIR=$TEST_RESULTS_DIR
+        mkdir -p $LOG_DIR
         LOG_FILENAME="test_${MODEL_CONFIG}_${RANDOM_SUFFIX}.xml"
         LOG_PATH="${LOG_DIR}/${LOG_FILENAME}"
         JUNIT_SUFFIX="-o junit_family=xunit1 --junitxml=${LOG_PATH}"
