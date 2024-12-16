@@ -45,7 +45,8 @@ do
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     export VLLM_SKIP_WARMUP=true
     RANDOM_SUFFIX=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 4; echo)
-    JUNIT_SUFFIX=""
+    JUNIT_FAMILY=""
+    JUNIT_XML=""
     if [[ -n "$TEST_RESULTS_DIR" ]]; then
         LOG_DIR=$TEST_RESULTS_DIR
         LOG_FILENAME="test_${MODEL_CONFIG}_${RANDOM_SUFFIX}.xml"
