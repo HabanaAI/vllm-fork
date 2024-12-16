@@ -143,6 +143,9 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
         platform = get_current_gaudi_platform()
         testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
                     f'tp{TP_SIZE}')
+        print("testname:", testname)
+        print("record_xml_attribute:", record_xml_attribute)
+        print("record_property:", record_property)
         record_xml_attribute("name", testname)
 
         # Set up environment for FP8 inference
