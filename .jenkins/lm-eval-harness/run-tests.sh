@@ -53,7 +53,7 @@ do
         LOG_PATH="${LOG_DIR}/${LOG_FILENAME}"
         JUNIT_SUFFIX="-o junit_family=xunit1 --junitxml=${LOG_PATH}"
     fi
-    pytest -s test_lm_eval_correctness.py "$JUNIT_SUFFIX" || LOCAL_SUCCESS=$?
+    pytest -s test_lm_eval_correctness.py $JUNIT_SUFFIX || LOCAL_SUCCESS=$?
 
     if [[ $LOCAL_SUCCESS == 0 ]]; then
         echo "=== PASSED MODEL: ${MODEL_CONFIG} ==="
