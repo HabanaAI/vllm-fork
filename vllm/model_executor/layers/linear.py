@@ -1011,6 +1011,7 @@ class RowParallelLinear(LinearBase):
         self.split_threshold = split_threshold
         self.split_size = split_size
         self.prefix = prefix
+        self.skip_seq_split = False
 
         # Divide the weight matrix along the last dimension.
         self.tp_rank = get_tensor_model_parallel_rank()
@@ -1099,7 +1100,7 @@ class RowParallelLinear(LinearBase):
             input_parallel = splitted_input[tp_rank].contiguous()
         return input_parallel
 
-    def forward(self, input_, skip_seq_split=False):
+    def forward(self, input_):
         input_parallel = self.resolve_input(input_)
 
         # Matrix multiply.
@@ -1122,7 +1123,7 @@ class RowParallelLinear(LinearBase):
         do_split = self.do_split and seq_len > 1 # split decode
         # NOTE: we found split tensor when it is too small is not helping with the performance.
         # 1 * 1024 * 4096 * 3 is [batch_size, seq_len, hidden_size * 3]
-        do_split = do_split and shape_total >  1 * 1024 * 8192 * 3 and not skip_seq_split
+        do_split = do_split and shape_total >  1 * 1024 * 8192 * 3 and not self.skip_seq_split
 
         if do_split:
             input_parallels = split_tensor_along_x_dim(input_parallel, 1, self.split_size)

@@ -99,7 +99,8 @@ class LlamaMLP(nn.Module):
     def forward(self, x, skip_seq_split=False):
         x, _ = self.gate_up_proj(x)
         x = self.act_fn(x)
-        x, _ = self.down_proj(x, skip_seq_split=skip_seq_split)
+        self.down_proj.skip_seq_split=skip_seq_split
+        x, _ = self.down_proj(x)
         return x
 
 
@@ -215,7 +216,8 @@ class LlamaAttention(nn.Module):
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata, **kwargs)
-        output, _ = self.o_proj(attn_output, skip_seq_split=skip_seq_split)
+        self.o_proj.skip_seq_split=skip_seq_split
+        output, _ = self.o_proj(attn_output)
         return output
 
 
