@@ -29,9 +29,14 @@ class Scheduler:
         cache_config: CacheConfig,
         lora_config: Optional[LoRAConfig],
     ) -> None:
+        # TODO: properly handle for HPU.
+        #        cache_config.enable_prefix_caching = False
+        #        scheduler_config.chunked_prefill_enabled = False
+
         self.scheduler_config = scheduler_config
         self.cache_config = cache_config
         self.lora_config = lora_config
+        self.disable_prefill_chunking = True
         # TODO: Support LoRA.
         assert lora_config is None, "V1 does not support LoRA yet."
 
@@ -203,6 +208,12 @@ class Scheduler:
                     num_computed_tokens -= 1
                     num_new_tokens = 1
                     computed_blocks.pop()
+
+                # If chunked prefill is not enabled, breakout of the loop.
+                if (not self.scheduler_config.chunked_prefill_enabled
+                        and num_new_tokens > token_budget):
+                    break
+
                 num_new_tokens = min(num_new_tokens, token_budget)
                 assert num_new_tokens > 0
 
@@ -524,16 +535,14 @@ class NewRequestData:
         block_ids: List[int],
         num_computed_tokens: int,
     ) -> "NewRequestData":
-        return cls(
-            req_id=request.request_id,
-            prompt_token_ids=request.prompt_token_ids,
-            prompt=request.prompt,
-            mm_inputs=request.mm_inputs,
-            mm_positions=request.mm_positions,
-            sampling_params=request.sampling_params,
-            block_ids=block_ids,
-            num_computed_tokens=num_computed_tokens,
-        )
+        return cls(req_id=request.request_id,
+                   prompt_token_ids=request.prompt_token_ids,
+                   prompt=request.prompt,
+                   mm_inputs=request.mm_inputs,
+                   mm_positions=request.mm_positions,
+                   sampling_params=request.sampling_params,
+                   block_ids=block_ids,
+                   num_computed_tokens=num_computed_tokens)
 
 
 @dataclass
@@ -550,11 +559,9 @@ class ResumedRequestData:
         block_ids: List[int],
         num_computed_tokens: int,
     ) -> "ResumedRequestData":
-        return cls(
-            req_id=request.request_id,
-            block_ids=block_ids,
-            num_computed_tokens=num_computed_tokens,
-        )
+        return cls(req_id=request.request_id,
+                   block_ids=block_ids,
+                   num_computed_tokens=num_computed_tokens)
 
 
 @dataclass
@@ -571,11 +578,9 @@ class RunningRequestData:
         new_block_ids: List[int],
         num_computed_tokens: int,
     ) -> "RunningRequestData":
-        return cls(
-            req_id=request.request_id,
-            new_block_ids=new_block_ids,
-            num_computed_tokens=num_computed_tokens,
-        )
+        return cls(req_id=request.request_id,
+                   new_block_ids=new_block_ids,
+                   num_computed_tokens=num_computed_tokens)
 
 
 @dataclass

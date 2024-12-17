@@ -1,6 +1,7 @@
 """KV-Cache Utilities."""
+import heapq
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from vllm.logger import init_logger
 
@@ -44,6 +45,63 @@ class KVCacheBlock:
     def reset_hash(self):
         """Reset the block hash when the block is evicted."""
         self._block_hash = None
+
+
+class FreeKVCacheBlockHeapQueue:
+    """TODO(kzawora): document this
+
+    Args:
+        blocks: A list of KVCacheBlock objects.
+    """
+
+    def __init__(self, blocks: List[KVCacheBlock]) -> None:
+        self.num_free_blocks = len(blocks)
+        self._free_block_indices: List[KVCacheBlock] = blocks[:]
+        self.tombstone: Dict[KVCacheBlock, int] = {}
+        heapq.heapify(self._free_block_indices)
+        assert len(self._free_block_indices) == self.num_free_blocks
+
+    def popleft(self) -> KVCacheBlock:
+        """Pop the first free block and reduce num_free_blocks by 1.
+        
+        Returns:
+            The first free block.
+        """
+        block: KVCacheBlock = heapq.heappop(self._free_block_indices)
+        #logger.info(f'[HEAPQ] Popped block {block.block_id}')
+        return block
+
+    def remove(self, block: KVCacheBlock) -> None:
+        """Remove a block in the free list and reduce num_free_blocks by 1.
+        
+        Args:
+            block: The block to remove.
+        """
+        self.tombstone[block] = self.tombstone.get(block, 0) + 1
+        while len(self._free_block_indices) > 0 and self._free_block_indices[
+                0] == block and self.tombstone[block] > 0:
+            heapq.heappop(self._free_block_indices)
+            self.tombstone[block] -= 1
+
+        self.num_free_blocks -= 1
+
+    def append(self, block: KVCacheBlock) -> None:
+        """Put a block back into the free list and increase
+        num_free_blocks by 1.
+
+        Args:
+            block: The block to append.
+        """
+        heapq.heappush(self._free_block_indices, block)
+        self.num_free_blocks += 1
+
+    def get_all_free_blocks(self) -> List[KVCacheBlock]:
+        """Get all free blocks in the free list. Mainly used for testing.
+        
+        Returns:
+            A list of free blocks.
+        """
+        return list(item for item in self._free_block_indices)
 
 
 class FreeKVCacheBlockQueue:
@@ -91,6 +149,7 @@ class FreeKVCacheBlockQueue:
 
         block = self.free_list_head
         self.remove(block)
+        #logger.info(f'[LL] Popped block {block.block_id}')
         return block
 
     def remove(self, block: KVCacheBlock) -> None:
