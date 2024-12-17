@@ -212,6 +212,8 @@ class HpuModelAdapter:
         self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
                                                '1').lower() in ['1', 'true'] \
                                                 and not is_fake_hpu()
+        self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
+                                           'false').lower() in ['1', 'true']
         self.block_size = block_size
         self.dtype = dtype
         self.layer_names = layer_names
@@ -363,7 +365,8 @@ class HpuModelAdapter:
         attention_layer = getattr(first_model_layer, attn_name)
         rope = getattr(attention_layer, rope_name)
 
-        rope.prepare_cos_sin(positions)
+        rope.prepare_cos_sin(positions,
+                             recompute_cos_sin=self.recompute_cos_sin)
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
