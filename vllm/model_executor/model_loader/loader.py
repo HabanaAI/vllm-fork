@@ -320,7 +320,7 @@ class DefaultModelLoader(BaseModelLoader):
                     xm.mark_step()
 
             weights_iterator = _xla_weights_iterator(weights_iterator)
-        
+
         if current_platform.is_hpu():
 
             import habana_frameworks.torch.core as htcore
