@@ -5,6 +5,7 @@ import json
 import random
 import time
 from typing import List, Optional
+import os
 
 import pandas as pd
 import torch
@@ -71,17 +72,54 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         raise ValueError("output_len too small")
 
     # Load the dataset.
-    with open(dataset_path) as f:
-        dataset = json.load(f)
+    if os.path.splitext(dataset_path)[1] == ".json":
+        with open(dataset_path) as f:
+            dataset = json.load(f)
+    elif os.path.splitext(dataset_path)[1] == ".pkl":
+        import pandas as pd
+        dataset = pd.read_pickle(dataset_path)
+        dataset = dataset[['input', 'output']].to_dict(orient="records")
+        for data in dataset:
+            data["conversations"] = [
+                {"value": data["input"]},
+                {"value": data["output"]}
+            ]
+
     # Filter out the conversations with less than 2 turns.
     dataset = [data for data in dataset if len(data["conversations"]) >= 2]
     # Shuffle the dataset.
-    random.shuffle(dataset)
+    random.shuffle(dataset)        
 
     # Filter out sequences that are too long or too short
     filtered_dataset: List[SampleRequest] = []
     for data in dataset:
         if len(filtered_dataset) == num_requests:
+            if args.sort_by_len:
+                filtered_dataset = sorted(filtered_dataset, key=lambda x: x.prompt_len)
+            if args.bucket_selective:
+                length_map = {}
+                for i, request in enumerate(filtered_dataset):
+                    length_map.setdefault(request.prompt_len, []).append(i)
+                ret = {}
+                for length, indices in length_map.items():
+                    bucket_size = (int(length / 128) + 1) * 128
+                    while len(indices) > 0:
+                        i = indices.pop(0)
+                        if ret.get(bucket_size, None) is None:
+                            ret[bucket_size] = []
+                        ret[bucket_size].append(filtered_dataset[i])
+                        remain_len = bucket_size - length
+                        while remain_len > 0:
+                            if length_map.get(remain_len, None) is not None and len(length_map[remain_len]) > 0:
+                                j = length_map[remain_len].pop(0)
+                                ret[bucket_size].append(filtered_dataset[j])
+                                break
+                            else:
+                                remain_len -= 1
+                # sort ret by key
+                ret = dict(sorted(ret.items(), key=lambda x: x[0]))
+                print("!!!!!!!!!!!!!!!sorted requests:", [(bucket_size, [i.prompt_len for i in req_list]) for bucket_size, req_list in ret.items()])
+                filtered_dataset = [req for data in ret.items() for req in data[1]]
             break
 
         # Only keep the first two turns of each conversation.
@@ -445,6 +483,12 @@ if __name__ == "__main__":
                         action='store_true',
                         default=False,
                         help="Disable decoupled async engine frontend.")
+    parser.add_argument("--sort-by-len",
+                        action='store_true',
+                        default=False)
+    parser.add_argument("--bucket-selective",
+                        action='store_true',
+                        default=False)
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
     if args.tokenizer is None:
