@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import (Any, Callable, Dict, List, Optional, Sequence, Tuple, Type,
                     Union)
 
+import habana_frameworks.torch
 import safetensors.torch
 import torch
 from torch import nn
