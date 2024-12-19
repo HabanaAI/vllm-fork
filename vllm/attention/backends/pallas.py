@@ -100,6 +100,7 @@ class PallasAttentionBackendImpl(AttentionImpl):
         kv_cache_dtype: str,
         blocksparse_params: Optional[Dict[str, Any]] = None,
         logits_soft_cap: Optional[float] = None,
+        **kwargs,
     ) -> None:
         self.num_heads = num_heads
         self.head_size = head_size

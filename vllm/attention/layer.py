@@ -38,9 +38,11 @@ class Attention(nn.Module):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         blocksparse_params: Optional[Dict[str, Any]] = None,
-        logits_soft_cap: Optional[float] = None,
+        logits_soft_cap: Optional[int] = 4096,
         per_layer_sliding_window: Optional[int] = None,
+        tp_rank: Optional[int] = None,
         prefix: str = "",
+        prev_attn: Optional[nn.Module] = None,
     ) -> None:
         super().__init__()
         if per_layer_sliding_window is not None:
@@ -96,7 +98,8 @@ class Attention(nn.Module):
         impl_cls = attn_backend.get_impl_cls()
         self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
                              alibi_slopes, sliding_window, kv_cache_dtype,
-                             blocksparse_params, logits_soft_cap)
+                             blocksparse_params, logits_soft_cap,
+                             tp_rank=tp_rank, prev_attn=prev_attn)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads

@@ -1,7 +1,7 @@
 import itertools
 from dataclasses import dataclass, field
-from typing import (Callable, Dict, Iterable, List, Literal, Mapping, Optional,
-                    Protocol, Set, Tuple, Union, overload)
+from typing import (Callable, Dict, Iterable, List, Literal, Mapping,
+                    Optional, Protocol, Set, Tuple, Union, overload)
 
 import torch
 import torch.nn as nn
@@ -330,7 +330,7 @@ def merge_multimodal_embeddings_from_map(
         inputs_embeds: torch.Tensor, multimodal_embeddings: NestedTensors,
         placeholder_map: MultiModalPlaceholderMap.IndexMap) -> torch.Tensor:
     """
-    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided 
+    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided
     placeholder map .
 
     Note:
@@ -415,11 +415,11 @@ def merge_multimodal_embeddings(
     Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
     positions in ``inputs_embeds`` corresponding to placeholder tokens in
     ``input_ids``.
-    
-    ``placeholder_token_id`` can be a list of token ids (e.g, token ids 
-    of img_start, img_break, and img_end tokens) when needed: This means 
-    the order of these tokens in the ``input_ids`` MUST MATCH the order of 
-    their embeddings in ``multimodal_embeddings`` since we need to 
+
+    ``placeholder_token_id`` can be a list of token ids (e.g, token ids
+    of img_start, img_break, and img_end tokens) when needed: This means
+    the order of these tokens in the ``input_ids`` MUST MATCH the order of
+    their embeddings in ``multimodal_embeddings`` since we need to
     slice-merge instead of individually scattering.
 
     For example, if input_ids is "TTTTTSIIIBIIIBIIIETTT", where
@@ -428,9 +428,9 @@ def merge_multimodal_embeddings(
     - I is image embedding token
     - B is image break token
     - E is image end token.
-    
-    Then the image embeddings (that correspond to I's) from vision encoder 
-    must be padded with embeddings of S, B, and E in the same order of 
+
+    Then the image embeddings (that correspond to I's) from vision encoder
+    must be padded with embeddings of S, B, and E in the same order of
     input_ids for a correct embedding merge.
 
     Note:
@@ -454,7 +454,10 @@ def merge_multimodal_embeddings(
 
 class LayerFn(Protocol):
 
-    def __call__(self, prefix: str) -> torch.nn.Module:
+    def __call__(
+            self,
+            prefix: str,
+            prev_layer: Optional[torch.nn.Module] = None) -> torch.nn.Module:
         ...
 
 
@@ -537,6 +540,7 @@ def make_layers(
     num_hidden_layers: int,
     layer_fn: LayerFn,
     prefix: str,
+    use_layer_sharing: bool = False,
 ) -> Tuple[int, int, torch.nn.ModuleList]:
     """Make a list of layers with the given layer function, taking
     pipeline parallelism into account.
@@ -546,11 +550,26 @@ def make_layers(
     start_layer, end_layer = get_pp_indices(num_hidden_layers,
                                             get_pp_group().rank_in_group,
                                             get_pp_group().world_size)
-    modules = torch.nn.ModuleList(
-        [PPMissingLayer() for _ in range(start_layer)] + [
-            maybe_offload_to_cpu(layer_fn(prefix=f"{prefix}.{idx}"))
-            for idx in range(start_layer, end_layer)
-        ] + [PPMissingLayer() for _ in range(end_layer, num_hidden_layers)])
+    layers = []
+    for _ in range(start_layer):
+        curr_layer = PPMissingLayer()
+        layers.append(curr_layer)
+
+    curr_layer = None
+    for idx in range(start_layer, end_layer):
+        if use_layer_sharing:
+            curr_layer = layer_fn(prefix=f"{prefix}.{idx}",
+                                  prev_layer=curr_layer)
+        else:
+            curr_layer = layer_fn(prefix=f"{prefix}.{idx}")
+        layers.append(maybe_offload_to_cpu(curr_layer))
+
+    for _ in range(end_layer, num_hidden_layers):
+        curr_layer = PPMissingLayer()
+        layers.append(curr_layer)
+
+    modules = nn.ModuleList(layers)
+
     return start_layer, end_layer, modules
 
 
