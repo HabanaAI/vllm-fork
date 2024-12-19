@@ -223,7 +223,7 @@ def run_internvl(question: str, modality: str):
     # Stop tokens for InternVL
     # models variants may have different stop tokens
     # please refer to the model card for the correct "stop words":
-    # https://huggingface.co/OpenGVLab/InternVL2-2B#service
+    # https://huggingface.co/OpenGVLab/InternVL2-2B/blob/main/conversation.py
     stop_tokens = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<|end|>"]
     stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
     return llm, prompt, stop_token_ids
@@ -377,6 +377,64 @@ def run_glm4v(question: str, modality: str):
     return llm, prompt, stop_token_ids
 
 
+# Idefics3-8B-Llama3
+def run_idefics3(question: str, modality: str):
+    assert modality == "image"
+    model_name = "HuggingFaceM4/Idefics3-8B-Llama3"
+
+    llm = LLM(
+        model=model_name,
+        max_model_len=8192,
+        max_num_seqs=2,
+        enforce_eager=True,
+        # if you are running out of memory, you can reduce the "longest_edge".
+        # see: https://huggingface.co/HuggingFaceM4/Idefics3-8B-Llama3#model-optimizations
+        mm_processor_kwargs={
+            "size": {
+                "longest_edge": 3 * 364
+            },
+        },
+    )
+    prompt = (
+        f"<|begin_of_text|>User:<image>{question}<end_of_utterance>\nAssistant:"
+    )
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
+
+# Aria
+def run_aria(question: str, modality: str):
+    assert modality == "image"
+    model_name = "rhymes-ai/Aria"
+
+    llm = LLM(model=model_name,
+              tokenizer_mode="slow",
+              trust_remote_code=True,
+              dtype="bfloat16")
+
+    prompt = (f"<|im_start|>user\n<fim_prefix><|img|><fim_suffix>\n{question}"
+              "<|im_end|>\n<|im_start|>assistant\n")
+
+    stop_token_ids = [93532, 93653, 944, 93421, 1019, 93653, 93519]
+    return llm, prompt, stop_token_ids
+
+
+# Mantis
+def run_mantis(question: str, modality: str):
+    assert modality == "image"
+
+    llama3_template = '<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'  # noqa: E501
+    prompt = llama3_template.format(f"{question}\n<image>")
+
+    llm = LLM(
+        model="TIGER-Lab/Mantis-8B-siglip-llama3",
+        max_model_len=4096,
+        hf_overrides={"architectures": ["MantisForConditionalGeneration"]},
+    )
+    stop_token_ids = [128009]
+    return llm, prompt, stop_token_ids
+
+
 model_example_map = {
     "llava": run_llava,
     "llava-next": run_llava_next,
@@ -397,6 +455,9 @@ model_example_map = {
     "mllama": run_mllama,
     "molmo": run_molmo,
     "glm4v": run_glm4v,
+    "idefics3": run_idefics3,
+    "aria": run_aria,
+    "mantis": run_mantis,
 }
 
 

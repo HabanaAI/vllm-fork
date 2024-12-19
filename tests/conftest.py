@@ -108,6 +108,23 @@ VIDEO_ASSETS = _VideoAssets()
 """Singleton instance of :class:`_VideoAssets`."""
 
 
+@pytest.fixture(params=[True, False])
+def run_with_both_engines(request, monkeypatch):
+    # Automatically runs tests twice, once with V1 and once without
+    use_v1 = request.param
+    # Tests decorated with `@skip_v1` are only run without v1
+    skip_v1 = request.node.get_closest_marker("skip_v1")
+
+    if use_v1:
+        if skip_v1:
+            pytest.skip("Skipping test on vllm V1")
+        monkeypatch.setenv('VLLM_USE_V1', '1')
+    else:
+        monkeypatch.setenv('VLLM_USE_V1', '0')
+
+    yield
+
+
 @pytest.fixture(autouse=True)
 def init_test_http_connection():
     # pytest_asyncio may use a different event loop per test
@@ -225,6 +242,9 @@ _T = TypeVar("_T", nn.Module, torch.Tensor, BatchEncoding, BatchFeature, dict)
 class HfRunner:
 
     def wrap_device(self, x: _T, device: Optional[str] = None) -> _T:
+        if x is None or isinstance(x, (bool, )):
+            return x
+
         if device is None:
             device = "cpu" if current_platform.is_cpu() else "cuda"
 
@@ -242,8 +262,8 @@ class HfRunner:
         dtype: str = "half",
         *,
         model_kwargs: Optional[Dict[str, Any]] = None,
-        is_embedding_model: bool = False,
         is_sentence_transformer: bool = False,
+        is_cross_encoder: bool = False,
         skip_tokenizer_init: bool = False,
         auto_cls: Type[_BaseAutoModelClass] = AutoModelForCausalLM,
         postprocess_inputs: Callable[..., BatchEncoding] = identity,
@@ -261,6 +281,14 @@ class HfRunner:
                     device="cpu",
                     trust_remote_code=True,
                 ).to(dtype=torch_dtype))
+        elif is_cross_encoder:
+            # Lazy init required for AMD CI
+            from sentence_transformers import CrossEncoder
+            self.model = CrossEncoder(model_name,
+                                      device="cpu",
+                                      trust_remote_code=True)
+            self.model.model = self.wrap_device(self.model.model)\
+                .to(dtype=torch_dtype)
         else:
             model_kwargs = model_kwargs if model_kwargs is not None else {}
             self.model = self.wrap_device(
@@ -604,6 +632,9 @@ class HfRunner:
     def encode(self, prompts: List[str]) -> List[List[torch.Tensor]]:
         return self.model.encode(prompts)
 
+    def predict(self, prompts: List[List[str]]) -> torch.Tensor:
+        return self.model.predict(prompts, convert_to_tensor=True)
+
     def __enter__(self):
         return self
 
@@ -617,6 +648,80 @@ def hf_runner():
     return HfRunner
 
 
+class HfHPURunner(HfRunner):
+
+    def wrap_device(self, x: _T, device: Optional[str] = None) -> _T:
+        if device is None:
+            device = "cpu" if current_platform.is_cpu() else "hpu"
+
+        if isinstance(x, dict):
+            return {k: self.wrap_device(v, device) for k, v in x.items()}
+
+        if hasattr(x, "device") and x.device.type == device:
+            return x
+
+        return x.to(device)
+
+    def __init__(
+        self,
+        model_name: str,
+        dtype: str = "half",
+        *,
+        model_kwargs: Optional[Dict[str, Any]] = None,
+        is_embedding_model: bool = False,
+        auto_cls: Type[_BaseAutoModelClass] = AutoModelForCausalLM,
+        postprocess_inputs: Callable[[BatchEncoding],
+                                     BatchEncoding] = identity,
+    ) -> None:
+        torch_dtype = STR_DTYPE_TO_TORCH_DTYPE[dtype]
+
+        self.model_name = model_name
+
+        model_kwargs = model_kwargs if model_kwargs is not None else {}
+        self.model = self.wrap_device(
+            auto_cls.from_pretrained(
+                model_name,
+                torch_dtype=torch_dtype,
+                trust_remote_code=True,
+                **model_kwargs,
+            ).eval())
+
+        from habana_frameworks.torch.hpu import wrap_in_hpu_graph
+        wrap_done = False
+        if hasattr(self.model, "language_model"):
+            self.model.language_model = wrap_in_hpu_graph(
+                self.model.language_model)
+            wrap_done = True
+        if hasattr(self.model, "vision_model"):
+            self.model.vision_model = wrap_in_hpu_graph(
+                self.model.vision_model)
+            wrap_done = True
+        if not wrap_done:
+            self.model = wrap_in_hpu_graph(self.model)
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+        )
+
+        # don't put this import at the top level
+        # it will call torch.cuda.device_count()
+        from transformers import AutoProcessor  # noqa: F401
+        self.processor = AutoProcessor.from_pretrained(
+            model_name,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+        )
+        self.dtype = dtype
+        self.postprocess_inputs = postprocess_inputs
+
+
+@pytest.fixture(scope="session")
+def hf_hpu_runner():
+    return HfHPURunner
+
+
 class VllmRunner:
 
     def __init__(
@@ -624,13 +729,14 @@ class VllmRunner:
         model_name: str,
         task: TaskOption = "auto",
         tokenizer_name: Optional[str] = None,
+        tokenizer_mode: str = "auto",
         # Use smaller max model length, otherwise bigger model cannot run due
         # to kv cache size limit.
         max_model_len: int = 1024,
         dtype: str = "half",
         disable_log_stats: bool = True,
         tensor_parallel_size: int = 1,
-        block_size: int = 16,
+        block_size: int = 16 if not current_platform.is_hpu() else 128,
         enable_chunked_prefill: bool = False,
         swap_space: int = 4,
         enforce_eager: Optional[bool] = False,
@@ -640,6 +746,7 @@ class VllmRunner:
             model=model_name,
             task=task,
             tokenizer=tokenizer_name,
+            tokenizer_mode=tokenizer_mode,
             trust_remote_code=True,
             dtype=dtype,
             swap_space=swap_space,
@@ -810,6 +917,7 @@ class VllmRunner:
         audios: Optional[PromptAudioInput] = None,
         videos: Optional[PromptVideoInput] = None,
         stop_token_ids: Optional[List[int]] = None,
+        stop: Optional[List[str]] = None,
     ) -> Union[List[TokensTextLogprobs],
                List[TokensTextLogprobsPromptLogprobs]]:
         greedy_logprobs_params = SamplingParams(
@@ -817,7 +925,8 @@ class VllmRunner:
             max_tokens=max_tokens,
             logprobs=num_logprobs,
             prompt_logprobs=num_prompt_logprobs,
-            stop_token_ids=stop_token_ids)
+            stop_token_ids=stop_token_ids,
+            stop=stop)
 
         return self.generate_w_logprobs(prompts,
                                         greedy_logprobs_params,
@@ -877,6 +986,14 @@ class VllmRunner:
         req_outputs = self.model.encode(inputs)
         return [req_output.outputs.embedding for req_output in req_outputs]
 
+    def score(
+        self,
+        text_1: Union[str, List[str]],
+        text_2: Union[str, List[str]],
+    ) -> List[List[float]]:
+        req_outputs = self.model.score(text_1, text_2)
+        return [req_output.outputs.embedding for req_output in req_outputs]
+
     def __enter__(self):
         return self
 
@@ -920,10 +1037,18 @@ def caplog_vllm(temporary_enable_log_propagate, caplog):
     yield caplog
 
 
+def is_hpu():
+    from importlib import util
+    return util.find_spec('habana_frameworks') is not None
+
+
 @pytest.fixture(scope="session")
 def num_gpus_available():
     """Get number of GPUs without initializing the CUDA context
     in current process."""
+
+    if is_hpu():
+        return torch.hpu.device_count()
 
     return cuda_device_count_stateless()
 
@@ -989,3 +1114,22 @@ def dummy_gemma2_embedding_path():
         with open(json_path, "w") as f:
             json.dump(config, f)
     return _dummy_gemma2_embedding_path
+
+
+# Add the flag `--optional` to allow run tests
+# that are marked with @pytest.mark.optional
+def pytest_addoption(parser):
+    parser.addoption("--optional",
+                     action="store_true",
+                     default=False,
+                     help="run optional test")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--optional"):
+        # --optional given in cli: do not skip optional tests
+        return
+    skip_optional = pytest.mark.skip(reason="need --optional option to run")
+    for item in items:
+        if "optional" in item.keywords:
+            item.add_marker(skip_optional)

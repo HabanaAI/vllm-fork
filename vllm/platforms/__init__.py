@@ -1,4 +1,5 @@
-from .interface import Platform, PlatformEnum, UnspecifiedPlatform
+from .interface import _Backend  # noqa: F401
+from .interface import CpuArchEnum, Platform, PlatformEnum, UnspecifiedPlatform
 
 current_platform: Platform
 
@@ -27,7 +28,15 @@ try:
     finally:
         pynvml.nvmlShutdown()
 except Exception:
-    pass
+    # CUDA is supported on Jetson, but NVML may not be.
+    import os
+
+    def cuda_is_jetson() -> bool:
+        return os.path.isfile("/etc/nv_tegra_release") \
+            or os.path.exists("/sys/class/tegra-firmware")
+
+    if cuda_is_jetson():
+        is_cuda = True
 
 is_rocm = False
 
@@ -44,8 +53,10 @@ except Exception:
 
 is_hpu = False
 try:
+    import os
     from importlib import util
-    is_hpu = util.find_spec('habana_frameworks') is not None
+    is_hpu = util.find_spec('habana_frameworks') is not None or os.environ.get(
+        'VLLM_USE_FAKE_HPU', '0') != '0'
 except Exception:
     pass
 
@@ -111,4 +122,4 @@ elif is_openvino:
 else:
     current_platform = UnspecifiedPlatform()
 
-__all__ = ['Platform', 'PlatformEnum', 'current_platform']
+__all__ = ['Platform', 'PlatformEnum', 'current_platform', 'CpuArchEnum']

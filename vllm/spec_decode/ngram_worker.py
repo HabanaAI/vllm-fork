@@ -4,10 +4,28 @@ from typing import List, Optional, Set, Tuple
 import torch
 
 from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.platforms import current_platform
 from vllm.sequence import ExecuteModelRequest
 from vllm.spec_decode.interfaces import SpeculativeProposals
 from vllm.spec_decode.proposer_worker_base import NonLLMProposerWorkerBase
 from vllm.spec_decode.top1_proposer import Top1Proposer
+
+if current_platform.is_cuda_alike():
+    DEVICE_TYPE = "cuda"
+elif current_platform.is_neuron():
+    DEVICE_TYPE = "neuron"
+elif current_platform.is_hpu():
+    DEVICE_TYPE = "hpu"
+elif current_platform.is_openvino():
+    DEVICE_TYPE = "openvino"
+elif current_platform.is_cpu():
+    DEVICE_TYPE = "cpu"
+elif current_platform.is_tpu():
+    DEVICE_TYPE = "tpu"
+elif current_platform.is_xpu():
+    DEVICE_TYPE = "xpu"
+else:
+    raise ValueError(f"Unsupported platform: {current_platform}")
 
 
 class NGramWorker(NonLLMProposerWorkerBase):
@@ -22,6 +40,7 @@ class NGramWorker(NonLLMProposerWorkerBase):
         # Get local_rank/vocab_size from kwargs attribute
         self.local_rank = kwargs["local_rank"]
         self.vocab_size = kwargs["vllm_config"].model_config.get_vocab_size()
+        self.device_type = kwargs.get("device_type", "cuda")
 
         # Lazy initialization list.
         self._proposer: Top1Proposer
@@ -34,7 +53,7 @@ class NGramWorker(NonLLMProposerWorkerBase):
         self.ngram_prompt_lookup_min = ngram_prompt_lookup_min
 
     def init_device(self):
-        self.device = torch.device(f"cuda:{self.local_rank}")
+        self.device = torch.device(f"{self.device_type}:{self.local_rank}")
         self.load_model = lambda *args, **kwargs: None
 
         # Current NGramWorker only supports Top1Proposer

@@ -5,6 +5,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+import vllm.envs as envs
 from vllm.distributed import (tensor_model_parallel_all_gather,
                               tensor_model_parallel_gather)
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -42,7 +43,9 @@ class LogitsProcessor(nn.Module):
         # Soft cap the logits. Used in Gemma 2.
         self.soft_cap = soft_cap
         # Whether to use gather or all-gather to gather the logits.
-        self.use_gather = not current_platform.is_tpu()
+
+        self.use_gather = not current_platform.is_tpu(
+        ) and not envs.VLLM_USE_V1
 
     def forward(
         self,
@@ -121,12 +124,28 @@ def _prune_hidden_states(
         return hidden_states
 
 
+def get_num_parameters(logits_processor):
+    """Extracts the number of parameters from the
+    signature and stores it for further use"""
+    if hasattr(logits_processor, 'num_parameters'):
+        return logits_processor.num_parameters
+    logits_processor.num_parameters = len(
+        inspect.signature(logits_processor).parameters)
+    return logits_processor.num_parameters
+
+
 def _apply_logits_processors(
     logits: torch.Tensor,
     sampling_metadata: SamplingMetadata,
 ) -> torch.Tensor:
-    found_logits_processors = False
     logits_processed = 0
+    found_logits_processors = any(
+        seq_group.sampling_params.logits_processors
+        for seq_group in sampling_metadata.seq_groups)
+    offload_to_cpu = current_platform.is_hpu() and found_logits_processors
+    if offload_to_cpu:
+        logits_device = logits.device
+        logits = logits.cpu()
     for seq_group in sampling_metadata.seq_groups:
         seq_ids = seq_group.seq_ids
         sampling_params = seq_group.sampling_params
@@ -141,8 +160,7 @@ def _apply_logits_processors(
                 prompt_tokens_ids = seq_group.seq_data[seq_id].prompt_token_ids
 
                 for logits_processor in logits_processors:
-                    parameters = inspect.signature(logits_processor).parameters
-                    if len(parameters) == 3:
+                    if get_num_parameters(logits_processor) == 3:
                         logits_row = logits_processor(prompt_tokens_ids,
                                                       past_tokens_ids,
                                                       logits_row)
@@ -158,4 +176,6 @@ def _apply_logits_processors(
     if found_logits_processors:
         # verifies that no rows in logits were missed unexpectedly
         assert logits_processed == logits.shape[0]
+    if offload_to_cpu:
+        logits = logits.to(logits_device)
     return logits
