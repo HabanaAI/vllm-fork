@@ -191,11 +191,16 @@ class MultiHeadAttention(nn.Module):
                                         kv_cache_dtype=None,
                                         block_size=16,
                                         is_attention_free=False)
-        if attn_backend in {_Backend.FLASH_ATTN, _Backend.FLASH_ATTN_VLLM_V1}:
-            attn_backend = _Backend.XFORMERS
 
-        self.attn_backend = attn_backend if attn_backend in {
-            _Backend.TORCH_SDPA, _Backend.XFORMERS
+        attn_backend_enum = backend_name_to_enum(attn_backend.get_name())
+
+        if attn_backend_enum in {
+                _Backend.FLASH_ATTN, _Backend.FLASH_ATTN_VLLM_V1
+        }:
+            attn_backend_enum = _Backend.XFORMERS
+
+        self.attn_backend = attn_backend_enum if attn_backend_enum in {
+            _Backend.TORCH_SDPA, _Backend.XFORMERS, _Backend.HPU_ATTN
         } else _Backend.TORCH_SDPA
 
     def forward(
@@ -228,6 +233,15 @@ class MultiHeadAttention(nn.Module):
                                                  value,
                                                  scale=self.scale)
             out = out.transpose(1, 2)
+        elif self.attn_backend == _Backend.HPU_ATTN:
+            query, key, value = (x.transpose(1, 2)
+                                 for x in (query, key, value))
+            out = F.scaled_dot_product_attention(query,
+                                                 key,
+                                                 value,
+                                                 scale=self.scale)
+            out = out.transpose(1, 2).contiguous()
+
         return out.view(bsz, q_len, -1)
 
 
