@@ -19,7 +19,6 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
-from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
@@ -293,11 +292,11 @@ class HpuModelAdapter:
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
 
-        if not is_fake_hpu():
+        if not is_fake_hpu() and htorch.utils.internal.is_lazy():
             block_mapping = torch.nn.functional.one_hot(metadata.block_groups,
                                                         num_classes=batch_size)
         else:
-            # Unfortunately one_hot on CPU
+            # Unfortunately one_hot on CPU/torch.compile mode/eager mode
             # doesn't handle out of bounds classes so we need to convert
             # all negative values to 0 (block_mapping) or bs (block_groups)
             block_groups = metadata.block_groups.to(torch.long)
@@ -633,10 +632,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
         self.seen_configs: set = set()
         self._mem_margin: Optional[int] = None
+        self.use_exponential_bucketing = os.environ.get('VLLM_EXPONENTIAL_BUCKETING',
+                                        'true').lower() == 'true'
+        if self.use_exponential_bucketing:
+            from vllm_hpu_extension.bucketing.exponential import HPUExponentialBucketingContext as HPUBucketingContext
+        else:
+            from vllm_hpu_extension.bucketing.linear import HPUBucketingContext
+        
         self.bucketing_ctx = HPUBucketingContext(self.max_num_seqs,
                                                  self.max_num_prefill_seqs,
                                                  self.block_size,
-                                                 self.max_num_batched_tokens)
+                                                 self.max_num_batched_tokens,
+                                                 self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -888,6 +895,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     "sliding window attention")
                 start_idx = max(0, seq_len - self.sliding_window)
             for i in range(context_len, seq_len):
+                if self.scheduler_config.task == 'embedding':
+                    break
                 if i < start_idx:
                     slot_mapping[-1].append(_PAD_SLOT_ID)
                     continue
@@ -918,7 +927,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             lora_prompt_mapping.extend(
                 [lora_id] *
                 (max_prompt_len
-                 if seq_group_metadata.sampling_params.prompt_logprobs else 1))
+                 if seq_group_metadata.sampling_params is not None and seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if any(context_lens):
             assert not self.scheduler_config.chunked_prefill_enabled
@@ -1434,8 +1443,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
-        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
-                             False, True)
+#        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
+#                             False, True)
         return
 
     def warmup_scenario(self,
@@ -2030,19 +2039,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         return lora_mask, lora_logits_mask
 
-    def add_dummy_seq(self, seq_group_metadata_list, is_prompt):
-        real_batch_size = len(seq_group_metadata_list)
-        batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
-            real_batch_size, is_prompt)
-        batch_size_padding = batch_size_padded - real_batch_size
-        seq_group_metadata_list = seq_group_metadata_list.copy()
-        if batch_size_padding > 0:
-            dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
-                0, 0, is_prompt)
-            seq_group_metadata_list.extend(dummy_seq_group_metadata
-                                           for _ in range(batch_size_padding))
-        return seq_group_metadata_list
-
     @torch.inference_mode()
     def execute_model(
         self,
@@ -2129,8 +2125,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             def try_revert_dummy_output_tokens():
                 if len(cache_orig_output_tokens_len) > 0:
                     # Reuse the original output token ids length
-                    for i in range(len(cache_orig_output_tokens_len)):
-                        seq_group_metadata = seq_group_metadata_list[i]
+                    for i, seq_group_metadata in enumerate(
+                            seq_group_metadata_list):
                         for j, data in seq_group_metadata.seq_data.items():
                             orig_output_tokens_len = \
                                 cache_orig_output_tokens_len[i][j]
@@ -2208,7 +2204,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         else:
                             raise RuntimeError(
                                 "seq_group_metadata_list is uninitialized")
-                        for seq_idx, seq_group_metadata in enumerate(
+                        for i, seq_group_metadata in enumerate(
                                 seq_group_metadata_list):
                             # Skip empty steps
                             seq_group_metadata.state.current_step += (
@@ -2216,10 +2212,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             # Cache the original output token ids
                             cache_orig_output_tokens_len.append({})
                             for j, data in seq_group_metadata.seq_data.items():
-                                cache_orig_output_tokens_len[seq_idx][j] = \
+                                cache_orig_output_tokens_len[i][j] = \
                                     len(data.output_token_ids)
-                    seq_group_metadata_list = self.add_dummy_seq(
-                        seq_group_metadata_list, is_prompt=False)
                     for seq_group_metadata in seq_group_metadata_list:
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[
