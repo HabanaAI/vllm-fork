@@ -2395,9 +2395,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     real_batch_size=real_batch_size,
                     is_prompt=is_prompt)
                 self.profiler.record_counter(self.event_start, counters)
-            ## Kamil: here is the part where MSS returns decodes at the end as a list
-            # in other steps it returns []. The output here if sampler for prompt was run
-            # during the decode needs to have appended the real output alongside the output from decodes.
+            ## Kamil: here is the part where MSS returns outputs of decodes at the end as a list in the first step
+            # and in other steps it returns []. If delayed sampler of prompts was run in the first step 
+            # then we need to add to this list the outputs from sampling of prompts.
             if num_steps == 1:
                 if self.return_hidden_states:
                     # we only need to pass hidden states of most recent token
