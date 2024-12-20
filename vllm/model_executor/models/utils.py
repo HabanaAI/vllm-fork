@@ -666,3 +666,26 @@ def extract_layer_index(layer_name: str) -> int:
     assert len(int_vals) == 1, (f"layer name {layer_name} should"
                                 " only contain one integer")
     return int_vals[0]
+
+def split_and_pad_to_length(input, target_length, seq_lens_tensor_list):
+    # we need to copy the key and value tensors to the padded tensors
+    # shape is [bacth_size, entire_seq_len, num_kv_heads, head_size]
+    padded_list = torch.split_with_sizes(input[:sum(seq_lens_tensor_list)], seq_lens_tensor_list, dim=0)
+
+    padded_tensor = torch.nn.utils.rnn.pad_sequence(padded_list, batch_first=True)
+    pad_shape = [0] * (input.dim() - 1) * 2
+    pad_shape += [0, target_length - padded_tensor.size(1)]
+    padded_tensor = torch.nn.functional.pad(padded_tensor, pad_shape, value=0)
+    return padded_tensor
+
+def split_and_pad_to_length_2(input, target_length, seq_lens_tensor_list):
+    # we need to copy the key and value tensors to the padded tensors
+    # shape is [bacth_size, entire_seq_len, num_kv_heads, head_size]
+    padded_tensor = torch.zeros((len(seq_lens_tensor_list), target_length, input.size(1), input.size(2)), device=input.device, dtype=input.dtype)
+
+    start = 0
+    for i in range(len(seq_lens_tensor_list)):
+        padded_tensor[i, :seq_lens_tensor_list[i], :, :] = input[start: start + seq_lens_tensor_list[i], :, :]
+        start = start + seq_lens_tensor_list[i]
+
+    return padded_tensor

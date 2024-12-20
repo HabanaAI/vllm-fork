@@ -56,7 +56,7 @@ from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
-                    maybe_prefix)
+                    maybe_prefix, split_and_pad_to_length)
 
 is_hpu = current_platform.is_hpu()
 
@@ -490,6 +490,12 @@ class LlamaModel(nn.Module):
                 "residual": residual
             })
 
+        # we need to split result before do RMSNorm
+        if attn_metadata.enable_merged_prefill and attn_metadata.is_prompt:
+            max_len=attn_metadata.slot_mapping.size(1)
+            seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
+            hidden_states = split_and_pad_to_length(hidden_states.view(-1, hidden_states.size(2)), max_len, seq_lens_tensor_list)
+            residual = split_and_pad_to_length(residual.view(-1, hidden_states.size(2)), max_len, seq_lens_tensor_list)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
