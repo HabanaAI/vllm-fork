@@ -1129,6 +1129,9 @@ class SchedulerConfig:
     # tokens in prefill.
     use_padding_aware_scheduling: bool = False
 
+    # If True, delayed sampling will be enabled for prompts.
+    enable_delayed_sampling: bool = False
+
     def __post_init__(self) -> None:
         if self.max_num_batched_tokens is None:
             if self.enable_chunked_prefill:
@@ -1203,6 +1206,12 @@ class SchedulerConfig:
         if self.use_padding_aware_scheduling and self.chunked_prefill_enabled:
             raise ValueError("Padding-aware scheduling currently "
                              "does not work with chunked prefill ")
+
+        if self.enable_delayed_sampling and self.num_lookahead_slots != 1:
+            raise ValueError(
+                "num_lookahead_slots "
+                f"({self.num_lookahead_slots}) must be 1 for delayed sampling."
+            )     
 
     @property
     def is_multi_step(self) -> bool:

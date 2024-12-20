@@ -186,6 +186,7 @@ class Sampler(nn.Module):
         # containing the sampled token ids and probabilities. This is used by
         # speculative decoding.
         self.include_gpu_probs_tensor = False
+        self.sample_token_positions_only = False
         self.should_modify_greedy_probs_inplace = False
 
     def _init_sampling_tensors(
@@ -302,6 +303,7 @@ class Sampler(nn.Module):
             sampling_tensors,
             include_gpu_probs_tensor=self.include_gpu_probs_tensor,
             modify_greedy_probs=self._should_modify_greedy_probs_inplace,
+            token_positions_only=self.sample_token_positions_only,
         )
 
         if self.include_gpu_probs_tensor:
@@ -588,6 +590,7 @@ def _apply_min_p(
 def _greedy_sample(
     selected_seq_groups: List[SequenceGroupToSample],
     samples: torch.Tensor,
+    token_positions_only: bool = False,
 ) -> SampleResultType:
     """Run greedy sampling on a given samples.
 
@@ -601,7 +604,9 @@ def _greedy_sample(
         same as the length of selected_seq_groups. If the corresponding
         seq_group has do_sample=False, tuple contains ([], [])
     """
-    samples_lst = samples.tolist()
+    print("DEBUG sync in greedy_sample")
+    if not token_positions_only:
+        samples_lst = samples.tolist()
     sample_idx = 0
     results: SampleResultType = []
     for seq_group in selected_seq_groups:
@@ -614,7 +619,9 @@ def _greedy_sample(
         assert num_parent_seqs == 1, (
             "Greedy sampling should have only one seq.")
         parent_ids = list(range(num_parent_seqs))
-        next_token_ids = [samples_lst[sample_idx]]
+        next_token_ids = [
+            sample_idx if token_positions_only else samples_lst[sample_idx]
+        ]
         results.append((next_token_ids, parent_ids))
         sample_idx += num_parent_seqs
     return results
@@ -637,7 +644,8 @@ def _random_sample(
         seq_group has do_sample=False, tuple contains ([], [])
     """
     # Find the maximum n value of the prompt phase requests.
-    random_samples = random_samples.cpu()
+    print("DEBUG sync in random_sample")
+    random_samples = random_samples.cpu() # zrobic zamiast tego torch.zeros, by nie kopiowac na cpu
     sample_idx = 0
     results: SampleResultType = []
     for seq_group in selected_seq_groups:
@@ -653,7 +661,7 @@ def _random_sample(
             # Prompt phase.
             parent_ids = [0] * sampling_params.n
             next_token_ids = random_samples[
-                sample_idx, :sampling_params.n].tolist()
+                sample_idx, :sampling_params.n].tolist() # to tez host operacja, czy to potrzebne?
         else:
             # Generation phase.
             parent_ids = list(range(num_parent_seqs))
@@ -798,7 +806,8 @@ def _top_k_top_p_multinomial_with_flashinfer(
 
 
 def get_pythonized_sample_results(
-        sample_result_args: SampleResultArgsType) -> SampleResultType:
+        sample_result_args: SampleResultArgsType,
+        token_positions_only: bool = False) -> SampleResultType:
     '''This function consumes GPU-side sampler results and computes
     Pythonized CPU-side sampler results (GPU -> CPU sync.)
 
@@ -836,7 +845,8 @@ def get_pythonized_sample_results(
             continue
         (seq_group_id, seq_groups) = sample_metadata[sampling_type]
         if sampling_type == SamplingType.GREEDY:
-            sample_results = _greedy_sample(seq_groups, greedy_samples)
+            sample_results = _greedy_sample(seq_groups, greedy_samples,
+                                                token_positions_only)
         elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
             sample_results = _random_sample(seq_groups,
                                             multinomial_samples[sampling_type])
@@ -858,6 +868,7 @@ def _sample_with_torch(
     sampling_tensors: SamplingTensors,
     include_gpu_probs_tensor: bool,
     modify_greedy_probs: bool,
+    token_positions_only: bool = False,
 ) -> SampleReturnType:
     '''Torch-oriented _sample() implementation.
 
@@ -967,13 +978,14 @@ def _sample_with_torch(
         greedy_samples=greedy_samples,
         beam_search_logprobs=beam_search_logprobs,
         sample_results_dict=sample_results_dict)
-
+    #import pdb; pdb.set_trace()
     if not sampling_metadata.skip_sampler_cpu_output:
-        # GPU<->CPU sync happens here.
+        # GPU<->CPU sync happens here,
+        # unless we're storing only token positions (token_positions_only=True).
         # This also converts the sampler output to a Python object.
         # Return Pythonized sampler result & sampled token ids
         return get_pythonized_sample_results(
-            maybe_deferred_args), sampled_token_ids_tensor
+            maybe_deferred_args, token_positions_only), sampled_token_ids_tensor
     else:
         # Defer sampler result Pythonization; return deferred
         # Pythonization args & sampled token ids
@@ -990,6 +1002,7 @@ def _sample(
     sampling_tensors: SamplingTensors,
     include_gpu_probs_tensor: bool,
     modify_greedy_probs: bool,
+    token_positions_only: bool,
 ) -> SampleReturnType:
     """
     Args:
@@ -1010,6 +1023,7 @@ def _sample(
         sampling_tensors,
         include_gpu_probs_tensor=include_gpu_probs_tensor,
         modify_greedy_probs=modify_greedy_probs,
+        token_positions_only=token_positions_only,
     )
 
 

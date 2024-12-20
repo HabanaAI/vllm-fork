@@ -116,7 +116,9 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
 
         sample = outputs.samples[0]
         seq = seq_group.first_seq
-        if not is_async:
+        # -1 means the output token is not valid (eg. first token if
+            # delayed sampling is enabled).
+        if not is_async and sample != -1:
             seq.append_token_id(sample.output_token, sample.logprobs)
         if sampling_params.detokenize and self.detokenizer:
             new_char_count = self.detokenizer.decode_sequence_inplace(

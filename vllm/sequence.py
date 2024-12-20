@@ -175,6 +175,10 @@ class SequenceData(msgspec.Struct,
     # It is used to compute mrope_position_ids.
     _mrope_position_delta: Optional[int] = None
 
+    # it is used in delayed prompt sampling
+    prev_logits = None
+    prev_logits_idx = None
+
     @staticmethod
     def from_prompt_token_counts(
             *token_counts: Tuple[int, int]) -> "SequenceData":
@@ -279,11 +283,11 @@ class SequenceData(msgspec.Struct,
     def mrope_position_delta(self, new_mrope_position_delta):
         self._mrope_position_delta = new_mrope_position_delta
 
-    def append_token_id(self, token_id: int, logprob: float) -> None:
+    def append_token_id(self, token_id: int, logprob: Optional[float]) -> None:
         self._output_token_ids.append(token_id)
         self._new_appended_tokens.append(token_id)
         self._cached_all_token_ids.append(token_id)
-        self._cumulative_logprob += logprob
+        self._cumulative_logprob += logprob if logprob is not None else 0.0
 
     def get_len(self) -> int:
         return len(self._output_token_ids) + len(self._prompt_token_ids)
@@ -315,8 +319,6 @@ class SequenceData(msgspec.Struct,
     def update_num_computed_tokens(self, num_new_computed_tokens: int):
         """Update number of tokens computed so far."""
         self._num_computed_tokens += num_new_computed_tokens
-        assert self._num_computed_tokens <= self.get_len(), (
-            self._num_computed_tokens, self.get_len())
         # If all tokens are computed, it means it is in decoding phase.
         if self.get_num_uncomputed_tokens() == 0:
             self._stage = SequenceStage.DECODE
@@ -536,9 +538,10 @@ class Sequence:
 
     def append_token_id(self, token_id: int, logprobs: Dict[int,
                                                             Logprob]) -> None:
-        assert token_id in logprobs
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        self.data.append_token_id(
+            token_id,
+            logprobs[token_id].logprob if token_id in logprobs else None)
 
     def get_len(self) -> int:
         return self.data.get_len()
