@@ -2152,7 +2152,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
-                with self.profiler.record_event('internal', model_event_name):
+                with self.profiler.record_event('internal', 
+                                                model_event_name,
+                                                args = {'real_seq_len': model_input.seq_lens,
+                                                        'real_batch_size': real_batch_size}):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
@@ -2169,7 +2172,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     ('compute_logits_'
                      f'{"prompt" if is_prompt else "decode"}_bs'
                      f'{batch_size}_'
-                     f'seq{seq_len}')):
+                     f'seq{seq_len}'),
+                    args = {'real_seq_len': model_input.seq_lens,
+                        'real_batch_size': real_batch_size}):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -2186,7 +2191,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         'internal', ('sample_'
                                      f'{"prompt" if is_prompt else "decode"}_'
                                      f'bs{batch_size}_'
-                                     f'seq{seq_len}')):
+                                     f'seq{seq_len}'),
+                                     args = {'real_seq_len': model_input.seq_lens,
+                                            'real_batch_size': real_batch_size}):
                     output = self.model.sample(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
