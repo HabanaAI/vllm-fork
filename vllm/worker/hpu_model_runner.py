@@ -382,14 +382,14 @@ class HpuModelAdapter:
                                      block_indices=indices)
         return metadata
 
-    def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
+    def _update_metadata(self, attn_metadata, device,
                          dtype):
 
         if attn_metadata.is_prompt:
-            attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
-                                                seq_len, device, dtype)
+            attn_metadata = self._set_attn_bias(attn_metadata, attn_metadata.num_prefills,
+                                                attn_metadata.num_prefill_tokens / attn_metadata.num_prefills, device, dtype)
         else:
-            attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
+            attn_metadata = self._set_block_mapping(attn_metadata, attn_metadata.num_decode_tokens,
                                                     device, dtype)
             attn_metadata = self._set_block_scales(attn_metadata, device)
         attn_metadata = self._set_indices_and_offsets(attn_metadata,
@@ -435,10 +435,8 @@ class HpuModelAdapter:
             virtual_engine = kwargs.pop('virtual_engine')
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
-            kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
-        if 'lora_mask' in kwargs:
-            LoraMask.setLoraMask(kwargs.pop('lora_mask'))
+            kwargs['attn_metadata'], input_ids.device, self.dtype)
+        LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
 
@@ -1083,7 +1081,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                  seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if any(context_lens):
-            assert not self.scheduler_config.chunked_prefill_enabled
+            # assert not self.scheduler_config.chunked_prefill_enabled
             # prefix caching
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
@@ -1477,8 +1475,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         base_event_name = 'prompt' if is_prompt else 'decode'
         self.profiler.start('internal', base_event_name)
 
-        seq_group_metadata_list, real_batch_size, batch_size_padded = (
-            self._add_dummy_seq(seq_group_metadata_list, is_prompt))
+        real_batch_size = len(seq_group_metadata_list)
+        batch_size_padded = real_batch_size
+        '''batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
+            real_batch_size, is_prompt)
+        batch_size_padding = batch_size_padded - real_batch_size
+        seq_group_metadata_list = seq_group_metadata_list.copy()
+        if batch_size_padding > 0:
+            dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
+                0, 0, is_prompt)
+            seq_group_metadata_list.extend(dummy_seq_group_metadata
+                                           for _ in range(batch_size_padding))'''
 
         prefill_reqs = []
         decode_reqs = []
@@ -1528,21 +1535,35 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # NOTE(kzawora): Here we diverge from GPU code - we don't
         # support mixed batches, so we either use decode or prefill
         # inputs, without coalescing.
-        assert (num_prefills == 0 and num_decode_tokens > 0) or (
+        '''if num_decode_tokens > 0:
+            import pdb; pdb.set_trace()'''
+        '''assert (num_prefills == 0 and num_decode_tokens > 0) or (
             num_prefills > 0
-            and num_decode_tokens == 0), "HPU does not support mixed batches!"
+            and num_decode_tokens == 0), "HPU does not support mixed batches!"'''
         if num_decode_tokens > 0:
-            input_tokens = decode_input_tokens
-            input_positions = decode_input_positions
+            '''input_tokens = decode_input_tokens
+            input_positions = decode_input_positions'''
             slot_mapping = decode_slot_mapping
             lora_index_mapping = decode_lora_index_mapping
             lora_prompt_mapping = decode_lora_prompt_mapping
             lora_requests = decode_lora_requests
             lora_ids = decode_lora_ids
-
+        if num_prefills > 0:
+            max_len = input_tokens.size(1)
+            input_tokens = input_tokens.flatten()
+            input_positions = input_positions.flatten()
+            if num_decode_tokens > 0:
+                import pdb; pdb.set_trace()
+                decode_input_tokens = decode_input_tokens.flatten()
+                decode_input_positions = decode_input_positions.flatten()
+                input_tokens = torch.cat(input_tokens, decode_input_tokens)
+                input_positions = torch.cat(input_positions, decode_input_positions)
+        else:
+            max_len = decode_input_tokens.size(1)
+            input_tokens = decode_input_tokens.flatten()
+            input_positions = decode_input_positions.flatten()
         # FIXME: We need to adjust selected_token_indices to accommodate
         # for padding
-        max_len = input_tokens.size(1)
         paddings = [max_len - q for q in query_lens]
         paddings = [0] + paddings[:-1]
         paddings = list(itertools.accumulate(paddings))
@@ -1616,6 +1637,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             assert decode_attn_metadata is not None
             metadata_dict.update(decode_attn_metadata.asdict_zerocopy())
 
+        #input_tokens = input_tokens.flatten()
+        if prefill_attn_metadata:
+            attn_metadata = prefill_attn_metadata
+            if decode_attn_metadata:
+                attn_metadata.num_decode_tokens = decode_attn_metadata.num_decode_tokens
+                attn_metadata.decode_slot_mapping = decode_attn_metadata.slot_mapping
+                attn_metadata.decode_block_list = decode_attn_metadata.block_list
+        else:
+            attn_metadata = decode_attn_metadata
+            attn_metadata.decode_slot_mapping = decode_attn_metadata.slot_mapping
+            attn_metadata.decode_block_list = decode_attn_metadata.block_list
+
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata
 
@@ -1672,6 +1705,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_offsets',
             'block_scales',
             'block_groups',
+            'num_prefills',
+            'num_prefill_tokens',
+            'num_decode_tokens',
+            'decode_slot_mapping',
+            'decode_block_list',
         ])
         return attention_metadata
 
@@ -1729,7 +1767,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
                         temperature=0) -> None:
-        use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+        return
+        '''use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
                          f"bs{batch_size}_"
@@ -1817,7 +1856,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if profiler:
             profiler.stop()
         self.profiler.end()
-        gc.collect()
+        gc.collect()'''
 
     def remove_all_loras(self):
         if not self.lora_manager:
