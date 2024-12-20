@@ -6,6 +6,7 @@ import random
 import time
 from typing import List, Optional
 
+import requests as reqs
 import torch
 import uvloop
 from PIL import Image
@@ -300,6 +301,16 @@ def main(args: argparse.Namespace):
     if args.dataset is None:
         vocab_size = tokenizer.vocab_size
         requests = []
+        mm_data = None
+        if args.mm_data:
+            mm_data_url = "https://llava-vl.github.io/static/images/view.jpg"
+            try:
+                raw_image = Image.open(reqs.get(
+                    mm_data_url, stream=True).raw).convert("RGB")
+            except Exception as e:
+                print(f"Failed to download image from {mm_data_url}: {e}")
+                raw_image = None
+            mm_data = {"image": raw_image}
         for _ in range(args.num_prompts):
             # Synthesize a prompt with the given input length.
             candidate_ids = [
@@ -327,7 +338,8 @@ def main(args: argparse.Namespace):
             requests.append(
                 SampleRequest(prompt=candidate_prompt,
                               prompt_len=args.input_len,
-                              expected_output_len=args.output_len))
+                              expected_output_len=args.output_len,
+                              multi_modal_data=mm_data))
     else:
         requests = sample_requests(tokenizer, args)
 
@@ -426,6 +438,10 @@ if __name__ == "__main__":
                         action='store_true',
                         default=False,
                         help="Disable decoupled async engine frontend.")
+    parser.add_argument("--mm-data",
+                        action='store_true',
+                        default=False,
+                        help="Add multi-modal data to the requests.")
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
     if args.tokenizer is None:
