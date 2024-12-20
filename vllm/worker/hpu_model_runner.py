@@ -11,6 +11,7 @@ import itertools
 import math
 import os
 import time
+import pdb
 from array import array
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
@@ -101,7 +102,7 @@ def align_workers(value, op):
 
 
 def setup_profiler():
-    schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1)
+    schedule = torch.profiler.schedule(wait=0, warmup=2, active=3, repeat=1)
     activities = [
         torch.profiler.ProfilerActivity.CPU,
         torch.profiler.ProfilerActivity.HPU
@@ -495,6 +496,7 @@ class ModelInputForHPU(ModelRunnerInputBase):
     async_callback: Optional[Callable] = None
     is_first_multi_step: bool = True
     is_last_step: bool = True
+    seq_group_metadata_list: Optional[List[SequenceGroupMetadata]] = None
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
@@ -758,6 +760,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             path_to_rope = get_path_to_rope(self.model)
             torch.hpu.synchronize()
 
+            # FIXME: Check if running with disable_tensor_cache=True causes
+            # RuntimeErrors. It was a case in 1.18 delayed sampling.
             with HabanaMemoryProfiler() as m_wrap:
                 self.model = self._maybe_wrap_in_hpu_graph(
                     self.model,
@@ -1060,7 +1064,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     generation_token = seq_data.get_last_token_id()
                     input_tokens.append([generation_token])
 
-                seq_len = seq_data.get_len()
+                seq_len = ((seq_data.get_num_computed_tokens() +
+                            1) if self.scheduler_config.enable_delayed_sampling
+                           else seq_data.get_len())
                 position = seq_len - 1
                 input_positions.append([position])
 
@@ -1331,7 +1337,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             "num_prefills": num_prefills,
             "batch_type": batch_type,
             "seq_lens": seq_lens,
-            "query_lens": query_lens
+            "query_lens": query_lens,
+            "seq_group_metadata_list": seq_group_metadata_list,
         }
         if prefill_attn_metadata is not None:
             metadata_dict.update(prefill_attn_metadata.asdict_zerocopy())
@@ -1352,7 +1359,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      multi_modal_kwargs=multi_modal_kwargs,
                                      real_batch_size=real_batch_size,
                                      batch_size_padded=batch_size_padded,
-                                     lora_ids=lora_ids), \
+                                     lora_ids=lora_ids,
+                                     seq_group_metadata_list=seq_group_metadata_list), \
                                         sampling_metadata
 
     def _seq_len(self, attn_metadata):
@@ -1443,9 +1451,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         seq_len,
                         is_prompt,
                         kv_caches,
-                        is_pt_profiler_run=False,
+                        is_pt_profiler_run=True,
                         is_lora_profile_run=False,
-                        temperature=0) -> None:
+                        temperature=1) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -1503,9 +1511,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         torch.hpu.synchronize()
         profiler = None
         if is_pt_profiler_run and self.is_driver_worker:
+            print(f'DEBUG setup profiler & start')
             profiler = setup_profiler()
             profiler.start()
-        for _ in range(times):
+        for _ in range(5):
             inputs = self.prepare_model_input(seqs)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
@@ -1533,6 +1542,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 profiler.step()
         if profiler:
             profiler.stop()
+        if profiler:
+            profiler.cleanup()
         self.profiler.end()
         gc.collect()
 
@@ -1653,6 +1664,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
+            print('DEBUG Starting warmup profiling...')
             phase, bs, seq_len, graph = profile.split('_')
             is_prompt = phase == 'prompt'
             graphs = graph == 't'
@@ -2054,6 +2066,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
@@ -2111,6 +2124,67 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     {"bypass_hpu_graphs": not use_graphs})
 
             htorch.core.mark_step()
+
+            # Kamil: I think this might be the place to sample the prompt tokens.
+            # We are in the first step of MSS and before the loop for decodes.
+            # This code was copied from delayed sampling, it should be a good starting point
+            input_ids = None
+            # Sample the next token based on previous logits if any.
+            if self.scheduler_config.enable_delayed_sampling \
+                    and self.is_driver_worker and not is_prompt:
+                logits_ids_list = []
+                logits_tensor = None
+                logits_tensor_list = []
+                if model_input.seq_group_metadata_list is not None:
+                    for seq_group_metadata in model_input.seq_group_metadata_list:
+                        assert len(seq_group_metadata.seq_data) == 1
+                        for seq_data in seq_group_metadata.seq_data.values():
+                            if seq_data.prev_logits is not None:
+                                if logits_tensor is None:
+                                    logits_tensor = seq_data.prev_logits
+                                if seq_data.prev_logits is logits_tensor:
+                                    # accumulate row ids from the same tensor
+                                    logits_ids_list.append(
+                                        seq_data.prev_logits_idx)
+                                else:
+                                    # new logits tensor,
+                                    # gather all previously collected rows
+                                    logits_tensor_list.append(
+                                        logits_tensor[torch.tensor(
+                                            logits_ids_list,
+                                            device=seq_data.prev_logits.device)])
+                                    logits_ids_list = [seq_data.prev_logits_idx]
+                                    logits_tensor = seq_data.prev_logits
+                            else:
+                                # warmup only, TODO add a check
+                                logits_tensor_list.append(
+                                    torch.zeros([1, 32000],
+                                                dtype=torch.float,
+                                                device="hpu"))
+                if logits_tensor is not None:
+                    logits_tensor_list.append(logits_tensor[torch.tensor(
+                        logits_ids_list, device=seq_data.prev_logits.device)])
+                prev_logits = torch.cat(logits_tensor_list, dim=0)
+                with self.profiler.record_event(
+                        'internal', f'sample_{"prompt" if is_prompt else "decode"}'
+                        '_bs{batch_size}_seq{seq_len}'):
+                    output = self.model.sample(
+                        logits=prev_logits,
+                        sampling_metadata=sampling_metadata,
+                    )
+                #TODO: check why broadcast failed for float tensor use dict instead
+                model_kwargs = {}
+                model_kwargs["input_ids"] = output.sampled_token_ids
+                broadcast_tensor_dict(model_kwargs, src=0)
+                input_ids = output.sampled_token_ids
+            elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
+                model_kwargs = broadcast_tensor_dict(src=0)
+                input_ids = model_kwargs["input_ids"]
+            if input_ids is not None:
+                execute_model_kwargs["input_ids"] = input_ids
+                htorch.core.mark_step()
+            ############################## proposed block code end ##############################
+
             if self.is_driver_worker:
                 model_event_name = ("model_"
                                     f"{'prompt' if is_prompt else 'decode'}_"
@@ -2119,8 +2193,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
-            if num_steps > 1:
-                # in case of multi-step scheduling
+
+            ## Kamil: Should we use these two flags in delayed sampling?
+            # they are used not to do a pythonized call in _sample_with_torch which forces a sync.
+            # Added this "or" here but original delayed sampling didn't add this flag
+            # but in sampler code added an if to not do a sync to CPU in the _greedy_sample
+            # function. Maybe we can reuse this flag instead of if in the _greedy_sample
+            # TODO: decide if we want to avoid pythonized call or if the sync in sampler
+            # Added here is_prompt
+            if num_steps > 1 or (is_prompt and self.scheduler_config.enable_delayed_sampling):
+            ############################## proposed block code end ##############################
+                # in case of multi-step scheduling or delayed sampling
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
@@ -2163,6 +2246,36 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         lora_logits_mask.index_select(
                             0, sampling_metadata.selected_token_indices))
 
+                # Kamil: Delayed sampling is returning a -1 as an answer during the prompt
+                # then in decode it samples a real answer. Using -1 we can later in vllm catch it
+                # and skip that answer.
+                # TODO: do we want to keep the -1 return from delayed sampling?
+                # Added here is_prompt
+                if is_prompt and self.scheduler_config.enable_delayed_sampling \
+                    and self.is_driver_worker:
+                    # For prompts compose empty output
+                    sampler_output = []
+                    for seq_group in sampling_metadata.seq_groups:
+                        seq_ids = seq_group.seq_ids
+                        next_token_id, parent_id = -1, 0
+                        seq_outputs = []
+                        seq_outputs.append(
+                            SequenceOutput(seq_ids[parent_id], next_token_id,
+                                        {-1: Logprob(0.0)}))
+                        sampler_output.append(
+                            CompletionSequenceGroupOutput(seq_outputs, None))
+                    sampled_token_probs, logprobs_tensor, sampled_token_ids = (
+                        None, None, None)
+                    output = SamplerOutput(
+                        outputs=sampler_output,
+                        sampled_token_probs=sampled_token_probs,
+                        sampled_token_ids=sampled_token_ids,
+                        logprobs=logprobs_tensor,
+                    )
+                    output.outputs = output.outputs[:real_batch_size]
+                    htorch.core.mark_step()
+                ############################## proposed block code end ##############################
+
                 # Compute the logits.
                 with self.profiler.record_event(
                         'internal',
@@ -2174,6 +2287,20 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
+
+                # Kamil: delayed sampling uses prev_logits and their idx to be saved
+                # for later compute. Added here is_prompt
+                if is_prompt and (self.scheduler_config.enable_delayed_sampling
+                and model_input.seq_group_metadata_list is not None
+                and self.is_driver_worker):
+                    for idx, seq_group_metadata in enumerate(
+                            model_input.seq_group_metadata_list):
+                        assert len(seq_group_metadata.seq_data) == 1
+                        for seq_data in seq_group_metadata.seq_data.values():
+                            seq_data.prev_logits = logits
+                            seq_data.prev_logits_idx = idx
+                ############################## proposed block code end ##############################
+
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
@@ -2181,20 +2308,30 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 if model_input.async_callback is not None:
                     model_input.async_callback()
-                # Sample the next token.
-                with self.profiler.record_event(
-                        'internal', ('sample_'
-                                     f'{"prompt" if is_prompt else "decode"}_'
-                                     f'bs{batch_size}_'
-                                     f'seq{seq_len}')):
-                    output = self.model.sample(
-                        logits=logits,
-                        sampling_metadata=sampling_metadata,
-                    )
-                    if num_steps > 1:
-                        output = output.sampled_token_ids
-                        self.cached_step_outputs.append(
-                            output.detach().clone())
+
+                # Kamil: delayed sampling is skiping sampling at the end in
+                # both decode and sample and does it always in the beginning of
+                # the next decode.
+                # TODO: do we want to keep the delayed sampling skip sampling at the end?
+                # I think we should only do this sampling in the decodes and skip it in the 
+                # prompts in prompt delayed sampling.
+                # So the prompts will skip the sampling at all and the decodes will do the sampling 
+                # at the end for their's results and at the beginning for prompts's outputs.
+                if not (self.scheduler_config.enable_delayed_sampling and is_prompt):
+                    with self.profiler.record_event(
+                            'internal', ('sample_'
+                                        f'{"prompt" if is_prompt else "decode"}_'
+                                        f'bs{batch_size}_'
+                                        f'seq{seq_len}')):
+                        output = self.model.sample(
+                            logits=logits,
+                            sampling_metadata=sampling_metadata,
+                        )
+                        if num_steps > 1:
+                            output = output.sampled_token_ids
+                            self.cached_step_outputs.append(
+                                output.detach().clone())
+                ############################## proposed block code end ##############################
                 htorch.core.mark_step()
                 if i < num_steps - 1:
                     if i == 0:
@@ -2269,6 +2406,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     real_batch_size=real_batch_size,
                     is_prompt=is_prompt)
                 self.profiler.record_counter(self.event_start, counters)
+            ## Kamil: here is the part where MSS returns outputs of decodes at the end as a list in the first step
+            # and in other steps it returns []. If delayed sampler of prompts was run in the first step 
+            # then we need to add to this list the outputs from sampling of prompts.
             if num_steps == 1:
                 if self.return_hidden_states:
                     # we only need to pass hidden states of most recent token
@@ -2279,6 +2419,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 return [output] if self.is_driver_worker else []
             else:
                 return []
+            ############################## proposed block code end ##############################
+            
 
         return output if type(output) is list else [output]
 
