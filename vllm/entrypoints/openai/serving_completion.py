@@ -85,7 +85,7 @@ class OpenAIServingCompletion(OpenAIServing):
             return self.create_error_response(
                 "suffix is not currently supported")
 
-        model_name = self.base_model_paths[0].name
+        model_name = request.model
         request_id = f"cmpl-{random_uuid()}"
         created_time = int(time.time())
 
