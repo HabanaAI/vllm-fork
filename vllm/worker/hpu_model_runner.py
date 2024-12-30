@@ -1456,6 +1456,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
+        print('prepare_input_tensors')
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -1553,11 +1554,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_tokens = input_tokens.flatten()
             input_positions = input_positions.flatten()
             if num_decode_tokens > 0:
-                import pdb; pdb.set_trace()
                 decode_input_tokens = decode_input_tokens.flatten()
                 decode_input_positions = decode_input_positions.flatten()
-                input_tokens = torch.cat(input_tokens, decode_input_tokens)
-                input_positions = torch.cat(input_positions, decode_input_positions)
+                input_tokens = torch.cat((input_tokens, decode_input_tokens), dim=0)
+                input_positions = torch.cat((input_positions, decode_input_positions), dim=0)
         else:
             max_len = decode_input_tokens.size(1)
             input_tokens = decode_input_tokens.flatten()
@@ -1596,7 +1596,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if (prefill_attn_metadata is not None
                 and decode_attn_metadata is not None):
             batch_type = BatchType.MIXED
-            raise NotImplementedError("Mixed batch is not supported on HPU")
         elif prefill_attn_metadata is not None:
             batch_type = BatchType.PREFILL
         else:

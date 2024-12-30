@@ -217,17 +217,17 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             prefill_key = key[:attn_metadata.num_prefill_tokens]
             prefill_value = value[:attn_metadata.num_prefill_tokens]
             hidden_size = prefill_query.shape[-1]
-            print(prefill_query.shape, hidden_size)
+            # print(prefill_query.shape, hidden_size)
             prefill_query = prefill_query.reshape(attn_metadata.num_prefills,
                                 attn_metadata.num_prefill_tokens // attn_metadata.num_prefills,
                                 hidden_size)
             hidden_size = prefill_key.shape[-1]
-            print(prefill_key.shape, hidden_size)
+            # print(prefill_key.shape, hidden_size)
             prefill_key = prefill_key.reshape(attn_metadata.num_prefills,
                                 attn_metadata.num_prefill_tokens // attn_metadata.num_prefills,
                                 hidden_size)
             hidden_size = prefill_value.shape[-1]
-            print(prefill_value.shape, hidden_size)
+            # print(prefill_value.shape, hidden_size)
             prefill_value = prefill_value.reshape(attn_metadata.num_prefills,
                                 attn_metadata.num_prefill_tokens // attn_metadata.num_prefills,
                                 hidden_size)
@@ -238,9 +238,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             prefill_value = prefill_value.view(-1, self.num_kv_heads, self.head_size)
             block_indices = attn_metadata.block_indices
             block_offsets = attn_metadata.block_offsets
-            key = key.unflatten(0, (block_indices.size(0), -1))
-            value = value.unflatten(0, (block_indices.size(0), -1))
+            prefill_key = prefill_key.unflatten(0, (block_indices.size(0), -1))
+            prefill_value = prefill_value.unflatten(0, (block_indices.size(0), -1))
             if kv_cache is not None:
+                # import pdb; pdb.set_trace()
                 key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                     kv_cache, self.num_kv_heads, self.head_size)
 
@@ -251,7 +252,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                         block_offsets)
                 prefill_value_cache = self.v_cache(prefill_value, value_cache, block_indices,
                                         block_offsets)
-        else:
+        if attn_metadata.num_decode_tokens > 0:
             # decode preprocessing
             decode_query = query[attn_metadata.num_prefill_tokens:]
             decode_key = key[attn_metadata.num_prefill_tokens:]
@@ -274,7 +275,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             decode_key = decode_key.view(-1, self.num_kv_heads, self.head_size)
             decode_value = decode_value.view(-1, self.num_kv_heads, self.head_size)
             block_indices = attn_metadata.block_indices
-            block_offsets = attn_metadata.block_offsets      
+            block_offsets = attn_metadata.block_offsets
             if kv_cache is not None:
                 key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                     kv_cache, self.num_kv_heads, self.head_size)
