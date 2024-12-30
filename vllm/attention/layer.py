@@ -234,12 +234,28 @@ class MultiHeadAttention(nn.Module):
                                                  scale=self.scale)
             out = out.transpose(1, 2)
         elif self.attn_backend == _Backend.HPU_ATTN:
+            from vllm_hpu_extension.utils import ModuleFusedSDPA
+            from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
+            HPUFusedSDPA = FusedSDPA
+            fsdpa_op = None if HPUFusedSDPA is None \
+                else ModuleFusedSDPA(HPUFusedSDPA)
+
             query, key, value = (x.transpose(1, 2)
                                  for x in (query, key, value))
-            out = F.scaled_dot_product_attention(query,
-                                                 key,
-                                                 value,
-                                                 scale=self.scale)
+
+            out = fsdpa_op(query,
+                           key,
+                           value,
+                           attn_mask=None,
+                           dropout_p=0.0,
+                           is_causal=True,
+                           scale=self.scale,
+                           softmax_mode="fast",
+                           recompute_mode=True,
+                           valid_sequence_lengths=None,
+                           padding_side='right')
+
             out = out.transpose(1, 2).contiguous()
 
         return out.view(bsz, q_len, -1)
