@@ -237,9 +237,7 @@ class MultiHeadAttention(nn.Module):
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
             from vllm_hpu_extension.utils import ModuleFusedSDPA
 
-            HPUFusedSDPA = FusedSDPA
-            fsdpa_op = None if HPUFusedSDPA is None \
-                else ModuleFusedSDPA(HPUFusedSDPA)
+            fsdpa_op = ModuleFusedSDPA(FusedSDPA)
 
             query, key, value = (x.transpose(1, 2)
                                  for x in (query, key, value))
@@ -247,14 +245,13 @@ class MultiHeadAttention(nn.Module):
             out = fsdpa_op(query,
                            key,
                            value,
-                           attn_mask=None,
+                           None,
                            dropout_p=0.0,
                            is_causal=True,
                            scale=self.scale,
                            softmax_mode="fast",
                            recompute_mode=True,
-                           valid_sequence_lengths=None,
-                           padding_side='right')
+                           valid_sequence_lengths=None)
 
             out = out.transpose(1, 2).contiguous()
 
