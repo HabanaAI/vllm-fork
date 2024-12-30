@@ -234,8 +234,8 @@ class MultiHeadAttention(nn.Module):
                                                  scale=self.scale)
             out = out.transpose(1, 2)
         elif self.attn_backend == _Backend.HPU_ATTN:
-            from vllm_hpu_extension.utils import ModuleFusedSDPA
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
+            from vllm_hpu_extension.utils import ModuleFusedSDPA
 
             HPUFusedSDPA = FusedSDPA
             fsdpa_op = None if HPUFusedSDPA is None \
