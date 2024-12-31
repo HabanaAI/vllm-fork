@@ -1225,7 +1225,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             temperature = 1.0
         else:
             temperature = 0
- 
+
         seq_group_metadata_list = seq_group_metadata_list.copy()
         if batch_size_padding > 0:
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
