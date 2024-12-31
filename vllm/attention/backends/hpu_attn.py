@@ -22,6 +22,8 @@ from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
 from vllm.logger import init_logger
 
+import habana_frameworks.torch as htorch
+
 logger = init_logger(__name__)
 
 
@@ -211,11 +213,17 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             )
 
         hidden_size: int = 0
+        prefill_query = query[:attn_metadata.num_prefill_tokens].clone()
+        prefill_key = key[:attn_metadata.num_prefill_tokens].clone()
+        prefill_value = value[:attn_metadata.num_prefill_tokens].clone()
+        decode_query = query[attn_metadata.num_prefill_tokens:].clone()
+        decode_key = key[attn_metadata.num_prefill_tokens:].clone()
+        decode_value = value[attn_metadata.num_prefill_tokens:].clone()
+        htorch.core.mark_step()
+        if attn_metadata.num_decode_tokens > 0:
+            import pdb; pdb.set_trace()
         if attn_metadata.num_prefill_tokens > 0:
             # prefill preprocessing
-            prefill_query = query[:attn_metadata.num_prefill_tokens]
-            prefill_key = key[:attn_metadata.num_prefill_tokens]
-            prefill_value = value[:attn_metadata.num_prefill_tokens]
             hidden_size = prefill_query.shape[-1]
             # print(prefill_query.shape, hidden_size)
             prefill_query = prefill_query.reshape(attn_metadata.num_prefills,
@@ -223,7 +231,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                 hidden_size)
             hidden_size = prefill_key.shape[-1]
             # print(prefill_key.shape, hidden_size)
-            prefill_key = prefill_key.reshape(attn_metadata.num_prefills,
+            prefill_key = prefill_key.reshape(attn_metadata.num_prefills,exit
                                 attn_metadata.num_prefill_tokens // attn_metadata.num_prefills,
                                 hidden_size)
             hidden_size = prefill_value.shape[-1]
@@ -233,15 +241,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                 hidden_size)
             prefill_batch_size, prefill_seq_len, prefill_hidden_size = prefill_query.shape
             _, seq_len_kv, _ = prefill_key.shape
-            prefill_query = prefill_query.view(-1, self.num_heads, self.head_size)
-            prefill_key = prefill_key.view(-1, self.num_kv_heads, self.head_size)
-            prefill_value = prefill_value.view(-1, self.num_kv_heads, self.head_size)
+            prefill_query = prefill_query.reshape(-1, self.num_heads, self.head_size)
+            prefill_key = prefill_key.reshape(-1, self.num_kv_heads, self.head_size)
+            prefill_value = prefill_value.reshape(-1, self.num_kv_heads, self.head_size)
             block_indices = attn_metadata.block_indices
             block_offsets = attn_metadata.block_offsets
             prefill_key = prefill_key.unflatten(0, (block_indices.size(0), -1))
             prefill_value = prefill_value.unflatten(0, (block_indices.size(0), -1))
             if kv_cache is not None:
-                # import pdb; pdb.set_trace()
                 key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                     kv_cache, self.num_kv_heads, self.head_size)
 
@@ -252,11 +259,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                         block_offsets)
                 prefill_value_cache = self.v_cache(prefill_value, value_cache, block_indices,
                                         block_offsets)
+            htorch.core.mark_step()
         if attn_metadata.num_decode_tokens > 0:
             # decode preprocessing
-            decode_query = query[attn_metadata.num_prefill_tokens:]
-            decode_key = key[attn_metadata.num_prefill_tokens:]
-            decode_value = value[attn_metadata.num_prefill_tokens:]
+            import pdb; pdb.set_trace()
             hidden_size = decode_query.shape[-1]
             print(decode_query.shape, hidden_size)
             decode_query = decode_query.reshape(attn_metadata.num_decode_tokens,
@@ -270,7 +276,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             decode_value = decode_value.reshape(attn_metadata.num_decode_tokens,
                                 1, hidden_size)
             decode_batch_size, decode_seq_len, decode_hidden_size = decode_query.shape
-            _, seq_len_kv, _ = decode_key.shape
             decode_query = decode_query.view(-1, self.num_heads, self.head_size)
             decode_key = decode_key.view(-1, self.num_kv_heads, self.head_size)
             decode_value = decode_value.view(-1, self.num_kv_heads, self.head_size)
@@ -287,6 +292,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                         block_offsets)
                 decode_value_cache = self.v_cache(decode_value, value_cache, block_indices,
                                         block_offsets)
+            htorch.core.mark_step()
+            import pdb; pdb.set_trace()
         
 
         prompt_output: torch.Tensor = None
@@ -295,9 +302,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         seq_len: int = 0
         if attn_metadata.num_prefills > 0:
             # Prompt run.
-            query = prefill_query
-            key = prefill_key
-            value = prefill_value
             batch_size = prefill_batch_size
             seq_len = prefill_seq_len
             hidden_size = prefill_hidden_size
@@ -348,9 +352,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             else:
                 # TODO: enable FusedSDPA
                 out = HPUPagedAttention.forward_prefix(
-                    query=query.view(query_shape),
-                    key=key.view(kv_shape),
-                    value=value.view(kv_shape),
+                    query=prefill_query.view(query_shape),
+                    key=prefill_key.view(kv_shape),
+                    value=prefill_value.view(kv_shape),
                     key_cache=prefill_key_cache,
                     value_cache=prefill_value_cache,
                     block_list=attn_metadata.block_list,
@@ -362,8 +366,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     keys_fetch_func=self.k_cache.fetch_from_cache,
                     values_fetch_func=self.v_cache.fetch_from_cache)
             prompt_output = out.reshape(batch_size, seq_len, hidden_size)
+        htorch.core.mark_step()
         if attn_metadata.num_decode_tokens > 0:
             # Decoding run.
+            import pdb; pdb.set_trace()
             query = decode_query
             key = decode_key
             value = decode_value
@@ -374,7 +380,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 query=query,
                 key_cache=decode_key_cache,
                 value_cache=decode_value_cache,
-                block_list=attn_metadata.block_list,
+                block_list=attn_metadata.decode_block_list,
                 block_mapping=attn_metadata.block_mapping,
                 block_bias=attn_metadata.attn_bias,
                 block_scales=attn_metadata.block_scales,
@@ -386,6 +392,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block2batch_matmul_op=self.block2batch_matmul,
                 keys_fetch_func=self.k_cache.fetch_from_cache,
                 values_fetch_func=self.v_cache.fetch_from_cache)
+        htorch.core.mark_step()
         # Reshape the output tensor.
         if not decode_output:
             return prompt_output.view(batch_size * seq_len, hidden_size)
@@ -394,7 +401,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         else:
             prompt_output = prompt_output.view(batch_size * seq_len, hidden_size)
             decode_output = decode_output.view(batch_size * seq_len, hidden_size)
-            return torch.cat(prompt_output, decode_output)
+            return torch.cat((prompt_output, decode_output))
 
     def forward_encoder_decoder(
         self,

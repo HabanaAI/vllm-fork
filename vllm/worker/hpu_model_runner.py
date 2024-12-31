@@ -370,31 +370,30 @@ class HpuModelAdapter:
         metadata = metadata._replace(block_scales=block_scales)
         return metadata
 
-    def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
+    def _set_indices_and_offsets(self, metadata, block_size):
         slot_mapping = metadata.slot_mapping.flatten()
         indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt:
+        if metadata.num_prefill_tokens > 0:
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
             offsets = None
-        else:
-            offsets = torch.fmod(slot_mapping, block_size)
+        if metadata.num_decode_tokens > 0:
+            decode_slot_mapping = metadata.decode_slot_mapping.flatten()
+            offsets = torch.fmod(decode_slot_mapping, block_size)
         metadata = metadata._replace(block_offsets=offsets,
                                      block_indices=indices)
         return metadata
 
     def _update_metadata(self, attn_metadata, device,
                          dtype):
-
-        if attn_metadata.is_prompt:
+        if attn_metadata.num_prefills > 0:
             attn_metadata = self._set_attn_bias(attn_metadata, attn_metadata.num_prefills,
                                                 attn_metadata.num_prefill_tokens / attn_metadata.num_prefills, device, dtype)
-        else:
+        if attn_metadata.num_decode_tokens > 0:
             attn_metadata = self._set_block_mapping(attn_metadata, attn_metadata.num_decode_tokens,
                                                     device, dtype)
             attn_metadata = self._set_block_scales(attn_metadata, device)
         attn_metadata = self._set_indices_and_offsets(attn_metadata,
-                                                      self.block_size,
-                                                      attn_metadata.is_prompt)
+                                                      self.block_size)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -1543,8 +1542,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             and num_decode_tokens == 0), "HPU does not support mixed batches!"'''
         if num_decode_tokens > 0:
             '''input_tokens = decode_input_tokens
-            input_positions = decode_input_positions'''
-            slot_mapping = decode_slot_mapping
+            input_positions = decode_input_positions
+            slot_mapping = decode_slot_mapping'''
             lora_index_mapping = decode_lora_index_mapping
             lora_prompt_mapping = decode_lora_prompt_mapping
             lora_requests = decode_lora_requests
@@ -1643,6 +1642,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 attn_metadata.num_decode_tokens = decode_attn_metadata.num_decode_tokens
                 attn_metadata.decode_slot_mapping = decode_attn_metadata.slot_mapping
                 attn_metadata.decode_block_list = decode_attn_metadata.block_list
+                attn_metadata.block_usage = decode_attn_metadata.block_usage
+                attn_metadata.block_groups = decode_attn_metadata.block_groups
         else:
             attn_metadata = decode_attn_metadata
             attn_metadata.decode_slot_mapping = decode_attn_metadata.slot_mapping
@@ -1668,7 +1669,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if attn_metadata.num_prefills != 0:
             return attn_metadata.slot_mapping.size(1)
         else:
-            return attn_metadata.block_list.numel()
+            return attn_metadata.decode_block_list.numel()
 
     def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:
         # NOTE(kzawora): To anyone working on this in the future:
