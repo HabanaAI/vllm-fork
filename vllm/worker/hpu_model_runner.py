@@ -1219,13 +1219,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             real_batch_size, is_prompt)
         batch_size_padding = batch_size_padded - real_batch_size
         if all([
-            seq_group_metadata.sampling_params.temperature
-            for seq_group_metadata in seq_group_metadata_list
+                seq_group_metadata.sampling_params.temperature
+                for seq_group_metadata in seq_group_metadata_list
         ]):
             temperature = 1.0
         else:
             temperature = 0
-        
+ 
         seq_group_metadata_list = seq_group_metadata_list.copy()
         if batch_size_padding > 0:
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
