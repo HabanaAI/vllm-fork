@@ -234,6 +234,7 @@ class RotaryEmbedding(CustomOp):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         from habana_frameworks.torch.hpex.kernels import (
             RotaryPosEmbeddingMode, apply_rotary_pos_emb)
+
         # Prepare cos-sin caches for long-context + LoRA with offsets for every
         # forward, since the offset information wasn't available previously
         if hasattr(self, "scaling_factors") or self.sin is None:
