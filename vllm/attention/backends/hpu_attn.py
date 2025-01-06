@@ -274,25 +274,23 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             seq_lens_tensor = attn_metadata.seq_lens_tensor
         if attn_bias is None:  # This is the case for prompt run
             attn_bias = attn_metadata.attn_bias
-        if enable_merged_prefill:
-            if attn_metadata.is_prompt:
-                max_len=attn_metadata.slot_mapping.size(1)
-                seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
-                # we need to copy the key and value tensors to the padded tensors
-                # shape is [bacth_size, entire_seq_len, num_kv_heads, head_size]
-                padded_key_tensor = split_and_pad_to_length(key, max_len, seq_lens_tensor_list)
-                padded_value_tensor = split_and_pad_to_length(value, max_len, seq_lens_tensor_list)
-                padded_key_tensor = padded_key_tensor.flatten(0, 1).unflatten(0, (block_indices.size(0), -1))
-                padded_value_tensor = padded_value_tensor.flatten(0, 1).unflatten(0, (block_indices.size(0), -1))
+        if enable_merged_prefill and attn_metadata.is_prompt and kv_cache is not None:
+            max_len=attn_metadata.slot_mapping.size(1)
+            seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
+            # we need to copy the key and value tensors to the padded tensors
+            # shape is [bacth_size, entire_seq_len, num_kv_heads, head_size]
+            padded_key_tensor = split_and_pad_to_length(key, max_len, seq_lens_tensor_list)
+            padded_value_tensor = split_and_pad_to_length(value, max_len, seq_lens_tensor_list)
+            padded_key_tensor = padded_key_tensor.flatten(0, 1).unflatten(0, (block_indices.size(0), -1))
+            padded_value_tensor = padded_value_tensor.flatten(0, 1).unflatten(0, (block_indices.size(0), -1))
 
-            if kv_cache is not None:
-                key_cache, value_cache = HPUPagedAttention.split_kv_cache(
-                    kv_cache, self.num_kv_heads, self.head_size)
+            key_cache, value_cache = HPUPagedAttention.split_kv_cache(
+                kv_cache, self.num_kv_heads, self.head_size)
 
-                key_cache = self.k_cache(padded_key_tensor, key_cache, block_indices,
-                                        block_offsets)
-                value_cache = self.v_cache(padded_value_tensor, value_cache, block_indices,
-                                        block_offsets)
+            key_cache = self.k_cache(padded_key_tensor, key_cache, block_indices,
+                                    block_offsets)
+            value_cache = self.v_cache(padded_value_tensor, value_cache, block_indices,
+                                    block_offsets)
         else:
             if attn_metadata.is_prompt:
                 key = key.unflatten(0, (block_indices.size(0), -1))
