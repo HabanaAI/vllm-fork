@@ -479,8 +479,10 @@ class HpuModelAdapter:
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
-        print("Warming up HPU Graph - input_ids: ", input_ids.shape,
-              "seq_lens_tensor: ", kwargs['attn_metadata'].seq_lens_tensor)
+        if kwargs['attn_metadata'].is_prompt:
+            print("Warming up HPU Graph - input_ids: ", input_ids,
+                  "seq_lens_tensor: ", kwargs['attn_metadata'].seq_lens_tensor,
+                  "selected_token_indices: ", selected_token_indices)
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -1613,7 +1615,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # FIXME: We need to adjust selected_token_indices to accommodate
         # for padding
-        max_len = input_tokens.size(1)
+        if self.enable_merged_prefill:
+            max_len = slot_mapping.size(1)
+        else:
+            max_len = input_tokens.size(1)
         paddings = [max_len - q for q in query_lens]
         paddings = [0] + paddings[:-1]
         paddings = list(itertools.accumulate(paddings))
