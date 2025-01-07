@@ -191,9 +191,9 @@ def run_vllm(
     use_beam_search = False
 
     if not use_beam_search:
-        for _ in range(3):
+        for _ in range(1):
             start = time.perf_counter()
-            llm.generate(prompts, sampling_params, use_tqdm=True)
+            llm.generate(prompts, sampling_params, use_tqdm=False)
             end = time.perf_counter()
     else:
         prompts = [request.prompt for request in requests]

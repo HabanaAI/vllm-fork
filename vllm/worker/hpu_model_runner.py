@@ -19,7 +19,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
-from vllm_hpu_extension.bucketing import HPUBucketingContext
+from vllm_hpu_extension.bucketing import HPUBucketingContext, generate_prompt_buckets
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
@@ -205,6 +205,59 @@ def get_names_for_rope(model: torch.nn.Module):
         }
 
 
+class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
+
+    def generate_prompt_buckets(self):
+        print(
+            "HPUBucketingContextWithMergedPrefill - generate_prompt_buckets is called"
+        )
+
+        prompt_bs_bucket_cfg = self.global_state.prompt_bs_bucket_cfg
+        prompt_seq_bucket_cfg = self.global_state.prompt_seq_bucket_cfg
+        print("prompt_seq_bucket_cfg: ", prompt_seq_bucket_cfg)
+        origin_max_prompt_len = prompt_seq_bucket_cfg[2]
+        max_prompt_len = prompt_bs_bucket_cfg[2] * prompt_seq_bucket_cfg[2]
+        max_prompt_len = min(self.max_num_batched_tokens, max_prompt_len)
+        prompt_seq_bucket_cfg[2] = max_prompt_len
+
+        prompt_buckets, prompt_omitted_buckets = \
+            generate_prompt_buckets(
+            prompt_bs_bucket_cfg,
+            prompt_seq_bucket_cfg,
+            self.max_num_batched_tokens)
+
+        print("prompt_buckets: ", prompt_buckets)
+        # expand
+        self.global_state.prompt_buckets = []
+        VLLM_PROMPT_BS_BUCKET_MAX = int(
+            os.environ.get('VLLM_PROMPT_BS_BUCKET_MAX', 16))
+        for bucket in prompt_buckets:
+            bs = 1
+            while bs <= VLLM_PROMPT_BS_BUCKET_MAX:
+                seq_len = bucket[1] // bs
+                if seq_len <= 32:
+                    bs = bs * 2
+                    continue
+                self.global_state.prompt_buckets.append(
+                    (bs * bucket[0], seq_len))
+                bs = bs * 2
+
+        self.global_state.prompt_buckets = list(filter(lambda bucket: bucket[1] <= origin_max_prompt_len, self.global_state.prompt_buckets))
+
+        msg = (f"Generated {len(self.global_state.prompt_buckets)} "
+               f"prompt buckets [bs, seq]: "
+               f"{list(sorted(self.global_state.prompt_buckets))}")
+        print(msg)
+
+        # msg = (f"Omitted {len(prompt_omitted_buckets)} "
+        #         "prompt buckets due to exceeded token budget "
+        #         f"(max_num_batched_tokens={self.max_num_batched_tokens})")
+        # print(msg)
+
+        # msg = f"Omitted prompt buckets: {list(sorted(prompt_omitted_buckets))}"
+        # print(msg)
+
+
 class HpuModelAdapter:
 
     def __init__(self, model, block_size, dtype, enforce_eager, layer_names):
@@ -212,8 +265,9 @@ class HpuModelAdapter:
         self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
                                                '1').lower() in ['1', 'true'] \
                                                 and not is_fake_hpu()
-        self.merged_prefill_attn_mask_compute = os.getenv('VLLM_MERGED_PREFILL_ATTN_MASK_COMPUTE',
-                                               '1').lower() in ['1', 'true']
+        self.merged_prefill_attn_mask_compute = os.getenv(
+            'VLLM_MERGED_PREFILL_ATTN_MASK_COMPUTE',
+            '1').lower() in ['1', 'true']
         self.block_size = block_size
         self.dtype = dtype
         self.layer_names = layer_names
@@ -289,26 +343,46 @@ class HpuModelAdapter:
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
         return attn_metadata
 
-    def _set_merged_attn_bias(self, attn_metadata, batch_size, max_seq_len, device,):# create a 2D causal attn mask to ensure I can only attend to the past
+    def _set_merged_attn_bias(
+        self,
+        attn_metadata,
+        batch_size,
+        max_seq_len,
+        device,
+    ):  # create a 2D causal attn mask to ensure I can only attend to the past
         if attn_metadata is None or not attn_metadata.is_prompt:
             return attn_metadata
         if not self.merged_prefill_attn_mask_compute:
             return attn_metadata
         #TODO: Support batch_size > 1
         seq_lens = attn_metadata.seq_lens_tensor.tolist()
-        causal_attn_mask_tensor = torch.ones((batch_size, max_seq_len, max_seq_len), dtype=torch.bool, device=device)
+        causal_attn_mask_tensor = torch.ones(
+            (batch_size, max_seq_len, max_seq_len),
+            dtype=torch.bool,
+            device=device)
         start = 0
         for i in range(batch_size):
             for seq_len in seq_lens:
                 # create triangular mask for each sequence
-                causal_mask = torch.triu(torch.ones((seq_len, seq_len), device=device, dtype=torch.bool), diagonal=1)
-                causal_attn_mask_tensor[i][start:start+seq_len, start:start+seq_len].logical_and_(causal_mask)
+                causal_mask = torch.triu(torch.ones((seq_len, seq_len),
+                                                    device=device,
+                                                    dtype=torch.bool),
+                                         diagonal=1)
+                causal_attn_mask_tensor[i][start:start + seq_len, start:start +
+                                           seq_len].logical_and_(causal_mask)
                 start += seq_len
-        causal_attn_mask_tensor = (torch.zeros_like(causal_attn_mask_tensor, device=device, dtype=self.dtype).masked_fill_(
-            causal_attn_mask_tensor, -10000)) # should be math(-inf) but -10000 is used for numerical stability
-        causal_attn_mask_tensor = causal_attn_mask_tensor.view(causal_attn_mask_tensor.shape[0], 1, causal_attn_mask_tensor.shape[1], causal_attn_mask_tensor.shape[2])
+        causal_attn_mask_tensor = (
+            torch.zeros_like(causal_attn_mask_tensor,
+                             device=device,
+                             dtype=self.dtype).masked_fill_(
+                                 causal_attn_mask_tensor, -10000)
+        )  # should be math(-inf) but -10000 is used for numerical stability
+        causal_attn_mask_tensor = causal_attn_mask_tensor.view(
+            causal_attn_mask_tensor.shape[0], 1,
+            causal_attn_mask_tensor.shape[1], causal_attn_mask_tensor.shape[2])
 
-        attn_metadata = attn_metadata._replace(attn_bias=causal_attn_mask_tensor)
+        attn_metadata = attn_metadata._replace(
+            attn_bias=causal_attn_mask_tensor)
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
@@ -365,7 +439,9 @@ class HpuModelAdapter:
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
         if attn_metadata.is_prompt and attn_metadata.enable_merged_prefill:
-            attn_metadata = self._set_merged_attn_bias(attn_metadata, batch_size, seq_len, device)
+            attn_metadata = self._set_merged_attn_bias(attn_metadata,
+                                                       batch_size, seq_len,
+                                                       device)
         elif attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
@@ -403,6 +479,8 @@ class HpuModelAdapter:
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
+        print("Warming up HPU Graph - input_ids: ", input_ids.shape,
+              "seq_lens_tensor: ", kwargs['attn_metadata'].seq_lens_tensor)
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -648,17 +726,26 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
         self.seen_configs: set = set()
         self._mem_margin: Optional[int] = None
-        self.bucketing_ctx = HPUBucketingContext(self.max_num_seqs,
-                                                 self.max_num_prefill_seqs,
-                                                 self.block_size,
-                                                 self.max_num_batched_tokens)
+        self.enable_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
+                                                    'false').lower() == 'true'
+        # self.bucketing_ctx = HPUBucketingContext(
+        #         self.max_num_seqs,
+        #         self.max_num_prefill_seqs,
+        #         self.block_size,
+        #         self.max_num_batched_tokens)
+        if self.enable_merged_prefill:
+            self.bucketing_ctx = HPUBucketingContextWithMergedPrefill(
+                self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
+                self.max_num_batched_tokens)
+        else:
+            self.bucketing_ctx = HPUBucketingContext(
+                self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
+                self.max_num_batched_tokens)
         self.graphed_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
         self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
                                                 'true').lower() == 'true'
-        self.enable_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
-                                                    'false').lower() == 'true'
         if vllm_config.speculative_config is not None \
             and self.use_contiguous_pa:
             raise ValueError(
@@ -1154,24 +1241,25 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         #seq_lens
         #context_lens
         #prefix_block_list
-        
+
         input_tokens_merged = list(itertools.chain.from_iterable(input_tokens))
         input_tokens_merged = [input_tokens_merged]
-        input_positions_merged = list(itertools.chain.from_iterable(input_positions))
+        input_positions_merged = list(
+            itertools.chain.from_iterable(input_positions))
         input_positions_merged = [input_positions_merged]
         slot_mapping_merged = list(itertools.chain.from_iterable(slot_mapping))
         slot_mapping_merged = [slot_mapping_merged]
         context_lens_merged = [sum(context_lens)]
         total_seq_lens = [sum(seq_lens)]
         total_query_lens = [sum(query_lens)]
-        
+
         max_query_len = max(total_query_lens)
         real_num_seqs = len(total_query_lens)
         assert max_query_len > 0
 
         # print("input_tokens_merged: ", input_tokens_merged)
         # print("input_positions_merged: ", input_positions_merged)
-        
+
         merged_prompt_len = max(
             self.bucketing_ctx.get_padded_prompt_seq_len(max(total_seq_lens)),
             self.block_size)
@@ -1432,6 +1520,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
         if len(seq_group_metadata_list) == 0:
+            print("seq_group_metadata_list is empty")
             return self._model_input_cls(), None
 
         input_tokens = None
@@ -1470,6 +1559,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 decode_reqs.append(seq_group_meta)
 
         # Prepare input tensors.
+        #print("prefill_reqs: ", prefill_reqs, "decode_reqs: ", decode_reqs)
         prepare_prompt_impl = self._prepare_prompt_merged if self.enable_merged_prefill else self._prepare_prompt
         (
             input_tokens,
@@ -1672,8 +1762,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
+        origin_enable_merged_prefill = self.enable_merged_prefill
+        self.enable_merged_prefill = False
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
+        self.enable_merged_prefill = origin_enable_merged_prefill
         return
 
     def warmup_scenario(self,
@@ -1744,10 +1837,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler = setup_profiler()
             profiler.start()
         for _ in range(times):
-            origin_enable_merged_prefill = self.enable_merged_prefill
-            self.enable_merged_prefill = False
             inputs = self.prepare_model_input(seqs)
-            self.enable_merged_prefill = origin_enable_merged_prefill
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:

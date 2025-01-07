@@ -31,6 +31,7 @@ except ImportError:
     logger.warning("Could not import HPU FusedSDPA kernel. "
                    "vLLM will use native implementation.")
 
+
 def prompt_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -42,7 +43,7 @@ def prompt_attention(
     softmax_op=torch.softmax,
     matmul_av_op=torch.matmul,
     valid_seq_lengths: Optional[torch.Tensor] = None,
-    fsdpa_op = None,
+    fsdpa_op=None,
 ) -> torch.Tensor:
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -65,7 +66,8 @@ def prompt_attention(
         if query_heads != kv_heads:
             attn_weights = attn_weights.flatten(1, 2)
     else:
-        VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE = os.environ.get('VLLM_REMOVE_REPEAT_KV_CACHE', '1') == '1'
+        VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE = os.environ.get(
+            'VLLM_REMOVE_REPEAT_KV_CACHE', '1') == '1'
         # TODO: remove after fusedsdpa fix for query_heads != kv_heads
         if query_heads != kv_heads:
             if VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE:
@@ -76,10 +78,11 @@ def prompt_attention(
         softmax_mode = 'fast'
         recompute_mode = True
         attn_weights = fsdpa_op(query, key, value, attn_bias, 0.0, False,
-                                       scale, softmax_mode, recompute_mode,
-                                       None, 'right')
+                                scale, softmax_mode, recompute_mode, None,
+                                'right')
     attn_weights = attn_weights.transpose(1, 2)
     return attn_weights
+
 
 class HPUAttentionBackend(AttentionBackend):
 
@@ -275,22 +278,26 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         if attn_bias is None:  # This is the case for prompt run
             attn_bias = attn_metadata.attn_bias
         if enable_merged_prefill and attn_metadata.is_prompt and kv_cache is not None:
-            max_len=attn_metadata.slot_mapping.size(1)
+            max_len = attn_metadata.slot_mapping.size(1)
             seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
             # we need to copy the key and value tensors to the padded tensors
             # shape is [bacth_size, entire_seq_len, num_kv_heads, head_size]
-            padded_key_tensor = split_and_pad_to_length(key, max_len, seq_lens_tensor_list)
-            padded_value_tensor = split_and_pad_to_length(value, max_len, seq_lens_tensor_list)
-            padded_key_tensor = padded_key_tensor.flatten(0, 1).unflatten(0, (block_indices.size(0), -1))
-            padded_value_tensor = padded_value_tensor.flatten(0, 1).unflatten(0, (block_indices.size(0), -1))
+            padded_key_tensor = split_and_pad_to_length(
+                key, max_len, seq_lens_tensor_list)
+            padded_value_tensor = split_and_pad_to_length(
+                value, max_len, seq_lens_tensor_list)
+            padded_key_tensor = padded_key_tensor.flatten(0, 1).unflatten(
+                0, (block_indices.size(0), -1))
+            padded_value_tensor = padded_value_tensor.flatten(0, 1).unflatten(
+                0, (block_indices.size(0), -1))
 
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
 
-            key_cache = self.k_cache(padded_key_tensor, key_cache, block_indices,
-                                    block_offsets)
-            value_cache = self.v_cache(padded_value_tensor, value_cache, block_indices,
-                                    block_offsets)
+            key_cache = self.k_cache(padded_key_tensor, key_cache,
+                                     block_indices, block_offsets)
+            value_cache = self.v_cache(padded_value_tensor, value_cache,
+                                       block_indices, block_offsets)
         else:
             if attn_metadata.is_prompt:
                 key = key.unflatten(0, (block_indices.size(0), -1))
@@ -303,9 +310,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory profiling run.
                 key_cache = self.k_cache(key, key_cache, block_indices,
-                                        block_offsets)
+                                         block_offsets)
                 value_cache = self.v_cache(value, value_cache, block_indices,
-                                        block_offsets)
+                                           block_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
