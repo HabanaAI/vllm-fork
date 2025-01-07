@@ -7,7 +7,7 @@ vLLM supports FP8 (8-bit floating point) weight and activation quantization usin
 Currently, quantization is supported only for Llama models.
 
 Intel Gaudi supports quantization of various modules and functions, including, but not limited to ``Linear``, ``KVCache``, ``Matmul`` and ``Softmax``. For more information, please refer to:
-`Supported Modules\Supported Functions\Custom Patched Modules <https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#supported-modules>`_.
+`Supported Modules\\Supported Functions\\Custom Patched Modules <https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#supported-modules>`_.
 
 .. note::
     Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described in the `vllm-hpu-extention <https://github.com/HabanaAI/vllm-hpu-extension/tree/main/calibration/README.md>`_ package.
