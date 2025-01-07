@@ -268,6 +268,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         block_offsets = kwargs.get('block_offsets', None)
         seq_lens_tensor = kwargs.get('seq_lens_tensor', None)
         attn_bias = kwargs.get('attn_bias', None)
+        seq_lens_tensor_list = kwargs.get('seq_lens_tensor_list', None)
         enable_merged_prefill = attn_metadata.enable_merged_prefill
         if block_indices is None:
             block_indices = attn_metadata.block_indices
@@ -279,7 +280,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             attn_bias = attn_metadata.attn_bias
         if enable_merged_prefill and attn_metadata.is_prompt and kv_cache is not None:
             max_len = attn_metadata.slot_mapping.size(1)
-            seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
             # we need to copy the key and value tensors to the padded tensors
             # shape is [bacth_size, entire_seq_len, num_kv_heads, head_size]
             padded_key_tensor = split_and_pad_to_length(

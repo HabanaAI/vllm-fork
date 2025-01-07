@@ -480,7 +480,7 @@ class HpuModelAdapter:
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
         if kwargs['attn_metadata'].is_prompt:
-            print("Warming up HPU Graph - input_ids: ", input_ids,
+            print("Warming up HPU Graph - input_ids: ", input_ids.shape,
                   "seq_lens_tensor: ", kwargs['attn_metadata'].seq_lens_tensor,
                   "selected_token_indices: ", selected_token_indices)
         hidden_states = self.model(*args, **kwargs)

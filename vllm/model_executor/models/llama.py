@@ -292,6 +292,7 @@ class LlamaDecoderLayer(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
+        seq_lens_tensor_list: List[int],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if isinstance(hidden_states, torch.Tensor):
             skip_split = hidden_states.size()[0] == 1
@@ -313,7 +314,8 @@ class LlamaDecoderLayer(nn.Module):
             hidden_states = self.self_attn(positions=positions,
                                            hidden_states=hidden_states,
                                            kv_cache=kv_cache,
-                                           attn_metadata=attn_metadata)
+                                           attn_metadata=attn_metadata,
+                                           seq_lens_tensor_list=seq_lens_tensor_list)
 
             # Fully Connected
             hidden_states, residual = self.post_attention_layernorm(
@@ -479,11 +481,15 @@ class LlamaModel(nn.Module):
             import habana_frameworks.torch as htorch
             htorch.core.mark_step()
 
+        if attn_metadata.enable_merged_prefill and attn_metadata.is_prompt:
+            seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
+        else:
+            seq_lens_tensor_list = None
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
             hidden_states, residual = layer(positions, hidden_states,
                                             kv_caches[i - self.start_layer],
-                                            attn_metadata, residual)
+                                            attn_metadata, residual, seq_lens_tensor_list)
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
@@ -493,7 +499,6 @@ class LlamaModel(nn.Module):
         # we need to split result before do RMSNorm
         if attn_metadata.enable_merged_prefill and attn_metadata.is_prompt:
             max_len=attn_metadata.slot_mapping.size(1)
-            seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
             hidden_states = split_and_pad_to_length(hidden_states.view(-1, hidden_states.size(2)), max_len, seq_lens_tensor_list)
             residual = split_and_pad_to_length(residual.view(-1, hidden_states.size(2)), max_len, seq_lens_tensor_list)
         hidden_states, _ = self.norm(hidden_states, residual)
