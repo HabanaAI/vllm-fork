@@ -209,6 +209,8 @@ class HpuModelAdapter:
         self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
                                                '1').lower() in ['1', 'true'] \
                                                 and not is_fake_hpu()
+        self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
+                                           'false').lower() in ['1', 'true']
         self.block_size = block_size
         self.dtype = dtype
         self.layer_names = layer_names
@@ -370,7 +372,8 @@ class HpuModelAdapter:
 
         # At the end, we should be at the RotaryEmbedding layer.
         if hasattr(current_module, 'prepare_cos_sin'):
-            current_module.prepare_cos_sin(positions)
+            current_module.prepare_cos_sin(
+                positions, recompute_cos_sin=self.recompute_cos_sin)
         else:
             raise AttributeError(
                 "The module at the end of the path does not have \
@@ -971,7 +974,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Note: num_prefill_tokens is calculated using the length of
         # input_tokens after padding.
         num_prefill_tokens = input_tokens_tensor.numel()
-        if prefix_block_list_tensor:
+        if prefix_block_list_tensor is not None:
             prefix_block_list_tensor = prefix_block_list_tensor.to(
                 self.device, non_blocking=True)
         input_tokens_tensor = input_tokens_tensor.to(  # type: ignore
