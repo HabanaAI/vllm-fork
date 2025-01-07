@@ -304,6 +304,7 @@ class LLMEngine:
                     "disable_custom_all_reduce":
                     self.parallel_config.disable_custom_all_reduce,
                     "split_qk_v": self.cache_config.split_qkv,
+                    "split_gate_up": self.cache_config.split_gate_up,
                 })
 
         if self.tokenizer:
