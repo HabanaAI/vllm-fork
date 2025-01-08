@@ -214,7 +214,6 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
 
         prompt_bs_bucket_cfg = self.global_state.prompt_bs_bucket_cfg
         prompt_seq_bucket_cfg = self.global_state.prompt_seq_bucket_cfg
-        print("prompt_seq_bucket_cfg: ", prompt_seq_bucket_cfg)
         origin_max_prompt_len = prompt_seq_bucket_cfg[2]
         max_prompt_len = prompt_bs_bucket_cfg[2] * prompt_seq_bucket_cfg[2]
         max_prompt_len = min(self.max_num_batched_tokens, max_prompt_len)
@@ -226,23 +225,7 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
             prompt_seq_bucket_cfg,
             self.max_num_batched_tokens)
 
-        print("prompt_buckets: ", prompt_buckets)
-        # expand
-        self.global_state.prompt_buckets = []
-        VLLM_PROMPT_BS_BUCKET_MAX = int(
-            os.environ.get('VLLM_PROMPT_BS_BUCKET_MAX', 16))
-        for bucket in prompt_buckets:
-            bs = 1
-            while bs <= VLLM_PROMPT_BS_BUCKET_MAX:
-                seq_len = bucket[1] // bs
-                if seq_len <= 32:
-                    bs = bs * 2
-                    continue
-                self.global_state.prompt_buckets.append(
-                    (bs * bucket[0], seq_len))
-                bs = bs * 2
-
-        self.global_state.prompt_buckets = list(filter(lambda bucket: bucket[1] <= origin_max_prompt_len, self.global_state.prompt_buckets))
+        self.global_state.prompt_buckets = list(filter(lambda bucket: bucket[1] <= origin_max_prompt_len and bucket[0] == 1, prompt_buckets))
 
         msg = (f"Generated {len(self.global_state.prompt_buckets)} "
                f"prompt buckets [bs, seq]: "
@@ -265,9 +248,6 @@ class HpuModelAdapter:
         self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
                                                '1').lower() in ['1', 'true'] \
                                                 and not is_fake_hpu()
-        self.merged_prefill_attn_mask_compute = os.getenv(
-            'VLLM_MERGED_PREFILL_ATTN_MASK_COMPUTE',
-            '1').lower() in ['1', 'true']
         self.block_size = block_size
         self.dtype = dtype
         self.layer_names = layer_names
@@ -352,8 +332,6 @@ class HpuModelAdapter:
     ):  # create a 2D causal attn mask to ensure I can only attend to the past
         if attn_metadata is None or not attn_metadata.is_prompt:
             return attn_metadata
-        if not self.merged_prefill_attn_mask_compute:
-            return attn_metadata
         #TODO: Support batch_size > 1
         seq_lens = attn_metadata.seq_lens_tensor.tolist()
         causal_attn_mask_tensor = torch.ones(
@@ -425,9 +403,12 @@ class HpuModelAdapter:
         return metadata
 
     def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
-        slot_mapping = metadata.slot_mapping.flatten()
+        if metadata.enable_merged_prefill and is_prompt:
+            slot_mapping = metadata.slot_mapping
+        else:
+            slot_mapping = metadata.slot_mapping.flatten()
         indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt:
+        if not metadata.enable_merged_prefill and is_prompt:
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
             offsets = None
         else:
@@ -481,8 +462,7 @@ class HpuModelAdapter:
             self._prepare_cos_sin(kwargs['positions'])
         if kwargs['attn_metadata'].is_prompt:
             print("Warming up HPU Graph - input_ids: ", input_ids.shape,
-                  "seq_lens_tensor: ", kwargs['attn_metadata'].seq_lens_tensor,
-                  "selected_token_indices: ", selected_token_indices)
+                  "seq_lens_tensor: ", kwargs['attn_metadata'].seq_lens_tensor.shape, 'slot_mapping: ', kwargs['attn_metadata'].slot_mapping.shape, 'selected_token_indices: ', selected_token_indices)
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -730,11 +710,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._mem_margin: Optional[int] = None
         self.enable_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
                                                     'false').lower() == 'true'
-        # self.bucketing_ctx = HPUBucketingContext(
-        #         self.max_num_seqs,
-        #         self.max_num_prefill_seqs,
-        #         self.block_size,
-        #         self.max_num_batched_tokens)
         if self.enable_merged_prefill:
             self.bucketing_ctx = HPUBucketingContextWithMergedPrefill(
                 self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
@@ -1244,13 +1219,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         #context_lens
         #prefix_block_list
 
+        slot_mapping_merged = list(itertools.chain.from_iterable(slot_mapping))
+        slot_mapping_merged = [i for i in slot_mapping_merged if i != _PAD_SLOT_ID]
+        slot_mapping = [slot_mapping_merged]
         input_tokens_merged = list(itertools.chain.from_iterable(input_tokens))
         input_tokens_merged = [input_tokens_merged]
         input_positions_merged = list(
             itertools.chain.from_iterable(input_positions))
         input_positions_merged = [input_positions_merged]
-        slot_mapping_merged = list(itertools.chain.from_iterable(slot_mapping))
-        slot_mapping_merged = [slot_mapping_merged]
         context_lens_merged = [sum(context_lens)]
         total_seq_lens = [sum(seq_lens)]
         total_query_lens = [sum(query_lens)]
@@ -1284,11 +1260,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                device='cpu')
 
         slot_mapping = make_tensor_with_pad(slot_mapping,
-                                            max_len=max_prompt_len,
+                                            max_len=merged_prompt_len,
                                             pad=_PAD_SLOT_ID,
                                             dtype=torch.long,
                                             device='cpu')
 
+        max_prefill_bs = int(os.environ.get('VLLM_PROMPT_BS_BUCKET_MAX', '16'))
+        max_prefill_bs = max(max_prefill_bs, len(seq_lens))
+        seq_lens = seq_lens + [0] * (max_prefill_bs - len(seq_lens))
+        context_lens = context_lens + [0] * (max_prefill_bs - len(context_lens))
         seq_lens_tensor = torch.tensor(seq_lens,
                                        dtype=torch.long,
                                        device='cpu')
@@ -1522,7 +1502,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
         if len(seq_group_metadata_list) == 0:
-            print("seq_group_metadata_list is empty")
             return self._model_input_cls(), None
 
         input_tokens = None
@@ -1561,7 +1540,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 decode_reqs.append(seq_group_meta)
 
         # Prepare input tensors.
-        #print("prefill_reqs: ", prefill_reqs, "decode_reqs: ", decode_reqs)
         prepare_prompt_impl = self._prepare_prompt_merged if self.enable_merged_prefill else self._prepare_prompt
         (
             input_tokens,
@@ -1615,23 +1593,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # FIXME: We need to adjust selected_token_indices to accommodate
         # for padding
-        if self.enable_merged_prefill:
-            max_len = slot_mapping.size(1)
-        else:
+        if not self.enable_merged_prefill:
             max_len = input_tokens.size(1)
-        paddings = [max_len - q for q in query_lens]
-        paddings = [0] + paddings[:-1]
-        paddings = list(itertools.accumulate(paddings))
-        paddings_prompt_logprobs = []
-        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-            if seq_group_metadata.sampling_params.prompt_logprobs is not None \
-                              and seq_group_metadata.is_prompt:
-                paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
-        paddings = torch.tensor(
-            paddings_prompt_logprobs if paddings_prompt_logprobs else paddings,
-            dtype=sampling_metadata.selected_token_indices.dtype,
-            device=sampling_metadata.selected_token_indices.device)
-        sampling_metadata.selected_token_indices.add_(paddings)
+            paddings = [max_len - q for q in query_lens]
+            paddings = [0] + paddings[:-1]
+            paddings = list(itertools.accumulate(paddings))
+            paddings_prompt_logprobs = []
+            for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                if seq_group_metadata.sampling_params.prompt_logprobs is not None \
+                                and seq_group_metadata.is_prompt:
+                    paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
+            paddings = torch.tensor(
+                paddings_prompt_logprobs if paddings_prompt_logprobs else paddings,
+                dtype=sampling_metadata.selected_token_indices.dtype,
+                device=sampling_metadata.selected_token_indices.device)
+            sampling_metadata.selected_token_indices.add_(paddings)
 
         if self.lora_config:
             lora_mapping = LoRAMapping(

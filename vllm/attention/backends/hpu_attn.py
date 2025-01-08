@@ -10,7 +10,6 @@ import torch
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
                                       VLLMKVCache)
-from vllm_hpu_extension.cache_ops import insert_or_update_cache
 
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionMetadata, AttentionType)
@@ -19,7 +18,6 @@ from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
 from vllm.logger import init_logger
 from vllm.utils import is_fake_hpu
-from vllm.model_executor.models.utils import split_and_pad_to_length
 
 logger = init_logger(__name__)
 
@@ -268,7 +266,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         block_offsets = kwargs.get('block_offsets', None)
         seq_lens_tensor = kwargs.get('seq_lens_tensor', None)
         attn_bias = kwargs.get('attn_bias', None)
-        seq_lens_tensor_list = kwargs.get('seq_lens_tensor_list', None)
         enable_merged_prefill = attn_metadata.enable_merged_prefill
         if block_indices is None:
             block_indices = attn_metadata.block_indices
@@ -278,25 +275,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             seq_lens_tensor = attn_metadata.seq_lens_tensor
         if attn_bias is None:  # This is the case for prompt run
             attn_bias = attn_metadata.attn_bias
-        if enable_merged_prefill and attn_metadata.is_prompt and kv_cache is not None:
-            max_len = attn_metadata.slot_mapping.size(1)
-            # we need to copy the key and value tensors to the padded tensors
-            # shape is [bacth_size, entire_seq_len, num_kv_heads, head_size]
-            padded_key_tensor = split_and_pad_to_length(
-                key, max_len, seq_lens_tensor_list)
-            padded_value_tensor = split_and_pad_to_length(
-                value, max_len, seq_lens_tensor_list)
-            padded_key_tensor = padded_key_tensor.flatten(0, 1).unflatten(
-                0, (block_indices.size(0), -1))
-            padded_value_tensor = padded_value_tensor.flatten(0, 1).unflatten(
-                0, (block_indices.size(0), -1))
-
+        if enable_merged_prefill and attn_metadata.is_prompt and kv_cache is not None:            
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
-                kv_cache, self.num_kv_heads, self.head_size)
-
-            key_cache = self.k_cache(padded_key_tensor, key_cache,
+                 kv_cache, self.num_kv_heads, self.head_size)
+            key_cache = self.k_cache(key, key_cache,
                                      block_indices, block_offsets)
-            value_cache = self.v_cache(padded_value_tensor, value_cache,
+            value_cache = self.v_cache(value, value_cache,
                                        block_indices, block_offsets)
         else:
             if attn_metadata.is_prompt:

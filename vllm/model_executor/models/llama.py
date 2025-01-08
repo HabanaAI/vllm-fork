@@ -56,7 +56,7 @@ from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
-                    maybe_prefix, split_and_pad_to_length)
+                    maybe_prefix)
 
 is_hpu = current_platform.is_hpu()
 
@@ -292,7 +292,6 @@ class LlamaDecoderLayer(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
-        seq_lens_tensor_list: List[int],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if isinstance(hidden_states, torch.Tensor):
             skip_split = hidden_states.size()[0] == 1
@@ -314,8 +313,7 @@ class LlamaDecoderLayer(nn.Module):
             hidden_states = self.self_attn(positions=positions,
                                            hidden_states=hidden_states,
                                            kv_cache=kv_cache,
-                                           attn_metadata=attn_metadata,
-                                           seq_lens_tensor_list=seq_lens_tensor_list)
+                                           attn_metadata=attn_metadata)
 
             # Fully Connected
             hidden_states, residual = self.post_attention_layernorm(
@@ -481,26 +479,17 @@ class LlamaModel(nn.Module):
             import habana_frameworks.torch as htorch
             htorch.core.mark_step()
 
-        if attn_metadata.enable_merged_prefill and attn_metadata.is_prompt:
-            seq_lens_tensor_list = attn_metadata.seq_lens_tensor.tolist()
-        else:
-            seq_lens_tensor_list = None
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
             hidden_states, residual = layer(positions, hidden_states,
                                             kv_caches[i - self.start_layer],
-                                            attn_metadata, residual, seq_lens_tensor_list)
+                                            attn_metadata, residual)
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
                 "residual": residual
             })
 
-        # we need to split result before do RMSNorm
-        if attn_metadata.enable_merged_prefill and attn_metadata.is_prompt:
-            max_len=attn_metadata.slot_mapping.size(1)
-            hidden_states = split_and_pad_to_length(hidden_states.view(-1, hidden_states.size(2)), max_len, seq_lens_tensor_list)
-            residual = split_and_pad_to_length(residual.view(-1, hidden_states.size(2)), max_len, seq_lens_tensor_list)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
