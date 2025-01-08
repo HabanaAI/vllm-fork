@@ -461,8 +461,13 @@ class HpuModelAdapter:
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
         if kwargs['attn_metadata'].is_prompt:
+            am = kwargs['attn_metadata']
             print("Warming up HPU Graph - input_ids: ", input_ids.shape,
-                  "seq_lens_tensor: ", kwargs['attn_metadata'].seq_lens_tensor.shape, 'slot_mapping: ', kwargs['attn_metadata'].slot_mapping.shape, 'selected_token_indices: ', selected_token_indices)
+                  "seq_lens_tensor: ", am.seq_lens_tensor.shape,
+                  "context_lens_tensor: ", am.context_lens_tensor.shape,
+                  "enable_merged_prefill:", am.enable_merged_prefill,
+                  "slot_mapping: ", am.slot_mapping.shape,
+                  "selected_token_indices: ", selected_token_indices.shape)
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -1235,8 +1240,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_num_seqs = len(total_query_lens)
         assert max_query_len > 0
 
-        # print("input_tokens_merged: ", input_tokens_merged)
-        # print("input_positions_merged: ", input_positions_merged)
 
         merged_prompt_len = max(
             self.bucketing_ctx.get_padded_prompt_seq_len(max(total_seq_lens)),
@@ -1264,6 +1267,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                             pad=_PAD_SLOT_ID,
                                             dtype=torch.long,
                                             device='cpu')
+        actual_num_prefills_tensor = torch.tensor(len(seq_lens),
+                                                  dtype=torch.long,
+                                                  device='cpu')
 
         max_prefill_bs = int(os.environ.get('VLLM_PROMPT_BS_BUCKET_MAX', '16'))
         max_prefill_bs = max(max_prefill_bs, len(seq_lens))
@@ -1289,9 +1295,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = seq_lens_tensor.to(self.device, non_blocking=True)
         context_lens_tensor = context_lens_tensor.to(self.device,
                                                      non_blocking=True)
+        actual_num_prefills_tensor = actual_num_prefills_tensor.to(
+            self.device, non_blocking=True)
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             enable_merged_prefill=True,
+            actual_num_prefills=actual_num_prefills_tensor,
             block_list=prefix_block_list_tensor,
             block_mapping=None,
             block_usage=None,
@@ -1608,6 +1617,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 dtype=sampling_metadata.selected_token_indices.dtype,
                 device=sampling_metadata.selected_token_indices.device)
             sampling_metadata.selected_token_indices.add_(paddings)
+        else:
+            paddings = [0] * (num_prefills - sampling_metadata.selected_token_indices.size(0))
+            paddings = torch.tensor(
+                paddings,
+                dtype=sampling_metadata.selected_token_indices.dtype,
+                device=sampling_metadata.selected_token_indices.device)
+            sampling_metadata.selected_token_indices = \
+                torch.cat((sampling_metadata.selected_token_indices, paddings), dim=0)
 
         if self.lora_config:
             lora_mapping = LoRAMapping(
@@ -1695,6 +1712,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'seq_lens_tensor',
             'context_lens_tensor',
             'enable_merged_prefill',
+            'actual_num_prefills',
             'block_list',
             'block_mapping',
             'block_usage',
@@ -2470,6 +2488,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         selected_token_indices=sampling_metadata.
                         selected_token_indices)
 
+                # change the selected_token_indices shape after fwd, so hpu graph capture can use exactly same shape
+                if execute_model_kwargs['attn_metadata'].actual_num_prefills is not None:
+                    actual_num_prefills = execute_model_kwargs['attn_metadata'].actual_num_prefills
+                    sampling_metadata.selected_token_indices = sampling_metadata.selected_token_indices[:actual_num_prefills]
+                    hidden_states = hidden_states[:actual_num_prefills]
                 if self.lora_config:
                     LoraMask.setLoraMask(
                         lora_logits_mask.index_select(
