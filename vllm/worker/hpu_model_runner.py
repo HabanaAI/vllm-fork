@@ -332,6 +332,8 @@ class HpuModelAdapter:
     ):  # create a 2D causal attn mask to ensure I can only attend to the past
         if attn_metadata is None or not attn_metadata.is_prompt:
             return attn_metadata
+        if attn_metadata.attn_bias is not None:
+            return attn_metadata
         #TODO: Support batch_size > 1
         seq_lens = attn_metadata.seq_lens_tensor.tolist()
         causal_attn_mask_tensor = torch.ones(
@@ -465,6 +467,7 @@ class HpuModelAdapter:
             print("Warming up HPU Graph - input_ids: ", input_ids.shape,
                   "seq_lens_tensor: ", am.seq_lens_tensor.shape,
                   "context_lens_tensor: ", am.context_lens_tensor.shape,
+                  "attn_bias: ", am.attn_bias.shape if am.attn_bias is not None else None,
                   "enable_merged_prefill:", am.enable_merged_prefill,
                   "slot_mapping: ", am.slot_mapping.shape,
                   "selected_token_indices: ", selected_token_indices.shape)
@@ -715,6 +718,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._mem_margin: Optional[int] = None
         self.enable_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
                                                     'false').lower() == 'true'
+        self.enable_cpu_merged_prefill_attn = os.environ.get('VLLM_CPU_MERGED_PREFILL_ATTN',
+                                                             'false').lower() == 'true'
         if self.enable_merged_prefill:
             self.bucketing_ctx = HPUBucketingContextWithMergedPrefill(
                 self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
@@ -1278,11 +1283,44 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = torch.tensor(seq_lens,
                                        dtype=torch.long,
                                        device='cpu')
-
-        context_lens_tensor = torch.tensor(context_lens_merged,
+        context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.long,
                                            device='cpu')
+        ##### Create attn_bias in CPU #####
 
+        if self.enable_cpu_merged_prefill_attn:
+            #TODO: Support batch_size > 1
+            batch_size = 1
+            max_seq_len = merged_prompt_len
+            device = 'cpu'
+            causal_attn_mask_tensor = torch.ones(
+                (batch_size, max_seq_len, max_seq_len),
+                dtype=torch.bool,
+                device=device)
+            start = 0
+            for i in range(batch_size):
+                for seq_len in seq_lens:
+                    # create triangular mask for each sequence
+                    causal_mask = torch.triu(torch.ones((seq_len, seq_len),
+                                                        device=device,
+                                                        dtype=torch.bool),
+                                            diagonal=1)
+                    causal_attn_mask_tensor[i][start:start + seq_len, start:start +
+                                            seq_len].logical_and_(causal_mask)
+                    start += seq_len
+            causal_attn_mask_tensor = (
+                torch.zeros_like(causal_attn_mask_tensor,
+                                device=device,
+                                dtype=self.model_config.dtype).masked_fill_(
+                                    causal_attn_mask_tensor, -10000)
+            )  # should be math(-inf) but -10000 is used for numerical stability
+            causal_attn_mask_tensor = causal_attn_mask_tensor.view(
+                causal_attn_mask_tensor.shape[0], 1,
+                causal_attn_mask_tensor.shape[1], causal_attn_mask_tensor.shape[2])
+            causal_attn_mask_tensor = causal_attn_mask_tensor.to(self.device, non_blocking=True)
+        else:
+            causal_attn_mask_tensor = None
+        ########################
         # Note: num_prefill_tokens is calculated using the length of
         # input_tokens after padding.
         num_prefill_tokens = input_tokens_tensor.numel()
@@ -1308,7 +1346,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_offsets=None,
             block_scales=None,
             block_groups=None,
-            attn_bias=None,
+            attn_bias=causal_attn_mask_tensor,
             seq_lens=seq_lens,
             seq_lens_tensor=seq_lens_tensor,
             context_lens_tensor=context_lens_tensor,

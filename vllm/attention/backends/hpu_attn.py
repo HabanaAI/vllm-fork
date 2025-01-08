@@ -308,8 +308,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_bias = attn_bias.tile(
                             (1, self.num_kv_heads, 1, 1))
                         attn_bias.add_(position_bias)
-                elif enable_merged_prefill:
-                    pass
+                # elif enable_merged_prefill:
+                #     pass
                 else:
                     attn_bias = None
 
