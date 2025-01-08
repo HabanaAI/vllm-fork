@@ -719,7 +719,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.enable_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
                                                     'false').lower() == 'true'
         self.enable_cpu_merged_prefill_attn = os.environ.get('VLLM_CPU_MERGED_PREFILL_ATTN',
-                                                             'false').lower() == 'true'
+                                                             'true').lower() == 'true'
         if self.enable_merged_prefill:
             self.bucketing_ctx = HPUBucketingContextWithMergedPrefill(
                 self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
@@ -1288,35 +1288,88 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                            device='cpu')
         ##### Create attn_bias in CPU #####
 
-        if self.enable_cpu_merged_prefill_attn:
-            #TODO: Support batch_size > 1
-            batch_size = 1
-            max_seq_len = merged_prompt_len
-            device = 'cpu'
+        def create_causal_attention_mask(batch_size, max_seq_len, seq_lens, device, dtype=torch.float32):
+            """
+            Create a causal attention mask tensor for variable-length sequences in a batch.
+
+            Args:
+                batch_size (int): Number of sequences in the batch.
+                max_seq_len (int): Maximum sequence length.
+                seq_lens (list[int]): List of sequence lengths for each sequence in the batch.
+                device (torch.device): Device to create the tensor on (e.g., 'cuda' or 'cpu').
+                dtype (torch.dtype): Data type for the final attention mask.
+
+            Returns:
+                torch.Tensor: A causal attention mask tensor.
+            """
+            # Initialize a mask tensor with all ones
             causal_attn_mask_tensor = torch.ones(
                 (batch_size, max_seq_len, max_seq_len),
                 dtype=torch.bool,
-                device=device)
+                device=device
+            )
+
             start = 0
             for i in range(batch_size):
-                for seq_len in seq_lens:
-                    # create triangular mask for each sequence
-                    causal_mask = torch.triu(torch.ones((seq_len, seq_len),
-                                                        device=device,
-                                                        dtype=torch.bool),
-                                            diagonal=1)
-                    causal_attn_mask_tensor[i][start:start + seq_len, start:start +
-                                            seq_len].logical_and_(causal_mask)
+                seq_len = seq_lens[i]
+                # Create a triangular mask for the current sequence
+                causal_mask = torch.triu(
+                    torch.ones((seq_len, seq_len), device=device, dtype=torch.bool),
+                    diagonal=1
+                )
+                # Apply the causal mask to the corresponding part of the tensor
+                causal_attn_mask_tensor[i, start:start + seq_len, start:start + seq_len].logical_and_(
+                    ~causal_mask
+                )
+                start += seq_len
+
+            # Convert the boolean mask to the desired dtype and apply -10000 (masked value)
+            causal_attn_mask_tensor = torch.zeros_like(
+                causal_attn_mask_tensor,
+                device=device,
+                dtype=dtype
+            ).masked_fill_(causal_attn_mask_tensor, -10000)
+
+            return causal_attn_mask_tensor
+
+        def create_causal_attention_mask_with_python(batch_size, max_seq_len, seq_lens):
+            """
+            Create a causal attention mask for variable-length sequences in a batch using Python lists.
+
+            Args:
+                batch_size (int): Number of sequences in the batch.
+                max_seq_len (int): Maximum sequence length.
+                seq_lens (list[int]): List of sequence lengths for each sequence in the batch.
+
+            Returns:
+                list: A 3D causal attention mask as a list of lists.
+            """
+            # Initialize the mask tensor with all ones (boolean values)
+            causal_attn_mask_tensor = [[[True for _ in range(max_seq_len)] for _ in range(max_seq_len)] for _ in range(batch_size)]
+
+            for i in range(batch_size):
+                start = 0
+                for j in range(len(seq_lens)):
+                    seq_len = seq_lens[j]
+                    # Create a triangular causal mask for the current sequence
+                    causal_mask = [[False if col <= row else True for col in range(seq_len)] for row in range(seq_len)]
+
+                    # Apply the causal mask to the corresponding positions in the batch mask
+                    for row in range(seq_len):
+                        for col in range(seq_len):
+                            causal_attn_mask_tensor[i][start + row][start + col] = causal_mask[row][col]
                     start += seq_len
-            causal_attn_mask_tensor = (
-                torch.zeros_like(causal_attn_mask_tensor,
-                                device=device,
-                                dtype=self.model_config.dtype).masked_fill_(
-                                    causal_attn_mask_tensor, -10000)
-            )  # should be math(-inf) but -10000 is used for numerical stability
-            causal_attn_mask_tensor = causal_attn_mask_tensor.view(
-                causal_attn_mask_tensor.shape[0], 1,
-                causal_attn_mask_tensor.shape[1], causal_attn_mask_tensor.shape[2])
+
+            # Convert True/False to a mask value (-10000 for masked positions, 0 for others)
+            final_mask = [[[0 if not cell else -10000 for cell in row] for row in matrix] for matrix in causal_attn_mask_tensor]
+            final_mask_tensor = torch.tensor(final_mask, dtype=self.model_config.dtype)
+            final_mask_tensor = final_mask_tensor.view(final_mask_tensor.size(0), 1, final_mask_tensor.size(1), final_mask_tensor.size(2))
+
+            return final_mask_tensor
+        if self.enable_cpu_merged_prefill_attn:
+            #TODO: Support batch_size > 1
+            batch_size = 1
+            causal_attn_mask_tensor = create_causal_attention_mask_with_python(batch_size, merged_prompt_len, seq_lens)
             causal_attn_mask_tensor = causal_attn_mask_tensor.to(self.device, non_blocking=True)
         else:
             causal_attn_mask_tensor = None

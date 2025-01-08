@@ -30,7 +30,7 @@ except ImportError:
                    "vLLM will use native implementation.")
 
 
-def prompt_attention(
+def prompt_fsdpa(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -48,36 +48,20 @@ def prompt_attention(
     value = value.transpose(1, 2)
     query_heads = query.size(1)
     kv_heads = key.size(1)
-    #if attn_bias is not None or fsdpa_op is None:
-    if fsdpa_op is None:
-        if query_heads != kv_heads:
-            query = query.unflatten(1, (kv_heads, -1))
-            key = key.unflatten(1, (kv_heads, 1))
-            value = value.unflatten(1, (kv_heads, 1))
-            if attn_bias is not None:
-                attn_bias = attn_bias.unsqueeze(1)
-        attn_weights = matmul_qk_op(query * scale, key.transpose(-1, -2))
+    VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE = os.environ.get(
+        'VLLM_REMOVE_REPEAT_KV_CACHE_MERGED_PREFILL', '1') == '1'
+    # TODO: remove after fusedsdpa fix for query_heads != kv_heads
+    if query_heads != kv_heads:
+        if VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE:
+            key = ops.repeat_kv(key, int(query_heads // kv_heads))
+            value = ops.repeat_kv(value, int(query_heads // kv_heads))
         if attn_bias is not None:
-            attn_weights.add_(attn_bias)
-        attn_weights = softmax_op(attn_weights, dim=-1)
-        attn_weights = matmul_av_op(attn_weights, value)
-        if query_heads != kv_heads:
-            attn_weights = attn_weights.flatten(1, 2)
-    else:
-        VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE = os.environ.get(
-            'VLLM_REMOVE_REPEAT_KV_CACHE_MERGED_PREFILL', '1') == '1'
-        # TODO: remove after fusedsdpa fix for query_heads != kv_heads
-        if query_heads != kv_heads:
-            if VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE:
-                key = ops.repeat_kv(key, int(query_heads // kv_heads))
-                value = ops.repeat_kv(value, int(query_heads // kv_heads))
-            if attn_bias is not None:
-                attn_bias = attn_bias.unsqueeze(1)
-        softmax_mode = 'fast'
-        recompute_mode = True
-        attn_weights = fsdpa_op(query, key, value, attn_bias, 0.0, False,
-                                scale, softmax_mode, recompute_mode, None,
-                                'right')
+            attn_bias = attn_bias.unsqueeze(1)
+    softmax_mode = 'fast'
+    recompute_mode = True
+    attn_weights = fsdpa_op(query, key, value, attn_bias, 0.0, False,
+                            scale, softmax_mode, recompute_mode, None,
+                            'right')
     attn_weights = attn_weights.transpose(1, 2)
     return attn_weights
 
@@ -308,13 +292,13 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_bias = attn_bias.tile(
                             (1, self.num_kv_heads, 1, 1))
                         attn_bias.add_(position_bias)
-                # elif enable_merged_prefill:
-                #     pass
+                elif enable_merged_prefill:
+                    pass
                 else:
                     attn_bias = None
 
-                if enable_merged_prefill:
-                    prompt_attn_func = prompt_attention
+                if enable_merged_prefill and self.prefill_use_fusedsdpa:
+                    prompt_attn_func = prompt_fsdpa
                 else:
                     prompt_attn_func = ops.prompt_attention
                 out = prompt_attn_func(
