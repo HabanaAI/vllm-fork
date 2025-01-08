@@ -391,9 +391,11 @@ class HpuModelAdapter:
                 a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
+        '''
         if not get_pp_group().is_first_rank:
             for key, tensor in kwargs['intermediate_tensors'].tensors.items():
                 kwargs['intermediate_tensors'][key] = torch.empty_like(tensor).copy_(tensor)
+        '''
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
