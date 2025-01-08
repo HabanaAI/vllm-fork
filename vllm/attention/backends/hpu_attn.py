@@ -65,7 +65,7 @@ def prompt_attention(
             attn_weights = attn_weights.flatten(1, 2)
     else:
         VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE = os.environ.get(
-            'VLLM_REMOVE_REPEAT_KV_CACHE', '1') == '1'
+            'VLLM_REMOVE_REPEAT_KV_CACHE_MERGED_PREFILL', '1') == '1'
         # TODO: remove after fusedsdpa fix for query_heads != kv_heads
         if query_heads != kv_heads:
             if VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE:
@@ -276,28 +276,20 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             seq_lens_tensor = attn_metadata.seq_lens_tensor
         if attn_bias is None:  # This is the case for prompt run
             attn_bias = attn_metadata.attn_bias
-        if enable_merged_prefill and attn_metadata.is_prompt and kv_cache is not None:            
+        if attn_metadata.is_prompt and not enable_merged_prefill:
+            key = key.unflatten(0, (block_indices.size(0), -1))
+            value = value.unflatten(0, (block_indices.size(0), -1))
+        if kv_cache is not None:
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
-                 kv_cache, self.num_kv_heads, self.head_size)
-            key_cache = self.k_cache(key, key_cache,
-                                     block_indices, block_offsets)
-            value_cache = self.v_cache(value, value_cache,
-                                       block_indices, block_offsets)
-        else:
-            if attn_metadata.is_prompt:
-                key = key.unflatten(0, (block_indices.size(0), -1))
-                value = value.unflatten(0, (block_indices.size(0), -1))
-            if kv_cache is not None:
-                key_cache, value_cache = HPUPagedAttention.split_kv_cache(
-                    kv_cache, self.num_kv_heads, self.head_size)
+                kv_cache, self.num_kv_heads, self.head_size)
 
-                # Reshape the input keys and values and store them in the cache.
-                # If kv_cache is not provided, the new key and value tensors are
-                # not cached. This happens during the initial memory profiling run.
-                key_cache = self.k_cache(key, key_cache, block_indices,
-                                         block_offsets)
-                value_cache = self.v_cache(value, value_cache, block_indices,
-                                           block_offsets)
+            # Reshape the input keys and values and store them in the cache.
+            # If kv_cache is not provided, the new key and value tensors are
+            # not cached. This happens during the initial memory profiling run.
+            key_cache = self.k_cache(key, key_cache, block_indices,
+                                        block_offsets)
+            value_cache = self.v_cache(value, value_cache, block_indices,
+                                        block_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
