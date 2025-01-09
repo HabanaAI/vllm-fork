@@ -48,8 +48,8 @@ jobs:
         - name: Calculate Tests
           id: tests
           run: |
-            test_list=$(yq -oj e .jenkins/test_config.yaml  | jq '[.stages[].steps[]]')
-            echo "tests_list=$(echo $test_list)" >> $GITHUB_OUTPUT
+            test_list=$(yq -oj e .jenkins/test_config.yaml  | jq "[.stages[].steps[]]")
+            echo "tests_list=${test_list}" >> $GITHUB_OUTPUT
   TestRun:
     name: Test / ${{matrix.tests.name}}
     needs: [CalculateJobs]
@@ -76,7 +76,7 @@ jobs:
             RELEASED_SYNAPSE_VERSION: ${{ vars.RELEASED_SYNAPSE_VERSION }}
             BASE_BRANCH: ${{github.head_ref}}      
           run: |
-            if [[ $TARGET_BRANCH == 'habana_main' ]]; then
+            if [[ $TARGET_BRANCH == "habana_main" ]]; then
               synapse_version=${RELEASED_SYNAPSE_VERSION#v}
             elif [[ $TARGET_BRANCH =~ v*.*.* ]]; then
               synapse_version=${TARGET_BRANCH#v}
@@ -84,10 +84,10 @@ jobs:
               echo "Cant Calculate Synapse Version, Failing The Test"
               exit 1
             fi
-            synapse_build=$(curl https://dms.habana-labs.com/api/v1.1/branch/info/v$synapse_version | jq -r '.release_id')
+            synapse_build=$(curl https://dms.habana-labs.com/api/v1.1/branch/info/v$synapse_version | jq -r ".release_id")
             pt_version=${{ vars.PT_VERSION }}
             BUILD_TAG="Github-vLLM-Fork-${{ github.event.number }}-${{github.run_number}}"
-            safe_cmd=$(echo "${TEST_COMMAND}" | sed "s|\\&|\\\\&|g")
+            safe_cmd=${TEST_COMMAND//&/\\&}
             echo "Writing Pod Template To File"
             echo "${POD_TEMPLATE}" > pod.yml
             sed -i "s/##VERSION##/${synapse_version}/g" pod.yml
