@@ -327,40 +327,34 @@ class HpuModelAdapter:
     def _set_merged_attn_bias(
         self,
         attn_metadata,
-        batch_size,
         max_seq_len,
+        eos_indices,
         device,
+        dtype
     ):  # create a 2D causal attn mask to ensure I can only attend to the past
         if attn_metadata is None or not attn_metadata.is_prompt:
             return attn_metadata
         if attn_metadata.attn_bias is not None:
             return attn_metadata
         #TODO: Support batch_size > 1
-        seq_lens = attn_metadata.seq_lens_tensor.tolist() #[6, 8, 5, 7 ]
-        causal_attn_mask_tensor = torch.ones(
-            (batch_size, max_seq_len, max_seq_len),
-            dtype=torch.bool,
-            device=device)
-        start = 0
-        for i in range(batch_size):
-            for seq_len in seq_lens:
-                # create triangular mask for each sequence
-                causal_mask = torch.triu(torch.ones((seq_len, seq_len),
-                                                    device=device,
-                                                    dtype=torch.bool),
-                                         diagonal=1)
-                causal_attn_mask_tensor[i][start:start + seq_len, start:start +
-                                           seq_len].logical_and_(causal_mask)
-                start += seq_len
-        causal_attn_mask_tensor = (
-            torch.zeros_like(causal_attn_mask_tensor,
-                             device=device,
-                             dtype=self.dtype).masked_fill_(
-                                 causal_attn_mask_tensor, -10000)
-        )  # should be math(-inf) but -10000 is used for numerical stability
+        # get length of each sequence
+        reps = attn_metadata.seq_lens_tensor
+        # get indices of all EOS tokens
+        # repeat each eos index n times along dimension 1 (n is the number of tokens in the sequence)
+        repeated_idx_small = torch.repeat_interleave(eos_indices, reps, dim=0)
+        repeated_idx = torch.zeros(max_seq_len, dtype=dtype, device=device)
+        repeated_idx[:repeated_idx_small.size(0)] = repeated_idx_small
+        repeated_idx = repeated_idx.view(1,-1).expand(max_seq_len, -1)
+        # create tensor with all indices from 0 to T-1 repeated T times along dimesion 1
+        mask_indices = torch.arange(max_seq_len, dtype=dtype).view(-1,1).expand(-1, max_seq_len)
+        # create causal mask and additionally mask out all tokens from preceeding sequences
+        mask = mask_indices.le(repeated_idx)
+        causal_mask = torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device).tril()
+        causal_mask = causal_mask.logical_and(mask)
+        # should be math(-inf) but -10000 is used for numerical stability
+        causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, -10000)
         causal_attn_mask_tensor = causal_attn_mask_tensor.view(
-            causal_attn_mask_tensor.shape[0], 1,
-            causal_attn_mask_tensor.shape[1], causal_attn_mask_tensor.shape[2])
+            1, 1, causal_attn_mask_tensor.shape[0], causal_attn_mask_tensor.shape[1])
 
         attn_metadata = attn_metadata._replace(
             attn_bias=causal_attn_mask_tensor)
@@ -421,11 +415,11 @@ class HpuModelAdapter:
         return metadata
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
-                         dtype):
+                         dtype, eos_indices):
         if attn_metadata.is_prompt and attn_metadata.enable_merged_prefill:
             attn_metadata = self._set_merged_attn_bias(attn_metadata,
-                                                       batch_size, seq_len,
-                                                       device)
+                                                       seq_len, eos_indices,
+                                                       device, dtype)
         elif attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
@@ -459,7 +453,7 @@ class HpuModelAdapter:
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
+            input_ids.device, self.dtype, selected_token_indices)
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
@@ -1390,6 +1384,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                      non_blocking=True)
         actual_num_prefills_tensor = actual_num_prefills_tensor.to(
             self.device, non_blocking=True)
+
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             enable_merged_prefill=True,
