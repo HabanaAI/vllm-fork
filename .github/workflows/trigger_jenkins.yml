@@ -49,7 +49,7 @@ jobs:
           id: tests
           run: |
             test_list=$(yq -oj e .jenkins/test_config.yaml  | jq "[.stages[].steps[]]")
-            echo "tests_list=${test_list}" >> $GITHUB_OUTPUT
+            echo "tests_list=$(echo ${test_list})" >> $GITHUB_OUTPUT
   TestRun:
     name: Test / ${{matrix.tests.name}}
     needs: [CalculateJobs]
