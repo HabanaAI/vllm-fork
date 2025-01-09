@@ -233,15 +233,6 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
                f"{list(sorted(self.global_state.prompt_buckets))}")
         print(msg)
 
-        # msg = (f"Omitted {len(prompt_omitted_buckets)} "
-        #         "prompt buckets due to exceeded token budget "
-        #         f"(max_num_batched_tokens={self.max_num_batched_tokens})")
-        # print(msg)
-
-        # msg = f"Omitted prompt buckets: {list(sorted(prompt_omitted_buckets))}"
-        # print(msg)
-
-
 class HpuModelAdapter:
 
     def __init__(self, model, block_size, dtype, enforce_eager, layer_names):
@@ -706,10 +697,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._mem_margin: Optional[int] = None
         self.enable_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
                                                     'false').lower() == 'true'
-        self.enable_cpu_merged_prefill_attn = os.environ.get('VLLM_CPU_MERGED_PREFILL_ATTN',
-                                                             'false').lower() == 'true'
-        if self.enable_merged_prefill and self.enable_cpu_merged_prefill_attn:
-            self.causal_attn_mask_tensor_cache = dict()
         if self.enable_merged_prefill:
             self.bucketing_ctx = HPUBucketingContextWithMergedPrefill(
                 self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
@@ -1212,13 +1199,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 slot = block_number * self.block_size + block_offset
                 slot_mapping[-1].append(slot)
 
-        #input_tokens
-        #input_positions
-        #slot_mapping
-        #seq_lens
-        #context_lens
-        #prefix_block_list
-
         slot_mapping_merged = list(itertools.chain.from_iterable(slot_mapping))
         slot_mapping_merged = [i for i in slot_mapping_merged if i != _PAD_SLOT_ID]
         slot_mapping = [slot_mapping_merged]
@@ -1227,7 +1207,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_positions_merged = list(
             itertools.chain.from_iterable(input_positions))
         input_positions_merged = [input_positions_merged]
-        context_lens_merged = [sum(context_lens)]
         total_seq_lens = [sum(seq_lens)]
         total_query_lens = [sum(query_lens)]
 
@@ -1238,9 +1217,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         merged_prompt_len = max(
             self.bucketing_ctx.get_padded_prompt_seq_len(max(total_seq_lens)),
-            self.block_size)
-        max_prompt_len = max(
-            self.bucketing_ctx.get_padded_prompt_seq_len(max(seq_lens)),
             self.block_size)
         # get cumsum of seq_lens
         repeated_idx = list(itertools.accumulate(seq_lens)) 
@@ -1270,7 +1246,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                   dtype=torch.long,
                                                   device='cpu')
 
-        max_prefill_bs = int(os.environ.get('VLLM_PROMPT_BS_BUCKET_MAX', '16'))
+        max_prefill_bs = int(os.environ.get('VLLM_PROMPT_BS_BUCKET_MAX', '8'))
         max_prefill_bs = max(max_prefill_bs, len(seq_lens))
         seq_lens = seq_lens + [0] * (max_prefill_bs - len(seq_lens))
         context_lens = context_lens + [0] * (max_prefill_bs - len(context_lens))
@@ -1281,91 +1257,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                            dtype=torch.long,
                                            device='cpu')
         ##### Create attn_bias in CPU #####
-
-        def create_causal_attention_mask(batch_size, max_seq_len, seq_lens, device, dtype=torch.float32):
-            """
-            Create a causal attention mask tensor for variable-length sequences in a batch.
-
-            Args:
-                batch_size (int): Number of sequences in the batch.
-                max_seq_len (int): Maximum sequence length.
-                seq_lens (list[int]): List of sequence lengths for each sequence in the batch.
-                device (torch.device): Device to create the tensor on (e.g., 'cuda' or 'cpu').
-                dtype (torch.dtype): Data type for the final attention mask.
-
-            Returns:
-                torch.Tensor: A causal attention mask tensor.
-            """
-            # Initialize a mask tensor with all ones
-            causal_attn_mask_tensor = torch.ones(
-                (batch_size, max_seq_len, max_seq_len),
-                dtype=torch.bool,
-                device=device
-            )
-
-            start = 0
-            for i in range(batch_size):
-                seq_len = seq_lens[i]
-                # Create a triangular mask for the current sequence
-                causal_mask = torch.triu(
-                    torch.ones((seq_len, seq_len), device=device, dtype=torch.bool),
-                    diagonal=1
-                )
-                # Apply the causal mask to the corresponding part of the tensor
-                causal_attn_mask_tensor[i, start:start + seq_len, start:start + seq_len].logical_and_(
-                    ~causal_mask
-                )
-                start += seq_len
-
-            # Convert the boolean mask to the desired dtype and apply -10000 (masked value)
-            causal_attn_mask_tensor = torch.zeros_like(
-                causal_attn_mask_tensor,
-                device=device,
-                dtype=dtype
-            ).masked_fill_(causal_attn_mask_tensor, -10000)
-
-            return causal_attn_mask_tensor
-
-        def create_causal_attention_mask_with_python(batch_size, max_seq_len, seq_lens):
-            """
-            Create a causal attention mask for variable-length sequences in a batch using Python lists.
-
-            Args:
-                batch_size (int): Number of sequences in the batch.
-                max_seq_len (int): Maximum sequence length.
-                seq_lens (list[int]): List of sequence lengths for each sequence in the batch.
-
-            Returns:
-                list: A 3D causal attention mask as a list of lists.
-            """
-            # Initialize the mask tensor with all ones (boolean values)
-            if batch_size not in self.causal_attn_mask_tensor_cache:
-                self.causal_attn_mask_tensor_cache[batch_size] = {}
-            if max_seq_len not in self.causal_attn_mask_tensor_cache[batch_size]:
-                causal_attn_mask_tensor = [[[-10000 for _ in range(max_seq_len)] for _ in range(max_seq_len)] for _ in range(batch_size)]
-                self.causal_attn_mask_tensor_cache[batch_size][max_seq_len] = copy.copy(causal_attn_mask_tensor)
-            else:
-                causal_attn_mask_tensor = copy.copy(self.causal_attn_mask_tensor_cache[batch_size][max_seq_len])
-
-            for i in range(batch_size):
-                start = 0
-                for j in range(len(seq_lens)):
-                    seq_len = seq_lens[j]   
-                    for row in range(seq_len):
-                        causal_attn_mask_tensor[i][start + row][start:start + row + 1] = [0] * (row + 1)
-                    start += seq_len
-
-            final_mask_tensor = torch.tensor(causal_attn_mask_tensor, dtype=self.model_config.dtype)
-            final_mask_tensor = final_mask_tensor.view(final_mask_tensor.size(0), 1, final_mask_tensor.size(1), final_mask_tensor.size(2))
-
-            return final_mask_tensor
-        if self.enable_cpu_merged_prefill_attn:
-            #TODO: Support batch_size > 1
-            batch_size = 1
-            causal_attn_mask_tensor = create_causal_attention_mask_with_python(batch_size, merged_prompt_len, seq_lens)
-            causal_attn_mask_tensor = causal_attn_mask_tensor.to(self.device, non_blocking=True)
-        else:
-            causal_attn_mask_tensor = None
+        causal_attn_mask_tensor = None
         ########################
         # Note: num_prefill_tokens is calculated using the length of
         # input_tokens after padding.
