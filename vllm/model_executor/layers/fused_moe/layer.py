@@ -16,6 +16,14 @@ from vllm.platforms import current_platform
 
 is_hpu = current_platform.is_hpu()
 
+if current_platform.is_cuda_alike():
+    from .fused_moe import fused_experts
+else:
+    fused_experts = None  # type: ignore
+if current_platform.is_tpu():
+    from .moe_pallas import fused_moe as fused_moe_pallas
+else:
+    fused_moe_pallas = None  # type: ignore
 logger = init_logger(__name__)
 
 
@@ -40,13 +48,13 @@ class FusedMoEMethodBase(QuantizeMethodBase):
         raise NotImplementedError
 
 
+@CustomOp.register("unquantized_fused_moe")
 class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     """MoE method without quantization."""
 
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
-
         # Fused gate_up_proj (column parallel)
         w13_weight = torch.nn.Parameter(torch.empty(num_experts,
                                                     2 * intermediate_size,
@@ -77,7 +85,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             num_expert_group: Optional[int] = None,
             custom_routing_function: Optional[Callable] = None
     ) -> torch.Tensor:
-
         return self.forward(x=x,
                             layer=layer,
                             router_logits=router_logits,
@@ -100,10 +107,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             num_expert_group: Optional[int] = None,
             custom_routing_function: Optional[Callable] = None
     ) -> torch.Tensor:
-
-        from vllm.model_executor.layers.fused_moe.fused_moe import (
-            fused_experts)
-
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
             router_logits=router_logits,
@@ -156,18 +159,18 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             num_expert_group: Optional[int] = None,
             custom_routing_function: Optional[Callable] = None
     ) -> torch.Tensor:
-
-        from vllm.model_executor.layers.fused_moe.moe_pallas import fused_moe
         assert not use_grouped_topk
         assert num_expert_group is None
         assert topk_group is None
         assert custom_routing_function is None
-        return fused_moe(hidden_states=x,
-                         w1=layer.w13_weight,
-                         w2=layer.w2_weight,
-                         topk=top_k,
-                         gating_output=router_logits,
-                         renormalize=renormalize)
+        return fused_moe_pallas(hidden_states=x,
+                                w1=layer.w13_weight,
+                                w2=layer.w2_weight,
+                                topk=top_k,
+                                gating_output=router_logits,
+                                renormalize=renormalize)
+
+    forward_native = forward_cuda
 
 
 class FusedMoE(torch.nn.Module):
@@ -226,9 +229,13 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
-        if current_platform.is_hpu():
-            from vllm_hpu_extension.ops import StaticFusedMOE
-            self.hpu_static_fused_moe = StaticFusedMOE(self.num_experts)
+        if is_hpu:
+            from vllm_hpu_extension.ops import DynamicFusedMOE, StaticFusedMOE
+
+            from vllm.model_executor.layers.quantization.inc import INCConfig
+            selected_fused_moe = (StaticFusedMOE if isinstance(
+                quant_config, INCConfig) else DynamicFusedMOE)
+            self.hpu_static_fused_moe = selected_fused_moe(self.num_experts)
 
         if quant_config is None:
             self.quant_method: Optional[QuantizeMethodBase] = (
@@ -284,7 +291,7 @@ class FusedMoE(torch.nn.Module):
 
     def _load_per_channel_weight_scale(self, expert_data: torch.Tensor,
                                        shard_dim: int, shard_id: str,
-                                       loaded_weight: torch.tensor,
+                                       loaded_weight: torch.Tensor,
                                        tp_rank: int):
         # for per channel weight quantization
         if shard_id == "w2":
@@ -321,8 +328,10 @@ class FusedMoE(torch.nn.Module):
         expert_data.copy_(loaded_weight)
 
         if is_hpu:
-            self.hpu_static_fused_moe.w13_list[expert_id].set_weight(
-                orig_exp_data)
+            from vllm_hpu_extension.ops import StaticFusedMOE
+            if isinstance(self.hpu_static_fused_moe, StaticFusedMOE):
+                self.hpu_static_fused_moe.w13_list[expert_id].set_weight(
+                    orig_exp_data)
 
     def _load_w2(self,
                  expert_data: torch.Tensor,
@@ -341,8 +350,10 @@ class FusedMoE(torch.nn.Module):
         # w2, down_proj: Load into only logical weight of w2.
         expert_data.copy_(loaded_weight)
         if is_hpu:
-            self.hpu_static_fused_moe.w2_list[expert_id].set_weight(
-                expert_data)
+            from vllm_hpu_extension.ops import StaticFusedMOE
+            if isinstance(self.hpu_static_fused_moe, StaticFusedMOE):
+                self.hpu_static_fused_moe.w2_list[expert_id].set_weight(
+                    expert_data)
 
     def _load_single_value(self, param: torch.nn.Parameter,
                            loaded_weight: torch.Tensor, expert_id: int):
@@ -352,7 +363,7 @@ class FusedMoE(torch.nn.Module):
         param_data[expert_id] = loaded_weight
 
     def _load_g_idx(self, shard_id: str, expert_data: torch.Tensor,
-                    shard_dim: int, loaded_weight: torch.tensor, tp_rank: int):
+                    shard_dim: int, loaded_weight: torch.Tensor, tp_rank: int):
 
         if shard_id == "w2":
             self._load_w2(shard_id=shard_id,

@@ -1,10 +1,10 @@
-vLLM with Intel® Gaudi® AI Accelerators
-=========================================
+Installation with Intel® Gaudi® AI Accelerators
+===============================================
 
 This README provides instructions on running vLLM with Intel Gaudi devices.
 
 Requirements and Installation
-=============================
+-----------------------------
 
 Please follow the instructions provided in the `Gaudi Installation
 Guide <https://docs.habana.ai/en/latest/Installation_Guide/index.html>`__
@@ -13,7 +13,7 @@ please follow the methods outlined in the `Optimizing Training Platform
 Guide <https://docs.habana.ai/en/latest/PyTorch/Model_Optimization_PyTorch/Optimization_in_Training_Platform.html>`__.
 
 Requirements
-------------
+~~~~~~~~~~~~
 
 -  OS: Ubuntu 22.04 LTS
 -  Python: 3.10
@@ -22,7 +22,7 @@ Requirements
 
 
 Quick start using Dockerfile
-============================
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. code:: console
 
    $ docker build -f Dockerfile.hpu -t vllm-hpu-env  .
@@ -30,14 +30,14 @@ Quick start using Dockerfile
 
 
 .. tip::
-   If you're observing the following error: ``docker: Error response from daemon: Unknown runtime specified habana.``, please refer to "Install Using Containers" section of `Intel Gaudi Software Stack and Driver Installation <https://docs.habana.ai/en/v1.18.0/Installation_Guide/Bare_Metal_Fresh_OS.html`__. Make sure you have ``habana-container-runtime`` package installed and that ```habana`` container runtime is registered.
+   If you're observing the following error: ``docker: Error response from daemon: Unknown runtime specified habana.``, please refer to "Install optional packages" section of `Install Driver and Software <https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html#install-driver-and-software>`__ and "Configure Container Runtime" section of `Docker Installation <https://docs.habana.ai/en/latest/Installation_Guide/Installation_Methods/Docker_Installation.html#configure-container-runtime>`__. Make sure you have ``habanalabs-container-runtime`` package installed and that ``habana`` container runtime is registered.
 
 
 Build from source
-=================
+~~~~~~~~~~~~~~~~~
 
 Environment verification
-------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 To verify that the Intel Gaudi software was correctly installed, run:
 
@@ -48,16 +48,15 @@ To verify that the Intel Gaudi software was correctly installed, run:
    $ pip list | grep habana # verify that habana-torch-plugin, habana-torch-dataloader, habana-pyhlml and habana-media-loader are installed
    $ pip list | grep neural # verify that neural_compressor is installed
 
-Refer to `Intel Gaudi Software Stack
-Verification <https://docs.habana.ai/en/latest/Installation_Guide/Platform_Upgrade_and_Unboxing.html#system-verifications-and-final-tests>`__
+Refer to `System Verification and Final Tests <https://docs.habana.ai/en/latest/Installation_Guide/System_Verification_and_Final_Tests.html>`__
 for more details.
 
 Run Docker Image
-----------------
+^^^^^^^^^^^^^^^^
 
 It is highly recommended to use the latest Docker image from Intel Gaudi
 vault. Refer to the `Intel Gaudi
-documentation <https://docs.habana.ai/en/latest/Installation_Guide/Bare_Metal_Fresh_OS.html#pull-prebuilt-containers>`__
+documentation <https://docs.habana.ai/en/latest/Installation_Guide/Installation_Methods/Docker_Installation.html#use-intel-gaudi-containers>`__
 for more details.
 
 Use the following commands to run a Docker image:
@@ -68,7 +67,17 @@ Use the following commands to run a Docker image:
    $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.18.0/ubuntu22.04/habanalabs/pytorch-installer-2.4.0:latest
 
 Build and Install vLLM
----------------------------
+^^^^^^^^^^^^^^^^^^^^^^
+
+To build and install vLLM from source, run:
+
+.. code:: console
+
+   $ git clone https://github.com/vllm-project/vllm.git
+   $ cd vllm
+   $ pip install -r requirements-hpu.txt
+   $ python setup.py develop
+
 
 Currently, the latest features and performance optimizations are developed in Gaudi's `vLLM-fork <https://github.com/HabanaAI/vllm-fork>`__ and we periodically upstream them to vLLM main repo. To install latest `HabanaAI/vLLM-fork <https://github.com/HabanaAI/vllm-fork>`__, run the following:
 
@@ -77,16 +86,17 @@ Currently, the latest features and performance optimizations are developed in Ga
    $ git clone https://github.com/HabanaAI/vllm-fork.git
    $ cd vllm-fork
    $ git checkout habana_main
-   $ pip install -e .
+   $ pip install -r requirements-hpu.txt
+   $ python setup.py develop
 
 
 Supported Features
-==================
+------------------
 
 -  `Offline batched
-   inference <https://github.com/HabanaAI/vllm-fork/blob/habana_main/docs/source/getting_started/quickstart.rst#offline-batched-inference>`__
+   inference <https://docs.vllm.ai/en/latest/getting_started/quickstart.html#offline-batched-inference>`__
 -  Online inference via `OpenAI-Compatible
-   Server <https://github.com/HabanaAI/vllm-fork/blob/habana_main/docs/source/getting_started/quickstart.rst#openai-compatible-server>`__
+   Server <https://docs.vllm.ai/en/latest/getting_started/quickstart.html#openai-compatible-server>`__
 -  HPU autodetection - no need to manually select device within vLLM
 -  Paged KV cache with algorithms enabled for Intel Gaudi accelerators
 -  Custom Intel Gaudi implementations of Paged Attention, KV cache ops,
@@ -99,7 +109,7 @@ Supported Features
 -  INC quantization
 
 Unsupported Features
-====================
+--------------------
 
 -  Beam search
 -  LoRA adapters
@@ -107,7 +117,7 @@ Unsupported Features
 -  Prefill chunking (mixed-batch inferencing)
 
 Supported Configurations
-========================
+------------------------
 
 The following configurations have been validated to be function with
 Gaudi2 devices. Configurations that are not listed may or may not work.
@@ -148,10 +158,10 @@ Gaudi2 devices. Configurations that are not listed may or may not work.
    with tensor parallelism on 2x HPU, BF16 datatype with random or greedy sampling
 
 Performance Tuning
-==================
+------------------
 
 Execution modes
----------------
+~~~~~~~~~~~~~~~
 
 Currently in vLLM for HPU we support four execution modes, depending on selected HPU PyTorch Bridge backend (via ``PT_HPU_LAZY_MODE`` environment variable), and ``--enforce-eager`` flag.  
 
@@ -180,7 +190,7 @@ Currently in vLLM for HPU we support four execution modes, depending on selected
 
 
 Bucketing mechanism
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 Intel Gaudi accelerators work best when operating on models with fixed tensor shapes. `Intel Gaudi Graph Compiler <https://docs.habana.ai/en/latest/Gaudi_Overview/Intel_Gaudi_Software_Suite.html#graph-compiler-and-runtime>`__ is responsible for generating optimized binary code that implements the given model topology on Gaudi. In its default configuration, the produced binary code may be heavily dependent on input and output tensor shapes, and can require graph recompilation when encountering differently shaped tensors within the same topology. While the resulting binaries utilize Gaudi efficiently, the compilation itself may introduce a noticeable overhead in end-to-end execution.
 In a dynamic inference serving scenario, there is a need to minimize the number of graph compilations and reduce the risk of graph compilation occurring during server runtime. Currently it is achieved by "bucketing" model's forward pass across two dimensions - ``batch_size`` and ``sequence_length``. 
@@ -229,7 +239,7 @@ As an example, if a request of 3 sequences, with max sequence length of 412 come
    Bucketing is transparent to a client - padding in sequence length dimension is never returned to the client, and padding in batch dimension does not create new requests.
 
 Warmup
-------
+~~~~~~
 
 Warmup is an optional, but highly recommended step occurring before vLLM server starts listening. It executes a forward pass for each bucket with dummy data. The goal is to pre-compile all graphs and not incur any graph compilation overheads within bucket boundaries during server runtime. Each warmup step is logged during vLLM startup:
 
@@ -253,7 +263,7 @@ This example uses the same buckets as in *Bucketing mechanism* section. Each out
    Compiling all the buckets might take some time and can be turned off with ``VLLM_SKIP_WARMUP=true`` environment variable. Keep in mind that if you do that, you may face graph compilations once executing a given bucket for the first time. It is fine to disable warmup for development, but it's highly recommended to enable it in deployment.
 
 HPU Graph capture
------------------
+~~~~~~~~~~~~~~~~~
 
 `HPU Graphs <https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html>`__ are currently the most performant execution method of vLLM on Intel Gaudi. When HPU Graphs are enabled, execution graphs will be traced (recorded) ahead of time (after performing warmup), to be later replayed during inference, significantly reducing host overheads. Recording can take large amounts of memory, which needs to be taken into account when allocating KV cache. Enabling HPU Graphs will impact the number of available KV cache blocks, but vLLM provides user-configurable variables to control memory management.
 
@@ -317,7 +327,7 @@ Each described step is logged by vLLM server, as follows (negative values corres
 
 
 Recommended vLLM Parameters
----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  We recommend running inference on Gaudi 2 with ``block_size`` of 128
    for BF16 data type. Using default values (16, 32) might lead to
@@ -329,7 +339,7 @@ Recommended vLLM Parameters
    If you encounter out-of-memory issues, see troubleshooting section.
 
 Environment variables
----------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 **Diagnostic and profiling knobs:**
 
@@ -368,7 +378,8 @@ Environment variables
          - sequence length min (``VLLM_DECODE_BLOCK_BUCKET_MIN``): ``block_size``
          - sequence length step (``VLLM_DECODE_BLOCK_BUCKET_STEP``): ``block_size``
          - sequence length max (``VLLM_DECODE_BLOCK_BUCKET_MAX``): ``max(128, (max_num_seqs*max_model_len)/block_size)``
-
+-  ``VLLM_HANDLE_TOPK_DUPLICATES``: if ``true``, will handle duplicates that are outside of top-k, ``false`` by default
+-  ``VLLM_CONFIG_HIDDEN_LAYERS``: configure how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. The default is 1. It helps with throughput improvement under inter-token latency limitation for some models.
 
 Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM execution:  
 
@@ -376,7 +387,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 -   ``PT_HPU_ENABLE_LAZY_COLLECTIVES``: required to be ``true`` for tensor parallel inference with HPU Graphs
 
 Troubleshooting: Tweaking HPU Graphs
-====================================
+------------------------------------
 
 If you experience device out-of-memory issues or want to attempt
 inference at higher batch sizes, try tweaking HPU Graphs by following

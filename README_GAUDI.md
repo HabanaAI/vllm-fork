@@ -20,7 +20,7 @@ $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_
 ```
 
 > [!TIP]
-> If you're facing the following error: `docker: Error response from daemon: Unknown runtime specified habana.`, please refer to "Install Using Containers" section of [Intel Gaudi Software Stack and Driver Installation](https://docs.habana.ai/en/v1.18.0/Installation_Guide/Bare_Metal_Fresh_OS.html). Make sure you have `habana-container-runtime` package installed and that `habana` container runtime is registered correctly.
+> If you're facing the following error: `docker: Error response from daemon: Unknown runtime specified habana.`, please refer to "Install optional packages" section of [Install Driver and Software](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html#install-driver-and-software) and "Configure Container Runtime" section of [Docker Installation] (https://docs.habana.ai/en/latest/Installation_Guide/Installation_Methods/Docker_Installation.html#configure-container-runtime). Make sure you have ``habanalabs-container-runtime`` package installed and that ``habana`` container runtime is registered.
 
 
 ## Build from source
@@ -35,7 +35,7 @@ $ pip list | grep habana # verify that habana-torch-plugin, habana-torch-dataloa
 $ pip list | grep neural # verify that neural-compressor is installed
 ```
 
-Refer to [Intel Gaudi Software Stack Verification](https://docs.habana.ai/en/latest/Installation_Guide/SW_Verification.html#platform-upgrade) for more details.
+Refer to [System Verification and Final Tests](https://docs.habana.ai/en/latest/Installation_Guide/System_Verification_and_Final_Tests.html) for more details.
 
 ### Run Docker Image
 
@@ -56,7 +56,8 @@ Currently, the latest features and performance optimizations are developed in Ga
 $ git clone https://github.com/HabanaAI/vllm-fork.git
 $ cd vllm-fork
 $ git checkout habana_main
-$ pip install -e .
+$ pip install -r requirements-hpu.txt
+$ python setup.py develop
 ```
 
 # Supported Features
@@ -246,6 +247,7 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
 - `VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL`: if `true`, will log graph compilations per each vLLM engine step, always, even if there were none. Disabled by default.
 - `VLLM_HPU_LOG_STEP_CPU_FALLBACKS`: if `true`, will log cpu fallbacks per each vLLM engine step, only when there was any. Disabled by default.
 - `VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL`: if `true`, will log cpu fallbacks per each vLLM engine step, always, even if there were none. Disabled by default.
+- `VLLM_REGIONAL_COMPILATION`: if `false`, turn off regional compilation (when using torch.compile execution mode).
 
 **Performance tuning knobs:**
 
@@ -276,11 +278,34 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
       - block size min (`VLLM_DECODE_BLOCK_BUCKET_MIN`): `block_size`
       - block size step (`VLLM_DECODE_BLOCK_BUCKET_STEP`): `block_size`
       - block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`): `max(128, (max_num_seqs*max_model_len)/block_size)`
+-  `VLLM_HANDLE_TOPK_DUPLICATES`: if ``true``, will handle duplicates that are outside of top-k, ``false`` by default
+-  `VLLM_CONFIG_HIDDEN_LAYERS`: configure how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. The default is 1. It helps with throughput improvement under inter-token latency limitation for some models.
 
 Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM execution:
 
 - `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used, if `1` PyTorch Lazy backend for Gaudi will be used, `1` is default
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES`: required to be `true` for tensor parallel inference with HPU Graphs
+
+# Quantization, FP8 inference and model calibration process
+
+> [!NOTE]
+> Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described in the [vllm-hpu-extention](https://github.com/HabanaAI/vllm-hpu-extension/tree/main/calibration/README.md) package.
+
+Once you've completed the model calibration process and collected the measurements, you can run FP8 inference with vLLM using the following command:
+```bash
+export QUANT_CONFIG=/path/to/quant/config/inc/meta-llama-3.1-405b-instruct/maxabs_measure_g3.json
+vllm serve meta-llama/Llama-3.1-405B-Instruct --quantization inc --kv-cache-dtype fp8_inc --weights-load-device cpu --tensor_paralel_size 8
+```
+
+`QUANT_CONFIG` is an environment variable that points to the measurement or quantization configuration file. The measurement configuration file is used during the calibration procedure to collect measurements for a given model. The quantization configuration is used during inference.
+
+> [!TIP]
+> If you are just prototyping or testing your model with FP8, you can use the `VLLM_SKIP_WARMUP=true` environment variable to disable the warmup stage, which can take a long time. However, we do not recommend disabling this feature in production environments, as it causes a dramatic performance drop.
+
+> [!TIP]
+> When using FP8 models, you may experience timeouts caused by the long compilation time of FP8 operations. To mitigate this problem, you can use these two environment variables:
+> - `VLLM_ENGINE_ITERATION_TIMEOUT_S` - to adjust the vLLM server timeout. You can set the value in seconds, e.g., 600 equals 10 minutes.
+> - `VLLM_RPC_TIMEOUT` - to adjust the RPC protocol timeout used by the OpenAI-compatible API. This value is in microseconds, e.g., 600000 equals 10 minutes.
 
 # Troubleshooting: Tweaking HPU Graphs
 

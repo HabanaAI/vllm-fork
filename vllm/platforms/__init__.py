@@ -1,4 +1,5 @@
-from .interface import Platform, PlatformEnum, UnspecifiedPlatform
+from .interface import _Backend  # noqa: F401
+from .interface import CpuArchEnum, Platform, PlatformEnum, UnspecifiedPlatform
 
 current_platform: Platform
 
@@ -27,7 +28,15 @@ try:
     finally:
         pynvml.nvmlShutdown()
 except Exception:
-    pass
+    # CUDA is supported on Jetson, but NVML may not be.
+    import os
+
+    def cuda_is_jetson() -> bool:
+        return os.path.isfile("/etc/nv_tegra_release") \
+            or os.path.exists("/sys/class/tegra-firmware")
+
+    if cuda_is_jetson():
+        is_cuda = True
 
 is_rocm = False
 
@@ -54,6 +63,9 @@ except Exception:
 is_xpu = False
 
 try:
+    # installed IPEX if the machine has XPUs.
+    import intel_extension_for_pytorch  # noqa: F401
+    import oneccl_bindings_for_pytorch  # noqa: F401
     import torch
     if hasattr(torch, 'xpu') and torch.xpu.is_available():
         is_xpu = True
@@ -64,6 +76,20 @@ is_cpu = False
 try:
     from importlib.metadata import version
     is_cpu = "cpu" in version("vllm")
+except Exception:
+    pass
+
+is_neuron = False
+try:
+    import transformers_neuronx  # noqa: F401
+    is_neuron = True
+except ImportError:
+    pass
+
+is_openvino = False
+try:
+    from importlib.metadata import version
+    is_openvino = "openvino" in version("vllm")
 except Exception:
     pass
 
@@ -87,7 +113,13 @@ elif is_xpu:
 elif is_cpu:
     from .cpu import CpuPlatform
     current_platform = CpuPlatform()
+elif is_neuron:
+    from .neuron import NeuronPlatform
+    current_platform = NeuronPlatform()
+elif is_openvino:
+    from .openvino import OpenVinoPlatform
+    current_platform = OpenVinoPlatform()
 else:
     current_platform = UnspecifiedPlatform()
 
-__all__ = ['Platform', 'PlatformEnum', 'current_platform']
+__all__ = ['Platform', 'PlatformEnum', 'current_platform', 'CpuArchEnum']

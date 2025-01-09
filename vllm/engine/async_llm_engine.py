@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import time
 import weakref
 from functools import partial
@@ -6,35 +7,36 @@ from typing import (Any, AsyncGenerator, Callable, Coroutine, Dict, Iterable,
                     List, Mapping, Optional, Set, Tuple, Type, Union, overload)
 from weakref import ReferenceType
 
+from typing_extensions import deprecated
+
 import vllm.envs as envs
-from vllm.beam_search import BeamSearchSequence, create_sort_beams_key_function
-from vllm.config import (DecodingConfig, EngineConfig, LoRAConfig, ModelConfig,
-                         ParallelConfig, SchedulerConfig)
+from vllm.config import (DecodingConfig, LoRAConfig, ModelConfig,
+                         ParallelConfig, SchedulerConfig, VllmConfig)
 from vllm.core.scheduler import SchedulerOutputs
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_timeout import asyncio_timeout
 from vllm.engine.llm_engine import LLMEngine, SchedulerOutputState
 from vllm.engine.metrics_types import StatLoggerBase
+from vllm.engine.protocol import EngineClient
 from vllm.executor.executor_base import ExecutorAsyncBase
 from vllm.executor.gpu_executor import GPUExecutorAsync
 from vllm.executor.hpu_executor import HPUExecutorAsync
 from vllm.executor.ray_utils import initialize_ray_cluster
-from vllm.inputs import PromptType, TokensPrompt
+from vllm.inputs import PromptType
+from vllm.inputs.preprocess import InputPreprocessor
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.guided_decoding import (
     get_guided_decoding_logits_processor)
 from vllm.model_executor.layers.sampler import SamplerOutput
-from vllm.outputs import (CompletionOutput, EmbeddingRequestOutput,
-                          RequestOutput)
+from vllm.outputs import PoolingRequestOutput, RequestOutput
 from vllm.pooling_params import PoolingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
-from vllm.sampling_params import BeamSearchParams, SamplingParams
+from vllm.sampling_params import SamplingParams
 from vllm.sequence import ExecuteModelRequest
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 from vllm.usage.usage_lib import UsageContext
-from vllm.utils import (collect_from_async_generator, deprecate_kwargs,
-                        random_uuid, weak_bind)
+from vllm.utils import deprecate_kwargs, weak_bind
 
 logger = init_logger(__name__)
 ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
@@ -76,7 +78,7 @@ STOP_ITERATION = Exception()  # Sentinel
 
 
 class AsyncStream:
-    """A stream of RequestOutputs or EmbeddingRequestOutputs for a request
+    """A stream of RequestOutputs or PoolingRequestOutputs for a request
     that can be iterated over asynchronously via an async generator."""
 
     def __init__(self, request_id: str, cancel: Callable[[str], None]) -> None:
@@ -85,7 +87,7 @@ class AsyncStream:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._finished = False
 
-    def put(self, item: Union[RequestOutput, EmbeddingRequestOutput,
+    def put(self, item: Union[RequestOutput, PoolingRequestOutput,
                               Exception]) -> None:
         if not self._finished:
             self._queue.put_nowait(item)
@@ -105,7 +107,7 @@ class AsyncStream:
 
     async def generator(
         self
-    ) -> AsyncGenerator[Union[RequestOutput, EmbeddingRequestOutput], None]:
+    ) -> AsyncGenerator[Union[RequestOutput, PoolingRequestOutput], None]:
         try:
             while True:
                 result = await self._queue.get()
@@ -156,7 +158,7 @@ class RequestTracker:
 
     def process_request_output(self,
                                request_output: Union[RequestOutput,
-                                                     EmbeddingRequestOutput],
+                                                     PoolingRequestOutput],
                                *,
                                verbose: bool = False) -> None:
         """Process a request output from the engine."""
@@ -267,7 +269,7 @@ class _AsyncLLMEngine(LLMEngine):
 
     async def step_async(
         self, virtual_engine: int
-    ) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
+    ) -> List[Union[RequestOutput, PoolingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
         The workers are ran asynchronously if possible.
 
@@ -302,6 +304,9 @@ class _AsyncLLMEngine(LLMEngine):
             ctx.seq_group_metadata_list = seq_group_metadata_list
             ctx.scheduler_outputs = scheduler_outputs
 
+            finished_requests_ids = self.scheduler[
+                virtual_engine].get_and_reset_finished_requests_ids()
+
             # Maybe switch from async mode to sync mode
             if not allow_async_output_proc and len(ctx.output_queue) > 0:
                 self._process_model_outputs(ctx=ctx)
@@ -313,13 +318,13 @@ class _AsyncLLMEngine(LLMEngine):
                 self._cache_scheduler_outputs_for_multi_step(
                     virtual_engine, seq_group_metadata_list, scheduler_outputs,
                     allow_async_output_proc)
+        else:
+            finished_requests_ids = list()
 
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
         if not scheduler_outputs.is_empty():
-            finished_requests_ids = self.scheduler[
-                virtual_engine].get_and_reset_finished_requests_ids()
 
             # Check if we have a cached last_output from the previous iteration.
             # For supporting PP this is probably the best way to pass the
@@ -415,7 +420,14 @@ class _AsyncLLMEngine(LLMEngine):
         """Stop the remote worker execution loop."""
         await self.model_executor.stop_remote_worker_execution_loop_async()
 
-    @overload  # DEPRECATED
+    async def get_tokenizer_async(self,
+                                  lora_request: Optional[LoRARequest] = None
+                                  ) -> AnyTokenizer:
+        return await (
+            self.get_tokenizer_group().get_lora_tokenizer_async(lora_request))
+
+    @overload
+    @deprecated("'inputs' will be renamed to 'prompt")
     async def add_request_async(
         self,
         request_id: str,
@@ -475,6 +487,10 @@ class _AsyncLLMEngine(LLMEngine):
         if arrival_time is None:
             arrival_time = time.time()
 
+        if self.tokenizer is not None:
+            tokenizer = await self.get_tokenizer_async(lora_request)
+            self._validate_token_prompt(prompt, tokenizer=tokenizer)
+
         preprocessed_inputs = await self.input_preprocessor.preprocess_async(
             prompt,
             request_id=request_id,
@@ -491,9 +507,10 @@ class _AsyncLLMEngine(LLMEngine):
             # implementation in the LLMEngine
             params = await build_guided_decoding_logits_processor_async(
                 sampling_params=params,
-                tokenizer=self.get_tokenizer(lora_request),
+                tokenizer=await self.get_tokenizer_async(lora_request),
                 default_guided_backend=self.decoding_config.
-                guided_decoding_backend)
+                guided_decoding_backend,
+                model_config=self.model_config)
 
         self._add_processed_request(
             request_id=request_id,
@@ -514,14 +531,20 @@ class _AsyncLLMEngine(LLMEngine):
 
 async def build_guided_decoding_logits_processor_async(
         sampling_params: SamplingParams, tokenizer: AnyTokenizer,
-        default_guided_backend: str) -> SamplingParams:
+        default_guided_backend: str,
+        model_config: ModelConfig) -> SamplingParams:
     """Constructs logits processors based on the guided_decoding,
     logits_bias, and allowed_token_ids fields in sampling_params. Deletes
     those fields and adds the constructed logits processors to the
     logits_processors field. Modifies sampling params in-place and returns
     the modified sampling params."""
-    if (guided_decoding := sampling_params.guided_decoding) is None:
+    if sampling_params.guided_decoding is None:
         return sampling_params
+
+    # Defensively copy sampling params since guided decoding logits
+    # processors can have different state for each request
+    sampling_params = copy.copy(sampling_params)
+    guided_decoding = sampling_params.guided_decoding
 
     logger.debug("Building guided decoding logits processor. "
                  "Params: %s", guided_decoding)
@@ -529,7 +552,9 @@ async def build_guided_decoding_logits_processor_async(
     guided_decoding.backend = guided_decoding.backend or default_guided_backend
 
     processor = await get_guided_decoding_logits_processor(
-        guided_params=guided_decoding, tokenizer=tokenizer)
+        guided_params=guided_decoding,
+        tokenizer=tokenizer,
+        model_config=model_config)
 
     if processor:
         if sampling_params.logits_processors is None:
@@ -542,7 +567,7 @@ async def build_guided_decoding_logits_processor_async(
     return sampling_params
 
 
-class AsyncLLMEngine:
+class AsyncLLMEngine(EngineClient):
     """An asynchronous wrapper for :class:`LLMEngine`.
 
     This class is used to wrap the :class:`LLMEngine` class to make it
@@ -597,7 +622,7 @@ class AsyncLLMEngine:
 
     @classmethod
     def _get_executor_cls(
-            cls, engine_config: EngineConfig) -> Type[ExecutorAsyncBase]:
+            cls, engine_config: VllmConfig) -> Type[ExecutorAsyncBase]:
         distributed_executor_backend = (
             engine_config.parallel_config.distributed_executor_backend)
         if isinstance(distributed_executor_backend, type):
@@ -621,6 +646,10 @@ class AsyncLLMEngine:
             from vllm.executor.cpu_executor import CPUExecutorAsync
             executor_class = CPUExecutorAsync
         elif engine_config.device_config.device_type == "hpu":
+            if distributed_executor_backend == "mp":
+                from vllm.executor.multiproc_hpu_executor import (
+                    MultiprocessingHPUExecutorAsync)
+                executor_class = MultiprocessingHPUExecutorAsync
             if distributed_executor_backend == "ray":
                 initialize_ray_cluster(engine_config.parallel_config)
                 from vllm.executor.ray_hpu_executor import RayHPUExecutorAsync
@@ -664,7 +693,7 @@ class AsyncLLMEngine:
     def from_engine_args(
         cls,
         engine_args: AsyncEngineArgs,
-        engine_config: Optional[EngineConfig] = None,
+        engine_config: Optional[VllmConfig] = None,
         start_engine_loop: bool = True,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
@@ -672,7 +701,7 @@ class AsyncLLMEngine:
         """Creates an async LLM engine from the engine arguments."""
         # Create the engine configs.
         if engine_config is None:
-            engine_config = engine_args.create_engine_config()
+            engine_config = engine_args.create_engine_config(usage_context)
 
         executor_class = cls._get_executor_cls(engine_config)
 
@@ -681,7 +710,7 @@ class AsyncLLMEngine:
 
         # Create the async LLM engine.
         engine = cls(
-            **engine_config.to_dict(),
+            vllm_config=engine_config,
             executor_class=executor_class,
             log_requests=not engine_args.disable_log_requests,
             log_stats=not engine_args.disable_log_stats,
@@ -722,12 +751,14 @@ class AsyncLLMEngine:
         self.set_errored(exc)
         self._request_tracker.propagate_exception(exc)
 
+    async def get_input_preprocessor(self) -> InputPreprocessor:
+        return self.engine.input_preprocessor
+
     async def get_tokenizer(
         self,
         lora_request: Optional[LoRARequest] = None,
     ) -> AnyTokenizer:
-        return await (self.engine.get_tokenizer_group().
-                      get_lora_tokenizer_async(lora_request))
+        return await self.engine.get_tokenizer_async(lora_request)
 
     def start_background_loop(self) -> None:
         """Start the background loop."""
@@ -814,7 +845,7 @@ class AsyncLLMEngine:
     async def run_engine_loop(engine_ref: ReferenceType):
         """We use a weakref to the engine so that the running loop
         doesn't prevent the engine being garbage collected."""
-        engine: Optional["AsyncLLMEngine"] = engine_ref()
+        engine: Optional[AsyncLLMEngine] = engine_ref()
         if not engine:
             return
 
@@ -881,7 +912,8 @@ class AsyncLLMEngine:
 
     # This method does not need to be async, but kept that way
     # for backwards compatibility.
-    @overload  # DEPRECATED
+    @overload
+    @deprecated("'inputs' will be renamed to 'prompt")
     def add_request(
         self,
         request_id: str,
@@ -894,7 +926,7 @@ class AsyncLLMEngine:
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         priority: int = 0,
     ) -> Coroutine[None, None, AsyncGenerator[Union[
-            RequestOutput, EmbeddingRequestOutput], None]]:
+            RequestOutput, PoolingRequestOutput], None]]:
         ...
 
     @overload
@@ -909,7 +941,7 @@ class AsyncLLMEngine:
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         priority: int = 0,
     ) -> Coroutine[None, None, AsyncGenerator[Union[
-            RequestOutput, EmbeddingRequestOutput], None]]:
+            RequestOutput, PoolingRequestOutput], None]]:
         ...
 
     @deprecate_kwargs(
@@ -928,7 +960,7 @@ class AsyncLLMEngine:
         priority: int = 0,
         *,
         inputs: Optional[PromptType] = None,  # DEPRECATED
-    ) -> AsyncGenerator[Union[RequestOutput, EmbeddingRequestOutput], None]:
+    ) -> AsyncGenerator[Union[RequestOutput, PoolingRequestOutput], None]:
         if inputs is not None:
             prompt = inputs
         assert prompt is not None and params is not None
@@ -1010,6 +1042,7 @@ class AsyncLLMEngine:
             >>> # the complete example.
             >>>
             >>> # initialize the engine and the example input
+            >>> # note that engine_args here is AsyncEngineArgs instance
             >>> engine = AsyncLLMEngine.from_engine_args(engine_args)
             >>> example_input = {
             >>>     "prompt": "What is LLM?",
@@ -1048,102 +1081,6 @@ class AsyncLLMEngine:
         ):
             yield LLMEngine.validate_output(output, RequestOutput)
 
-    async def beam_search(
-        self,
-        prompt: Union[PromptType, List[int]],
-        request_id: str,
-        params: BeamSearchParams,
-    ) -> AsyncGenerator[RequestOutput, None]:
-
-        beam_width = params.beam_width
-        max_tokens = params.max_tokens
-        ignore_eos = params.ignore_eos
-        temperature = params.temperature
-        length_penalty = params.length_penalty
-
-        tokenizer = await self.get_tokenizer()
-        tokenizedPrompt = prompt if isinstance(
-            prompt, list) else tokenizer.encode(prompt)
-        tokenizedLength = len(tokenizedPrompt)
-
-        sort_beams_key = create_sort_beams_key_function(
-            tokenizer.eos_token_id, length_penalty)
-
-        beam_search_params = SamplingParams(logprobs=2 * beam_width,
-                                            max_tokens=1,
-                                            temperature=temperature)
-        all_beams = [BeamSearchSequence(tokens=tokenizedPrompt, cum_logprob=0)]
-        completed = []
-
-        for _ in range(max_tokens):
-            prompts_batch = [
-                TokensPrompt(prompt_token_ids=beam.tokens)
-                for beam in all_beams
-            ]
-
-            tasks = []
-
-            request_id = f"beam_search-{random_uuid()}"
-            for i, individual_prompt in enumerate(prompts_batch):
-                request_id_item = f"{request_id}-{i}"
-                task = asyncio.create_task(
-                    collect_from_async_generator(
-                        self.generate(individual_prompt, beam_search_params,
-                                      request_id_item)))
-                tasks.append(task)
-
-            output = await asyncio.gather(*tasks)
-
-            output = [x[0] for x in output]
-
-            logger.info(output)
-
-            new_beams = []
-            for i, current_beam in enumerate(all_beams):
-                result = output[i]
-
-                if result.outputs[0].logprobs is not None:
-                    logprobs = result.outputs[0].logprobs[0]
-                    for token_id, logprob_obj in logprobs.items():
-                        new_beam = BeamSearchSequence(
-                            tokens=current_beam.tokens + [token_id],
-                            cum_logprob=current_beam.cum_logprob +
-                            logprob_obj.logprob)
-
-                        if token_id == tokenizer.eos_token_id and \
-                            not ignore_eos:
-                            completed.append(new_beam)
-                        else:
-                            new_beams.append(new_beam)
-
-            sorted_beams = sorted(new_beams, key=sort_beams_key, reverse=True)
-            all_beams = sorted_beams[:beam_width]
-
-        completed.extend(all_beams)
-        sorted_completed = sorted(completed, key=sort_beams_key, reverse=True)
-        best_beams = sorted_completed[:beam_width]
-
-        for beam in best_beams:
-            beam.text = tokenizer.decode(beam.tokens[tokenizedLength:])
-
-        beam_search_output = RequestOutput(
-            request_id=request_id,
-            prompt=prompt,
-            outputs=[
-                CompletionOutput(
-                    text=beam.text,
-                    cumulative_logprob=beam.cum_logprob,
-                    token_ids=beam.tokens,
-                    index=i,
-                    logprobs=beam.cum_logprob,
-                ) for (i, beam) in enumerate(best_beams)
-            ],
-            finished=True,
-            prompt_token_ids=tokenizedPrompt,
-            prompt_logprobs=None)
-
-        yield LLMEngine.validate_output(beam_search_output, RequestOutput)
-
     async def encode(
         self,
         prompt: PromptType,
@@ -1152,7 +1089,7 @@ class AsyncLLMEngine:
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         priority: int = 0,
-    ) -> AsyncGenerator[EmbeddingRequestOutput, None]:
+    ) -> AsyncGenerator[PoolingRequestOutput, None]:
         """Generate outputs for a request from an embedding model.
 
         Generate outputs for a request. This method is a coroutine. It adds the
@@ -1170,7 +1107,7 @@ class AsyncLLMEngine:
                 Only applicable with priority scheduling.
 
         Yields:
-            The output `EmbeddingRequestOutput` objects from the LLMEngine
+            The output `PoolingRequestOutput` objects from the LLMEngine
             for the request.
 
         Details:
@@ -1189,6 +1126,7 @@ class AsyncLLMEngine:
             >>> # the complete example.
             >>>
             >>> # initialize the engine and the example input
+            >>> # note that engine_args here is AsyncEngineArgs instance
             >>> engine = AsyncLLMEngine.from_engine_args(engine_args)
             >>> example_input = {
             >>>     "input": "What is LLM?",
@@ -1222,7 +1160,7 @@ class AsyncLLMEngine:
                 trace_headers=trace_headers,
                 priority=priority,
         ):
-            yield LLMEngine.validate_output(output, EmbeddingRequestOutput)
+            yield LLMEngine.validate_output(output, PoolingRequestOutput)
 
     async def abort(self, request_id: str) -> None:
         """Abort a request.

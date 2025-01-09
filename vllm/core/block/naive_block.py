@@ -1,5 +1,5 @@
-from collections import deque
-from typing import Deque, FrozenSet, Iterable, List, Optional, Tuple
+import heapq
+from typing import FrozenSet, Iterable, List, Optional, Tuple
 
 from vllm.core.block.common import (BlockPool, CopyOnWriteTracker, RefCounter,
                                     get_all_blocks_recursively)
@@ -36,7 +36,9 @@ class NaiveBlockAllocator(BlockAllocator):
         if block_ids is None:
             block_ids = range(num_blocks)
 
-        self._free_block_indices: Deque[BlockId] = deque(block_ids)
+        self._free_block_indices: List[
+            BlockId] = block_ids[:]  # type: ignore[index]
+        heapq.heapify(self._free_block_indices)
         self._all_block_indices = frozenset(block_ids)
         assert len(self._all_block_indices) == num_blocks
 
@@ -129,7 +131,7 @@ class NaiveBlockAllocator(BlockAllocator):
         if not self._free_block_indices:
             raise BlockAllocator.NoFreeBlocksError()
 
-        block_id = self._free_block_indices.popleft()
+        block_id = heapq.heappop(self._free_block_indices)
         self._refcounter.incr(block_id)
         return block_id
 
@@ -139,7 +141,7 @@ class NaiveBlockAllocator(BlockAllocator):
 
         refcount = self._refcounter.decr(block_id)
         if refcount == 0:
-            self._free_block_indices.appendleft(block_id)
+            heapq.heappush(self._free_block_indices, block_id)
 
         block.block_id = None
 
@@ -262,13 +264,6 @@ class NaiveBlockAllocator(BlockAllocator):
         """
         pass
 
-    def get_computed_block_ids(self, prev_computed_block_ids: List[int],
-                               block_ids: List[int],
-                               skip_last_block_id: bool) -> List[int]:
-        """No prefix caching here => return empty list
-        """
-        return []
-
     def get_common_computed_block_ids(
             self, computed_seq_block_ids: List[List[int]]) -> List[int]:
         """Determine blocks that can be skipped in prefill.
@@ -328,6 +323,10 @@ class NaiveBlockAllocator(BlockAllocator):
 
     def get_prefix_cache_hit_rate(self) -> float:
         return -1
+
+    def find_cached_blocks_prefix(self, block_hashes: List[int]) -> List[int]:
+        # Not applicable for naive block allocator.
+        return []
 
 
 class NaiveBlock(Block):

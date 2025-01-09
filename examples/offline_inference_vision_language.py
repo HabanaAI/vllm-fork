@@ -1,6 +1,6 @@
 """
-This example shows how to use vLLM for running offline inference 
-with the correct prompt format on vision language models.
+This example shows how to use vLLM for running offline inference with
+the correct prompt format on vision language models for text generation.
 
 For most models, the prompt format should follow corresponding examples
 on HuggingFace model repository.
@@ -176,6 +176,31 @@ def run_minicpmv(question: str, modality: str):
     return llm, prompt, stop_token_ids
 
 
+# H2OVL-Mississippi
+def run_h2ovl(question: str, modality: str):
+    assert modality == "image"
+
+    model_name = "h2oai/h2ovl-mississippi-2b"
+
+    llm = LLM(
+        model=model_name,
+        trust_remote_code=True,
+        max_model_len=8192,
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name,
+                                              trust_remote_code=True)
+    messages = [{'role': 'user', 'content': f"<image>\n{question}"}]
+    prompt = tokenizer.apply_chat_template(messages,
+                                           tokenize=False,
+                                           add_generation_prompt=True)
+
+    # Stop tokens for H2OVL-Mississippi
+    # https://huggingface.co/h2oai/h2ovl-mississippi-2b
+    stop_token_ids = [tokenizer.eos_token_id]
+    return llm, prompt, stop_token_ids
+
+
 # InternVL
 def run_internvl(question: str, modality: str):
     assert modality == "image"
@@ -198,7 +223,7 @@ def run_internvl(question: str, modality: str):
     # Stop tokens for InternVL
     # models variants may have different stop tokens
     # please refer to the model card for the correct "stop words":
-    # https://huggingface.co/OpenGVLab/InternVL2-2B#service
+    # https://huggingface.co/OpenGVLab/InternVL2-2B/blob/main/conversation.py
     stop_tokens = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<|end|>"]
     stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
     return llm, prompt, stop_token_ids
@@ -262,17 +287,37 @@ def run_qwen2_vl(question: str, modality: str):
 
     model_name = "Qwen/Qwen2-VL-7B-Instruct"
 
-    # Tested on L40
     llm = LLM(
         model=model_name,
-        max_model_len=8192,
+        max_model_len=4096,
         max_num_seqs=5,
+        # Note - mm_processor_kwargs can also be passed to generate/chat calls
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+        },
     )
 
     prompt = ("<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
               "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>"
               f"{question}<|im_end|>\n"
               "<|im_start|>assistant\n")
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
+
+# Pixtral HF-format
+def run_pixtral_hf(question: str, modality: str):
+    assert modality == "image"
+
+    model_name = "mistral-community/pixtral-12b"
+
+    llm = LLM(
+        model=model_name,
+        max_model_len=8192,
+    )
+
+    prompt = f"<s>[INST]{question}\n[IMG][/INST]"
     stop_token_ids = None
     return llm, prompt, stop_token_ids
 
@@ -300,6 +345,23 @@ def run_mllama(question: str, modality: str):
     return llm, prompt, stop_token_ids
 
 
+# Molmo
+def run_molmo(question, modality):
+    assert modality == "image"
+
+    model_name = "allenai/Molmo-7B-D-0924"
+
+    llm = LLM(
+        model=model_name,
+        trust_remote_code=True,
+        dtype="bfloat16",
+    )
+
+    prompt = question
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
+
 # GLM-4v
 def run_glm4v(question: str, modality: str):
     assert modality == "image"
@@ -315,6 +377,64 @@ def run_glm4v(question: str, modality: str):
     return llm, prompt, stop_token_ids
 
 
+# Idefics3-8B-Llama3
+def run_idefics3(question: str, modality: str):
+    assert modality == "image"
+    model_name = "HuggingFaceM4/Idefics3-8B-Llama3"
+
+    llm = LLM(
+        model=model_name,
+        max_model_len=8192,
+        max_num_seqs=2,
+        enforce_eager=True,
+        # if you are running out of memory, you can reduce the "longest_edge".
+        # see: https://huggingface.co/HuggingFaceM4/Idefics3-8B-Llama3#model-optimizations
+        mm_processor_kwargs={
+            "size": {
+                "longest_edge": 3 * 364
+            },
+        },
+    )
+    prompt = (
+        f"<|begin_of_text|>User:<image>{question}<end_of_utterance>\nAssistant:"
+    )
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
+
+# Aria
+def run_aria(question: str, modality: str):
+    assert modality == "image"
+    model_name = "rhymes-ai/Aria"
+
+    llm = LLM(model=model_name,
+              tokenizer_mode="slow",
+              trust_remote_code=True,
+              dtype="bfloat16")
+
+    prompt = (f"<|im_start|>user\n<fim_prefix><|img|><fim_suffix>\n{question}"
+              "<|im_end|>\n<|im_start|>assistant\n")
+
+    stop_token_ids = [93532, 93653, 944, 93421, 1019, 93653, 93519]
+    return llm, prompt, stop_token_ids
+
+
+# Mantis
+def run_mantis(question: str, modality: str):
+    assert modality == "image"
+
+    llama3_template = '<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'  # noqa: E501
+    prompt = llama3_template.format(f"{question}\n<image>")
+
+    llm = LLM(
+        model="TIGER-Lab/Mantis-8B-siglip-llama3",
+        max_model_len=4096,
+        hf_overrides={"architectures": ["MantisForConditionalGeneration"]},
+    )
+    stop_token_ids = [128009]
+    return llm, prompt, stop_token_ids
+
+
 model_example_map = {
     "llava": run_llava,
     "llava-next": run_llava_next,
@@ -326,12 +446,18 @@ model_example_map = {
     "chameleon": run_chameleon,
     "minicpmv": run_minicpmv,
     "blip-2": run_blip2,
+    "h2ovl_chat": run_h2ovl,
     "internvl_chat": run_internvl,
     "NVLM_D": run_nvlm_d,
     "qwen_vl": run_qwen_vl,
     "qwen2_vl": run_qwen2_vl,
+    "pixtral_hf": run_pixtral_hf,
     "mllama": run_mllama,
+    "molmo": run_molmo,
     "glm4v": run_glm4v,
+    "idefics3": run_idefics3,
+    "aria": run_aria,
+    "mantis": run_mantis,
 }
 
 
@@ -415,7 +541,7 @@ def main(args):
 if __name__ == "__main__":
     parser = FlexibleArgumentParser(
         description='Demo on using vLLM for offline inference with '
-        'vision language models')
+        'vision language models for text generation')
     parser.add_argument('--model-type',
                         '-m',
                         type=str,

@@ -1,27 +1,34 @@
 import argparse
 import asyncio
+import concurrent
 import contextlib
 import datetime
 import enum
 import gc
+import getpass
+import importlib.util
 import inspect
 import ipaddress
+import math
 import os
-import random
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 import warnings
 import weakref
-from asyncio import FIRST_COMPLETED, ensure_future
+from asyncio import FIRST_COMPLETED, AbstractEventLoop, Future, Task
+from collections import UserDict, defaultdict
+from collections.abc import Iterable, Mapping
 from functools import lru_cache, partial, wraps
 from platform import uname
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generic,
-                    Hashable, List, Literal, Optional, OrderedDict, Set, Tuple,
-                    Type, TypeVar, Union, overload)
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
+                    Dict, Generic, Hashable, List, Literal, Optional,
+                    OrderedDict, Set, Tuple, Type, TypeVar, Union, overload)
 from uuid import uuid4
 
 import numpy as np
@@ -31,17 +38,21 @@ import torch
 import torch.types
 import yaml
 from packaging.version import Version
+from torch.library import Library
 from typing_extensions import ParamSpec, TypeIs, assert_never
 
 import vllm.envs as envs
 from vllm.logger import enable_trace_function_call, init_logger
 from vllm.platforms import current_platform
 
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
+
 logger = init_logger(__name__)
 
 # Exception strings for non-implemented encoder/decoder scenarios
 
-# Reminder: Please update docs/source/serving/compatibility_matrix.rst
+# Reminder: Please update docs/source/usage/compatibility_matrix.rst
 # If the feature combo become valid
 
 STR_NOT_IMPL_ENC_DEC_SWA = \
@@ -78,16 +89,13 @@ STR_NOT_IMPL_ENC_DEC_SPEC_DEC = ("Speculative decoding is not "
                                  "currently supported with encoder/"
                                  "decoder models.")
 
-STR_NOT_IMPL_ENC_DEC_BACKEND = ("XFormers is the only backend "
-                                "currently supported with encoder/"
+STR_NOT_IMPL_ENC_DEC_BACKEND = ("XFormers and Flash-Attention are the only "
+                                "backends currently supported with encoder/"
                                 "decoder models.")
 
 STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER = ("Prompt adapters are not "
                                        "currently supported with encoder/"
                                        "decoder models.")
-
-STR_NOT_IMPL_ENC_DEC_CPU = ("CPU is not currently supported with "
-                            "encoder/decoder models.")
 
 # Efficiently import all enc/dec error strings
 # rather than having to import all of the above
@@ -103,7 +111,6 @@ STR_NOT_IMPL_ENC_DEC_ERR_STRS = {
     "STR_NOT_IMPL_ENC_DEC_SPEC_DEC": STR_NOT_IMPL_ENC_DEC_SPEC_DEC,
     "STR_NOT_IMPL_ENC_DEC_BACKEND": STR_NOT_IMPL_ENC_DEC_BACKEND,
     "STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER": STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER,
-    "STR_NOT_IMPL_ENC_DEC_CPU": STR_NOT_IMPL_ENC_DEC_CPU
 }
 
 # Constants related to forcing the attention backend selection
@@ -313,37 +320,6 @@ class PyObjectCache:
         self._index = 0
 
 
-def is_hip() -> bool:
-    return torch.version.hip is not None
-
-
-@lru_cache(maxsize=None)
-def is_cpu() -> bool:
-    from importlib.metadata import PackageNotFoundError, version
-    try:
-        return "cpu" in version("vllm")
-    except PackageNotFoundError:
-        return False
-
-
-@lru_cache(maxsize=None)
-def is_openvino() -> bool:
-    from importlib.metadata import PackageNotFoundError, version
-    try:
-        return "openvino" in version("vllm")
-    except PackageNotFoundError:
-        return False
-
-
-@lru_cache(maxsize=None)
-def is_neuron() -> bool:
-    try:
-        import transformers_neuronx
-    except ImportError:
-        transformers_neuronx = None
-    return transformers_neuronx is not None
-
-
 @lru_cache(maxsize=None)
 def is_fake_hpu() -> bool:
     return os.environ.get('VLLM_USE_FAKE_HPU', '0') != '0'
@@ -359,29 +335,6 @@ def hpu_device_string():
 def hpu_backend_string():
     backend_string = 'hccl' if not is_fake_hpu() else 'gloo'
     return backend_string
-
-
-@lru_cache(maxsize=None)
-def is_xpu() -> bool:
-    from importlib.metadata import PackageNotFoundError, version
-    try:
-        is_xpu_flag = "xpu" in version("vllm")
-    except PackageNotFoundError:
-        return False
-    # vllm is not build with xpu
-    if not is_xpu_flag:
-        return False
-    try:
-        import intel_extension_for_pytorch as ipex  # noqa: F401
-        _import_ipex = True
-    except ImportError as e:
-        logger.warning("Import Error for IPEX: %s", e.msg)
-        _import_ipex = False
-    # ipex dependency is not ready
-    if not _import_ipex:
-        logger.warning("not found ipex lib")
-        return False
-    return hasattr(torch, "xpu") and torch.xpu.is_available()
 
 
 @lru_cache(maxsize=None)
@@ -401,38 +354,8 @@ def get_cpu_memory() -> int:
     return psutil.virtual_memory().total
 
 
-def seed_everything(seed: int) -> None:
-    """
-    Set the seed of each random module.
-
-    Loosely based on: https://github.com/Lightning-AI/pytorch-lightning/blob/2.4.0/src/lightning/fabric/utilities/seed.py#L20
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-
-    if current_platform.is_cuda_alike():
-        torch.cuda.manual_seed_all(seed)
-
-    if is_xpu():
-        torch.xpu.manual_seed_all(seed)
-
-    if current_platform.is_hpu():
-        torch.hpu.manual_seed_all(seed)
-
-
 def random_uuid() -> str:
     return str(uuid.uuid4().hex)
-
-
-@lru_cache(maxsize=None)
-def get_vllm_instance_id() -> str:
-    """
-    If the environment variable VLLM_INSTANCE_ID is set, return it.
-    Otherwise, return a random UUID.
-    Instance id represents an instance of the VLLM. All processes in the same
-    instance should have the same instance id.
-    """
-    return envs.VLLM_INSTANCE_ID or f"vllm-instance-{random_uuid()}"
 
 
 @lru_cache(maxsize=None)
@@ -441,7 +364,10 @@ def in_wsl() -> bool:
     return "microsoft" in " ".join(uname()).lower()
 
 
-def make_async(func: Callable[P, T]) -> Callable[P, Awaitable[T]]:
+def make_async(
+    func: Callable[P, T],
+    executor: Optional[concurrent.futures.Executor] = None
+) -> Callable[P, Awaitable[T]]:
     """Take a blocking function, and run it on in an executor thread.
 
     This function prevents the blocking function from blocking the
@@ -452,9 +378,15 @@ def make_async(func: Callable[P, T]) -> Callable[P, Awaitable[T]]:
     def _async_wrapper(*args: P.args, **kwargs: P.kwargs) -> asyncio.Future:
         loop = asyncio.get_event_loop()
         p_func = partial(func, *args, **kwargs)
-        return loop.run_in_executor(executor=None, func=p_func)
+        return loop.run_in_executor(executor=executor, func=p_func)
 
     return _async_wrapper
+
+
+def _next_task(iterator: AsyncGenerator[T, None],
+               loop: AbstractEventLoop) -> Task:
+    # Can use anext() in python >= 3.10
+    return loop.create_task(iterator.__anext__())  # type: ignore[arg-type]
 
 
 async def iterate_with_cancellation(
@@ -465,19 +397,27 @@ async def iterate_with_cancellation(
     at least once per second to check for client cancellation.
     """
 
-    # Can use anext() in python >= 3.10
-    awaits = [ensure_future(iterator.__anext__())]
+    loop = asyncio.get_running_loop()
+
+    awaits: List[Future[T]] = [_next_task(iterator, loop)]
+    next_cancel_check: float = 0
     while True:
-        done, pending = await asyncio.wait(awaits, timeout=1)
-        if await is_cancelled():
-            with contextlib.suppress(BaseException):
-                awaits[0].cancel()
-                await iterator.aclose()
-            raise asyncio.CancelledError("client cancelled")
+        done, pending = await asyncio.wait(awaits, timeout=1.5)
+
+        # Check for cancellation at most once per second
+        time_now = time.time()
+        if time_now >= next_cancel_check:
+            if await is_cancelled():
+                with contextlib.suppress(BaseException):
+                    awaits[0].cancel()
+                    await iterator.aclose()
+                raise asyncio.CancelledError("client cancelled")
+            next_cancel_check = time_now + 1
+
         if done:
             try:
                 item = await awaits[0]
-                awaits[0] = ensure_future(iterator.__anext__())
+                awaits[0] = _next_task(iterator, loop)
                 yield item
             except StopAsyncIteration:
                 # we are done
@@ -498,25 +438,29 @@ async def merge_async_iterators(
     to check for client cancellation.
     """
 
-    # Can use anext() in python >= 3.10
-    awaits = {
-        ensure_future(pair[1].__anext__()): pair
-        for pair in enumerate(iterators)
-    }
-    timeout = None if is_cancelled is None else 1
+    loop = asyncio.get_running_loop()
+
+    awaits = {_next_task(pair[1], loop): pair for pair in enumerate(iterators)}
+    timeout = None if is_cancelled is None else 1.5
+    next_cancel_check: float = 0
     try:
         while awaits:
             done, pending = await asyncio.wait(awaits.keys(),
                                                return_when=FIRST_COMPLETED,
                                                timeout=timeout)
-            if is_cancelled is not None and await is_cancelled():
-                raise asyncio.CancelledError("client cancelled")
+            if is_cancelled is not None:
+                # Check for cancellation at most once per second
+                time_now = time.time()
+                if time_now >= next_cancel_check:
+                    if await is_cancelled():
+                        raise asyncio.CancelledError("client cancelled")
+                    next_cancel_check = time_now + 1
             for d in done:
                 pair = awaits.pop(d)
                 try:
                     item = await d
                     i, it = pair
-                    awaits[ensure_future(it.__anext__())] = pair
+                    awaits[_next_task(it, loop)] = pair
                     yield i, item
                 except StopAsyncIteration:
                     pass
@@ -539,6 +483,13 @@ async def collect_from_async_generator(
 
 def get_ip() -> str:
     host_ip = envs.VLLM_HOST_IP
+    if "HOST_IP" in os.environ and "VLLM_HOST_IP" not in os.environ:
+        logger.warning(
+            "The environment variable HOST_IP is deprecated and ignored, as"
+            " it is often used by Docker and other software to"
+            "interact with the container's network stack. Please"
+            "use VLLM_HOST_IP instead to set the IP address for vLLM processes"
+            " to communicate with each other.")
     if host_ip:
         return host_ip
 
@@ -698,7 +649,7 @@ def create_kv_caches_with_random_flash(
     seed: int = 0,
     device: Optional[str] = "cuda",
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    seed_everything(seed)
+    current_platform.seed_everything(seed)
 
     torch_dtype = get_kv_cache_torch_dtype(cache_dtype, model_dtype)
     key_value_cache_shape = (num_blocks, 2, block_size, num_heads, head_size)
@@ -740,7 +691,7 @@ def create_kv_caches_with_random(
             f"Does not support key cache of type fp8 with head_size {head_size}"
         )
 
-    seed_everything(seed)
+    current_platform.seed_everything(seed)
 
     torch_dtype = get_kv_cache_torch_dtype(cache_dtype, model_dtype)
 
@@ -779,6 +730,12 @@ def create_kv_caches_with_random(
 
 
 @lru_cache
+def print_info_once(msg: str) -> None:
+    # Set the stacklevel to 2 to print the caller's line info
+    logger.info(msg, stacklevel=2)
+
+
+@lru_cache
 def print_warning_once(msg: str) -> None:
     # Set the stacklevel to 2 to print the caller's line info
     logger.warning(msg, stacklevel=2)
@@ -799,16 +756,16 @@ def is_pin_memory_available() -> bool:
         print_warning_once("Using 'pin_memory=False' as WSL is detected. "
                            "This may slow down the performance.")
         return False
-    elif is_xpu():
+    elif current_platform.is_xpu():
         print_warning_once("Pin memory is not supported on XPU.")
         return False
-    elif is_neuron():
+    elif current_platform.is_neuron():
         print_warning_once("Pin memory is not supported on Neuron.")
         return False
     elif current_platform.is_hpu():
         print_warning_once("Pin memory is not supported on HPU.")
         return False
-    elif is_cpu() or is_openvino():
+    elif current_platform.is_cpu() or current_platform.is_openvino():
         return False
     return True
 
@@ -823,7 +780,7 @@ class DeviceMemoryProfiler:
         if current_platform.is_cuda_alike():
             torch.cuda.reset_peak_memory_stats(self.device)
             mem = torch.cuda.max_memory_allocated(self.device)
-        elif is_xpu():
+        elif current_platform.is_xpu():
             torch.xpu.reset_peak_memory_stats(self.device)  # type: ignore
             mem = torch.xpu.max_memory_allocated(self.device)  # type: ignore
         return mem
@@ -866,6 +823,30 @@ def make_ndarray_with_pad(
     return padded_x
 
 
+def make_ndarray_with_pad_align(
+    x: List[List[T]],
+    pad: T,
+    dtype: npt.DTypeLike,
+    *,
+    max_len_align: int = 1024,
+) -> npt.NDArray:
+    """
+    Make a padded array from 2D inputs.
+    The padding is applied to the end of each inner list until it reaches
+    `max_len`.
+    """
+    # Unlike for most functions, map is faster than a genexpr over `len`
+    max_len = max(map(len, x), default=0)
+    max_len_aligned = math.ceil(max_len / max_len_align) * max_len_align
+    padded_x = np.full((len(x), max_len_aligned), pad, dtype=dtype)
+
+    for ind, blocktb in enumerate(x):
+        assert len(blocktb) <= max_len_aligned
+        padded_x[ind, :len(blocktb)] = blocktb
+
+    return padded_x
+
+
 def make_tensor_with_pad(
     x: List[List[T]],
     pad: T,
@@ -883,6 +864,34 @@ def make_tensor_with_pad(
     """
     np_dtype = TORCH_DTYPE_TO_NUMPY_DTYPE[dtype]
     padded_x = make_ndarray_with_pad(x, pad, np_dtype, max_len=max_len)
+
+    tensor = torch.from_numpy(padded_x).to(device)
+    if pin_memory:
+        tensor = tensor.pin_memory()
+
+    return tensor
+
+
+def make_tensor_with_pad_align(
+    x: List[List[T]],
+    pad: T,
+    dtype: torch.dtype,
+    *,
+    max_len_align: int = 1024,
+    device: Optional[Union[str, torch.device]] = None,
+    pin_memory: bool = False,
+) -> torch.Tensor:
+    """
+    Make a padded tensor from 2D inputs.
+    The padding is applied to the end of each inner list until it reaches
+    max_len_aligned, max_len_aligned is max_len rounding to the nearest 
+    `max_len_align`.
+    """
+    np_dtype = TORCH_DTYPE_TO_NUMPY_DTYPE[dtype]
+    padded_x = make_ndarray_with_pad_align(x,
+                                           pad,
+                                           np_dtype,
+                                           max_len_align=max_len_align)
 
     tensor = torch.from_numpy(padded_x).to(device)
     if pin_memory:
@@ -978,6 +987,25 @@ def flatten_2d_lists(lists: List[List[T]]) -> List[T]:
     return [item for sublist in lists for item in sublist]
 
 
+_K = TypeVar("_K", bound=Hashable)
+_V = TypeVar("_V")
+
+
+def full_groupby(values: Iterable[_V], *, key: Callable[[_V], _K]):
+    """
+    Unlike :class:`itertools.groupby`, groups are not broken by
+    non-contiguous data.
+    """
+    groups = defaultdict[_K, list[_V]](list)
+
+    for value in values:
+        groups[key(value)].append(value)
+
+    return groups.items()
+
+
+# TODO: This function can be removed if transformer_modules classes are
+# serialized by value when communicating between processes
 def init_cached_hf_modules() -> None:
     """
     Lazy initialization of the Hugging Face modules.
@@ -1039,34 +1067,82 @@ def find_nccl_library() -> str:
     return so_file
 
 
-def enable_trace_function_call_for_thread() -> None:
+def enable_trace_function_call_for_thread(vllm_config: "VllmConfig") -> None:
     """Set up function tracing for the current thread,
     if enabled via the VLLM_TRACE_FUNCTION environment variable
     """
 
     if envs.VLLM_TRACE_FUNCTION:
         tmp_dir = tempfile.gettempdir()
+        # add username to tmp_dir to avoid permission issues
+        tmp_dir = os.path.join(tmp_dir, getpass.getuser())
         filename = (f"VLLM_TRACE_FUNCTION_for_process_{os.getpid()}"
                     f"_thread_{threading.get_ident()}_"
                     f"at_{datetime.datetime.now()}.log").replace(" ", "_")
-        log_path = os.path.join(tmp_dir, "vllm", get_vllm_instance_id(),
+        log_path = os.path.join(tmp_dir, "vllm",
+                                f"vllm-instance-{vllm_config.instance_id}",
                                 filename)
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         enable_trace_function_call(log_path)
 
 
 # `functools` helpers
-def identity(value: T) -> T:
+def identity(value: T, **kwargs) -> T:
+    """Returns the first provided value."""
     return value
 
 
 F = TypeVar('F', bound=Callable[..., Any])
 
 
+def deprecate_args(
+    start_index: int,
+    is_deprecated: Union[bool, Callable[[], bool]] = True,
+    additional_message: Optional[str] = None,
+) -> Callable[[F], F]:
+
+    if not callable(is_deprecated):
+        is_deprecated = partial(identity, is_deprecated)
+
+    def wrapper(fn: F) -> F:
+
+        params = inspect.signature(fn).parameters
+        pos_types = (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        pos_kws = [
+            kw for kw, param in params.items() if param.kind in pos_types
+        ]
+
+        @wraps(fn)
+        def inner(*args, **kwargs):
+            if is_deprecated():
+                deprecated_args = pos_kws[start_index:len(args)]
+                if deprecated_args:
+                    msg = (
+                        f"The positional arguments {deprecated_args} are "
+                        "deprecated and will be removed in a future update.")
+                    if additional_message is not None:
+                        msg += f" {additional_message}"
+
+                    warnings.warn(
+                        DeprecationWarning(msg),
+                        stacklevel=3,  # The inner function takes up one level
+                    )
+
+            return fn(*args, **kwargs)
+
+        return inner  # type: ignore
+
+    return wrapper
+
+
 def deprecate_kwargs(
-        *kws: str,
-        is_deprecated: Union[bool, Callable[[], bool]] = True,
-        additional_message: Optional[str] = None) -> Callable[[F], F]:
+    *kws: str,
+    is_deprecated: Union[bool, Callable[[], bool]] = True,
+    additional_message: Optional[str] = None,
+) -> Callable[[F], F]:
     deprecated_kws = set(kws)
 
     if not callable(is_deprecated):
@@ -1112,7 +1188,7 @@ def _cuda_device_count_stateless(
 
     if not torch.cuda._is_compiled():
         return 0
-    if is_hip():
+    if current_platform.is_rocm():
         # ROCm uses amdsmi instead of nvml for stateless device count
         # This requires a sufficiently modern version of Torch 2.4.0
         raw_count = torch.cuda._device_count_amdsmi() if (hasattr(
@@ -1169,15 +1245,41 @@ def run_once(f: Callable[P, None]) -> Callable[P, None]:
     return wrapper
 
 
+class StoreBoolean(argparse.Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if values.lower() == "true":
+            setattr(namespace, self.dest, True)
+        elif values.lower() == "false":
+            setattr(namespace, self.dest, False)
+        else:
+            raise ValueError(f"Invalid boolean value: {values}. "
+                             "Expected 'true' or 'false'.")
+
+
+class SortedHelpFormatter(argparse.HelpFormatter):
+    """SortedHelpFormatter that sorts arguments by their option strings."""
+
+    def add_arguments(self, actions):
+        actions = sorted(actions, key=lambda x: x.option_strings)
+        super().add_arguments(actions)
+
+
 class FlexibleArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that allows both underscore and dash in names."""
+
+    def __init__(self, *args, **kwargs):
+        # Set the default 'formatter_class' to SortedHelpFormatter
+        if 'formatter_class' not in kwargs:
+            kwargs['formatter_class'] = SortedHelpFormatter
+        super().__init__(*args, **kwargs)
 
     def parse_args(self, args=None, namespace=None):
         if args is None:
             args = sys.argv[1:]
 
         if '--config' in args:
-            args = FlexibleArgumentParser._pull_args_from_config(args)
+            args = self._pull_args_from_config(args)
 
         # Convert underscores to dashes and vice versa in argument names
         processed_args = []
@@ -1190,13 +1292,16 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
                 else:
                     processed_args.append('--' +
                                           arg[len('--'):].replace('_', '-'))
+            elif arg.startswith('-O') and arg != '-O' and len(arg) == 2:
+                # allow -O flag to be used without space, e.g. -O3
+                processed_args.append('-O')
+                processed_args.append(arg[2:])
             else:
                 processed_args.append(arg)
 
         return super().parse_args(processed_args, namespace)
 
-    @staticmethod
-    def _pull_args_from_config(args: List[str]) -> List[str]:
+    def _pull_args_from_config(self, args: List[str]) -> List[str]:
         """Method to pull arguments specified in the config file
         into the command-line args variable.
 
@@ -1240,7 +1345,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         file_path = args[index + 1]
 
-        config_args = FlexibleArgumentParser._load_config_file(file_path)
+        config_args = self._load_config_file(file_path)
 
         # 0th index is for {serve,chat,complete}
         # followed by model_tag (only for serve)
@@ -1261,8 +1366,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         return args
 
-    @staticmethod
-    def _load_config_file(file_path: str) -> List[str]:
+    def _load_config_file(self, file_path: str) -> List[str]:
         """Loads a yaml file and returns the key value pairs as a
         flattened list with argparse like pattern
         ```yaml
@@ -1288,7 +1392,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         config: Dict[str, Union[int, str]] = {}
         try:
-            with open(file_path, 'r') as config_file:
+            with open(file_path) as config_file:
                 config = yaml.safe_load(config_file)
         except Exception as ex:
             logger.error(
@@ -1296,9 +1400,18 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
                 Make sure path is correct", file_path)
             raise ex
 
+        store_boolean_arguments = [
+            action.dest for action in self._actions
+            if isinstance(action, StoreBoolean)
+        ]
+
         for key, value in config.items():
-            processed_args.append('--' + key)
-            processed_args.append(str(value))
+            if isinstance(value, bool) and key not in store_boolean_arguments:
+                if value:
+                    processed_args.append('--' + key)
+            else:
+                processed_args.append('--' + key)
+                processed_args.append(str(value))
 
         return processed_args
 
@@ -1500,20 +1613,171 @@ def migrate_to_cpu():
     htorch.utils.internal.is_lazy.return_value = False
 
 
-def get_beam_search_score(
-    tokens: List[int],
-    cumulative_logprob: float,
-    eos_token_id: int,
-    length_penalty: float = 1.0,
-) -> float:
-    """Calculate the beam search score with length penalty.
+# Adapted from: https://stackoverflow.com/a/47212782/5082708
+class LazyDict(Mapping[str, T], Generic[T]):
 
-    Adapted from
+    def __init__(self, factory: Dict[str, Callable[[], T]]):
+        self._factory = factory
+        self._dict: Dict[str, T] = {}
 
-    https://github.com/huggingface/transformers/blob/ccb92be23def445f2afdea94c31286f84b89eb5b/src/transformers/generation/beam_search.py#L938
+    def __getitem__(self, key: str) -> T:
+        if key not in self._dict:
+            if key not in self._factory:
+                raise KeyError(key)
+            self._dict[key] = self._factory[key]()
+        return self._dict[key]
+
+    def __setitem__(self, key: str, value: Callable[[], T]):
+        self._factory[key] = value
+
+    def __iter__(self):
+        return iter(self._factory)
+
+    def __len__(self):
+        return len(self._factory)
+
+
+class ClassRegistry(UserDict[Type[T], _V]):
+
+    def __getitem__(self, key: Type[T]) -> _V:
+        for cls in key.mro():
+            if cls in self.data:
+                return self.data[cls]
+
+        raise KeyError(key)
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, type):
+            return False
+
+        return any(cls in self.data for cls in key.mro())
+
+
+def weak_ref_tensor(tensor: torch.Tensor) -> torch.Tensor:
     """
-    seq_len = len(tokens)
-    if tokens[-1] == eos_token_id:
-        seq_len -= 1
+    Create a weak reference to a tensor.
+    The new tensor will share the same data as the original tensor,
+    but will not keep the original tensor alive.
+    """
+    return torch.ops._C.weak_ref_tensor(tensor)
 
-    return cumulative_logprob / (seq_len**length_penalty)
+
+def weak_ref_tensors(
+    tensors: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]]
+) -> Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]]:
+    """
+    Convenience function to create weak references to tensors,
+    for single tensor, list of tensors or tuple of tensors.
+    """
+    if isinstance(tensors, torch.Tensor):
+        return weak_ref_tensor(tensors)
+    if isinstance(tensors, list):
+        return [weak_ref_tensor(t) for t in tensors]
+    if isinstance(tensors, tuple):
+        return tuple(weak_ref_tensor(t) for t in tensors)
+    raise ValueError("Invalid type for tensors")
+
+
+def is_in_doc_build() -> bool:
+    try:
+        from sphinx.ext.autodoc.mock import _MockModule
+        return isinstance(torch, _MockModule)
+    except ModuleNotFoundError:
+        return False
+
+
+def import_from_path(module_name: str, file_path: Union[str, os.PathLike]):
+    """
+    Import a Python file according to its file path.
+
+    Based on the official recipe:
+    https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
+    """
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{module_name}'")
+
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# create a library to hold the custom op
+vllm_lib = Library("vllm", "FRAGMENT")  # noqa
+
+
+def direct_register_custom_op(
+    op_name: str,
+    op_func: Callable,
+    mutates_args: List[str],
+    fake_impl: Optional[Callable] = None,
+    target_lib: Optional[Library] = None,
+    dispatch_key: str = "CUDA",
+):
+    """
+    `torch.library.custom_op` can have significant overhead because it
+    needs to consider complicated dispatching logic. This function
+    directly registers a custom op and dispatches it to the CUDA backend.
+    See https://gist.github.com/youkaichao/ecbea9ec9fc79a45d2adce1784d7a9a5
+    for more details.
+
+    By default, the custom op is registered to the vLLM library. If you
+    want to register it to a different library, you can pass the library
+    object to the `target_lib` argument.
+
+    IMPORTANT: the lifetime of the operator is tied to the lifetime of the
+    library object. If you want to bind the operator to a different library,
+    make sure the library object is alive when the operator is used.
+    """
+    if is_in_doc_build() or not supports_custom_op():
+        return
+    import torch.library
+    if hasattr(torch.library, "infer_schema"):
+        schema_str = torch.library.infer_schema(op_func,
+                                                mutates_args=mutates_args)
+    else:
+        # for pytorch 2.4
+        import torch._custom_op.impl
+        schema_str = torch._custom_op.impl.infer_schema(op_func, mutates_args)
+    my_lib = target_lib or vllm_lib
+    my_lib.define(op_name + schema_str)
+    my_lib.impl(op_name, op_func, dispatch_key=dispatch_key)
+    if fake_impl is not None:
+        my_lib._register_fake(op_name, fake_impl)
+
+
+def resolve_obj_by_qualname(qualname: str) -> Any:
+    """
+    Resolve an object by its fully qualified name.
+    """
+    module_name, obj_name = qualname.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, obj_name)
+
+
+def kill_process_tree(pid: int):
+    """
+    Kills all descendant processes of the given pid by sending SIGKILL.
+
+    Args:
+        pid (int): Process ID of the parent process
+    """
+    try:
+        parent = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return
+
+    # Get all children recursively
+    children = parent.children(recursive=True)
+
+    # Send SIGKILL to all children first
+    for child in children:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(child.pid, signal.SIGKILL)
+
+    # Finally kill the parent
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)

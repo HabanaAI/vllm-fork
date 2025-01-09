@@ -3,22 +3,25 @@ import dataclasses
 import json
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Any, Dict, List, Literal, Mapping, Optional,
-                    Tuple, Type, Union)
+                    Tuple, Type, Union, cast, get_args)
 
 import torch
 
 import vllm.envs as envs
-from vllm.config import (CacheConfig, ConfigFormat, DecodingConfig,
-                         DeviceConfig, EngineConfig, LoadConfig, LoadFormat,
-                         LoRAConfig, ModelConfig, ObservabilityConfig,
-                         ParallelConfig, PromptAdapterConfig, SchedulerConfig,
-                         SpeculativeConfig, TokenizerPoolConfig)
+from vllm.config import (CacheConfig, CompilationConfig, ConfigFormat,
+                         DecodingConfig, DeviceConfig, HfOverrides,
+                         KVTransferConfig, LoadConfig, LoadFormat, LoRAConfig,
+                         ModelConfig, ObservabilityConfig, ParallelConfig,
+                         PoolerConfig, PromptAdapterConfig, SchedulerConfig,
+                         SpeculativeConfig, TaskOption, TokenizerPoolConfig,
+                         VllmConfig)
 from vllm.executor.executor_base import ExecutorBase
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.platforms import current_platform
 from vllm.transformers_utils.utils import check_gguf_file
-from vllm.utils import FlexibleArgumentParser
+from vllm.usage.usage_lib import UsageContext
+from vllm.utils import FlexibleArgumentParser, StoreBoolean
 
 if TYPE_CHECKING:
     from vllm.transformers_utils.tokenizer_group import BaseTokenizerGroup
@@ -86,13 +89,15 @@ class EngineArgs:
     model: str = 'facebook/opt-125m'
     served_model_name: Optional[Union[str, List[str]]] = None
     tokenizer: Optional[str] = None
+    task: TaskOption = "auto"
     skip_tokenizer_init: bool = False
     tokenizer_mode: str = 'auto'
     trust_remote_code: bool = False
+    allowed_local_media_path: str = ""
     download_dir: Optional[str] = None
     load_format: str = 'auto'
     weights_load_device: Optional[str] = None
-    config_format: str = 'auto'
+    config_format: ConfigFormat = ConfigFormat.AUTO
     dtype: str = 'auto'
     kv_cache_dtype: str = 'auto'
     quantization_param_path: Optional[str] = None
@@ -104,30 +109,33 @@ class EngineArgs:
     # notice.
     distributed_executor_backend: Optional[Union[str,
                                                  Type[ExecutorBase]]] = None
+    # number of P/D disaggregation (or other disaggregation) workers
     pipeline_parallel_size: int = 1
     tensor_parallel_size: int = 1
     max_parallel_loading_workers: Optional[int] = None
     # NOTE(kzawora): default block size for Gaudi should be 128
     # smaller sizes still work, but very inefficiently
     block_size: int = 16 if not current_platform.is_hpu() else 128
-    enable_prefix_caching: bool = False
+    enable_prefix_caching: Optional[bool] = None
     disable_sliding_window: bool = False
     use_v2_block_manager: bool = True
+    use_padding_aware_scheduling: bool = current_platform.is_hpu()
     swap_space: float = 4  # GiB
     cpu_offload_gb: float = 0  # GiB
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
+    max_num_prefill_seqs: Optional[int] = None
     max_logprobs: int = 20  # Default value for OpenAI Chat Completions API
     disable_log_stats: bool = False
     revision: Optional[str] = None
     code_revision: Optional[str] = None
-    rope_scaling: Optional[dict] = None
+    rope_scaling: Optional[Dict[str, Any]] = None
     rope_theta: Optional[float] = None
+    hf_overrides: Optional[HfOverrides] = None
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
     enforce_eager: Optional[bool] = None
-    max_context_len_to_capture: Optional[int] = None
     max_seq_len_to_capture: int = 8192
     disable_custom_all_reduce: bool = False
     tokenizer_pool_size: int = 0
@@ -135,9 +143,11 @@ class EngineArgs:
     # is intended for expert use only. The API may change without
     # notice.
     tokenizer_pool_type: Union[str, Type["BaseTokenizerGroup"]] = "ray"
-    tokenizer_pool_extra_config: Optional[dict] = None
+    tokenizer_pool_extra_config: Optional[Dict[str, Any]] = None
     limit_mm_per_prompt: Optional[Mapping[str, int]] = None
+    mm_processor_kwargs: Optional[Dict[str, Any]] = None
     enable_lora: bool = False
+    enable_lora_bias: bool = False
     max_loras: int = 1
     max_lora_rank: int = 16
     enable_prompt_adapter: bool = False
@@ -161,7 +171,7 @@ class EngineArgs:
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: Optional[bool] = None
 
-    guided_decoding_backend: str = 'outlines'
+    guided_decoding_backend: str = 'xgrammar'
     # Speculative decoding configuration.
     speculative_model: Optional[str] = None
     speculative_model_quantization: Optional[str] = None
@@ -181,13 +191,30 @@ class EngineArgs:
     otlp_traces_endpoint: Optional[str] = None
     collect_detailed_traces: Optional[str] = None
     disable_async_output_proc: bool = False
-    override_neuron_config: Optional[Dict[str, Any]] = None
-    mm_processor_kwargs: Optional[Dict[str, Any]] = None
     scheduling_policy: Literal["fcfs", "priority"] = "fcfs"
 
+    override_neuron_config: Optional[Dict[str, Any]] = None
+    override_pooler_config: Optional[PoolerConfig] = None
+    compilation_config: Optional[CompilationConfig] = None
+    worker_cls: str = "auto"
+
+    kv_transfer_config: Optional[KVTransferConfig] = None
+
     def __post_init__(self):
-        if self.tokenizer is None:
+        if not self.tokenizer:
             self.tokenizer = self.model
+
+        # Override the default value of enable_prefix_caching if it's not set
+        # by user.
+        if self.enable_prefix_caching is None:
+            self.enable_prefix_caching = bool(envs.VLLM_USE_V1)
+
+        # support `EngineArgs(compilation_config={...})`
+        # without having to manually construct a
+        # CompilationConfig object
+        if isinstance(self.compilation_config, (int, dict)):
+            self.compilation_config = CompilationConfig.from_cli(
+                str(self.compilation_config))
 
         # Setup plugins
         from vllm.plugins import load_general_plugins
@@ -203,6 +230,15 @@ class EngineArgs:
             type=str,
             default=EngineArgs.model,
             help='Name or path of the huggingface model to use.')
+        parser.add_argument(
+            '--task',
+            default=EngineArgs.task,
+            choices=get_args(TaskOption),
+            help='The task to use the model for. Each vLLM instance only '
+            'supports one task, even if the same model can be used for '
+            'multiple tasks. When the model only supports one task, "auto" '
+            'can be used to select it; otherwise, you must specify explicitly '
+            'which task to use.')
         parser.add_argument(
             '--tokenizer',
             type=nullable_str,
@@ -246,6 +282,13 @@ class EngineArgs:
         parser.add_argument('--trust-remote-code',
                             action='store_true',
                             help='Trust remote code from huggingface.')
+        parser.add_argument(
+            '--allowed-local-media-path',
+            type=str,
+            help="Allowing API requests to read local images or videos "
+            "from directories specified by the server file system. "
+            "This is a security risk. "
+            "Should only be enabled in trusted environments.")
         parser.add_argument('--download-dir',
                             type=nullable_str,
                             default=EngineArgs.download_dir,
@@ -317,7 +360,7 @@ class EngineArgs:
             'scaling factors. This should generally be supplied, when '
             'KV cache dtype is FP8. Otherwise, KV cache scaling factors '
             'default to 1.0, which may cause accuracy issues. '
-            'FP8_E5M2 (without scaling) is only supported on cuda version'
+            'FP8_E5M2 (without scaling) is only supported on cuda version '
             'greater than 11.8. On ROCm (AMD GPU), FP8_E4M3 is instead '
             'supported for common inference criteria.')
         parser.add_argument('--max-model-len',
@@ -328,11 +371,12 @@ class EngineArgs:
         parser.add_argument(
             '--guided-decoding-backend',
             type=str,
-            default='outlines',
-            choices=['outlines', 'lm-format-enforcer'],
+            default='xgrammar',
+            choices=['outlines', 'lm-format-enforcer', 'xgrammar'],
             help='Which engine will be used for guided decoding'
             ' (JSON schema / regex etc) by default. Currently support '
-            'https://github.com/outlines-dev/outlines and '
+            'https://github.com/outlines-dev/outlines,'
+            'https://github.com/mlc-ai/xgrammar, and '
             'https://github.com/noamgat/lm-format-enforcer.'
             ' Can be overridden per request via guided_decoding_backend'
             ' parameter.')
@@ -341,9 +385,14 @@ class EngineArgs:
             '--distributed-executor-backend',
             choices=['ray', 'mp'],
             default=EngineArgs.distributed_executor_backend,
-            help='Backend to use for distributed serving. When more than 1 GPU '
-            'is used, will be automatically set to "ray" if installed '
-            'or "mp" (multiprocessing) otherwise.')
+            help='Backend to use for distributed model '
+            'workers, either "ray" or "mp" (multiprocessing). If the product '
+            'of pipeline_parallel_size and tensor_parallel_size is less than '
+            'or equal to the number of GPUs available, "mp" will be used to '
+            'keep processing on a single host. Otherwise, this will default '
+            'to "ray" if Ray is installed and fail otherwise. Note that tpu '
+            'and hpu only support Ray for distributed inference.')
+
         parser.add_argument(
             '--worker-use-ray',
             action='store_true',
@@ -378,19 +427,32 @@ class EngineArgs:
                             'tokens. This is ignored on neuron devices and '
                             'set to max-model-len')
 
-        parser.add_argument('--enable-prefix-caching',
-                            action='store_true',
-                            help='Enables automatic prefix caching.')
+        parser.add_argument(
+            "--enable-prefix-caching",
+            action=argparse.BooleanOptionalAction,
+            default=EngineArgs.enable_prefix_caching,
+            help="Enables automatic prefix caching. "
+            "Use --no-enable-prefix-caching to disable explicitly.",
+        )
         parser.add_argument('--disable-sliding-window',
                             action='store_true',
                             help='Disables sliding window, '
                             'capping to sliding window size')
+        parser.add_argument('--use-v2-block-manager',
+                            action='store_true',
+                            default=True,
+                            help='[DEPRECATED] block manager v1 has been '
+                            'removed and SelfAttnBlockSpaceManager (i.e. '
+                            'block manager v2) is now the default. '
+                            'Setting this flag to True or False'
+                            ' has no effect on vLLM behavior.')
         parser.add_argument(
-            '--use-v2-block-manager',
-            default=EngineArgs.use_v2_block_manager,
+            '--use-padding-aware-scheduling',
+            default=EngineArgs.use_padding_aware_scheduling,
             action='store_true',
-            help='Use BlockSpaceMangerV2. By default this is set to True. '
-            'Set to False to use BlockSpaceManagerV1')
+            help=('Use padding-aware scheduling. If True, the scheduler '
+                  'will consider padded tokens in prefill. '
+                  'By default this is set to False on non-HPU devices. '))
         parser.add_argument(
             '--num-lookahead-slots',
             type=int,
@@ -417,9 +479,9 @@ class EngineArgs:
             'this argument can be seen as a virtual way to increase '
             'the GPU memory size. For example, if you have one 24 GB '
             'GPU and set this to 10, virtually you can think of it as '
-            'a 34 GB GPU. Then you can load a 13B model with BF16 weight,'
+            'a 34 GB GPU. Then you can load a 13B model with BF16 weight, '
             'which requires at least 26GB GPU memory. Note that this '
-            'requires fast CPU-GPU interconnect, as part of the model is'
+            'requires fast CPU-GPU interconnect, as part of the model is '
             'loaded from CPU memory to GPU memory on the fly in each '
             'model forward pass.')
         parser.add_argument(
@@ -429,13 +491,17 @@ class EngineArgs:
             help='The fraction of GPU memory to be used for the model '
             'executor, which can range from 0 to 1. For example, a value of '
             '0.5 would imply 50%% GPU memory utilization. If unspecified, '
-            'will use the default value of 0.9.')
+            'will use the default value of 0.9. This is a global gpu memory '
+            'utilization limit, for example if 50%% of the gpu memory is '
+            'already used before vLLM starts and --gpu-memory-utilization is '
+            'set to 0.9, then only 40%% of the gpu memory will be allocated '
+            'to the model executor.')
         parser.add_argument(
             '--num-gpu-blocks-override',
             type=int,
             default=None,
             help='If specified, ignore GPU profiling result and use this number'
-            'of GPU blocks. Used for testing preemption.')
+            ' of GPU blocks. Used for testing preemption.')
         parser.add_argument('--max-num-batched-tokens',
                             type=int,
                             default=EngineArgs.max_num_batched_tokens,
@@ -445,6 +511,13 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.max_num_seqs,
                             help='Maximum number of sequences per iteration.')
+        parser.add_argument(
+            '--max-num-prefill-seqs',
+            type=int,
+            default=EngineArgs.max_num_prefill_seqs,
+            help=('Maximum number of prefill sequences per '
+                  'iteration. Can be used only with padding-aware '
+                  'scheduling. Must be <= max_num_seqs.'))
         parser.add_argument(
             '--max-logprobs',
             type=int,
@@ -466,30 +539,29 @@ class EngineArgs:
                             'None, we assume the model weights are not '
                             'quantized and use `dtype` to determine the data '
                             'type of the weights.')
-        parser.add_argument('--rope-scaling',
-                            default=None,
-                            type=json.loads,
-                            help='RoPE scaling configuration in JSON format. '
-                            'For example, {"type":"dynamic","factor":2.0}')
+        parser.add_argument(
+            '--rope-scaling',
+            default=None,
+            type=json.loads,
+            help='RoPE scaling configuration in JSON format. '
+            'For example, {"rope_type":"dynamic","factor":2.0}')
         parser.add_argument('--rope-theta',
                             default=None,
                             type=float,
                             help='RoPE theta. Use with `rope_scaling`. In '
                             'some cases, changing the RoPE theta improves the '
                             'performance of the scaled model.')
+        parser.add_argument('--hf-overrides',
+                            type=json.loads,
+                            default=EngineArgs.hf_overrides,
+                            help='Extra arguments for the HuggingFace config. '
+                            'This should be a JSON string that will be '
+                            'parsed into a dictionary.')
         parser.add_argument('--enforce-eager',
                             action='store_true',
                             help='Always use eager-mode PyTorch. If False, '
                             'will use eager mode and CUDA graph in hybrid '
                             'for maximal performance and flexibility.')
-        parser.add_argument('--max-context-len-to-capture',
-                            type=int,
-                            default=EngineArgs.max_context_len_to_capture,
-                            help='Maximum context length covered by CUDA '
-                            'graphs. When a sequence has context length '
-                            'larger than this, we fall back to eager mode. '
-                            '(DEPRECATED. Use --max-seq-len-to-capture instead'
-                            ')')
         parser.add_argument('--max-seq-len-to-capture',
                             type=int,
                             default=EngineArgs.max_seq_len_to_capture,
@@ -540,13 +612,16 @@ class EngineArgs:
             '--mm-processor-kwargs',
             default=None,
             type=json.loads,
-            help=('Overrides for the multimodal input mapping/processing,'
+            help=('Overrides for the multimodal input mapping/processing, '
                   'e.g., image processor. For example: {"num_crops": 4}.'))
 
         # LoRA related configs
         parser.add_argument('--enable-lora',
                             action='store_true',
                             help='If True, enable handling of LoRA adapters.')
+        parser.add_argument('--enable-lora-bias',
+                            action='store_true',
+                            help='If True, enable bias for LoRA adapters.')
         parser.add_argument('--max-loras',
                             type=int,
                             default=EngineArgs.max_loras,
@@ -566,7 +641,7 @@ class EngineArgs:
             '--lora-dtype',
             type=str,
             default=EngineArgs.lora_dtype,
-            choices=['auto', 'float16', 'bfloat16', 'float32'],
+            choices=['auto', 'float16', 'bfloat16'],
             help=('Data type for LoRA. If auto, will default to '
                   'base model dtype.'))
         parser.add_argument(
@@ -585,8 +660,8 @@ class EngineArgs:
             type=int,
             default=EngineArgs.max_cpu_loras,
             help=('Maximum number of LoRAs to store in CPU memory. '
-                  'Must be >= than max_num_seqs. '
-                  'Defaults to max_num_seqs.'))
+                  'Must be >= than max_loras. '
+                  'Defaults to max_loras.'))
         parser.add_argument(
             '--fully-sharded-loras',
             action='store_true',
@@ -767,7 +842,7 @@ class EngineArgs:
             type=str,
             default=[],
             help="The pattern(s) to ignore when loading the model."
-            "Default to 'original/**/*' to avoid repeated loading of llama's "
+            "Default to `original/**/*` to avoid repeated loading of llama's "
             "checkpoints.")
         parser.add_argument(
             '--preemption-mode',
@@ -787,9 +862,9 @@ class EngineArgs:
             "of the provided names. The model name in the model "
             "field of a response will be the first name in this "
             "list. If not specified, the model name will be the "
-            "same as the `--model` argument. Noted that this name(s)"
+            "same as the `--model` argument. Noted that this name(s) "
             "will also be used in `model_name` tag content of "
-            "prometheus metrics, if multiple names provided, metrics"
+            "prometheus metrics, if multiple names provided, metrics "
             "tag will take the first one.")
         parser.add_argument('--qlora-adapter-name-or-path',
                             type=str,
@@ -818,12 +893,6 @@ class EngineArgs:
             default=EngineArgs.disable_async_output_proc,
             help="Disable async output processing. This may result in "
             "lower performance.")
-        parser.add_argument(
-            '--override-neuron-config',
-            type=json.loads,
-            default=None,
-            help="Override or set neuron device configuration. "
-            "e.g. {\"cast_logits_dtype\": \"bloat16\"}.'")
 
         parser.add_argument(
             '--scheduling-policy',
@@ -834,6 +903,48 @@ class EngineArgs:
             'or "priority" (requests are handled based on given '
             'priority (lower value means earlier handling) and time of '
             'arrival deciding any ties).')
+
+        parser.add_argument(
+            '--override-neuron-config',
+            type=json.loads,
+            default=None,
+            help="Override or set neuron device configuration. "
+            "e.g. {\"cast_logits_dtype\": \"bloat16\"}.'")
+        parser.add_argument(
+            '--override-pooler-config',
+            type=PoolerConfig.from_json,
+            default=None,
+            help="Override or set the pooling method in the embedding model. "
+            "e.g. {\"pooling_type\": \"mean\", \"normalize\": false}.'")
+
+        parser.add_argument('--compilation-config',
+                            '-O',
+                            type=CompilationConfig.from_cli,
+                            default=None,
+                            help='torch.compile configuration for the model.'
+                            'When it is a number (0, 1, 2, 3), it will be '
+                            'interpreted as the optimization level.\n'
+                            'NOTE: level 0 is the default level without '
+                            'any optimization. level 1 and 2 are for internal '
+                            'testing only. level 3 is the recommended level '
+                            'for production.\n'
+                            'To specify the full compilation config, '
+                            'use a JSON string.\n'
+                            'Following the convention of traditional '
+                            'compilers, using -O without space is also '
+                            'supported. -O3 is equivalent to -O 3.')
+
+        parser.add_argument('--kv-transfer-config',
+                            type=KVTransferConfig.from_cli,
+                            default=None,
+                            help='The configurations for distributed KV cache '
+                            'transfer. Should be a JSON string.')
+
+        parser.add_argument(
+            '--worker-cls',
+            type=str,
+            default="auto",
+            help='The worker class to use for distributed execution.')
 
         return parser
 
@@ -848,21 +959,24 @@ class EngineArgs:
     def create_model_config(self) -> ModelConfig:
         return ModelConfig(
             model=self.model,
-            tokenizer=self.tokenizer,
+            task=self.task,
+            # We know this is not None because we set it in __post_init__
+            tokenizer=cast(str, self.tokenizer),
             tokenizer_mode=self.tokenizer_mode,
             trust_remote_code=self.trust_remote_code,
+            allowed_local_media_path=self.allowed_local_media_path,
             dtype=self.dtype,
             seed=self.seed,
             revision=self.revision,
             code_revision=self.code_revision,
             rope_scaling=self.rope_scaling,
             rope_theta=self.rope_theta,
+            hf_overrides=self.hf_overrides,
             tokenizer_revision=self.tokenizer_revision,
             max_model_len=self.max_model_len,
             quantization=self.quantization,
             quantization_param_path=self.quantization_param_path,
             enforce_eager=self.enforce_eager,
-            max_context_len_to_capture=self.max_context_len_to_capture,
             max_seq_len_to_capture=self.max_seq_len_to_capture,
             max_logprobs=self.max_logprobs,
             disable_sliding_window=self.disable_sliding_window,
@@ -870,9 +984,10 @@ class EngineArgs:
             served_model_name=self.served_model_name,
             limit_mm_per_prompt=self.limit_mm_per_prompt,
             use_async_output_proc=not self.disable_async_output_proc,
-            override_neuron_config=self.override_neuron_config,
             config_format=self.config_format,
             mm_processor_kwargs=self.mm_processor_kwargs,
+            override_neuron_config=self.override_neuron_config,
+            override_pooler_config=self.override_pooler_config,
         )
 
     def create_load_config(self, load_device=None) -> LoadConfig:
@@ -886,7 +1001,12 @@ class EngineArgs:
             ignore_patterns=self.ignore_patterns,
         )
 
-    def create_engine_config(self) -> EngineConfig:
+    def create_engine_config(self,
+                             usage_context: Optional[UsageContext] = None
+                             ) -> VllmConfig:
+        if envs.VLLM_USE_V1:
+            self._override_v1_engine_args(usage_context)
+
         # gguf file needs a specific model loader and doesn't use hf_repo
         if check_gguf_file(self.model):
             self.quantization = self.load_format = "gguf"
@@ -922,8 +1042,9 @@ class EngineArgs:
             self.enable_prefix_caching = False
 
         cache_config = CacheConfig(
+            # neuron needs block_size = max_model_len
             block_size=self.block_size if self.device != "neuron" else
-            self.max_model_len,  # neuron needs block_size = max_model_len
+            (self.max_model_len if self.max_model_len is not None else 0),
             gpu_memory_utilization=self.gpu_memory_utilization,
             swap_space=self.swap_space,
             cache_dtype=self.kv_cache_dtype,
@@ -945,7 +1066,9 @@ class EngineArgs:
                 self.tokenizer_pool_extra_config,
             ),
             ray_workers_use_nsight=self.ray_workers_use_nsight,
-            distributed_executor_backend=self.distributed_executor_backend)
+            distributed_executor_backend=self.distributed_executor_backend,
+            worker_cls=self.worker_cls,
+        )
 
         max_model_len = model_config.max_model_len
         use_long_context = max_model_len > 32768
@@ -954,16 +1077,20 @@ class EngineArgs:
             # long context (> 32K) models. This is to avoid OOM errors in the
             # initial memory profiling phase.
 
-            # Chunked prefill is currently disabled for multimodal models by
-            # default.
-            if use_long_context and not model_config.is_multimodal_model:
+            # For multimodal models, chunked prefill is disabled by default in
+            # V0, but enabled by design in V1
+            if model_config.is_multimodal_model:
+                self.enable_chunked_prefill = bool(envs.VLLM_USE_V1)
+
+            elif use_long_context:
                 is_gpu = device_config.device_type == "cuda"
                 use_sliding_window = (model_config.get_sliding_window()
                                       is not None)
                 use_spec_decode = self.speculative_model is not None
                 if (is_gpu and not use_sliding_window and not use_spec_decode
                         and not self.enable_lora
-                        and not self.enable_prompt_adapter):
+                        and not self.enable_prompt_adapter
+                        and model_config.task != "embedding"):
                     self.enable_chunked_prefill = True
                     logger.warning(
                         "Chunked prefill is enabled by default for models with "
@@ -980,12 +1107,10 @@ class EngineArgs:
                 "errors during the initial memory profiling phase, or result "
                 "in low performance due to small KV cache space. Consider "
                 "setting --max-model-len to a smaller value.", max_model_len)
+        elif self.enable_chunked_prefill and model_config.task == "embedding":
+            msg = "Chunked prefill is not supported for embedding models"
+            raise ValueError(msg)
 
-        if self.num_scheduler_steps > 1 and not self.use_v2_block_manager:
-            self.use_v2_block_manager = True
-            logger.warning(
-                "Enabled BlockSpaceManagerV2 because it is "
-                "required for multi-step (--num-scheduler-steps > 1)")
 
         speculative_config = SpeculativeConfig.maybe_create_spec_config(
             target_model_config=model_config,
@@ -1002,7 +1127,6 @@ class EngineArgs:
             speculative_disable_by_batch_size,
             speculative_max_model_len=self.speculative_max_model_len,
             enable_chunked_prefill=self.enable_chunked_prefill,
-            use_v2_block_manager=self.use_v2_block_manager,
             disable_log_stats=self.disable_log_stats,
             ngram_prompt_lookup_max=self.ngram_prompt_lookup_max,
             ngram_prompt_lookup_min=self.ngram_prompt_lookup_min,
@@ -1015,7 +1139,7 @@ class EngineArgs:
             disable_logprobs=self.disable_logprobs_during_spec_decoding,
         )
 
-        # Reminder: Please update docs/source/serving/compatibility_matrix.rst
+        # Reminder: Please update docs/source/usage/compatibility_matrix.rst
         # If the feature combo become valid
         if self.num_scheduler_steps > 1:
             if speculative_config is not None:
@@ -1033,15 +1157,25 @@ class EngineArgs:
             if speculative_config is None \
             else speculative_config.num_lookahead_slots
 
+        if not self.use_v2_block_manager:
+            logger.warning(
+                "[DEPRECATED] Block manager v1 has been removed, "
+                "and setting --use-v2-block-manager to True or False has "
+                "no effect on vLLM behavior. Please remove "
+                "--use-v2-block-manager in your engine argument. "
+                "If your use case is not supported by "
+                "SelfAttnBlockSpaceManager (i.e. block manager v2),"
+                " please file an issue with detailed information.")
+
         scheduler_config = SchedulerConfig(
+            task=model_config.task,
             max_num_batched_tokens=self.max_num_batched_tokens,
             max_num_seqs=self.max_num_seqs,
+            max_num_prefill_seqs=self.max_num_prefill_seqs,
             max_model_len=model_config.max_model_len,
-            use_v2_block_manager=self.use_v2_block_manager,
             num_lookahead_slots=num_lookahead_slots,
             delay_factor=self.scheduler_delay_factor,
             enable_chunked_prefill=self.enable_chunked_prefill,
-            embedding_mode=model_config.embedding_mode,
             is_multimodal_model=model_config.is_multimodal_model,
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
@@ -1049,8 +1183,9 @@ class EngineArgs:
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
                              and parallel_config.use_ray),
             policy=self.scheduling_policy,
-        )
+            use_padding_aware_scheduling=self.use_padding_aware_scheduling)
         lora_config = LoRAConfig(
+            bias_enabled=self.enable_lora_bias,
             max_lora_rank=self.max_lora_rank,
             max_loras=self.max_loras,
             fully_sharded_loras=self.fully_sharded_loras,
@@ -1095,14 +1230,7 @@ class EngineArgs:
             or "all" in detailed_trace_modules,
         )
 
-        if (model_config.get_sliding_window() is not None
-                and scheduler_config.chunked_prefill_enabled
-                and not scheduler_config.use_v2_block_manager):
-            raise ValueError(
-                "Chunked prefill is not supported with sliding window. "
-                "Set --disable-sliding-window to disable sliding window.")
-
-        return EngineConfig(
+        config = VllmConfig(
             model_config=model_config,
             cache_config=cache_config,
             parallel_config=parallel_config,
@@ -1114,7 +1242,42 @@ class EngineArgs:
             decoding_config=decoding_config,
             observability_config=observability_config,
             prompt_adapter_config=prompt_adapter_config,
+            compilation_config=self.compilation_config,
+            kv_transfer_config=self.kv_transfer_config,
         )
+
+        if envs.VLLM_USE_V1:
+            self._override_v1_engine_config(config)
+        return config
+
+    def _override_v1_engine_args(self, usage_context: UsageContext) -> None:
+        """
+        Override the EngineArgs's args based on the usage context for V1.
+        """
+        assert envs.VLLM_USE_V1, "V1 is not enabled"
+
+        if self.max_num_batched_tokens is None:
+            # When no user override, set the default values based on the
+            # usage context.
+            if usage_context == UsageContext.LLM_CLASS:
+                logger.warning("Setting max_num_batched_tokens to 8192 "
+                               "for LLM_CLASS usage context.")
+                self.max_num_seqs = 1024
+                self.max_num_batched_tokens = 8192
+            elif usage_context == UsageContext.OPENAI_API_SERVER:
+                logger.warning("Setting max_num_batched_tokens to 2048 "
+                               "for OPENAI_API_SERVER usage context.")
+                self.max_num_seqs = 1024
+                self.max_num_batched_tokens = 2048
+
+    def _override_v1_engine_config(self, engine_config: VllmConfig) -> None:
+        """
+        Override the EngineConfig's configs based on the usage context for V1.
+        """
+        assert envs.VLLM_USE_V1, "V1 is not enabled"
+        if engine_config.model_config.is_multimodal_model:
+            # TODO (ywang96): Enable APC by default when VLM supports it.
+            assert not engine_config.cache_config.enable_prefix_caching
 
 
 @dataclass
@@ -1131,18 +1294,6 @@ class AsyncEngineArgs(EngineArgs):
                             action='store_true',
                             help='Disable logging requests.')
         return parser
-
-
-class StoreBoolean(argparse.Action):
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        if values.lower() == "true":
-            setattr(namespace, self.dest, True)
-        elif values.lower() == "false":
-            setattr(namespace, self.dest, False)
-        else:
-            raise ValueError(f"Invalid boolean value: {values}. "
-                             "Expected 'true' or 'false'.")
 
 
 # These functions are used by sphinx to build the documentation

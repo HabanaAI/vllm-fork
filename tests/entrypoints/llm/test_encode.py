@@ -3,9 +3,8 @@ from typing import List
 
 import pytest
 
-from vllm import LLM, EmbeddingRequestOutput, PoolingParams
-
-from ...conftest import cleanup
+from vllm import LLM, PoolingParams, PoolingRequestOutput
+from vllm.distributed import cleanup_dist_env_and_memory
 
 MODEL_NAME = "intfloat/e5-mistral-7b-instruct"
 
@@ -41,11 +40,11 @@ def llm():
 
         del llm
 
-    cleanup()
+    cleanup_dist_env_and_memory()
 
 
-def assert_outputs_equal(o1: List[EmbeddingRequestOutput],
-                         o2: List[EmbeddingRequestOutput]):
+def assert_outputs_equal(o1: List[PoolingRequestOutput],
+                         o2: List[PoolingRequestOutput]):
     assert [o.outputs for o in o1] == [o.outputs for o in o2]
 
 

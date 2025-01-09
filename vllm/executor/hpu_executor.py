@@ -37,16 +37,10 @@ class HPUExecutor(ExecutorBase):
             distributed_init_method = get_distributed_init_method(
                 get_ip(), get_open_port())
         return dict(
-            model_config=self.model_config,
-            parallel_config=self.parallel_config,
-            scheduler_config=self.scheduler_config,
-            device_config=self.device_config,
-            cache_config=self.cache_config,
-            load_config=self.load_config,
+            vllm_config=self.vllm_config,
             local_rank=local_rank,
             rank=rank,
             distributed_init_method=distributed_init_method,
-            lora_config=self.lora_config,
             is_driver_worker=rank == 0,
         )
 
@@ -54,10 +48,7 @@ class HPUExecutor(ExecutorBase):
                        local_rank: int = 0,
                        rank: int = 0,
                        distributed_init_method: Optional[str] = None):
-        wrapper = WorkerWrapperBase(
-            worker_module_name="vllm.worker.hpu_worker",
-            worker_class_name="HPUWorker",
-        )
+        wrapper = WorkerWrapperBase(vllm_config=self.vllm_config)
         wrapper.init_worker(**self._get_worker_kwargs(local_rank, rank,
                                                       distributed_init_method))
         return wrapper.worker
@@ -89,9 +80,6 @@ class HPUExecutor(ExecutorBase):
             self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
         msg = f"init_cache_engine took {cache_init_m.get_summary_string()}"
         logger.info(msg)
-
-    def finish_measurements(self):
-        self.driver_worker.finish_measurements()
 
     def execute_model(
             self,
@@ -196,7 +184,7 @@ class HPUExecutor(ExecutorBase):
     def stop_profile(self) -> None:
         self.driver_worker.stop_profile()
 
-    def shutdown(self) -> None:
+    def shutdown_inc(self) -> None:
         self.driver_worker.shutdown_inc()
 
 
