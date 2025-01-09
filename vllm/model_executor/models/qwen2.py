@@ -508,7 +508,7 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             self,
             skip_prefixes=(["lm_head."]
                            if self.config.tie_word_embeddings else None),
-        )        
+        )
         loader_out = loader.load_weights(weights)
         if current_platform.is_hpu():
             torch.hpu.synchronize()
