@@ -121,6 +121,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     context_lens_tensor: Optional[torch.Tensor]
     enable_merged_prefill: bool = False
     actual_num_prefills: Optional[torch.Tensor] = None
+    repeated_idx_tensor: Optional[torch.Tensor] = None
     seq_lens: Optional[List[int]] = None
     encoder_seq_lens: Optional[List[int]] = None
     encoder_seq_lens_tensor: Optional[torch.Tensor] = None

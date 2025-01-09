@@ -328,7 +328,6 @@ class HpuModelAdapter:
         self,
         attn_metadata,
         max_seq_len,
-        eos_indices,
         device,
         dtype
     ):  # create a 2D causal attn mask to ensure I can only attend to the past
@@ -338,15 +337,9 @@ class HpuModelAdapter:
             return attn_metadata
         #TODO: Support batch_size > 1
         # get length of each sequence
-        reps = attn_metadata.seq_lens_tensor
-        # get indices of all EOS tokens
-        # repeat each eos index n times along dimension 1 (n is the number of tokens in the sequence)
-        repeated_idx_small = torch.repeat_interleave(eos_indices, reps, dim=0)
-        repeated_idx = torch.zeros(max_seq_len, dtype=dtype, device=device)
-        repeated_idx[:repeated_idx_small.size(0)] = repeated_idx_small
-        repeated_idx = repeated_idx.view(1,-1).expand(max_seq_len, -1)
+        repeated_idx = attn_metadata.repeated_idx_tensor.view(1,-1).expand(max_seq_len, -1)
         # create tensor with all indices from 0 to T-1 repeated T times along dimesion 1
-        mask_indices = torch.arange(max_seq_len, dtype=dtype).view(-1,1).expand(-1, max_seq_len)
+        mask_indices = torch.arange(max_seq_len, dtype=dtype, device=device).view(-1,1).expand(-1, max_seq_len)
         # create causal mask and additionally mask out all tokens from preceeding sequences
         mask = mask_indices.le(repeated_idx)
         causal_mask = torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device).tril()
@@ -415,10 +408,10 @@ class HpuModelAdapter:
         return metadata
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
-                         dtype, eos_indices):
+                         dtype):
         if attn_metadata.is_prompt and attn_metadata.enable_merged_prefill:
             attn_metadata = self._set_merged_attn_bias(attn_metadata,
-                                                       seq_len, eos_indices,
+                                                       seq_len,
                                                        device, dtype)
         elif attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
@@ -453,7 +446,7 @@ class HpuModelAdapter:
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype, selected_token_indices)
+            input_ids.device, self.dtype)
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
@@ -714,7 +707,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.enable_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
                                                     'false').lower() == 'true'
         self.enable_cpu_merged_prefill_attn = os.environ.get('VLLM_CPU_MERGED_PREFILL_ATTN',
-                                                             'true').lower() == 'true'
+                                                             'false').lower() == 'true'
         if self.enable_merged_prefill and self.enable_cpu_merged_prefill_attn:
             self.causal_attn_mask_tensor_cache = dict()
         if self.enable_merged_prefill:
@@ -1249,9 +1242,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_prompt_len = max(
             self.bucketing_ctx.get_padded_prompt_seq_len(max(seq_lens)),
             self.block_size)
-
+        # get cumsum of seq_lens
+        repeated_idx = list(itertools.accumulate(seq_lens)) 
+        repeated_idx = [[idx - 1] * seq_len for idx, seq_len in zip(repeated_idx, seq_lens)]
+        repeated_idx = list(itertools.chain.from_iterable(repeated_idx)) + [0] * (merged_prompt_len - sum(seq_lens))
         prefix_block_list_tensor = None
 
+        repeated_idx_tensor = torch.tensor(repeated_idx, dtype=torch.long, device='cpu')
         input_tokens_tensor = make_tensor_with_pad(input_tokens_merged,
                                                    max_len=merged_prompt_len,
                                                    pad=0,
@@ -1382,6 +1379,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = seq_lens_tensor.to(self.device, non_blocking=True)
         context_lens_tensor = context_lens_tensor.to(self.device,
                                                      non_blocking=True)
+        repeated_idx_tensor = repeated_idx_tensor.to(self.device, non_blocking=True)
         actual_num_prefills_tensor = actual_num_prefills_tensor.to(
             self.device, non_blocking=True)
 
@@ -1389,6 +1387,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             enable_merged_prefill=True,
             actual_num_prefills=actual_num_prefills_tensor,
+            repeated_idx_tensor=repeated_idx_tensor,
             block_list=prefix_block_list_tensor,
             block_mapping=None,
             block_usage=None,
@@ -1801,6 +1800,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'context_lens_tensor',
             'enable_merged_prefill',
             'actual_num_prefills',
+            'repeated_idx_tensor',
             'block_list',
             'block_mapping',
             'block_usage',
