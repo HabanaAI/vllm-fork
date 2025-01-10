@@ -1,9 +1,13 @@
+from dataclasses import dataclass
 import pickle
 import signal
 from typing import List, Optional
 
+import cloudpickle
 import zmq
+import time
 
+from vllm import SamplingParams
 from vllm.engine.llm_engine import LLMEngine
 from vllm.engine.mm_arg_utils import MMAsyncEngineArgs
 # yapf conflicts with isort for this block
@@ -11,17 +15,32 @@ from vllm.engine.mm_arg_utils import MMAsyncEngineArgs
 from vllm.engine.multiprocessing import (ENGINE_DEAD_ERROR, IPC_DATA_EXT,
                                          IPC_HEALTH_EXT, IPC_INPUT_EXT,
                                          IPC_OUTPUT_EXT, VLLM_RPC_SUCCESS_STR,
-                                         RPCError, RPCProcessRequest)
+                                         RPCError, RPCProcessRequest, RPCAbortRequest, RPCUProfileRequest, RPCError)
 from vllm.engine.multiprocessing.engine import MQLLMEngine
 # yapf: enable
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.usage.usage_lib import UsageContext
+import traceback
 
 logger = init_logger(__name__)
 
 POLLING_TIMEOUT_MS = 10000
 HEALTHY_RESPONSE = (pickle.dumps(VLLM_RPC_SUCCESS_STR), )
+
+@dataclass
+class RPCModelRequest:
+    request_id: Optional[str]
+    models: List[str]
+
+@dataclass
+class RPCModelResponse:
+    request_id: Optional[str]
+    finished: bool
+    text: str
+    existing_models: Optional[List[str]] = None
+    closed_models: Optional[List[str]] = None
+    new_models: Optional[List[str]] = None
 
 
 class MMLLMEngine(MQLLMEngine):
@@ -31,11 +50,13 @@ class MMLLMEngine(MQLLMEngine):
                  use_async_sockets: bool,
                  *args,
                  log_requests: bool = True,
+                 engine_args: MMAsyncEngineArgs = None,
                  **kwargs) -> None:
         # For MQLLMEngine, we can use cached outputs, since each new request
         # output is immediately pickled and send over the socket, which frees
         # the python object to be reused again.
         kwargs['use_cached_outputs'] = True
+        self.engine_config= {'args': args, 'kwargs': kwargs, 'engine_args': engine_args}
 
         # get configs from args and kwargs, determine how many models to load
         original_vllm_config_list = kwargs.get('vllm_config')
@@ -95,7 +116,8 @@ class MMLLMEngine(MQLLMEngine):
                    executor_class=executor_class,
                    log_requests=not engine_args.disable_log_requests,
                    log_stats=not engine_args.disable_log_stats,
-                   usage_context=usage_context)
+                   usage_context=usage_context,
+                   engine_args=engine_args)
 
     def cleanup(self):
         """Cleanup zeromq state on shutdown."""
@@ -147,6 +169,38 @@ class MMLLMEngine(MQLLMEngine):
 
     # FIXME: add model field in RPCProcessRequest,
     # and dispatch to the correct engine
+    def handle_new_input(self):
+        """Handle new input from the socket"""
+        try:
+            while self.input_socket.poll(timeout=0) != 0:
+                frames = self.input_socket.recv_multipart(copy=False)
+                request = pickle.loads(frames[0].buffer)
+
+                if isinstance(request, RPCProcessRequest):
+                    if len(frames) > 1:
+                        # Use cloudpickle for logits processors
+                        assert isinstance(request.params, SamplingParams)
+                        lprocs = cloudpickle.loads(frames[1].buffer)
+                        request.params.logits_processors = lprocs
+                    self._handle_process_request(request)
+                elif isinstance(request, RPCAbortRequest):
+                    self._handle_abort_request(request)
+                elif isinstance(request, RPCModelRequest):
+                    self._handle_model_request(request)
+                elif isinstance(request, RPCUProfileRequest):
+                    if request == RPCUProfileRequest.START_PROFILE:
+                        self.start_profile()
+                    else:
+                        self.stop_profile()
+                else:
+                    raise ValueError("Unknown RPCRequest Type: "
+                                     f"{type(request)}")
+
+        except Exception as e:
+            self._set_errored(e)
+            self._send_unhealthy(e)
+            raise e
+
     def _handle_process_request(self, request: RPCProcessRequest):
         """Handle RPCProcessRequest by adding it to the LLMEngine."""
         request_id = request.request_id
@@ -169,8 +223,8 @@ class MMLLMEngine(MQLLMEngine):
                         prompt_adapter_request=request.prompt_adapter_request,
                         priority=request.priority)
 
-            if self.log_requests:
-                logger.info("Added request %s.", request.request_id)
+                    if self.log_requests:
+                        logger.info(f"{request.model} - Added request to {request.request_id}")
 
         except Exception as e:
             # We do not set self._errored = True here, since the error
@@ -184,6 +238,60 @@ class MMLLMEngine(MQLLMEngine):
 
             # Remove request from the engine.
             self.engine.abort_request(request_id)
+
+    def _handle_model_request(self, request: RPCModelRequest):
+        print("Get model request - ", request.models)
+        """Handle RPCModelRequest by loading the models."""
+        try:
+            close_engines = []
+            models = []
+            closed_models = []
+            new_models = []
+            msg = ""
+            for engine in self.engines:
+                models.append(engine.model_config.model)
+                if engine.model_config.model not in request.models:
+                    close_engines.append(engine)
+            # del models that are not in close_models
+            for engine in close_engines:
+                closed_models.append(engine.model_config.model)
+                self.engines.remove(engine)
+                del engine
+            # start the models that are in request.models not in models
+            for model in request.models:
+                if model not in models:
+                    start = time.perf_counter()
+                    print('start new model', model)
+                    engine_args = self.engine_config['engine_args']
+                    engine_args.model = model
+                    engine_args.tokenizer = model
+                    engine_args.models = None
+                    vllm_config = engine_args.create_engine_configs()[0]
+                    args = self.engine_config['args']
+                    kwargs = self.engine_config['kwargs']
+                    kwargs['vllm_config'] = vllm_config
+                    engine = LLMEngine(*args, **kwargs)
+                    self.engines.append(engine)
+                    new_models.append((model, f"launch time: {time.perf_counter() - start} seconds"))
+            msg += f"Existing models: {models}."
+            msg += f"Closed Models: {closed_models}."
+            msg += f"Starting new model: {new_models}."
+            self._send_outputs([
+                RPCModelResponse(
+                    request_id=request.request_id,
+                    finished=True,
+                    text=msg,
+                    existing_models=models,
+                    closed_models=closed_models,
+                    new_models=[m[0] for m in new_models]
+                )
+            ])
+        except Exception as e:
+            print("error happends: ", traceback.format_exc())
+            rpc_err = RPCError(request_id=request.request_id,
+                               is_engine_errored=False,
+                               exception=e)
+            self._send_outputs(rpc_err)
 
     def _health_check(self):
         # Send unhealthy if engine has already errored

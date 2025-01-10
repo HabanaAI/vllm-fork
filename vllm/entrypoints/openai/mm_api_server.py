@@ -47,7 +47,8 @@ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               LoadLoraAdapterRequest,
                                               TokenizeRequest,
                                               TokenizeResponse,
-                                              UnloadLoraAdapterRequest)
+                                              UnloadLoraAdapterRequest,
+                                              ModelConfigRequest)
 # yapf: enable
 from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
 from vllm.entrypoints.openai.serving_completion import OpenAIServingCompletion
@@ -329,6 +330,13 @@ async def show_available_models(raw_request: Request):
 
     models = await handler.show_available_models()
     return JSONResponse(content=models.model_dump())
+
+@router.post("/v1/update_models")
+async def update_models(request: ModelConfigRequest, raw_request: Request):
+    handler = base(raw_request)
+
+    response = await handler.update_model_config(request)
+    return JSONResponse(content=response)
 
 
 @router.get("/version")
