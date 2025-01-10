@@ -13,7 +13,7 @@ from vllm.utils import ClassRegistry
 
 from .audio import AudioPlugin
 from .base import MultiModalInputMapper, MultiModalPlugin, MultiModalTokensCalc
-from .image import ImagePlugin, ImageIdxPlugin ,PixelValuesPlugin
+from .image import ImageIdxPlugin, ImagePlugin, PixelValuesPlugin
 from .inputs import MultiModalDataDict, MultiModalKwargs, NestedTensors
 from .processing import BaseMultiModalProcessor
 from .video import VideoPlugin
@@ -55,7 +55,8 @@ class MultiModalRegistry:
     :class:`~vllm.multimodal.MultiModalPlugin` for each modality.
     """
 
-    DEFAULT_PLUGINS = (ImagePlugin(), AudioPlugin(), VideoPlugin(), ImageIdxPlugin(), PixelValuesPlugin())
+    DEFAULT_PLUGINS = (ImagePlugin(), AudioPlugin(), VideoPlugin(),
+                       ImageIdxPlugin(), PixelValuesPlugin())
 
     def __init__(
             self,

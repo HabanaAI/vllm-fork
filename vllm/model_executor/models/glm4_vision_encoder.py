@@ -7,6 +7,7 @@ from typing import Optional
 import torch
 from torch import nn
 from torch.nn import LayerNorm
+
 from vllm.attention.layer import MultiHeadAttention
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.activation import SiluAndMul, get_act_fn
@@ -84,30 +85,30 @@ class Attention(nn.Module):
             quant_config=quant_config,
         )
         if not is_hpu:
-            self.attn = MultiHeadAttention(self.num_heads_per_rank, self.head_dim,
-                                       self.scale)
+            self.attn = MultiHeadAttention(self.num_heads_per_rank,
+                                           self.head_dim, self.scale)
         self.output_dropout = torch.nn.Dropout(config.dropout_prob)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, L, _ = x.shape
         qkv, _ = self.query_key_value(x)  # B, L, 3 * H * D
         q, k, v = qkv.chunk(3, dim=-1)
-        
+
         if is_hpu:
             q = q.reshape(B, L, self.num_heads_per_rank,
-                        self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
+                          self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
             k = k.reshape(B, L, self.num_heads_per_rank,
-                        self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
+                          self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
             v = v.reshape(B, L, self.num_heads_per_rank,
-                        self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
-        
+                          self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
+
             out = FusedSDPA.apply(q, k, v, None, 0., False, None, 'fast', True,
                                   None, 'right')
             output, _ = self.dense(out.transpose(1, 2).reshape(B, L, -1))
         else:
-             out = self.attn(q, k, v)
-             output, _ = self.dense(out)
-             
+            out = self.attn(q, k, v)
+            output, _ = self.dense(out)
+
         output = self.output_dropout(output)
         return output
 
@@ -181,8 +182,7 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList([
             TransformerLayer(config,
                              quant_config=quant_config,
-                             prefix=f"{prefix}.layer.{layer_idx}"
-                             )
+                             prefix=f"{prefix}.layer.{layer_idx}")
             for layer_idx in range(config.num_hidden_layers)
         ])
 

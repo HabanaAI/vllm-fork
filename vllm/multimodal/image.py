@@ -84,7 +84,8 @@ class ImagePlugin(MultiModalPlugin):
 
     def _default_max_multimodal_tokens(self, ctx: InputContext) -> int:
         return 3000
-    
+
+
 class ImageIdxPlugin(MultiModalPlugin):
     """Plugin for image positions."""
 

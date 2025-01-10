@@ -4,7 +4,7 @@
 import os
 from argparse import Namespace
 from array import array
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple, Set
+from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 import torch
 from PIL import Image
@@ -14,7 +14,8 @@ from torch.nn import LayerNorm
 from vllm.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
-from vllm.inputs import INPUT_REGISTRY, InputContext, DecoderOnlyInputs, DummyData, InputContext
+from vllm.inputs import (INPUT_REGISTRY, DecoderOnlyInputs, DummyData,
+                         InputContext)
 from vllm.logger import init_logger
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -24,14 +25,14 @@ from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
-from vllm.model_executor.layers.sampler import Sampler, SamplerOutput, get_sampler
+from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.glm4_vision_encoder import EVA2CLIPModel
 from vllm.model_executor.models.module_mapping import MultiModelKeys
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalDataDict
+from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalKwargs
 from vllm.multimodal.utils import cached_get_tokenizer
 from vllm.platforms import current_platform
@@ -40,7 +41,8 @@ from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, IntermediateTensors,
 from vllm.transformers_utils.configs import ChatGLMConfig
 
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
-from .utils import is_pp_missing_parameter,get_input_mask, make_layers, maybe_prefix
+from .utils import (get_input_mask, is_pp_missing_parameter, make_layers,
+                    maybe_prefix)
 
 logger = init_logger(__name__)
 
@@ -69,9 +71,8 @@ def get_max_glmv_image_tokens(ctx: InputContext):
     raise NotImplementedError(msg)
 
 
-def dummy_data_for_glmv(
-    ctx: InputContext, seq_len: int, mm_counts: Mapping[str, int]
-) -> DummyData:
+def dummy_data_for_glmv(ctx: InputContext, seq_len: int,
+                        mm_counts: Mapping[str, int]) -> DummyData:
     hf_config = ctx.get_hf_config(ChatGLMConfig)
     vision_config = getattr(hf_config, 'vision_config', None)
 
@@ -162,8 +163,8 @@ def input_processor_for_glmv(ctx: InputContext, llm_inputs: DecoderOnlyInputs):
         position_ids[i] = new_position_ids
         attention_mask[i] = new_attention_mask
         img_idx.append(new_image_idx)
-    
-    multi_modal_data["img_idx"] = torch.tensor(img_idx, dtype=torch.long)    
+
+    multi_modal_data["img_idx"] = torch.tensor(img_idx, dtype=torch.long)
     multi_modal_data["pixel_values"] = torch.tensor(pixel_values,
                                                     dtype=torch.bfloat16)
     llm_inputs['multi_modal_data'] = multi_modal_data
@@ -426,7 +427,7 @@ class GLMTransformer(nn.Module):
         # Number of layers.
         self.num_layers = config.num_layers
 
-        # Transformer layers.        
+        # Transformer layers.
         self.start_layer, self.end_layer, self.layers = make_layers(
             self.num_layers,
             lambda prefix: GLMBlock(
@@ -460,12 +461,12 @@ class GLMTransformer(nn.Module):
             layer = self.layers[i]
             hidden_states = layer(
                 hidden_states=hidden_states,
-                position_ids=position_ids,                
+                position_ids=position_ids,
                 kv_cache=kv_caches[i - self.start_layer],
                 attn_metadata=attn_metadata,
             )
 
-        # Final layer norm.        
+        # Final layer norm.
         if get_pp_group().is_last_rank and self.post_layer_norm:
             hidden_states = self.final_layernorm(hidden_states)
 
@@ -474,11 +475,7 @@ class GLMTransformer(nn.Module):
 
 class ChatGLMModel(nn.Module):
 
-    def __init__(
-        self,
-        vllm_config:VllmConfig,
-        prefix: str = ""
-    ):
+    def __init__(self, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
 
         config = vllm_config.model_config.hf_config
@@ -519,16 +516,14 @@ class ChatGLMModel(nn.Module):
                     """)
         return pixel_values
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        position_ids: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-        pixel_values: Optional[torch.Tensor] = None,
-        img_idx: Optional[torch.LongTensor] = None
-    ) -> torch.Tensor:
+    def forward(self,
+                input_ids: torch.Tensor,
+                position_ids: torch.Tensor,
+                kv_caches: List[torch.Tensor],
+                attn_metadata: AttentionMetadata,
+                intermediate_tensors: Optional[IntermediateTensors] = None,
+                pixel_values: Optional[torch.Tensor] = None,
+                img_idx: Optional[torch.LongTensor] = None) -> torch.Tensor:
         inputs_embeds = self.embedding(input_ids)
 
         if self.vision_config_flag is not None:
@@ -543,7 +538,7 @@ class ChatGLMModel(nn.Module):
 
             batch_size, seq_length = input_ids.shape
 
-            img_idx = img_idx.reshape(batch_size, -1)            
+            img_idx = img_idx.reshape(batch_size, -1)
             for i in range(batch_size):
                 inputs_embeds[i].index_copy_(0, img_idx[i], image_embeds[i])
 
@@ -558,6 +553,7 @@ class ChatGLMModel(nn.Module):
             return IntermediateTensors({"hidden_states": hidden_states})
 
         return hidden_states
+
 
 class ChatGLMBaseModel(nn.Module, SupportsLoRA, SupportsPP):
 
@@ -710,16 +706,17 @@ class ChatGLMV(ChatGLMBaseModel, SupportsMultiModal):
             tower_model="transformer.vision.transformer")
 
 
-
 def input_imageidx_mapper_for_glmv(ctx: InputContext,
                                    data: object) -> MultiModalKwargs:
     img_idx = data
     return MultiModalKwargs({"img_idx": img_idx})
 
+
 def input_pixelValues_mapper_for_glmv(ctx: InputContext,
                                       data: object) -> MultiModalKwargs:
     pixel_values = data
     return MultiModalKwargs({"pixel_values": pixel_values})
+
 
 @MULTIMODAL_REGISTRY.register_input_mapper("img_idx",
                                            input_imageidx_mapper_for_glmv)
@@ -730,14 +727,14 @@ def input_pixelValues_mapper_for_glmv(ctx: InputContext,
 @INPUT_REGISTRY.register_dummy_data(dummy_data_for_glmv)
 @INPUT_REGISTRY.register_input_processor(input_processor_for_glmv)
 class ChatGLMForCausalLM(ChatGLMBaseModel, SupportsLoRA, SupportsPP,
-                         SupportsMultiModal):    
+                         SupportsMultiModal):
     # Ensure that the LoRA support check passes when the class is not
     # initialized, but set all these attributes to empty.
     packed_modules_mapping = {}
     supported_lora_modules = []
     embedding_modules = {}
     embedding_padding_modules = []
-    
+
     def __new__(
         cls,
         vllm_config: VllmConfig,
@@ -749,4 +746,4 @@ class ChatGLMForCausalLM(ChatGLMBaseModel, SupportsLoRA, SupportsPP,
             return ChatGLMV(vllm_config=vllm_config, prefix=prefix)
         # Initialize LLM
         else:
-            return ChatGLM(vllm_config=vllm_config, prefix=prefix)    
+            return ChatGLM(vllm_config=vllm_config, prefix=prefix)
