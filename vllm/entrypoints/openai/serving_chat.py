@@ -221,6 +221,7 @@ class OpenAIServingChat(OpenAIServing):
                         engine_prompt,
                         sampling_params,
                         request_id,
+                        model = request.model,
                         lora_request=lora_request,
                         trace_headers=trace_headers,
                         prompt_adapter_request=prompt_adapter_request,
