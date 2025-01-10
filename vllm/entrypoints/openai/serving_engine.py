@@ -2,10 +2,11 @@ import json
 import pathlib
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import (Any, Callable, Dict, Iterable, Iterator, List, Mapping,
+from typing import (Any, AsyncGenerator, Callable, Dict, Iterable, Iterator, List, Mapping,
                     Optional, Sequence, Tuple, TypedDict, Union)
 
 from pydantic import Field
+from fastapi import Request
 from starlette.datastructures import Headers
 from typing_extensions import Annotated
 
@@ -32,7 +33,8 @@ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               ModelPermission,
                                               TokenizeChatRequest,
                                               TokenizeCompletionRequest,
-                                              UnloadLoraAdapterRequest)
+                                              UnloadLoraAdapterRequest,
+                                              ModelConfigRequest)
 from vllm.entrypoints.openai.tool_parsers import ToolParser
 # yapf: enable
 from vllm.inputs import TokensPrompt
@@ -46,7 +48,8 @@ from vllm.sequence import Logprob
 from vllm.tracing import (contains_trace_headers, extract_trace_headers,
                           log_tracing_disabled_warning)
 from vllm.transformers_utils.tokenizer import AnyTokenizer, MistralTokenizer
-from vllm.utils import AtomicCounter, is_list_of
+from vllm.utils import AtomicCounter, is_list_of, random_uuid
+from vllm.engine.multiprocessing.mm_engine import RPCModelResponse
 
 logger = init_logger(__name__)
 
@@ -166,6 +169,27 @@ class OpenAIServing:
         model_cards.extend(lora_cards)
         model_cards.extend(prompt_adapter_cards)
         return ModelList(data=model_cards)
+
+    async def update_model_config(self, request: ModelConfigRequest) -> str:
+        models = [model.id for model in request.models]
+        request_id = f"mdlcfg-{random_uuid()}"
+        ret = await self.engine_client.update_model_config(request_id, models)
+        if isinstance(ret, RPCModelResponse):
+            new_models = ret.new_models
+            closed_models = ret.closed_models
+
+            to_delete = []
+            for model in closed_models:
+                for i, base_model in enumerate(self.base_model_paths):
+                    if base_model.name == model:
+                        to_delete.append(i)
+            for i in to_delete:
+                del self.base_model_paths[i]
+            for model in new_models:
+                self.base_model_paths.append(BaseModelPath(name=model, model_path=model))
+
+            ret = ret.text
+        return ret
 
     def create_error_response(
             self,

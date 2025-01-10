@@ -72,7 +72,6 @@ class ModelCard(OpenAIBaseModel):
     max_model_len: Optional[int] = None
     permission: List[ModelPermission] = Field(default_factory=list)
 
-
 class ModelList(OpenAIBaseModel):
     object: str = "list"
     data: List[ModelCard] = Field(default_factory=list)
@@ -133,6 +132,11 @@ class ChatCompletionNamedToolChoiceParam(OpenAIBaseModel):
     function: ChatCompletionNamedFunction
     type: Literal["function"] = "function"
 
+class ModelInfo(OpenAIBaseModel):
+    id: str
+
+class ModelConfigRequest(OpenAIBaseModel):
+    models: Optional[List[ModelInfo]] = None
 
 class ChatCompletionRequest(OpenAIBaseModel):
     # Ordered by official OpenAI API documentation

@@ -19,6 +19,7 @@ from vllm.engine.multiprocessing import (ENGINE_DEAD_ERROR, IPC_DATA_EXT,
                                          IPC_HEALTH_EXT, IPC_INPUT_EXT,
                                          IPC_OUTPUT_EXT, RPCProcessRequest)
 from vllm.engine.multiprocessing.client import MQLLMEngineClient
+from vllm.engine.multiprocessing.mm_engine import RPCModelRequest, RPCModelResponse
 # yapf: enable
 from vllm.inputs import PromptType
 from vllm.inputs.preprocess import InputPreprocessor
@@ -46,7 +47,8 @@ class MMLLMEngineClient(MQLLMEngineClient):
             engine_config.model_config for engine_config in engine_configs
         ]
         self.model_config = self.model_configs[0]
-        engine_config = engine_configs[0]
+        self.engine_configs = engine_configs
+        engine_config = self.engine_configs[0]
         self.decoding_config = engine_config.decoding_config
 
         # Create the tokenizer group.
@@ -103,6 +105,57 @@ class MMLLMEngineClient(MQLLMEngineClient):
         "inputs",
         additional_message="Please use the 'prompt' parameter instead.",
     )
+    async def update_model_config(self, request_id: Optional[str], model_list: Optional[List[str]]) -> Union[RPCModelResponse, str]:
+        queue: asyncio.Queue[Union[RequestOutput,
+                                   BaseException]] = asyncio.Queue()
+        self.output_queues[request_id] = queue
+        # If already dead, error out.
+        if self._errored_with is not None:
+            raise ENGINE_DEAD_ERROR(self._errored_with)
+
+        try:
+            request_bytes = pickle.dumps(
+                RPCModelRequest(
+                    request_id=request_id,
+                    models = model_list
+                ))
+
+            await self.input_socket.send_multipart((request_bytes, ), copy=False)
+
+            # add timeout
+            request_output = await queue.get()
+        finally:
+            self.output_queues.pop(request_id)
+        if isinstance(request_output, BaseException):
+            return f"{request_output}"
+        else:
+            closed_models = request_output.closed_models
+            new_models = request_output.new_models
+
+            # update existing model configs
+            self._update_model_config(closed_models, new_models)
+
+            return request_output
+
+    def _update_model_config(self, closed_models: Optional[List[str]], new_models: Optional[List[str]]):
+        # Create the tokenizer group.
+        engine_config = self.engine_configs[0]
+        model_config = self.model_configs[0]
+        for model_name in new_models:
+            new_model_config = copy.deepcopy(model_config)
+            new_model_config.model = model_name
+            new_model_config.tokenizer = model_name
+            self.model_configs.append(new_model_config)
+            self.tokenizers.append(
+                init_tokenizer_from_configs(
+                    model_config=new_model_config,
+                    scheduler_config=engine_config.scheduler_config,
+                    parallel_config=engine_config.parallel_config,
+                    enable_lora=bool(engine_config.lora_config),
+                ))
+            self.input_preprocessors.append(
+                InputPreprocessor(new_model_config, self.tokenizers[-1]))
+
     def generate(
         self,
         prompt: Optional[PromptType] = None,
