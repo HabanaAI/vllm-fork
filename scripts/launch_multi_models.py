@@ -65,7 +65,6 @@ def launch_server(models, port, log_file="mm_vllm_server.log", timeout = 300):
         "--gpu-memory-utilization", str(mem_ratio),
         "--use-v2-block-manager",
         "--max-model-len", "4096",
-        "--disable-async-output-proc",
         "--models"
     ]
     command += models
@@ -136,7 +135,7 @@ def main():
         else:
             print("Running models do not match the requested models. Restarting server.")
             kill_existing_pid(existing_pid)
-    if args.force_restart:
+    if existing_pid and args.force_restart:
         print("Force restart requested. Killing existing server.")
         kill_existing_pid(existing_pid)
 

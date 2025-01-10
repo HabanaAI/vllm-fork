@@ -271,6 +271,9 @@ class MMLLMEngine(MQLLMEngine):
                     kwargs = self.engine_config['kwargs']
                     kwargs['vllm_config'] = vllm_config
                     engine = LLMEngine(*args, **kwargs)
+                    if self.use_async_sockets:
+                        engine.process_request_outputs_callback = \
+                            self._async_socket_engine_callback
                     self.engines.append(engine)
                     new_models.append((model, f"launch time: {time.perf_counter() - start} seconds"))
             msg += f"Existing models: {models}."
