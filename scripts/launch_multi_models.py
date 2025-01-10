@@ -22,9 +22,10 @@ SERVER_URL_TEMPLATE = "http://localhost:{port}/v1/models"
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Launch vLLM server with multiple models.")
-    parser.add_argument("--models", nargs="+", required=True, help="List of models to load.")
+    parser.add_argument("--models", nargs="+", help="List of models to load.")
     parser.add_argument("--force-restart", action="store_true", help="Force restart the server.")
     parser.add_argument("--port", type=int, default=8000, help="Port for the vLLM server.")
+    parser.add_argument("--stop-all", action="store_true", help="Stop all running models.")
     return parser.parse_args()
 
 def get_running_models(port):
@@ -121,6 +122,10 @@ def main():
                 existing_pid = int(f.read().strip())
             except ValueError:
                 print("Invalid PID in PID file.")
+    if args.stop_all:
+        if existing_pid:
+            kill_existing_pid(existing_pid)
+        return
     
     # Check existing server
     if existing_pid and not args.force_restart:
