@@ -49,14 +49,12 @@ def prompt_fsdpa(
     query_heads = query.size(1)
     kv_heads = key.size(1)
     VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE = os.environ.get(
-        'VLLM_REMOVE_REPEAT_KV_CACHE_MERGED_PREFILL', '1') == '1'
+        'VLLM_REMOVE_REPEAT_KV_CACHE', '1') == '1'
     # TODO: remove after fusedsdpa fix for query_heads != kv_heads
     if query_heads != kv_heads:
         if VLLM_DO_NOT_REMOVE_REPEAT_KV_CACHE:
             key = ops.repeat_kv(key, int(query_heads // kv_heads))
             value = ops.repeat_kv(value, int(query_heads // kv_heads))
-        if attn_bias is not None:
-            attn_bias = attn_bias.unsqueeze(1)
     softmax_mode = 'fast'
     recompute_mode = True
     attn_weights = fsdpa_op(query, key, value, attn_bias, 0.0, False,
