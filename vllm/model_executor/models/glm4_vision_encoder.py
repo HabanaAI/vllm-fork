@@ -7,7 +7,6 @@ from typing import Optional
 import torch
 from torch import nn
 from torch.nn import LayerNorm
-
 from vllm.attention.layer import MultiHeadAttention
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.activation import SiluAndMul, get_act_fn
@@ -18,12 +17,18 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
+from vllm.platforms import current_platform
+
+is_hpu = current_platform.is_hpu()
+if is_hpu:
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 
 class PatchEmbedding(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+
         self.proj = nn.Conv2d(config.in_channels,
                               config.hidden_size,
                               kernel_size=config.patch_size,
@@ -48,6 +53,7 @@ class PatchEmbedding(nn.Module):
         cls_token = self.cls_embedding.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_token, x), dim=1)
         x += self.position_embedding.weight.unsqueeze(0)
+
         return x
 
 
@@ -77,17 +83,31 @@ class Attention(nn.Module):
             config.hidden_size,
             quant_config=quant_config,
         )
-
-        self.attn = MultiHeadAttention(self.num_heads_per_rank, self.head_dim,
+        if not is_hpu:
+            self.attn = MultiHeadAttention(self.num_heads_per_rank, self.head_dim,
                                        self.scale)
         self.output_dropout = torch.nn.Dropout(config.dropout_prob)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, L, _ = x.shape
         qkv, _ = self.query_key_value(x)  # B, L, 3 * H * D
         q, k, v = qkv.chunk(3, dim=-1)
-
-        out = self.attn(q, k, v)
-        output, _ = self.dense(out)
+        
+        if is_hpu:
+            q = q.reshape(B, L, self.num_heads_per_rank,
+                        self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
+            k = k.reshape(B, L, self.num_heads_per_rank,
+                        self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
+            v = v.reshape(B, L, self.num_heads_per_rank,
+                        self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
+        
+            out = FusedSDPA.apply(q, k, v, None, 0., False, None, 'fast', True,
+                                  None, 'right')
+            output, _ = self.dense(out.transpose(1, 2).reshape(B, L, -1))
+        else:
+             out = self.attn(q, k, v)
+             output, _ = self.dense(out)
+             
         output = self.output_dropout(output)
         return output
 
@@ -161,7 +181,8 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList([
             TransformerLayer(config,
                              quant_config=quant_config,
-                             prefix=f"{prefix}.layer.{layer_idx}")
+                             prefix=f"{prefix}.layer.{layer_idx}"
+                             )
             for layer_idx in range(config.num_hidden_layers)
         ])
 
@@ -281,10 +302,10 @@ class EVA2CLIPModel(nn.Module):
         x = self.patch_embedding(images)
         x = self.transformer(x)
         x = x[:, 1:]
-
         b, s, h = x.shape
         grid_size = int(s**0.5)
-        x = x.view(b, grid_size, grid_size, h).permute(0, 3, 1, 2)
+
+        x = x.reshape(b, grid_size, grid_size, h).permute(0, 3, 1, 2)
         x = self.conv(x)
 
         x = x.flatten(2).transpose(1, 2)
