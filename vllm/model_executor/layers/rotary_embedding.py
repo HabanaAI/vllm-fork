@@ -102,7 +102,9 @@ class RotaryEmbedding(CustomOp):
 
     def prepare_cos_sin(self,
                         positions: torch.Tensor,
-                        offsets: Optional[torch.Tensor] = None):
+                        offsets: Optional[torch.Tensor] = None,
+                        recompute_cos_sin: bool = False):
+        self.recompute_cos_sin = recompute_cos_sin
         if offsets is not None:
             offsets = offsets.view(positions.shape[0], -1)
             positions = positions + offsets
@@ -232,8 +234,13 @@ class RotaryEmbedding(CustomOp):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         from habana_frameworks.torch.hpex.kernels import (
             RotaryPosEmbeddingMode, apply_rotary_pos_emb)
-        if self.sin is None:
+
+        # Prepare cos-sin caches for long-context + LoRA with offsets for every
+        # forward, since the offset information wasn't available previously
+        if hasattr(self, "scaling_factors") or self.sin is None:
             self.prepare_cos_sin(positions, offsets)
+        if self.recompute_cos_sin:
+            self.prepare_cos_sin(positions, offsets, recompute_cos_sin=True)
         num_tokens = positions.shape[0] * positions.shape[1]
         # HPU RoPE kernel requires hidden dimension for cos and sin to be equal
         # to query hidden dimension, so the original tensors need to be

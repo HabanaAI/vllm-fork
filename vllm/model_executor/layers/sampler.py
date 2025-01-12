@@ -405,6 +405,14 @@ class ApplyToppTopkScalar:
         self._increment = increment
 
     def __call__(self, logits: torch.Tensor, p: float, k: int):
+        if k == 1 and not ApplyToppTopkScalar._handle_duplicates:
+            new_logits = torch.full(logits.shape,
+                                    -float("inf"),
+                                    device=logits.device)
+            vals, idx = torch.max(logits, keepdim=True, dim=1)
+            new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
+            return new_logits
+
         if k > ApplyToppTopkScalar._padded_k:
             ApplyToppTopkScalar._padded_k = min(k + self._increment,
                                                 logits.shape[1])
@@ -528,7 +536,7 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
         output_tokens_tensor, vocab_size, num_seqs)
 
     repetition_penalties = repetition_penalties[:, None].repeat(1, vocab_size)
-    repetition_penalties[~(prompt_mask | output_mask)] = 1.0
+    repetition_penalties.masked_fill_(~(prompt_mask | output_mask), 1.0)
     logits = torch.where(logits > 0, logits / repetition_penalties,
                          logits * repetition_penalties)
 
