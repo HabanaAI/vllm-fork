@@ -336,7 +336,9 @@ class HpuModelAdapter:
         causal_mask = torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device).tril()
         causal_mask = causal_mask.logical_and(mask)
         # should be math(-inf) but -10000 is used for numerical stability
-        causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, -10000)
+        #causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, -math.inf)
+        #print("min: ", torch.finfo(dtype).min)
+        causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, torch.finfo(dtype).min)
         causal_attn_mask_tensor = causal_attn_mask_tensor.view(
             1, 1, causal_attn_mask_tensor.shape[0], causal_attn_mask_tensor.shape[1])
 
