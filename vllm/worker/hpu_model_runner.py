@@ -335,10 +335,7 @@ class HpuModelAdapter:
         mask = mask_indices.le(repeated_idx)
         causal_mask = torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device).tril()
         causal_mask = causal_mask.logical_and(mask)
-        # should be math(-inf) but -10000 is used for numerical stability
-        #causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, -math.inf)
-        #print("min: ", torch.finfo(dtype).min)
-        causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, torch.finfo(dtype).min)
+        causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, -math.inf)
         causal_attn_mask_tensor = causal_attn_mask_tensor.view(
             1, 1, causal_attn_mask_tensor.shape[0], causal_attn_mask_tensor.shape[1])
 
@@ -1223,7 +1220,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # get cumsum of seq_lens
         repeated_idx = list(itertools.accumulate(seq_lens)) 
         repeated_idx = [[idx - 1] * seq_len for idx, seq_len in zip(repeated_idx, seq_lens)]
-        repeated_idx = list(itertools.chain.from_iterable(repeated_idx)) + [0] * (merged_prompt_len - sum(seq_lens))
+        repeated_idx = list(itertools.chain.from_iterable(repeated_idx)) + [merged_prompt_len] * (merged_prompt_len - sum(seq_lens))
         prefix_block_list_tensor = None
 
         repeated_idx_tensor = torch.tensor(repeated_idx, dtype=torch.long, device='cpu')
