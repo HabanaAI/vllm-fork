@@ -13,6 +13,7 @@ import itertools
 import math
 import os
 import time
+import copy
 from array import array
 from enum import Enum, IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
@@ -254,6 +255,32 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
                f"{list(sorted(self.global_state.prompt_buckets))}")
         print(msg)
 
+
+class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
+
+    def generate_prompt_buckets(self):
+        prompt_bs_bucket_cfg = self.global_state.prompt_bs_bucket_cfg
+        prompt_seq_bucket_cfg = self.global_state.prompt_seq_bucket_cfg
+        origin_max_prompt_len = prompt_seq_bucket_cfg[2]
+        max_prompt_len = prompt_bs_bucket_cfg[2] * prompt_seq_bucket_cfg[2]
+        max_prompt_len = min(self.max_num_batched_tokens, max_prompt_len)
+        prompt_seq_bucket_cfg[2] = max_prompt_len
+
+        prompt_buckets, prompt_omitted_buckets = \
+            generate_prompt_buckets(
+            prompt_bs_bucket_cfg,
+            prompt_seq_bucket_cfg,
+            self.max_num_batched_tokens)
+
+        self.global_state.prompt_buckets = list(
+            filter(
+                lambda bucket: bucket[1] <= origin_max_prompt_len and bucket[0]
+                == 1, prompt_buckets))
+
+        msg = (f"Generated {len(self.global_state.prompt_buckets)} "
+               f"prompt buckets [bs, seq]: "
+               f"{list(sorted(self.global_state.prompt_buckets))}")
+        print(msg)
 
 class HpuModelAdapter:
 
