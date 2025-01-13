@@ -62,10 +62,10 @@ stages:
     steps:
       - name: test_llama_lora
         flavor: g2
-        command: VLLM_SKIP_WARMUP=true python -m pytest tests/lora/test_llama_hpu.py -k test_llama_lora_1x
+        command: VLLM_SKIP_WARMUP=true pytest -v tests/lora/test_llama_hpu.py::test_llama_lora_1x
       - name: test_multilora
         flavor: g2
-        command: VLLM_SKIP_WARMUP=true python -m pytest tests/lora/test_multilora_hpu.py -k test_llama_multilora_1x
+        command: VLLM_SKIP_WARMUP=true pytest -v tests/lora/test_multilora_hpu.py::test_llama_multilora_1x
       - name: test_long_context
         flavor: g2
-        command: VLLM_SKIP_WARMUP=true python -m pytest tests/lora/test_long_context_hpu.py -k test_quality
+        command: VLLM_SKIP_WARMUP=true pytest -v tests/lora/test_long_context_hpu.py::test_quality
