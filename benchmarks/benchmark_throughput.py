@@ -5,6 +5,7 @@ import json
 import random
 import time
 from typing import List, Optional
+import os
 
 import pandas as pd
 import torch
@@ -71,8 +72,19 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         raise ValueError("output_len too small")
 
     # Load the dataset.
-    with open(dataset_path) as f:
-        dataset = json.load(f)
+    if os.path.splitext(dataset_path)[1] == ".json":
+        with open(dataset_path) as f:
+            dataset = json.load(f)
+    elif os.path.splitext(dataset_path)[1] == ".pkl":
+        import pandas as pd
+        dataset = pd.read_pickle(dataset_path)
+        dataset = dataset[['input', 'output']].to_dict(orient="records")
+        for data in dataset:
+            data["conversations"] = [
+                {"value": data["input"]},
+                {"value": data["output"]}
+            ]
+
     # Filter out the conversations with less than 2 turns.
     dataset = [data for data in dataset if len(data["conversations"]) >= 2]
     # Shuffle the dataset.
@@ -80,8 +92,11 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
 
     # Filter out sequences that are too long or too short
     filtered_dataset: List[SampleRequest] = []
+    prompt_lens = []
     for data in dataset:
         if len(filtered_dataset) == num_requests:
+            if args.sort_by_len:
+                filtered_dataset = sorted(filtered_dataset, key=lambda x: x.prompt_len)
             break
 
         # Only keep the first two turns of each conversation.
@@ -120,7 +135,11 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
                           prompt_len=prompt_len,
                           expected_output_len=output_len,
                           multi_modal_data=multi_modal_data))
+        prompt_lens.append(prompt_len)
+    print("!!!!prompt length are: ", pd.Series(prompt_lens).describe())
 
+    # for i, data in enumerate(filtered_dataset):
+    #     print(i, data.prompt)
     return filtered_dataset
 
 
@@ -151,9 +170,9 @@ def run_vllm(
     use_beam_search = False
 
     if not use_beam_search:
-        for _ in range(2):
+        for _ in range(1):
             start = time.perf_counter()
-            llm.generate(prompts, sampling_params, use_tqdm=True)
+            llm.generate(prompts, sampling_params, use_tqdm=False)
             end = time.perf_counter()
     else:
         prompts = [request.prompt for request in requests]
@@ -445,6 +464,12 @@ if __name__ == "__main__":
                         action='store_true',
                         default=False,
                         help="Disable decoupled async engine frontend.")
+    parser.add_argument("--sort-by-len",
+                        action='store_true',
+                        default=False)
+    parser.add_argument("--bucket-selective",
+                        action='store_true',
+                        default=False)
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
     if args.tokenizer is None:
