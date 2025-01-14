@@ -648,6 +648,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                  self.max_num_batched_tokens)
         self.graphed_buckets: Set[Any] = set()
 
+        # Setup cache sizes for torch compile
+        if not self.enforce_eager and not htorch.utils.internal.is_lazy():
+            cache_size_limit = 500
+            # multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION','true').lower() == 'true' else 1
+            # cache_size_limit = 1 + multiplier * (
+            #      self.bucketing_ctx.prompt_buckets_len() +
+            #      self.bucketing_ctx.decode_buckets_len(1000))
+            # print( f"-----------------------------------------    cache_size_limit = {cache_size_limit}")
+            torch._dynamo.config.cache_size_limit = max(
+                cache_size_limit, torch._dynamo.config.cache_size_limit)
+            # Multiply by 8 to follow the original default ratio between
+            # the cache_size_limit and accumulated_cache_size_limit
+            torch._dynamo.config.accumulated_cache_size_limit = max(
+                cache_size_limit * 8,
+                torch._dynamo.config.accumulated_cache_size_limit)
+
         self._set_gc_threshold()
         self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
                                                 'true').lower() == 'true'
