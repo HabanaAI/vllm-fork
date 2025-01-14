@@ -235,7 +235,7 @@ class FusedMoE(torch.nn.Module):
             from vllm.model_executor.layers.quantization.inc import INCConfig
             selected_fused_moe = (StaticFusedMOE if isinstance(
                 quant_config, INCConfig) else DynamicFusedMOE)
-            self.hpu_static_fused_moe = selected_fused_moe(self.num_experts)
+            self.hpu_static_fused_moe = selected_fused_moe(self.num_experts, renormalize=renormalize)
 
         if quant_config is None:
             self.quant_method: Optional[QuantizeMethodBase] = (
