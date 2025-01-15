@@ -47,7 +47,8 @@ def launch_lm_eval(eval_config):
                  f"dtype={dtype}," \
                  f"max_model_len=4096," \
                  f"max_num_seqs={max_num_seqs}," \
-                 f"trust_remote_code={trust_remote_code}"
+                 f"trust_remote_code={trust_remote_code}," \
+                 f"distributed_executor_backend=ray"
     if eval_config.get("fp8"):
         model_args += ",quantization=inc," \
             "kv_cache_dtype=fp8_inc," \
