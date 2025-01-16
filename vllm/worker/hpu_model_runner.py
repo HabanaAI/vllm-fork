@@ -22,6 +22,8 @@ import torch
 from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.ops import batch2block, block2batch
+from vllm_hpu_extension.flags import enabled_flags
+import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 
@@ -213,8 +215,7 @@ class HpuModelAdapter:
 
     def __init__(self, model, vllm_config, layer_names):
         self.model = model
-        self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
-                                               '0').lower() in ['1', 'true']
+        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
         self.vllm_config = vllm_config
@@ -596,6 +597,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
         ModelRunnerBase.__init__(self, vllm_config=vllm_config)
+        environment.set_model_config(self.model_config)
         self.is_driver_worker = is_driver_worker
         self.return_hidden_states = return_hidden_states
 
