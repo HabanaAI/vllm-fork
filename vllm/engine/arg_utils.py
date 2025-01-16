@@ -170,7 +170,7 @@ class EngineArgs:
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: Optional[bool] = None
 
-    guided_decoding_backend: str = 'xgrammar'
+    guided_decoding_backend: str = 'outlines'
     logits_processor_pattern: Optional[str] = None
     # Speculative decoding configuration.
     speculative_model: Optional[str] = None
@@ -379,7 +379,7 @@ class EngineArgs:
         parser.add_argument(
             '--guided-decoding-backend',
             type=str,
-            default='xgrammar',
+            default='outlines',
             choices=['outlines', 'lm-format-enforcer', 'xgrammar'],
             help='Which engine will be used for guided decoding'
             ' (JSON schema / regex etc) by default. Currently support '
