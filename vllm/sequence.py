@@ -175,6 +175,9 @@ class SequenceData(msgspec.Struct,
     # It is used to compute mrope_position_ids.
     _mrope_position_delta: Optional[int] = None
 
+    _prev_logits: Optional[List[torch.Tensor]] = None
+    _prev_logits_idx: Optional[int] = None
+
     @staticmethod
     def from_prompt_token_counts(
             *token_counts: Tuple[int, int]) -> "SequenceData":
@@ -237,9 +240,25 @@ class SequenceData(msgspec.Struct,
     def prompt_token_ids(self) -> Tuple[int, ...]:
         return self._prompt_token_ids_tuple
 
+    @property
+    def prev_logits(self) -> torch.Tensor:
+        return self._prev_logits
+
+    @property
+    def prev_logits_idx(self) -> int:
+        return self._prev_logits_idx
+
     @prompt_token_ids.setter
     def prompt_token_ids(self, new_prompt_token_ids) -> None:
         raise NotImplementedError
+    
+    @prev_logits.setter
+    def prev_logits(self, previous_logits) -> None:
+        self._prev_logits = previous_logits
+
+    @prev_logits_idx.setter
+    def prev_logits_idx(self, prev_logits_idx) -> None:
+        self._prev_logits_idx = prev_logits_idx
 
     @property
     def prompt_token_ids_array(self) -> array:
@@ -296,6 +315,9 @@ class SequenceData(msgspec.Struct,
 
     def get_token_ids(self) -> List[int]:
         return self._cached_all_token_ids
+    
+    def get_previous_logits(self) -> List[torch.Tensor]:
+        return self._prev_logits
 
     def get_prefix_token_ids(
             self, num_tokens: int
@@ -380,7 +402,9 @@ class SequenceData(msgspec.Struct,
                 f"prompt_token_ids={self._prompt_token_ids}, "
                 f"output_token_ids={self.output_token_ids}, "
                 f"cumulative_logprob={self.cumulative_logprob}, "
-                f"get_num_computed_tokens={self.get_num_computed_tokens()}")
+                f"get_num_computed_tokens={self.get_num_computed_tokens()}, "
+                f"previous_logits={self._prev_logits}",
+                f"previous_logits_id={self._prev_logits_id}")
 
 
 class Sequence:
