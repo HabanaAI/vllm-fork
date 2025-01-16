@@ -198,14 +198,7 @@ class MultiHeadAttention(nn.Module):
         if attn_backend in {_Backend.FLASH_ATTN, _Backend.FLASH_ATTN_VLLM_V1}:
             attn_backend = _Backend.XFORMERS
 
-        attn_backend_enum = backend_name_to_enum(attn_backend.get_name())
-
-        if attn_backend_enum in {
-                _Backend.FLASH_ATTN, _Backend.FLASH_ATTN_VLLM_V1
-        }:
-            attn_backend_enum = _Backend.XFORMERS
-
-        self.attn_backend = attn_backend_enum if attn_backend_enum in {
+        self.attn_backend = attn_backend if attn_backend in {
             _Backend.TORCH_SDPA, _Backend.XFORMERS, _Backend.HPU_ATTN
         } else _Backend.TORCH_SDPA
 
@@ -260,7 +253,7 @@ class MultiHeadAttention(nn.Module):
                            valid_sequence_lengths=None)
 
             out = out.transpose(1, 2)
-            
+
         return out.reshape(bsz, q_len, -1)
 
 
