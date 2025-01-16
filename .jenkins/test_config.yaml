@@ -100,3 +100,34 @@ stages:
       flavor: g2
       command: export VLLM_SKIP_WARMUP=true && pip install -e tests/vllm_test_utils && pytest -v tests/entrypoints/llm/test_guided_generate.py -s -vvv --log-cli-level=INFO
     
+  - name: test_gsm8k_small_models_tcompile
+    steps:
+      - name: gsm8k_small_g3_tp1_tc
+        flavor: g3
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-small.txt -t 1
+      - name: gsm8k_small_g3_tp2_tc
+        flavor: g3.s
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-small.txt -t 2
+      - name: gsm8k_small_g2_tp1_tc
+        flavor: g2
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-small.txt -t 1
+      - name: gsm8k_small_g2_tp2_tc
+        flavor: g2.s
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-small.txt -t 2
+      - name: gsm8k_llama2_g3_tp1_tc
+        flavor: g3
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-llama2.txt -t 1
+      - name: gsm8k_llama2_g3_tp2_tc
+        flavor: g3.s
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-llama2.txt -t 2
+      - name: gsm8k_lama2_g2_tp1_tc
+        flavor: g2
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-llama2.txt -t 1
+      - name: gsm8k_lama2_g2_tp2_tc
+        flavor: g2.s
+        command: cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-llama2.txt -t 2
+  - name: tests_lora_compile
+    steps:
+      - name: test_multilora_compile
+        flavor: g2
+        command: PT_HPU_LAZY_MODE=0 VLLM_SKIP_WARMUP=true pytest -v tests/lora/test_multilora_hpu.py::test_llama_multilora_1x
