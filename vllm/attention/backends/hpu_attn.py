@@ -2,13 +2,12 @@
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 ###############################################################################
 
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
-import vllm_hpu_extension.ops as ops
 import vllm_hpu_extension.kernels as kernels
+import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
                                       VLLMKVCache)
@@ -19,7 +18,6 @@ from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
 from vllm.logger import init_logger
-from vllm.utils import is_fake_hpu
 
 logger = init_logger(__name__)
 
