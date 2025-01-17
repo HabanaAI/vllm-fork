@@ -42,6 +42,8 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
 
     from vllm.model_executor.layers.quantization.quark.quark import QuarkConfig
 
+    from vllm_hpu_extension.awq_hpu import AWQHPUConfig
+
     from .aqlm import AQLMConfig
     from .awq import AWQConfig
     from .awq_marlin import AWQMarlinConfig
@@ -64,7 +66,6 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     from .neuron_quant import NeuronQuantConfig
     from .qqq import QQQConfig
     from .tpu_int8 import Int8TpuConfig
-    from vllm_hpu_extension.awq_hpu import AWQHPUConfig
 
     method_to_config: Dict[str, Type[QuantizationConfig]] = {
         "aqlm": AQLMConfig,
