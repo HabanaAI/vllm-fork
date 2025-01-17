@@ -172,7 +172,8 @@ class ModelConfig:
             hf_overrides: Optional[HfOverrides] = None,
             mm_processor_kwargs: Optional[Dict[str, Any]] = None,
             override_neuron_config: Optional[Dict[str, Any]] = None,
-            override_pooler_config: Optional["PoolerConfig"] = None) -> None:
+            override_pooler_config: Optional["PoolerConfig"] = None,
+            enable_delayed_sampling: bool = False) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.tokenizer_mode = tokenizer_mode
@@ -217,6 +218,7 @@ class ModelConfig:
         self.max_logprobs = max_logprobs
         self.disable_sliding_window = disable_sliding_window
         self.skip_tokenizer_init = skip_tokenizer_init
+        self.enable_delayed_sampling = enable_delayed_sampling
 
         hf_config = get_config(self.model, trust_remote_code, revision,
                                code_revision, config_format)
@@ -779,6 +781,16 @@ class CacheConfig:
             raise ValueError(
                 "GPU memory utilization must be less than 1.0. Got "
                 f"{self.gpu_memory_utilization}.")
+        
+        # if self.enable_delayed_sampling and self.num_lookahead_slots != 1:
+        #     raise ValueError(
+        #         "num_lookahead_slots "
+        #         f"({self.num_lookahead_slots}) must be 1 for delayed sampling."
+        #     )
+        # if self.enable_delayed_sampling and not self.use_v2_block_manager:
+        #     raise ValueError("use_v2_block_manager "
+        #                      f"({self.use_v2_block_manager}) must be True "
+        #                      "for delayed sampling.")
 
     def _verify_cache_dtype(self) -> None:
         if self.cache_dtype == "auto":

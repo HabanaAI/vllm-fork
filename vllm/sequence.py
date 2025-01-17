@@ -302,7 +302,7 @@ class SequenceData(msgspec.Struct,
         self._output_token_ids.append(token_id)
         self._new_appended_tokens.append(token_id)
         self._cached_all_token_ids.append(token_id)
-        self._cumulative_logprob += logprob
+        self._cumulative_logprob += logprob if logprob is not None else 0.0
 
     def get_len(self) -> int:
         return len(self._output_token_ids) + len(self._prompt_token_ids)
@@ -403,8 +403,8 @@ class SequenceData(msgspec.Struct,
                 f"output_token_ids={self.output_token_ids}, "
                 f"cumulative_logprob={self.cumulative_logprob}, "
                 f"get_num_computed_tokens={self.get_num_computed_tokens()}, "
-                f"previous_logits={self._prev_logits}",
-                f"previous_logits_id={self._prev_logits_id}")
+                f"previous_logits={self._prev_logits}, "
+                f"previous_logits_id={self._prev_logits_idx})")
 
 
 class Sequence:
@@ -560,9 +560,9 @@ class Sequence:
 
     def append_token_id(self, token_id: int, logprobs: Dict[int,
                                                             Logprob]) -> None:
-        assert token_id in logprobs
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        self.data.append_token_id(token_id,
+            logprobs[token_id].logprob if token_id in logprobs else None)
 
     def get_len(self) -> int:
         return self.data.get_len()

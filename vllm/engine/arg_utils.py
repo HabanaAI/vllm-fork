@@ -170,6 +170,7 @@ class EngineArgs:
 
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: Optional[bool] = None
+    enable_delayed_sampling: bool = False
 
     guided_decoding_backend: str = 'xgrammar'
     # Speculative decoding configuration.
@@ -594,6 +595,14 @@ class EngineArgs:
                             'This should be a JSON string that will be '
                             'parsed into a dictionary. Ignored if '
                             'tokenizer_pool_size is 0.')
+        
+        parser.add_argument(
+            '--enable-delayed-sampling',
+            action='store_true',
+            help='If set, the sampling will be delayed by 1 step. First '
+            'model request execution (prefill) will return an invalid token '
+            'id that will be discarded. Actual sampling of valid token ids '
+            'starts from second model execution.')
 
         # Multimodal related configs
         parser.add_argument(
@@ -1183,7 +1192,8 @@ class EngineArgs:
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
                              and parallel_config.use_ray),
             policy=self.scheduling_policy,
-            use_padding_aware_scheduling=self.use_padding_aware_scheduling)
+            use_padding_aware_scheduling=self.use_padding_aware_scheduling,)
+            #enable_delayed_sampling=self.enable_delayed_sampling)
         lora_config = LoRAConfig(
             bias_enabled=self.enable_lora_bias,
             max_lora_rank=self.max_lora_rank,

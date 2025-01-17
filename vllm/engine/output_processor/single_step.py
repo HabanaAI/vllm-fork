@@ -115,9 +115,11 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
         sampling_params = seq_group.sampling_params
 
         sample = outputs.samples[0]
+
         seq = seq_group.first_seq
         if not is_async:
-            seq.append_token_id(sample.output_token, sample.logprobs)
+            if sample.output_token != -1:
+                seq.append_token_id(sample.output_token, sample.logprobs)
         if sampling_params.detokenize and self.detokenizer:
             new_char_count = self.detokenizer.decode_sequence_inplace(
                 seq, sampling_params)
@@ -132,3 +134,6 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
         if seq.is_finished():
             for scheduler in self.scheduler:
                 scheduler.free_seq(seq)
+            
+            # DEBUG
+            logger.info("Seq finished")
