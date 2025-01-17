@@ -606,6 +606,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if is_fake_hpu():
             self.device_config.device = torch.device('cpu')
             self.device_config.device_type = 'cpu'
+            self.load_config.device = None
         self.device = self.device_config.device
         self.enforce_eager = self.model_config.enforce_eager
         self.max_num_seqs = self.scheduler_config.max_num_seqs
@@ -1911,15 +1912,6 @@ class HabanaProfilerCounterHelper:
             counters['const_block_size'] = cache_config.block_size
             self.logged_once = True
         return counters
-
-
-def unwrap_model(model):
-    if isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
-        return unwrap_model(model._orig_mod)
-    else:
-        model = list(vars(model)['_modules'].values())[0]
-        modules = list(vars(model)['_modules'].values())
-        return modules
 
 
 class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
