@@ -872,13 +872,14 @@ class MllamaTextCrossAttention(nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # Skip writing kv-cache for the initial profiling run.
-        if is_hpu and kv_cache is not None:
+        if is_hpu and kv_cache is not None and isinstance(kv_cache, tuple):
             assert self.attn.backend == _Backend.HPU_ATTN
             # During cross-attention decode, key & value will be None,
             # we don't need to cache them.
             if (k is not None) and (v is not None):
-                from vllm.attention.ops.hpu_paged_attn import HPUPagedAttention
                 from vllm_hpu_extension.utils import VLLMKVCache
+
+                from vllm.attention.ops.hpu_paged_attn import HPUPagedAttention
                 key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                     kv_cache, self.num_local_key_value_heads, self.head_dim)
                 cached_k = torch.cat([k[s:e] for s, e in kv_range_for_decode])
@@ -888,9 +889,9 @@ class MllamaTextCrossAttention(nn.Module):
                 k_cache = VLLMKVCache()
                 v_cache = VLLMKVCache()
                 key_cache = k_cache(cached_k, key_cache, block_indices,
-                                         block_offsets)
+                                    block_offsets)
                 value_cache = v_cache(cached_v, value_cache, block_indices,
-                                           block_offsets)
+                                      block_offsets)
         elif len(kv_cache.shape) > 1:
             i = torch.ones(1, dtype=torch.float32)
             if self.attn.backend in (_Backend.FLASH_ATTN,
@@ -955,8 +956,11 @@ class MllamaTextCrossAttention(nn.Module):
                 q_len, self.num_local_heads * self.head_dim)
             return output
         else:
-            output = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attention_mask, dropout_p=0.0)
+            output = F.scaled_dot_product_attention(q,
+                                                    k,
+                                                    v,
+                                                    attn_mask=attention_mask,
+                                                    dropout_p=0.0)
             output = output.permute(2, 0, 1, 3).reshape(
                 q_len, self.num_local_heads * self.head_dim)
             return output
