@@ -720,9 +720,9 @@ class GroupCoordinator:
                 # use group for GPU tensors
                 htorch.core.mark_step()
                 torch.hpu.synchronize()
-                _tmp_tensor = torch.empty_like(tensor)
-                _tmp_tensor.copy_(tensor)
-                torch.distributed.send(_tmp_tensor,
+                #_tmp_tensor = torch.empty_like(tensor)
+                #_tmp_tensor.copy_(tensor)
+                torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=group)
                 htorch.core.mark_step()
