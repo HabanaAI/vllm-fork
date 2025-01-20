@@ -373,6 +373,7 @@ class HpuModelAdapter:
     def _set_indices_and_offsets(self, metadata, block_size):
         slot_mapping = metadata.slot_mapping.flatten()
         indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+        decode_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
         if metadata.num_prefill_tokens > 0:
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
             offsets = None
@@ -380,7 +381,8 @@ class HpuModelAdapter:
             decode_slot_mapping = metadata.decode_slot_mapping.flatten()
             offsets = torch.fmod(decode_slot_mapping, block_size)
         metadata = metadata._replace(block_offsets=offsets,
-                                     block_indices=indices)
+                                     block_indices=indices,
+                                     decode_block_indices=decode_indices)
         return metadata
 
     def _update_metadata(self, attn_metadata, device,
@@ -1455,7 +1457,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
-        print('prepare_input_tensors')
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -1535,8 +1536,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # NOTE(kzawora): Here we diverge from GPU code - we don't
         # support mixed batches, so we either use decode or prefill
         # inputs, without coalescing.
-        '''if num_decode_tokens > 0:
-            import pdb; pdb.set_trace()'''
         '''assert (num_prefills == 0 and num_decode_tokens > 0) or (
             num_prefills > 0
             and num_decode_tokens == 0), "HPU does not support mixed batches!"'''
@@ -1710,6 +1709,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'num_decode_tokens',
             'decode_slot_mapping',
             'decode_block_list',
+            'decode_block_indices'
         ])
         return attention_metadata
 
