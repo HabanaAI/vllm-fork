@@ -67,6 +67,7 @@ def test_models(
     ) as vllm_model:
         vllm_outputs = vllm_model.generate_greedy(example_prompts, max_tokens)
 
+    print(vllm_outputs)
     check_outputs_equal(
         outputs_0_lst=hf_outputs,
         outputs_1_lst=vllm_outputs,

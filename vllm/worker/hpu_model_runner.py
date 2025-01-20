@@ -371,10 +371,11 @@ class HpuModelAdapter:
         return metadata
 
     def _set_indices_and_offsets(self, metadata, block_size):
-        slot_mapping = metadata.slot_mapping.flatten()
-        indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        decode_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+        indices = None
+        decode_indices = None
         if metadata.num_prefill_tokens > 0:
+            slot_mapping = metadata.slot_mapping.flatten()
+            indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
             offsets = None
         if metadata.num_decode_tokens > 0:
@@ -1094,9 +1095,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for bt in prefix_block_tables))
 
             # TODO: pad to proper len
-            pad_len = len(prefix_block_list)
+            '''pad_len = len(prefix_block_list)
             prefix_block_list = pad_list(prefix_block_list, pad_len,
-                                         _PAD_BLOCK_ID)
+                                         _PAD_BLOCK_ID)'''
 
             prefix_block_list_tensor = torch.tensor(prefix_block_list,
                                                     dtype=torch.long,
@@ -1648,6 +1649,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             attn_metadata = decode_attn_metadata
             attn_metadata.decode_slot_mapping = decode_attn_metadata.slot_mapping
             attn_metadata.decode_block_list = decode_attn_metadata.block_list
+            attn_metadata.block_list = None
+            attn_metadata.slot_mapping = None
 
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata

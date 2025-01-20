@@ -216,8 +216,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         hidden_size: int = 0
         prefill_query = query[:attn_metadata.num_prefill_tokens]
-        prefill_key = value[:attn_metadata.num_prefill_tokens]
-        prefill_value = key[:attn_metadata.num_prefill_tokens]
+        prefill_key = key[:attn_metadata.num_prefill_tokens]
+        prefill_value = value[:attn_metadata.num_prefill_tokens]
         decode_query = query[attn_metadata.num_prefill_tokens:]
         decode_key = key[attn_metadata.num_prefill_tokens:]
         decode_value = value[attn_metadata.num_prefill_tokens:]
@@ -242,7 +242,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             prefill_key = prefill_key.reshape(-1, self.num_kv_heads, self.head_size)
             prefill_value = prefill_value.reshape(-1, self.num_kv_heads, self.head_size)
             block_indices = attn_metadata.block_indices
-            block_offsets = attn_metadata.block_offsets
+            block_offsets = None
             prefill_key = prefill_key.unflatten(0, (block_indices.size(0), -1))
             prefill_value = prefill_value.unflatten(0, (block_indices.size(0), -1))
             if kv_cache is not None:
@@ -253,9 +253,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory profiling run.
                 prefill_key_cache = self.k_cache(prefill_key, key_cache, block_indices,
-                                        None)
+                                        block_offsets)
                 prefill_value_cache = self.v_cache(prefill_value, value_cache, block_indices,
-                                        None)
+                                        block_offsets)
             htorch.core.mark_step()
         if attn_metadata.num_decode_tokens > 0:
             # decode preprocessing
@@ -386,13 +386,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         htorch.core.mark_step()
         # Reshape the output tensor.
         if decode_output is None:
-            return prompt_output.view(prefill_batch_size * prefill_seq_len, prefill_hidden_size)
+            prompt_output = prompt_output.view(prefill_batch_size * prefill_seq_len, prefill_hidden_size)
+            return prompt_output
         elif prompt_output is None:
             return decode_output.view(decode_batch_size * decode_seq_len, decode_hidden_size)
         else:
-            prompt_output = prompt_output.view(prefill_batch_size * prefill_seq_len, hidden_size)
-            decode_output = decode_output.view(decode_batch_size * decode_seq_len, hidden_size)
-            return torch.cat((prompt_output, decode_output))
+            prompt_output = prompt_output.view(prefill_batch_size * prefill_seq_len, prefill_hidden_size)
+            decode_output = decode_output.view(decode_batch_size * decode_seq_len, decode_hidden_size)
+            output = torch.cat((prompt_output, decode_output))
+            htorch.core.mark_step()
+            return output
 
     def forward_encoder_decoder(
         self,
