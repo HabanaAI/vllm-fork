@@ -357,7 +357,7 @@ class HpuModelAdapter:
             metadata = metadata._replace(block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
         metadata = metadata._replace(block_mapping=block_mapping,
-                                     attn_bias=attn_bias)
+                                     decode_attn_bias=attn_bias)
         return metadata
 
     def _set_block_scales(self, metadata, device):
@@ -379,6 +379,7 @@ class HpuModelAdapter:
             offsets = None
         if metadata.num_decode_tokens > 0:
             decode_slot_mapping = metadata.decode_slot_mapping.flatten()
+            decode_indices = torch.div(decode_slot_mapping, block_size, rounding_mode="floor")
             offsets = torch.fmod(decode_slot_mapping, block_size)
         metadata = metadata._replace(block_offsets=offsets,
                                      block_indices=indices,
@@ -1709,7 +1710,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'num_decode_tokens',
             'decode_slot_mapping',
             'decode_block_list',
-            'decode_block_indices'
+            'decode_block_indices',
+            'decode_attn_bias'
         ])
         return attention_metadata
 

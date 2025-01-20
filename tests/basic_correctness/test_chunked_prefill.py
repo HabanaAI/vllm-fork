@@ -25,7 +25,7 @@ MODELS = [
 
 
 @pytest.mark.parametrize("model", MODELS)
-@pytest.mark.parametrize("dtype", ["half"])
+@pytest.mark.parametrize("dtype", ["bfloat16"])
 @pytest.mark.parametrize("max_tokens", [32])
 @pytest.mark.parametrize("chunked_prefill_token_size", [4,])
 @pytest.mark.parametrize("enforce_eager", [True])

@@ -95,6 +95,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     decode_slot_mapping: Optional[torch.Tensor] = None
     decode_block_list: Optional[torch.Tensor] = None
     decode_block_indices: Optional[torch.Tensor] = None
+    decode_attn_bias: Optional[torch.Tensor] = None
 
 
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
@@ -214,12 +215,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             )
 
         hidden_size: int = 0
-        prefill_query = query[:attn_metadata.num_prefill_tokens].clone()
-        prefill_key = key[:attn_metadata.num_prefill_tokens].clone()
-        prefill_value = value[:attn_metadata.num_prefill_tokens].clone()
-        decode_query = query[attn_metadata.num_prefill_tokens:].clone()
-        decode_key = key[attn_metadata.num_prefill_tokens:].clone()
-        decode_value = value[attn_metadata.num_prefill_tokens:].clone()
+        prefill_query = query[:attn_metadata.num_prefill_tokens]
+        prefill_key = value[:attn_metadata.num_prefill_tokens]
+        prefill_value = key[:attn_metadata.num_prefill_tokens]
+        decode_query = query[attn_metadata.num_prefill_tokens:]
+        decode_key = key[attn_metadata.num_prefill_tokens:]
+        decode_value = value[attn_metadata.num_prefill_tokens:]
         htorch.core.mark_step()
         if attn_metadata.num_prefill_tokens > 0:
             # prefill preprocessing
@@ -252,22 +253,19 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory profiling run.
                 prefill_key_cache = self.k_cache(prefill_key, key_cache, block_indices,
-                                        block_offsets)
+                                        None)
                 prefill_value_cache = self.v_cache(prefill_value, value_cache, block_indices,
-                                        block_offsets)
+                                        None)
             htorch.core.mark_step()
         if attn_metadata.num_decode_tokens > 0:
             # decode preprocessing
             hidden_size = decode_query.shape[-1]
-            print(decode_query.shape, hidden_size)
             decode_query = decode_query.reshape(attn_metadata.num_decode_tokens,
                                 1, hidden_size)
             hidden_size = decode_key.shape[-1]
-            print(decode_key.shape, hidden_size)
             decode_key = decode_key.reshape(attn_metadata.num_decode_tokens,
                                 1, hidden_size)
             hidden_size = decode_value.shape[-1]
-            print(decode_value.shape, hidden_size)
             decode_value = decode_value.reshape(attn_metadata.num_decode_tokens,
                                 1, hidden_size)
             decode_batch_size, decode_seq_len, decode_hidden_size = decode_query.shape
@@ -369,14 +367,13 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             batch_size = decode_batch_size
             seq_len = decode_seq_len
             hidden_size = decode_hidden_size
-            htorch.core.mark_step()
             decode_output = HPUPagedAttention.forward_decode(
                 query=query,
                 key_cache=decode_key_cache,
                 value_cache=decode_value_cache,
                 block_list=attn_metadata.decode_block_list,
                 block_mapping=attn_metadata.block_mapping,
-                block_bias=attn_metadata.attn_bias,
+                block_bias=attn_metadata.decode_attn_bias,
                 block_scales=attn_metadata.block_scales,
                 block_groups=attn_metadata.block_groups,
                 scale=self.scale,
@@ -386,7 +383,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block2batch_matmul_op=self.block2batch_matmul,
                 keys_fetch_func=self.k_cache.fetch_from_cache,
                 values_fetch_func=self.v_cache.fetch_from_cache)
-            print(decode_output.shape, decode_output.to('cpu'))
         htorch.core.mark_step()
         # Reshape the output tensor.
         if decode_output is None:
