@@ -330,7 +330,7 @@ class HpuModelAdapter:
         # get length of each sequence
         repeated_idx = attn_metadata.repeated_idx_tensor.view(1,-1).expand(max_seq_len, -1)
         # create tensor with all indices from 0 to T-1 repeated T times along dimesion 1
-        mask_indices = torch.arange(max_seq_len, dtype=dtype, device=device).view(-1,1).expand(-1, max_seq_len)
+        mask_indices = torch.arange(0, max_seq_len, dtype=torch.long, device=device).view(-1,1).expand(-1, max_seq_len)
         # create causal mask and additionally mask out all tokens from preceeding sequences
         mask = mask_indices.le(repeated_idx)
         causal_mask = torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device).tril()
