@@ -44,9 +44,6 @@ from vllm.utils import direct_register_custom_op, supports_custom_op
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
-if current_platform.is_hpu():
-    import habana_frameworks.torch as htorch
-
 @dataclass
 class GraphCaptureContext:
     stream: torch.cuda.Stream

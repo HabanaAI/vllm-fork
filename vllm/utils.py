@@ -2270,6 +2270,8 @@ def bind_kv_cache(
         if ctx[layer_name].attn_type in (AttentionType.DECODER,
                                          AttentionType.ENCODER_DECODER)
     ]
+    for layer_need_kv_cache_n in layer_need_kv_cache:
+        print(f'layer_need_kv_cache_n = {layer_need_kv_cache_n}')
     layer_index_sorted = sorted(
         set(
             extract_layer_index(layer_name)
@@ -2278,6 +2280,8 @@ def bind_kv_cache(
         kv_cache_idx = layer_index_sorted.index(
             extract_layer_index(layer_name))
         forward_ctx = ctx[layer_name]
+        print(f'frw.kv_cache len = {len(forward_ctx.kv_cache)}, kv_cache len = {len(kv_cache)}')
+        #print(f'frw.kv_cache = {forward_ctx.kv_cache}, kv_cache = {kv_cache}')
         assert len(forward_ctx.kv_cache) == len(kv_cache)
         for ve, ve_kv_cache in enumerate(kv_cache):
             forward_ctx.kv_cache[ve] = ve_kv_cache[kv_cache_idx]
