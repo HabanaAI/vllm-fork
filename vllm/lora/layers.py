@@ -51,6 +51,9 @@ def _get_lora_device(base_layer: nn.Module) -> torch.device:
     # marlin
     elif hasattr(base_layer, "B"):
         return base_layer.B.device
+    # HQQ marlin
+    elif hasattr(base_layer, "W_q"):
+        return base_layer.W_q.device
     else:
         raise ValueError(f"Unsupported base layer: {base_layer}")
 
@@ -232,7 +235,6 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         added_tokens_mask = x > self.base_layer.org_vocab_size - 1
-        embeddings_indices = None
         embeddings_indices = self.punica_wrapper.embeddings_indices
         indices = embeddings_indices[1].view_as(x)
         full_lora_a_embeddings = F.embedding(
@@ -938,8 +940,8 @@ class LogitsProcessorWithLoRA(BaseLayerWithLoRA):
         return self.base_layer.soft_cap
 
     @property
-    def use_gather(self):
-        return self.base_layer.use_gather
+    def use_all_gather(self):
+        return self.base_layer.use_all_gather
 
     @property
     def org_vocab_size(self):
