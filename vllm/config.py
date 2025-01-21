@@ -172,8 +172,7 @@ class ModelConfig:
             hf_overrides: Optional[HfOverrides] = None,
             mm_processor_kwargs: Optional[Dict[str, Any]] = None,
             override_neuron_config: Optional[Dict[str, Any]] = None,
-            override_pooler_config: Optional["PoolerConfig"] = None,
-            enable_delayed_sampling: bool = False) -> None:
+            override_pooler_config: Optional["PoolerConfig"] = None) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.tokenizer_mode = tokenizer_mode
@@ -218,7 +217,6 @@ class ModelConfig:
         self.max_logprobs = max_logprobs
         self.disable_sliding_window = disable_sliding_window
         self.skip_tokenizer_init = skip_tokenizer_init
-        self.enable_delayed_sampling = enable_delayed_sampling
 
         hf_config = get_config(self.model, trust_remote_code, revision,
                                code_revision, config_format)
@@ -1118,6 +1116,7 @@ class SchedulerConfig:
     preemption_mode: Optional[str] = None
 
     num_scheduler_steps: int = 1
+    enable_delayed_sampling: bool = False
 
     multi_step_stream_outputs: bool = False
 
@@ -1208,6 +1207,11 @@ class SchedulerConfig:
                 "num_scheduler_steps "
                 f"({self.num_scheduler_steps}) must be greater than or "
                 "equal to 1.")
+        if self.enable_delayed_sampling and self.num_lookahead_slots != 1:
+            raise ValueError(
+                "num_lookahead_slots "
+                f"({self.num_lookahead_slots}) must be 1 for delayed sampling."
+            )
         if self.max_num_prefill_seqs is not None \
             and not self.use_padding_aware_scheduling:
             raise ValueError("max_num_prefill_seqs can be only "

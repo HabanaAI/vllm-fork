@@ -136,4 +136,4 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
                 scheduler.free_seq(seq)
             
             # DEBUG
-            logger.info("Seq finished")
+            #logger.info("Seq finished")

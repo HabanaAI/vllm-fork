@@ -1192,8 +1192,8 @@ class EngineArgs:
             send_delta_data=(envs.VLLM_USE_RAY_SPMD_WORKER
                              and parallel_config.use_ray),
             policy=self.scheduling_policy,
-            use_padding_aware_scheduling=self.use_padding_aware_scheduling,)
-            #enable_delayed_sampling=self.enable_delayed_sampling)
+            use_padding_aware_scheduling=self.use_padding_aware_scheduling,
+            enable_delayed_sampling=self.enable_delayed_sampling)
         lora_config = LoRAConfig(
             bias_enabled=self.enable_lora_bias,
             max_lora_rank=self.max_lora_rank,
