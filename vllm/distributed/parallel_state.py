@@ -40,9 +40,13 @@ import vllm.envs as envs
 from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
 from vllm.utils import direct_register_custom_op, supports_custom_op
+from vllm.platforms import current_platform
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
+
+if current_platform.is_hpu():
+    import habana_frameworks.torch as htorch
 
 @dataclass
 class GraphCaptureContext:

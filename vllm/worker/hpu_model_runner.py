@@ -412,8 +412,6 @@ class HpuModelAdapter:
             self._prepare_cos_sin(kwargs['positions'])
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
                                  virtual_engine):
-            if get_pp_group().is_last_rank:
-                print("LAST RANK")
             hidden_states = self.model(*args, **kwargs)
             if not get_pp_group().is_last_rank:
                 pass
