@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional
 
 import torch
 
+from vllm import envs
 from vllm.logger import init_logger
 
 from .interface import Platform, PlatformEnum, _Backend
@@ -41,10 +42,17 @@ class HpuPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         if parallel_config.worker_cls == "auto":
-            if scheduler_config.is_multi_step:
+            if envs.VLLM_USE_V1:
+                parallel_config.worker_cls = \
+                    "vllm.v1.worker.hpu_worker.HPUWorker"
+            elif scheduler_config.is_multi_step:
+                if envs.VLLM_USE_V1:
+                    raise NotImplementedError
                 parallel_config.worker_cls = \
                     "vllm.worker.multi_step_hpu_worker.MultiStepHPUWorker"
             elif vllm_config.speculative_config:
+                if envs.VLLM_USE_V1:
+                    raise NotImplementedError
                 parallel_config.worker_cls = \
                     "vllm.spec_decode.spec_decode_worker.create_spec_worker"
                 parallel_config.sd_worker_cls = \

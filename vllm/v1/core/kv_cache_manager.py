@@ -1,10 +1,12 @@
+import os
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from vllm.logger import init_logger
 from vllm.utils import cdiv
-from vllm.v1.core.kv_cache_utils import (BlockHashType, FreeKVCacheBlockQueue,
-                                         KVCacheBlock,
+from vllm.v1.core.kv_cache_utils import (BlockHashType,
+                                         FreeKVCacheBlockHeapQueue,
+                                         FreeKVCacheBlockQueue, KVCacheBlock,
                                          generate_block_hash_extra_keys,
                                          hash_block_tokens,
                                          hash_request_tokens)
@@ -29,7 +31,8 @@ class KVCacheManager:
         self.max_model_len = max_model_len
         self.max_num_blocks_per_req = cdiv(max_model_len, block_size)
         self.sliding_window = sliding_window
-        self.enable_caching = enable_caching
+        self.enable_caching = os.environ.get('VLLM_ENABLE_PREFIX_CACHING',
+                                             'true') in ['true', '1']
         # NOTE(woosuk): To avoid frequent block allocation, we preallocate some
         # blocks for each request. For example, when a request reaches the end
         # of its block table, we preallocate N blocks in advance. This way, we
@@ -45,12 +48,14 @@ class KVCacheManager:
 
         # A Block pool of all kv-cache blocks.
         self.block_pool: List[KVCacheBlock] = [
-            KVCacheBlock(idx) for idx in range(num_gpu_blocks)
+            KVCacheBlock(idx) for idx in range(1, num_gpu_blocks)
         ]
         # Free block queue that constructs and manipulates a doubly linked
         # list of free blocks (including eviction candidates when caching is
         # enabled).
-        self.free_block_queue = FreeKVCacheBlockQueue(self.block_pool)
+        block_queue_impl = FreeKVCacheBlockHeapQueue if os.environ.get(
+            'VLLM_USE_HEAPQ') in ['1', 'true'] else FreeKVCacheBlockQueue
+        self.free_block_queue = block_queue_impl(self.block_pool)
 
         # {block_hash: {block ID: block}}. A cached block is
         # a full block with a block hash that can be used for prefix caching.

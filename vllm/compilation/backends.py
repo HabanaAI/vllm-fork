@@ -15,6 +15,7 @@ import torch.fx as fx
 import vllm.envs as envs
 from vllm.config import CompilationConfig, VllmConfig
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 from vllm.utils import weak_ref_tensors
 
 from .counter import compilation_counter
@@ -440,7 +441,7 @@ class VllmBackend:
         vllm_config: VllmConfig,
     ):
         global global_graph_pool
-        if global_graph_pool is None:
+        if global_graph_pool is None and current_platform.is_cuda_alike():
             global_graph_pool = torch.cuda.graph_pool_handle()
 
         # TODO: in the future, if we want to use multiple

@@ -48,7 +48,8 @@ class Sampler(nn.Module):
         # Sample the next token.
         sampled = self.sample(logits, sampling_metadata)
         # Use int32 to reduce the tensor size.
-        sampled = sampled.to(torch.int32)
+        #        sampled = sampled.to(torch.int32)
+        sampled = sampled  # .to(torch.int32) NOTE(kzawora): WHY DO WE HAVE AN UNDEFINED BEHAVIOR HERE?! IN WHICH WORLD DOES 75696 INT64 CAST TO -828218624 INT32?!? HOW CAN ARGMAX EVEN RETURN -828218624?! >_< # NOQA
 
         # NOTE: CPU-GPU synchronization happens here.
         sampler_output = SamplerOutput(
