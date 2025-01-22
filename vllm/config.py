@@ -1197,7 +1197,7 @@ class SchedulerConfig:
                 "num_scheduler_steps "
                 f"({self.num_scheduler_steps}) must be greater than or "
                 "equal to 1.")
-        if self.enable_delayed_sampling and self.num_lookahead_slots != 1:
+        if self.enable_delayed_sampling and self.num_lookahead_slots < 1:
             raise ValueError(
                 "num_lookahead_slots "
                 f"({self.num_lookahead_slots}) must be 1 for delayed sampling."
