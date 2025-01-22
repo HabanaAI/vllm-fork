@@ -801,12 +801,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_group_metadata_list = seq_group_metadata_list.copy()
 
         if batch_size_padding > 0:
-            sampling_temperatures = [
-                seq_group_metadata.sampling_params.temperature
-                for seq_group_metadata in seq_group_metadata_list
-            ]
-            temperature = 0 if 0 in sampling_temperatures else 1.0
-
+            has_greedy_samples = any(
+                seq_group_metadata.sampling_params.temperature == 0.0
+                for seq_group_metadata in seq_group_metadata_list)
+            temperature = 0.0 if has_greedy_samples else 1.0
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
                 0, 0, is_prompt, temperature=temperature)
             seq_group_metadata_list.extend(dummy_seq_group_metadata
