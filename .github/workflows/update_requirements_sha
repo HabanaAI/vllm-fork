@@ -1,0 +1,19 @@
+name: update-requirements-sha
+on:
+  push:
+    branches:
+      - habana_main
+  pull_request:
+    branches:
+      - habana_main
+jobs:
+  updaterequirements:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    steps:
+    - name: Get vllm-hpu-extension latest
+      run: |
+        LATEST=git ls-remote https://github.com/HabanaAI/vllm-hpu-extension.git HEAD | awk '{ print substr($1, 1, 7)}'
+        echo $LATEST
