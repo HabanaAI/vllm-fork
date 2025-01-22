@@ -636,6 +636,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.model_config.is_attention_free,
         ) if needs_attn_backend else None
 
+        torch._dynamo.config.cache_size_limit = \
+            2 + self.model_config.get_num_layers(self.parallel_config)
+        torch._dynamo.config.accumulated_cache_size_limit = \
+            8 * torch._dynamo.config.cache_size_limit
+
         # Multi-modal data support
         self.input_registry = input_registry
         self.mm_registry = mm_registry
@@ -1721,8 +1726,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_ctx.generate_prompt_buckets()
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
-            multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
-                                        'true').lower() == 'true' else 1
+            multiplier = 2 + self.model_config.get_num_layers(
+                self.parallel_config) if os.getenv(
+                    'VLLM_REGIONAL_COMPILATION',
+                    'true').lower() == 'true' else 1
             cache_size_limit = 1 + multiplier * (
                 len(self.bucketing_ctx.prompt_buckets) +
                 len(self.bucketing_ctx.decode_buckets))
