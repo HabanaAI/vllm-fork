@@ -15,5 +15,5 @@ jobs:
     steps:
     - name: Get vllm-hpu-extension latest
       run: |
-        LATEST=git ls-remote https://github.com/HabanaAI/vllm-hpu-extension.git HEAD | awk '{ print substr($1, 1, 7)}'
+        LATEST="git ls-remote https://github.com/HabanaAI/vllm-hpu-extension.git HEAD | awk '{ print substr($1, 1, 7)}'"
         echo $LATEST
