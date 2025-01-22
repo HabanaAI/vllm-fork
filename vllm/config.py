@@ -780,15 +780,11 @@ class CacheConfig:
                 "GPU memory utilization must be less than 1.0. Got "
                 f"{self.gpu_memory_utilization}.")
         
-        # if self.enable_delayed_sampling and self.num_lookahead_slots != 1:
-        #     raise ValueError(
-        #         "num_lookahead_slots "
-        #         f"({self.num_lookahead_slots}) must be 1 for delayed sampling."
-        #     )
-        # if self.enable_delayed_sampling and not self.use_v2_block_manager:
-        #     raise ValueError("use_v2_block_manager "
-        #                      f"({self.use_v2_block_manager}) must be True "
-        #                      "for delayed sampling.")
+        if self.enable_delayed_sampling and self.num_lookahead_slots != 1:
+            raise ValueError(
+                "num_lookahead_slots "
+                f"({self.num_lookahead_slots}) must be 1 for delayed sampling."
+            )
 
     def _verify_cache_dtype(self) -> None:
         if self.cache_dtype == "auto":
