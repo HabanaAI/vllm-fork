@@ -2186,7 +2186,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 model_kwargs["input_ids"] = output.sampled_token_ids
                 broadcast_tensor_dict(model_kwargs, src=0)
                 input_ids = output.sampled_token_ids
-            elif not is_prompt:
+            elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
                 model_kwargs = broadcast_tensor_dict(src=0)
                 input_ids = model_kwargs["input_ids"]
             if input_ids is not None:
