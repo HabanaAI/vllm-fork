@@ -51,6 +51,9 @@ def _get_lora_device(base_layer: nn.Module) -> torch.device:
     # marlin
     elif hasattr(base_layer, "B"):
         return base_layer.B.device
+    # HQQ marlin
+    elif hasattr(base_layer, "W_q"):
+        return base_layer.W_q.device
     else:
         raise ValueError(f"Unsupported base layer: {base_layer}")
 
@@ -232,7 +235,6 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         added_tokens_mask = x > self.base_layer.org_vocab_size - 1
-        embeddings_indices = None
         embeddings_indices = self.punica_wrapper.embeddings_indices
         indices = embeddings_indices[1].view_as(x)
         full_lora_a_embeddings = F.embedding(
@@ -406,7 +408,9 @@ class ReplicatedLinearWithLoRA(BaseLinearLayerWithLoRA):
         self.output_size = self.base_layer.output_size
         self.n_slices = 1
 
-    def forward(self, input_):
+    def forward(
+        self, input_: torch.Tensor
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Forward of ReplicatedLinearWithLoRA
 
         Args:
@@ -426,8 +430,9 @@ class ReplicatedLinearWithLoRA(BaseLinearLayerWithLoRA):
                        if self.base_layer.skip_bias_add else None)
         return output, output_bias
 
+    # ReplicatedLinear should always be replaced, regardless of the fully
+    # sharded LoRAs setting, because it is, by definition, copied per GPU.
     @classmethod
-    @_not_fully_sharded_can_replace
     def can_replace_layer(
         cls,
         source_layer: nn.Module,
@@ -479,7 +484,7 @@ class ColumnParallelLinearWithLoRA(BaseLinearLayerWithLoRA):
         # ColumnParallelLinear.
         else:
             tensor_model_parallel_rank = get_tensor_model_parallel_rank()
-            shard_size = self.output_dim
+            shard_size = self.output_size
             start_idx = tensor_model_parallel_rank * shard_size
             end_idx = (tensor_model_parallel_rank + 1) * shard_size
             lora_b = lora_b[:, start_idx:end_idx]
@@ -490,13 +495,15 @@ class ColumnParallelLinearWithLoRA(BaseLinearLayerWithLoRA):
         if bias is None:
             return bias
         tensor_model_parallel_rank = get_tensor_model_parallel_rank()
-        shard_size = self.output_dim
+        shard_size = self.output_size
         start_idx = tensor_model_parallel_rank * shard_size
         end_idx = (tensor_model_parallel_rank + 1) * shard_size
         bias = bias[start_idx:end_idx]
         return bias
 
-    def forward(self, input_):
+    def forward(
+        self, input_: torch.Tensor
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Forward of ColumnParallelLinear
 
         Args:
@@ -833,7 +840,9 @@ class RowParallelLinearWithLoRA(BaseLinearLayerWithLoRA):
     def slice_bias(self, bias: torch.Tensor) -> torch.Tensor:
         return bias
 
-    def forward(self, input_):
+    def forward(
+        self, input_: torch.Tensor
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Forward of RowParallelLinear
 
         Args:
@@ -931,8 +940,8 @@ class LogitsProcessorWithLoRA(BaseLayerWithLoRA):
         return self.base_layer.soft_cap
 
     @property
-    def use_gather(self):
-        return self.base_layer.use_gather
+    def use_all_gather(self):
+        return self.base_layer.use_all_gather
 
     @property
     def org_vocab_size(self):
