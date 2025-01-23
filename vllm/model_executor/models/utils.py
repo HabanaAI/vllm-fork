@@ -360,6 +360,16 @@ def _merge_multimodal_embeddings(
     Note:
         This updates ``inputs_embeds`` in place.
     """
+    ## --
+    ## really bad WA for placeholders - to fix
+    missmatch = is_multimodal.sum().item() - _flatten_embeddings(multimodal_embeddings).shape[0]
+    if missmatch:
+        flat_is_multimodal = is_multimodal.flatten()
+        true_indices = torch.where(flat_is_multimodal == True)[0]
+        indices_to_remove = true_indices[-missmatch:] if missmatch > 0 else []
+        flat_is_multimodal[indices_to_remove] = False
+        is_multimodal = flat_is_multimodal.reshape(is_multimodal.shape)
+    ## --
     num_expected_tokens = is_multimodal.sum().item()
     assert isinstance(num_expected_tokens, int)
 
