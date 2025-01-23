@@ -396,7 +396,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         set_random_seed(self.model_config.seed)
 
     @property
-    def do_metadata_broadcast(self) -> bool: 
+    def do_metadata_broadcast(self) -> bool:
         return self.parallel_config.tensor_parallel_size > 1
 
     @property

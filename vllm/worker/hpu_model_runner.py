@@ -198,7 +198,7 @@ def get_path_to_rope(model: torch.nn.Module):
             for child_name, child_module in parent.named_children():
                 # If the current child is of type RotaryEmbedding,
                 # return the full path
-                if child_module.__class__.__name__.endswith("RotaryEmbedding"):    
+                if child_module.__class__.__name__.endswith("RotaryEmbedding"): 
                     return path + [child_name]
                 # Otherwise, recurse into this child to check its children
                 result = find_rope_layer(child_module, path + [child_name])
@@ -368,10 +368,8 @@ class HpuModelAdapter:
         current_module = self.model  # Start from the top level of the model
 
         for layer in self.layer_names:
-            # If the current layer is a string, it's a name (for named_children)
-            if layer.isdigit(
-            ):  # Check if the layer is an index (numeric as string)
-                layer = int(layer)  # Convert to integer if it's an index
+            if layer.isdigit():  # Check if the layer is an index
+                layer = int(layer)
 
             # Check if the current layer is a name in a module
             if isinstance(
@@ -384,18 +382,14 @@ class HpuModelAdapter:
 
         # At the end, we should be at the RotaryEmbedding layer.
         if hasattr(current_module, 'prepare_cos_sin'):
-            current_module.prepare_cos_sin(positions)
+            current_module.prepare_cos_sin(
+                positions, recompute_cos_sin=self.recompute_cos_sin)
         else:
             raise AttributeError(
                 "The module at the end of the path does not have \
                 a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
-        '''
-        if not get_pp_group().is_first_rank:
-            for key, tensor in kwargs['intermediate_tensors'].tensors.items():
-                kwargs['intermediate_tensors'][key] = torch.empty_like(tensor).copy_(tensor)
-        '''
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
@@ -416,8 +410,10 @@ class HpuModelAdapter:
             if not get_pp_group().is_last_rank:
                 pass
             else:
-                hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-                hidden_states = hidden_states.index_select(0, selected_token_indices)
+                hidden_states = hidden_states.view(
+                        -1, hidden_states.shape[-1])
+                hidden_states = hidden_states.index_select(
+                        0, selected_token_indices)
         
         return hidden_states
 
@@ -1600,16 +1596,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        #print(f'num_layers = {num_layers} \n self.parallel_config = {self.parallel_config}')
         kv_caches = [None] * num_layers
-        #print(f'kv_caches = {[kv_caches]} \n kv_caches len = {len([kv_caches])}')
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
             [[None] * num_layers for _ in range(self.parallel_config.pipeline_parallel_size)])
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
-        
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
         return
@@ -2254,8 +2247,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 assert model_input.lora_ids is not None
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
-                    attn_metadata.is_prompt)
-            
+                    attn_metadata.is_prompt) 
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -2315,7 +2307,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
-
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
@@ -2339,7 +2330,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
-                                                            sampling_metadata)
+                                                       sampling_metadata)
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:

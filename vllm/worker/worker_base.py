@@ -389,8 +389,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         start_time = time.perf_counter()
         inputs = self.prepare_input(execute_model_req)
         if inputs is None:
-            return None
-        
+            return None 
         model_input, worker_input, kwargs = inputs
         num_steps = worker_input.num_steps
 
@@ -398,7 +397,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         if worker_input.num_seq_groups == 0:
             return []
-        
         intermediate_tensors = None
         orig_model_execute_time = 0.0
         if not get_pp_group().is_first_rank:

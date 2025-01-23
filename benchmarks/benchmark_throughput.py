@@ -498,10 +498,6 @@ if __name__ == "__main__":
         help="Path to the lora adapters to use. This can be an absolute path, "
         "a relative path, or a Hugging Face model identifier.")
 
-    parser.add_argument("--pipeline_parallel_size",
-                        type=int,
-                        default=1,
-                        help="Piepeline parallel size.")
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
     if args.tokenizer is None:
