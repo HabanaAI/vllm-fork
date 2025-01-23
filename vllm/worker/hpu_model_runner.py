@@ -425,9 +425,6 @@ class HpuModelAdapter:
     def make_empty_intermediate_tensors(self, *args, **kwargs):
         return self.model.make_empty_intermediate_tensors(*args, **kwargs)
 
-    def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
-        return self.model.embed_tokens(input_ids)
-
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
 
