@@ -19,7 +19,9 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
+import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing import HPUBucketingContext
+from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
@@ -214,8 +216,7 @@ class HpuModelAdapter:
 
     def __init__(self, model, vllm_config, layer_names):
         self.model = model
-        self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
-                                               '0').lower() in ['1', 'true']
+        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
         self.vllm_config = vllm_config
@@ -597,6 +598,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
         ModelRunnerBase.__init__(self, vllm_config=vllm_config)
+        environment.set_model_config(self.model_config)
         self.is_driver_worker = is_driver_worker
         self.return_hidden_states = return_hidden_states
 
@@ -789,6 +791,25 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.model_memory_usage = m.consumed_device_memory
         msg = f"Loading model weights took in total {m.get_summary_string()}"
         logger.info(msg)
+
+    def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
+        real_batch_size = len(seq_group_metadata_list)
+        batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
+            real_batch_size, is_prompt)
+        batch_size_padding = batch_size_padded - real_batch_size
+
+        seq_group_metadata_list = seq_group_metadata_list.copy()
+
+        if batch_size_padding > 0:
+            has_greedy_samples = any(
+                seq_group_metadata.sampling_params.temperature == 0.0
+                for seq_group_metadata in seq_group_metadata_list)
+            temperature = 0.0 if has_greedy_samples else 1.0
+            dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
+                0, 0, is_prompt, temperature=temperature)
+            seq_group_metadata_list.extend(dummy_seq_group_metadata
+                                           for _ in range(batch_size_padding))
+        return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         return htorch.hpu.wrap_in_hpu_graph(
@@ -1254,16 +1275,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         base_event_name = 'prompt' if is_prompt else 'decode'
         self.profiler.start('internal', base_event_name)
 
-        real_batch_size = len(seq_group_metadata_list)
-        batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
-            real_batch_size, is_prompt)
-        batch_size_padding = batch_size_padded - real_batch_size
-        seq_group_metadata_list = seq_group_metadata_list.copy()
-        if batch_size_padding > 0:
-            dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
-                0, 0, is_prompt)
-            seq_group_metadata_list.extend(dummy_seq_group_metadata
-                                           for _ in range(batch_size_padding))
+        seq_group_metadata_list, real_batch_size, batch_size_padded = (
+            self._add_dummy_seq(seq_group_metadata_list, is_prompt))
 
         prefill_reqs = []
         decode_reqs = []
@@ -2064,19 +2077,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         return lora_mask, lora_logits_mask
 
-    def add_dummy_seq(self, seq_group_metadata_list, is_prompt):
-        real_batch_size = len(seq_group_metadata_list)
-        batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
-            real_batch_size, is_prompt)
-        batch_size_padding = batch_size_padded - real_batch_size
-        seq_group_metadata_list = seq_group_metadata_list.copy()
-        if batch_size_padding > 0:
-            dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
-                0, 0, is_prompt)
-            seq_group_metadata_list.extend(dummy_seq_group_metadata
-                                           for _ in range(batch_size_padding))
-        return seq_group_metadata_list
-
     @torch.inference_mode()
     def execute_model(
         self,
@@ -2253,7 +2253,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             for j, data in seq_group_metadata.seq_data.items():
                                 cache_orig_output_tokens_len[seq_idx][j] = \
                                     len(data.output_token_ids)
-                    seq_group_metadata_list = self.add_dummy_seq(
+                    seq_group_metadata_list, _, _ = self._add_dummy_seq(
                         seq_group_metadata_list, is_prompt=False)
                     for seq_group_metadata in seq_group_metadata_list:
                         for data in seq_group_metadata.seq_data.values():
