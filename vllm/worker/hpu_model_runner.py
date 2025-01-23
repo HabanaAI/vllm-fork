@@ -30,8 +30,7 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
 
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import DeviceConfig, VllmConfig
-from vllm.distributed import broadcast_tensor_dict
-from vllm.distributed import get_pp_group
+from vllm.distributed import broadcast_tensor_dict, get_pp_group
 from vllm.distributed.parallel_state import get_world_group
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
@@ -180,6 +179,7 @@ def modify_model_layers(module: torch.nn.Module,
         else:
             modify_model_layers(child_module, suffix_list, n, counter)
 
+
 def get_path_to_rope(model: torch.nn.Module):
     """Dynamically get the path to the RotaryEmbedding layer in the model.
     This function will recursively search through the module hierarchy to find
@@ -198,7 +198,7 @@ def get_path_to_rope(model: torch.nn.Module):
             for child_name, child_module in parent.named_children():
                 # If the current child is of type RotaryEmbedding,
                 # return the full path
-                if child_module.__class__.__name__.endswith("RotaryEmbedding"): 
+                if child_module.__class__.__name__.endswith("RotaryEmbedding"):
                     return path + [child_name]
                 # Otherwise, recurse into this child to check its children
                 result = find_rope_layer(child_module, path + [child_name])
@@ -211,6 +211,7 @@ def get_path_to_rope(model: torch.nn.Module):
 
     # Return the result if found, otherwise None
     return path_to_rope
+
 
 class HpuModelAdapter:
 
@@ -410,11 +411,9 @@ class HpuModelAdapter:
             if not get_pp_group().is_last_rank:
                 pass
             else:
-                hidden_states = hidden_states.view(
-                        -1, hidden_states.shape[-1])
+                hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
                 hidden_states = hidden_states.index_select(
-                        0, selected_token_indices)
-        
+                    0, selected_token_indices)
         return hidden_states
 
     def compute_logits(self, *args, **kwargs):
@@ -425,7 +424,7 @@ class HpuModelAdapter:
 
     def make_empty_intermediate_tensors(self, *args, **kwargs):
         return self.model.make_empty_intermediate_tensors(*args, **kwargs)
-    
+
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.embed_tokens(input_ids)
 
@@ -1597,9 +1596,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
+        bind_kv_caches = [
+            [None] * num_layers
+            for _ in range(self.parallel_config.pipeline_parallel_size)
+        ]
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
-            [[None] * num_layers for _ in range(self.parallel_config.pipeline_parallel_size)])
+            bind_kv_caches)
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
@@ -1680,14 +1683,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_single_step:
                 intermediate_tensors = None
-
                 if not get_pp_group().is_first_rank:
-                    intermediate_tensors = self.model.make_empty_intermediate_tensors(
-                        batch_size=batch_size,
-                        context_size=seq_len if is_prompt else 1,
-                        dtype=self.model_config.dtype,
-                        device=self.device)
-                self.execute_model(inputs, kv_caches, intermediate_tensors=intermediate_tensors,  warmup_mode=True)
+                    intermediate_tensors = \
+                        self.model.make_empty_intermediate_tensors(
+                            batch_size=batch_size,
+                            context_size=seq_len if is_prompt else 1,
+                            dtype=self.model_config.dtype,
+                            device=self.device)
+                self.execute_model(inputs,
+                                   kv_caches,
+                                   intermediate_tensors=intermediate_tensors,
+                                   warmup_mode=True)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
@@ -2247,7 +2253,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 assert model_input.lora_ids is not None
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
-                    attn_metadata.is_prompt) 
+                    attn_metadata.is_prompt)
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -2316,7 +2322,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     LoraMask.setLoraMask(
                         lora_logits_mask.index_select(
                             0, sampling_metadata.selected_token_indices))
-                
                 if not get_pp_group().is_last_rank:
                     return hidden_states
 
@@ -2324,9 +2329,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 with self.profiler.record_event(
                         'internal',
                     ('compute_logits_'
-                    f'{"prompt" if is_prompt else "decode"}_bs'
-                    f'{batch_size}_'
-                    f'seq{seq_len}')):
+                     f'{"prompt" if is_prompt else "decode"}_bs'
+                     f'{batch_size}_'
+                     f'seq{seq_len}')):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,

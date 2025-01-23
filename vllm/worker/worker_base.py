@@ -389,7 +389,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         start_time = time.perf_counter()
         inputs = self.prepare_input(execute_model_req)
         if inputs is None:
-            return None 
+            return None
         model_input, worker_input, kwargs = inputs
         num_steps = worker_input.num_steps
 

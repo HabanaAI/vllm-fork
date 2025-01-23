@@ -18,8 +18,8 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
 from vllm.config import ParallelConfig, VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment, get_pp_group)
+from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
+                              init_distributed_environment)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -513,9 +513,9 @@ def init_worker_distributed_environment(
                                       parallel_config.pipeline_parallel_size)
 
     if parallel_config.pipeline_parallel_size > 1:
-            # torch-ccl xpu need a collective API warm up
-            # before calling send/recv API
-            get_pp_group().all_reduce(torch.zeros(1).to('hpu'))
+        # torch-ccl xpu need a collective API warm up
+        # before calling send/recv API
+        get_pp_group().all_reduce(torch.zeros(1).to('hpu'))
     if torch.distributed.is_initialized():
         torch_world_size = torch.distributed.get_world_size()
         if torch_world_size != parallel_config.world_size:

@@ -39,14 +39,15 @@ import vllm.distributed.kv_transfer.kv_transfer_agent as kv_transfer
 import vllm.envs as envs
 from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
-from vllm.utils import direct_register_custom_op, supports_custom_op
 from vllm.platforms import current_platform
+from vllm.utils import direct_register_custom_op, supports_custom_op
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
 if current_platform.is_hpu():
     import habana_frameworks.torch as htorch
+
 
 @dataclass
 class GraphCaptureContext:
@@ -524,7 +525,7 @@ class GroupCoordinator:
         size_tensor = torch.tensor([object_tensor.numel()],
                                    dtype=torch.long,
                                    device="cpu")
-        
+
         # Send object size
         htorch.core.mark_step()
         torch.hpu.synchronize()
@@ -708,7 +709,7 @@ class GroupCoordinator:
             if (all_gather_group is not None
                     and tensor.numel() % all_gather_size == 0):
                 tensor = tensor.reshape(all_gather_size, -1)[all_gather_rank]
-            
+
             if tensor.is_cpu:
                 # use metadata_group for CPU tensors
                 htorch.core.mark_step()
@@ -788,7 +789,7 @@ class GroupCoordinator:
                                            src=self.ranks[src],
                                            group=group)
                     htorch.core.mark_step()
-                
+
                 if use_all_gather:
                     # do the allgather
                     tensor = all_gather_group.all_gather(  # type: ignore
