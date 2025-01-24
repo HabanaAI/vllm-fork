@@ -2325,7 +2325,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 
                 # Delayed sampling
                 # MSS: Sample for decodes, but not for the last one
-                is_last_multistep = i == (num_steps - 1) and i != 0
+                is_last_multistep = True if ((i == num_steps - 1) and i != 0) else False
                 # No DS
                 if self.scheduler_config.enable_delayed_sampling:
                     if num_steps==1:
