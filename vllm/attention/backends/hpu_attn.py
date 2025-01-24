@@ -157,7 +157,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         self.attn_type = attn_type
         if (self.attn_type != AttentionType.DECODER
-                and self.attn_type != AttentionType.ENCODER_DECODER):
+                and self.attn_type != AttentionType.ENCODER_DECODER
+                and self.attn_type != AttentionType.ENCODER_ONLY):
             raise NotImplementedError("Encoder self-attention "
                                       "is not implemented for "
                                       "HPUAttentionImpl")
@@ -203,7 +204,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         value = value.view(-1, self.num_kv_heads, self.head_size)
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
-        if attn_metadata.is_prompt:
+        if attn_metadata.is_prompt and self.attn_type is not AttentionType.ENCODER_ONLY:
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
@@ -238,7 +239,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_bias.add_(position_bias)
                 else:
                     attn_bias = None
-
                 out = ops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
