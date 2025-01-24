@@ -1,14 +1,17 @@
-import atexit
 import os
 import pickle
 import signal
 import sys
 import time
+import weakref
 from dataclasses import dataclass
 from enum import Enum, auto
+from functools import partial
 from multiprocessing.process import BaseProcess
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import cloudpickle
+import psutil
 import zmq
 
 from vllm.config import VllmConfig
@@ -17,12 +20,13 @@ from vllm.distributed import (destroy_distributed_environment,
 from vllm.distributed.device_communicators.shm_broadcast import (Handle,
                                                                  MessageQueue)
 from vllm.executor.multiproc_worker_utils import (
-    _add_prefix, get_mp_context, set_multiprocessing_worker_envs)
+    _add_prefix, set_multiprocessing_worker_envs)
 from vllm.logger import init_logger
-from vllm.utils import (get_distributed_init_method, get_open_port,
-                        get_open_zmq_ipc_path)
+from vllm.utils import (get_distributed_init_method, get_mp_context,
+                        get_open_port, get_open_zmq_ipc_path, zmq_socket_ctx)
+from vllm.v1.executor.abstract import Executor
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
-from vllm.v1.utils import make_zmq_socket
 from vllm.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
@@ -31,12 +35,25 @@ POLLING_TIMEOUT_MS = 5000
 POLLING_TIMEOUT_S = POLLING_TIMEOUT_MS // 1000
 
 
-class MultiprocExecutor:
+class MultiprocExecutor(Executor):
 
     def __init__(self, vllm_config: VllmConfig) -> None:
         # Call self.shutdown at exit to clean up
         # and ensure workers will be terminated.
-        atexit.register(self.shutdown)
+        self._finalizer = weakref.finalize(self, self.shutdown)
+
+        # The child processes will send SIGUSR1 when unrecoverable
+        # errors happen.
+        def sigusr1_handler(signum, frame):
+            logger.fatal(
+                "MulitprocExecutor got fatal signal from worker processes, "
+                "shutting down. See stack trace above for root cause issue.")
+            # Propagate error up to parent process.
+            parent_process = psutil.Process().parent()
+            parent_process.send_signal(signal.SIGUSR1)
+            self.shutdown()
+
+        signal.signal(signal.SIGUSR1, sigusr1_handler)
 
         self.vllm_config = vllm_config
         self.parallel_config = vllm_config.parallel_config
@@ -76,34 +93,39 @@ class MultiprocExecutor:
         for w in self.workers:
             w.worker_response_mq.wait_until_ready()
 
-    def initialize(self, num_gpu_blocks: int) -> None:
+    def initialize(self, kv_cache_config: KVCacheConfig) -> None:
         """
         Initialize the KV caches and begin the model execution loop of the
         underlying workers.
         """
-        self.collective_rpc("initialize_cache", args=(num_gpu_blocks, ))
+        self.collective_rpc("initialize_cache", args=(kv_cache_config, ))
         self.collective_rpc("compile_or_warm_up_model")
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_available_memory(self) -> int:
         """
-        Determine the number of available KV blocks by invoking the
+        Determine the available memory (in bytes) for KV cache by invoking the
         underlying worker.
         """
-        num_blocks = self.collective_rpc("determine_num_available_blocks")
+        memory_sizes = self.collective_rpc("determine_available_memory")
 
         # Since we use a shared centralized controller, we take the minimum
-        # number of blocks across all workers to make sure all the memory
+        # memory size across all workers to make sure all the memory
         # operators can be applied to all workers.
-        num_gpu_blocks = min(b[0] for b in num_blocks)
-        num_cpu_blocks = min(b[1] for b in num_blocks)
+        return min(memory_sizes)
 
-        return num_gpu_blocks, num_cpu_blocks
+    def get_kv_cache_spec(self) -> KVCacheSpec:
+        """
+        Get all kv cache needed by the model by invoking the underlying worker.
+        """
+        kv_cache_specs = self.collective_rpc("get_kv_cache_spec")
+        assert all(s == kv_cache_specs[0] for s in kv_cache_specs)
+        return kv_cache_specs[0]
 
     def collective_rpc(self,
-                       method: str,
+                       method: Union[str, Callable],
                        timeout: Optional[float] = None,
                        args: Tuple = (),
-                       kwargs: Optional[Dict] = None) -> []:
+                       kwargs: Optional[Dict] = None) -> List[Any]:
         """
         Execute an RPC call on workers.
         
@@ -121,11 +143,16 @@ class MultiprocExecutor:
         kwargs = kwargs or {}
 
         try:
-            self.rpc_broadcast_mq.enqueue((method, args, kwargs))
+            if isinstance(method, str):
+                send_method = method
+            else:
+                send_method = cloudpickle.dumps(
+                    method, protocol=pickle.HIGHEST_PROTOCOL)
+            self.rpc_broadcast_mq.enqueue((send_method, args, kwargs))
 
             responses = [None] * self.world_size
             for w in self.workers:
-                dequeue_timeout = timeout - (time.monotonic() - start_time()
+                dequeue_timeout = timeout - (time.monotonic() - start_time
                                              ) if timeout is not None else None
                 status, result = w.worker_response_mq.dequeue(
                     timeout=dequeue_timeout)
@@ -153,7 +180,7 @@ class MultiprocExecutor:
                                            args=(scheduler_output, ))[0]
         return model_output
 
-    def profile(self, is_start=True):
+    def profile(self, is_start: bool = True):
         self.collective_rpc("profile", args=(is_start, ))
         return
 
@@ -163,6 +190,10 @@ class MultiprocExecutor:
         termination and kill signals if needed."""
 
         def wait_for_termination(procs, timeout):
+            if not time:
+                # If we are in late stage shutdown, the interpreter may replace
+                # `time` with `None`.
+                return all(not proc.is_alive() for proc in procs)
             start_time = time.time()
             while time.time() - start_time < timeout:
                 if all(not proc.is_alive() for proc in procs):
@@ -172,21 +203,28 @@ class MultiprocExecutor:
 
         # Send SIGTERM if still running
         active_procs = [w.proc for w in self.workers if w.proc.is_alive()]
-        self.workers = None
         for p in active_procs:
             p.terminate()
-        if wait_for_termination(active_procs, 4):
-            return
+        if not wait_for_termination(active_procs, 4):
+            # Send SIGKILL if still running
+            active_procs = [p for p in active_procs if p.is_alive()]
+            for p in active_procs:
+                p.kill()
 
-        # Send SIGKILL if still running
-        active_procs = [p for p in active_procs if p.is_alive()]
-        for p in active_procs:
-            p.kill()
+        self._cleanup_sockets()
+
+    def _cleanup_sockets(self):
+        for w in self.workers:
+            # Remove the zmq ipc socket file
+            socket_path = w.ready_path.replace("ipc://", "")
+            if os and os.path.exists(socket_path):
+                os.remove(socket_path)
 
     def shutdown(self):
         """Properly shut down the executor and its workers"""
-        if (hasattr(self, 'workers') and self.workers is not None):
-            for w in self.workers:  #TODO: not sure if needed
+        if getattr(self, 'shutting_down', False):
+            self.shutting_down = True
+            for w in self.workers:
                 w.worker_response_mq = None
             self._ensure_worker_termination()
 
@@ -220,9 +258,18 @@ class WorkerProc:
         ready_path: str,
     ):
         self.rank = rank
-        wrapper = WorkerWrapperBase(vllm_config=vllm_config)
-        wrapper.init_worker(vllm_config, local_rank, rank,
-                            distributed_init_method)
+        wrapper = WorkerWrapperBase(vllm_config=vllm_config, rpc_rank=rank)
+        # TODO: move `init_worker` to executor level as a collective rpc call
+        all_kwargs: List[Dict] = [
+            {} for _ in range(vllm_config.parallel_config.world_size)
+        ]
+        all_kwargs[rank] = {
+            "vllm_config": vllm_config,
+            "local_rank": local_rank,
+            "rank": rank,
+            "distributed_init_method": distributed_init_method,
+        }
+        wrapper.init_worker(all_kwargs)
         self.worker = wrapper.worker
 
         pid = os.getpid()
@@ -238,13 +285,13 @@ class WorkerProc:
         worker_response_mq_handle = self.worker_response_mq.export_handle()
 
         # Send Readiness signal to EngineCore process.
-        with make_zmq_socket(ready_path, zmq.constants.PUSH) as ready_socket:
+        with zmq_socket_ctx(ready_path, zmq.constants.PUSH) as ready_socket:
             payload = pickle.dumps(worker_response_mq_handle,
                                    protocol=pickle.HIGHEST_PROTOCOL)
             ready_socket.send_string(WorkerProc.READY_STR)
             ready_socket.send(payload)
 
-        self.worker.initialize()
+        self.worker.init_device()
         self.worker.load_model()
 
     @staticmethod
@@ -324,8 +371,11 @@ class WorkerProc:
         except SystemExit:
             logger.debug("Worker interrupted.")
 
-        except BaseException as e:
-            logger.exception(e)
+        except Exception:
+            # worker_busy_loop sends exceptions exceptons to Executor
+            # for shutdown, but if there is an error in startup or an
+            # error with IPC itself, we need to alert the parent.
+            psutil.Process().parent().send_signal(signal.SIGUSR1)
             raise
 
         finally:
@@ -340,7 +390,7 @@ class WorkerProc:
         ready_path: str,
     ) -> Optional[Handle]:
         """Wait until the Worker is ready."""
-        with make_zmq_socket(ready_path, zmq.constants.PULL) as socket:
+        with zmq_socket_ctx(ready_path, zmq.constants.PULL) as socket:
 
             # Wait for Worker to send READY.
             while socket.poll(timeout=POLLING_TIMEOUT_MS) == 0:
@@ -365,10 +415,15 @@ class WorkerProc:
             method, args, kwargs = self.rpc_broadcast_mq.dequeue()
 
             try:
-                output = getattr(self.worker, method)(*args, **kwargs)
-            except BaseException as e:
+                if isinstance(method, str):
+                    func = getattr(self.worker, method)
+                elif isinstance(method, bytes):
+                    func = partial(cloudpickle.loads(method), self.worker)
+                output = func(*args, **kwargs)
+            except Exception as e:
                 self.worker_response_mq.enqueue(
                     (WorkerProc.ResponseStatus.FAILURE, e))
+                logger.exception("WorkerProc hit an exception: %s", exc_info=e)
                 continue
 
             self.worker_response_mq.enqueue(

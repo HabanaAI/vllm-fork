@@ -1,16 +1,18 @@
 import os
-from typing import Optional, Tuple
+from typing import Optional
 
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.utils import get_distributed_init_method, get_ip, get_open_port
+from vllm.v1.executor.abstract import Executor
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.worker.gpu_worker import Worker
 
 logger = init_logger(__name__)
 
 
-class UniprocExecutor:
+class UniprocExecutor(Executor):
 
     def __init__(self, vllm_config: VllmConfig) -> None:
         self.vllm_config = vllm_config
@@ -25,8 +27,8 @@ class UniprocExecutor:
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
 
-        self.worker = self._create_worker()
-        self.worker.initialize()
+        self.worker: Worker = self._create_worker()
+        self.worker.init_device()
         self.worker.load_model()
 
     def _create_worker(
@@ -48,20 +50,22 @@ class UniprocExecutor:
             distributed_init_method=distributed_init_method,
         )
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
-        """Determine the number of available KV blocks by invoking the
-        underlying worker.
+    def determine_available_memory(self) -> int:
+        """Determine the available memory (in bytes) for KV cache by invoking 
+        the underlying worker.
         """
-        return self.worker.determine_num_available_blocks()
+        return self.worker.determine_available_memory()
 
-    def initialize(self, num_gpu_blocks: int) -> None:
+    def get_kv_cache_spec(self) -> KVCacheSpec:
+        """Get all kv cache needed by the model by invoking the underlying
+        worker.
+        """
+        return self.worker.get_kv_cache_spec()
+
+    def initialize(self, kv_cache_config: KVCacheConfig) -> None:
         """Initialize the KV cache by invoking the underlying worker.
         """
-        # NOTE: This is logged in the executor because there can be >1 worker
-        # with other executors. We could log in the engine level, but work
-        # remains to abstract away the device for non-GPU configurations.
-        logger.info("# GPU blocks: %d", num_gpu_blocks)
-        self.worker.initialize_cache(num_gpu_blocks)
+        self.worker.initialize_cache(kv_cache_config)
         self.worker.compile_or_warm_up_model()
 
     def execute_model(
@@ -69,13 +73,14 @@ class UniprocExecutor:
         scheduler_output,
     ) -> ModelRunnerOutput:
         output = self.worker.execute_model(scheduler_output)
+        assert output is not None
         return output
 
     def profile(self, is_start: bool = True):
         self.worker.profile(is_start)
 
     def shutdown(self):
-        self.worker = None
+        pass
 
     def check_health(self) -> None:
         # UniprocExecutor will always be healthy as long as

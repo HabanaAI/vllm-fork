@@ -1,11 +1,9 @@
 import copy
-import json
 import math
 import os
 import re
 from dataclasses import dataclass, field
-from typing import (Any, Callable, Dict, List, Optional, Sequence, Tuple, Type,
-                    Union)
+from typing import Any, Callable, Dict, List, Optional, Sequence, Type, Union
 
 import safetensors.torch
 import torch
@@ -22,14 +20,14 @@ from vllm.lora.layers import (BaseLayerWithLoRA,
                               LinearScalingRotaryEmbeddingWithLora,
                               LoRAMapping)
 from vllm.lora.lora import LoRALayerWeights, PackedLoRALayerWeights
+from vllm.lora.peft_helper import PEFTHelper
 from vllm.lora.punica_wrapper import get_punica_wrapper
 from vllm.lora.utils import (from_layer, from_layer_logits_processor,
                              is_regex_target_modules,
                              parse_fine_tuned_lora_name, replace_submodule)
 from vllm.model_executor.models import SupportsLoRA, supports_multimodal
 from vllm.model_executor.models.module_mapping import MultiModelKeys
-from vllm.model_executor.models.utils import PPMissingLayer
-from vllm.platforms import current_platform
+from vllm.model_executor.models.utils import PPMissingLayer, WeightsMapper
 from vllm.utils import is_pin_memory_available
 
 logger = init_logger(__name__)
@@ -47,116 +45,6 @@ class LongContextLoRAContext:
     # offsets to the sin_cos_cache for each lora_id loaded.
     # This value is dynamically modified.
     offsets_by_lora_id: Dict[int, int] = field(default_factory=dict)
-
-
-def convert_mapping(
-    mapping: LoRAMapping,
-    lora_index_to_id: List[Optional[int]],
-    max_loras: int,
-    vocab_size: int,
-    extra_vocab_size: int,
-    long_lora_context: Optional[LongContextLoRAContext] = None,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
-           Optional[torch.Tensor], List[int]]:
-    """Converts LoRAMapping to index tensors.
-
-    Args:
-        mapping: LoRAMapping mapping rows in a batch to LoRA ids.
-        lora_index_to_id: List mapping LoRA ids to LoRA indices.
-        max_loras: Maximum number of LoRAs.
-        vocab_size: Model vocab size.
-        extra_vocab_size: Extra vocab size each LoRA can have.
-        long_lora_context: Passed if there are long context lora in a batch.
-
-    Returns:
-        A tuple of tensors:
-            base_indices: Tensor of shape [batch_size] mapping batch rows to
-                LoRA indices.
-            sampler_indices: Tensor of shape [batch_size] mapping requests to
-                LoRA indices for sampler. For generation, this will be the
-                same as base_indicies. For prefill, this will map requests
-                to LoRA indices.
-            sampler_indices_padded: Tensor of shape [batch_size] mapping
-                requests to LoRA indices for sampler with padding.
-                Same as sampler_indicies, but -1 is replaced with
-                max_loras.
-            embeddings_indices: Tensor of shape [2, batch_size] mapping
-                requests to embedding indices. First row is for embeddings
-                added by the LoRAs, second row is for the LoRA.lora_a
-                embeddings.
-            long_lora_indices: Tensor of shape [batch_size] mapping
-                requests to RoPE offsets and rot dims for long LoRAs.
-                None if long context lora doesn't exist.
-            indices_len: List of lengths of the above tensors.
-                Used to index into each tensor. It contains length for
-                (base_indices, sampler_indices, sampler_indices_padded,
-                embeddings_indices, long_lora_indices). If long_lora doesn't
-                exist, it only contains first 4 entries.
-    """
-    index_mapping_indices: List[int] = list(mapping.index_mapping).copy()
-    embedding_indices = index_mapping_indices.copy()
-    lora_indices = index_mapping_indices.copy()
-    long_lora_offsets: Optional[torch.Tensor] = None
-    device = "hpu" if current_platform.is_hpu() else "cuda"
-    if long_lora_context:
-        long_lora_offsets = torch.zeros(len(index_mapping_indices),
-                                        device=device,
-                                        dtype=torch.long)
-    prompt_mapping: List[int] = [
-        lora_index_to_id.index(x) if x > 0 else -1
-        for x in mapping.prompt_mapping
-    ]
-    lora_idx = None
-    for i in range(len(index_mapping_indices)):
-        # TODO index can be slow. optimize
-        lora_idx = (lora_index_to_id.index(index_mapping_indices[i])
-                    if index_mapping_indices[i] > 0 else -1)
-        embedding_indices[i] = lora_idx if index_mapping_indices[i] > 0 else 0
-        lora_indices[i] = lora_idx
-        if long_lora_context:
-            assert long_lora_offsets is not None
-            lora_offset: int = long_lora_context.offsets_by_lora_id.get(
-                index_mapping_indices[i], 0)
-            long_lora_offsets[i] = lora_offset
-
-    indices_list: List[Union[List[int], torch.Tensor]] = [
-        index_mapping_indices, lora_indices, embedding_indices
-    ]
-    if long_lora_context:
-        assert long_lora_offsets is not None
-        indices_list.append(long_lora_offsets)
-    indices = torch.tensor(indices_list, dtype=torch.long, device=device)
-    prompt_mapping_tensor = torch.tensor(prompt_mapping,
-                                         device=device,
-                                         dtype=torch.long)
-    embeddings_indices = torch.stack([
-        indices[2] * extra_vocab_size,
-        indices[2] * (vocab_size + extra_vocab_size)
-    ])
-    embeddings_indices[embeddings_indices == -1] = max_loras - 1
-    base_indices = indices[1]
-    sampler_indices = prompt_mapping_tensor
-    sampler_indices_padded = sampler_indices.clone()
-    sampler_indices_padded[sampler_indices_padded == -1] = max_loras - 1
-    sampler_indices_padded = (
-        torch.arange(
-            0, len(sampler_indices_padded), device=device, dtype=torch.long) +
-        (sampler_indices_padded * len(sampler_indices_padded)))
-    long_lora_indices = None
-    long_lora_indices_len: Optional[int] = None
-    if long_lora_context:
-        long_lora_indices = indices[3]
-        long_lora_indices_len = long_lora_indices.shape[-1]
-    # Contain length of indices tensors. Used to index into each tensor.
-    indices_len = [
-        base_indices.shape[-1], sampler_indices.shape[-1],
-        sampler_indices_padded.shape[-1], embeddings_indices.shape[-1]
-    ]
-    if long_lora_indices_len is not None:
-        indices_len.append(long_lora_indices_len)
-
-    return (base_indices, sampler_indices, sampler_indices_padded,
-            embeddings_indices, long_lora_indices, indices_len)
 
 
 def get_lora_id():
@@ -216,23 +104,22 @@ class LoRAModel(AdapterModel):
     def from_lora_tensors(
         cls,
         lora_model_id: int,
-        rank: int,
-        lora_alpha: int,
         tensors: Dict[str, torch.Tensor],
+        peft_helper: PEFTHelper,
         device: str = "cuda",
         dtype: Optional[torch.dtype] = None,
         embeddings: Optional[Dict[str, torch.Tensor]] = None,
         target_embedding_padding: Optional[int] = None,
-        scaling_factor: Optional[float] = None,
         embedding_modules: Optional[Dict[str, str]] = None,
         embedding_padding_modules: Optional[List[str]] = None,
+        weights_mapper: Optional[WeightsMapper] = None,
     ) -> "LoRAModel":
         """Create a LoRAModel from a dictionary of tensors."""
         pin_memory = str(device) == "cpu" and is_pin_memory_available()
         loras: Dict[str, LoRALayerWeights] = {}
         for tensor_name, tensor in tensors.items():
             module_name, is_lora_a, is_bias = parse_fine_tuned_lora_name(
-                tensor_name)
+                tensor_name, weights_mapper)
             if module_name not in loras:
                 lora_embeddings_tensor = None
                 if embeddings:
@@ -247,10 +134,9 @@ class LoRAModel(AdapterModel):
                         if pin_memory:
                             lora_embeddings_tensor = (
                                 lora_embeddings_tensor.pin_memory())
-                loras[module_name] = LoRALayerWeights(module_name, rank,
-                                                      lora_alpha, None, None,
-                                                      None,
-                                                      lora_embeddings_tensor)
+                loras[module_name] = LoRALayerWeights.from_config(
+                    module_name, peft_helper, lora_embeddings_tensor)
+
             if is_bias:
                 loras[module_name].bias = tensor.to(device=device,
                                                     dtype=dtype).t()
@@ -282,21 +168,26 @@ class LoRAModel(AdapterModel):
 
         for lora in loras.values():
             lora.optimize()
-        return cls(lora_model_id, rank, loras, scaling_factor=scaling_factor)
+
+        return cls(lora_model_id,
+                   peft_helper.r,
+                   loras,
+                   scaling_factor=peft_helper.vllm_long_context_scaling_factor)
 
     @classmethod
     def from_local_checkpoint(
         cls,
         lora_dir: str,
         expected_lora_modules: List[str],
+        peft_helper: PEFTHelper,
         *,
-        max_position_embeddings: Optional[int] = None,
         lora_model_id: Optional[int] = None,
         device: str = "cuda",
         dtype: Optional[torch.dtype] = None,
         target_embedding_padding: Optional[int] = None,
         embedding_modules: Optional[Dict[str, str]] = None,
         embedding_padding_modules: Optional[List[str]] = None,
+        weights_mapper: Optional[WeightsMapper] = None,
     ) -> "LoRAModel":
         """Create a LoRAModel from a local checkpoint.
         
@@ -304,9 +195,7 @@ class LoRAModel(AdapterModel):
             lora_dir: The local path that has lora data.
             expected_lora_modules: Name of modules that are expected to be
                 replaced by lora.
-            max_position_embeddings: Max position embedding length. Used to
-                scaling the largest context length. If None, the lora model's
-                context length is not scaled.
+            peft_helper: Loaded lora configuration information.
             lora_model_id: Lora model id. If not given, automatically set by
                 a global counter.
             device: Device where the lora model is loaded.
@@ -315,15 +204,14 @@ class LoRAModel(AdapterModel):
         Returns:
             Loaded LoRA Model.
         """
-        lora_config_path = os.path.join(lora_dir, "adapter_config.json")
         lora_tensor_path = os.path.join(lora_dir, "adapter_model.safetensors")
         lora_bin_file_path = os.path.join(lora_dir, "adapter_model.bin")
         new_embeddings_tensor_path = os.path.join(
             lora_dir, "new_embeddings.safetensors")
         new_embeddings_bin_file_path = os.path.join(lora_dir,
                                                     "new_embeddings.bin")
-        with open(lora_config_path) as f:
-            config = json.load(f)
+
+        unexpected_modules: List[Union[list[str], str]]
         if os.path.isfile(lora_tensor_path):
             tensors: Dict[str, torch.Tensor] = {}
             # Find unexpected modules.
@@ -336,7 +224,8 @@ class LoRAModel(AdapterModel):
             with safetensors.safe_open(lora_tensor_path,
                                        framework="pt") as f:  # type: ignore
                 for lora_module in f.keys():  # noqa
-                    module_name, _, _ = parse_fine_tuned_lora_name(lora_module)
+                    module_name, _, _ = parse_fine_tuned_lora_name(
+                        lora_module, weights_mapper)
                     part_name = module_name.split(".")[-1]
                     if part_name not in expected_lora_modules:
                         unexpected_modules.append(module_name)
@@ -354,7 +243,7 @@ class LoRAModel(AdapterModel):
             # When a bin file is provided, we rely on config to find unexpected
             # modules.
             unexpected_modules = []
-            target_modules = config["target_modules"]
+            target_modules = peft_helper.target_modules
             if not isinstance(target_modules, list):
                 target_modules = [target_modules]
             for module in target_modules:
@@ -368,7 +257,7 @@ class LoRAModel(AdapterModel):
             # https://github.com/vllm-project/vllm/pull/5909. But there's no
             # other better mechanism.
             if unexpected_modules and not is_regex_target_modules(
-                    config["target_modules"], expected_lora_modules):
+                    peft_helper.target_modules, expected_lora_modules):
                 raise ValueError(
                     f"While loading {lora_dir}, expected"
                     f" target modules in {expected_lora_modules}"
@@ -386,30 +275,18 @@ class LoRAModel(AdapterModel):
             embeddings = torch.load(new_embeddings_bin_file_path,
                                     map_location=device)
 
-        rank = config["r"]
-        lora_alpha = config["lora_alpha"]
-        context_length = config.get("context_length", None)
-        scaling_factor = None
-        if context_length:
-            if max_position_embeddings is None:
-                max_position_embeddings = context_length
-            scaling_factor = float(
-                math.ceil(context_length / max_position_embeddings))
-
         return cls.from_lora_tensors(
             lora_model_id=get_lora_id()
             if lora_model_id is None else lora_model_id,
-            rank=rank,
-            lora_alpha=lora_alpha,
             tensors=tensors,
+            peft_helper=peft_helper,
             device=device,
             dtype=dtype,
             embeddings=embeddings,
             target_embedding_padding=target_embedding_padding,
-            scaling_factor=scaling_factor,
             embedding_modules=embedding_modules,
             embedding_padding_modules=embedding_padding_modules,
-        )
+            weights_mapper=weights_mapper)
 
 
 class LoRAModelManager(AdapterModelManager):
@@ -443,10 +320,7 @@ class LoRAModelManager(AdapterModelManager):
         self.lora_index_to_id: List[Optional[int]] = [None] * self.lora_slots
         self.vocab_size = vocab_size
         self.long_lora_context: Optional[LongContextLoRAContext] = None
-        punica_max_num_batched_tokens = max_num_batched_tokens
-        if current_platform.is_hpu():
-            punica_max_num_batched_tokens = 3 * max_num_batched_tokens
-        self.punica_wrapper = get_punica_wrapper(punica_max_num_batched_tokens,
+        self.punica_wrapper = get_punica_wrapper(max_num_batched_tokens,
                                                  max_batches=self.max_num_seqs,
                                                  device=self.device)
         # Scaling factor -> offset to the sin_cos_cache to it.
