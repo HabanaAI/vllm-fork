@@ -138,7 +138,7 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         else:
             from vllm_hpu_extension.bucketing.linear import HPUBucketingContext
 
-        hpu_bucketing_context = HPUBucketingContext()
+        hpu_bucketing_context = HPUBucketingContext.get_instance()
         padded_bs = hpu_bucketing_context.get_padded_prompt_batch_size(
             batch_size)
         padded_seq = hpu_bucketing_context.get_padded_prompt_seq_len(
