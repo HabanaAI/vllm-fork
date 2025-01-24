@@ -599,7 +599,6 @@ def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
         dtype: torch.dtype,
         device: torch.device,
     ) -> IntermediateTensors:
-        print("\n\n\n MAKING EMPTY INTERMEDIATE TENSORST \n\n\n")
         return IntermediateTensors({
             key: torch.zeros((batch_size, context_size, hidden_size),
                              dtype=dtype,
