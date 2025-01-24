@@ -358,9 +358,13 @@ class HPUEncoderDecoderModelRunner(
 
         return attn_metadata
 
+    @torch.inference_mode()
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        kv_caches = [None] * num_layers
+        kv_caches = [
+            torch.tensor([], dtype=torch.bfloat16, device=self.device)
+            for _ in range(num_layers)
+        ]
         max_batch_size = self.max_num_prefill_seqs
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         max_seq_len = min(self.max_num_batched_tokens // max_batch_size,
@@ -447,24 +451,18 @@ class HPUEncoderDecoderModelRunner(
         sampling_params = SamplingParams(temperature=temperature)
         num_blocks = math.ceil(seq_len / self.block_size)
         cross_block_table: Optional[List[int]] = None
-        seq_len = max(seq_len, 1)
+        encoder_dummy_data \
+            = self.input_registry.dummy_data_for_profiling(
+            self.model_config,
+            seq_len,
+            self.mm_registry,
+            is_encoder_data=True)
         mm_counts = self.mm_registry.get_mm_limits_per_prompt(
             self.model_config)
         num_images = mm_counts["image"]
         max_mm_tokens = self.mm_registry.get_max_multimodal_tokens(
             self.model_config) * num_images
-        decoder_dummy_data \
-            = self.input_registry.dummy_data_for_profiling(
-                self.model_config,
-                seq_len,
-                self.mm_registry,
-                is_encoder_data=False)
-        encoder_dummy_data \
-            = self.input_registry.dummy_data_for_profiling(
-                self.model_config,
-                max_mm_tokens,
-                self.mm_registry,
-                is_encoder_data=True)
+        seq_len = max(seq_len, 1)
         if is_prompt:
             input_len = seq_len
             output_len = 0
@@ -478,11 +476,15 @@ class HPUEncoderDecoderModelRunner(
             num_cross_blocks = min(self.bucketing_ctx.num_hpu_blocks,
                                    max_mm_tokens) // self.block_size
             cross_block_table = [_PAD_BLOCK_ID] * num_cross_blocks
-        prompt_token_ids = [0] * input_len
         output_token_ids = [1] * output_len
-        prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
-        seq_data = SequenceData(prompt_token_ids_array)
+        decoder_dummy_data = self.input_registry \
+            .dummy_data_for_profiling(self.model_config,
+                                      seq_len,
+                                      self.mm_registry,
+                                      is_encoder_data=False)
+        seq_data = decoder_dummy_data.seq_data
         seq_data.output_token_ids = output_token_ids
+
         return SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=is_prompt,
@@ -490,9 +492,9 @@ class HPUEncoderDecoderModelRunner(
             sampling_params=sampling_params,
             block_tables=block_tables,
             encoder_seq_data=encoder_dummy_data.seq_data,
-            multi_modal_data=decoder_dummy_data.multi_modal_data,
+            multi_modal_data=decoder_dummy_data.multi_modal_data or encoder_dummy_data.multi_modal_data,
             multi_modal_placeholders=decoder_dummy_data.
-            multi_modal_placeholders,
+            multi_modal_placeholders or encoder_dummy_data.multi_modal_placeholders,
             cross_block_table=cross_block_table)
 
     def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:
