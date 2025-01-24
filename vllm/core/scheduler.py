@@ -130,16 +130,19 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         return batch_size * max_seq_len
 
     def _hpu_padding_fn(self, batch_size, max_seq_len):
-        use_exponential_bucketing = os.environ.get('VLLM_EXPONENTIAL_BUCKETING',
-                                'true').lower() == 'true'
+        use_exponential_bucketing = os.environ.get(
+            'VLLM_EXPONENTIAL_BUCKETING', 'true').lower() == 'true'
         if use_exponential_bucketing:
-            from vllm_hpu_extension.bucketing.exponential import HPUExponentialBucketingContext as HPUBucketingContext
+            from vllm_hpu_extension.bucketing.exponential import (
+                HPUExponentialBucketingContext as HPUBucketingContext)
         else:
             from vllm_hpu_extension.bucketing.linear import HPUBucketingContext
 
         hpu_bucketing_context = HPUBucketingContext()
-        padded_bs = hpu_bucketing_context.get_padded_prompt_batch_size(batch_size)
-        padded_seq = hpu_bucketing_context.get_padded_prompt_seq_len(max_seq_len)
+        padded_bs = hpu_bucketing_context.get_padded_prompt_batch_size(
+            batch_size)
+        padded_seq = hpu_bucketing_context.get_padded_prompt_seq_len(
+            max_seq_len)
         return padded_bs * padded_seq
 
     def _padding_fn_selector(self):

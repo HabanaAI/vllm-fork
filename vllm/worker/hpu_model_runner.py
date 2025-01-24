@@ -653,13 +653,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
         self.seen_configs: set = set()
         self._mem_margin: Optional[int] = None
-        self.use_exponential_bucketing = os.environ.get('VLLM_EXPONENTIAL_BUCKETING',
-                                        'true').lower() == 'true'
+        self.use_exponential_bucketing = os.environ.get(
+            'VLLM_EXPONENTIAL_BUCKETING', 'true').lower() == 'true'
         if self.use_exponential_bucketing:
-            from vllm_hpu_extension.bucketing.exponential import HPUExponentialBucketingContext as HPUBucketingContext
+            from vllm_hpu_extension.bucketing.exponential import (
+                HPUExponentialBucketingContext as HPUBucketingContext)
         else:
             from vllm_hpu_extension.bucketing.linear import HPUBucketingContext
-        
+
         self.bucketing_ctx = HPUBucketingContext(self.max_num_seqs,
                                                  self.max_num_prefill_seqs,
                                                  self.block_size,
