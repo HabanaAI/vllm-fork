@@ -884,8 +884,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     "sliding window attention")
                 start_idx = max(0, seq_len - self.sliding_window)
             for i in range(context_len, seq_len):
-                if self.scheduler_config.task == 'embedding':
-                    break
                 if i < start_idx:
                     slot_mapping[-1].append(_PAD_SLOT_ID)
                     continue
@@ -916,7 +914,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             lora_prompt_mapping.extend(
                 [lora_id] *
                 (max_prompt_len
-                 if seq_group_metadata.sampling_params is not None and seq_group_metadata.sampling_params.prompt_logprobs else 1))
+                 if seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if any(context_lens):
             assert not self.scheduler_config.chunked_prefill_enabled
@@ -1432,8 +1430,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
-#        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
-#                             False, True)
+        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
+                             False, True)
         return
 
     def warmup_scenario(self,
@@ -2114,8 +2112,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             def try_revert_dummy_output_tokens():
                 if len(cache_orig_output_tokens_len) > 0:
                     # Reuse the original output token ids length
-                    for i, seq_group_metadata in enumerate(
-                            seq_group_metadata_list):
+                    for i in range(len(cache_orig_output_tokens_len)):
+                        seq_group_metadata = seq_group_metadata_list[i]
                         for j, data in seq_group_metadata.seq_data.items():
                             orig_output_tokens_len = \
                                 cache_orig_output_tokens_len[i][j]
@@ -2193,7 +2191,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         else:
                             raise RuntimeError(
                                 "seq_group_metadata_list is uninitialized")
-                        for i, seq_group_metadata in enumerate(
+                        for seq_idx, seq_group_metadata in enumerate(
                                 seq_group_metadata_list):
                             # Skip empty steps
                             seq_group_metadata.state.current_step += (
@@ -2201,8 +2199,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             # Cache the original output token ids
                             cache_orig_output_tokens_len.append({})
                             for j, data in seq_group_metadata.seq_data.items():
-                                cache_orig_output_tokens_len[i][j] = \
+                                cache_orig_output_tokens_len[seq_idx][j] = \
                                     len(data.output_token_ids)
+                    seq_group_metadata_list = self.add_dummy_seq(
+                        seq_group_metadata_list, is_prompt=False)
                     for seq_group_metadata in seq_group_metadata_list:
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[
