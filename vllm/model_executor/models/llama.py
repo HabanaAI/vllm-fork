@@ -24,6 +24,7 @@
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, Union
+import os
 
 import torch
 from torch import nn
@@ -58,7 +59,22 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     maybe_prefix)
 
 is_hpu = current_platform.is_hpu()
+if is_hpu:
+    import habana_frameworks.torch as htorch
 
+# split_size>128: fixed-length splits (each slice is split_size)
+# split_size<128: fixed-num splits (split_size num of slices)
+def get_split_size(seq_len, batch_size, orig_split_size):
+    if orig_split_size<128:
+        split_size = max((seq_len*batch_size)//orig_split_size, 1)
+    else:
+        split_size = orig_split_size
+    return split_size
+
+# Use the first override whenever possible
+VLLM_MLP_SIZE_OVERRIDE = int(os.environ.get("VLLM_MLP_SIZE_OVERRIDE", "512"))
+# Use the second override 
+VLLM_MLP_SIZE_OVERRIDE_2 = int(os.environ.get("VLLM_MLP_SIZE_OVERRIDE_2", "384"))
 
 class LlamaMLP(nn.Module):
 
@@ -70,6 +86,8 @@ class LlamaMLP(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         bias: bool = False,
         prefix: str = "",
+        do_split: bool = False,
+        split_size: int = 2,
         split_gate_up: bool = False
     ) -> None:
         super().__init__()
@@ -113,34 +131,44 @@ class LlamaMLP(nn.Module):
     def forward(self, x):
         batch_size = x.size(0)
         seq_len = x.size(1)
-        if (seq_len*batch_size)%512==0:
-            x = x.view(-1,512,self.hidden_size)
+        if (seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE==0:
+            x = x.view(-1,VLLM_MLP_SIZE_OVERRIDE,self.hidden_size)
+        elif (seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE_2==0:
+            x = x.view(-1,VLLM_MLP_SIZE_OVERRIDE_2,self.hidden_size)
         if self.split_gate_up:
             x = nn.functional.silu(self.gate_proj(x)[0]) * self.up_proj(x)[0]
         else:
             x, _ = self.gate_up_proj(x)
             x = self.act_fn(x)
+
+        # Separate split for down is not implemented yet
         x, _ = self.down_proj(x)
-        if (seq_len*batch_size)%512==0:
+
+        if ((seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE==0) or ((seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE_2==0):
             x = x.view(batch_size,seq_len,self.hidden_size)
         return x
 
 
 class LlamaAttention(nn.Module):
 
-    def __init__(self,
-                 config: LlamaConfig,
-                 hidden_size: int,
-                 num_heads: int,
-                 num_kv_heads: int,
-                 rope_theta: float = 10000,
-                 rope_scaling: Optional[Dict[str, Any]] = None,
-                 max_position_embeddings: int = 8192,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 bias: bool = False,
-                 bias_o_proj: bool = False,
-                 cache_config: Optional[CacheConfig] = None,
-                 prefix: str = "") -> None:
+    def __init__(
+        self,
+        config: LlamaConfig,
+        hidden_size: int,
+        num_heads: int,
+        num_kv_heads: int,
+        rope_theta: float = 10000,
+        rope_scaling: Optional[Dict[str, Any]] = None,
+        max_position_embeddings: int = 8192,
+        quant_config: Optional[QuantizationConfig] = None,
+        bias: bool = False,
+        bias_o_proj: bool = False,
+        cache_config: Optional[CacheConfig] = None,
+        prefix: str = "",
+        do_split: bool = False,
+        split_size: int = 2,
+        output_slice: bool = False
+    ) -> None:
         super().__init__()
         layer_idx = extract_layer_index(prefix)
         self.hidden_size = hidden_size
@@ -170,6 +198,9 @@ class LlamaAttention(nn.Module):
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
         self.split_qkv = cache_config.split_qkv
+        self.do_split = do_split
+        self.split_size = split_size
+        self.output_slice = output_slice
 
         if self.split_qkv:
             self.qkv_proj = SplitQKVParallelLinear(
@@ -238,6 +269,51 @@ class LlamaAttention(nn.Module):
             prefix=f"{prefix}.attn",
         )
 
+    def forward_qkv(
+        self,
+        hidden_states: torch.Tensor,
+    ):
+        if self.split_qkv:
+            q, k, v, _ = self.qkv_proj(hidden_states)
+        else:
+            qkv, _ = self.qkv_proj(hidden_states)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
+                                dim=-1)
+        
+        return q,k,v
+    
+    def forward_attnpost(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        positions: torch.Tensor,
+        kv_cache: torch.Tensor,
+        attn_metadata: AttentionMetadata,
+    ) -> torch.Tensor:
+        q, k = self.rotary_emb(positions, q, k)
+        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+        batch_size = attn_output.size(0)
+        seq_len = attn_output.size(1)
+        split_size = get_split_size(seq_len, batch_size, self.split_size)
+        do_split = self.do_split and attn_metadata.is_prompt
+        if ((seq_len*batch_size)//split_size>=2) and do_split:
+            attn_output = attn_output.view(1, -1, self.q_size)
+            attn_list = torch.split(attn_output, split_size, 1)
+            output_list = []
+            for attn_slice in attn_list:
+                output_slice = self.o_proj(attn_slice)[0]
+                output_list.append(output_slice)
+            if self.output_slice:
+                return output_list
+            else:
+                output = torch.cat(output_list)
+                output = output.view(batch_size, seq_len, self.hidden_size)
+                return output
+        else:
+            output, _ = self.o_proj(attn_output)
+            return output
+
     def forward(
         self,
         positions: torch.Tensor,
@@ -245,6 +321,10 @@ class LlamaAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
+        batch_size = hidden_states.size(0)
+        seq_len = hidden_states.size(1)
+        split_size = get_split_size(seq_len, batch_size, self.split_size)
+        do_split = self.do_split and attn_metadata.is_prompt
         if self.split_qkv:
             q, k, v, _ = self.qkv_proj(hidden_states)
         else:
@@ -253,8 +333,22 @@ class LlamaAttention(nn.Module):
                                 dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
-        output, _ = self.o_proj(attn_output)
-        return output
+        if ((seq_len*batch_size)//split_size>=2) and do_split:
+            attn_output = attn_output.view(1, -1, self.q_size)
+            attn_list = torch.split(attn_output, split_size, 1)
+            output_list = []
+            for attn_slice in attn_list:
+                output_slice = self.o_proj(attn_slice)[0]
+                output_list.append(output_slice)
+            if self.output_slice:
+                return output_list
+            else:
+                output = torch.cat(output_list)
+                output = output.view(batch_size, seq_len, self.hidden_size)
+                return output
+        else:
+            output, _ = self.o_proj(attn_output)
+            return output
 
 
 class LlamaDecoderLayer(nn.Module):
@@ -285,6 +379,12 @@ class LlamaDecoderLayer(nn.Module):
         if hasattr(config, 'qkv_bias'):
             attention_bias = config.qkv_bias
 
+        split_size = int(os.environ.get('VLLM_TP_SPLIT_SIZE_BY_SEQ', '1'))
+        output_slice = int(os.environ.get('OUTPUT_SLICE', '1')) == 1
+        do_split = split_size > 1
+        self.split_size = split_size
+        self.do_split = do_split
+        self.output_slice = output_slice and do_split
         self.self_attn = LlamaAttention(
             config=config,
             hidden_size=self.hidden_size,
@@ -299,6 +399,9 @@ class LlamaDecoderLayer(nn.Module):
             bias_o_proj=bias_o_proj,
             cache_config=cache_config,
             prefix=f"{prefix}.self_attn",
+            do_split=do_split,
+            split_size=split_size,
+            output_slice=output_slice
         )
         self.mlp = LlamaMLP(
             hidden_size=self.hidden_size,
@@ -307,7 +410,9 @@ class LlamaDecoderLayer(nn.Module):
             quant_config=quant_config,
             bias=getattr(config, "mlp_bias", False),
             prefix=f"{prefix}.mlp",
-            split_gate_up=cache_config.split_gate_up
+            do_split=do_split,
+            split_size=split_size,
+            split_gate_up=cache_config.split_gate_up,
         )
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
@@ -322,24 +427,88 @@ class LlamaDecoderLayer(nn.Module):
         attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Self Attention
-        if residual is None:
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
+        # Get prompt bs from attn_metadata. The one from hidden_states may be inaccurate due to slicing
+        if attn_metadata.is_prompt:
+            batch_size = attn_metadata.seq_lens_tensor.size(0)
         else:
-            hidden_states, residual = self.input_layernorm(
+            batch_size = 1
+        # Self Attention
+        if (residual is not None) and type(hidden_states)==list:
+            # TP parallel slice cross layers
+            residual_list_output = []
+            q_list = []
+            k_list = []
+            v_list = []
+            for hidden_states_ind, residual_ind in zip(hidden_states, residual):
+                hidden_states_ind, residual_ind = self.input_layernorm(hidden_states_ind, residual_ind)
+                
+                q,k,v = self.self_attn.forward_qkv(hidden_states_ind)
+                residual_list_output.append(residual_ind)
+                q_list.append(q)
+                k_list.append(k)
+                v_list.append(v)
+                # Prevent qkv from getting merged by GC
+                htorch.core.mark_step()
+            q = torch.cat(q_list, dim=1)
+            k = torch.cat(k_list, dim=1)
+            v = torch.cat(v_list, dim=1)
+            residual = torch.cat(residual_list_output, dim=1)
+            hidden_states_shape = residual.shape
+            batch_size_fake, seq_len_fake, hidden_size = hidden_states_shape
+            hidden_states = self.self_attn.forward_attnpost(
+                q=q,
+                k=k,
+                v=v,
+                positions=positions,
+                kv_cache=kv_cache,
+                attn_metadata=attn_metadata
+            )
+        else:
+            if residual is None:
+                residual = hidden_states
+                hidden_states = self.input_layernorm(hidden_states)
+            else:
+                hidden_states, residual = self.input_layernorm(
+                    hidden_states, residual)
+            hidden_states_shape = hidden_states.shape
+            batch_size_fake, seq_len_fake, hidden_size = hidden_states_shape
+            
+            hidden_states = self.self_attn(positions=positions,
+                                        hidden_states=hidden_states,
+                                        kv_cache=kv_cache,
+                                        attn_metadata=attn_metadata)
+        
+        # Calculate real seq_len from product of inaccurate batch_size and seq_len
+        seq_len = (batch_size_fake*seq_len_fake)//batch_size
+        split_size = get_split_size(seq_len, batch_size, self.split_size)
+        # only split for prefill
+        do_split = self.do_split and attn_metadata.is_prompt
+
+        # self_attn output a list of tensors to be processed sequential at layernorm and mlp
+        if do_split and (seq_len*batch_size)//split_size>=2 and self.output_slice:
+            # Slice residual
+            residual = residual.view(1, -1, hidden_size)
+            residual_list = torch.split(residual, split_size, 1)
+
+            residual_list_output = []
+            output_list = []
+            # Sequentially process slices
+            for hidden_state, residual in zip(hidden_states, residual_list):
+                hidden_state, residual = self.post_attention_layernorm(hidden_state, residual)
+                hidden_state = self.mlp(hidden_state)
+                residual_list_output.append(residual)
+                output_list.append(hidden_state)
+
+            residual = residual_list_output
+            hidden_states = output_list
+
+        else:
+            # Fully Connected
+            hidden_states, residual = self.post_attention_layernorm(
                 hidden_states, residual)
-        hidden_states = self.self_attn(positions=positions,
-                                       hidden_states=hidden_states,
-                                       kv_cache=kv_cache,
-                                       attn_metadata=attn_metadata)
+            hidden_states = self.mlp(hidden_states)
 
-        # Fully Connected
-        hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
-        hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
-
 
 @support_torch_compile
 class LlamaModel(nn.Module):
@@ -381,6 +550,7 @@ class LlamaModel(nn.Module):
                                       prefix=prefix),
             prefix=f"{prefix}.layers",
         )
+
         if get_pp_group().is_last_rank:
             self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         else:
@@ -417,7 +587,6 @@ class LlamaModel(nn.Module):
             residual = intermediate_tensors["residual"]
 
         if is_hpu:
-            import habana_frameworks.torch as htorch
             htorch.core.mark_step()
 
         for i in range(self.start_layer, self.end_layer):
@@ -425,6 +594,9 @@ class LlamaModel(nn.Module):
             hidden_states, residual = layer(positions, hidden_states,
                                             kv_caches[i - self.start_layer],
                                             attn_metadata, residual)
+        if type(hidden_states)==list:
+            hidden_states = torch.cat(hidden_states, dim=1)
+            residual = torch.cat(residual, dim=1)
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
