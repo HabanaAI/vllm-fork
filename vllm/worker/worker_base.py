@@ -387,16 +387,20 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         start_time = time.perf_counter()
+        
         inputs = self.prepare_input(execute_model_req)
         if inputs is None:
             return None
+        
         model_input, worker_input, kwargs = inputs
         num_steps = worker_input.num_steps
 
         self.execute_worker(worker_input)
 
+        # If there is no input, we don't need to execute the model.
         if worker_input.num_seq_groups == 0:
             return []
+
         intermediate_tensors = None
         orig_model_execute_time = 0.0
         if not get_pp_group().is_first_rank:
