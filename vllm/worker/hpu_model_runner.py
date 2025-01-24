@@ -295,11 +295,11 @@ class HpuModelAdapter:
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
 
-        if not is_fake_hpu() and htorch.utils.internal.is_lazy():
+        if not is_fake_hpu():
             block_mapping = torch.nn.functional.one_hot(metadata.block_groups,
                                                         num_classes=batch_size)
         else:
-            # Unfortunately one_hot on CPU/torch.compile mode/eager mode
+            # Unfortunately one_hot on CPU
             # doesn't handle out of bounds classes so we need to convert
             # all negative values to 0 (block_mapping) or bs (block_groups)
             block_groups = metadata.block_groups.to(torch.long)
@@ -2025,6 +2025,21 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 lora_logits_mask = lora_mask
 
         return lora_mask, lora_logits_mask
+
+
+    def add_dummy_seq(self, seq_group_metadata_list, is_prompt):
+        real_batch_size = len(seq_group_metadata_list)
+        batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
+            real_batch_size, is_prompt)
+        batch_size_padding = batch_size_padded - real_batch_size
+        seq_group_metadata_list = seq_group_metadata_list.copy()
+        if batch_size_padding > 0:
+            dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
+                0, 0, is_prompt)
+            seq_group_metadata_list.extend(dummy_seq_group_metadata
+                                           for _ in range(batch_size_padding))
+        return seq_group_metadata_list
+
 
     @torch.inference_mode()
     def execute_model(
