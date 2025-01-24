@@ -2164,6 +2164,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             input_ids = None
             # Delayed sampling
             # Sample the next token based on previous logits if any.
+            # With and without MSS
             if self.scheduler_config.enable_delayed_sampling \
                 and self.is_driver_worker and not is_prompt:
                 logits_ids_list = []
@@ -2195,10 +2196,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                 device="hpu"))
                 if logits_tensor is not None:
                     logits_tensor_list.append(logits_tensor[torch.tensor(
-                        logits_ids_list, device=seq_data.prev_logits.device)])
+                        logits_ids_list, device=logits_tensor.device)])
                     
                 prev_logits = torch.cat(logits_tensor_list, dim=0)
 
+                # Sample next token - delayed sampling
                 with self.profiler.record_event(
                         'internal', f'sample_{"prompt" if is_prompt else "decode"}'
                         '_bs{batch_size}_seq{seq_len}'):
@@ -2276,10 +2278,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     and self.is_driver_worker and i==0:
                     if not is_prompt:
                         htorch.core.mark_step()
-                        for i, seq_group_output in enumerate(
+                        for j, seq_group_output in enumerate(
                             output.outputs[:real_batch_size]):
                             for sample in seq_group_output.samples:
-                                sample.output_token = output.sampled_token_ids[i][0]
+                                sample.output_token = output.sampled_token_ids[j][0]
                     else:
                         # For prompts compose empty output
                         from vllm.sequence import (CompletionSequenceGroupOutput,
@@ -2320,7 +2322,20 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
 
-                # Save logits and idx
+                
+                # Delayed sampling
+                # MSS: Sample for decodes, but not for the last one
+                is_last_multistep = i == (num_steps - 1) and i != 0
+                # No DS
+                if self.scheduler_config.enable_delayed_sampling:
+                    if num_steps==1:
+                        should_sample = False # Delayed sampling, no MSS, never sample
+                    else: # MSS
+                        should_sample = False if is_last_multistep else True
+                else:
+                    should_sample = True
+
+                #! Should Save logits and idx only when not sampling
                 if (self.scheduler_config.enable_delayed_sampling and model_input.seq_group_metadata_list is not None and self.is_driver_worker):
                     for idx, seq_group_metadata in enumerate(model_input.seq_group_metadata_list):
                         assert len(seq_group_metadata.seq_data) == 1
@@ -2329,15 +2344,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             seq_data.prev_logits_idx = idx
 
                 htorch.core.mark_step()
-
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
 
                 if model_input.async_callback is not None:
                     model_input.async_callback()
-                    
-                if not self.scheduler_config.enable_delayed_sampling or i==(num_steps-1):
+
+                if should_sample:
                     # Sample the next token.
                     with self.profiler.record_event(
                             'internal', ('sample_'
@@ -2395,7 +2409,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 else:
                                     try_revert_dummy_output_tokens()
                                     return []
-
+                                
                     result = self._prepare_decode(seq_group_metadata_list,
                                                   output=output)
                     if self.lora_config:
