@@ -523,6 +523,7 @@ class GroupCoordinator:
                                    device="cpu")
 
         # Send object size
+        
         torch.distributed.send(size_tensor,
                                dst=self.ranks[dst],
                                group=self.cpu_group)
@@ -565,6 +566,7 @@ class GroupCoordinator:
             "Received object sender rank does not match the size sender rank.")
 
         obj = pickle.loads(object_tensor.numpy().tobytes())
+        
         return obj
 
     def broadcast_tensor_dict(
