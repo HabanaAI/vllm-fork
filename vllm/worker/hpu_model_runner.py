@@ -75,7 +75,6 @@ _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
-ENCODER_ONLY = True
 def subtuple(obj: object,
              typename: str,
              to_copy: List[str],
@@ -1368,7 +1367,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if seq_group_metadata.sampling_params and seq_group_metadata.sampling_params.prompt_logprobs is not None \
                                 and seq_group_metadata.is_prompt:
                     paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
-            
+
                 paddings = torch.tensor(
                     paddings_prompt_logprobs if paddings_prompt_logprobs else paddings,
                     dtype=sampling_metadata.selected_token_indices.dtype,
