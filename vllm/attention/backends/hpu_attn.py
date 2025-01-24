@@ -247,14 +247,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     attn_bias = None
                 if self.sliding_window:
                     if self.prompt_attn_bias is None:
-                        attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor, self.sliding_window, query.dtype)
+                        self.prompt_attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor, self.sliding_window, query.dtype)
                     valid_seq_lengths = None #TODO: remove after fusedsdpa optimization is done
 
                 out = ops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
                     value.view(kv_shape),
-                    attn_bias=attn_bias,
+                    attn_bias=self.prompt_attn_bias if self.prompt_attn_bias else attn_bias,
                     p=0.0,
                     scale=self.scale,
                     matmul_qk_op=self.matmul_qk,
