@@ -157,7 +157,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
         self.attn_type = attn_type
-        self.prompt_attn_bias = None
         if (self.attn_type != AttentionType.DECODER
                 and self.attn_type != AttentionType.ENCODER_DECODER):
             raise NotImplementedError("Encoder self-attention "
@@ -246,15 +245,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 else:
                     attn_bias = None
                 if self.sliding_window:
-                    if self.prompt_attn_bias is None:
-                        self.prompt_attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor, self.sliding_window, query.dtype)
+                    attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor, self.sliding_window, query.dtype)
                     valid_seq_lengths = None #TODO: remove after fusedsdpa optimization is done
 
                 out = ops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
                     value.view(kv_shape),
-                    attn_bias=self.prompt_attn_bias if self.prompt_attn_bias else attn_bias,
+                    attn_bias=attn_bias,
                     p=0.0,
                     scale=self.scale,
                     matmul_qk_op=self.matmul_qk,
@@ -280,8 +278,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     keys_fetch_func=self.k_cache.fetch_from_cache,
                     values_fetch_func=self.v_cache.fetch_from_cache)
             output = out.reshape(batch_size, seq_len, hidden_size)
-        else:
-            self.prompt_attn_bias = None
+
             # Decoding run.
             output = HPUPagedAttention.forward_decode(
                 query=query,
