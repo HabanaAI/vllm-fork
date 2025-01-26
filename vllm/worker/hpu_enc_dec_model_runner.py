@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union, cast
 
 import habana_frameworks.torch as htorch
 import torch
+from PIL import Image
 from vllm_hpu_extension.ops import batch2block, block2batch
 
 from vllm.attention import AttentionMetadata
@@ -21,7 +22,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceData, SequenceGroupMetadata,
                            SequenceOutput)
-from vllm.utils import is_fake_hpu
+from vllm.utils import is_fake_hpu, is_list_of
 from vllm.worker.hpu_model_runner import (HpuModelAdapter, HPUModelRunnerBase,
                                           ModelInputForHPUWithSamplingMetadata,
                                           setup_profiler, subtuple)
