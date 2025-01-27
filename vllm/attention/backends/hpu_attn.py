@@ -224,12 +224,13 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             query_shape = (batch_size, seq_len, self.num_heads, self.head_size)
             kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
                         self.head_size)
+
             if attn_metadata is None or attn_metadata.block_list is None:
+                attn_bias = attn_metadata.attn_bias
                 if not self.prefill_use_fusedsdpa:
                     # TODO: move this outside of model
                     assert attn_metadata.attn_bias is not None, \
                             'attn_bias must be set before calling model.forward'
-                    attn_bias = attn_metadata.attn_bias
                     if self.alibi_slopes is not None:
                         position_bias = _make_alibi_bias(
                             self.alibi_slopes, self.num_kv_heads,
@@ -237,20 +238,19 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_bias = attn_bias.tile(
                             (1, self.num_kv_heads, 1, 1))
                         attn_bias.add_(position_bias)
-                else:
-                    attn_bias = None
+
                 out = ops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
                     value.view(kv_shape),
-                    attn_bias=attn_bias,
+                    attn_bias=attn_metadata.attn_bias,
                     p=0.0,
                     scale=self.scale,
                     matmul_qk_op=self.matmul_qk,
                     softmax_op=self.softmax,
                     matmul_av_op=self.matmul_av,
                     valid_seq_lengths=attn_metadata.seq_lens_tensor,
-                    fsdpa_op=self.fused_scaled_dot_product_attention,
+                    fsdpa_op=self.fused_scaled_dot_product_attention if self.prefill_use_fusedsdpa else None,
                 )
             else:
                 # TODO: enable FusedSDPA

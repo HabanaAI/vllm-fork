@@ -44,7 +44,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
 from vllm.model_executor.models import supports_multimodal
-
+from vllm.model_executor.model_loader.utils import get_architecture_class_name
 from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
@@ -214,7 +214,7 @@ def get_path_to_rope(model: torch.nn.Module):
 
 class HpuModelAdapter:
 
-    def __init__(self, model, vllm_config, layer_names):
+    def __init__(self, model, vllm_config, layer_names, model_arch_causal):
         self.model = model
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
@@ -224,6 +224,9 @@ class HpuModelAdapter:
         self.dtype = vllm_config.model_config.dtype
         self.layer_names = layer_names
         enforce_eager = vllm_config.model_config.enforce_eager
+        self.is_causal = True
+        if hasattr(self.model, "_pooler") and model_arch_causal is False:
+            self.is_causal = False
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -259,7 +262,7 @@ class HpuModelAdapter:
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
-        if (attn_metadata is None or self.prefill_use_fusedsdpa
+        if (attn_metadata is None or (self.prefill_use_fusedsdpa and self.is_causal)
                 or not attn_metadata.is_prompt):
             return attn_metadata
 
@@ -286,15 +289,18 @@ class HpuModelAdapter:
                                      query_lens_t.unsqueeze(-1)).view(
                                          batch_size, 1, 1, seq_len))
         len_mask_v = len_mask.view(batch_size, 1, seq_len, 1)
-        causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),
+        attn_mask = torch.zeros((batch_size, 1, seq_len, seq_len),
                                             device=device,
-                                            dtype=torch.bool),
-                                 diagonal=1)
-        mask = causal_mask.logical_or(len_mask).logical_or(len_mask_v)
+                                            dtype=torch.bool)
+        if self.is_causal:
+            attn_mask = torch.triu(attn_mask,diagonal=1)
+
+        mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
         mask = torch.concat((past_mask, mask), dim=-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
+
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
@@ -350,6 +356,7 @@ class HpuModelAdapter:
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
+
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
@@ -411,7 +418,7 @@ class HpuModelAdapter:
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-            if selected_token_indices:
+            if selected_token_indices is True:
                 hidden_states = hidden_states.index_select(0,
                                                        selected_token_indices)
         return hidden_states
@@ -700,9 +707,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
+        
+    def is_causal(self) -> bool:
+        encoder_decoder = ["Bert", "Roberta", "Bart"]
+        model_name = get_architecture_class_name(self.model_config)
+        if "Causal" in model_name or model_name not in encoder_decoder:
+            return True
+        else:
+            return False
 
     def load_model(self) -> None:
-
+        model_arch_causal = self.is_causal()
         import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
            self.model_config.quantization == 'fp8':
@@ -789,7 +804,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.model = self._maybe_wrap_in_hpu_graph(
                     self.model,
                     vllm_config=self.vllm_config,
-                    layer_names=path_to_rope)
+                    layer_names=path_to_rope,
+                    model_arch_causal=model_arch_causal)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
 

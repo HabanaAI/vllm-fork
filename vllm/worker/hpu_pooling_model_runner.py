@@ -48,12 +48,9 @@ class HPUPoolingModelRunner(
         num_steps: int = 1,
         warmup_mode=False,
     ) -> Optional[Union[List[PoolerOutput], IntermediateTensors]]:
-
         if num_steps > 1:
             raise ValueError(
                 "HPUPoolingModelRunner does not support multi-step execution.")
-            
-        
         input_tokens = model_input.input_tokens
         input_positions = model_input.input_positions
         attn_metadata = model_input.attn_metadata
@@ -120,9 +117,6 @@ class HPUPoolingModelRunner(
 
         htorch.core.mark_step()
 
-        if not self.is_driver_worker:
-            return []
-
         if self.is_driver_worker and self.profiler.enabled:
             # Stop recording 'execute_model' event
             self.profiler.end()
@@ -135,7 +129,9 @@ class HPUPoolingModelRunner(
                 real_batch_size=real_batch_size,
                 is_prompt=is_prompt)
             self.profiler.record_counter(self.event_start, counters)
-        return [self.model.model._pooler(hidden_states=hidden_states,
+        if not self.is_driver_worker:
+            return []
+        return[self.model.model._pooler(hidden_states=hidden_states,
                               pooling_metadata=model_input.pooling_metadata)]
 
     def make_model_input_from_broadcasted_tensor_dict(
@@ -153,18 +149,12 @@ class HPUPoolingModelRunner(
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None
     ) -> ModelInputForHPUWithPoolingMetadata:
-        '''
-        assert seq_group_metadata_list is not None
-        model_input = self.prepare_model_input(
-            seq_group_metadata_list, finished_requests_ids)
-        # Prepare PoolingMetadata.
-        assert model_input.seq_lens is not None
-        '''
         with self.profiler.record_event('internal', 'prepare_input_tensors'):
             assert seq_group_metadata_list is not None
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
+
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
 
