@@ -297,8 +297,9 @@ class HpuModelAdapter:
 
         mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
         mask = torch.concat((past_mask, mask), dim=-1)
+        # as -math.inf causes nan, use very small value 
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -math.inf))
+            mask, -3E30)) #-math.inf))
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
 
         return attn_metadata
