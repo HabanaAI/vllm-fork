@@ -135,10 +135,7 @@ class Attention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        if current_platform.is_hpu() and self.use_direct_call:
-            forward_context: ForwardContext = get_forward_context()
-            attn_metadata = forward_context.attn_metadata
-            kv_cache = self.kv_cache[forward_context.virtual_engine]
+        if self.use_direct_call: 
             return self.impl.forward(query, key, value, kv_cache,
                                      attn_metadata, self._k_scale,
                                      self._v_scale)
