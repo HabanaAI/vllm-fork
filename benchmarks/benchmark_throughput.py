@@ -374,14 +374,10 @@ def main(args: argparse.Namespace):
                 lora_request, lora_tokenizer = get_random_lora_request(args)
                 if lora_tokenizer:
                     request_tokenizer = lora_tokenizer
-            if args.mm_data:
-                input_len = args.input_len - 2
-            else:
-                input_len = args.input_len
+            input_len = args.input_len - 2 if args.mm_data else args.input_len
             # Synthesize a prompt with the given input length.
             candidate_ids = [
-                random.randint(0, vocab_size - 1)
-                for _ in range(input_len)
+                random.randint(0, vocab_size - 1) for _ in range(input_len)
             ]
             # As tokenizer may add additional tokens like BOS, we need to try
             # different lengths to get the desired input length.
@@ -403,17 +399,18 @@ def main(args: argparse.Namespace):
                     candidate_ids = candidate_ids[:diff]
             if mm_data is not None:
                 requests.append(
-                        SampleRequest(prompt="<|image|><|begin_of_text|>" + candidate_prompt,
-                            prompt_len=args.input_len,
-                            expected_output_len=args.output_len,
-                            lora_request=lora_request,
-                            multi_modal_data=mm_data))
+                    SampleRequest(prompt="<|image|><|begin_of_text|>" +
+                                  candidate_prompt,
+                                  prompt_len=args.input_len,
+                                  expected_output_len=args.output_len,
+                                  lora_request=lora_request,
+                                  multi_modal_data=mm_data))
             else:
                 requests.append(
-                        SampleRequest(prompt=candidate_prompt,
-                            prompt_len=args.input_len,
-                            expected_output_len=args.output_len,
-                            lora_request=lora_request))
+                    SampleRequest(prompt=candidate_prompt,
+                                  prompt_len=args.input_len,
+                                  expected_output_len=args.output_len,
+                                  lora_request=lora_request))
     else:
         requests = sample_requests(tokenizer, args)
 
