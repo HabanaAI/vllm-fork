@@ -803,9 +803,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             real_batch_size, is_prompt)
         batch_size_padding = batch_size_padded - real_batch_size
 
-        #! TODO: batch size padding breakes accuracy
-        batch_size_padding =0
-
         seq_group_metadata_list = seq_group_metadata_list.copy()
 
         if batch_size_padding > 0:
@@ -1485,6 +1482,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
+
         seq_data.output_token_ids = output_token_ids
         return SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
@@ -2164,7 +2162,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             htorch.core.mark_step()
 
-            #breakpoint()
             input_ids = None
             # Delayed sampling
             # Sample the next token based on previous logits if any.
@@ -2175,33 +2172,34 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 logits_tensor = None
                 logits_tensor_list = []
                 if model_input.seq_group_metadata_list is not None:
-                    for seq_group_metadata in model_input.seq_group_metadata_list:
+                    for i, seq_group_metadata in enumerate(model_input.seq_group_metadata_list):
                         assert len(seq_group_metadata.seq_data) == 1
                         for seq_data in seq_group_metadata.seq_data.values():
-                            if seq_data.prev_logits is not None:
-                                if logits_tensor is None:
-                                    logits_tensor = seq_data.prev_logits
-                                if seq_data.prev_logits is logits_tensor:
-                                    logits_ids_list.append(
-                                        seq_data.prev_logits_idx)
-                                else:
-                                    logits_tensor_list.append(
-                                        logits_tensor[torch.tensor(
-                                            logits_ids_list,
-                                            device=seq_data.prev_logits.device)])
-                                    
-                                    logits_ids_list = [seq_data.prev_logits_idx]
-                                    logits_tensor = seq_data.prev_logits
-                            else:
-                                # warmup only, TODO add a check
-                                logits_tensor_list.append(
-                                    torch.zeros([1, 32000],
+                            if seq_data.prev_logits is None:
+                                # Padded sequences and warmup
+                                #TODO: Add some sort of check based on metadata(?)
+                                seq_data.prev_logits = torch.zeros([1, 32000],
                                                 dtype=torch.float,
-                                                device="hpu"))
+                                                device="hpu")
+                                seq_data.prev_logits_idx = i
+                            if logits_tensor is None:
+                                logits_tensor = seq_data.prev_logits
+                            if seq_data.prev_logits is logits_tensor:
+                                logits_ids_list.append(
+                                    seq_data.prev_logits_idx)
+                            else:
+                                logits_tensor_list.append(
+                                    logits_tensor[torch.tensor(
+                                        logits_ids_list,
+                                        device=seq_data.prev_logits.device)])
+                                
+                                logits_ids_list = [seq_data.prev_logits_idx]
+                                logits_tensor = seq_data.prev_logits
+
                 if logits_tensor is not None:
                     logits_tensor_list.append(logits_tensor[torch.tensor(
                         logits_ids_list, device=logits_tensor.device)])
-                    
+                
                 prev_logits = torch.cat(logits_tensor_list, dim=0)
 
                 # Sample next token - delayed sampling
