@@ -300,6 +300,7 @@ class HpuModelAdapter:
         # as -math.inf causes nan, use very small value 
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -3E30)) #-math.inf))
+        print("attn_bias ", attn_bias)
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
 
         return attn_metadata
@@ -712,11 +713,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def is_causal(self) -> bool:
         encoder_decoder = ["Bert", "Roberta", "Bart"]
         model_name = get_architecture_class_name(self.model_config)
-        if "Causal" in model_name or model_name not in encoder_decoder:
-            return True
+        if any([m in model_name for m in encoder_decoder]):
+            status = False
         else:
-            return False
-
+            status = True
+        print("libin debug is_causal ", model_name, status)
+        return status
     def load_model(self) -> None:
         model_arch_causal = self.is_causal()
         import habana_frameworks.torch.core as htcore
