@@ -803,6 +803,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             real_batch_size, is_prompt)
         batch_size_padding = batch_size_padded - real_batch_size
 
+        #! TODO: batch size padding breakes accuracy
+        batch_size_padding =0
+
         seq_group_metadata_list = seq_group_metadata_list.copy()
 
         if batch_size_padding > 0:
@@ -2161,6 +2164,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             htorch.core.mark_step()
 
+            #breakpoint()
             input_ids = None
             # Delayed sampling
             # Sample the next token based on previous logits if any.
@@ -2340,8 +2344,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     for idx, seq_group_metadata in enumerate(model_input.seq_group_metadata_list):
                         assert len(seq_group_metadata.seq_data) == 1
                         for seq_data in seq_group_metadata.seq_data.values():
-                            seq_data.prev_logits = logits
-                            seq_data.prev_logits_idx = idx
+                            seq_data.prev_logits = logits if not should_sample else None
+                            seq_data.prev_logits_idx = idx if not should_sample else None
 
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
