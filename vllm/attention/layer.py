@@ -152,11 +152,13 @@ class Attention(nn.Module):
             attn_metadata.enable_kv_scales_calculation:
             self.calc_kv_scales(key, value)
 
-        if current_platform.is_hpu() and self.use_direct_call:
+        if current_platform.is_hpu(
+        ) and self.use_direct_call and torch._dynamo.is_compiling():
             forward_context: ForwardContext = get_forward_context()
             attn_metadata = forward_context.attn_metadata
             kv_cache = self.kv_cache[forward_context.virtual_engine]
-            return self.impl.forward(self, query, key, value, kv_cache, attn_metadata)
+            return self.impl.forward(self, query, key, value, kv_cache,
+                                     attn_metadata)
 
         if self.use_output:
             output = torch.empty_like(query)
