@@ -104,8 +104,7 @@ class RMSNorm(CustomOp):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        from vllm_hpu_extension.kernels import rms_norm
-        HPUFusedRMSNorm = rms_norm()
+        from vllm_hpu_extension.ops import HPUFusedRMSNorm
         if HPUFusedRMSNorm is None:
             return self.forward_native(x, residual)
         if residual is not None:
