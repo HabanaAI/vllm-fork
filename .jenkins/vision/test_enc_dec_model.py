@@ -80,7 +80,7 @@ def get_current_gaudi_platform():
             f"Unsupported device: the device type is {device_type}.")
 
 
-def test_enc_dec_model(record_xml_attribute):
+def test_enc_dec_model(record_xml_attribute, record_property):
     try:
         config = yaml.safe_load(
             Path(TEST_DATA_FILE).read_text(encoding="utf-8"))
