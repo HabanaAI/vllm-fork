@@ -7,7 +7,6 @@ import yaml
 from transformers import AutoTokenizer
 
 from vllm import LLM, SamplingParams
-from vllm.assets.image import ImageAsset
 
 TEST_DATA_FILE = os.environ.get(
     "TEST_DATA_FILE",
