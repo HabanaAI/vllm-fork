@@ -289,7 +289,7 @@ class HpuModelAdapter:
                                      query_lens_t.unsqueeze(-1)).view(
                                          batch_size, 1, 1, seq_len))
         len_mask_v = len_mask.view(batch_size, 1, seq_len, 1)
-        attn_mask = torch.zeros((batch_size, 1, seq_len, seq_len),
+        attn_mask = torch.ones((batch_size, 1, seq_len, seq_len),
                                             device=device,
                                             dtype=torch.bool)
         if self.is_causal:
