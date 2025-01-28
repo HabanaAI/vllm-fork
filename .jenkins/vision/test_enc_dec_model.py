@@ -1,10 +1,7 @@
 import atexit
 import os
 from pathlib import Path
-<<<<<<< HEAD
-=======
 from PIL import Image
->>>>>>> e54fab062 (Add image data to test folder)
 
 import yaml
 from transformers import AutoTokenizer
