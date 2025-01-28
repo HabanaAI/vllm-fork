@@ -2178,7 +2178,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             if seq_data.prev_logits is None:
                                 # Padded sequences and warmup
                                 #TODO: Add some sort of check based on metadata(?)
-                                seq_data.prev_logits = torch.zeros([1, 32000],
+                                seq_data.prev_logits = torch.zeros([1, self.vocab_size],
                                                 dtype=torch.float,
                                                 device="hpu")
                                 seq_data.prev_logits_idx = i
@@ -2199,7 +2199,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if logits_tensor is not None:
                     logits_tensor_list.append(logits_tensor[torch.tensor(
                         logits_ids_list, device=logits_tensor.device)])
-                
+
                 prev_logits = torch.cat(logits_tensor_list, dim=0)
 
                 # Sample next token - delayed sampling
@@ -2218,6 +2218,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
                 model_kwargs = broadcast_tensor_dict(src=0)
                 input_ids = model_kwargs["input_ids"]
+
             if input_ids is not None:
                 execute_model_kwargs["input_ids"] = input_ids
                 htorch.core.mark_step()
@@ -2263,6 +2264,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
+
                 # Model forward
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(

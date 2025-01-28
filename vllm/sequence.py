@@ -403,8 +403,8 @@ class SequenceData(msgspec.Struct,
                 f"output_token_ids={self.output_token_ids}, "
                 f"cumulative_logprob={self.cumulative_logprob}, "
                 f"get_num_computed_tokens={self.get_num_computed_tokens()}, "
-                f"previous_logits={self._prev_logits}, "
-                f"previous_logits_id={self._prev_logits_idx})")
+                f"prev_logits={self._prev_logits}, "
+                f"prev_logits_id={self._prev_logits_idx})")
 
 
 class Sequence:
