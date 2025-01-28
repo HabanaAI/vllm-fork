@@ -7,7 +7,6 @@ from vllm import LLM, SamplingParams
 from vllm.assets.image import ImageAsset
 from transformers import AutoTokenizer
 
-
 TEST_DATA_FILE = os.environ.get(
     "TEST_DATA_FILE",
     ".jenkins/vision/configs/Meta-Llama-3.2-11B-Vision-Instruct.yaml")
@@ -97,8 +96,8 @@ def test_enc_dec_model(record_xml_attribute):
         llm, prompt = launch_enc_dec_model(config, question)
 
         sampling_params = SamplingParams(temperature=0.0,
-                                        max_tokens=100,
-                                        stop_token_ids=None)
+                                         max_tokens=100,
+                                         stop_token_ids=None)
 
         num_prompts = config.get('num_prompts', 1)
         inputs = [{
