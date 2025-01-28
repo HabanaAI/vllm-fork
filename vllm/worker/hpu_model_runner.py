@@ -1126,10 +1126,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     generation_token = seq_data.get_last_token_id()
                     input_tokens.append([generation_token])
 
-                # DS
-                seq_len = ((seq_data.get_num_computed_tokens() +
-                            1) if self.scheduler_config.enable_delayed_sampling
-                            else seq_data.get_len())
+                seq_len = seq_data.get_len()
                 position = seq_len - 1
                 input_positions.append([position])
 
