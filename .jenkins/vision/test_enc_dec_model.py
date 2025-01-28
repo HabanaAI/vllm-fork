@@ -1,11 +1,12 @@
 import atexit
 import os
 from pathlib import Path
+
 import yaml
+from transformers import AutoTokenizer
 
 from vllm import LLM, SamplingParams
 from vllm.assets.image import ImageAsset
-from transformers import AutoTokenizer
 
 TEST_DATA_FILE = os.environ.get(
     "TEST_DATA_FILE",
