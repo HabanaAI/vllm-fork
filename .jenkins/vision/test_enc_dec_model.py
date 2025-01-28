@@ -1,6 +1,10 @@
 import atexit
 import os
 from pathlib import Path
+<<<<<<< HEAD
+=======
+from PIL import Image
+>>>>>>> e54fab062 (Add image data to test folder)
 
 import yaml
 from transformers import AutoTokenizer
@@ -52,8 +56,7 @@ def launch_enc_dec_model(config, question):
 
 
 def get_input():
-    image = ImageAsset("cherry_blossom") \
-            .pil_image.convert("RGB")
+    image = Image.open("data/cherry_blossom.jpg").convert("RGB")
     img_question = "What is the content of this image?"
 
     return {
