@@ -602,6 +602,11 @@ def initialize_dummy_weights(
                 # XLA device does not support torch.Generator()
                 param.uniform_(low, high)
                 continue
+            
+            if current_platform.is_hpu():
+                # HPU device does not support torch.Generator()
+                param.uniform_(low, high)
+                continue
 
             generator = torch.Generator(device=param.data.device)
             generator.manual_seed(seed)
