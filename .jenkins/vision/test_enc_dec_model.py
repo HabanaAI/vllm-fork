@@ -1,9 +1,9 @@
 import atexit
 import os
 from pathlib import Path
-from PIL import Image
 
 import yaml
+from PIL import Image
 from transformers import AutoTokenizer
 
 from vllm import LLM, SamplingParams
