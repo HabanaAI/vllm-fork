@@ -113,6 +113,7 @@ def test_enc_dec_model(record_xml_attribute, record_property):
             generated_text = o.outputs[0].text
             assert generated_text, "Generated text is empty"
             print(generated_text)
+            os._exit(0)
 
     except Exception as exc:
         atexit.register(fail_on_exit)
