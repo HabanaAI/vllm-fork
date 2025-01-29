@@ -11,6 +11,7 @@ import itertools
 import math
 import os
 import time
+import typing
 from array import array
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
@@ -74,6 +75,21 @@ _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
+
+
+class DynamicTensorFlags:
+    enable_dynamic_shapes = os.getenv('VLLM_HPU_ENABLE_DYNAMIC_SHAPES',
+                                      'true').lower() in ['1', 'true']
+    dynamic_prefill_batch = os.getenv('VLLM_HPU_DYNAMIC_PREFILL_BATCH',
+                                      'true').lower() in ['1', 'true']
+    dynamic_prefill_seq = os.getenv('VLLM_HPU_DYNAMIC_PREFILL_SEQ',
+                                    'true').lower() in ['1', 'true']
+    dynamic_decode_batch = os.getenv('VLLM_HPU_DYNAMIC_DECODE_BATCH',
+                                     'true').lower() in ['1', 'true']
+    dynamic_decode_block = os.getenv('VLLM_HPU_DYNAMIC_DECODE_BLOCK',
+                                     'true').lower() in ['1', 'true']
+    ensure_mark_static = os.getenv('VLLM_HPU_ENSURE_MARK_STATIC',
+                                   'true').lower() in ['1', 'true']
 
 
 def subtuple(obj: object,
@@ -255,6 +271,7 @@ class HpuModelAdapter:
                                            children_name)
 
     def _compile_region(self, model, name, module):
+        #print(f'compiling {module}...')
         module = torch.compile(module, backend='hpu_backend', dynamic=False)
         setattr(model, name, module)
 
@@ -390,6 +407,131 @@ class HpuModelAdapter:
                 "The module at the end of the path does not have \
                 a 'prepare_cos_sin' method.")
 
+    def torch_compile_mark_tensors(self, *args, **kwargs):
+        dynamic_prefill_batch = DynamicTensorFlags.dynamic_prefill_batch
+        dynamic_prefill_seq = DynamicTensorFlags.dynamic_prefill_seq
+        dynamic_decode_batch = DynamicTensorFlags.dynamic_decode_batch
+        dynamic_decode_block = DynamicTensorFlags.dynamic_decode_block
+        ensure_mark_static = DynamicTensorFlags.ensure_mark_static
+        is_prompt = kwargs['attn_metadata'].is_prompt
+        if ensure_mark_static:
+            for cache in kwargs['kv_caches']:
+                if cache is not None:
+                    torch._dynamo.mark_static(cache[0])
+                    torch._dynamo.mark_static(cache[1])
+            if not is_prompt:
+                # these dims are always 1 in decode
+                torch._dynamo.mark_static(kwargs['input_ids'], 1)
+                torch._dynamo.mark_static(kwargs['positions'], 1)
+                torch._dynamo.mark_static(kwargs['attn_metadata'].slot_mapping,
+                                          1)
+
+        class DynamicTensor(typing.NamedTuple):
+            name: str
+            tensor: torch.Tensor
+            dim: int
+            min: Optional[int] = None
+            max: Optional[int] = None
+
+        dynamic_tensors = []
+        if (dynamic_prefill_batch and is_prompt) or (dynamic_decode_batch
+                                                     and not is_prompt):
+            min_bs = 1
+            max_bs = self.vllm_config.scheduler_config.max_num_seqs
+            tensor_prefix = f"[{'prefill' if is_prompt else 'decode'} batch] "
+            if is_prompt and \
+                self.vllm_config.scheduler_config.max_num_prefill_seqs \
+                    is not None:
+                max_bs = self.vllm_config.scheduler_config.max_num_prefill_seqs
+            tensor_info = [
+                (f'{tensor_prefix}input_ids', kwargs['input_ids'], 0),
+                (f'{tensor_prefix}positions', kwargs['positions'], 0),
+                (f'{tensor_prefix}seq_lens_tensor',
+                 kwargs['attn_metadata'].seq_lens_tensor, 0),
+                (f'{tensor_prefix}slot_mapping',
+                 kwargs['attn_metadata'].slot_mapping, 0),
+                (f'{tensor_prefix}context_lens_tensor',
+                 kwargs['attn_metadata'].context_lens_tensor, 0)
+            ]
+            if (dynamic_decode_batch and not is_prompt):
+                tensor_info.append((f'{tensor_prefix}attn_bias',
+                                    kwargs['attn_metadata'].attn_bias, 1))
+                tensor_info.append((f'{tensor_prefix}block_indices',
+                                    kwargs['attn_metadata'].block_indices, 0))
+                tensor_info.append((f'{tensor_prefix}block_mapping',
+                                    kwargs['attn_metadata'].block_mapping, 1))
+            dynamic_batch_tensors = [
+                DynamicTensor(name=name,
+                              tensor=tensor,
+                              dim=dim,
+                              min=min_bs,
+                              max=max_bs) for name, tensor, dim in tensor_info
+            ]
+            dynamic_tensors.extend(dynamic_batch_tensors)
+        if dynamic_prefill_seq and is_prompt:
+            min_seq_len = 1
+            max_seq_len = self.vllm_config.scheduler_config.max_model_len
+            tensor_prefix = "[prefill seq] "
+            tensor_info = [
+                (f'{tensor_prefix}input_ids', kwargs['input_ids'], 1),
+                (f'{tensor_prefix}positions', kwargs['positions'], 1),
+                (f'{tensor_prefix}slot_mapping',
+                 kwargs['attn_metadata'].slot_mapping, 1)
+            ]
+            dynamic_seq_tensors = [
+                DynamicTensor(name=name,
+                              tensor=tensor,
+                              dim=dim,
+                              min=min_seq_len,
+                              max=max_seq_len)
+                for name, tensor, dim in tensor_info
+            ]
+            dynamic_tensors.extend(dynamic_seq_tensors)
+        if dynamic_decode_block and not is_prompt:
+            min_num_blocks = 1
+            max_num_blocks = kwargs['kv_caches'][0][0].shape[0]
+            tensor_prefix = "[decode block] "
+            tensor_info = [
+                (f'{tensor_prefix}attn_bias',
+                 kwargs['attn_metadata'].attn_bias, 0),
+                (f'{tensor_prefix}block_list',
+                 kwargs['attn_metadata'].block_list, 0),
+                (f'{tensor_prefix}block_mapping',
+                 kwargs['attn_metadata'].block_mapping, 0),
+                (f'{tensor_prefix}block_scales',
+                 kwargs['attn_metadata'].block_scales, 0),
+                (f'{tensor_prefix}block_groups',
+                 kwargs['attn_metadata'].block_groups, 0),
+                (f'{tensor_prefix}block_usage',
+                 kwargs['attn_metadata'].block_usage, 0),
+            ]
+            dynamic_seq_tensors = [
+                DynamicTensor(name=name,
+                              tensor=tensor,
+                              dim=dim,
+                              min=min_num_blocks,
+                              max=max_num_blocks)
+                for name, tensor, dim in tensor_info
+            ]
+            dynamic_tensors.extend(dynamic_seq_tensors)
+
+        for ts in dynamic_tensors:
+            if ts.tensor is not None:
+                msg = (f'Marking dynamic tensor {ts.name} at '
+                       f'dim {ts.dim} (min={ts.min}, max={ts.max})')
+                logger.debug(msg)
+                assert ts.tensor.shape[ts.dim] >= ts.min and ts.tensor.shape[
+                    ts.dim] <= ts.max, \
+                        (f'Invalid shape for {ts.name} '
+                         f'at dim {ts.dim}: {ts.tensor.shape[ts.dim]}')
+                torch._dynamo.mark_dynamic(ts.tensor,
+                                           ts.dim,
+                                           min=ts.min,
+                                           max=ts.max)
+            else:
+                msg = f'Dynamic tensor {ts.name} is None, skipping'
+                logger.debug(msg)
+
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
@@ -405,6 +547,15 @@ class HpuModelAdapter:
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
+
+        if DynamicTensorFlags.enable_dynamic_shapes:
+            if not htorch.utils.internal.is_lazy(
+            ) and not self.vllm_config.model_config.enforce_eager:
+                self.torch_compile_mark_tensors(*args, **kwargs)
+            else:
+                logger.warning_once(
+                    "Dynamic shapes are only supported in torch.compile mode")
+
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
