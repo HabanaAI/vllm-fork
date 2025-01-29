@@ -604,11 +604,11 @@ def initialize_dummy_weights(
                 continue
             
             if current_platform.is_hpu():
-                # HPU device does not support torch.Generator()
-                param.uniform_(low, high)
-                continue
-
-            generator = torch.Generator(device=param.data.device)
+                import habana_frameworks.torch.hpu.random as htrandom
+                generator = htrandom.default_generators[0]
+            else:
+                generator = torch.Generator(device=param.data.device)
+                
             generator.manual_seed(seed)
             if torch.finfo(param.data.dtype).bits < 16:
                 # uniform_ doesn't support < 16-bit datatypes (FP8)
