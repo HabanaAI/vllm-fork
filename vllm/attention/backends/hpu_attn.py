@@ -2,32 +2,25 @@
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 ###############################################################################
 
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
+import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
+from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
                                       VLLMKVCache)
 
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
+                                              AttentionLayer,
                                               AttentionMetadata, AttentionType)
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
 from vllm.logger import init_logger
-from vllm.utils import is_fake_hpu
 
 logger = init_logger(__name__)
-
-HPUFusedSDPA = None
-try:
-    from habana_frameworks.torch.hpex.kernels import FusedSDPA
-    HPUFusedSDPA = FusedSDPA
-except ImportError:
-    logger.warning("Could not import HPU FusedSDPA kernel. "
-                   "vLLM will use native implementation.")
 
 
 class HPUAttentionBackend(AttentionBackend):
@@ -139,6 +132,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.block2batch_matmul = Matmul()
         self.k_cache = VLLMKVCache()
         self.v_cache = VLLMKVCache()
+        HPUFusedSDPA = kernels.fsdpa()
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
@@ -151,9 +145,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
-        self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
-                                               '1').lower() in ['1', 'true'] \
-                                               and not is_fake_hpu()
+        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         if self.prefill_use_fusedsdpa:
             assert alibi_slopes is None, \
                 'Prefill with FusedSDPA not supported with alibi slopes!'
@@ -173,13 +165,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
     def forward(
         self,
+        layer: AttentionLayer,
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: HPUAttentionMetadata,
-        k_scale: float = 1.0,
-        v_scale: float = 1.0,
         output: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Forward pass with xFormers and PagedAttention.
@@ -193,6 +184,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         Returns:
             shape = [num_tokens, num_heads * head_size]
         """
+        assert layer._k_scale_float == 1.0 and layer._v_scale_float == 1.0
         if self.attn_type == AttentionType.ENCODER_DECODER:
             return self.forward_encoder_decoder(
                 query=query,
@@ -200,8 +192,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 value=value,
                 kv_cache=kv_cache,
                 attn_metadata=attn_metadata,
-                k_scale=k_scale,
-                v_scale=v_scale,
+                k_scale=layer._k_scale_float,
+                v_scale=layer._k_scale_float,
             )
 
         batch_size, seq_len, hidden_size = query.shape
