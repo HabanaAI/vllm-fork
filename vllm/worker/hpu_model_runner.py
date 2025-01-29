@@ -288,14 +288,15 @@ class HpuModelAdapter:
                                  dtype=torch.int32).view(1, seq_len).ge(
                                      query_lens_t.unsqueeze(-1)).view(
                                          batch_size, 1, 1, seq_len))
-        attn_mask = torch.ones((batch_size, 1, seq_len, seq_len),
+        if self.is_causal:
+            attn_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),
+                                            device=device,
+                                            dtype=torch.bool),diagonal=1)
+        else:
+            attn_mask = torch.zeros((batch_size, 1, seq_len, seq_len),
                                             device=device,
                                             dtype=torch.bool)
-        
-        if self.is_causal:
-            attn_mask = torch.triu(attn_mask,diagonal=1)
-            
-        if not hasattr(self.model.model, "_pooler"):
+        if hasattr(self.model.model, "_pooler"):
             len_mask_v = len_mask.view(batch_size, 1, seq_len, 1)
             mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
             off_value = -3E38 #small number, avoid nan and overflow

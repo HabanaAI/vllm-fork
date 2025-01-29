@@ -57,7 +57,6 @@ class BertEmbedding(nn.Module):
         token_type_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         input_shape = input_ids.size()
-
         # Input embeddings.
         inputs_embeds = self.word_embeddings(input_ids)
 
