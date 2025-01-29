@@ -288,19 +288,24 @@ class HpuModelAdapter:
                                  dtype=torch.int32).view(1, seq_len).ge(
                                      query_lens_t.unsqueeze(-1)).view(
                                          batch_size, 1, 1, seq_len))
-        len_mask_v = len_mask.view(batch_size, 1, seq_len, 1)
         attn_mask = torch.ones((batch_size, 1, seq_len, seq_len),
                                             device=device,
                                             dtype=torch.bool)
+        
         if self.is_causal:
             attn_mask = torch.triu(attn_mask,diagonal=1)
+            
+        if not hasattr(self.model.model, "_pooler"):
+            len_mask_v = len_mask.view(batch_size, 1, seq_len, 1)
+            mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
+            off_value = 3E38 #small number, avoid nan and overflow
+        else:
+            mask = attn_mask.logical_or(len_mask)#no need for len_mask_v as decode overwrite it
+            off_value = -math.inf
 
-        mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
         mask = torch.concat((past_mask, mask), dim=-1)
-        # as -math.inf causes nan, use very small value 
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -3E38)) #-math.inf))
-        print("attn_bias ", attn_bias)
+            mask, off_value))
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
 
         return attn_metadata
@@ -420,7 +425,7 @@ class HpuModelAdapter:
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-            if selected_token_indices is True:
+            if selected_token_indices is not None:
                 hidden_states = hidden_states.index_select(0,
                                                        selected_token_indices)
         return hidden_states
@@ -711,14 +716,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                           'false').lower() == 'true'
         
     def is_causal(self) -> bool:
-        encoder_decoder = ["Bert", "Roberta", "Bart"]
+        non_causal = ["Bert", "Roberta", "Bart"]
         model_name = get_architecture_class_name(self.model_config)
-        if any([m in model_name for m in encoder_decoder]):
-            status = False
+        if any([m in model_name for m in non_causal]):
+            return False
         else:
-            status = True
-        print("libin debug is_causal ", model_name, status)
-        return status
+            return True
+
     def load_model(self) -> None:
         model_arch_causal = self.is_causal()
         import habana_frameworks.torch.core as htcore
