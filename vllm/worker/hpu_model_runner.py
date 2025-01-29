@@ -298,9 +298,9 @@ class HpuModelAdapter:
         if not hasattr(self.model.model, "_pooler"):
             len_mask_v = len_mask.view(batch_size, 1, seq_len, 1)
             mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
-            off_value = 3E38 #small number, avoid nan and overflow
+            off_value = -3E38 #small number, avoid nan and overflow
         else:
-            mask = attn_mask.logical_or(len_mask)#no need for len_mask_v as decode overwrite it
+            mask = attn_mask.logical_or(len_mask)#no need for len_mask_v as decode overwrites it
             off_value = -math.inf
 
         mask = torch.concat((past_mask, mask), dim=-1)
