@@ -74,8 +74,7 @@ stages:
       - name: test_gptq
         flavor: g2
         command: VLLM_SKIP_WARMUP=true pytest -v tests/quantization/test_gptq.py::test_gptq
-  - name: tests_int4_quantization
-    steps:
       - name: test_awq
         flavor: g2
         command: VLLM_SKIP_WARMUP=true pytest -v tests/quantization/test_awq.py::test_awq
+
