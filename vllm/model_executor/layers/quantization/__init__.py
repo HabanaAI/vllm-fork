@@ -20,6 +20,7 @@ QUANTIZATION_METHODS: List[str] = [
     "gptq_marlin",
     "awq_marlin",
     "gptq",
+    "gptq_hpu",
     "compressed-tensors",
     "bitsandbytes",
     "qqq",
@@ -77,6 +78,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
 
     # lazy import to avoid triggering `torch.compile` too early
     from vllm_hpu_extension.awq_hpu import AWQHPUConfig
+    from vllm_hpu_extension.gptq_hpu import GPTQHPUConfig
 
     from vllm.model_executor.layers.quantization.quark.quark import QuarkConfig
 
@@ -120,6 +122,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
         "gptq_marlin": GPTQMarlinConfig,
         "awq_marlin": AWQMarlinConfig,
         "gptq": GPTQConfig,
+        "gptq_hpu": GPTQHPUConfig,
         "compressed-tensors": CompressedTensorsConfig,
         "bitsandbytes": BitsAndBytesConfig,
         "qqq": QQQConfig,
