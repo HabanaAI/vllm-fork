@@ -2179,25 +2179,32 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                 dtype=torch.float,
                                                 device="hpu")
                                 seq_data.prev_logits_idx = i
+                            #! This causes recompilations due to changing tensor shapes
                             if logits_tensor is None:
                                 logits_tensor = seq_data.prev_logits
+                            # If the current sequence has the same logits
                             if seq_data.prev_logits is logits_tensor:
                                 logits_ids_list.append(
                                     seq_data.prev_logits_idx)
+                            # Different logits
                             else:
+                                # Save logits of all previous sequences
+                                # Varying shape causes recompilations
                                 logits_tensor_list.append(
-                                    logits_tensor[torch.tensor(
-                                        logits_ids_list,
-                                        device=seq_data.prev_logits.device)])
+                                    torch.index_select(logits_tensor, 0, torch.tensor(logits_ids_list, device=htorch.hpu.current_device())))
                                 
+                                # Store new id
                                 logits_ids_list = [seq_data.prev_logits_idx]
+                                
+                                # Save logits tensor
                                 logits_tensor = seq_data.prev_logits
 
                 if logits_tensor is not None:
                     logits_tensor_list.append(logits_tensor[torch.tensor(
                         logits_ids_list, device=logits_tensor.device)])
 
-                prev_logits = torch.cat(logits_tensor_list, dim=0)
+                #! Logits have different shapes that causes recompilations
+                prev_logits = torch.cat(logits_tensor_list, dim=0).to(htorch.hpu.current_device())
 
                 # Sample next token - delayed sampling
                 with self.profiler.record_event(
@@ -2322,7 +2329,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
-
                 
                 # Delayed sampling
                 # MSS: Sample for decodes, but not for the last one
