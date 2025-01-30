@@ -8,6 +8,7 @@ from vllm.config import DeviceConfig, VllmConfig
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.model_executor.pooling_metadata import PoolingMetadata
+
 from vllm.multimodal import MultiModalKwargs, MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.pooling_params import PoolingParams
 from vllm.sequence import (IntermediateTensors, PoolerOutput, SequenceData,
@@ -131,6 +132,7 @@ class HPUPoolingModelRunner(
             self.profiler.record_counter(self.event_start, counters)
         if not self.is_driver_worker:
             return []
+
         return[self.model.model._pooler(hidden_states=hidden_states,
                               pooling_metadata=model_input.pooling_metadata)]
 
@@ -158,8 +160,16 @@ class HPUPoolingModelRunner(
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
 
+            #get prompt length based on pool method as we padding
+            if model_input.real_batch_size == model_input.batch_size_padded:
+                prompt_offsets = [ i * model_input.input_tokens.shape[1] for i in range (model_input.real_batch_size)]
+                prompt_offsets_tensor = torch.tensor(prompt_offsets).to(model_input.input_tokens.device)
+            #TODO
+            #else: 
+            
             pooling_metadata = self._prepare_pooling(seq_group_metadata_list,
-                                            model_input.seq_lens)
+                                            prompt_lens=model_input.attn_metadata.seq_lens_tensor,
+                                            prompt_offsets=prompt_offsets_tensor)
 
         return dataclasses.replace(model_input,
                                    virtual_engine=virtual_engine,
@@ -169,6 +179,7 @@ class HPUPoolingModelRunner(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         prompt_lens: List[int],
+        prompt_offsets: List[int],
     ) -> PoolingMetadata:
         """Prepare PoolingMetadata for the sequence group metadata list."""
         seq_groups: List[Tuple[List[int], PoolingParams]] = []
@@ -185,6 +196,7 @@ class HPUPoolingModelRunner(
             seq_groups=seq_groups,
             seq_data=seq_data,
             prompt_lens=prompt_lens,
+            prompt_offsets=prompt_offsets,
         )
 
         return pooling_metadata

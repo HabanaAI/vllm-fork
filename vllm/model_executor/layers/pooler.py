@@ -46,6 +46,7 @@ class SimplePooler(nn.Module):
         step_tag_id: Optional[int] = None,
         returned_token_ids: Optional[List[int]] = None,
     ) -> "SimplePooler":
+        print("libin debug pooling type/norm/softmax ", pooling_type,normalize, softmax)
         if pooling_type == PoolingType.LAST:
             assert step_tag_id is None and returned_token_ids is None
             return LastPool(normalize=normalize, softmax=softmax)
@@ -77,7 +78,8 @@ class SimplePooler(nn.Module):
         pooling_metadata: PoolingMetadata,
     ) -> torch.Tensor:
         return PoolingTensors.from_pooling_metadata(
-            pooling_metadata, hidden_states.device).prompt_lens
+            pooling_metadata, hidden_states.device).prompt_lens, PoolingTensors.from_pooling_metadata(
+            pooling_metadata, hidden_states.device).prompt_offsets
 
     def extract_states(
         self,
@@ -107,12 +109,14 @@ class CLSPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
-
-        first_token_flat_indices = torch.zeros_like(prompt_lens)
-        first_token_flat_indices[1:] += torch.cumsum(prompt_lens, dim=0)[:-1]
+        prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
+        if prompt_offsets is not None:
+            first_token_flat_indices = prompt_offsets
+        else:
+            first_token_flat_indices = torch.zeros_like(prompt_lens)
+            first_token_flat_indices[1:] += torch.cumsum(prompt_lens, dim=0)[:-1]
         return hidden_states[first_token_flat_indices]
-
+    
 
 class LastPool(SimplePooler):
 
@@ -121,9 +125,11 @@ class LastPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
-
-        last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
+        prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
+        if prompt_offsets is not None:
+            last_token_flat_indices = torch.sum(torch.cat((prompt_lens.unsqueeze(0), prompt_offsets.unsqueeze(0)),0), dim=0, keepdim=True) - 1
+        else:
+            last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
         return hidden_states[last_token_flat_indices]
 
 
@@ -134,7 +140,7 @@ class AllPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
+        prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
 
         offset = 0
         pooled_data = list[torch.Tensor]()
@@ -152,7 +158,7 @@ class MeanPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
+        prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
 
         cumsum = torch.cumsum(hidden_states, dim=0)
         start_indices = torch.cat([
@@ -184,7 +190,7 @@ class StepPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
+        prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
 
         returned_token_ids = self.returned_token_ids
         if returned_token_ids is not None and len(returned_token_ids) > 0:
