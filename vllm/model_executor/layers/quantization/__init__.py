@@ -6,6 +6,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 QUANTIZATION_METHODS: List[str] = [
     "aqlm",
     "awq",
+    "awq_hpu",
     "deepspeedfp",
     "tpu_int8",
     "fp8",
@@ -19,6 +20,7 @@ QUANTIZATION_METHODS: List[str] = [
     "gptq_marlin",
     "awq_marlin",
     "gptq",
+    "gptq_hpu",
     "compressed-tensors",
     "bitsandbytes",
     "qqq",
@@ -30,12 +32,54 @@ QUANTIZATION_METHODS: List[str] = [
     "quark"
 ]
 
+# The customized quantization methods which will be added to this dict.
+_CUSTOMIZED_METHOD_TO_QUANT_CONFIG = {}
+
+
+def register_quantization_config(quantization: str):
+    """Register a customized vllm quantization config.
+
+    When a quantization method is not supported by vllm, you can register a customized
+    quantization config to support it.
+
+    Args:
+        quantization (str): The quantization method name.
+
+    Examples:
+        >>> from vllm.model_executor.layers.quantization import register_quantization_config
+        >>> from vllm.model_executor.layers.quantization import get_quantization_config
+        >>> from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
+        >>>
+        >>> @register_quantization_config("my_quant")
+        ... class MyQuantConfig(QuantizationConfig):
+        ...     pass
+        >>>
+        >>> get_quantization_config("my_quant")
+        <class 'MyQuantConfig'>
+    """  # noqa: E501
+
+    def _wrapper(quant_config_cls):
+        if quantization in QUANTIZATION_METHODS:
+            raise ValueError(
+                f"The quantization method `{quantization}` is already exists.")
+        if not issubclass(quant_config_cls, QuantizationConfig):
+            raise ValueError("The quantization config must be a subclass of "
+                             "`QuantizationConfig`.")
+        _CUSTOMIZED_METHOD_TO_QUANT_CONFIG[quantization] = quant_config_cls
+        QUANTIZATION_METHODS.append(quantization)
+        return quant_config_cls
+
+    return _wrapper
+
 
 def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     if quantization not in QUANTIZATION_METHODS:
         raise ValueError(f"Invalid quantization method: {quantization}")
 
     # lazy import to avoid triggering `torch.compile` too early
+    from vllm_hpu_extension.awq_hpu import AWQHPUConfig
+    from vllm_hpu_extension.gptq_hpu import GPTQHPUConfig
+
     from vllm.model_executor.layers.quantization.quark.quark import QuarkConfig
 
     from .aqlm import AQLMConfig
@@ -64,6 +108,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     method_to_config: Dict[str, Type[QuantizationConfig]] = {
         "aqlm": AQLMConfig,
         "awq": AWQConfig,
+        "awq_hpu": AWQHPUConfig,
         "deepspeedfp": DeepSpeedFPConfig,
         "tpu_int8": Int8TpuConfig,
         "fp8": Fp8Config,
@@ -77,6 +122,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
         "gptq_marlin": GPTQMarlinConfig,
         "awq_marlin": AWQMarlinConfig,
         "gptq": GPTQConfig,
+        "gptq_hpu": GPTQHPUConfig,
         "compressed-tensors": CompressedTensorsConfig,
         "bitsandbytes": BitsAndBytesConfig,
         "qqq": QQQConfig,
@@ -87,6 +133,8 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
         "inc": INCConfig,
         "quark": QuarkConfig
     }
+    # Update the `method_to_config` with customized quantization methods.
+    method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)
 
     return method_to_config[quantization]
 

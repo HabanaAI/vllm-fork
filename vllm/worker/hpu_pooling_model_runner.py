@@ -1,29 +1,15 @@
 import dataclasses
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
-
-import torch
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import habana_frameworks.torch as htorch
-from vllm.config import DeviceConfig, VllmConfig
-from vllm.forward_context import set_forward_context
-from vllm.inputs import INPUT_REGISTRY, InputRegistry
-from vllm.model_executor.pooling_metadata import PoolingMetadata
+import torch
 
-from vllm.multimodal import MultiModalKwargs, MULTIMODAL_REGISTRY, MultiModalRegistry
+from vllm.model_executor.pooling_metadata import PoolingMetadata
+from vllm.multimodal import MultiModalKwargs
 from vllm.pooling_params import PoolingParams
 from vllm.sequence import (IntermediateTensors, PoolerOutput, SequenceData,
                            SequenceGroupMetadata)
-from vllm.worker.hpu_model_runner import (HPUModelRunnerBase, ModelInputForHPU,
-                                          ModelInputForHPUWithSamplingMetadata,
-                                          setup_profiler, subtuple)
-
-
-from vllm.worker.model_runner_base import (
-    _add_attn_metadata_broadcastable_dict,
-    _add_sampling_metadata_broadcastable_dict)
-
-if TYPE_CHECKING:
-    from vllm.attention.backends.abstract import AttentionBackend
+from vllm.worker.hpu_model_runner import HPUModelRunnerBase, ModelInputForHPU
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,7 +83,7 @@ class HPUPoolingModelRunner(
             "intermediate_tensors":
             intermediate_tensors,
         }
-        
+
         if htorch.utils.internal.is_lazy():
             execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
 
@@ -113,7 +99,8 @@ class HPUPoolingModelRunner(
         with self.profiler.record_event('internal', model_event_name):
             hidden_states = self.model.forward(
                 **execute_model_kwargs,
-                selected_token_indices=None #sampling_metadata.selected_token_indices
+                selected_token_indices=
+                None  #sampling_metadata.selected_token_indices
             )
 
         htorch.core.mark_step()
@@ -133,8 +120,11 @@ class HPUPoolingModelRunner(
         if not self.is_driver_worker:
             return []
 
-        return[self.model.model._pooler(hidden_states=hidden_states,
-                              pooling_metadata=model_input.pooling_metadata)]
+        return [
+            self.model.model._pooler(
+                hidden_states=hidden_states,
+                pooling_metadata=model_input.pooling_metadata)
+        ]
 
     def make_model_input_from_broadcasted_tensor_dict(
             self,
@@ -159,17 +149,17 @@ class HPUPoolingModelRunner(
 
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
+            prompt_offsets = [
+                i * model_input.input_tokens.shape[1]
+                for i in range(model_input.real_batch_size)
+            ]
+            prompt_offsets_tensor = torch.tensor(prompt_offsets).to(
+                model_input.input_tokens.device)
 
-            #get prompt length based on pool method as we padding
-            if model_input.real_batch_size == model_input.batch_size_padded:
-                prompt_offsets = [ i * model_input.input_tokens.shape[1] for i in range (model_input.real_batch_size)]
-                prompt_offsets_tensor = torch.tensor(prompt_offsets).to(model_input.input_tokens.device)
-            #TODO
-            #else: 
-            
-            pooling_metadata = self._prepare_pooling(seq_group_metadata_list,
-                                            prompt_lens=model_input.attn_metadata.seq_lens_tensor,
-                                            prompt_offsets=prompt_offsets_tensor)
+            pooling_metadata = self._prepare_pooling(
+                seq_group_metadata_list,
+                prompt_lens=model_input.attn_metadata.seq_lens_tensor,
+                prompt_offsets=prompt_offsets_tensor)
 
         return dataclasses.replace(model_input,
                                    virtual_engine=virtual_engine,
@@ -198,7 +188,6 @@ class HPUPoolingModelRunner(
             prompt_lens=prompt_lens,
             prompt_offsets=prompt_offsets,
         )
-
         return pooling_metadata
 
     def profile_run(self) -> None:

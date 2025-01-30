@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
@@ -17,7 +17,8 @@ class PoolingMetadata:
         seq_groups: List of (seq_ids, pooling_params).
         seq_data: A mapping of sequence ID to additional sequence data.
         prompt_lens: List of the lengths of each prompt.
-        prompt_offsets: List of prompt offsets for each prompt when flat out with padding 
+        prompt_offsets: List of prompt start offsets for each prompt
+        when flat out with padding
     """
 
     def __init__(
@@ -75,8 +76,9 @@ class PoolingTensors:
                 device="cpu",
                 dtype=torch.long,
                 pin_memory=pin_memory,
-            ).to(device=device,non_blocking=True)
+            ).to(device=device, non_blocking=True)
         else:
             prompt_offsets_t = None
         return cls(prompt_lens=prompt_lens_t.to(device=device,
-                                                non_blocking=True), prompt_offsets=prompt_offsets_t)
+                                                non_blocking=True),
+                   prompt_offsets=prompt_offsets_t)
