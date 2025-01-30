@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 import torch
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
-from vllm_hpu_extension.flags import enabled_flags as call_enabled_flags
+from vllm_hpu_extension.flags import get_enabled_flags
 from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
                                       VLLMKVCache)
 
@@ -150,7 +150,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         if not enabled_flags:
-            enabled_flags = call_enabled_flags()
+            enabled_flags = get_enabled_flags()
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags
         if self.prefill_use_fusedsdpa:
             assert alibi_slopes is None, \

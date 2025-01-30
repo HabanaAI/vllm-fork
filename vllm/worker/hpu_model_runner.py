@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing import HPUBucketingContext
-from vllm_hpu_extension.flags import enabled_flags as call_enabled_flags
+from vllm_hpu_extension.flags import get_enabled_flags
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
@@ -222,7 +222,7 @@ class HpuModelAdapter:
 
         self.model = model
         if not enabled_flags:
-            enabled_flags = call_enabled_flags()
+            enabled_flags = get_enabled_flags()
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
