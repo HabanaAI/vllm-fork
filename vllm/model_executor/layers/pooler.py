@@ -46,7 +46,6 @@ class SimplePooler(nn.Module):
         step_tag_id: Optional[int] = None,
         returned_token_ids: Optional[List[int]] = None,
     ) -> "SimplePooler":
-        print("libin debug pooling type/norm/softmax ", pooling_type,normalize, softmax)
         if pooling_type == PoolingType.LAST:
             assert step_tag_id is None and returned_token_ids is None
             return LastPool(normalize=normalize, softmax=softmax)
@@ -161,20 +160,17 @@ class MeanPool(SimplePooler):
     ) -> Union[list[torch.Tensor], torch.Tensor]:
         prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
         cumsum = torch.cumsum(hidden_states, dim=0)
-
         if prompt_offsets is not None:
-            end_indices = prompt_offsets + prompt_lens - 1
-            result = (cumsum[end_indices] - cumsum[prompt_offsets-1]) / prompt_lens.unsqueeze(1)
-            result[0] = (cumsum[prompt_lens[0]-1]) / prompt_lens[0]
-            return result
+            end_indices = prompt_offsets + prompt_lens
+            start_indices = prompt_offsets
         else:
             start_indices = torch.cat([
                 torch.tensor([0], device=hidden_states.device),
                 torch.cumsum(prompt_lens[:-1], dim=0)
                 ])
             end_indices = torch.cumsum(prompt_lens, dim=0)
-            return  (cumsum[end_indices - 1] - cumsum[start_indices] +
-                hidden_states[start_indices]) / prompt_lens.unsqueeze(1)
+        return  (cumsum[end_indices - 1] - cumsum[start_indices] +
+            hidden_states[start_indices]) / prompt_lens.unsqueeze(1)
 
 
 class StepPool(SimplePooler):
