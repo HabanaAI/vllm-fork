@@ -127,7 +127,8 @@ class LastPool(SimplePooler):
     ) -> Union[list[torch.Tensor], torch.Tensor]:
         prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
         if prompt_offsets is not None:
-            last_token_flat_indices = torch.sum(torch.cat((prompt_lens.unsqueeze(0), prompt_offsets.unsqueeze(0)),0), dim=0, keepdim=True) - 1
+            last_token_flat_indices = (torch.sum(torch.cat((prompt_lens.unsqueeze(0), prompt_offsets.unsqueeze(0)),0),
+                                                 dim=0, keepdim=True) - 1).squeeze(0)
         else:
             last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
         return hidden_states[last_token_flat_indices]
@@ -159,14 +160,20 @@ class MeanPool(SimplePooler):
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
         prompt_lens, prompt_offsets = self.get_prompt_lens(hidden_states, pooling_metadata)
-
         cumsum = torch.cumsum(hidden_states, dim=0)
-        start_indices = torch.cat([
-            torch.tensor([0], device=hidden_states.device),
-            torch.cumsum(prompt_lens[:-1], dim=0)
-        ])
-        end_indices = torch.cumsum(prompt_lens, dim=0)
-        return (cumsum[end_indices - 1] - cumsum[start_indices] +
+
+        if prompt_offsets is not None:
+            end_indices = prompt_offsets + prompt_lens - 1
+            result = (cumsum[end_indices] - cumsum[prompt_offsets-1]) / prompt_lens.unsqueeze(1)
+            result[0] = (cumsum[prompt_lens[0]-1]) / prompt_lens[0]
+            return result
+        else:
+            start_indices = torch.cat([
+                torch.tensor([0], device=hidden_states.device),
+                torch.cumsum(prompt_lens[:-1], dim=0)
+                ])
+            end_indices = torch.cumsum(prompt_lens, dim=0)
+            return  (cumsum[end_indices - 1] - cumsum[start_indices] +
                 hidden_states[start_indices]) / prompt_lens.unsqueeze(1)
 
 
