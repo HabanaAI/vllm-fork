@@ -377,7 +377,7 @@ class HpuModelAdapter:
             slot_mapping = metadata.slot_mapping.flatten()
             indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
-            offsets = None
+            offsets = torch.fmod(slot_mapping, block_size)
         if metadata.num_decode_tokens > 0:
             decode_slot_mapping = metadata.decode_slot_mapping.flatten()
             decode_indices = torch.div(decode_slot_mapping, block_size, rounding_mode="floor")

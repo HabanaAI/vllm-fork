@@ -23,6 +23,7 @@ from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
 from vllm.logger import init_logger
 
 import habana_frameworks.torch as htorch
+import math
 
 logger = init_logger(__name__)
 
@@ -173,13 +174,42 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
-        self.attn_type = attn_type
-        if (self.attn_type != AttentionType.DECODER
-                and self.attn_type != AttentionType.ENCODER_DECODER
-                and self.attn_type != AttentionType.ENCODER_ONLY):
-            raise NotImplementedError("Encoder self-attention "
-                                      "is not implemented for "
-                                      "HPUAttentionImpl")
+    def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
+                       dtype):
+        if batch_size > 1:
+            import pdb; pdb.set_trace()
+        prefill_metadata = attn_metadata
+
+        seq_lens_t = prefill_metadata.seq_lens_tensor
+        context_lens_t = prefill_metadata.context_lens_tensor
+        query_lens_t = seq_lens_t - context_lens_t
+
+        block_list = attn_metadata.block_list
+        max_context_len = (block_list.size(-1) - 1 //
+                           batch_size if block_list is not None else 0)
+        max_context_len = max_context_len * 128
+        max_context_len = max_context_len + attn_metadata.block_offsets[0].item()
+        past_mask = torch.arange(0,
+                                 max_context_len,
+                                 dtype=torch.int32,
+                                 device=device)
+        past_mask = (past_mask.view(1, -1).expand(batch_size, -1).ge(
+            context_lens_t.view(-1, 1)).view(batch_size, 1, -1).expand(
+                batch_size, seq_len, -1).view(batch_size, 1, seq_len, -1))
+
+        len_mask = (torch.arange(0, seq_len - max_context_len, device=device,
+                                 dtype=torch.int32).view(1, seq_len - max_context_len).ge(
+                                     query_lens_t.unsqueeze(-1)).view(
+                                         batch_size, 1, 1, seq_len - max_context_len))
+        causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len - max_context_len),
+                                            device=device,
+                                            dtype=torch.bool),
+                                 diagonal=1)
+        mask = causal_mask.logical_or(len_mask)
+        mask = torch.concat((past_mask, mask), dim=-1)
+        attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
+            mask, -math.inf))
+        return attn_bias
 
     def forward(
         self,
@@ -242,7 +272,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             prefill_key = prefill_key.reshape(-1, self.num_kv_heads, self.head_size)
             prefill_value = prefill_value.reshape(-1, self.num_kv_heads, self.head_size)
             block_indices = attn_metadata.block_indices
-            block_offsets = None
+            block_offsets = attn_metadata.block_offsets
             prefill_key = prefill_key.unflatten(0, (block_indices.size(0), -1))
             prefill_value = prefill_value.unflatten(0, (block_indices.size(0), -1))
             if kv_cache is not None:
@@ -343,20 +373,35 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             else:
                 # TODO: enable FusedSDPA
-                out = HPUPagedAttention.forward_prefix(
+                attn_bias = self._set_attn_bias(attn_metadata, batch_size, int(seq_len), query.device,
+                       query.dtype)
+                '''out = HPUPagedAttention.forward_prefix(
                     query=prefill_query.view(query_shape),
                     key=prefill_key.view(kv_shape),
                     value=prefill_value.view(kv_shape),
                     key_cache=prefill_key_cache,
                     value_cache=prefill_value_cache,
                     block_list=attn_metadata.block_list,
-                    attn_bias=attn_metadata.attn_bias,
+                    attn_bias=attn_bias,
                     scale=self.scale,
                     matmul_qk_op=self.matmul_qk,
                     matmul_av_op=self.matmul_av,
                     softmax_op=self.softmax,
                     keys_fetch_func=self.k_cache.fetch_from_cache,
-                    values_fetch_func=self.v_cache.fetch_from_cache)
+                    values_fetch_func=self.v_cache.fetch_from_cache)'''
+                out = ops.prompt_attention(
+                    prefill_query.view(query_shape),
+                    self.k_cache.fetch_from_cache(prefill_key_cache, attn_metadata.block_list).view(kv_shape),
+                    self.v_cache.fetch_from_cache(prefill_value_cache, attn_metadata.block_list).view(kv_shape),
+                    attn_bias=attn_bias,
+                    p=0.0,
+                    scale=self.scale,
+                    matmul_qk_op=self.matmul_qk,
+                    softmax_op=self.softmax,
+                    matmul_av_op=self.matmul_av,
+                    valid_seq_lengths=attn_metadata.seq_lens_tensor,
+                    fsdpa_op=self.fused_scaled_dot_product_attention,
+                )
             prompt_output = out.reshape(batch_size, seq_len, hidden_size)
         htorch.core.mark_step()
         if attn_metadata.num_decode_tokens > 0:
