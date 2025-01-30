@@ -265,24 +265,35 @@ class MultiHeadAttention(nn.Module):
                                                  scale=self.scale)
             out = out.transpose(1, 2)
         elif self.attn_backend == _Backend.HPU_ATTN:
-            from habana_frameworks.torch.hpex.kernels import FusedSDPA
-            from vllm_hpu_extension.utils import ModuleFusedSDPA
-
-            fsdpa_op = ModuleFusedSDPA(FusedSDPA)
-
             query, key, value = (x.transpose(1, 2)
                                  for x in (query, key, value))
 
-            out = fsdpa_op(query,
-                           key,
-                           value,
-                           None,
-                           dropout_p=0.0,
-                           is_causal=False,
-                           scale=self.scale,
-                           softmax_mode="fast",
-                           recompute_mode=True,
-                           valid_sequence_lengths=None)
+            import pdb; pdb.set_trace()
+            from vllm_hpu_extension.flags import enabled_flags
+
+            if "fsdpa" in enabled_flags():
+                print("fsdpa")
+                from habana_frameworks.torch.hpex.kernels import FusedSDPA
+                from vllm_hpu_extension.utils import ModuleFusedSDPA
+
+                fsdpa_op = ModuleFusedSDPA(FusedSDPA)
+
+                out = fsdpa_op(query,
+                               key,
+                               value,
+                               None,
+                               dropout_p=0.0,
+                               is_causal=False,
+                               scale=self.scale,
+                               softmax_mode="fast",
+                               recompute_mode=True,
+                               valid_sequence_lengths=None)
+            else:
+                print("no fsdpa")
+                out = F.scaled_dot_product_attention(query,
+                                                 key,
+                                                 value,
+                                                 scale=self.scale)
 
             out = out.transpose(1, 2)
 
