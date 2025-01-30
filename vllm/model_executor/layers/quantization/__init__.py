@@ -18,6 +18,7 @@ QUANTIZATION_METHODS: List[str] = [
     "gptq_marlin_24",
     "gptq_marlin",
     "awq_marlin",
+    "awq_hpu",
     "gptq",
     "gptq_hpu",
     "compressed-tensors",
