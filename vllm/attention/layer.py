@@ -240,9 +240,7 @@ class MultiHeadAttention(nn.Module):
             backend = _Backend.XFORMERS
 
         self.attn_backend = backend if backend in {
-            _Backend.TORCH_SDPA,
-            _Backend.XFORMERS,
-            _Backend.HPU_ATTN
+            _Backend.TORCH_SDPA, _Backend.XFORMERS, _Backend.HPU_ATTN
         } else _Backend.TORCH_SDPA
 
     def forward(
@@ -304,9 +302,9 @@ class MultiHeadAttention(nn.Module):
                                valid_sequence_lengths=None)
             else:
                 out = F.scaled_dot_product_attention(query,
-                                                 key,
-                                                 value,
-                                                 scale=self.scale)
+                                                     key,
+                                                     value,
+                                                     scale=self.scale)
 
             out = out.transpose(1, 2)
 
