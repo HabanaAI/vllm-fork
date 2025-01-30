@@ -77,6 +77,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
 
     # lazy import to avoid triggering `torch.compile` too early
     from vllm_hpu_extension.gptq_hpu import GPTQHPUConfig
+
     from vllm.model_executor.layers.quantization.quark.quark import QuarkConfig
 
     from .aqlm import AQLMConfig
