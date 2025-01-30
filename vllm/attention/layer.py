@@ -268,11 +268,9 @@ class MultiHeadAttention(nn.Module):
             query, key, value = (x.transpose(1, 2)
                                  for x in (query, key, value))
 
-            import pdb; pdb.set_trace()
             from vllm_hpu_extension.flags import enabled_flags
 
             if "fsdpa" in enabled_flags():
-                print("fsdpa")
                 from habana_frameworks.torch.hpex.kernels import FusedSDPA
                 from vllm_hpu_extension.utils import ModuleFusedSDPA
 
@@ -289,7 +287,6 @@ class MultiHeadAttention(nn.Module):
                                recompute_mode=True,
                                valid_sequence_lengths=None)
             else:
-                print("no fsdpa")
                 out = F.scaled_dot_product_attention(query,
                                                  key,
                                                  value,
