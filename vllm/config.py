@@ -2827,7 +2827,7 @@ class CompilationConfig(BaseModel):
 
     # Per-model forward context
     # Map from layer name to the attention cls
-    static_forward_context: Dict[str, Any] = PrivateAttr
+    static_forward_context: torch.nn.ModuleList = PrivateAttr
 
     def compute_hash(self) -> str:
         """
@@ -2912,7 +2912,7 @@ class CompilationConfig(BaseModel):
         self.enabled_custom_ops = Counter()
         self.disabled_custom_ops = Counter()
         self.traced_files = set()
-        self.static_forward_context = {}
+        self.static_forward_context = torch.nn.ModuleDict()
         self.compilation_time = 0.0
 
     def init_backend(self, vllm_config: "VllmConfig") -> Union[str, Callable]:

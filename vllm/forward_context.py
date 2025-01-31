@@ -25,7 +25,7 @@ batchsize_forward_time: defaultdict = defaultdict(list)
 @dataclass
 class ForwardContext:
     # copy from vllm_config.compilation_config.static_forward_context
-    attn_layers: Dict[str, Any]
+    attn_layers: torch.nn.ModuleDict
     # TODO: extend to support per-layer dynamic forward context
     attn_metadata: "AttentionMetadata"  # set dynamically for each forward pass
     # TODO: remove after making all virtual_engines share the same kv cache
