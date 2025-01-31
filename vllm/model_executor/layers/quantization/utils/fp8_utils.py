@@ -70,14 +70,19 @@ def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype):
     weight_scale_m, weight_scale_n = weight_scale.shape
     assert weight_scale_m == M // block_size_m
     assert weight_scale_n == N // block_size_n
-    weight_scale = weight_scale.view(1, weight_scale_m, 1, weight_scale_n)
+    weight_scale = weight_scale.view(weight_scale_m, 1, weight_scale_n, 1)
+    # print(weight_scale.shape)
+    # print(weight.shape)
     dequant_weight = weight.to(dtype) * weight_scale.to(dtype)
 
     # change block format back to normal
-    dequant_weight = dequant_weight.view(M // block_size_m, block_size_m, N // block_size_n, block_size_n)
+    dequant_weight = dequant_weight.view(M, N)
+
+    # print(dequant_weight.shape)
     # dequant_weight = dequant_weight.permute(0, 2, 1, 3).contiguous().view(M, N)
 
     dequant_weight = unpad_weight(dequant_weight, original_M, original_N)
+
 
     return dequant_weight
 
