@@ -227,7 +227,7 @@ class HpuModelAdapter:
         self.layer_names = layer_names
         enforce_eager = vllm_config.model_config.enforce_eager
         self.is_pooler = hasattr(self.model, "_pooler")
-        self.is_causal = not model_arch_causal
+        self.is_causal = model_arch_causal
 
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
