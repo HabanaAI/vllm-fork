@@ -181,9 +181,11 @@ class HpuModelAdapter:
                 self.regional_compilation_layers_list = [RMSNorm]
                 self._regional_compilation(self.model)
             else:
-                self.model = torch.compile(self.model,
-                                           backend='hpu_backend',
-                                           dynamic=False)
+                self.model = torch.compile(
+                    self.model,
+                    backend='hpu_backend',
+                    dynamic=None,
+                    options={"force_static_compile": True})
 
     def _regional_compilation(self,
                               module,
@@ -202,7 +204,10 @@ class HpuModelAdapter:
                                            children_name)
 
     def _compile_region(self, model, name, module):
-        module = torch.compile(module, backend='hpu_backend', dynamic=False)
+        module = torch.compile(module,
+                               backend='hpu_backend',
+                               dynamic=None,
+                               options={"force_static_compile": True})
         setattr(model, name, module)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
