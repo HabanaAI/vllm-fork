@@ -46,7 +46,7 @@ def pad_weight(weight, block_size):
 
 def unpad_weight(weight, original_M, original_N):
     """Removes padding from the matrix to restore its original shape."""
-    return weight[:original_M, :original_N].contiguous()
+    return weight[:original_M, :original_N]
 
 
 def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype):
@@ -63,19 +63,19 @@ def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype):
 
     # change weight to block format
     weight = weight.view(M // block_size_m, block_size_m, N // block_size_n, block_size_n) # [0, 1, 2, 3]
-    weight = weight.permute(0, 2, 1, 3)
-    weight = weight.contiguous().view(M // block_size_m, N // block_size_n, -1)
+    # weight = weight.permute(0, 2, 1, 3)
+    # weight = weight.contiguous().view(M // block_size_m, N // block_size_n, -1)
     
     # mul scale
     weight_scale_m, weight_scale_n = weight_scale.shape
     assert weight_scale_m == M // block_size_m
     assert weight_scale_n == N // block_size_n
-    weight_scale = weight_scale.view(weight_scale_m, weight_scale_n, 1)
+    weight_scale = weight_scale.view(1, weight_scale_m, 1, weight_scale_n)
     dequant_weight = weight.to(dtype) * weight_scale.to(dtype)
 
     # change block format back to normal
-    dequant_weight = dequant_weight.view(M // block_size_m, N // block_size_n, block_size_m, block_size_n)
-    dequant_weight = dequant_weight.permute(0, 2, 1, 3).contiguous().view(M, N)
+    dequant_weight = dequant_weight.view(M // block_size_m, block_size_m, N // block_size_n, block_size_n)
+    # dequant_weight = dequant_weight.permute(0, 2, 1, 3).contiguous().view(M, N)
 
     dequant_weight = unpad_weight(dequant_weight, original_M, original_N)
 
