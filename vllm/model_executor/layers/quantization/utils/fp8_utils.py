@@ -46,40 +46,56 @@ def pad_weight(weight, block_size):
 
 def unpad_weight(weight, original_M, original_N):
     """Removes padding from the matrix to restore its original shape."""
-    return weight[:original_M, :original_N].contiguous()
+    return weight[:original_M, :original_N]
 
-
-def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype):
+def pad_block_fp8_weight_naive(weight, weight_scale, block_size):
 
     assert len(block_size) == 2
-    assert len(weight_scale.shape) == 2
     assert len(weight.shape) == 2
-    # assert M % block_size_m == 0 and N % block_size_n == 0, \
-    #     f"Matrix dimensions must be divisible by block_size, got M: {M}, N: {N}, block_size_m: {block_size_m}, block_size_n: {block_size_n}"
     
-    weight, original_M, original_N = pad_weight(weight, block_size)
-    M, N = weight.shape
     block_size_m, block_size_n = block_size
+    weight_scale_m, weight_scale_n = weight_scale.shape
+
+    weight, orig_M, orig_N = pad_weight(weight, block_size)
+    M, N = weight.shape
+
+    assert weight_scale_m == M // block_size_m
+    assert weight_scale_n == N // block_size_n
 
     # change weight to block format
     weight = weight.view(M // block_size_m, block_size_m, N // block_size_n, block_size_n) # [0, 1, 2, 3]
-    weight = weight.permute(0, 2, 1, 3)
-    weight = weight.contiguous().view(M // block_size_m, N // block_size_n, -1)
+    weight = weight.permute(0, 2, 1, 3).contiguous().view(M // block_size_m, N // block_size_n, -1)
+
+    return weight, orig_M, orig_N
+
+
+def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype, original_M=None, original_N=None):
+
+    assert len(block_size) == 2
+    assert len(weight_scale.shape) == 2
+
+    if len(weight.shape) == 2:
+        weight, original_M, original_N = pad_block_fp8_weight_naive(weight, weight_scale, block_size)
     
-    # mul scale
+    block_size_m, block_size_n = block_size
+
     weight_scale_m, weight_scale_n = weight_scale.shape
-    assert weight_scale_m == M // block_size_m
-    assert weight_scale_n == N // block_size_n
     weight_scale = weight_scale.view(weight_scale_m, weight_scale_n, 1)
+
+    # mul scale
     dequant_weight = weight.to(dtype) * weight_scale.to(dtype)
 
     # change block format back to normal
-    dequant_weight = dequant_weight.view(M // block_size_m, N // block_size_n, block_size_m, block_size_n)
-    dequant_weight = dequant_weight.permute(0, 2, 1, 3).contiguous().view(M, N)
+    view_shape = (*dequant_weight.shape[:-1], block_size_m, block_size_n)
+    view_shape_merged = (dequant_weight.shape[0]*block_size_m, dequant_weight.shape[1]*block_size_n)
+    dequant_weight = dequant_weight.view(*view_shape)
+    dequant_weight = dequant_weight.permute(0, 2, 1, 3).contiguous().view(*view_shape_merged)
 
-    dequant_weight = unpad_weight(dequant_weight, original_M, original_N)
+    if original_M is not None and original_N is not None:
+        dequant_weight = unpad_weight(dequant_weight, original_M, original_N)
 
     return dequant_weight
+
 
 def apply_block_fp8_linear_hpu(
     input: torch.Tensor,
@@ -88,12 +104,16 @@ def apply_block_fp8_linear_hpu(
     weight_scale: torch.Tensor,
     input_scale: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
+    original_M: Optional[torch.Tensor] = None,
+    original_N: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     assert input_scale is None
     # View input as 2D matrix for fp8 methods
     input_2d = input.view(-1, input.shape[-1])
-    output_shape = [*input.shape[:-1], weight.shape[0]]
-    dequant_weight = dequant_block_fp8_weight_naive(weight, weight_scale, block_size, input_2d.dtype)
+    original_M = original_M.data
+    original_N = original_N.data
+    output_shape = [*input.shape[:-1], original_M]
+    dequant_weight = dequant_block_fp8_weight_naive(weight, weight_scale, block_size, input_2d.dtype, original_M, original_N)
     output = torch.nn.functional.linear(input_2d, dequant_weight, bias=None)
     if bias is not None:
         output = output + bias

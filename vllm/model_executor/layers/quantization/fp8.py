@@ -255,6 +255,17 @@ class Fp8LinearMethod(LinearMethodBase):
     def process_weights_after_loading(self, layer: Module) -> None:
         # Block quant doesn't need to process weights after loading
         if self.block_quant:
+            if current_platform.is_hpu():
+                from vllm.model_executor.layers.quantization.utils.fp8_utils import pad_block_fp8_weight_naive
+                weight, orig_M, orig_N = pad_block_fp8_weight_naive(
+                    layer.weight,
+                    layer.weight_scale_inv,
+                    self.quant_config.weight_block_size)
+                layer.weight = torch.nn.Parameter(weight, requires_grad=False)
+                orig_M = torch.nn.Parameter(torch.tensor(orig_M, dtype=torch.int32), requires_grad=False)
+                orig_N = torch.nn.Parameter(torch.tensor(orig_N, dtype=torch.int32), requires_grad=False)
+                layer.register_parameter("orig_M", orig_M)
+                layer.register_parameter("orig_N", orig_N)
             return
         layer.weight = torch.nn.Parameter(layer.weight.data,
                                           requires_grad=False)
@@ -355,6 +366,8 @@ class Fp8LinearMethod(LinearMethodBase):
                     weight_scale=layer.weight_scale_inv,
                     input_scale=layer.input_scale,
                     bias=bias,
+                    original_M=layer.orig_M,
+                    original_N=layer.orig_N,
                 )
             else:
                 return apply_w8a8_block_fp8_linear(
