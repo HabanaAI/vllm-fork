@@ -29,6 +29,8 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 
 from vllm.attention import AttentionMetadata, get_attn_backend
+from vllm.attention.backends.abstract import AttentionType
+from vllm.attention.backends.hpu_attn import HPUAttentionImpl
 from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed import broadcast_tensor_dict
 from vllm.distributed.parallel_state import get_world_group
@@ -44,7 +46,6 @@ from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
-from vllm.model_executor.model_loader.utils import get_architecture_class_name
 from vllm.model_executor.models import supports_multimodal
 from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
@@ -216,7 +217,7 @@ def get_path_to_rope(model: torch.nn.Module):
 
 class HpuModelAdapter:
 
-    def __init__(self, model, vllm_config, layer_names, model_arch_causal):
+    def __init__(self, model, vllm_config, layer_names):
         self.model = model
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
@@ -227,8 +228,9 @@ class HpuModelAdapter:
         self.layer_names = layer_names
         enforce_eager = vllm_config.model_config.enforce_eager
         self.is_pooler = hasattr(self.model, "_pooler")
-        self.is_causal = model_arch_causal
-
+        self.is_causal = True
+        if self.is_pooler:
+            self.set_causal_option(self.model)
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -314,7 +316,6 @@ class HpuModelAdapter:
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, off_value))
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
-
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
@@ -445,6 +446,18 @@ class HpuModelAdapter:
 
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
+
+    def set_causal_option(self, module):
+        if isinstance(module, HPUAttentionImpl) and hasattr(
+                module, 'attn_type'):
+            self.is_causal = not (
+                module.attn_type == AttentionType.ENCODER
+                or module.attn_type == AttentionType.ENCODER_ONLY
+                or module.attn_type == AttentionType.ENCODER_DECODER)
+            return
+        else:
+            for child_name, child_module in module.named_children():
+                self.set_causal_option(child_module)
 
     # sampler property will be used by spec_decode_worker
     # don't rename
@@ -723,11 +736,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
 
-    def is_causal(self) -> bool:
-        non_causal = ["Bert", "Roberta", "Bart"]
-        model_name = get_architecture_class_name(self.model_config)
-        return not any([m in model_name for m in non_causal])
-
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
@@ -740,7 +748,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"{next(self.model.parameters()).device} "
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
-            model_arch_causal = self.is_causal()
             self.is_pooler = hasattr(self.model, "_pooler")
             if self.lora_config:
                 assert hasattr(self.model, "supported_lora_modules"
@@ -816,8 +823,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.model = self._maybe_wrap_in_hpu_graph(
                     self.model,
                     vllm_config=self.vllm_config,
-                    layer_names=path_to_rope,
-                    model_arch_causal=model_arch_causal)
+                    layer_names=path_to_rope)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
 
