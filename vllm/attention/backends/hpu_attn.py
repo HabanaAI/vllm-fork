@@ -73,10 +73,9 @@ class HPUMLAAttentionBackend(HPUAttentionBackend):
         num_blocks: int,
         block_size: int,
         num_kv_heads: int,
-        kv_lora_rank: int,
+        head_size: int,
     ) -> Tuple[int, ...]:
-        k_pe_size = kv_lora_rank // 8
-        return (num_blocks, block_size, kv_lora_rank + k_pe_size), True
+        return (num_blocks, block_size, head_size), True
     
     @staticmethod
     def get_impl_cls() -> Type["HPUAttentionImpl"]:
