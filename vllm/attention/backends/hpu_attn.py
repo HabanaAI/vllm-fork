@@ -75,7 +75,7 @@ class HPUMLAAttentionBackend(HPUAttentionBackend):
         num_kv_heads: int,
         head_size: int,
     ) -> Tuple[int, ...]:
-        return (num_blocks, block_size, head_size), True
+        return (num_blocks, block_size, head_size), (num_blocks, block_size, head_size//9*8)
     
     @staticmethod
     def get_impl_cls() -> Type["HPUAttentionImpl"]:
@@ -136,7 +136,8 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
         self.matmul_av = Matmul()
         self.batch2block_matmul = Matmul()
         self.block2batch_matmul = Matmul()
-        self.latent_cache = VLLMKVCache()
+        self.latent_cache_k = VLLMKVCache()
+        self.latent_cache_v = VLLMKVCache()
         HPUFusedSDPA = kernels.fsdpa()
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
@@ -201,19 +202,29 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
 
-        latent_vec = torch.concat(
+        latent_vec_k = torch.concat(
                 (k_c_normed, k_pe.view(batch_size, -1, self.qk_rope_head_dim)), dim=-1)
         # assert layer._k_scale == 0, f"got _k_scale={layer._k_scale}"
-        latent_vec = latent_vec.view(-1, self.qk_rope_head_dim + self.kv_lora_rank)
+        latent_vec_k = latent_vec_k.view(-1, self.qk_rope_head_dim + self.kv_lora_rank)
+        latent_vec_v = k_c_normed.view(-1, self.kv_lora_rank)
         if is_prefill:
-            latent_vec = latent_vec.unflatten(0, (block_indices.size(0), -1))
+            latent_vec_k = latent_vec_k.unflatten(0, (block_indices.size(0), -1))
+            latent_vec_v = latent_vec_v.unflatten(0, (block_indices.size(0), -1))
         # print("latent_vec", latent_vec.shape)
 
 
         # write the latent and rope to kv cache
-        if kv_cache is not None:
-            kv_cache = self.latent_cache(latent_vec, kv_cache, block_indices,
+        if kv_cache is not None and len(kv_cache) == 2:
+            # print(f"k cache shape: {kv_cache[0].shape}")
+            # print(f"v cache shape: {kv_cache[1].shape}")
+            # print(f"latent vec k shape: {latent_vec_k.shape}")
+            # print(f"latent vec v shape: {latent_vec_v.shape}")
+            
+            k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0], block_indices,
                                         block_offsets)
+            v_cache = self.latent_cache_v(latent_vec_v, kv_cache[1], block_indices,
+                                        block_offsets)
+            kv_cache = (k_cache, v_cache)
 
         if is_prefill:
             return self._forward_prefill(q, k_c_normed, k_pe, attn_metadata, batch_size)
@@ -265,13 +276,13 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
         self,
         q_nope: torch.Tensor,
         q_pe: torch.Tensor,
-        kv_c_and_k_pe_cache: torch.Tensor,
+        kv_cache: torch.Tensor,
         attn_metadata: HPUAttentionMetadata,
         batch_size: int
     ) -> torch.Tensor:
         q = torch.cat([q_nope, q_pe], dim=-1)
-        kv_c_and_k_pe_cache = kv_c_and_k_pe_cache.unsqueeze(2)
-        kv_c_cache = kv_c_and_k_pe_cache[..., :self.kv_lora_rank]
+        kv_c_and_k_pe_cache = kv_cache[0].unsqueeze(2)
+        kv_c_cache = kv_cache[1].unsqueeze(2)
 
         output = HPUPagedAttention.forward_decode(
             query=q,
@@ -287,8 +298,8 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
             matmul_av_op=self.matmul_av,
             batch2block_matmul_op=self.batch2block_matmul,
             block2batch_matmul_op=self.block2batch_matmul,
-            keys_fetch_func=self.latent_cache.fetch_from_cache,
-            values_fetch_func=self.latent_cache.fetch_from_cache)
+            keys_fetch_func=self.latent_cache_k.fetch_from_cache,
+            values_fetch_func=self.latent_cache_v.fetch_from_cache)
         output = output.view(batch_size, 1, -1)
         result = self._v_up_proj_and_o_proj(output)
         result = result.view(batch_size, 1, -1)
