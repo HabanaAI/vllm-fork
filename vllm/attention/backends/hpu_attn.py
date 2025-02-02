@@ -185,9 +185,6 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
             q_pe = torch.matmul(hidden_states_or_q_c, self.W_QR)\
                 .view(-1, self.num_heads, self.qk_rope_head_dim)
             input_positions = attn_metadata.input_positions.view(-1)
-            print("q_pe", q_pe.shape)
-            print("k_pe", k_pe.shape)
-            print("input_positions", attn_metadata.input_positions.shape)
             q_pe, k_pe = \
                 self.rotary_emb(input_positions, q_pe, k_pe)
         else:
@@ -196,9 +193,6 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
             
             q_pe = q[..., self.qk_nope_head_dim:]
 
-            # print("q_pe shape", q_pe.shape)
-            # print("k_pe shape", k_pe.shape)
-            # print("input_positions shape", attn_metadata.input_positions.shape)
             input_positions = attn_metadata.input_positions.view(-1)
             # TODO(lucas): there must be a nicer way to write this line
             q[..., self.qk_nope_head_dim:], k_pe = \
@@ -210,7 +204,11 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
         latent_vec = torch.concat(
                 (k_c_normed, k_pe.view(batch_size, -1, self.qk_rope_head_dim)), dim=-1)
         # assert layer._k_scale == 0, f"got _k_scale={layer._k_scale}"
-        # print(f"layer._k_scale={layer._k_scale}")
+        latent_vec = latent_vec.view(-1, self.qk_rope_head_dim + self.kv_lora_rank)
+        if is_prefill:
+            latent_vec = latent_vec.unflatten(0, (block_indices.size(0), -1))
+        # print("latent_vec", latent_vec.shape)
+
 
         # write the latent and rope to kv cache
         if kv_cache is not None:
@@ -271,16 +269,10 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
         attn_metadata: HPUAttentionMetadata,
         batch_size: int
     ) -> torch.Tensor:
-        print(f"q_nope shape: {q_nope.shape}")
-        print(f"q_pe shape: {q_pe.shape}")
-
         q = torch.cat([q_nope, q_pe], dim=-1)
         kv_c_and_k_pe_cache = kv_c_and_k_pe_cache.unsqueeze(2)
         kv_c_cache = kv_c_and_k_pe_cache[..., :self.kv_lora_rank]
 
-        print(f"q shape: {q.shape}")
-        print(f"kv_c_and_k_pe_cache shape: {kv_c_and_k_pe_cache.shape}")
-        print(f"kv_c_cache shape: {kv_c_cache.shape}")
         output = HPUPagedAttention.forward_decode(
             query=q,
             key_cache=kv_c_and_k_pe_cache,
@@ -298,10 +290,8 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata]):
             keys_fetch_func=self.latent_cache.fetch_from_cache,
             values_fetch_func=self.latent_cache.fetch_from_cache)
         output = output.view(batch_size, 1, -1)
-        print("output", output.shape)
         result = self._v_up_proj_and_o_proj(output)
         result = result.view(batch_size, 1, -1)
-        print("result", result.shape)
         return result
 
 
