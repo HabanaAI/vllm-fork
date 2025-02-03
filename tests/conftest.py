@@ -5,7 +5,6 @@ from collections import UserList
 from enum import Enum
 from typing import (Any, Callable, Dict, List, Optional, Tuple, Type,
                     TypedDict, TypeVar, Union)
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -29,19 +28,21 @@ from vllm.distributed import (cleanup_dist_env_and_memory,
                               init_distributed_environment,
                               initialize_model_parallel)
 from vllm.inputs import (ExplicitEncoderDecoderPrompt, TextPrompt,
-                         to_enc_dec_tuple_list, zip_enc_dec_prompts)
+                         TokensPrompt, to_enc_dec_tuple_list,
+                         zip_enc_dec_prompts)
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.platforms import current_platform
 from vllm.sampling_params import BeamSearchParams
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, cuda_device_count_stateless,
-                        identity)
+                        identity, is_list_of)
 
 logger = init_logger(__name__)
 
 _TEST_DIR = os.path.dirname(__file__)
 _TEST_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "example.txt")]
 _LONG_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "summary.txt")]
+_SYS_MSG = os.path.join(_TEST_DIR, "system_messages", "sonnet3.5_nov2024.txt")
 
 _M = TypeVar("_M")
 _PromptMultiModalInput = Union[List[_M], List[List[_M]]]
@@ -110,7 +111,7 @@ VIDEO_ASSETS = _VideoAssets()
 
 
 @pytest.fixture(params=[True, False])
-def run_with_both_engines(request):
+def run_with_both_engines(request, monkeypatch):
     # Automatically runs tests twice, once with V1 and once without
     use_v1 = request.param
     # Tests decorated with `@skip_v1` are only run without v1
@@ -119,11 +120,11 @@ def run_with_both_engines(request):
     if use_v1:
         if skip_v1:
             pytest.skip("Skipping test on vllm V1")
-        with patch('vllm.envs.VLLM_USE_V1', True):
-            yield
+        monkeypatch.setenv('VLLM_USE_V1', '1')
     else:
-        with patch('vllm.envs.VLLM_USE_V1', False):
-            yield
+        monkeypatch.setenv('VLLM_USE_V1', '0')
+
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -177,6 +178,12 @@ def example_prompts() -> List[str]:
     for filename in _TEST_PROMPTS:
         prompts += _read_prompts(filename)
     return prompts
+
+
+@pytest.fixture
+def example_system_message() -> str:
+    with open(_SYS_MSG) as f:
+        return f.read()
 
 
 class DecoderPromptType(Enum):
@@ -238,11 +245,13 @@ def video_assets() -> _VideoAssets:
 
 
 _T = TypeVar("_T", nn.Module, torch.Tensor, BatchEncoding, BatchFeature, dict)
+_R = TypeVar("_R")
 
 
 class HfRunner:
 
     def wrap_device(self, x: _T, device: Optional[str] = None) -> _T:
+        from vllm.platforms import current_platform
         if x is None or isinstance(x, (bool, )):
             return x
 
@@ -649,6 +658,80 @@ def hf_runner():
     return HfRunner
 
 
+class HfHPURunner(HfRunner):
+
+    def wrap_device(self, x: _T, device: Optional[str] = None) -> _T:
+        if device is None:
+            device = "cpu" if current_platform.is_cpu() else "hpu"
+
+        if isinstance(x, dict):
+            return {k: self.wrap_device(v, device) for k, v in x.items()}
+
+        if hasattr(x, "device") and x.device.type == device:
+            return x
+
+        return x.to(device)
+
+    def __init__(
+        self,
+        model_name: str,
+        dtype: str = "half",
+        *,
+        model_kwargs: Optional[Dict[str, Any]] = None,
+        is_embedding_model: bool = False,
+        auto_cls: Type[_BaseAutoModelClass] = AutoModelForCausalLM,
+        postprocess_inputs: Callable[[BatchEncoding],
+                                     BatchEncoding] = identity,
+    ) -> None:
+        torch_dtype = STR_DTYPE_TO_TORCH_DTYPE[dtype]
+
+        self.model_name = model_name
+
+        model_kwargs = model_kwargs if model_kwargs is not None else {}
+        self.model = self.wrap_device(
+            auto_cls.from_pretrained(
+                model_name,
+                torch_dtype=torch_dtype,
+                trust_remote_code=True,
+                **model_kwargs,
+            ).eval())
+
+        from habana_frameworks.torch.hpu import wrap_in_hpu_graph
+        wrap_done = False
+        if hasattr(self.model, "language_model"):
+            self.model.language_model = wrap_in_hpu_graph(
+                self.model.language_model)
+            wrap_done = True
+        if hasattr(self.model, "vision_model"):
+            self.model.vision_model = wrap_in_hpu_graph(
+                self.model.vision_model)
+            wrap_done = True
+        if not wrap_done:
+            self.model = wrap_in_hpu_graph(self.model)
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+        )
+
+        # don't put this import at the top level
+        # it will call torch.cuda.device_count()
+        from transformers import AutoProcessor  # noqa: F401
+        self.processor = AutoProcessor.from_pretrained(
+            model_name,
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+        )
+        self.dtype = dtype
+        self.postprocess_inputs = postprocess_inputs
+
+
+@pytest.fixture(scope="session")
+def hf_hpu_runner():
+    return HfHPURunner
+
+
 class VllmRunner:
 
     def __init__(
@@ -663,7 +746,7 @@ class VllmRunner:
         dtype: str = "half",
         disable_log_stats: bool = True,
         tensor_parallel_size: int = 1,
-        block_size: int = 16,
+        block_size: int = 16 if not current_platform.is_hpu() else 128,
         enable_chunked_prefill: bool = False,
         swap_space: int = 4,
         enforce_eager: Optional[bool] = False,
@@ -719,14 +802,6 @@ class VllmRunner:
                     inputs[i]["multi_modal_data"] = {"audio": audio}
 
         return inputs
-
-    def classify(self, prompts: List[str]) -> List[str]:
-        req_outputs = self.model.encode(prompts)
-        outputs = []
-        for req_output in req_outputs:
-            embedding = req_output.outputs.embedding
-            outputs.append(embedding)
-        return outputs
 
     def generate(
         self,
@@ -888,6 +963,12 @@ class VllmRunner:
         beam_width: int,
         max_tokens: int,
     ) -> List[Tuple[List[List[int]], List[str]]]:
+        if is_list_of(prompts, str, check="all"):
+            prompts = [TextPrompt(prompt=prompt) for prompt in prompts]
+        else:
+            prompts = [
+                TokensPrompt(prompt_token_ids=tokens) for tokens in prompts
+            ]
         outputs = self.model.beam_search(
             prompts,
             BeamSearchParams(beam_width=beam_width, max_tokens=max_tokens))
@@ -897,6 +978,10 @@ class VllmRunner:
             texts = [x.text for x in output.sequences]
             returned_outputs.append((token_ids, texts))
         return returned_outputs
+
+    def classify(self, prompts: List[str]) -> List[List[float]]:
+        req_outputs = self.model.classify(prompts)
+        return [req_output.outputs.probs for req_output in req_outputs]
 
     def encode(
         self,
@@ -910,16 +995,20 @@ class VllmRunner:
                                  videos=videos,
                                  audios=audios)
 
-        req_outputs = self.model.encode(inputs)
+        req_outputs = self.model.embed(inputs)
         return [req_output.outputs.embedding for req_output in req_outputs]
 
     def score(
         self,
         text_1: Union[str, List[str]],
         text_2: Union[str, List[str]],
-    ) -> List[List[float]]:
+    ) -> List[float]:
         req_outputs = self.model.score(text_1, text_2)
-        return [req_output.outputs.embedding for req_output in req_outputs]
+        return [req_output.outputs.score for req_output in req_outputs]
+
+    def apply_model(self, func: Callable[[nn.Module], _R]) -> list[_R]:
+        executor = self.model.llm_engine.model_executor
+        return executor.apply_model(func)
 
     def __enter__(self):
         return self

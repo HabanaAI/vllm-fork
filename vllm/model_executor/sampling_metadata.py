@@ -9,7 +9,8 @@ from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (PyObjectCache, async_tensor_h2d,
-                        is_pin_memory_available, make_tensor_with_pad)
+                        is_pin_memory_available, make_tensor_with_pad,
+                        make_tensor_with_pad_align)
 
 _SAMPLING_EPS = 1e-5
 
@@ -167,7 +168,8 @@ class SamplingMetadata:
             pin_memory=pin_memory,
         )
         categorized_sample_indices = {
-            t: async_tensor_h2d(
+            t:
+            async_tensor_h2d(
                 seq_ids,
                 dtype=torch.int,
                 target_device=device,
@@ -199,8 +201,12 @@ def _prepare_seq_groups(
     device: str,
     generators: Optional[Dict[str, torch.Generator]] = None,
     cache: Optional[SamplingMetadataCache] = None,
-) -> Tuple[List[SequenceGroupToSample], List[int], Dict[SamplingType,
-                                                        List[int]], int, ]:
+) -> Tuple[
+        List[SequenceGroupToSample],
+        List[int],
+        Dict[SamplingType, List[int]],
+        int,
+]:
     """Prepare sequence groups and indices for sampling.
 
     Args:
@@ -523,20 +529,38 @@ class SamplingTensors:
         do_penalties = prompt_tokens or output_tokens
 
         if do_penalties:
-            prompt_t = make_tensor_with_pad(
-                prompt_tokens,
-                vocab_size,
-                device="cpu",
-                dtype=torch.int64,
-                pin_memory=pin_memory,
-            )
-            output_t = make_tensor_with_pad(
-                output_tokens,
-                vocab_size,
-                device="cpu",
-                dtype=torch.int64,
-                pin_memory=pin_memory,
-            )
+            if current_platform.is_hpu():
+                prompt_t = make_tensor_with_pad_align(
+                    prompt_tokens,
+                    vocab_size,
+                    device="cpu",
+                    dtype=torch.int64,
+                    pin_memory=pin_memory,
+                    max_len_align=1024,
+                )
+                output_t = make_tensor_with_pad_align(
+                    output_tokens,
+                    vocab_size,
+                    device="cpu",
+                    dtype=torch.int64,
+                    pin_memory=pin_memory,
+                    max_len_align=1024,
+                )
+            else:
+                prompt_t = make_tensor_with_pad(
+                    prompt_tokens,
+                    vocab_size,
+                    device="cpu",
+                    dtype=torch.int64,
+                    pin_memory=pin_memory,
+                )
+                output_t = make_tensor_with_pad(
+                    output_tokens,
+                    vocab_size,
+                    device="cpu",
+                    dtype=torch.int64,
+                    pin_memory=pin_memory,
+                )
         else:
             empty_tensor = torch.empty(0, device=device, dtype=torch.long)
             prompt_t = empty_tensor

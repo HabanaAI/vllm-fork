@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 
 import vllm.envs as envs
+from vllm.model_executor.layers.utils import apply_penalties
 from vllm.model_executor.sampling_metadata import (SamplingMetadata,
                                                    SamplingTensors,
                                                    SequenceGroupToSample)
@@ -264,11 +265,11 @@ class Sampler(nn.Module):
 
         # Apply presence and frequency penalties.
         if do_penalties:
-            logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
-                                      sampling_tensors.output_tokens,
-                                      sampling_tensors.presence_penalties,
-                                      sampling_tensors.frequency_penalties,
-                                      sampling_tensors.repetition_penalties)
+            logits = apply_penalties(logits, sampling_tensors.prompt_tokens,
+                                     sampling_tensors.output_tokens,
+                                     sampling_tensors.presence_penalties,
+                                     sampling_tensors.frequency_penalties,
+                                     sampling_tensors.repetition_penalties)
 
         # Use float32 to apply temperature scaling.
         # Use in-place division to avoid creating a new tensor.
@@ -405,6 +406,14 @@ class ApplyToppTopkScalar:
         self._increment = increment
 
     def __call__(self, logits: torch.Tensor, p: float, k: int):
+        if k == 1 and not ApplyToppTopkScalar._handle_duplicates:
+            new_logits = torch.full(logits.shape,
+                                    -float("inf"),
+                                    device=logits.device)
+            vals, idx = torch.max(logits, keepdim=True, dim=1)
+            new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
+            return new_logits
+
         if k > ApplyToppTopkScalar._padded_k:
             ApplyToppTopkScalar._padded_k = min(k + self._increment,
                                                 logits.shape[1])
@@ -528,7 +537,7 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
         output_tokens_tensor, vocab_size, num_seqs)
 
     repetition_penalties = repetition_penalties[:, None].repeat(1, vocab_size)
-    repetition_penalties[~(prompt_mask | output_mask)] = 1.0
+    repetition_penalties.masked_fill_(~(prompt_mask | output_mask), 1.0)
     logits = torch.where(logits > 0, logits / repetition_penalties,
                          logits * repetition_penalties)
 
@@ -871,9 +880,10 @@ def _sample_with_torch(
       tensors required for Pythonization
     '''
 
-    categorized_seq_group_ids: Dict[SamplingType,
-                                    List[int]] = {t: []
-                                                  for t in SamplingType}
+    categorized_seq_group_ids: Dict[SamplingType, List[int]] = {
+        t: []
+        for t in SamplingType
+    }
     categorized_sample_indices = sampling_metadata.categorized_sample_indices
     for i, seq_group in enumerate(sampling_metadata.seq_groups):
         sampling_params = seq_group.sampling_params

@@ -24,15 +24,16 @@ TEST_DATA_FILE = os.environ.get(
     "LM_EVAL_TEST_DATA_FILE",
     ".jenkins/lm-eval-harness/configs/Meta-Llama-3-8B-Instruct.yaml")
 
+REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
+                                    "false") in ['1', 'true']
+
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
 
-def setup_fp8(model_path, device_type):
-    flavor = f"g{device_type[-1]}"
-    normalized_model_name = Path(model_path).parts[-1].lower()
+def setup_fp8():
     os.environ[
         "QUANT_CONFIG"] = \
-            f"/software/data/vllm-benchmarks/inc/{normalized_model_name}/maxabs_quant_{flavor}.json"
+            "inc_unit_scales_config.json"
 
 
 def fail_on_exit():
@@ -147,7 +148,7 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
 
         # Set up environment for FP8 inference
         if eval_config.get("fp8"):
-            setup_fp8(eval_config["model_name"], platform)
+            setup_fp8()
         # Launch eval requests.
         start_time = time.perf_counter()
         results = launch_lm_eval(eval_config)
@@ -172,9 +173,10 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
                                 x['resps'])))['input_ids'])) for x in samples
             ]
             tokenized_outputs_lens = [len(x) for x in tokenized_outputs]
-            report_performance(task['name'], tokenized_inputs_lens,
-                               tokenized_outputs_lens, total_time,
-                               record_property)
+            if REPORT_PERFORMANCE:
+                report_performance(task['name'], tokenized_inputs_lens,
+                                   tokenized_outputs_lens, total_time,
+                                   record_property)
 
             for metric in task["metrics"]:
                 ground_truth = metric["value"]
