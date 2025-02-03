@@ -2295,8 +2295,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
-                
-                with self.profiler.record_event('internal', 
+
+                with self.profiler.record_event('internal',
                                                 model_event_name,
                                                 args=profiler_args):
                     hidden_states = self.model.forward(
