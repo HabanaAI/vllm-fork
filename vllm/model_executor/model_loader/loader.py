@@ -326,6 +326,7 @@ class DefaultModelLoader(BaseModelLoader):
                               fall_back_to_pt=True)
 
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
+        import pdb;pdb.set_trace()
         device_config = vllm_config.device_config
         model_config = vllm_config.model_config
 
@@ -339,8 +340,11 @@ class DefaultModelLoader(BaseModelLoader):
 
             logger.info("Loading weights on %s...", self.load_config.device)
             weights_to_load = {name for name, _ in model.named_parameters()}
-            loaded_weights = model.load_weights(
-                self._get_all_weights(model_config, model))
+            import pdb;pdb.set_trace()
+            initialize_dummy_weights(model)
+            ##loaded_weights = model.load_weights(
+            ##    self._get_all_weights(model_config, model))
+            loaded_weights = None
             # We only enable strict check for non-quantiized models
             # that have loaded weights tracking currently.
             if model_config.quantization is None and loaded_weights is not None:
@@ -383,6 +387,7 @@ class DummyModelLoader(BaseModelLoader):
                 model = _initialize_model(vllm_config=vllm_config)
             # NOTE(woosuk): For accurate performance evaluation, we assign
             # random values to the weights.
+            import pdb;pdb.set_trace()
             initialize_dummy_weights(model)
 
             for _, module in model.named_modules():
