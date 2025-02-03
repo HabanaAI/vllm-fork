@@ -2289,7 +2289,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         for j, seq_group_output in enumerate(
                             output.outputs[:real_batch_size]):
                             for sample in seq_group_output.samples:
-                                sample.output_token = output.sampled_token_ids[j][0]
+                                sample.output_token = output.sampled_token_ids[j][0].item()
                     else:
                         # For prompts compose empty output
                         from vllm.sequence import (CompletionSequenceGroupOutput,
