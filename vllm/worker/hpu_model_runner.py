@@ -2209,7 +2209,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # Sample next token - delayed sampling
                 with self.profiler.record_event(
                         'internal', f'sample_{"prompt" if is_prompt else "decode"}'
-                        '_bs{batch_size}_seq{seq_len}'):
+                        f'_bs{batch_size}_seq{seq_len}'):
                     output = self.model.sample(
                         logits=prev_logits,
                         sampling_metadata=sampling_metadata,
