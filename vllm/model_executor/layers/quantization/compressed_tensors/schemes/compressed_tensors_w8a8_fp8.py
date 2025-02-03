@@ -66,8 +66,7 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
                         weight_scale=layer.weight_scale,
                         input_scale=input_scale)
                 if input_scale is not None:
-                    layer.input_scale = Parameter(input_scale,
-                                                  requires_grad=False)
+                    layer.input_scale = Parameter(input_scale, requires_grad=False)
             else:
                 weight_scale = layer.weight_scale.data
 
@@ -83,8 +82,7 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
             input_scale = layer.input_scale.max()
             if is_gaudi2():
                 input_scale = input_scale * get_gaudi2_scale_factor()
-            layer.input_scale = Parameter(input_scale,
-                                          requires_grad=False)
+            layer.input_scale = Parameter(input_scale, requires_grad=False)
         else:
             layer.input_scale = None
 
