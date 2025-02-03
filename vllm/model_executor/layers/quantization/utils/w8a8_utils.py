@@ -1,7 +1,6 @@
 from typing import List, Optional, Tuple, Union
 
 import torch
-from torch import Tensor
 
 from vllm import _custom_ops as ops
 from vllm.platforms import current_platform
