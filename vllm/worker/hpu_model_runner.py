@@ -335,7 +335,7 @@ class HpuModelAdapter:
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
 
-        if (is_fake_hpu() and htorch.utils.internal.is_lazy())\
+        if (not is_fake_hpu() and htorch.utils.internal.is_lazy())\
               or "compile_one_hot" in enabled_flags():
             # Use one_hot directly on HPU on lazy or on t.compile when
             # build is >= 20.0.0.370
