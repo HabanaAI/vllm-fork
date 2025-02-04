@@ -415,12 +415,12 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
         self.block_quant = self.quant_config.weight_block_size is not None
-        self.moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 8))
+        self.moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 1))
+        self.ep_rank = 0
 
     def create_weights(self, layer: Module, num_experts: int, hidden_size: int,
                        intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
-
         if self.quant_config.is_checkpoint_fp8_serialized:
             params_dtype = torch.float8_e4m3fn
         if self.block_quant:
@@ -808,6 +808,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             w13_list_slice = [w13_weight[j] for j in range(min_expert, max_expert)]
             w2_list_slice = [w2_weight[j] for j in range(min_expert, max_expert)]
 
+            ep_shift = self.ep_rank * num_experts
             final_hidden_states += torch.ops.hpu.mixture_of_experts(
                                          hidden_states=x,
                                          expert_routing_table=topk_ids.to(torch.int64),
@@ -816,8 +817,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                          w3=w2_list_slice,
                                          permuted_weights=True,
                                          activation="silu",
-                                         experts_min=min_expert,
-                                         experts_max=max_expert - 1)
+                                         experts_min=min_expert + ep_shift,
+                                         experts_max=max_expert - 1 + ep_shift)
             htorch.core.mark_step()
         return final_hidden_states.view(-1, x.shape[1])
 
