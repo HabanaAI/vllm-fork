@@ -150,9 +150,15 @@ def run_vllm(
     use_beam_search = False
 
     if not use_beam_search:
-        start = time.perf_counter()
+
+        #warmup
         llm.generate(prompts, sampling_params, use_tqdm=True)
+
+        #inference and profiling
+        start = time.perf_counter()
+        llm.generate(prompts, sampling_params, use_tqdm=True, profiling=True)
         end = time.perf_counter()
+
     else:
         prompts = [request.prompt for request in requests]
         # output_len should be the same for all requests.

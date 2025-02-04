@@ -1,0 +1,63 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "FP8 Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/app/vllm-fork/benchmarks/benchmark_throughput.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--model", "/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/",
+                "--device", "hpu",
+                "--seed", "2024",
+                "--backend", "vllm",
+                "--dataset", "/app/ShareGPT_V3_unfiltered_cleaned_split.json",
+                "--num-prompts", "2",
+                "--quantization", "inc",
+                "--dtype", "bfloat16",
+                "--kv-cache-dtype", "fp8_inc",
+            ],
+            "env":{
+                "PT_HPU_LAZY_MODE": "1",
+                "VLLM_SKIP_WARMUP": "true",
+                "PT_HPU_WEIGHT_SHARING":"0",
+                "QUANT_CONFIG":"/app/vllm-hpu-extension/calibration/inc_llama3.1_8b_g3/meta-llama-3.1-8b-instruct/maxabs_quant_g3.json"
+            },
+        },
+
+        {
+            "name": "PF16 Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/app/vllm-fork/benchmarks/benchmark_throughput.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--model", "/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/",
+                "--device", "hpu",
+                "--seed", "2024",
+                "--backend", "vllm",
+                "--dataset", "/app/ShareGPT_V3_unfiltered_cleaned_split.json",
+                "--num-prompts", "2",
+                "--dtype", "bfloat16"
+            ],
+            "env":{
+                "PT_HPU_LAZY_MODE": "1",
+                "VLLM_SKIP_WARMUP": "true",
+            }
+        },
+    ],    
+
+    "compounds": [
+            {
+                "name": "Run FP8 and PF16 Debuggers Together",
+                "configurations": [
+                    "FP8 Python Debugger: Current File with Arguments",
+                    "PF16 Python Debugger: Current File with Arguments"
+                ]
+            }
+    ]
+}
