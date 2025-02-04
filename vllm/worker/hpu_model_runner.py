@@ -1939,36 +1939,40 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         False, kv_caches)
 
             if not self.enforce_eager and htorch.utils.internal.is_lazy():
-                assert self.mem_margin is not None, \
-                    ("HabanaWorker.determine_num_available_blocks needs "
-                    "to be called before warming up the model.")
+                if not self.is_pooler:
+                    assert self.mem_margin is not None, \
+                        ("HabanaWorker.determine_num_available_blocks needs "
+                        "to be called before warming up the model.")
+
                 free_mem = HabanaMemoryProfiler.current_free_device_memory()
                 graph_free_mem = free_mem - self.mem_margin
                 graph_free_mem = align_workers(graph_free_mem,
                                                torch.distributed.ReduceOp.MIN)
-                prompt_graph_mem_ratio = float(
-                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
-                prompt_available_memory = (prompt_graph_mem_ratio *
-                                           graph_free_mem)
-                decode_available_memory = (graph_free_mem -
-                                           prompt_available_memory)
-                msg = (
-                    f"Using {format_bytes(graph_free_mem)}"
-                    f"/{format_bytes(free_mem)} "
-                    "of free device memory for HPUGraphs, "
-                    f"{format_bytes(prompt_available_memory)} for prompt and "
-                    f"{format_bytes(decode_available_memory)} for decode "
-                    f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
-                logger.info(msg)
                 prompt_strategy = os.environ.get('VLLM_GRAPH_PROMPT_STRATEGY',
                                                  'min_tokens')
-                decode_strategy = os.environ.get('VLLM_GRAPH_DECODE_STRATEGY',
-                                                 'max_bs')
-                mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
-                    self.warmup_graphs(
-                    prompt_strategy, self.bucketing_ctx.prompt_buckets,
-                    True, kv_caches, prompt_available_memory)
                 if not self.is_pooler:
+                    prompt_graph_mem_ratio = float(
+                        os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
+                    prompt_available_memory = (prompt_graph_mem_ratio *
+                                               graph_free_mem)
+                    decode_available_memory = (graph_free_mem -
+                                               prompt_available_memory)
+                    msg = (
+                        f"Using {format_bytes(graph_free_mem)}"
+                        f"/{format_bytes(free_mem)} "
+                        "of free device memory for HPUGraphs, "
+                        f"{format_bytes(prompt_available_memory)} \
+                            for prompt and "
+                        f"{format_bytes(decode_available_memory)} for decode "
+                        f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
+                    logger.info(msg)
+                    mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
+                        self.warmup_graphs(
+                        prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                        True, kv_caches, prompt_available_memory)
+
+                    decode_strategy = os.environ.get(
+                        'VLLM_GRAPH_DECODE_STRATEGY', 'max_bs')
                     mem_post_decode, decode_batch_seq, decode_captured_all = \
                         self.warmup_graphs(
                         decode_strategy, self.bucketing_ctx.decode_buckets,
@@ -2002,6 +2006,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 mem_post_decode, mem_post_decode,
                                 decode_batch_seq)
                 else:
+                    prompt_available_memory = graph_free_mem
+                    msg = (
+                        f"Using {format_bytes(graph_free_mem)}"
+                        f"/{format_bytes(free_mem)} "
+                        "of free device memory for HPUGraphs, "
+                        f"{format_bytes(prompt_available_memory)} for prompt")
+                    logger.info(msg)
+                    prompt_strategy = os.environ.get(
+                        'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
+
+                    mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
+                        self.warmup_graphs(
+                        prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                        True, kv_caches, prompt_available_memory)
                     if mem_post_prompt < graph_free_mem \
                         and not prompt_captured_all:
                         mem_post_prompt, _, prompt_captured_all = (
