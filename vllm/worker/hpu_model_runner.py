@@ -2203,6 +2203,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits_tensor_list.append(logits_tensor[torch.tensor(
                         logits_ids_list, device=logits_tensor.device)])
 
+                # Seperate logits concat from sampler graph
+                htorch.core.mark_step()
+
                 #! Logits have different shapes that causes recompilations
                 prev_logits = torch.cat(logits_tensor_list, dim=0).to(htorch.hpu.current_device())
 
@@ -2210,15 +2213,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 with self.profiler.record_event(
                         'internal', f'sample_{"prompt" if is_prompt else "decode"}'
                         f'_bs{batch_size}_seq{seq_len}'):
-                    output = self.model.sample(
+                    prev_output = self.model.sample(
                         logits=prev_logits,
                         sampling_metadata=sampling_metadata,
                     )
 
                 model_kwargs = {}
-                model_kwargs["input_ids"] = output.sampled_token_ids
+                model_kwargs["input_ids"] = prev_output.sampled_token_ids
                 broadcast_tensor_dict(model_kwargs, src=0)
-                input_ids = output.sampled_token_ids
+                input_ids = prev_output.sampled_token_ids
+
+                if num_steps == 1:
+                    output = prev_output
+
             elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
                 model_kwargs = broadcast_tensor_dict(src=0)
                 input_ids = model_kwargs["input_ids"]
@@ -2283,7 +2290,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 
                 # Read and update the previous token ids to return
                 if self.scheduler_config.enable_delayed_sampling \
-                    and self.is_driver_worker and i==0:
+                    and self.is_driver_worker and num_steps==1:
                     if not is_prompt:
                         htorch.core.mark_step()
                         for j, seq_group_output in enumerate(
@@ -2370,6 +2377,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             sampling_metadata=sampling_metadata,
                         )
                         if num_steps > 1:
+                            if i == 0:
+                                prev_output = prev_output.sampled_token_ids
+                                self.cached_step_outputs.append(
+                                prev_output.detach().clone())
+
                             output = output.sampled_token_ids
                             self.cached_step_outputs.append(
                                 output.detach().clone())
