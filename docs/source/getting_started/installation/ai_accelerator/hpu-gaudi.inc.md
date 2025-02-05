@@ -6,8 +6,8 @@ This tab provides instructions on how to run vLLM with Intel Gaudi devices.
 
 - Ubuntu 22.04 LTS OS
 - Python 3.10
-- Intel Gaudi accelerator
-- Intel Gaudi software version 1.19.0 and above
+- Intel Gaudi 2 and 3 AI accelerators
+- Intel Gaudi software version 1.20.0 and above
 
 Please follow the instructions provided in the [Gaudi Installation Guide](https://docs.habana.ai/en/latest/Installation_Guide/index.html) to set up the execution environment. To achieve the best performance, please follow the methods outlined in the [Optimizing Training Platform Guide](https://docs.habana.ai/en/latest/PyTorch/Model_Optimization_PyTorch/Optimization_in_Training_Platform.html).
 
