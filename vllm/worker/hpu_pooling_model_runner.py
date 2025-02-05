@@ -5,7 +5,6 @@ import habana_frameworks.torch as htorch
 import torch
 
 from vllm.model_executor.pooling_metadata import PoolingMetadata
-from vllm.multimodal import MultiModalKwargs
 from vllm.pooling_params import PoolingParams
 from vllm.sequence import (IntermediateTensors, PoolerOutput, SequenceData,
                            SequenceGroupMetadata)
@@ -65,23 +64,13 @@ class HPUPoolingModelRunner(
             for _ in range(num_layers)
         ]
 
-        cross_enc_kwargs = {}
-        #if model_input.token_type_ids is not None:
-        #    cross_enc_kwargs["token_type_ids"] = model_input.token_type_ids
         execute_model_kwargs = {
-            "input_ids":
-            model_input.input_tokens,
-            "positions":
-            model_input.input_positions,
-            "kv_caches":
-            kv_caches,
+            "input_ids": model_input.input_tokens,
+            "positions": model_input.input_positions,
+            "kv_caches": kv_caches,
             "attn_metadata":
             super().trim_attn_metadata(model_input.attn_metadata),
-            **MultiModalKwargs.as_kwargs(model_input.multi_modal_kwargs or {},
-                                         device=self.device),
-            **cross_enc_kwargs,
-            "intermediate_tensors":
-            intermediate_tensors,
+            "intermediate_tensors": intermediate_tensors,
         }
 
         if htorch.utils.internal.is_lazy():
@@ -149,9 +138,15 @@ class HPUPoolingModelRunner(
 
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
+
+            assert model_input.input_tokens is not None and \
+                model_input.attn_metadata is not None and \
+                model_input.batch_size_padded is not None and \
+                model_input.attn_metadata.seq_lens_tensor is not None
+
             prompt_offsets = [
                 i * model_input.input_tokens.shape[1]
-                for i in range(model_input.real_batch_size)
+                for i in range(model_input.batch_size_padded)
             ]
             prompt_offsets_tensor = torch.tensor(prompt_offsets).to(
                 model_input.input_tokens.device)
