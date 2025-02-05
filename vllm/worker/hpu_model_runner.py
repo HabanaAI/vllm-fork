@@ -2377,7 +2377,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             sampling_metadata=sampling_metadata,
                         )
                         if num_steps > 1:
-                            if i == 0:
+                            # Cache previous outputs for delayed sampling
+                            if self.scheduler_config.enable_delayed_sampling and i == 0:
                                 prev_output = prev_output.sampled_token_ids
                                 self.cached_step_outputs.append(
                                 prev_output.detach().clone())
