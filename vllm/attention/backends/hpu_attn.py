@@ -205,7 +205,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         value = value.view(-1, self.num_kv_heads, self.head_size)
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
-        if attn_metadata.is_prompt and self.attn_type is not AttentionType.ENCODER_ONLY:
+        if attn_metadata.is_prompt and self.attn_type \
+            is not AttentionType.ENCODER_ONLY:
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
@@ -251,7 +252,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     softmax_op=self.softmax,
                     matmul_av_op=self.matmul_av,
                     valid_seq_lengths=attn_metadata.seq_lens_tensor,
-                    fsdpa_op=self.fused_scaled_dot_product_attention if self.prefill_use_fusedsdpa else None,
+                    fsdpa_op=self.fused_scaled_dot_product_attention
+                    if self.prefill_use_fusedsdpa else None,
                 )
             else:
                 # TODO: enable FusedSDPA
