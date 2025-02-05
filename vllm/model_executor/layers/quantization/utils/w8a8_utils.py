@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 
 from vllm import _custom_ops as ops
+from vllm_hpu_extension.ops import is_hpu_gaudi2, get_hpu_gaudi2_scale_factor
 from vllm.platforms import current_platform
 
 # Input scaling factors are no longer optional in _scaled_mm starting
@@ -72,15 +73,6 @@ def convert_to_channelwise(
         start = end
 
     return weight_scale_channel
-
-def is_hpu_gaudi2():
-    return current_platform.is_hpu() and htexp._get_device_type(
-    ) == htexp.synDeviceType.synDeviceGaudi2
-
-
-def get_hpu_gaudi2_scale_factor():
-    return (torch.finfo(torch.float8_e4m3fn).max /
-            torch.finfo(torch.float8_e4m3fnuz).max)
 
 def requantize_with_max_scale(
         weight: torch.Tensor, weight_scale: torch.Tensor,
