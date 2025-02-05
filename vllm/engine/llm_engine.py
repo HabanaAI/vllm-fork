@@ -228,6 +228,7 @@ class LLMEngine:
         self.prompt_adapter_config = vllm_config.prompt_adapter_config  # noqa
         self.observability_config = vllm_config.observability_config or ObservabilityConfig(  # noqa
         )
+        self.received_counter = 0
 
         logger.info(
             "Initializing a V0 LLM engine (v%s) with config: %s, "
@@ -753,6 +754,12 @@ class LLMEngine:
             prompt_adapter_request=prompt_adapter_request,
         )
         processed_inputs = self.input_processor(preprocessed_inputs)
+
+        self.received_counter += 1
+        logger.info(
+            f"Received {self.received_counter} request | " \
+            f"request_id = {request_id} | "\
+            f"arrival_time = {arrival_time}")
 
         self._add_processed_request(
             request_id=request_id,

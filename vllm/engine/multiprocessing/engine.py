@@ -98,6 +98,8 @@ class MQLLMEngine:
         # Error state.
         self._errored_with: Optional[BaseException] = None
 
+        self.finished_counter = 0
+
     @property
     def dead_error(self) -> BaseException:
         if self._errored_with is not None:
@@ -332,6 +334,15 @@ class MQLLMEngine:
                     outputs.exception = outputs.exception.cause
             except ImportError:
                 pass
+
+            if isinstance(outputs, list):
+                for output in outputs:
+                    if isinstance(output, RequestOutput) and output.finished:
+                        self.finished_counter += 1
+                        logger.info(
+                            f"Finished {self.finished_counter} request | " \
+                            f"request_id = {output.request_id} | " \
+                            f"finished_time = {output.metrics.finished_time}")
 
             output_bytes = pickle.dumps(outputs)
             self.output_socket.send_multipart((output_bytes, ), copy=False)
