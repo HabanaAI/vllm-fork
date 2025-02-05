@@ -2178,26 +2178,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 seq_data.prev_logits = torch.zeros([1, self.vocab_size],
                                                 dtype=torch.float,
                                                 device="hpu")
-                                seq_data.prev_logits_idx = i
-                            #! This causes recompilations due to changing tensor shapes
-                            if logits_tensor is None:
-                                logits_tensor = seq_data.prev_logits
-                            # If the current sequence has the same logits
-                            if seq_data.prev_logits is logits_tensor:
-                                logits_ids_list.append(
-                                    seq_data.prev_logits_idx)
-                            # Different logits
-                            else:
-                                # Save logits of all previous sequences
-                                # Varying shape causes recompilations
-                                logits_tensor_list.append(
-                                    torch.index_select(logits_tensor, 0, torch.tensor(logits_ids_list, device=htorch.hpu.current_device())))
-                                
-                                # Store new id
-                                logits_ids_list = [seq_data.prev_logits_idx]
-                                
-                                # Save logits tensor
-                                logits_tensor = seq_data.prev_logits
+                            logits_tensor_list.append(seq_data.prev_logits)
 
                 if logits_tensor is not None:
                     logits_tensor_list.append(logits_tensor[torch.tensor(
@@ -2354,8 +2335,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     for idx, seq_group_metadata in enumerate(model_input.seq_group_metadata_list):
                         assert len(seq_group_metadata.seq_data) == 1
                         for seq_data in seq_group_metadata.seq_data.values():
-                            seq_data.prev_logits = logits if not should_sample else None
-                            seq_data.prev_logits_idx = idx if not should_sample else None
+                            seq_data.prev_logits = torch.unsqueeze(logits[idx],0) if not should_sample else None
+                            # seq_data.prev_logits_idx = idx if not should_sample else None
 
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
