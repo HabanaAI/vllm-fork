@@ -228,11 +228,11 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         self.head_size)
 
             if attn_metadata is None or attn_metadata.block_list is None:
-                attn_bias = attn_metadata.attn_bias
                 if not self.prefill_use_fusedsdpa:
                     # TODO: move this outside of model
                     assert attn_metadata.attn_bias is not None, \
                             'attn_bias must be set before calling model.forward'
+                    attn_bias = attn_metadata.attn_bias
                     if self.alibi_slopes is not None:
                         position_bias = _make_alibi_bias(
                             self.alibi_slopes, self.num_kv_heads,
@@ -240,12 +240,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_bias = attn_bias.tile(
                             (1, self.num_kv_heads, 1, 1))
                         attn_bias.add_(position_bias)
+                else:
+                    attn_bias = attn_metadata.attn_bias
 
                 out = ops.prompt_attention(
                     query.view(query_shape),
                     key.view(kv_shape),
                     value.view(kv_shape),
-                    attn_bias=attn_metadata.attn_bias,
+                    attn_bias=attn_bias,
                     p=0.0,
                     scale=self.scale,
                     matmul_qk_op=self.matmul_qk,
