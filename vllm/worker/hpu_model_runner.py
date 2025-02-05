@@ -36,8 +36,8 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.sampler import SamplerOutput
-from vllm.model_executor.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding)
+# from vllm.model_executor.layers.vocab_parallel_embedding import (
+#     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
 from vllm.model_executor.models import supports_multimodal
 from vllm.model_executor.sampling_metadata import SequenceGroupToSample
@@ -178,9 +178,7 @@ class HpuModelAdapter:
         ) and not enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').lower() == 'true':
-                self.regional_compilation_layers_list = [
-                    RMSNorm, VocabParallelEmbedding
-                ]
+                self.regional_compilation_layers_list = [RMSNorm]
                 self._regional_compilation(self.model)
             else:
                 self.model = torch.compile(self.model,
