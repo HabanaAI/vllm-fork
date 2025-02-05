@@ -93,7 +93,8 @@ class RobertaEmbedding(nn.Module):
             pos_list.append(position_ids[offset])
             token_list.append(input_ids[offset])
 
-        for index, (positions, tokens, seq_len) in enumerate(zip(pos_list, token_list, seq_lens)):
+        for index, (positions, tokens,
+                    seq_len) in enumerate(zip(pos_list, token_list, seq_lens)):
             # Verify assumption that incoming position are
             # always a sequence from 0 to N.
             expected_pos = torch.arange(positions.size()[0],
@@ -102,7 +103,8 @@ class RobertaEmbedding(nn.Module):
             valid_input_mask = expected_pos < seq_len.to('cpu')
             expected_pos = expected_pos * valid_input_mask
             assert torch.equal(positions.to('cpu'), expected_pos)
-            position_ids[index] = create_position_ids_from_input_ids(tokens, self.padding_idx, seq_len)
+            position_ids[index] = create_position_ids_from_input_ids(
+                tokens, self.padding_idx, seq_len)
 
         # Position embeddings.
         position_embeddings = self.position_embeddings(position_ids)
