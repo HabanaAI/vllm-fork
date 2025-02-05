@@ -120,6 +120,7 @@ class RobertaEmbedding(nn.Module):
 # Adapted from transformers
 def create_position_ids_from_input_ids(input_ids,
                                        padding_idx,
+                                       seq_len,
                                        past_key_values_length=0):
     """
     Replace non-padding symbols with their position numbers.
