@@ -416,7 +416,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         self.quant_config = quant_config
         self.block_quant = self.quant_config.weight_block_size is not None
         self.moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 1))
-        self.ep_rank = 0
 
     def create_weights(self, layer: Module, num_experts: int, hidden_size: int,
                        intermediate_size_per_partition: int,
@@ -696,6 +695,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
+        ep_rank=0,
     ) -> torch.Tensor:
         from vllm.model_executor.layers.fused_moe import fused_experts
 
@@ -710,7 +710,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                             num_expert_group=num_expert_group,
                             custom_routing_function=custom_routing_function,
                             scoring_func=scoring_func,
-                            e_score_correction_bias=e_score_correction_bias)
+                            e_score_correction_bias=e_score_correction_bias,
+                            ep_rank=ep_rank)
 
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
@@ -754,7 +755,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         num_expert_group: Optional[int] = None,
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
-        e_score_correction_bias: Optional[torch.Tensor] = None
+        e_score_correction_bias: Optional[torch.Tensor] = None,
+        ep_rank=0,
     ):
         # #assert not use_grouped_topk, 'use_grouped_topk must be False on HPU'
         # # assert num_expert_group is None, ('num_expert_group is '
@@ -789,6 +791,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         orig_N_w13 = layer.orig_N_w13.data
         orig_M_w2 = layer.orig_M_w2.data
         orig_N_w2 = layer.orig_N_w2.data
+        ep_shift = ep_rank * num_experts
         w13_weight = dequant_block_fp8_weight_naive(layer.w13_weight,
                                                     layer.w13_weight_scale_inv,
                                                     block_size=self.quant_config.weight_block_size,
@@ -808,7 +811,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             w13_list_slice = [w13_weight[j] for j in range(min_expert, max_expert)]
             w2_list_slice = [w2_weight[j] for j in range(min_expert, max_expert)]
 
-            ep_shift = self.ep_rank * num_experts
             final_hidden_states += torch.ops.hpu.mixture_of_experts(
                                          hidden_states=x,
                                          expert_routing_table=topk_ids.to(torch.int64),
