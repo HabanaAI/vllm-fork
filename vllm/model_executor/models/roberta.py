@@ -96,14 +96,12 @@ class RobertaEmbedding(nn.Module):
             # always a sequence from 0 to N.
             expected_pos = torch.arange(positions.size()[0],
                                         dtype=torch.long,
-                                        device=inputs_embeds.device)
-            torch.hpu.synchronize()
-            print("positions[:seq_len]", positions[:seq_len])
-            print("expected_pos[:seq_len]", expected_pos[:seq_len])
-            assert torch.equal(positions[:seq_len], expected_pos[:seq_len])
+                                        device='cpu')
+            valid_input_mask = expected_pos < seq_len.to('cpu')
+            expected_pos = expected_pos * valid_input_mask
+            assert torch.equal(positions.to('cpu'), expected_pos)
             position_ids[index] = create_position_ids_from_input_ids(tokens, self.padding_idx, seq_len)
 
-        torch.hpu.synchronize()
         # Position embeddings.
         position_embeddings = self.position_embeddings(position_ids)
         if token_type_ids is None:
@@ -134,13 +132,17 @@ def create_position_ids_from_input_ids(input_ids,
     """
     # The series of casts and type-conversions here are carefully
     # balanced to both work with ONNX export and XLA.
-    valid_input_mask = torch.tensor([1 if i < seq_len else 0 for i in range(input_ids.shape[0])])
+    valid_input_mask = torch.arange(input_ids.size()[0],
+                                    dtype=torch.int,
+                                    device=input_ids.device)
+    valid_input_mask = valid_input_mask < seq_len
+
     mask = input_ids.ne(padding_idx).int()
 
     incremental_indices = (torch.cumsum(mask, dim=0).type_as(mask) +
                            past_key_values_length) * mask
 
-    return incremental_indices.long() + padding_idx * valid_input_mask
+    return (incremental_indices.long() + padding_idx) * valid_input_mask
 
 
 # Adapted from transformers
