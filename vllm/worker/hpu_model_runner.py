@@ -2187,12 +2187,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 logits_ids_list.append(
                                     seq_data.prev_logits_idx)
                             # Different logits
-                            else:
+                             else:
                                 # Save logits of all previous sequences
-                                # Varying shape causes recompilations
                                 logits_tensor_list.append(
-                                    torch.index_select(logits_tensor, 0, torch.tensor(logits_ids_list, device=htorch.hpu.current_device())))
-                                
+                                    logits_tensor[torch.tensor(
+                                        logits_ids_list,
+                                        device=seq_data.prev_logits.device)])
                                 # Store new id
                                 logits_ids_list = [seq_data.prev_logits_idx]
                                 
@@ -2203,11 +2203,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits_tensor_list.append(logits_tensor[torch.tensor(
                         logits_ids_list, device=logits_tensor.device)])
 
-                # Seperate logits concat from sampler graph
-                htorch.core.mark_step()
-
                 #! Logits have different shapes that causes recompilations
-                prev_logits = torch.cat(logits_tensor_list, dim=0).to(htorch.hpu.current_device())
+                prev_logits = torch.cat(logits_tensor_list, dim=0)
+                htorch.core.mark_step()
 
                 # Sample next token - delayed sampling
                 with self.profiler.record_event(
