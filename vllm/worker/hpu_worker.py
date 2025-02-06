@@ -221,6 +221,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def load_model(self):
         self.model_runner.load_model()
         if isinstance(self.model_runner, HPUPoolingModelRunner):
+            # recipes we will use the extra memory for graphs/blocks
+            free_hpu_memory = torch.hpu.mem_get_info()[0]
+            hpu_memory_margin = free_hpu_memory * (
+                1 - self.cache_config.gpu_memory_utilization)
+            self.model_runner.mem_margin = hpu_memory_margin
             self._warm_up_model()
 
     def execute_model(
