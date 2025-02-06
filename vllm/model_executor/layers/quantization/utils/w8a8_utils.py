@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 
 from vllm import _custom_ops as ops
-from vllm_hpu_extension.ops import is_hpu_gaudi2, get_hpu_gaudi2_scale_factor
+from vllm_hpu_extension.ops import get_hpu_gaudi2_scale_factor, is_hpu_gaudi2
 from vllm.platforms import current_platform
 
 # Input scaling factors are no longer optional in _scaled_mm starting

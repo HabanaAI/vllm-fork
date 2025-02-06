@@ -3,7 +3,7 @@ from typing import Callable, List, Optional
 import torch
 from compressed_tensors.quantization import QuantizationStrategy
 from torch.nn import Parameter
-from vllm_hpu_extension.ops import is_hpu_gaudi2, get_hpu_gaudi2_scale_factor
+from vllm_hpu_extension.ops import get_hpu_gaudi2_scale_factor, is_hpu_gaudi2
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
