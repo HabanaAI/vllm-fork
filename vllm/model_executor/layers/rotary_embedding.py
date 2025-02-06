@@ -838,6 +838,26 @@ class MRotaryEmbedding(RotaryEmbedding):
                             dim=-1)
 
         query_shape = query.shape
+        breakpoint()
+        '''
+        in CPU:
+
+        query.shape
+        torch.Size([1451, 3584])
+
+         num_tokens
+        1451
+        (Pdb) self.head_size
+        128
+
+        on HPU:
+        query.shape
+        torch.Size([32, 1024, 3584])
+        (Pdb) num_tokens
+        1024
+        (Pdb) self.head_size
+        128
+        '''
         query = query.view(num_tokens, -1, self.head_size)
         query_rot = query[..., :self.rotary_dim]
         query_pass = query[..., self.rotary_dim:]
