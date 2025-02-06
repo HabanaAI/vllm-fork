@@ -1018,6 +1018,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
 
+            '''
+            seq_group_metadata.multi_modal_data is None, so we dont enter this
+            hence multi_modal_kwargs_list isnt populated
+
+            on cpu its:
+             seq_group_metadata.multi_modal_data
+{'pixel_values': tensor([[-1.1061, -1.1061, -1.1061,  ..., -1.4518, -1.4518, -1.4518],
+        [-1.1207, -1.1207, -1.1207,  ..., -1.4376, -1.4376, -1.4376],
+        [-1.1353, -1.1353, -1.1353,  ..., -1.4376, -1.4376, -1.4376],
+        ...,
+        [ 1.1128,  0.9668,  0.8792,  ...,  0.8945,  1.1221,  1.3496],
+        [ 0.9230,  1.2004,  1.3902,  ...,  0.7950,  0.3542,  0.2973],
+        [ 0.9814,  0.9376,  1.0836,  ...,  1.2643,  1.1789,  1.1363]]), 'image_grid_thw': tensor([[ 1, 62, 92]])}
+
+            '''
             if seq_group_metadata.multi_modal_data:
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
@@ -1586,11 +1601,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs)
-
-        if not self.is_pooler:
-            sampling_metadata = SamplingMetadata.prepare(
-                seq_group_metadata_list, seq_lens, query_lens, self.device,
-                self.pin_memory)
+        sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
+                                                     seq_lens, query_lens,
+                                                     self.device,
+                                                     self.pin_memory)
 
         if not self.scheduler_config.chunked_prefill_enabled:
             assert (len(prefill_reqs) and len(decode_reqs)) == 0
@@ -1774,12 +1788,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
         seq_data.output_token_ids = output_token_ids
-        return SequenceGroupMetadata(request_id=str(group_id),
+        x = SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
                                      seq_data={group_id: seq_data},
                                      sampling_params=sampling_params,
                                      block_tables=block_tables,
                                      lora_request=lora_request)
+        '''
+        x.multi_modal_data is empty.... 
+        we need to pass in some dummy here.
+        I think llama3.2VL is working, how is it working if this is empty?.. need to track llama3.2vl status
+        '''
+        return x
 
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
@@ -1864,6 +1884,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
+            '''
+            sasarkar: at this point inputs.multi_modal_kwargs.keys() is empty.. thats not good
+            '''
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
@@ -2328,6 +2351,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     seq_group_metadata_list=seq_group_metadata_list)
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
+            '''
+            sasarkar: model_input.multi_modal_kwargs empty here.. not good
+            '''
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
