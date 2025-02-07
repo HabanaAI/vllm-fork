@@ -135,6 +135,7 @@ _EMBEDDING_MODELS = {
     "LlavaNextForConditionalGeneration": ("llava_next", "LlavaNextForConditionalGeneration"),  # noqa: E501
     "Phi3VForCausalLM": ("phi3v", "Phi3VForCausalLM"),
     "Qwen2VLForConditionalGeneration": ("qwen2_vl", "Qwen2VLForConditionalGeneration"),  # noqa: E501
+    "Qwen2_5_VLForConditionalGeneration": ("qwen2_5_vl", "Qwen2_5_VLForConditionalGeneration"),
     # [Auto-converted (see adapters.py)]
     "Qwen2ForSequenceClassification": ("qwen2", "Qwen2ForCausalLM"),
     # Technically PrithviGeoSpatialMAE is a model that works on images, both in
