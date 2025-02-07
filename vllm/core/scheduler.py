@@ -1003,7 +1003,7 @@ class Scheduler:
 
         blocks_needed = 0
         end_of_batch_index = -1
-        num_free_gpu_blocks = self.block_manager.block_allocator.get_num_free_blocks(device=Device.GPU) - 96 # TODO Tune the reserve
+        num_free_gpu_blocks = self.block_manager.block_allocator.get_num_free_blocks(device=Device.GPU)
         total_length = 0
         # TODO Refactor this code (the logic is the same)
         for idx in range(len(waiting_queue)):
