@@ -1793,6 +1793,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return x
 
     def profile_run(self) -> None:
+        return
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
