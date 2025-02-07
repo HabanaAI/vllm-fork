@@ -2189,7 +2189,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 logits_ids_list.append(
                                     seq_data.prev_logits_idx)
                             # Different logits
-                             else:
+                            else:
                                 # Save logits of all previous sequences
                                 logits_tensor_list.append(
                                     logits_tensor[torch.tensor(
