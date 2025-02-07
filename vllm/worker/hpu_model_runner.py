@@ -2104,7 +2104,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             # last multi-step
             output = self._decode_sampler_outputs(
                 model_input) if self.is_driver_worker else []
-            torch.hpu.synchronize()
+            # WA - this sync causes 4ms+ gap before decodes in MSS + delayed.
+            # Let's remove it for testing and check if TP>1 works without it
+            #torch.hpu.synchronize()
 
         if model_input.is_first_multi_step:
             # first multi-step
