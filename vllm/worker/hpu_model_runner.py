@@ -2351,12 +2351,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     should_sample = True
 
                 #! Should Save logits and idx only when not sampling
-                if (self.scheduler_config.enable_delayed_sampling and model_input.seq_group_metadata_list is not None and self.is_driver_worker):
+                if (self.scheduler_config.enable_delayed_sampling
+                        and model_input.seq_group_metadata_list is not None
+                        and self.is_driver_worker and not should_sample):
                     for idx, seq_group_metadata in enumerate(model_input.seq_group_metadata_list):
                         assert len(seq_group_metadata.seq_data) == 1
                         for seq_data in seq_group_metadata.seq_data.values():
-                            seq_data.prev_logits = logits if not should_sample else None
-                            seq_data.prev_logits_idx = idx if not should_sample else None
+                            seq_data.prev_logits = logits
+                            seq_data.prev_logits_idx = idx
 
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
