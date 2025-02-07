@@ -40,6 +40,7 @@ from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
@@ -53,6 +54,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceData, SequenceGroupMetadata,
                            SequenceOutput)
+from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
                         make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
@@ -381,14 +383,14 @@ class HpuModelAdapter:
                             int):  # Indexed-based access (like ModuleList)
                 current_module = list(current_module._modules.values())[layer]
 
-        # At the end, we should be at the RotaryEmbedding layer.
-        if hasattr(current_module, 'prepare_cos_sin'):
-            current_module.prepare_cos_sin(
-                positions, recompute_cos_sin=self.recompute_cos_sin)
-        else:
-            raise AttributeError(
-                "The module at the end of the path does not have \
-                a 'prepare_cos_sin' method.")
+        # # At the end, we should be at the RotaryEmbedding layer.
+        # if hasattr(current_module, 'prepare_cos_sin'):
+        #     current_module.prepare_cos_sin(
+        #         positions, recompute_cos_sin=self.recompute_cos_sin)
+        # else:
+        #     raise AttributeError(
+        #         "The module at the end of the path does not have \
+        #         a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -698,6 +700,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
 
+    @property
+    def model_is_mrope(self) -> bool:
+        return uses_mrope(self.model_config.hf_config)
+
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
@@ -839,6 +845,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     ) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
+        input_mrope_positions: List[List[int]] = [[] for _ in range(3)]
         slot_mapping: List[List[int]] = []
         lora_index_mapping: List[List[int]] = []
         lora_prompt_mapping: List[List[int]] = []
@@ -922,8 +929,41 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         mm_data,
                         seq_group_metadata.mm_processor_kwargs,
                     )
-
                 multi_modal_kwargs_list.append(mm_kwargs)
+
+                mrope_positions = None
+                # special processing for mrope position deltas.
+                if self.model_is_mrope:
+                    image_grid_thw = mm_kwargs.get("image_grid_thw", None)
+                    video_grid_thw = mm_kwargs.get("video_grid_thw", None)
+                    assert image_grid_thw is not None or video_grid_thw is not None, (
+                        "mrope embedding type requires multi-modal input mapper "
+                        "returns 'image_grid_thw' or 'video_grid_thw'.")
+
+                    hf_config = self.model_config.hf_config
+
+                    token_ids = seq_data.get_token_ids()
+                    mrope_positions, mrope_position_delta = \
+                        MRotaryEmbedding.get_input_positions(
+                            token_ids,
+                            image_grid_thw=image_grid_thw,
+                            video_grid_thw=video_grid_thw,
+                            image_token_id=hf_config.image_token_id,
+                            video_token_id=hf_config.video_token_id,
+                            vision_start_token_id=hf_config.vision_start_token_id,
+                            vision_end_token_id=hf_config.vision_end_token_id,
+                            spatial_merge_size=hf_config.vision_config.
+                            spatial_merge_size,
+                            context_len=context_len,
+                        )
+                    seq_data.mrope_position_delta = mrope_position_delta
+
+                if mrope_positions:
+                    for idx in range(3):
+                        input_mrope_positions[idx].extend(mrope_positions[idx])
+                else:
+                    input_positions.extend(list(range(context_len, seq_len)))
+
 
                 for modality, placeholder_map in placeholder_maps.items():
                     multi_modal_placeholder_maps[modality].extend(
@@ -959,6 +999,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_offset = i % self.block_size
                 slot = block_number * self.block_size + block_offset
                 slot_mapping[-1].append(slot)
+
+        if any(input_mrope_positions):
+            input_positions = None  # type: ignore
+        else:
+            input_mrope_positions = None  # type: ignore
 
         max_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
@@ -1011,7 +1056,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                    dtype=torch.long,
                                                    device='cpu')
 
-        input_positions = make_tensor_with_pad(input_positions,
+        input_positions = make_tensor_with_pad(input_positions or input_mrope_positions,
                                                max_len=max_prompt_len,
                                                pad=0,
                                                dtype=torch.long,
@@ -1098,6 +1143,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     ) -> PrepareDecodeMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
+        input_mrope_positions: List[List[int]] = [[] for _ in range(3)]
         slot_mapping: List[List[int]] = []
         seq_lens: List[int] = []
         encoder_seq_lens: List[int] = []
@@ -1143,7 +1189,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
-                input_positions.append([position])
+
+                if seq_data.mrope_position_delta is not None:
+                    context_len = seq_data.get_num_computed_tokens()
+                    next_pos = MRotaryEmbedding.get_next_input_positions(
+                        seq_data.mrope_position_delta,
+                        context_len,
+                        seq_len,
+                    )
+                    for idx in range(3):
+                        input_mrope_positions[idx].extend(next_pos[idx])
+                else:
+                    input_positions.append(position)
+
+                if any(input_mrope_positions):
+                    input_positions = None  # type: ignore
+                else:
+                    input_mrope_positions = None  # type: ignore
 
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -1180,7 +1242,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             real_batch_size = len(seq_group_metadata_list)
             input_tokens = output[:real_batch_size].clone()
 
-        input_positions = torch.tensor(input_positions,
+        input_positions = torch.tensor(input_positions or input_mrope_positions,
                                        dtype=torch.long,
                                        device='cpu')
 
