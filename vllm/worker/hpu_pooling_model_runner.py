@@ -83,11 +83,9 @@ class HPUPoolingModelRunner(
             "kv_caches": kv_caches,
             "attn_metadata":
             super().trim_attn_metadata(model_input.attn_metadata),
-            **MultiModalKwargs.as_kwargs(model_input.multi_modal_kwargs or {},
-                                         device=self.device),
-            **cross_enc_kwargs,
             "intermediate_tensors": intermediate_tensors,
             "lora_mask": lora_mask,
+            "intermediate_tensors": intermediate_tensors,
         }
 
         if htorch.utils.internal.is_lazy():
@@ -157,11 +155,13 @@ class HPUPoolingModelRunner(
                 seq_group_metadata_list)
 
             assert model_input.input_tokens is not None and \
+                model_input.attn_metadata is not None and \
+                model_input.batch_size_padded is not None and \
                 model_input.attn_metadata.seq_lens_tensor is not None
 
             prompt_offsets = [
                 i * model_input.input_tokens.shape[1]
-                for i in range(model_input.real_batch_size)
+                for i in range(model_input.batch_size_padded)
             ]
             prompt_offsets_tensor = torch.tensor(prompt_offsets).to(
                 model_input.input_tokens.device)
