@@ -1,0 +1,12 @@
+model_name: "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf"
+tasks:
+- name: "gsm8k"
+  metrics:
+  - name: "exact_match,strict-match"
+    value: 0.12
+  - name: "exact_match,flexible-extract"
+    value: 0.124
+limit: 250
+num_fewshot: 5
+dtype: "bfloat16"
+fp8: true
