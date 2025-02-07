@@ -838,7 +838,7 @@ class MRotaryEmbedding(RotaryEmbedding):
                             dim=-1)
 
         query_shape = query.shape
-        breakpoint()
+        #breakpoint()
         '''
         in CPU:
 
