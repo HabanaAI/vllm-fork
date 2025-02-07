@@ -39,8 +39,8 @@ from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
-from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
+from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
@@ -383,14 +383,16 @@ class HpuModelAdapter:
                             int):  # Indexed-based access (like ModuleList)
                 current_module = list(current_module._modules.values())[layer]
 
-        # # At the end, we should be at the RotaryEmbedding layer.
-        # if hasattr(current_module, 'prepare_cos_sin'):
-        #     current_module.prepare_cos_sin(
-        #         positions, recompute_cos_sin=self.recompute_cos_sin)
-        # else:
-        #     raise AttributeError(
-        #         "The module at the end of the path does not have \
-        #         a 'prepare_cos_sin' method.")
+        # At the end, we should be at the RotaryEmbedding layer.
+        if hasattr(current_module, 'prepare_cos_sin'):
+            current_module.prepare_cos_sin(
+                positions, recompute_cos_sin=self.recompute_cos_sin)
+        else:
+            pass
+            # dont raise error for qwen2-vl
+            # raise AttributeError(
+            #    "The module at the end of the path does not have \
+            #    a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -405,6 +407,7 @@ class HpuModelAdapter:
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
+
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
@@ -702,7 +705,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @property
     def model_is_mrope(self) -> bool:
-        return uses_mrope(self.model_config.hf_config)
+        config = self.model_config.hf_config
+        return uses_mrope(config)
 
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
@@ -929,10 +933,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         mm_data,
                         seq_group_metadata.mm_processor_kwargs,
                     )
-                multi_modal_kwargs_list.append(mm_kwargs)
 
                 mrope_positions = None
-                # special processing for mrope position deltas.
                 if self.model_is_mrope:
                     image_grid_thw = mm_kwargs.get("image_grid_thw", None)
                     video_grid_thw = mm_kwargs.get("video_grid_thw", None)
@@ -941,7 +943,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         "returns 'image_grid_thw' or 'video_grid_thw'.")
 
                     hf_config = self.model_config.hf_config
-
                     token_ids = seq_data.get_token_ids()
                     mrope_positions, mrope_position_delta = \
                         MRotaryEmbedding.get_input_positions(
@@ -957,13 +958,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             context_len=context_len,
                         )
                     seq_data.mrope_position_delta = mrope_position_delta
-
                 if mrope_positions:
                     for idx in range(3):
                         input_mrope_positions[idx].extend(mrope_positions[idx])
                 else:
                     input_positions.extend(list(range(context_len, seq_len)))
 
+
+                multi_modal_kwargs_list.append(mm_kwargs)
 
                 for modality, placeholder_map in placeholder_maps.items():
                     multi_modal_placeholder_maps[modality].extend(
@@ -1189,7 +1191,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
-
                 if seq_data.mrope_position_delta is not None:
                     context_len = seq_data.get_num_computed_tokens()
                     next_pos = MRotaryEmbedding.get_next_input_positions(
@@ -1201,11 +1202,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         input_mrope_positions[idx].extend(next_pos[idx])
                 else:
                     input_positions.append(position)
-
-                if any(input_mrope_positions):
-                    input_positions = None  # type: ignore
-                else:
-                    input_mrope_positions = None  # type: ignore
 
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -1227,6 +1223,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 slot_mapping.append([slot])
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
+
+                if any(input_mrope_positions):
+                    input_positions = None  # type: ignore
+                else:
+                    input_mrope_positions = None  # type: ignore
 
                 if self.sliding_window is not None:
                     sliding_window_blocks = (self.sliding_window //
@@ -1639,14 +1640,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
         seq_data.output_token_ids = output_token_ids
-        return SequenceGroupMetadata(request_id=str(group_id),
+        x = SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
                                      seq_data={group_id: seq_data},
                                      sampling_params=sampling_params,
                                      block_tables=block_tables,
                                      lora_request=lora_request)
+        return x
 
     def profile_run(self) -> None:
+        return 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
@@ -1658,7 +1661,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
-        return
 
     def warmup_scenario(self,
                         batch_size,
