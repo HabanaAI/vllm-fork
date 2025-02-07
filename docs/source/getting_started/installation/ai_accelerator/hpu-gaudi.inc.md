@@ -103,7 +103,7 @@ If you are facing the following error: `docker: Error response from daemon: Unkn
 
 ## Extra information
 
-# Supported Features
+## Supported Features
 | **Feature** 	| **Description** 	| **References** 	|
 |---	|---	|---	|
 | Offline batched inference 	| Offline inference using LLM class from vLLM Python API 	| [Quickstart](https://docs.vllm.ai/en/stable/getting_started/quickstart.html#offline-batched-inference)<br>[Example](https://docs.vllm.ai/en/stable/getting_started/examples/offline_inference.html) 	|
@@ -362,6 +362,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 
 - `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used, if `1` PyTorch Lazy backend for Gaudi will be used. `1` is the default.
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES` must be set to `true` for tensor parallel inference with HPU Graphs.
+- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava model.
 
 ## Quantization, FP8 Inference and Model Calibration Process
 
