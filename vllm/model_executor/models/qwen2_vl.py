@@ -571,7 +571,7 @@ class Qwen2VisionTransformer(nn.Module):
             hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
             wpos_ids = torch.arange(w).unsqueeze(0).expand(h, -1)
             hpos_ids = hpos_ids.reshape(
-                h // self.spatial_merge_size,
+                h // self.spatial_merge_size,  # buggy... 62/2 is yielding 0 .. seems its ok wo hpu graphs
                 self.spatial_merge_size,
                 w // self.spatial_merge_size,
                 self.spatial_merge_size,
@@ -586,7 +586,6 @@ class Qwen2VisionTransformer(nn.Module):
                 torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1))
         pos_ids = torch.cat(pos_ids, dim=0)
         max_grid_size = grid_thw[:, 1:].max()
-        breakpoint()
         rotary_pos_emb_full = self.rotary_pos_emb(max_grid_size)
         rotary_pos_emb = rotary_pos_emb_full[pos_ids].flatten(1)
         return rotary_pos_emb
@@ -1105,7 +1104,7 @@ class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 raise ValueError(f"{name} should be 2D or batched 3D tensor. "
                                  f"Got ndim: {mm_input.ndim} "
                                  f"(shape={mm_input.shape})")
-            # sasarkar buggy
+            # sasarkar buggy  ... seems an issue with hpu graph?
             '''
             (Pdb) (list(mm_input))
 [tensor([[ 1, 62, 92]], device='hpu:0')]
