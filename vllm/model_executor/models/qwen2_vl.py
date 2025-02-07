@@ -586,6 +586,7 @@ class Qwen2VisionTransformer(nn.Module):
                 torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1))
         pos_ids = torch.cat(pos_ids, dim=0)
         max_grid_size = grid_thw[:, 1:].max()
+        breakpoint()
         rotary_pos_emb_full = self.rotary_pos_emb(max_grid_size)
         rotary_pos_emb = rotary_pos_emb_full[pos_ids].flatten(1)
         return rotary_pos_emb
@@ -1104,6 +1105,14 @@ class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 raise ValueError(f"{name} should be 2D or batched 3D tensor. "
                                  f"Got ndim: {mm_input.ndim} "
                                  f"(shape={mm_input.shape})")
+            # sasarkar buggy
+            '''
+            (Pdb) (list(mm_input))
+[tensor([[ 1, 62, 92]], device='hpu:0')]
+(Pdb) torch.concat(list(mm_input))
+tensor([[0, 0, 0]], device='hpu:0')
+
+            '''
             return torch.concat(list(mm_input))
         else:
             return torch.concat(mm_input)
@@ -1118,10 +1127,13 @@ class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             return None
 
         if pixel_values is not None:
-            pixel_values = self._validate_and_reshape_mm_tensor(
-                pixel_values, "image pixel values")
-            image_grid_thw = self._validate_and_reshape_mm_tensor(
-                image_grid_thw, "image grid_thw")
+            # sasarkar: _validate_and_reshape_mm_tensor seems to be messing up the values some how
+            #pixel_values = self._validate_and_reshape_mm_tensor(
+            #    pixel_values, "image pixel values")
+            #image_grid_thw = self._validate_and_reshape_mm_tensor(
+            #    image_grid_thw, "image grid_thw")
+            pixel_values = pixel_values.view(-1, pixel_values.shape[-1])
+            image_grid_thw = image_grid_thw.view(-1, image_grid_thw.shape[-1])
 
             if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of image pixel values. "
@@ -1132,6 +1144,7 @@ class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                                            image_grid_thw=image_grid_thw)
 
         if image_embeds is not None:
+            assert False, "Call me if this is hit"
             image_embeds = self._validate_and_reshape_mm_tensor(
                 image_embeds, "image embeds")
             image_grid_thw = self._validate_and_reshape_mm_tensor(
@@ -1349,6 +1362,15 @@ class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     video_input=video_input)
                 input_ids = None
 
+        '''
+        During "warmup": ... have switched off warmup memory for now
+        hpu:
+        input_ids, positions: 32x1024
+
+        CPU:
+        input_ids is None
+        positions: 3x1451:
+        '''
         hidden_states = self.language_model.model(
             input_ids=input_ids,
             positions=positions,
