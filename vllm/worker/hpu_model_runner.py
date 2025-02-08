@@ -408,8 +408,9 @@ class HpuModelAdapter:
             input_ids.device, self.dtype)
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
 
-        if self.layer_names is not None:
-            self._prepare_cos_sin(kwargs['positions'])
+        #  NOTE: Let's disable this optimization for a moment
+        # if self.layer_names is not None:
+        #     self._prepare_cos_sin(kwargs['positions'])
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)

@@ -234,14 +234,13 @@ class RotaryEmbedding(CustomOp):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         from habana_frameworks.torch.hpex.kernels import (
             RotaryPosEmbeddingMode, apply_rotary_pos_emb)
-
-        # Prepare cos-sin caches for long-context + LoRA with offsets for every
-        # forward, since the offset information wasn't available previously
-        if hasattr(self, "scaling_factors") or self.sin is None:
-            self.prepare_cos_sin(positions, offsets)
-        if self.recompute_cos_sin:
-            self.prepare_cos_sin(positions, offsets, recompute_cos_sin=True)
-        num_tokens = positions.shape[0] * positions.shape[1]
+        positions = positions.flatten()
+        if offsets is not None:
+            positions = positions + offsets
+        num_tokens = positions.shape[0]
+        cos_sin = self.cos_sin_cache.index_select(0, positions).view(
+            num_tokens, 1, -1)
+        cos, sin = cos_sin.chunk(2, dim=-1)
         # HPU RoPE kernel requires hidden dimension for cos and sin to be equal
         # to query hidden dimension, so the original tensors need to be
         # expanded
@@ -252,10 +251,19 @@ class RotaryEmbedding(CustomOp):
         rope_mode: RotaryPosEmbeddingMode
         if self.is_neox_style:
             rope_mode = RotaryPosEmbeddingMode.BLOCKWISE
+            cos = torch.cat((cos, cos), dim=-1)
+            sin = torch.cat((sin, sin), dim=-1)
         else:
             rope_mode = RotaryPosEmbeddingMode.PAIRWISE
-        sin = self.sin
-        cos = self.cos
+            sin = torch.repeat_interleave(sin,
+                                          2,
+                                          dim=-1,
+                                          output_size=cos_sin.shape[-1])
+            cos = torch.repeat_interleave(cos,
+                                          2,
+                                          dim=-1,
+                                          output_size=cos_sin.shape[-1])
+
         query_shape = query.shape
         query = query.view(num_tokens, -1, self.head_size)
         query_rot = query[..., :self.rotary_dim]
@@ -271,6 +279,7 @@ class RotaryEmbedding(CustomOp):
         key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0, rope_mode)
         key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
         return query, key
+
 
     def extra_repr(self) -> str:
         s = f"head_size={self.head_size}, rotary_dim={self.rotary_dim}"
