@@ -395,6 +395,10 @@ class HpuModelAdapter:
             #    a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
+        # import pdb; pdb.set_trace()
+        print("DEBUG: here we already have problems with kwargs['pixel_values']")
+        print(kwargs["pixel_values"][..., 1])
+
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
@@ -1641,13 +1645,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
         seq_data.output_token_ids = output_token_ids
-        x = SequenceGroupMetadata(request_id=str(group_id),
+        return SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
                                      seq_data={group_id: seq_data},
                                      sampling_params=sampling_params,
                                      block_tables=block_tables,
                                      lora_request=lora_request)
-        return x
 
     def profile_run(self) -> None:
         return 
@@ -2356,6 +2359,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
+                # import pdb; pdb.set_trace()
+                print("DEBUG: outer level execute_model_kwargs['pixel_values'] ")
+                print(execute_model_kwargs["pixel_values"][..., 1])
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
