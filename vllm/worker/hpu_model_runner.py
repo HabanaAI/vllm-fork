@@ -395,9 +395,6 @@ class HpuModelAdapter:
             #    a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
-        # import pdb; pdb.set_trace()
-        print("DEBUG: here we already have problems with kwargs['pixel_values']")
-        print(kwargs["pixel_values"][..., 1])
 
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
@@ -829,7 +826,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         return htorch.hpu.wrap_in_hpu_graph(
-            HpuModelAdapter(*args, **kwargs), disable_tensor_cache=True
+            HpuModelAdapter(*args, **kwargs), disable_tensor_cache=False
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
@@ -2359,9 +2356,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
-                # import pdb; pdb.set_trace()
-                print("DEBUG: outer level execute_model_kwargs['pixel_values'] ")
-                print(execute_model_kwargs["pixel_values"][..., 1])
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
