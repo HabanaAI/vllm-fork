@@ -17,6 +17,7 @@ import copy
 import json
 import math
 from collections import defaultdict
+from collections.abc import Hashable, Iterable
 from functools import lru_cache
 from typing import Any, Callable, DefaultDict, Dict, List, Union
 
@@ -37,8 +38,35 @@ from transformers import PreTrainedTokenizerBase
 def _cached(fn):
     cache: Dict[Any, Any] = {}
 
+    def is_hashable(obj):
+        """
+        Determines if an object can be used as cache dictionary key.
+        
+        Args:
+            obj: The object to check for hashability.
+        Returns:
+            bool: True if the object is hashable, False otherwise.
+                  - Returns False if the object is an instance of CFGState.
+                  - Returns True if the object is an instance of Hashable.
+                  - If the object is an Iterable, returns True only if all items
+                  in the iterable are hashable.
+                  - Returns False for all other cases.
+        """
+        match obj:
+            case CFGState():
+                return False
+            case Iterable():
+                is_all_hashable = True
+                for item in obj:
+                    is_all_hashable &= is_hashable(item)
+                return is_all_hashable
+            case Hashable():
+                return True
+            case _:
+                return False
+
     def cached_fn(*args):
-        cache_key = id(args)
+        cache_key = tuple(arg if is_hashable(arg) else id(arg) for arg in args)
         if cache_key in cache:
             result = cache[cache_key]
         else:
