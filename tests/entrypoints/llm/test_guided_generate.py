@@ -28,6 +28,7 @@ def llm():
 
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend", GUIDED_DECODING_BACKENDS)
+@pytest.mark.t_compile
 def test_guided_regex(sample_regex, llm, guided_decoding_backend: str):
     sampling_params = SamplingParams(temperature=0.8,
                                      top_p=0.95,
@@ -54,6 +55,7 @@ def test_guided_regex(sample_regex, llm, guided_decoding_backend: str):
 
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend", GUIDED_DECODING_BACKENDS)
+@pytest.mark.t_compile
 def test_guided_json_completion(sample_json_schema, llm,
                                 guided_decoding_backend: str):
     sampling_params = SamplingParams(temperature=1.0,
@@ -84,6 +86,7 @@ def test_guided_json_completion(sample_json_schema, llm,
 
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend", GUIDED_DECODING_BACKENDS)
+@pytest.mark.t_compile
 def test_guided_complex_json_completion(sample_complex_json_schema, llm,
                                         guided_decoding_backend: str):
     sampling_params = SamplingParams(temperature=1.0,
@@ -115,6 +118,7 @@ def test_guided_complex_json_completion(sample_complex_json_schema, llm,
 
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend", GUIDED_DECODING_BACKENDS)
+@pytest.mark.t_compile
 def test_guided_definition_json_completion(sample_definition_json_schema, llm,
                                            guided_decoding_backend: str):
     sampling_params = SamplingParams(temperature=1.0,
@@ -146,6 +150,7 @@ def test_guided_definition_json_completion(sample_definition_json_schema, llm,
 
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend", GUIDED_DECODING_BACKENDS)
+@pytest.mark.t_compile
 def test_guided_choice_completion(sample_guided_choice, llm,
                                   guided_decoding_backend: str):
     sampling_params = SamplingParams(temperature=0.8,
@@ -210,6 +215,7 @@ def test_guided_grammar(sample_sql_statements, llm,
 
 
 @pytest.mark.skip_global_cleanup
+@pytest.mark.t_compile
 def test_guided_options_request_deprecation_warning(sample_regex, llm):
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 
@@ -221,6 +227,7 @@ def test_guided_options_request_deprecation_warning(sample_regex, llm):
 
 
 @pytest.mark.skip_global_cleanup
+@pytest.mark.t_compile
 def test_validation_against_both_guided_decoding_options(sample_regex, llm):
     sampling_params = SamplingParams(
         temperature=0.8,
@@ -236,6 +243,7 @@ def test_validation_against_both_guided_decoding_options(sample_regex, llm):
 
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend", GUIDED_DECODING_BACKENDS)
+@pytest.mark.t_compile
 def test_guided_json_object(llm, guided_decoding_backend: str):
     sampling_params = SamplingParams(temperature=1.0,
                                      max_tokens=100,

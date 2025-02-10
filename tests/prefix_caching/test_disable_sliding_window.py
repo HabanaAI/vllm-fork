@@ -20,6 +20,7 @@ MODEL_LEN_LEN = [
 ]
 
 
+@pytest.mark.t_compile
 @pytest.mark.parametrize("model_len_len", MODEL_LEN_LEN)
 def test_disable_sliding_window(model_len_len, ):
     model, sliding_len, full_len = model_len_len

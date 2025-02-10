@@ -49,6 +49,7 @@ def api_server(tokenizer_pool_size: int, distributed_executor_backend: str):
 
 @pytest.mark.parametrize("tokenizer_pool_size", [0, 2])
 @pytest.mark.parametrize("distributed_executor_backend", ["mp", "ray"])
+@pytest.mark.t_compile
 def test_api_server(api_server, tokenizer_pool_size: int,
                     distributed_executor_backend: str):
     """
