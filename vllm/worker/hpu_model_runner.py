@@ -58,6 +58,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceData, SequenceGroupMetadata,
                            SequenceOutput)
+from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
                         make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
@@ -750,13 +751,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @property
     def model_is_mrope(self) -> bool:
-        """Detect if the model has "mrope" rope_scaling type.
-        mrope requires keep "rope_deltas" between prompt and decoding phases."""
-        rope_scaling = getattr(self.model_config.hf_config, "rope_scaling", {})
-        breakpoint()
-        if rope_scaling is None:
-            return False
-        return rope_scaling.get("type", None) == "mrope"
+        config = self.model_config.hf_config
+        return uses_mrope(config)
 
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
@@ -1016,11 +1012,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     )
 
                 mrope_positions = None
-                #breakpoint()
                 if self.model_config.uses_mrope:
-                #if self.model_is_mrope:  # this returns false... rope_scaling.get("type", None) == "mrope" fails as it is "default"
                     image_grid_thw = mm_kwargs.get("image_grid_thw", None)
                     video_grid_thw = mm_kwargs.get("video_grid_thw", None)
+                    second_per_grid_ts = mm_kwargs.get("second_per_grid_ts", None)
                     assert image_grid_thw is not None or video_grid_thw is not None, (
                         "mrope embedding type requires multi-modal input mapper "
                         "returns 'image_grid_thw' or 'video_grid_thw'.")
@@ -1030,14 +1025,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     mrope_positions, mrope_position_delta = \
                         MRotaryEmbedding.get_input_positions(
                             token_ids,
+                            hf_config=hf_config,
                             image_grid_thw=image_grid_thw,
                             video_grid_thw=video_grid_thw,
-                            image_token_id=hf_config.image_token_id,
-                            video_token_id=hf_config.video_token_id,
-                            vision_start_token_id=hf_config.vision_start_token_id,
-                            vision_end_token_id=hf_config.vision_end_token_id,
-                            spatial_merge_size=hf_config.vision_config.
-                            spatial_merge_size,
+                            second_per_grid_ts=second_per_grid_ts,
                             context_len=context_len,
                         )
                     seq_data.mrope_position_delta = mrope_position_delta
