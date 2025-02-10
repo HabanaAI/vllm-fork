@@ -440,7 +440,8 @@ class SamplingParams(
 
     @cached_property
     def sampling_type(self) -> SamplingType:
-        if self.temperature < _SAMPLING_EPS:
+        # tricky change: use greedy sampling if top_k == 1
+        if self.temperature < _SAMPLING_EPS or self.top_k == 1:
             return SamplingType.GREEDY
         if self.seed is not None:
             return SamplingType.RANDOM_SEED
