@@ -22,8 +22,8 @@ PROMPTS = [
 LORA_NAME = "typeof/zephyr-7b-beta-lora"
 
 
-@pytest.fixture(scope="module")
-def llm():
+@pytest.fixture(scope="module", params=[{"enforce_eager": False}, {"enforce_eager": True}])
+def llm(request):
     # pytest caches the fixture so we use weakref.proxy to
     # enable garbage collection
     llm = LLM(model=MODEL_NAME,
@@ -33,7 +33,7 @@ def llm():
               max_loras=4,
               max_lora_rank=64,
               max_num_seqs=128,
-              enforce_eager=True)
+              enforce_eager=request.param["enforce_eager"])
 
     with llm.deprecate_legacy_api():
         yield weakref.proxy(llm)
@@ -49,6 +49,7 @@ def zephyr_lora_files():
 
 
 @pytest.mark.skip_global_cleanup
+@pytest.mark.t_compile
 def test_multiple_lora_requests(llm: LLM, zephyr_lora_files):
     lora_request = [
         LoRARequest(LORA_NAME + str(idx), idx + 1, zephyr_lora_files)
