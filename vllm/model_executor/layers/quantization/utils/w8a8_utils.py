@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from vllm_hpu_extension.ops import get_hpu_gaudi2_scale_factor, is_hpu_gaudi2
+
 from vllm import _custom_ops as ops
 from vllm.platforms import current_platform
 
@@ -72,6 +73,7 @@ def convert_to_channelwise(
         start = end
 
     return weight_scale_channel
+
 
 def requantize_with_max_scale(
         weight: torch.Tensor, weight_scale: torch.Tensor,
