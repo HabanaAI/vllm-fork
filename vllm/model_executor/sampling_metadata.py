@@ -139,6 +139,7 @@ class SamplingMetadata:
         num_prompts: int,
         skip_sampler_cpu_output: bool = False,
         reuse_sampling_tensors: bool = False,
+        force_greedy_sample: bool = False,
     ) -> None:
         self.seq_groups = seq_groups
         self.selected_token_indices = selected_token_indices
@@ -146,6 +147,7 @@ class SamplingMetadata:
         self.num_prompts = num_prompts
         self.skip_sampler_cpu_output = skip_sampler_cpu_output
         self.reuse_sampling_tensors = reuse_sampling_tensors
+        self.force_greedy_sample = force_greedy_sample
 
     @staticmethod
     def prepare(
@@ -162,6 +164,7 @@ class SamplingMetadata:
             selected_token_indices,
             categorized_sample_indices,
             num_prompts,
+            force_greedy_sample,
         ) = _prepare_seq_groups(seq_group_metadata_list, seq_lens, query_lens,
                                 device, generators, cache)
         selected_token_indices = async_tensor_h2d(
@@ -186,6 +189,7 @@ class SamplingMetadata:
             selected_token_indices=selected_token_indices,
             categorized_sample_indices=categorized_sample_indices,
             num_prompts=num_prompts,
+            force_greedy_sample=force_greedy_sample,
         )
         return sampling_metadata
 
@@ -249,6 +253,8 @@ def _prepare_seq_groups(
     logit_idx = 0
     # Total number of prompts from given sequence groups.
     num_prompts = 0
+
+    force_greedy_sample = True
 
     for i, seq_group_metadata in enumerate(seq_group_metadata_list):
         seq_ids = seq_group_metadata.seq_data.keys()
@@ -348,6 +354,12 @@ def _prepare_seq_groups(
                 list(range(logit_idx, logit_idx + sample_len)))
             logit_idx += sample_len
 
+        if force_greedy_sample:
+            # If we detect non_greedy in seq_group_metadata, we will
+            # set force_greedy_sample to False.
+            force_greedy_sample = \
+                sampling_params.sampling_type == SamplingType.GREEDY
+
         if cache is not None:
             sample_obj.sampling_params = sampling_params
             sample_obj.seq_data = seq_group_metadata.seq_data
@@ -374,7 +386,7 @@ def _prepare_seq_groups(
         cache.reset()
 
     return (seq_groups, selected_token_indices, categorized_sample_indices,
-            num_prompts)
+            num_prompts, force_greedy_sample)
 
 
 @dataclass
