@@ -20,6 +20,7 @@ from collections import defaultdict
 from functools import lru_cache
 from typing import Any, Callable, DefaultDict, Dict, List, Union
 
+import numpy as np
 import torch
 from outlines import grammars
 from outlines.caching import cache
@@ -37,11 +38,12 @@ def _cached(fn):
     cache: Dict[Any, Any] = {}
 
     def cached_fn(*args):
-        if args in cache:
-            result = cache[args]
+        cache_key = id(args)
+        if cache_key in cache:
+            result = cache[cache_key]
         else:
             result = fn(*args)
-            cache[args] = result
+            cache[cache_key] = result
         return result
 
     return cached_fn
@@ -60,7 +62,15 @@ class BaseLogitsProcessor:
     @lru_cache(maxsize=128)
     def _create_mask_tensor(allowed_tokens, vocab_size, device):
         mask = torch.full((vocab_size, ), -math.inf, device=device)
-        mask[list(allowed_tokens)] = 0
+        # The tokenizer may support more token ids than the model can generate,
+        # eg. Llama 3.2 Vision models have an `<|image|>` token with id 128256
+        # but scores.shape == torch.Size([128256])
+        # Using NumPy is faster for filtering token ids
+        allowed_tokens = np.array(allowed_tokens, dtype=np.int64)
+        allowed_tokens = torch.tensor(allowed_tokens, device=device)
+        allowed_tokens = allowed_tokens.masked_select(
+            allowed_tokens < vocab_size)
+        mask.index_fill_(0, allowed_tokens, 0)
         return mask
 
     def _get_mask_tensor(self, state_id, vocab_size, device):
