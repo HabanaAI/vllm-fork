@@ -150,14 +150,19 @@ def run_vllm(
     use_beam_search = False
 
     if not use_beam_search:
+        if not args.skip_warmup_profiling:
+            # inference and profiling
+            start = time.perf_counter()
+            llm.generate(prompts, sampling_params, use_tqdm=True, profiling=True)
+            end = time.perf_counter()
+        else:
+            # warmup
+            llm.generate(prompts, sampling_params, use_tqdm=True)
 
-        #warmup
-        llm.generate(prompts, sampling_params, use_tqdm=True)
-
-        #inference and profiling
-        start = time.perf_counter()
-        llm.generate(prompts, sampling_params, use_tqdm=True, profiling=True)
-        end = time.perf_counter()
+            # inference and profiling
+            start = time.perf_counter()
+            llm.generate(prompts, sampling_params, use_tqdm=True, profiling=True)
+            end = time.perf_counter()
 
     else:
         prompts = [request.prompt for request in requests]
@@ -375,6 +380,7 @@ def main(args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = FlexibleArgumentParser(description="Benchmark the throughput.")
+    parser.add_argument("--skip-warmup-profiling", action="store_true", default=False, help="skip warmup when profiling")
     parser.add_argument("--backend",
                         type=str,
                         choices=["vllm", "hf", "mii"],
