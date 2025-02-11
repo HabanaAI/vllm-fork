@@ -122,7 +122,7 @@ If you are facing the following error: `docker: Error response from daemon: Unkn
 | Multi-step scheduling support 	| vLLM HPU backend includes multi-step scheduling support for host overhead reduction, configurable by standard `--num-scheduler-seqs` parameter.  	| [Feature RFC](https://github.com/vllm-project/vllm/issues/6854) 	|
 | Automatic prefix caching (experimental) 	| vLLM HPU backend includes automatic prefix caching (APC) support for more efficient prefills, configurable by standard `--enable-prefix-caching` parameter. 	| [Documentation](https://docs.vllm.ai/en/stable/automatic_prefix_caching/apc.html)<br>[Details](https://docs.vllm.ai/en/stable/automatic_prefix_caching/details.html) 	|
 | Speculative decoding (functional release) 	| vLLM HPU backend includes experimental speculative decoding support for improving inter-token latency in some scenarios, configurabie via standard `--speculative_model` and `--num_speculative_tokens` parameters. 	| [Documentation](https://docs.vllm.ai/en/stable/models/spec_decode.html)<br>[Example](https://docs.vllm.ai/en/stable/getting_started/examples/mlpspeculator.html) 	|
-| Multiprocessing backend 	| TBD 	| [Documentation](TBD)<br>[Example](TBD) 	|                                                                                                                                                                |
+| Multiprocessing backend 	| Multiprocessing is the default distributed runtime in vLLM. The vLLM HPU backend supports it alongside Ray. 	| [Documentation](https://docs.vllm.ai/en/latest/serving/distributed_serving.html)	|                                                                                                                                                                |
 
 ## Unsupported Features
 
@@ -150,8 +150,9 @@ The following configurations have been validated to be function with Gaudi2 devi
 - [llava-hf/llava-1.5-7b-hf](https://huggingface.co/llava-hf/llava-1.5-7b-hf) on single HPU or with tensor parallelism on 8x HPU, BF16 datatype
 - [Qwen/Qwen2-72B-Instruct](https://huggingface.co/Qwen/Qwen2-72B-Instruct) with tensor parallelism on 8x HPU, BF16 datatype
 - [Qwen/Qwen2.5-72B-Instruct](https://huggingface.co/Qwen/Qwen2.5-72B-Instruct) with tensor parallelism on 8x HPU, BF16 datatype
-- [Mistral-Large-TBD](https://huggingface.co/Qwen/Qwen2.5-72B-Instruct) on single HPU or with tensor parallelism on 8x HPU, BF16 datatype
+- [mistralai/Mistral-Large-Instruct-2407](https://huggingface.co/mistralai/Mistral-Large-Instruct-2407) with tensor parallelism on 8x HPU, BF16 datatype
 - [princeton-nlp/gemma-2-9b-it-SimPO](https://huggingface.co/princeton-nlp/gemma-2-9b-it-SimPO) on single HPU, BF16 datatype
+- [meta-llama/Llama-3.2-90B-Vision-Instruct](https://huggingface.co/meta-llama/Llama-3.2-90B-Vision-Instruct) with tensor parallelism on 4x and 8x HPU, BF16 datatype
 
 ## Performance Tuning
 
