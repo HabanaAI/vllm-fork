@@ -21,7 +21,6 @@ from collections.abc import Hashable, Iterable
 from functools import lru_cache
 from typing import Any, Callable, DefaultDict, Dict, List, Union
 
-import numpy as np
 import torch
 from outlines import grammars
 from outlines.caching import cache
@@ -38,35 +37,23 @@ from transformers import PreTrainedTokenizerBase
 def _cached(fn):
     cache: Dict[Any, Any] = {}
 
-    def is_hashable(obj):
-        """
-        Determines if an object can be used as cache dictionary key.
-        
-        Args:
-            obj: The object to check for hashability.
-        Returns:
-            bool: True if the object is hashable, False otherwise.
-                  - Returns False if the object is an instance of CFGState.
-                  - Returns True if the object is an instance of Hashable.
-                  - If the object is an Iterable, returns True only if all items
-                  in the iterable are hashable.
-                  - Returns False for all other cases.
-        """
+    def hash_args(obj):
         match obj:
-            case CFGState():
-                return False
             case Iterable():
-                is_all_hashable = True
-                for item in obj:
-                    is_all_hashable &= is_hashable(item)
-                return is_all_hashable
+                # NOTE(kzawora): be careful not to hash genexpr directly
+                # (e.g hash(hash_args(item) for item in obj))
+                # hashing different generator expressions can yield the
+                # same hash (and vice versa)
+                # see https://stackoverflow.com/q/38174211
+                # this is why we hash the tuple, not genexpr here
+                return hash(tuple(hash_args(item) for item in obj))
             case Hashable():
-                return True
+                return hash(obj)
             case _:
-                return False
+                return hash(id(obj))
 
     def cached_fn(*args):
-        cache_key = tuple(arg if is_hashable(arg) else id(arg) for arg in args)
+        cache_key = hash_args(args)
         if cache_key in cache:
             result = cache[cache_key]
         else:
@@ -93,8 +80,6 @@ class BaseLogitsProcessor:
         # The tokenizer may support more token ids than the model can generate,
         # eg. Llama 3.2 Vision models have an `<|image|>` token with id 128256
         # but scores.shape == torch.Size([128256])
-        # Using NumPy is faster for filtering token ids
-        allowed_tokens = np.array(allowed_tokens, dtype=np.int64)
         allowed_tokens = torch.tensor(allowed_tokens, device=device)
         allowed_tokens = allowed_tokens.masked_select(
             allowed_tokens < vocab_size)
