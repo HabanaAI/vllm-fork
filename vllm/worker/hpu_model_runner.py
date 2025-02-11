@@ -19,6 +19,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
+import torch.nn as nn
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.flags import enabled_flags
@@ -822,6 +823,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
+    def get_model(self) -> nn.Module:
+        if isinstance(self.model, HpuModelAdapter):
+            return self.model.model
+        return self.model
+
     def _use_graphs(self, batch_size, seq_len, is_prompt):
         if self.enforce_eager:
             return False
@@ -1069,7 +1075,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=num_prefill_tokens,
             num_decode_tokens=0,
             slot_mapping=slot_mapping,
-            multi_modal_placeholder_index_maps=placeholder_index_maps)
+            multi_modal_placeholder_index_maps=placeholder_index_maps,
+            enable_kv_scales_calculation=False,
+        )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         for t in multi_modal_kwargs:
             if torch.is_tensor(multi_modal_kwargs[t]):
@@ -1097,11 +1105,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_positions: List[List[int]] = []
         slot_mapping: List[List[int]] = []
         seq_lens: List[int] = []
+        encoder_seq_lens: List[int] = []
+        cross_block_tables: List[List[int]] = []
         block_tables: List[List[int]] = []
         lora_index_mapping: List[List[int]] = []
         lora_prompt_mapping: List[List[int]] = []
         lora_requests: Set[LoRARequest] = set()
 
+        is_enc_dec_model = self.model_config.is_encoder_decoder
         if len(seq_group_metadata_list) == 0:
             return PrepareDecodeMetadata.empty()
         lora_ids: List[int] = []
@@ -1116,6 +1127,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_ids = list(seq_group_metadata.seq_data.keys())
             lora_id = seq_group_metadata.lora_int_id
             lora_ids.append(lora_id)
+            if is_enc_dec_model:
+                for _ in range(len(seq_group_metadata.seq_data)):
+                    encoder_seq_len = (
+                        seq_group_metadata.encoder_seq_data.get_len()
+                        if seq_group_metadata.encoder_seq_data else 0)
+                    encoder_seq_lens.append(encoder_seq_len)
+                    cross_block_table = seq_group_metadata.cross_block_table
+                    cross_block_tables.append([] if (
+                        cross_block_table is None) else cross_block_table)
 
             if lora_id > 0:
                 lora_requests.add(seq_group_metadata.lora_request)
@@ -1186,6 +1206,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
 
+        if is_enc_dec_model:
+            last_cross_block_usage = [
+                (encoder_seq_len - 1) % self.block_size + 1
+                for encoder_seq_len in encoder_seq_lens
+            ]
+            cross_block_groups = [[i] * len(bt)
+                                  for i, bt in enumerate(cross_block_tables)]
+            cross_block_usage = [
+                [self.block_size] * (len(bt) - 1) + [lbu]
+                for bt, lbu in zip(cross_block_tables, last_cross_block_usage)
+                if bt
+            ]
+            cross_block_list = flatten(cross_block_tables)
+            cross_block_groups = flatten(cross_block_groups)
+            cross_block_usage = flatten(cross_block_usage)
+            assert len(cross_block_list) == len(cross_block_groups)
+            assert len(cross_block_list) == len(cross_block_usage)
+
+        else:
+            cross_block_list = None
+            cross_block_groups = None
+            cross_block_usage = None
+            encoder_seq_lens_tensor = None
+
         padding_fn = None
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
@@ -1206,6 +1250,50 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_list = padding_fn(block_list, _PAD_BLOCK_ID)
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
+
+        if is_enc_dec_model:
+            if self.use_contiguous_pa:
+                cross_block_bucket_size = max(
+                    max(cross_block_list) +
+                    1, len(cross_block_list)) if cross_block_list else 0
+                cross_block_bucket_size = \
+                    self.bucketing_ctx.get_padded_decode_num_blocks(
+                    cross_block_bucket_size)
+                indices = [None] * cross_block_bucket_size
+                for i, bid in enumerate(cross_block_list):
+                    indices[bid] = i
+                padding_fn = lambda tensor, pad_value: gather_list(
+                    tensor, indices, pad_value)
+            else:
+                cross_block_bucket_size = \
+                    self.bucketing_ctx.get_padded_decode_num_blocks(
+                    len(cross_block_list))
+                padding_fn = lambda tensor, pad_value: pad_list(
+                    tensor, cross_block_bucket_size, pad_value)
+
+            real_batch_size = len(seq_group_metadata_list)
+            batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
+                real_batch_size, False)
+            batch_size_padding = batch_size_padded - real_batch_size
+            if batch_size_padding > 0:
+                encoder_seq_lens.extend(encoder_seq_lens[0]
+                                        for _ in range(batch_size_padding))
+            cross_block_list = padding_fn(cross_block_list, _PAD_BLOCK_ID)
+            cross_block_groups = padding_fn(cross_block_groups, -1)
+            cross_block_usage = padding_fn(cross_block_usage, 1)
+
+            cross_block_list = torch.tensor(cross_block_list,
+                                            dtype=torch.int,
+                                            device='cpu')
+            cross_block_groups = torch.tensor(cross_block_groups,
+                                              dtype=torch.int,
+                                              device='cpu')
+            cross_block_usage = torch.tensor(cross_block_usage,
+                                             dtype=self.model_config.dtype,
+                                             device='cpu')
+            encoder_seq_lens_tensor = torch.tensor(encoder_seq_lens,
+                                                   dtype=torch.long,
+                                                   device='cpu')
 
         block_list = torch.tensor(block_list, dtype=torch.int, device='cpu')
         block_groups = torch.tensor(block_groups,
@@ -1230,6 +1318,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.device, non_blocking=True)
         slot_mapping = slot_mapping.to(  # type: ignore
             self.device, non_blocking=True)
+        if is_enc_dec_model:
+            cross_block_list = cross_block_list.to(  # type: ignore
+                self.device, non_blocking=True)
+            cross_block_groups = cross_block_groups.to(  # type: ignore
+                self.device, non_blocking=True)
+            cross_block_usage = cross_block_usage.to(  # type: ignore
+                self.device, non_blocking=True)
+            encoder_seq_lens_tensor = encoder_seq_lens_tensor.to(  # type: ignore
+                self.device, non_blocking=True)
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
@@ -1242,12 +1339,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_groups=block_groups,
             attn_bias=None,
             seq_lens_tensor=None,
+            encoder_seq_lens=encoder_seq_lens,
+            encoder_seq_lens_tensor=encoder_seq_lens_tensor,
+            cross_block_list=cross_block_list,
+            cross_block_groups=cross_block_groups,
+            cross_block_usage=cross_block_usage,
             context_lens_tensor=None,
             num_prefills=0,
             num_prefill_tokens=0,
             num_decode_tokens=num_decode_tokens,
             slot_mapping=slot_mapping,
-            multi_modal_placeholder_index_maps=None)
+            multi_modal_placeholder_index_maps=None,
+            enable_kv_scales_calculation=False,
+        )
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -2277,8 +2381,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             broadcast_data["attn_metadata"])
                     })
 
-                # Model forward
-                with self.profiler.record_event('internal', model_event_name):
+                profiler_args = {
+                    'real_seq_len': model_input.seq_lens,
+                    'real_batch_size': real_batch_size
+                }
+
+                with self.profiler.record_event('internal',
+                                                model_event_name,
+                                                args=profiler_args):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
@@ -2332,7 +2442,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     ('compute_logits_'
                      f'{"prompt" if is_prompt else "decode"}_bs'
                      f'{batch_size}_'
-                     f'seq{seq_len}')):
+                     f'seq{seq_len}'),
+                        args=profiler_args):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -2375,7 +2486,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             'internal', ('sample_'
                                         f'{"prompt" if is_prompt else "decode"}_'
                                         f'bs{batch_size}_'
-                                        f'seq{seq_len}')):
+                                        f'seq{seq_len}'),
+                             args=profiler_args):
                         output = self.model.sample(
                             logits=logits,
                             sampling_metadata=sampling_metadata,
