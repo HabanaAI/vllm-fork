@@ -15,21 +15,32 @@ parser.add_argument("--task", type=str, default="gsm8k", help="The model path.")
 parser.add_argument("--tokenizer", type=str, default=model_path, help="The model path.")
 parser.add_argument("--tp_size", type=int, default=8, help="Tensor Parallelism size.")
 parser.add_argument("--ep_size", type=int, default=4, help="Expert Parallelism size.")
+parser.add_argument("--inc_quant", action="store_true", help="Enable inc_quant mode.")
 parser.add_argument("-l", "--limit", type=int, default=16, help="test request counts.")
 args = parser.parse_args()
 
+#os.environ["VLLM_SKIP_WARMUP"] = "true"
+#os.environ["HABANA_VISIBLE_DEVICES"] = "ALL"
+#os.environ["PT_HPU_ENABLE_LAZY_COLLECTIVES"] = "true"
+#if args.ep_size > 1:
+#    os.environ["VLLM_MOE_N_SLICE"] = "1"
+#    os.environ["VLLM_EP_SIZE"] = f"{args.ep_size}"
+#else:
+#    os.environ["VLLM_MOE_N_SLICE"] = "4"
+#    os.environ["VLLM_EP_SIZE"] = "1"
+
+#os.environ["VLLM_MLA_DISABLE_REQUANTIZATION"] = "1"
+#os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
 os.environ["VLLM_SKIP_WARMUP"] = "true"
 os.environ["HABANA_VISIBLE_DEVICES"] = "ALL"
 os.environ["PT_HPU_ENABLE_LAZY_COLLECTIVES"] = "true"
-if args.ep_size > 1:
-    os.environ["VLLM_MOE_N_SLICE"] = "1"
-    os.environ["VLLM_EP_SIZE"] = f"{args.ep_size}"
-else:
-    os.environ["VLLM_MOE_N_SLICE"] = "4"
-    os.environ["VLLM_EP_SIZE"] = "1"
-
+# os.environ["VLLM_RAY_DISABLE_LOG_TO_DRIVER"] = "1"
+# os.environ["RAY_IGNORE_UNHANDLED_ERRORS"] = "1"
+os.environ["VLLM_MOE_N_SLICE"] = "1"
+os.environ["VLLM_EP_SIZE"] = "8"
 os.environ["VLLM_MLA_DISABLE_REQUANTIZATION"] = "1"
 os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
+
 
 if __name__ == "__main__":
 
@@ -46,9 +57,22 @@ if __name__ == "__main__":
             max_model_len=4096,
             gpu_memory_utilization=0.8,
         )
+    elif args.inc_quant:
+        llm = VLLM(
+            pretrained=model,
+            quantization="inc",
+            weights_load_device="cpu",
+            tokenizer=args.tokenizer,
+            tensor_parallel_size=args.tp_size,
+            distributed_executor_backend='mp',
+            trust_remote_code=True,
+            max_model_len=4096,
+            dtype="bfloat16",
+            gpu_memory_utilization=0.8,
+        )
     else:
         llm = VLLM(
-            pretrained=model, 
+            pretrained=model,
             tokenizer=args.tokenizer,
             tensor_parallel_size=args.tp_size,
             distributed_executor_backend='mp',

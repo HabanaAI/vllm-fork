@@ -32,7 +32,10 @@ from vllm.platforms import current_platform
 
 if current_platform.is_hpu():
     from vllm_hpu_extension.ops import scaled_fp8_quant
+    #import habana_frameworks.torch.core as htcore
+    #import habana_frameworks.torch.utils.experimental as htexp
     ops.scaled_fp8_quant = scaled_fp8_quant
+    #cast_from_fp8_fcn = lambda x, dtype, scale=None: torch.ops.hpu.cast_from_fp8(x, scale, dtype)
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
@@ -779,39 +782,46 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias)
         final_hidden_states = torch.zeros_like(x)
-        num_experts = layer.w13_weight.shape[0]
-        n_expert_slice = layer.w13_weight.shape[0] // self.moe_n_slice
-        assert n_expert_slice * self.moe_n_slice == num_experts
+        #num_experts = layer.w13_weight.shape[0]
+        #n_expert_slice = layer.w13_weight.shape[0] // self.moe_n_slice
+        #assert n_expert_slice * self.moe_n_slice == num_experts
+        num_experts = layer.num_experts
+        n_expert_slice = num_experts // self.moe_n_slice
 
-        # w13_list = layer.hpu_fused_moe.MoeOp.w13_list
-        # w2_list = layer.hpu_fused_moe.MoeOp.w2_list
-        from vllm.model_executor.layers.quantization.utils.fp8_utils import dequant_block_fp8_weight_naive
+        w13_list = layer.hpu_fused_moe.MoeOp.w13_list
+        w2_list = layer.hpu_fused_moe.MoeOp.w2_list
+        #from vllm.model_executor.layers.quantization.utils.fp8_utils import dequant_block_fp8_weight_naive
 
-        orig_M_w13 = layer.orig_M_w13.data
-        orig_N_w13 = layer.orig_N_w13.data
-        orig_M_w2 = layer.orig_M_w2.data
-        orig_N_w2 = layer.orig_N_w2.data
+        #orig_M_w13 = layer.orig_M_w13.data
+        #orig_N_w13 = layer.orig_N_w13.data
+        #orig_M_w2 = layer.orig_M_w2.data
+        #orig_N_w2 = layer.orig_N_w2.data
         ep_shift = ep_rank * num_experts
-        w13_weight = dequant_block_fp8_weight_naive(layer.w13_weight,
-                                                    layer.w13_weight_scale_inv,
-                                                    block_size=self.quant_config.weight_block_size,
-                                                    dtype=x.dtype,
-                                                    original_M=orig_M_w13,
-                                                    original_N=orig_N_w13)
-        w2_weight = dequant_block_fp8_weight_naive(layer.w2_weight,
-                                                    layer.w2_weight_scale_inv,
-                                                    block_size=self.quant_config.weight_block_size,
-                                                    dtype=x.dtype,
-                                                    original_M=orig_M_w2,
-                                                    original_N=orig_N_w2)
+        #w13_weight = dequant_block_fp8_weight_naive(layer.w13_weight,
+        #                                            layer.w13_weight_scale_inv,
+        #                                            block_size=self.quant_config.weight_block_size,
+        #                                            dtype=x.dtype,
+        #                                            original_M=orig_M_w13,
+        #                                            original_N=orig_N_w13)
+        #w2_weight = dequant_block_fp8_weight_naive(layer.w2_weight,
+        #                                            layer.w2_weight_scale_inv,
+        #                                            block_size=self.quant_config.weight_block_size,
+        #                                            dtype=x.dtype,
+        #                                            original_M=orig_M_w2,
+        #                                            original_N=orig_N_w2)
         for i in range(self.moe_n_slice):
             min_expert = i * n_expert_slice
             max_expert = (i + 1) * n_expert_slice
 
-            w13_list_slice = [w13_weight[j] for j in range(min_expert, max_expert)]
-            w2_list_slice = [w2_weight[j] for j in range(min_expert, max_expert)]
+            #w13_list_slice = [w13_weight[j] for j in range(min_expert, max_expert)]
+            #w2_list_slice = [w2_weight[j] for j in range(min_expert, max_expert)]
+            w13_list_slice = [w13_list[j].weight.t().data for j in range(min_expert, max_expert)]
+            w2_list_slice = [w2_list[j].weight.t().data for j in range(min_expert, max_expert)]
+            #w13_list_slice = [cast_from_fp8_fcn(w13_list[j].weight.t().data, torch.bfloat16, w13_list[j].scale_weight) for j in range(min_expert, max_expert)]
+            #w2_list_slice = [cast_from_fp8_fcn(w2_list[j].weight.t().data, torch.bfloat16, w13_list[j].scale_weight) for j in range(min_expert, max_expert)]
 
-            final_hidden_states += torch.ops.hpu.mixture_of_experts(
+            #final_hidden_states += torch.ops.hpu.mixture_of_experts(
+            final_hidden_states += torch.ops.hpu.mixture_of_experts.(
                                          hidden_states=x,
                                          expert_routing_table=topk_ids.to(torch.int64),
                                          router_weights=topk_weights.to(x.dtype),
