@@ -1558,7 +1558,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seqs = [
                 self.create_dummy_seq_group_metadata(
                     i,
-                    b * self.block_size - 1,
+                    b * self.block_size - 2,
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
@@ -1582,7 +1582,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.execute_model(inputs,
                                    kv_caches,
                                    warmup_mode=True,
-                                   num_steps=2,
+                                   num_steps=3,
                                    seqs=seqs)
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=False,
