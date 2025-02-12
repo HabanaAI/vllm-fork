@@ -12,7 +12,7 @@ To achieve the best performance, please follow the methods outlined in the
 
 - Ubuntu 22.04 LTS OS
 - Python 3.10
-- Intel Gaudi accelerator
+- Intel Gaudi 2 and 3 AI accelerators
 - Intel Gaudi software version 1.19.0 and above
 
 ## Quick Start Using Dockerfile
@@ -141,6 +141,7 @@ The following configurations have been validated to be function with Gaudi2 devi
 - [meta-llama/Meta-Llama-3.1-70B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B-Instruct) with tensor parallelism on 8x HPU, BF16 datatype with random or greedy sampling
 - [mistralai/Mistral-7B-Instruct-v0.3](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3) on single HPU or with tensor parallelism on 2x HPU, BF16 datatype with random or greedy sampling
 - [mistralai/Mixtral-8x7B-Instruct-v0.1](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1) with tensor parallelism on 2x HPU, BF16 datatype with random or greedy sampling
+- [llava-hf/llava-1.5-7b-hf](https://huggingface.co/llava-hf/llava-1.5-7b-hf) on single HPU or with tensor parallelism on 8x HPU, BF16 datatype
 
 # Performance Tuning
 
@@ -368,6 +369,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 
 - `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used, if `1` PyTorch Lazy backend for Gaudi will be used. `1` is the default.
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES` must be set to `true` for tensor parallel inference with HPU Graphs.
+- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava model.
 
 # Quantization, FP8 Inference and Model Calibration Process
 
@@ -377,7 +379,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 
 Once you have completed the model calibration process and collected the measurements, you can run FP8 inference with vLLM using the following command:
 ```bash
-export QUANT_CONFIG=/path/to/quant/config/inc/meta-llama-3.1-405b-instruct/maxabs_measure_g3.json
+export QUANT_CONFIG=/path/to/quant/config/inc/meta-llama-3.1-405b-instruct/maxabs_quant_g3.json
 vllm serve meta-llama/Llama-3.1-405B-Instruct --quantization inc --kv-cache-dtype fp8_inc --weights-load-device cpu --tensor_paralel_size 8
 ```
 
@@ -395,10 +397,8 @@ measurements for a given model. The quantization configuration is used during in
 
 # Troubleshooting
 
-If you encounter device out-of-memory issues or want to attempt inference with higher batch sizes, try tweaking HPU Graphs as follows:
-
-- Tweak `gpu_memory_utilization` knob. This will decrease the allocation of KV cache, leaving some headroom for capturing graphs with larger batch size. By default, `gpu_memory_utilization` is set to 0.9.
-  It attempts to allocate ~90% of HBM left for KV cache after short profiling run. Note that this reduces the number of KV cache blocks you have available, and therefore reduces the effective maximum
-  number of tokens handled at a given time.
-- If this method is not efficient, you can disable `HPUGraph` completely. With HPU Graphs disabled, you are trading latency and throughput at lower batches for potentially higher throughput on higher batches.
-  You can do that by adding `--enforce-eager` flag to the server (for online inference), or by passing `enforce_eager=True` argument to LLM constructor (for offline inference).
+The following steps address Out of Memory related errors:
+- Increase gpu_memory_utilization - This addresses insufficient overall memory. The vLLM pre-allocates HPU cache by using gpu_memory_utilization% of device memory. By default, gpu_memory_utilization is set to 0.9. By increasing this utilization, you can provide more KV cache space.
+- Decrease max_num_seqs or max_num_batched_tokens - This may reduce the number of concurrent requests in a batch, thereby requiring less KV cache space when overall usable memory is limited.
+- Increase tensor_parallel_size - This approach shards model weights, so each GPU has more memory available for KV cache.
+- For maximizing memory available for KV cache, you can disable `HPUGraph` completely. With HPU Graphs disabled, you are trading latency and throughput at lower batches for potentially higher throughput on higher batches. You can do that by adding `--enforce-eager` flag to the server (for online inference), or by passing `enforce_eager=True` argument to LLM constructor (for offline inference).
