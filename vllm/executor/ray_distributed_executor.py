@@ -137,6 +137,10 @@ class RayDistributedExecutor(DistributedExecutorBase):
 
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
+        def retain_envs(var_name):
+            retain_var_list = ['GLOO_SOCKET_IFNAME']
+            return ('HPU' in var_name or 'RAY' in var_name or 'VLLM' in var_name or var_name in retain_var_list)
+
         if (self.parallel_config.tensor_parallel_size == 1
                 and self.parallel_config.pipeline_parallel_size == 1):
             # For single GPU case, we use a ray worker with constrained memory.
@@ -185,11 +189,14 @@ class RayDistributedExecutor(DistributedExecutorBase):
                 )(RayWorkerWrapper).remote(vllm_config=self.vllm_config,
                                            rpc_rank=rank)
             else:
+                runtime_env_vars = {k:v for k, v in os.environ.items() if retain_envs(k)}
+                logger.info(f"setting ray env with {runtime_env_vars}")
                 worker = ray.remote(
                     num_cpus=0,
                     num_gpus=0,
                     resources={current_platform.ray_device_key: num_gpus},
                     scheduling_strategy=scheduling_strategy,
+                    runtime_env={"env_vars": runtime_env_vars},
                     **ray_remote_kwargs,
                 )(RayWorkerWrapper).remote(vllm_config=self.vllm_config,
                                            rpc_rank=rank)
