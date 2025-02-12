@@ -96,6 +96,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     decode_slot_mapping: Optional[torch.Tensor] = None
     decode_block_list: Optional[torch.Tensor] = None
     decode_block_indices: Optional[torch.Tensor] = None
+    decode_block_offsets: Optional[torch.Tensor] = None
     decode_attn_bias: Optional[torch.Tensor] = None
 
 
@@ -174,37 +175,24 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
-    def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
-                       dtype):
-        if batch_size > 1:
-            import pdb; pdb.set_trace()
-        prefill_metadata = attn_metadata
-
-        seq_lens_t = prefill_metadata.seq_lens_tensor
-        context_lens_t = prefill_metadata.context_lens_tensor
-        query_lens_t = seq_lens_t - context_lens_t
-
-        block_list = attn_metadata.block_list
-        max_context_len = (block_list.size(-1) - 1 //
-                           batch_size if block_list is not None else 0)
-        max_context_len = max_context_len * 128
-        max_context_len = max_context_len + attn_metadata.block_offsets[0].item()
+    def _set_attn_bias(self, seq_len, context_len, query_len, device, dtype):
+        con_len = context_len.item()
         past_mask = torch.arange(0,
-                                 max_context_len,
-                                 dtype=torch.int32,
-                                 device=device)
-        past_mask = (past_mask.view(1, -1).expand(batch_size, -1).ge(
-            context_lens_t.view(-1, 1)).view(batch_size, 1, -1).expand(
-                batch_size, seq_len, -1).view(batch_size, 1, seq_len, -1))
+                                con_len,
+                                dtype=torch.int32,
+                                device=device)
+        past_mask = (past_mask.view(1, -1).expand(1, -1).ge(
+            con_len).view(1, 1, -1).expand(
+                1, seq_len, -1).view(1, 1, seq_len, -1))
 
-        len_mask = (torch.arange(0, seq_len - max_context_len, device=device,
-                                 dtype=torch.int32).view(1, seq_len - max_context_len).ge(
-                                     query_lens_t.unsqueeze(-1)).view(
-                                         batch_size, 1, 1, seq_len - max_context_len))
-        causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len - max_context_len),
+        len_mask = (torch.arange(0, seq_len - con_len, device=device,
+                                dtype=torch.int32).view(1, seq_len - con_len).ge(
+                                    query_len.unsqueeze(-1)).view(
+                                        1, 1, 1, seq_len - con_len))
+        causal_mask = torch.triu(torch.ones((1, 1, seq_len, seq_len - con_len),
                                             device=device,
                                             dtype=torch.bool),
-                                 diagonal=1)
+                                diagonal=1)
         mask = causal_mask.logical_or(len_mask)
         mask = torch.concat((past_mask, mask), dim=-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
@@ -303,7 +291,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             decode_key = decode_key.view(-1, self.num_kv_heads, self.head_size)
             decode_value = decode_value.view(-1, self.num_kv_heads, self.head_size)
             block_indices = attn_metadata.decode_block_indices
-            block_offsets = attn_metadata.block_offsets
+            block_offsets = attn_metadata.decode_block_offsets
             if kv_cache is not None:
                 key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                     kv_cache, self.num_kv_heads, self.head_size)
@@ -373,8 +361,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             else:
                 # TODO: enable FusedSDPA
-                attn_bias = self._set_attn_bias(attn_metadata, batch_size, int(seq_len), query.device,
-                       query.dtype)
+                seq_lens_t = attn_metadata.seq_lens_tensor
+                context_lens_t = attn_metadata.context_lens_tensor
+                query_lens_t = seq_lens_t - context_lens_t
+                attn_bias = None
+                for i in range(batch_size):
+                    single_attn_bias = self._set_attn_bias(int(seq_len), context_lens_t[i], query_lens_t[i], query.device, query.dtype)
+                    if attn_bias == None:
+                        attn_bias = single_attn_bias
+                    else:
+                        attn_bias = torch.cat((single_attn_bias, attn_bias), dim=0)
                 '''out = HPUPagedAttention.forward_prefix(
                     query=prefill_query.view(query_shape),
                     key=prefill_key.view(kv_shape),

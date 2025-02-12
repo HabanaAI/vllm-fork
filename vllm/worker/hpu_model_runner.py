@@ -373,6 +373,8 @@ class HpuModelAdapter:
     def _set_indices_and_offsets(self, metadata, block_size):
         indices = None
         decode_indices = None
+        offsets = None
+        decode_offsets = None
         if metadata.num_prefill_tokens > 0:
             slot_mapping = metadata.slot_mapping.flatten()
             indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
@@ -381,10 +383,11 @@ class HpuModelAdapter:
         if metadata.num_decode_tokens > 0:
             decode_slot_mapping = metadata.decode_slot_mapping.flatten()
             decode_indices = torch.div(decode_slot_mapping, block_size, rounding_mode="floor")
-            offsets = torch.fmod(decode_slot_mapping, block_size)
+            decode_offsets = torch.fmod(decode_slot_mapping, block_size)
         metadata = metadata._replace(block_offsets=offsets,
                                      block_indices=indices,
-                                     decode_block_indices=decode_indices)
+                                     decode_block_indices=decode_indices,
+                                     decode_block_offsets=decode_offsets)
         return metadata
 
     def _update_metadata(self, attn_metadata, device,
@@ -1564,7 +1567,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_positions = decode_input_positions.flatten()
         # FIXME: We need to adjust selected_token_indices to accommodate
         # for padding
-        paddings = [max_len - q for q in query_lens]
+        paddings = []
+        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+            if seq_group_metadata.is_prompt and seq_group_metadata.do_sample:
+                padding = max_len - query_lens[i]
+                paddings.append(padding)
+        '''paddings = [max_len - q for q in query_lens]'''
         paddings = [0] + paddings[:-1]
         paddings = list(itertools.accumulate(paddings))
         paddings_prompt_logprobs = []
@@ -1714,6 +1722,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'decode_slot_mapping',
             'decode_block_list',
             'decode_block_indices',
+            'decode_block_offsets',
             'decode_attn_bias'
         ])
         return attention_metadata
