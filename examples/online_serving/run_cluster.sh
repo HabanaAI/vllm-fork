@@ -27,23 +27,29 @@ cleanup() {
     docker stop node
     docker rm node
 }
-trap cleanup EXIT
+# Uncomment if you want the node to terminate on exit
+#trap cleanup EXIT
 
 # Command setup for head or worker node
 RAY_START_CMD="ray start --block"
 if [ "${NODE_TYPE}" == "--head" ]; then
-    RAY_START_CMD+=" --head --port=6379"
+    RAY_START_CMD+=" --head --node-ip-address ${HEAD_NODE_ADDRESS} --port=6379"
 else
     RAY_START_CMD+=" --address=${HEAD_NODE_ADDRESS}:6379"
 fi
 
 # Run the docker command with the user specified parameters and additional arguments
 docker run \
+    -td \
     --entrypoint /bin/bash \
     --network host \
+    --ipc=host \
     --name node \
     --shm-size 10.24g \
-    --gpus all \
+    --runtime=habana \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -e GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME} \
+    -e HCCL_SOCKET_IFNAME=${HCCL_SOCKET_IFNAME} \
     -v "${PATH_TO_HF_HOME}:/root/.cache/huggingface" \
     "${ADDITIONAL_ARGS[@]}" \
     "${DOCKER_IMAGE}" -c "${RAY_START_CMD}"

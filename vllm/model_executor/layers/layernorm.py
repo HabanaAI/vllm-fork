@@ -115,7 +115,7 @@ class RMSNorm(CustomOp):
         if residual is not None:
             orig_shape = x.shape
             if orig_shape != residual.shape:
-                residual += x.view(residual.shape)
+                residual = residual + x.view(residual.shape)
             else:
                 residual += x
             # Note: HPUFusedRMSNorm requires 3D tensors as inputs
