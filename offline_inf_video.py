@@ -1,3 +1,9 @@
+from vllm import LLM
+from vllm import SamplingParams
+import PIL
+from PIL import Image
+import cv2
+
 # Process video input and select specified number of evenly distributed frames
 def sample_frames(path, num_frames):
     video = cv2.VideoCapture(path)
