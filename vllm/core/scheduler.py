@@ -27,7 +27,7 @@ ENABLE_ARTIFICIAL_PREEMPT = bool(
     os.getenv("VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT", False))  # noqa
 ARTIFICIAL_PREEMPTION_PROB = 0.5
 ARTIFICIAL_PREEMPTION_MAX_CNT = 500
-
+VLLM_DEFRAGMENT_BLOCK_IDS = int(os.getenv("VLLM_DEFRAGMENT_BLOCK_IDS", "0"))
 
 class PreemptionMode(enum.Enum):
     """Preemption modes.
@@ -1397,8 +1397,16 @@ class Scheduler:
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
         scheduler_start_time = time.perf_counter()
-
         scheduler_outputs: SchedulerOutputs = self._schedule()
+
+        for _ in range(VLLM_DEFRAGMENT_BLOCK_IDS):
+            selected_blocks = self.block_manager.defragment()
+            if not selected_blocks:
+                break
+            scheduler_outputs.blocks_to_copy.extend(selected_blocks)
+        if len(scheduler_outputs.blocks_to_copy) > 0:
+            print('Defragmenting {} blocks'.format(len(scheduler_outputs.blocks_to_copy)))
+
         now = time.time()
 
         if not self.cache_config.enable_prefix_caching:
@@ -1440,7 +1448,8 @@ class Scheduler:
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
-                block_tables[seq_id] = self.block_manager.get_block_table(seq)
+                bt = self.block_manager.get_block_table(seq)
+                block_tables[seq_id] = bt
                 self.block_manager.access_all_blocks_in_seq(seq, now)
 
             if self.cache_config.enable_prefix_caching:

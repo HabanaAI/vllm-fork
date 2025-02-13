@@ -105,6 +105,25 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         self._last_access_blocks_tracker = LastAccessBlocksTracker(
             self.block_allocator)
 
+    def defragment(self):
+        if len(self.block_tables) == 0:
+            return []
+        max_blocks = [(max(block_table._blocks._blocks, key=lambda b: b.block_id), seq_id) for seq_id, block_table in self.block_tables.items()]
+        max_block, max_block_seq = max(max_blocks, key=lambda b: b[0].block_id)
+        prev_block_id = max_block.block_id
+        self.block_allocator._allocators[Device.GPU].reassign_block_id(max_block)
+        new_block_id = max_block.block_id
+        if prev_block_id != new_block_id:
+            affected_block_table = self.block_tables[max_block_seq]
+            affected_block_table.update(affected_block_table.blocks)
+            #print('Defragmenting done...', prev_block_id, new_block_id)
+            return [(prev_block_id, new_block_id)]
+        #print('Defragmenting skipped')
+        #next_block = self.block_allocator.allocate_mutable_block(prev_block=max_block.prev_block, device=max_block.device())
+        #print('Defragmenting...', max_block.block_id, next_block.block_id)
+        #self.block_allocator.free(next_block)
+        return []
+
     def can_allocate(self,
                      seq_group: SequenceGroup,
                      num_lookahead_slots: int = 0) -> AllocStatus:

@@ -108,6 +108,10 @@ class NaiveBlockAllocator(BlockAllocator):
 
         return blocks
 
+    def reassign_block_id(self, block):
+        self._free_block_id(block)
+        block.block_id = self._allocate_block_id()
+
     def allocate_mutable_block(self,
                                prev_block: Optional[Block],
                                extra_hash: Optional[int] = None,
