@@ -203,7 +203,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
              target_hidden_states, non_spec_target_token_ids,
              non_spec_target_probs, non_spec_target_logprobs,
              non_spec_target_hidden_states) = self._split_scoring_output_hpu(
-                 target_sampler_output, num_scoring_tokens)
+                 target_sampler_output, num_scoring_tokens, non_spec_indices)
         else:
             (target_token_ids, target_probs, target_logprobs,
              target_hidden_states, non_spec_target_token_ids,
@@ -314,7 +314,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
                 _,
                 _,
             ) = self._split_scoring_output_hpu(target_sampler_output,
-                                               num_scoring_tokens)
+                                               num_scoring_tokens, [])
         else:
             (
                 target_sampler_output.sampled_token_ids,
@@ -466,7 +466,9 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
 
     @staticmethod
     def _split_scoring_output_hpu(
-        sampler_output: SamplerOutput, num_scoring_tokens: int
+        sampler_output: SamplerOutput,
+        num_scoring_tokens: int,
+        non_spec_indices: List[int],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
                Optional[torch.Tensor], torch.Tensor, torch.Tensor,
                torch.Tensor, Optional[torch.Tensor]]:
@@ -481,22 +483,24 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
         #
         # First samples are from speculative scoring, latter samples are non-
         # speculative samples.
-        split_sizes = (num_scoring_tokens,
+        split_sizes = (len(non_spec_indices), num_scoring_tokens,
                        sampler_output.sampled_token_ids.numel() -
-                       num_scoring_tokens)
-        (spec_probs, non_spec_probs
-         ) = sampler_output.sampled_token_probs.split(split_sizes)
-        (spec_sampled_tokens, non_spec_sampled_tokens
+                       num_scoring_tokens - len(non_spec_indices))
+        (non_spec_probs, spec_probs,
+         dummy_probs) = sampler_output.sampled_token_probs.split(split_sizes)
+        (non_spec_sampled_tokens, spec_sampled_tokens, dummy_sampled_tokens
          ) = sampler_output.sampled_token_ids.flatten().split(split_sizes)
         (
-            spec_logprobs,
             non_spec_logprobs,
+            spec_logprobs,
+            dummy_logprobs,
         ) = sampler_output.logprobs.split(split_sizes)
 
         if sampler_output.hidden_states is not None:
             (
-                spec_hidden_states,
                 non_spec_hidden_states,
+                spec_hidden_states,
+                dummy_hidden_states,
             ) = sampler_output.hidden_states.split(split_sizes)
         else:
             spec_hidden_states, non_spec_hidden_states = None, None

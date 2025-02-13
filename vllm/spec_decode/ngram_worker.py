@@ -46,7 +46,8 @@ class NGramWorker(NonLLMProposerWorkerBase):
     def __init__(self, *args, **kwargs):
         # Get local_rank/vocab_size from kwargs attribute
         self.local_rank = kwargs["local_rank"]
-        self.vocab_size = kwargs["vllm_config"].model_config.get_vocab_size()
+        self.vllm_config = kwargs["vllm_config"]
+        self.model_config = self.vllm_config.model_config
         self.device_type = kwargs.get("device_type", "cuda")
 
         # Lazy initialization list.
