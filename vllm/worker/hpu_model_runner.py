@@ -21,7 +21,6 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
-import torch.nn as nn
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.flags import enabled_flags
@@ -885,7 +884,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
-    def get_model(self) -> nn.Module:
+    def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
             return self.model.model
         return self.model
@@ -956,7 +955,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if len(seq_group_metadata_list) == 0:
             return PreparePromptMetadata.empty()
 
-        #breakpoint()
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
@@ -1010,24 +1008,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
 
-            '''
-            seq_group_metadata.multi_modal_data is None, so we dont enter this
-            hence multi_modal_kwargs_list isnt populated
-
-            on cpu its:
-             seq_group_metadata.multi_modal_data
-{'pixel_values': tensor([[-1.1061, -1.1061, -1.1061,  ..., -1.4518, -1.4518, -1.4518],
-        [-1.1207, -1.1207, -1.1207,  ..., -1.4376, -1.4376, -1.4376],
-        [-1.1353, -1.1353, -1.1353,  ..., -1.4376, -1.4376, -1.4376],
-        ...,
-        [ 1.1128,  0.9668,  0.8792,  ...,  0.8945,  1.1221,  1.3496],
-        [ 0.9230,  1.2004,  1.3902,  ...,  0.7950,  0.3542,  0.2973],
-        [ 0.9814,  0.9376,  1.0836,  ...,  1.2643,  1.1789,  1.1363]]), 'image_grid_thw': tensor([[ 1, 62, 92]])}
-
-            '''
             if seq_group_metadata.multi_modal_data:
                 positions = input_positions[0]
-                #breakpoint()
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
                     .from_seq_group(seq_group_metadata,
                       range(positions[0], positions[0] + len(positions)))
@@ -1041,7 +1023,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     )
 
                 mrope_positions = None
-                if self.model_config.uses_mrope:
+                if self.model_is_mrope:
                     image_grid_thw = mm_kwargs.get("image_grid_thw", None)
                     video_grid_thw = mm_kwargs.get("video_grid_thw", None)
                     second_per_grid_ts = mm_kwargs.get("second_per_grid_ts", None)
@@ -1061,15 +1043,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             context_len=context_len,
                         )
                     seq_data.mrope_position_delta = mrope_position_delta
-                #breakpoint()
-                '''
-                Hpu: mrope_positions 3x1024 .. 32 of the outer loop, so 1024*32 ...
-                '''
-                if mrope_positions:
-                    for idx in range(3):
-                        input_mrope_positions[idx].extend(mrope_positions[idx])
-                else:
-                    input_positions.extend(list(range(context_len, seq_len)))
+                    if mrope_positions:
+                        for idx in range(3):
+                            input_mrope_positions[idx].extend(mrope_positions[idx])
 
 
                 multi_modal_kwargs_list.append(mm_kwargs)
@@ -1168,10 +1144,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                    dtype=torch.long,
                                                    device='cpu')
 
-        #breakpoint()
-        #input_mrope_positions : list: 3x32768
-        # max_prompt_len: max_prompt_len
-        # in CPU this is: torch.Size([3, 1451])
         input_positions = make_tensor_with_pad(input_positions or input_mrope_positions,
                                                max_len=max_prompt_len,
                                                pad=0,
@@ -1314,7 +1286,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(3):
                         input_mrope_positions[idx].extend(next_pos[idx])
                 else:
-                    input_positions.append(position)
+                    input_positions.append([position])
 
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -1337,20 +1309,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
 
-                #sasarkar this bit isnt there in the latest cpu code. maybe subsumed by:
-                '''
-                 input_positions = torch.tensor(
-            input_data.input_positions
-            if not any(input_data.input_mrope_positions) else
-            input_data.input_mrope_positions,
-            dtype=torch.long,
-            device="cpu")
-                '''
-                if any(input_mrope_positions):
-                    input_positions = None  # type: ignore
-                else:
-                    input_mrope_positions = None  # type: ignore
-
                 if self.sliding_window is not None:
                     sliding_window_blocks = (self.sliding_window //
                                              self.block_size)
@@ -1364,6 +1322,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             real_batch_size = len(seq_group_metadata_list)
             input_tokens = output[:real_batch_size].clone()
+
+
+        if any(input_mrope_positions):
+            input_positions = None  # type: ignore
+        else:
+            input_mrope_positions = None  # type: ignore
 
         input_positions = torch.tensor(input_positions or input_mrope_positions,
                                        dtype=torch.long,
@@ -1786,36 +1750,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
         seq_data.output_token_ids = output_token_ids
-        # sasarkar, unify if-else later
-        if self.model_config.uses_mrope:
-            # sasarkar: hard coded img shape. what should it be in general?
-            multi_modal_data_dummy = MultiModalKwargs({'pixel_values': torch.rand([5704, 1176]), 'image_grid_thw': torch.tensor([[ 1, 62, 92]])})
-            x = SequenceGroupMetadata(request_id=str(group_id),
-                                        is_prompt=(output_len == 0),
-                                        seq_data={group_id: seq_data},
-                                        sampling_params=sampling_params,
-                                        block_tables=block_tables,
-                                        lora_request=lora_request,
-                                        multi_modal_data=multi_modal_data_dummy,
-                                        mm_processor_kwargs={},
-                                        multi_modal_placeholders={'image': [{'offset': 15, 'length': 1426}]}) # sasarkar.. remove hardcoded nums
-        else:
-            x = SequenceGroupMetadata(request_id=str(group_id),
-                                        is_prompt=(output_len == 0),
-                                        seq_data={group_id: seq_data},
-                                        sampling_params=sampling_params,
-                                        block_tables=block_tables,
-                                        lora_request=lora_request)
-        #breakpoint()
-        '''
-        x.multi_modal_data is empty.... 
-        we need to pass in some dummy here.
-        I think llama3.2VL is working, how is it working if this is empty?.. need to track llama3.2vl status
-        '''
-        return x
+        return SequenceGroupMetadata(request_id=str(group_id),
+                                     is_prompt=(output_len == 0),
+                                     seq_data={group_id: seq_data},
+                                     sampling_params=sampling_params,
+                                     block_tables=block_tables,
+                                     lora_request=lora_request)
 
     def profile_run(self) -> None:
-        return
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
@@ -1849,7 +1791,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # passed in, which contains a lora from the lora warmup path.
         dummy_lora_requests: List[LoRARequest] = []
         dummy_lora_requests_per_seq: List[LoRARequest] = []
-        #breakpoint()
         if self.lora_config and is_lora_profile_run:
             assert self.lora_manager is not None
             with self.lora_manager.dummy_lora_cache():
@@ -1869,7 +1810,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
-        #breakpoint()
         if is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
@@ -1900,10 +1840,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            '''
-            sasarkar: at this point inputs.multi_modal_kwargs.keys() is empty.. thats not good
-            '''
-            #breakpoint()
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
@@ -2368,9 +2304,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     seq_group_metadata_list=seq_group_metadata_list)
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
-            '''
-            sasarkar: model_input.multi_modal_kwargs empty here.. not good
-            '''
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
