@@ -1,5 +1,13 @@
 # test_config.yaml
 stages:
+  - name: test_perf
+    steps:
+      - name: llama3.1-8b_8k_1k
+        flavor: g2
+        command: cd .jenkins/perf && bash run-tests.sh -p 64 -s 32 -m /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B/ -i 8192 -o 1024 -t 1 -b 0
+      - name: llama3.1-8b_1k_1k
+        flavor: g3
+        command: cd .jenkins/perf && bash run-tests.sh -p 128 -s 128 -m /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B/ -i 1024 -o 1024 -t 1 -b 0
   - name: test_gsm8k_small_models
     steps:
       - name: gsm8k_small_g3_tp1
