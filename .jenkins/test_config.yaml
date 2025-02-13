@@ -96,7 +96,7 @@ stages:
     - name: test_lazy_outlines
       flavor: g2
       command: export VLLM_SKIP_WARMUP=true && pip install -e tests/vllm_test_utils &&pytest -v tests/entrypoints/llm/test_lazy_outlines.py -s -vvv --log-cli-level=INFO 
-    - name: 
+    - name: test_guided_generate
       flavor: g2
       command: export VLLM_SKIP_WARMUP=true && pip install -e tests/vllm_test_utils && pytest -v tests/entrypoints/llm/test_guided_generate.py -s -vvv --log-cli-level=INFO
     
