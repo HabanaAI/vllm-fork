@@ -14,7 +14,7 @@ while [[ $# -gt 0 ]]; do
         shift 2
         ;;
     --skip_warmup)
-        fp8="On"
+        SKIPWARMUP="On"
         shift 1
         ;;
     --download_image)
@@ -49,10 +49,13 @@ if [[ -n $InstallVLLM ]]; then
     cd vllm-fork
     pip install -r requirements-hpu.txt -q
     python setup.py develop
+    if [[ "$model" == *"Qwen2"* ]]; then
+        pip install git+https://github.com/huggingface/transformers.git@6b550462139655d488d4c663086a63e98713c6b9
+    fi
     cd ..
 fi
 
-if [[ -n "$fp8" ]]; then
+if [[ -n "$SKIPWARMUP" ]]; then
     export VLLM_SKIP_WARMUP=true
 else
     export VLLM_PROMPT_SEQ_BUCKET_MIN=1024
