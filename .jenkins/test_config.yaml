@@ -95,4 +95,4 @@ stages:
     steps:
     - name: test_lazy_outlines
       flavor: g2
-      command: pip install -e tests/vllm_test_utils && pytest -v tests/entrypoints/llm/test_lazy_outlines.py -s -vvv --log-cli-level=INFO
+      command: pip install -e tests/vllm_test_utils && VLLM_SKIP_WARMUP=true pytest -v tests/entrypoints/llm/test_lazy_outlines.py -s -vvv --log-cli-level=INFO
