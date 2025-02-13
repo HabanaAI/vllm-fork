@@ -12,7 +12,8 @@ Help() {
     echo "Syntax: bash benchmark_throughput.sh <-w> [-n:m:d:i:o:r:j:t:l:b:c:sfza] [-h]"
     echo "options:"
     echo "w  Weights of the model, could be model id in huggingface or local path"
-    echo "n  Number of HPU to use, [1-8], default=1"
+    echo "n TP value to use, [1-8], default=1"
+    echo "g PP value to use, default=1"
     echo "m  Module IDs of the HPUs to use, [0-7], default=None"
     echo "d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'"
     echo "i  Input length, int, default=1024"
@@ -36,7 +37,8 @@ Help() {
 }
 
 model_path=""
-num_hpu=1
+num_tp=1
+num_pp=1
 module_ids="None"
 dtype=bfloat16
 input_len=1024
@@ -57,7 +59,7 @@ block_size=128
 scheduler_steps=1
 
 # Get the options
-while getopts hw:n:m:d:i:o:r:j:t:l:b:p:e:c:sfza flag; do
+while getopts hw:n:g:m:d:i:o:r:j:t:l:b:p:e:c:sfza flag; do
     case $flag in
     h) # display Help
         Help
@@ -65,8 +67,10 @@ while getopts hw:n:m:d:i:o:r:j:t:l:b:p:e:c:sfza flag; do
         ;;
     w) # get model path
         model_path=$OPTARG ;;
-    n) # get number of HPUs
-        num_hpu=$OPTARG ;;
+    n) # get TP value
+        num_tp=$OPTARG ;;
+    g) # get PP value
+        num_pp=$OPTARG ;;
     m) # get module ids to use
         module_ids=$OPTARG ;;
     d) # get data type
@@ -115,8 +119,7 @@ fi
 
 model_name=$( echo "$model_path" | awk -F/ '{print $NF}' )
 
-if [ "$num_hpu" -gt 1 ]; then
-    export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
+if [ "$num_tp" -gt 1 ]; then
     unset HLS_MODULE_ID
     if [ "$module_ids" != "None" ]; then
         export HABANA_VISIBLE_MODULES=$module_ids
@@ -135,8 +138,8 @@ if [ "$json_path" != "" ]; then
     output_min=4
     output_max=2048
     IO_FLAGS=(--dataset "$json_path")
-    echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} random prompts from ${json_path} with max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
-    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_sharegpt_bs${max_num_seqs}_tp${num_hpu}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
+    echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} random prompts from ${json_path} with max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using TP${num_tp}xPP${num_pp} HPUs with module_ids=${module_ids}"
+    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_sharegpt_bs${max_num_seqs}_tp${num_tp}_pp${num_pp}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
 elif [ "$len_ratio" == "1.0" ]; then
     input_min=$input_len
     input_max=$input_len
@@ -144,16 +147,16 @@ elif [ "$len_ratio" == "1.0" ]; then
     output_max=$output_len
     disable_zero_padding=true
     IO_FLAGS=(--input-len "$input_len" --output-len "$output_len")
-    echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} fixed-length prompts with input_len=${input_len}, output_len=${output_len}, max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
-    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_len}_out${output_len}_bs${max_num_seqs}_tp${num_hpu}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
+    echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} fixed-length prompts with input_len=${input_len}, output_len=${output_len}, max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using TP${num_tp}xPP${num_pp} HPUs with module_ids=${module_ids}"
+    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_len}_out${output_len}_bs${max_num_seqs}_tp${num_tp}_pp${num_pp}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
 else
     input_min=$(bc <<< "($input_len * $len_ratio + 0.5) / 1")
     input_max=$input_len
     output_min=$(bc <<< "($output_len * $len_ratio + 0.5) / 1")
     output_max=$output_len
     IO_FLAGS=(--dataset random --random-input-len "$input_len" --random-output-len "$output_len" --random-range-ratio "$len_ratio")
-    echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} random-length prompts with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
-    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
+    echo "Benchmarking throughput for ${model_name} from ${model_path} using ${num_prompts} random-length prompts with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using TP${num_tp}xPP${num_pp} HPUs with module_ids=${module_ids}"
+    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_tp}_pp${num_pp}_step${scheduler_steps}_$(date +%F-%H-%M-%S)"
 fi
 
 case "$dtype" in
@@ -222,7 +225,7 @@ export RAY_IGNORE_UNHANDLED_ERRORS="1"
 export VLLM_RAY_DISABLE_LOG_TO_DRIVER="1"
 export VLLM_GRAPH_RESERVED_MEM=${VLLM_GRAPH_RESERVED_MEM:-"0.2"}
 export VLLM_GRAPH_PROMPT_RATIO=${VLLM_GRAPH_PROMPT_RATIO:-"0.8"}
-export VLLM_EP_SIZE=${VLLM_EP_SIZE:-"${num_hpu}"}
+export VLLM_EP_SIZE=${VLLM_EP_SIZE:-"${num_tp}"}
 export VLLM_MOE_N_SLICE=${VLLM_MOE_N_SLICE:-"4"}
 
 gpu_memory_utilization=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
@@ -236,7 +239,8 @@ python "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --backend vllm \
     --model "${model_path}" \
     --trust-remote-code \
-    --tensor-parallel-size "${num_hpu}" \
+    --tensor-parallel-size "${num_tp}" \
+    --pipeline-parallel-size "${num_pp}" \
     "${IO_FLAGS[@]}" \
     --device hpu \
     --dtype "${dtype}" \
@@ -255,4 +259,5 @@ python "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --distributed_executor_backend mp \
     --gpu-memory-utilization "${gpu_memory_utilization}" \
     --save-results "${case_name}".json \
+    --async-engine \
     |& tee "${case_name}".log

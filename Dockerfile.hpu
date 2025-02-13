@@ -1,4 +1,4 @@
-FROM vault.habana.ai/gaudi-docker/1.20.0/ubuntu24.04/habanalabs/pytorch-installer-2.6.0:latest
+FROM vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:1.20.1-97
 
 COPY ./ /workspace/vllm
 
@@ -12,10 +12,19 @@ ENV PT_HPU_ENABLE_LAZY_COLLECTIVES=true
 
 RUN VLLM_TARGET_DEVICE=hpu python3 setup.py install
 
+ENV VLLM_SKIP_WARMUP=true
+
+#ENV PT_HPU_LAZY_MODE=0
+#ENV PT_HPU_LAZY_ACC_PAR_MODE=0
+#ENV PT_HPU_ENABLE_LAZY_COLLECTIVES=false
+#ENV VLLM_GRAPH_RESERVED_MEM=0.3
+
 # install development dependencies (for testing)
 RUN python3 -m pip install -e tests/vllm_test_utils
 
 WORKDIR /workspace/
+
+RUN python3 -m pip install evaluate bert_score
 
 RUN ln -s /workspace/vllm/tests && ln -s /workspace/vllm/examples && ln -s /workspace/vllm/benchmarks
 

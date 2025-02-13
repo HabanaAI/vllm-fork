@@ -708,6 +708,9 @@ class FusedMoE(torch.nn.Module):
                 router_logits: torch.Tensor):
         assert self.quant_method is not None
 
+        quant_kwargs = {}
+        if (self.quant_method.__class__.__name__ in ("Fp8MoEMethod")):
+            quant_kwargs["ep_rank"] = self.ep_rank
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
             layer=self,
@@ -721,7 +724,7 @@ class FusedMoE(torch.nn.Module):
             custom_routing_function=self.custom_routing_function,
             scoring_func=self.scoring_func,
             e_score_correction_bias=self.e_score_correction_bias,
-            ep_rank=self.ep_rank)
+            **quant_kwargs)
 
         if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1):
             final_hidden_states = tensor_model_parallel_all_reduce(

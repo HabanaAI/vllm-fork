@@ -154,6 +154,7 @@ class GroupCoordinator:
     pynccl_comm: Optional[Any]  # PyNccl communicator
     ca_comm: Optional[Any]  # Custom allreduce communicator
     mq_broadcaster: Optional[Any]  # shared memory broadcaster
+    force_cpu: bool
 
     def __init__(
         self,
@@ -167,6 +168,7 @@ class GroupCoordinator:
         use_xpu_communicator: bool,
         use_message_queue_broadcaster: bool = False,
         group_name: Optional[str] = None,
+        force_cpu: bool = False,
     ):
         group_name = group_name or "anonymous"
         self.unique_name = _get_unique_name(group_name)
@@ -250,6 +252,7 @@ class GroupCoordinator:
         if use_message_queue_broadcaster and self.world_size > 1:
             self.mq_broadcaster = MessageQueue.create_from_process_group(
                 self.cpu_group, 1 << 22, 6)
+        self.force_cpu: bool = force_cpu
 
     @property
     def first_rank(self):
@@ -307,7 +310,7 @@ class GroupCoordinator:
         with torch.cuda.stream(stream), maybe_ca_context:
             yield graph_capture_context
 
-    def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+    def all_reduce(self, input_: torch.Tensor, op=None) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
         all-reduce operation.
@@ -338,7 +341,10 @@ class GroupCoordinator:
 
         if self.hpu_communicator is not None and \
             not self.hpu_communicator.disabled:
-            return self.hpu_communicator.all_reduce(input_)
+            if op is None:
+                return self.hpu_communicator.all_reduce(input_)
+            else:
+                return self.hpu_communicator.all_reduce(input_, op=op)
 
         if self.xpu_communicator is not None and \
                 not self.xpu_communicator.disabled:
@@ -703,6 +709,12 @@ class GroupCoordinator:
                 torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=metadata_group)
+            elif self.force_cpu:
+                # use metadata_group for CPU tensors
+                tensor = tensor.to('cpu')
+                torch.distributed.send(tensor,
+                                    dst=self.ranks[dst],
+                                    group=metadata_group)
             else:
                 # use group for GPU tensors
                 torch.distributed.send(tensor,
@@ -760,6 +772,13 @@ class GroupCoordinator:
                     torch.distributed.recv(tensor,
                                            src=self.ranks[src],
                                            group=metadata_group)
+                elif self.force_cpu:
+                    # use metadata_group for CPU tensors
+                    tensor = tensor.to('cpu')
+                    torch.distributed.recv(tensor,
+                                        src=self.ranks[src],
+                                        group=metadata_group)
+                    tensor = tensor.to(device=value.device)
                 else:
                     # use group for GPU tensors
                     torch.distributed.recv(tensor,
@@ -875,6 +894,7 @@ def init_model_parallel_group(
         use_xpu_communicator=True,
         use_message_queue_broadcaster=use_message_queue_broadcaster,
         group_name=group_name,
+        force_cpu=False, #True if group_name.lower() == "pp" else False,
     )
 
 

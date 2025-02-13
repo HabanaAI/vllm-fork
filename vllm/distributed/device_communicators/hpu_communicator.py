@@ -18,12 +18,15 @@ class HpuCommunicator:
         self.group = group
         self.world_size = dist.get_world_size(self.group)
 
-    def all_reduce(self, x: torch.Tensor) -> torch.Tensor:
+    def all_reduce(self, x: torch.Tensor, op=None) -> torch.Tensor:
         # FIXME(kzawora): this is a workaround for a bug in Habana PT bridge
         # occurring when PT_HPU_ENABLE_LAZY_COLLECTIVES=true env var is used
         # (which is required for tensor parallel HPUGraph inference)
         htorch.core.mark_step()
-        dist.all_reduce(x, group=self.group)
+        if op is None:
+            dist.all_reduce(x, group=self.group)
+        else:
+            dist.all_reduce(x, op=op, group=self.group)
         return x
 
     def all_gather(self, x: torch.Tensor, dim: int = -1) -> torch.Tensor:
