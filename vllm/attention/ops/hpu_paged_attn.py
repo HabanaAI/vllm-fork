@@ -55,6 +55,7 @@ class HPUPagedAttention:
                              value_cache: torch.Tensor,
                              slot_mapping: torch.Tensor, kv_cache_dtype: str,
                              is_prompt: bool) -> None:
+        import pdb;pdb.set_trace()
         cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
                                     slot_mapping, kv_cache_dtype, is_prompt)
 

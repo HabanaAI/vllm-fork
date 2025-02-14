@@ -338,7 +338,7 @@ class IpexAttnBackendImpl(AttentionImpl[IpexAttnMetadata]):
 
 
 def _make_alibi_bias(
-    alibi_slopes: torch.Tensor,
+    alibi_slopes: torch.Tenso r,
     dtype: torch.dtype,
     seq_lens: List[int],
 ) -> List[torch.Tensor]:

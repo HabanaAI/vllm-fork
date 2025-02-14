@@ -96,6 +96,7 @@ class FlashAttentionImpl(AttentionImpl):
         if blocksparse_params is not None:
             raise ValueError(
                 "FlashAttention does not support block-sparse attention.")
+        #import pdb;pdb.set_trace()
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)

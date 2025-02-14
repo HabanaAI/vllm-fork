@@ -136,6 +136,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+
         self.sliding_window = sliding_window
         self.alibi_slopes = alibi_slopes
         if alibi_slopes is not None:
@@ -158,6 +159,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         self.attn_type = attn_type
         self.prompt_attn_bias = None
+        print(f"ATTENTION INIT [{id(self)}] : sliding_window : {self.sliding_window}")
         if (self.attn_type != AttentionType.DECODER
                 and self.attn_type != AttentionType.ENCODER_DECODER):
             raise NotImplementedError("Encoder self-attention "
@@ -185,7 +187,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             attn_metadata: Metadata for attention.
         Returns:
             shape = [num_tokens, num_heads * head_size]
-        """
+        """   
         if self.attn_type == AttentionType.ENCODER_DECODER:
             return self.forward_encoder_decoder(
                 query=query,
@@ -225,17 +227,17 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             query_shape = (batch_size, seq_len, self.num_heads, self.head_size)
             kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
                         self.head_size)
+
             if attn_metadata is None or attn_metadata.block_list is None:
                 valid_seq_lengths=attn_metadata.seq_lens_tensor
+                print(f"HPUAttentionImpl : sliding_window {self.sliding_window} q{query.shape},kv{key.shape},seq_len{valid_seq_lengths}")
+
                 if not self.prefill_use_fusedsdpa:
                     # TODO: move this outside of model
                     assert attn_metadata.attn_bias is not None, \
                             'attn_bias must be set before calling model.forward'
                     attn_bias = attn_metadata.attn_bias
-                    # Force to use fused for performance/memory benefit
-                    # Also the non fusedsdpa has accuracy issue to be fixed
-                    if self.sliding_window is None:
-                        self.fused_scaled_dot_product_attention = None
+
                     if self.alibi_slopes is not None:
                         position_bias = _make_alibi_bias(
                             self.alibi_slopes, self.num_kv_heads,
@@ -245,9 +247,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_bias.add_(position_bias)
                 else:
                     attn_bias = None
+                
                 if self.sliding_window:
-                    if self.prompt_attn_bias is None:
-                        attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor, self.sliding_window, query.dtype)
+                    #attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor, self.sliding_window, query.dtype)           
+                    attn_bias = attn_metadata.attn_bias
                     valid_seq_lengths = None #TODO: remove after fusedsdpa optimization is done
 
                 out = ops.prompt_attention(
@@ -265,6 +268,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 )
             else:
                 # TODO: enable FusedSDPA
+                print("Paged attention")
                 out = HPUPagedAttention.forward_prefix(
                     query=query.view(query_shape),
                     key=key.view(kv_shape),
@@ -281,6 +285,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     values_fetch_func=self.v_cache.fetch_from_cache)
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
+            #print("=====DECODING::")
             self.prompt_attn_bias = None
             # Decoding run.
             output = HPUPagedAttention.forward_decode(
@@ -448,19 +453,37 @@ def _make_alibi_bias(
 def _make_sliding_window_bias(
     batch_size: int,
     seq_len: int,
-    query_lens_t: torch.tensor,
+    #query_lens_t: torch.tensor,
     window_size:int,
     dtype: torch.dtype,
-):
+) -> torch.Tensor:
+    '''
     shift = 0
-    query_lens_t = query_lens_t.reshape(batch_size, 1)
-    tensor = torch.full((batch_size, 1, seq_len, seq_len), dtype=dtype, fill_value=1)
+    #query_lens_t = query_lens_t.reshape(batch_size, 1)
+    tensor = torch.full((batch_size, 1, seq_len, seq_len), dtype=dtype, device="hpu", fill_value=1)
     mask = torch.tril(tensor, diagonal=shift)
-
+    
     len_mask = torch.arange(0, seq_len, device=query_lens_t.device, dtype=torch.int32).view(seq_len,1)
     len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size, 1, seq_len, 1)
     len_mask= torch.where(len_mask == False, 1, 0)
     mask = mask.logical_and(len_mask)
     mask = torch.triu(mask, diagonal=shift - window_size + 1)
     attn_bias = torch.where(mask, 0, -math.inf)
+
+    
+    mask = torch.triu(mask, diagonal=shift - window_size + 1)
+    #attn_bias = torch.log(mask)
+    attn_bias = torch.where(mask, 0, -math.inf)
+    attn_bias = attn_bias.to(dtype)
+    
+    '''
+    mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),
+                                            device="hpu",
+                                            dtype=torch.bool),
+                                 diagonal=1)
+    attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
+            mask, -math.inf))
+  
+
     return attn_bias
+

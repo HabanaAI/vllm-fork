@@ -95,6 +95,8 @@ class Attention(nn.Module):
                                         block_size, is_attention_free,
                                         blocksparse_params is not None)
         impl_cls = attn_backend.get_impl_cls()
+        #import pdb;pdb.set_trace()
+        print(f"num_heads:{num_heads}, head_size:{head_size}, num_kv_heads:{num_kv_heads}")
         self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
                              alibi_slopes, sliding_window, kv_cache_dtype,
                              blocksparse_params, logits_soft_cap, attn_type)

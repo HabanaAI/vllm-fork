@@ -24,6 +24,8 @@ class KVCacheManager:
         enable_caching: bool = True,
         num_preallocate_tokens: int = 64,
     ) -> None:
+        
+        import pdb;pdb.set_trace()
         self.block_size = block_size
         self.num_gpu_blocks = num_gpu_blocks
         self.max_model_len = max_model_len

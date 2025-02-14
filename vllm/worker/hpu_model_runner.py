@@ -256,13 +256,84 @@ class HpuModelAdapter:
     def _compile_region(self, model, name, module):
         module = torch.compile(module, backend='hpu_backend', dynamic=False)
         setattr(model, name, module)
+   
+    def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size, seq_len, window_size, device, dtype):
 
+        prefill_metadata = attn_metadata
+        #print(f"make_sliding_window_bias : seq_len {seq_len}, query_len_t {query_lens_t.shape}, window_size {window_size}")
+        print("HpuModelAdapter :: _set_attn_bias_for_sliding_window")
+        shift = 0
+        '''
+        #case1 - causal works : accuracy good
+        tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,dtype=dtype, fill_value=1)
+        mask = torch.tril(tensor, diagonal=0)
+        attn_bias = torch.log(mask)
+        '''
+
+        '''
+        #case 2 - causal + window size : accuracy good
+        tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,dtype=dtype, fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        attn_bias = torch.log(mask)
+        '''
+
+        
+        #case 3- causal + window size + q_len : accuracy bad
+        query_lens_t = prefill_metadata.seq_lens_tensor
+        query_lens_t = query_lens_t.reshape(batch_size, 1)
+
+        tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,dtype=dtype, fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        len_mask = torch.arange(0, seq_len, device=device, dtype=torch.int32).view(seq_len,1)
+        len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size, 1, seq_len, 1)
+        len_mask = torch.where(len_mask == False, 1, 0)
+        mask = mask.logical_and(len_mask)
+        mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        attn_bias =torch.where(mask,0, -math.inf)
+        
+
+        '''
+        #case 4- causal + sliding_window  : accuracy good
+        query_lens_t = prefill_metadata.seq_lens_tensor 
+        query_lens_t = query_lens_t.reshape(batch_size, 1)
+
+        print("query_lens_t:", query_lens_t)
+
+        tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,dtype=dtype, fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        len_mask = torch.arange(0, seq_len, device=device, dtype=torch.int32).view(seq_len,1)
+        len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size, 1, seq_len, 1)
+        len_mask = torch.where(len_mask == False, 1, 0)
+        attn_bias = mask.logical_and(len_mask)        
+        '''
+
+        '''
+        #case 5- causal + window size + q_len only right padding : accuracy good, but mem error at the end. 
+        query_lens_t = prefill_metadata.seq_lens_tensor
+        query_lens_t = query_lens_t.reshape(batch_size, 1)
+
+        tensor = torch.ones((batch_size, 1, seq_len, seq_len), device=device, dtype=torch.bool)
+        mask = torch.triu(tensor, diagonal=1)
+        len_mask = torch.arange(0, seq_len, device=device,dtype=torch.int32).view(1,seq_len)
+        len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size, 1, 1, seq_len)
+        mask = mask.logical_or(len_mask)
+        attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(mask, -math.inf))
+        '''
+        attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
+
+        return attn_metadata
+    
+                   
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
+
+        print("HpuModelAdapter: set_attn_bias ", attn_metadata)    
+        print("---------------------")
         if (attn_metadata is None or self.prefill_use_fusedsdpa
                 or not attn_metadata.is_prompt):
+            print("SKIP attn bias ")
             return attn_metadata
-
         prefill_metadata = attn_metadata
 
         seq_lens_t = prefill_metadata.seq_lens_tensor
@@ -290,9 +361,11 @@ class HpuModelAdapter:
                                             dtype=torch.bool),
                                  diagonal=1)
         mask = causal_mask.logical_or(len_mask)
+        #mask[:,:,query_len:,:]=True Isn't this missing?? 
         mask = torch.concat((past_mask, mask), dim=-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
+        print("Updated attn_bias::", attn_bias)
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
         return attn_metadata
 
@@ -351,7 +424,15 @@ class HpuModelAdapter:
                          dtype):
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
-                                                seq_len, device, dtype)
+                                                seq_len, device, dtype)                                                
+            
+            
+            attn_metadata = self._set_attn_bias_for_sliding_window(attn_metadata, batch_size,
+                                                seq_len, 4096, device, dtype)
+            
+            
+                                            
+            
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
@@ -602,6 +683,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.is_driver_worker = is_driver_worker
         self.return_hidden_states = return_hidden_states
 
+        #import pdb;pdb.set_trace()
         self.sliding_window = (self.model_config.get_sliding_window()
                                if self.model_config is not None else None)
         self.device_config = (self.device_config if self.device_config
@@ -847,6 +929,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             str, MultiModalPlaceholderMap] = collections.defaultdict(
                 MultiModalPlaceholderMap)
 
+        print("==ENTER: _prepare_prompt")
         if len(seq_group_metadata_list) == 0:
             return PreparePromptMetadata.empty()
 
@@ -938,12 +1021,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # For example, if the prompt len is 10, sliding window is 8, and
             # block size is 4, the first two tokens are masked and the slot
             # mapping will be [-1, -1, 2, 3, 4, 5, 6, 7, 0, 1].
+            #import pdb;pdb.set_trace()
             start_idx = 0
             if self.sliding_window is not None:
                 assert context_len == 0, (
                     "Prefix caching is currently not supported with "
                     "sliding window attention")
                 start_idx = max(0, seq_len - self.sliding_window)
+
+            #print(f"SLIDING_WINDOW : , start_idx {start_idx}, context_len {context_len}, seq_len {seq_len}, sliding_window {self.sliding_window}, block_size {self.block_size}")            
+            #import pdb;pdb.set_trace
             for i in range(context_len, seq_len):
                 if i < start_idx:
                     slot_mapping[-1].append(_PAD_SLOT_ID)
@@ -953,6 +1040,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_offset = i % self.block_size
                 slot = block_number * self.block_size + block_offset
                 slot_mapping[-1].append(slot)
+                #print(f"   SLIDING_WINDOW : {slot_mapping[-1].shape} ")
+            #print(f"SLIDING_WINDOW: slot_mapping {len(slot_mapping)}")
 
         max_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
@@ -999,6 +1088,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             prefix_block_list_tensor = None
 
+        print(f"SLIDING_WINDOW : ,  seq_len {seq_len}, sliding_window {self.sliding_window}")            
         input_tokens_tensor = make_tensor_with_pad(input_tokens,
                                                    max_len=max_prompt_len,
                                                    pad=0,
@@ -1098,8 +1188,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         lora_index_mapping: List[List[int]] = []
         lora_prompt_mapping: List[List[int]] = []
         lora_requests: Set[LoRARequest] = set()
-
         is_enc_dec_model = self.model_config.is_encoder_decoder
+        
         if len(seq_group_metadata_list) == 0:
             return PrepareDecodeMetadata.empty()
         lora_ids: List[int] = []
@@ -1293,6 +1383,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     dtype=torch.long,
                                     device='cpu')
 
+        #print("slot mapping - prepare_decoding, ", slot_mapping[0][0])
         input_tokens = input_tokens.to(  # type: ignore
             self.device, non_blocking=True)
         input_positions = input_positions.to(  # type: ignore
@@ -1337,6 +1428,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_decode_tokens=num_decode_tokens,
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=None)
+        #import pdb;pdb.set_trace()
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -1367,6 +1459,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.event_start = self.profiler.get_timestamp_us()
         is_prompt = seq_group_metadata_list[0].is_prompt
         base_event_name = 'prompt' if is_prompt else 'decode'
+        #print(f"prepare input tensor {base_event_name}")
         self.profiler.start('internal', base_event_name)
 
         seq_group_metadata_list, real_batch_size, batch_size_padded = (
@@ -1404,6 +1497,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs)
+
+        #print("prepare prompt : slot_mapping ", slot_mapping)
+        #print("prepare decode : slot_mapping", decode_slot_mapping)
         sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
                                                      seq_lens, query_lens,
                                                      self.device,
@@ -1423,6 +1519,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefills > 0
             and num_decode_tokens == 0), "HPU does not support mixed batches!"
         if num_decode_tokens > 0:
+            #print("num_decode_tokens > 0")
             input_tokens = decode_input_tokens
             input_positions = decode_input_positions
             slot_mapping = decode_slot_mapping
@@ -1656,6 +1753,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler = setup_profiler()
             profiler.start()
         for _ in range(times):
+            print("warmup - ")
             inputs = self.prepare_model_input(seqs)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
@@ -2281,6 +2379,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
+                #print("Execute model , forward ", i)
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,

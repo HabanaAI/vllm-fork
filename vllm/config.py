@@ -303,6 +303,7 @@ class ModelConfig:
         if self.enforce_eager is None:
             self.enforce_eager = False
 
+        #import pdb;pdb.set_trace()
         sliding_window = getattr(self.hf_text_config, "sliding_window", None)
         has_interleaved_attention = (sliding_window is not None) and (
             isinstance(sliding_window, list) or
@@ -327,6 +328,7 @@ class ModelConfig:
                 # only the attention layer itself is aware of the sliding
                 # window, and use the window size to compute the attention.
                 self.hf_text_config.interleaved_sliding_window = sliding_window
+
                 delattr(self.hf_text_config, "sliding_window")
                 sliding_window = None
 
