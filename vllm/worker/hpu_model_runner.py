@@ -264,9 +264,30 @@ def generate_custom_decode_buckets(bs_bucket_config, blocks_bucket_config,
         buckets.append((bs, block_buckets[-1]))
     for blocks in block_buckets:
         buckets.append((bs_buckets[-1], blocks))
-    if max_blocks != blocks_buckets[-1]:
+    if max_blocks != block_buckets[-1]:
         buckets.append((bs_buckets[-1], max_blocks))
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
+
+def next_pow2(value: int, base: int) -> int:
+    res = base
+    while value > 1:
+        value = (value + 1) // 2
+        res *= 2
+    return res
+
+
+def round_up(value: int, k: int) -> int:
+    return (value + k - 1) // k * k
+
+
+def find_bucket(value: int, config: Tuple[int, int, int]) -> int:
+    bmin, bstep, _ = config
+    if value <= bmin:
+        return bmin
+    else:      
+        next_step = round_up(value, bstep)
+        next_pow = next_pow2(value, bmin)
+        return min(next_step, next_pow)
 
 class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
 
@@ -307,6 +328,18 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
         print(f"Generated {len(self.global_state.decode_buckets)} "
               f"decode buckets [bs, total_blocks]: "
               f"{list(sorted(self.global_state.decode_buckets))}")
+
+    def get_padded_decode_num_blocks(self, num_blocks, batch_size): # FIXME (breaks compatibility)
+        assert self.num_hpu_blocks is not None, "num_hpu_blocks is not set"
+        cur_bs = 100000 # FIXME
+        num_blocks = 100000 # FIXME
+        for bs, blocks in self.global_state.decode_buckets:
+            if bs >= batch_size and cur_bs > bs:
+                cur_bs = bs
+                num_blocks = blocks
+            elif bs == cur_bs and num_blocks > blocks:
+                num_blocks = blocks
+        return num_blocks
 
 class HpuModelAdapter:
 
@@ -1525,7 +1558,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                              self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
-
+        real_batch_size = len(input_positions)
         if output is None:
             input_tokens = torch.tensor(input_tokens,
                                         dtype=torch.long,
@@ -1559,7 +1592,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
             block_bucket_size = self.bucketing_ctx.get_padded_decode_num_blocks(
-                block_bucket_size)
+                block_bucket_size, real_batch_size)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
