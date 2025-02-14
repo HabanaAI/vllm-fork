@@ -14,7 +14,7 @@ parser.add_argument("--model", type=str, default=model_path, help="The model pat
 parser.add_argument("--task", type=str, default="gsm8k", help="The model path.")
 parser.add_argument("--tokenizer", type=str, default=model_path, help="The model path.")
 parser.add_argument("--tp_size", type=int, default=8, help="Tensor Parallelism size.")
-parser.add_argument("--ep_size", type=int, default=4, help="Expert Parallelism size.")
+parser.add_argument("--ep_size", type=int, default=1, help="Expert Parallelism size.")
 parser.add_argument("-l", "--limit", type=int, default=16, help="test request counts.")
 args = parser.parse_args()
 
