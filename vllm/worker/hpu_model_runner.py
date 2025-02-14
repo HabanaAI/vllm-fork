@@ -11,6 +11,7 @@ import itertools
 import math
 import os
 import time
+import operator
 from array import array
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
@@ -214,6 +215,57 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
+def warmup_range(config: Tuple[int, int, int]):
+    """Generate a warmup range.
+
+    Start from bmin and multiply by 2 until you reach bstep.
+    Then, increase the values in the range by the value of bstep until you
+    reach bmax.
+
+    Example:
+    bmin = 2, bstep = 32, bmax = 64
+    => ramp_up = (2, 4, 8, 16)
+    => stable = (32, 64)
+    => return ramp_up + stable => (2, 4, 8, 16, 32, 64)
+    """
+    bmin, bstep, bmax = config
+    assert bmin <= bmax, ("Min. batch size cannot be greater than max. "
+                          "batch size. If you want to skip warmup, "
+                          "set VLLM_SKIP_WARMUP=true")
+    base = itertools.repeat(2)
+    ramp_up_acc = itertools.accumulate(base, func=operator.mul, initial=bmin)
+    ramp_up_tw = itertools.takewhile(lambda x: x < bstep and x <= bmax, \
+        ramp_up_acc)
+    stable = range(bstep, bmax + 1, bstep)
+    buckets = list(ramp_up_tw) + list(stable)
+    return list(filter(lambda bucket: bucket >= bmin, buckets))
+
+
+def generate_decode_buckets(bs_bucket_config, blocks_bucket_config,
+                            max_blocks):
+    buckets = []
+    bs_buckets = warmup_range(bs_bucket_config)
+    block_buckets = warmup_range(blocks_bucket_config)
+    last_bucket = max_blocks
+    for bs in bs_buckets:
+        for blocks in block_buckets:
+            if blocks >= last_bucket:
+                buckets.append((bs, last_bucket))
+                break
+            buckets.append((bs, blocks))
+    return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
+
+def generate_custom_decode_buckets(bs_bucket_config, blocks_bucket_config,
+                            max_blocks):
+    buckets = []
+    bs_buckets = warmup_range(bs_bucket_config)
+    block_buckets = warmup_range(blocks_bucket_config)
+    for bs in bs_buckets[:-1]:
+        buckets.append((bs, block_buckets[-1]))
+    for blocks in block_buckets:
+        buckets.append((bs_buckets[-1], blocks))
+    buckets.append((bs_buckets[-1], max_blocks))
+    return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
 
 class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
 
@@ -241,6 +293,19 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
                f"prompt buckets [bs, seq]: "
                f"{list(sorted(self.global_state.prompt_buckets))}")
         print(msg)
+
+    def generate_decode_buckets(self, max_blocks):
+        if int(os.environ.get('VLLM_NUM_HPU_BLOCKS', '0')) > 0:
+            self.global_state.decode_buckets = generate_custom_decode_buckets(
+                self.global_state.decode_bs_bucket_cfg,
+                self.global_state.decode_block_bucket_cfg, max_blocks)
+        else:
+            self.global_state.decode_buckets = generate_decode_buckets(
+                self.global_state.decode_bs_bucket_cfg,
+                self.global_state.decode_block_bucket_cfg, max_blocks)
+        print(f"Generated {len(self.global_state.decode_buckets)} "
+              f"decode buckets [bs, total_blocks]: "
+              f"{list(sorted(self.global_state.decode_buckets))}")
 
 class HpuModelAdapter:
 
@@ -2098,6 +2163,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                            graph_free_mem)
                 decode_available_memory = (graph_free_mem -
                                            prompt_available_memory)
+
+                if int(os.environ.get('VLLM_NUM_HPU_BLOCKS', '0')) > 0:
+                    prompt_available_memory = graph_free_mem
+                    decode_available_memory = graph_free_mem
+
                 msg = (
                     f"Using {format_bytes(graph_free_mem)}"
                     f"/{format_bytes(free_mem)} "
