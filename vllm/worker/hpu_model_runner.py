@@ -264,7 +264,8 @@ def generate_custom_decode_buckets(bs_bucket_config, blocks_bucket_config,
         buckets.append((bs, block_buckets[-1]))
     for blocks in block_buckets:
         buckets.append((bs_buckets[-1], blocks))
-    buckets.append((bs_buckets[-1], max_blocks))
+    if max_blocks != blocks_buckets[-1]:
+        buckets.append((bs_buckets[-1], max_blocks))
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
 
 class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
