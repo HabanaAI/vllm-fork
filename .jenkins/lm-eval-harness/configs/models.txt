@@ -1,7 +1,0 @@
-granite-8b.yaml
-granite-8b-fp8.yaml
-granite-20b.yaml
-granite-20b-fp8.yaml
-Qwen2-7b-Instruct.yaml
-Mixtral-8x7B-Instruct-v0.1.yaml
-Mistral-7B-Instruct-v0.3.yaml

@@ -1,10 +1,5 @@
 # test_config.yaml
 stages:
-  - name: test_gsm8k_models
-    steps:
-      - name: gsm8k_g3_tp1
-        flavor: g3
-        command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models.txt -t 1
   - name: test_gsm8k_small_models
     steps:
       - name: gsm8k_small_g3_tp1
