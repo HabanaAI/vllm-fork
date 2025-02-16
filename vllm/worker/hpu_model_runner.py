@@ -34,8 +34,8 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
 from vllm.config import DeviceConfig, VllmConfig
-from vllm.distributed import broadcast_tensor_dict, tensor_model_parallel_all_reduce
-from vllm.distributed.parallel_state import get_world_group, get_tp_group, get_tensor_model_parallel_world_size, get_tensor_model_parallel_rank
+from vllm.distributed import broadcast_tensor_dict
+from vllm.distributed.parallel_state import get_world_group
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
