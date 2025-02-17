@@ -12,6 +12,7 @@ import torch
 
 from vllm import LLM, SamplingParams
 
+
 def test_duplicated_ignored_sequence_group():
     """https://github.com/vllm-project/vllm/issues/1655"""
 
