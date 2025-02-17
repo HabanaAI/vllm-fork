@@ -2429,7 +2429,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
-        if use_delayed_sampling and not model_input.is_prompt:
+        if use_delayed_sampling and not model_input.is_prompt and self.is_driver_worker:
             num_cached = len(self.cached_step_outputs)
             assert num_cached > 0
             cur_seq_ids = self._get_seq_ids(model_input)
@@ -2441,8 +2441,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 padding = self.cached_step_outputs[i].size(0) - len(target_indices)
                 target_indices.extend([-1] * padding)
                 target_indices = torch.tensor(target_indices,
-                                              device=model_input.input_tokens.device,
-                                              dtype=model_input.input_tokens.dtype)
+                                            device=model_input.input_tokens.device,
+                                            dtype=model_input.input_tokens.dtype)
                 model_input.input_tokens.index_copy_(0, target_indices, self.cached_step_outputs[i])
                 htorch.core.mark_step()
 
@@ -2461,7 +2461,18 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 assert model_input.lora_mapping is not None
                 self.set_active_loras(model_input.lora_requests,
                                       model_input.lora_mapping)
-            input_tokens = model_input.input_tokens
+            # Rank!=0 workers has is_prompt==None
+            if use_delayed_sampling and not model_input.is_prompt and model_input.input_tokens.size(1)==1:
+                if self.is_driver_worker:
+                    model_kwargs_broadcast_data = {"input_tokens": model_input.input_tokens}
+                    broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+                    input_tokens = model_input.input_tokens
+                    
+                else:
+                    model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
+                    input_tokens = model_kwargs_broadcast_data["input_tokens"]
+            else:
+                input_tokens = model_input.input_tokens
             input_positions = model_input.input_positions
             attn_metadata = model_input.attn_metadata
             sampling_metadata = model_input.sampling_metadata
@@ -2592,7 +2603,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if num_steps > 1:
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
-                    if use_delayed_sampling:
+                    if use_delayed_sampling and self.is_driver_worker:
                         self._patch_prev_output()
                         output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
@@ -2695,7 +2706,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output.prefill_hidden_states = hidden_states
                     output.hidden_states = hidden_states
                 if use_delayed_sampling:
-                    return [fake_output]
+                    if self.is_driver_worker:
+                        return [fake_output]
+                    else:
+                        return []
 
                 return [output] if self.is_driver_worker else []
             else:
