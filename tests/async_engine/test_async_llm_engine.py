@@ -147,10 +147,16 @@ def uid() -> str:
     return str(uuid.uuid4())
 
 
-@pytest_asyncio.fixture(scope="module", params=[{"enforce_eager": False}, {"enforce_eager": True}])
+@pytest_asyncio.fixture(scope="module",
+                        params=[{
+                            "enforce_eager": False
+                        }, {
+                            "enforce_eager": True
+                        }])
 async def async_engine(request):
-    engine = await asyncio.get_event_loop().run_in_executor(executor=None,
-                                                            func=lambda: start_engine(request.param["enforce_eager"]))
+    engine = await asyncio.get_event_loop().run_in_executor(
+        executor=None,
+        func=lambda: start_engine(request.param["enforce_eager"]))
     try:
         yield engine
     finally:
