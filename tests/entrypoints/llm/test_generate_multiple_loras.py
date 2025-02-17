@@ -22,7 +22,12 @@ PROMPTS = [
 LORA_NAME = "typeof/zephyr-7b-beta-lora"
 
 
-@pytest.fixture(scope="module", params=[{"enforce_eager": False}, {"enforce_eager": True}])
+@pytest.fixture(scope="module",
+                params=[{
+                    "enforce_eager": False
+                }, {
+                    "enforce_eager": True
+                }])
 def llm(request):
     # pytest caches the fixture so we use weakref.proxy to
     # enable garbage collection
