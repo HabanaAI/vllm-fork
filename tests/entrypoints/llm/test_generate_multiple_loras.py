@@ -49,7 +49,6 @@ def zephyr_lora_files():
 
 
 @pytest.mark.skip_global_cleanup
-@pytest.mark.t_compile
 def test_multiple_lora_requests(llm: LLM, zephyr_lora_files):
     lora_request = [
         LoRARequest(LORA_NAME + str(idx), idx + 1, zephyr_lora_files)

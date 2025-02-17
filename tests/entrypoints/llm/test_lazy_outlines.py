@@ -56,7 +56,6 @@ def run_lmfe(sample_regex, enforce_eager):
 
 
 @pytest.mark.parametrize("enforce_eager", [False, True])
-@pytest.mark.t_compile
 def test_lazy_outlines(sample_regex, enforce_eager):
     """If users don't use guided decoding, outlines should not be imported.
     """

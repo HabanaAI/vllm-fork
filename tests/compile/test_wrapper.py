@@ -39,7 +39,6 @@ class MyWrapper(TorchCompileWrapperWithCustomDispatcher):
             return self.compiled_callable(x, cache)
 
 
-@pytest.mark.t_compile
 def test_torch_compile_wrapper():
     mod = MyMod()
     wrappers = []

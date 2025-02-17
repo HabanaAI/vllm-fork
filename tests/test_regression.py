@@ -12,7 +12,6 @@ import torch
 
 from vllm import LLM, SamplingParams
 
-@pytest.mark.t_compile
 def test_duplicated_ignored_sequence_group():
     """https://github.com/vllm-project/vllm/issues/1655"""
 
@@ -28,7 +27,6 @@ def test_duplicated_ignored_sequence_group():
     assert len(prompts) == len(outputs)
 
 
-@pytest.mark.t_compile
 def test_max_tokens_none():
     sampling_params = SamplingParams(temperature=0.01,
                                      top_p=0.1,
@@ -42,7 +40,6 @@ def test_max_tokens_none():
     assert len(prompts) == len(outputs)
 
 
-@pytest.mark.t_compile
 @pytest.mark.parametrize("enforce_eager", [False, True])
 def test_gc(enforce_eager):
     llm = LLM("facebook/opt-125m", enforce_eager=enforce_eager)
@@ -58,7 +55,6 @@ def test_gc(enforce_eager):
     assert allocated < 50 * 1024 * 1024
 
 
-@pytest.mark.t_compile
 def test_model_from_modelscope(monkeypatch):
     # model: https://modelscope.cn/models/qwen/Qwen1.5-0.5B-Chat/summary
     MODELSCOPE_MODEL_NAME = "qwen/Qwen1.5-0.5B-Chat"

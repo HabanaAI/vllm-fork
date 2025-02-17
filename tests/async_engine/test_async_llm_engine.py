@@ -170,7 +170,6 @@ def should_do_global_cleanup_after_test(request) -> bool:
 
 @pytest.mark.asyncio(scope="module")
 @pytest.mark.parametrize("stop", [None, ["a stop string"]])
-@pytest.mark.t_compile
 async def test_asyncio_run(async_engine, stop):
 
     scheduler_config = await async_engine.get_scheduler_config()
@@ -217,7 +216,6 @@ async def test_asyncio_run(async_engine, stop):
 
 @pytest.mark.asyncio(scope="module")
 @pytest.mark.parametrize("stop", [None, ["a stop string"]])
-@pytest.mark.t_compile
 async def test_output_kinds(async_engine, stop):
     """Test that output_kind works as expected and that
     results are equivalent across different kinds."""
@@ -316,7 +314,6 @@ async def test_output_kinds(async_engine, stop):
 
 @pytest.mark.asyncio(scope="module")
 @pytest.mark.parametrize("stop", [None, ["a stop string"]])
-@pytest.mark.t_compile
 async def test_cancellation(async_engine, stop):
     scheduler_config = await async_engine.get_scheduler_config()
     num_scheduler_steps = scheduler_config.num_scheduler_steps
@@ -347,7 +344,6 @@ async def test_cancellation(async_engine, stop):
 
 @pytest.mark.asyncio(scope="module")
 @pytest.mark.parametrize("stop", [None, ["a stop string"]])
-@pytest.mark.t_compile
 async def test_delayed_generator(async_engine, stop):
     scheduler_config = await async_engine.get_scheduler_config()
 
