@@ -1142,42 +1142,16 @@ def dummy_gemma2_embedding_path():
     return _dummy_gemma2_embedding_path
 
 
-def filter_matching_enforce_eager(params, target_value):
-    if "enforce_eager" in params:
-        if params["enforce_eager"] != target_value:
-            return True
-    else:
-        for value in params.values():
-            if isinstance(value, dict) and "enforce_eager" in value:
-                if value["enforce_eager"] != target_value:
-                    return True
-    return False
-
-
+# Add the flag `--optional` to allow run tests
+# that are marked with @pytest.mark.optional
 def pytest_addoption(parser):
-    # Add the flag `--optional` to allow run tests
-    # that are marked with @pytest.mark.optional
     parser.addoption("--optional",
                      action="store_true",
                      default=False,
                      help="run optional test")
-    parser.addoption("--enforce-eager",
-                     action="store",
-                     default=None,
-                     choices=[None, "True", "False"],
-                     help="Set to None to run all tests, otherwise filter tests containing enforce_eager parameter. \
-                           The filter only affects tests with the enforce_eager parameter, all other tests will run normally.")
 
 
 def pytest_collection_modifyitems(config, items):
-    enforce_eager = config.getoption('--enforce-eager')
-    if enforce_eager:
-        skip_enforce_eager = pytest.mark.skip(reason="--enforce-eager filter did not match with pytest parameter")
-        enforce_eager = True if enforce_eager == "True" else False if enforce_eager == "False" else None
-        for item in items:
-            if hasattr(item, 'callspec') and filter_matching_enforce_eager(item.callspec.params, enforce_eager):
-                item.add_marker(skip_enforce_eager)
-    
     if config.getoption("--optional"):
         # --optional given in cli: do not skip optional tests
         return
