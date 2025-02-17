@@ -3,7 +3,6 @@
 from typing import Optional
 
 import torch
-import pytest
 
 from vllm.compilation.wrapper import TorchCompileWrapperWithCustomDispatcher
 from vllm.config import CompilationLevel
