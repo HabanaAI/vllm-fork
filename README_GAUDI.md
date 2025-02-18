@@ -414,7 +414,7 @@ VLLM_PROMPT_SEQ_BUCKET_STEP=2048 # proposal for usage. depends on warmup results
 VLLM_PROMPT_SEQ_BUCKET_MAX=32768 # context length 32K, 16384 for 16K
 VLLM_DECODE_BLOCK_BUCKET_MIN=1024 # proposal for usage. depends on warmup results
 VLLM_DECODE_BLOCK_BUCKET_STEP=1024 # proposal for usage. depends on warmup results
-VLLM_DECODE_BLOCK_BUCKET_MAX=33792 # max_num_seqs * max_decode_seq // self.block_size, where max_decode_seq is input + output # i.e. 128*((32+1) * 1024)/128 or 32*((32+1)*1024)/128
+VLLM_DECODE_BLOCK_BUCKET_MAX=33792 # max_num_seqs * max_decode_seq // self.block_size, where max_decode_seq is input + output # i.e. 128*((32+1)* 1024)/128 or 32*((32+1)*1024)/128
 
 **Batch size setting**
 Usage of default batch_size=256 is not optimal for long context 8K+. Recompilation can occur due to not enough KV cache space for some sequence group.
@@ -422,6 +422,13 @@ Usage of default batch_size=256 is not optimal for long context 8K+. Recompilati
 Please decrease batch_size if recompialtion or next recomputation warning occurs during inference run:
 recompilation message example: "Configuration: (dprompt, 1, 36864) was not warmed-up!"
 warning example: "Sequence group cmpl-3cbf19b0c6d74b3f90b5d5db2ed2385e-0 is preempted by PreemptionMode.RECOMPUTE mode because there is not enough KV cache space. This can affect the end-to-end performance. Increase gpu_memory_utilization or tensor_parallel_size to provide more KV cache memory."
+
+**Usage of Multi-Step Scheduling feature**
+It is recommended to enable "Multi-Step Scheduling feature" feature for better decode performance. More details about feature: https://github.com/vllm-project/vllm/issues/6854
+
+**Gaudi3 usage**
+All steps above are valid for gaudi3.
+It is recommended only to change VLLM_PROMPT_SEQ_BUCKET_STEP to higher value for faster warmup.
 
 # Troubleshooting
 
