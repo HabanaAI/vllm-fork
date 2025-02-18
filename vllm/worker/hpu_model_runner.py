@@ -680,23 +680,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # We can either use VLLM_GC_THR_GEN[0-2] (this has higher priority)
         # to set particular generation threshold or use simpler
         # VLLM_GC_THR_MULTIPLIER to multiply default values.
-        default_gc_thrs = list(gc.get_threshold())
-        print(f'default_gc_thrs: {default_gc_thrs}')
+
+        # gc.get_threshold default, avoiding potential overflow due to 
+        # multiplier and set later (get->mult->set->repeat->...->overflow)
+        default_gc_thrs = [700, 10, 10]
+
         requested_gc_thrs = [0] * len(default_gc_thrs)
         for i in range(len(default_gc_thrs)):
             requested_gc_thrs[i] = int(
                 os.environ.get(f'VLLM_GC_THR_GEN{i}', default_gc_thrs[i]))
         if requested_gc_thrs == default_gc_thrs:
+            # 16*threshold is rare enough for gc to not cause perf issues
             gc_thr_multiplier = int(
                 os.environ.get('VLLM_GC_THR_MULTIPLIER', 16))
             requested_gc_thrs = [
                 t * gc_thr_multiplier for t in default_gc_thrs
             ]
-        print(f'requested_gc_thrs: {requested_gc_thrs}')
-        import sys
-        sys.exit()
         gc.set_threshold(*requested_gc_thrs)
-
         # Multi-modal data support
         self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
             .create_input_mapper(self.model_config)
