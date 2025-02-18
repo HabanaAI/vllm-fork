@@ -693,6 +693,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 t * gc_thr_multiplier for t in default_gc_thrs
             ]
         print(f'requested_gc_thrs: {requested_gc_thrs}')
+        import sys
+        sys.exit()
         gc.set_threshold(*requested_gc_thrs)
 
         # Multi-modal data support
