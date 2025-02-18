@@ -634,22 +634,6 @@ class HPUModelRunner:
         )
 
         self.use_hpu_graph = not self.model_config.enforce_eager
-        # TODO(woosuk): Provide an option to tune the max cudagraph batch size.
-        self.cudagraph_batch_sizes = [1, 2, 4] + [i for i in range(8, 513, 8)]
-        self.max_batch_size = 256  # TODO(kzawora): fix this garbage
-        self.input_ids = torch.zeros(
-            (self.max_batch_size, self.max_num_tokens),
-            dtype=torch.int32,
-            device=self.device)
-        self.positions = torch.zeros(
-            (self.max_batch_size, self.max_num_tokens),
-            dtype=torch.int64,
-            device=self.device)
-        self.prefill_positions = torch.tensor(
-            range(self.max_model_len),
-            device="cpu",
-        ).to(torch.int32).reshape(1, -1)
-
         self.max_num_seqs = self.scheduler_config.max_num_seqs
         self.max_prefill_batch_size = 16  # TODO(kzawora): add knob for that
         self.padding_aware_scheduling = True  # TODO(kzawora): add knob for that
@@ -669,6 +653,55 @@ class HPUModelRunner:
             logger.info("Bucketing is OFF.")
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
+        
+        # Cached torch/numpy tensors
+        self.num_swaps = 2
+        self.cur_swap_id = 0
+        self.input_ids_cpu = []
+        self.input_ids_np = []
+        self.input_positions_cpu = []
+        self.input_positions_np = []
+        self.slot_mapping_cpu = []
+        self.slot_mapping_np = []
+        self.prompt_context_lens_cpu = []
+        self.prompt_effective_query_lens_cpu = []
+        self.decode_context_lens_cpu = []
+        self.decode_context_lens_np = []
+        for _ in range(self.num_swaps):
+            self.input_ids_cpu.append(
+                torch.empty(self.max_num_tokens,
+                            dtype=torch.int32,
+                            device="cpu"))
+            self.input_ids_np.append(self.input_ids_cpu[-1].numpy())
+
+            self.input_positions_cpu.append(
+                torch.empty(self.max_num_tokens,
+                            dtype=torch.int32,
+                            device="cpu"))
+            self.input_positions_np.append(
+                self.input_positions_cpu[-1].numpy())
+
+            self.slot_mapping_cpu.append(
+                torch.empty(self.max_num_tokens,
+                            dtype=torch.int64,
+                            device="cpu"))
+            self.slot_mapping_np.append(self.slot_mapping_cpu[-1].numpy())
+
+            self.prompt_context_lens_cpu.append(
+                torch.empty((1), dtype=torch.int32, device="cpu"))
+            self.prompt_effective_query_lens_cpu.append(
+                torch.empty((1), dtype=torch.int32, device="cpu"))
+
+            self.decode_context_lens_cpu.append(
+                torch.empty(self.max_num_tokens,
+                            dtype=torch.int32,
+                            device="cpu"))
+            self.decode_context_lens_np.append(
+                self.decode_context_lens_cpu[-1].numpy())
+
+        # Range tensor with values [0 .. self.max_num_tokens - 1].
+        # Used to initialize positions / context_lens / seq_lens
+        self.arange_np = np.arange(self.max_num_tokens, dtype=np.int32)
 
     def get_kv_cache_spec(self) -> KVCacheSpec:
         """
@@ -1063,10 +1096,10 @@ class HPUModelRunner:
                 # Else, we'll break on first batch size that fits token budget.
                 if not self.padding_aware_scheduling or can_schedule:
                     break
-            context_lens = torch.zeros(padded_batch_size, dtype=torch.int32,device='cpu')
+
+            context_lens = np.zeros(padded_batch_size, dtype=np.int32)
             if use_prefix_caching:
-                self.input_batch.num_computed_tokens_cpu[
-                    batch_idx:batch_idx + num_prefills]
+                context_lens = self.input_batch.num_computed_tokens_cpu[batch_idx:batch_idx + num_prefills]
             # TODO(kzawora): this is an ugly hack for prefix caching, remove
             # that once batch padding works properly (idk why it doesn't)
             if use_prefix_caching:
@@ -1105,10 +1138,9 @@ class HPUModelRunner:
                 # is pre-filled with 0s
 
                 # Prepare and sanitize positions ids (cpu)
-                positions[
-                    i, :prompt_len] = self.prefill_positions[:, context_len:
+                positions[i, :prompt_len] = torch.tensor(self.arange_np[context_len:
                                                              context_len +
-                                                             prompt_len]
+                                                             prompt_len], dtype=torch.int32, device='cpu')
                 #positions[i, prompt_len:] = 0 # no need to sanitize - buffer
                 # is pre-filled with 0s
 
@@ -1138,7 +1170,7 @@ class HPUModelRunner:
             # logits indices in prefill must account for padding: last
             # token logits will be emitted at index
             # (idx - 1) * padded_seq_len + seq_len[idx] - 1
-            np.cumsum(padded_prompt_lens[:num_prefills],
+            np.cumsum(prompt_lens[:num_prefills],
                       out=query_start_loc_np[1:])
             query_start_loc_np[:num_prefills] += num_scheduled_tokens[
                 batch_idx:batch_idx + num_prefills]
@@ -1165,7 +1197,7 @@ class HPUModelRunner:
             prefill_position_ids.append(positions_device)
             prefill_logits_indices.append(logits_indices_device)
             attn_metadata = None
-            if use_prefix_caching:
+            if use_prefix_caching and any(context_lens):
                 # Prefix caching
                 num_blocks = np.ceil(context_lens / self.block_size).astype(
                     np.int32).tolist()
@@ -1269,7 +1301,7 @@ class HPUModelRunner:
                                                          self.block_size))
         # NOTE(kzawora): the "-1" is what causes this entire thing to work
         # properly and have good accuracy - why? beats me...
-        block_offsets = (padded_index-1) % self.block_size
+        block_offsets = (padded_index) % self.block_size
         slot_mapping = block_number * self.block_size + block_offsets
         # Set an out of range value for the padding tokens so that they
         # are ignored when inserting into the KV cache.
@@ -1331,6 +1363,294 @@ class HPUModelRunner:
                 slot_mapping=slot_mapping_device,
             ))
 
+    def _prepare_prompt(self,
+                        prompt_req_ids: List[str],
+                        num_scheduled_tokens_list: List[int]) -> PromptData:
+        prefill_request_ids = []
+        prefill_prompt_lens = []
+        prefill_token_ids = []
+        prefill_position_ids = []
+        prefill_attn_metadata = []
+        prefill_logits_indices = []
+        block_table_cpu_tensor = self.input_batch.block_table.get_cpu_tensor()
+        use_prefix_caching = self.cache_config.enable_prefix_caching
+
+        for req_index, num_scheduled_tokens in zip(prompt_req_ids,num_scheduled_tokens_list):
+            num_computed_tokens = self.input_batch.num_computed_tokens_cpu[
+                req_index]
+            num_prompt_tokens = self.input_batch.num_prompt_tokens[req_index]
+
+            # Must be prompt
+            assert num_computed_tokens < num_prompt_tokens
+
+            # Prompt len
+            prompt_len = num_scheduled_tokens
+            padded_batch_size, padded_prompt_len = self._get_padded_prefill_dims(1, prompt_len, True)
+            assert padded_prompt_len <= self.max_model_len
+
+            # Seq len
+            seq_len = num_computed_tokens + prompt_len
+            padded_seq_len = num_computed_tokens + padded_prompt_len
+
+            # Input tokens
+            input_tokens_cpu = self.input_batch.token_ids_cpu_tensor[
+                req_index, num_computed_tokens:padded_seq_len]
+            input_tokens_cpu[prompt_len:] = 0
+
+            # Input positions
+            input_positions_np = self.input_positions_np[
+                self.cur_swap_id][:padded_prompt_len]
+            np.add(num_computed_tokens,
+                self.arange_np[:padded_prompt_len],
+                out=input_positions_np)
+            input_positions_np[prompt_len:] = 0
+
+            # Slot mapping
+            block_table_np = \
+                self.input_batch.block_table.get_numpy_array()
+            block_numbers_np = block_table_np[req_index, input_positions_np //
+                                            self.block_size]
+            block_offsets_np = input_positions_np % self.block_size
+
+            slot_mapping_np = self.slot_mapping_np[
+                self.cur_swap_id][:padded_prompt_len]
+            np.add(block_numbers_np * self.block_size,
+                block_offsets_np,
+                out=slot_mapping_np)
+            slot_mapping_np[prompt_len:] = _PAD_SLOT_ID
+
+            # Block table
+            block_table_cpu = None
+            if num_computed_tokens > 0:
+                block_table_cpu = self.input_batch.block_table.get_cpu_tensor()
+                block_table_cpu = block_table_cpu[req_index]
+
+            # Context len
+            self.prompt_context_lens_cpu[self.cur_swap_id][0] = 0
+            if num_computed_tokens > 0:
+                self.prompt_context_lens_cpu[self.cur_swap_id][0] = seq_len
+
+            # Effective query len
+            self.prompt_effective_query_lens_cpu[self.cur_swap_id][0] = prompt_len
+
+            # Get final tensors
+            input_tokens = input_tokens_cpu.reshape(1, -1)
+            input_positions = self.input_positions_cpu[
+                self.cur_swap_id][:padded_prompt_len].reshape(1,
+                                                            -1)
+            slot_mapping = self.slot_mapping_cpu[
+                self.cur_swap_id][:padded_prompt_len].reshape(1,
+                                                            -1)
+            block_table = block_table_cpu.reshape(1, -1).to(
+                self.device) if block_table_cpu is not None else None
+
+            context_lens = self.prompt_context_lens_cpu[self.cur_swap_id]
+            effective_query_lens = self.prompt_effective_query_lens_cpu[
+                self.cur_swap_id]
+
+            token_ids_device = _async_h2d_tensor_copy(input_tokens, self.device)
+            positions_device = _async_h2d_tensor_copy(input_positions, self.device)
+            seq_lens_tensor_device = _async_h2d_tensor_copy(
+                effective_query_lens, self.device)
+            slot_mapping_device = _async_h2d_tensor_copy(
+                slot_mapping, self.device)
+            logits_indices_device = _async_h2d_tensor_copy(
+                logits_indices, self.device)
+            attn_metadata = None
+            if use_prefix_caching and any(context_lens):
+                # Prefix caching
+                num_blocks = np.ceil(context_lens / self.block_size).astype(
+                    np.int32).tolist()
+                max_num_blocks = max(num_blocks)
+                #if bucketing:
+                #    max_num_blocks = self.bucketing_ctx.get_padded_decode_num_blocks(max_num_blocks) # noqa
+                prefix_block_tables = torch.zeros(
+                    (padded_batch_size, max_num_blocks),
+                    dtype=torch.int32,
+                    device='cpu')
+                for i, n in enumerate(num_blocks):
+                    prefix_block_tables[i, :n] = block_table_cpu_tensor[i, :n]
+                context_lens_tensor = torch.zeros((padded_batch_size),
+                                                  dtype=torch.int32,
+                                                  device='cpu')
+                context_lens_tensor[0] = torch.tensor(context_lens,
+                                                                  device='cpu')
+
+                block_list_device = _async_h2d_tensor_copy(
+                    prefix_block_tables.flatten(), self.device)
+                context_lens_tensor_device = _async_h2d_tensor_copy(
+                    context_lens_tensor, self.device)
+                attn_metadata = \
+                    HPUAttentionMetadataV1.make_cached_prefill_metadata(
+                    seq_lens_tensor=seq_lens_tensor_device,
+                    context_lens_tensor=context_lens_tensor_device,
+                    num_prefills=1,
+                    num_prefill_tokens=0,
+                    slot_mapping=slot_mapping_device,
+                    block_list=block_list_device)
+            else:
+                attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
+                    seq_lens_tensor=seq_lens_tensor_device,
+                    num_prefills=1,
+                    num_prefill_tokens=0,
+                    slot_mapping=slot_mapping_device,
+                )
+
+            prefill_request_ids.append([req_index])
+            prefill_prompt_lens.append([seq_lens_tensor_device])
+            prefill_token_ids.append([token_ids_device])
+            prefill_position_ids.append([positions_device])
+            prefill_logits_indices.append([logits_indices_device])
+            prefill_attn_metadata.append([attn_metadata])
+
+        self.swap_step()
+
+        # Attn metadata
+        attn_metadata = PallasMetadata(
+            num_prefills=1,
+            num_prefill_tokens=0,  # NOTE: This is not used.
+            num_decode_tokens=0,
+            slot_mapping=slot_mapping,
+            multi_modal_placeholder_index_maps=None,
+            enable_kv_scales_calculation=True,
+            block_tables=block_table,
+            context_lens=context_lens,
+            effective_query_lens=effective_query_lens,
+        )
+
+        return PrefillInputData(request_ids=prefill_request_ids,
+                        prompt_lens=prefill_prompt_lens,
+                        token_ids=prefill_token_ids,
+                        position_ids=prefill_position_ids,
+                        attn_metadata=prefill_attn_metadata,
+                        logits_indices=prefill_logits_indices)
+
+
+
+        return PromptData(input_tokens, input_positions, attn_metadata)
+
+    def _prepare_decode(
+        self,
+        decode_req_ids: List[str],
+    ) -> DecodeData:
+        # Batch size
+        batch_size = len(decode_req_ids)
+        padded_batch_size = self.bucketing_ctx.get_padded_batch_size(
+                batch_size, False)
+        assert padded_batch_size <= self.max_model_len
+
+        # Init [0 .. batch_size - 1]
+        req_indices_np = self.arange_np[:padded_batch_size]
+
+        # Input positions
+        input_positions_np = self.input_positions_np[
+            self.cur_swap_id][:padded_batch_size]
+        np.add(self.input_batch.num_computed_tokens_cpu[:padded_batch_size],
+               0,
+               out=input_positions_np)
+        input_positions_np[batch_size:] = 0
+        input_positions_cpu = self.input_positions_cpu[
+            self.cur_swap_id][:padded_batch_size]
+
+        # Input tokens
+        token_indices_np = (
+            input_positions_np +
+            req_indices_np * self.input_batch.token_ids_cpu.shape[1])
+        input_tokens_cpu = self.input_ids_cpu[
+            self.cur_swap_id][:padded_batch_size]
+        torch.index_select(self.input_batch.token_ids_cpu_tensor.flatten(),
+                           0,
+                           torch.from_numpy(token_indices_np),
+                           out=input_tokens_cpu)
+        input_tokens_cpu[batch_size:] = 0
+
+        # Slot mapping
+        block_table_indices_np = (
+            req_indices_np * self.max_num_blocks_per_req +
+            input_positions_np // self.block_size)
+
+        block_table_cpu = self.input_batch.block_table.get_cpu_tensor()
+
+        block_numbers_np = block_table_cpu.flatten(
+        )[block_table_indices_np].numpy()
+
+        block_offsets_np = input_positions_np % self.block_size
+
+        slot_mapping_np = self.slot_mapping_np[
+            self.cur_swap_id][:padded_batch_size]
+        np.add(block_numbers_np * self.block_size,
+               block_offsets_np,
+               out=slot_mapping_np)
+        slot_mapping_np[batch_size:] = _PAD_SLOT_ID
+
+        block_table_cpu = block_table_cpu[:padded_batch_size]
+
+        # Context lens
+        context_lens_np = self.decode_context_lens_np[
+            self.cur_swap_id][:padded_batch_size]
+        np.add(self.input_batch.num_computed_tokens_cpu[:padded_batch_size],
+               1,
+               out=context_lens_np)
+        context_lens_np[batch_size:] = 0
+
+        # Get final tensors
+        input_tokens = input_tokens_cpu.reshape(-1, 1)
+        input_positions = input_positions_cpu.reshape(-1, 1)
+        slot_mapping = self.slot_mapping_cpu[
+            self.cur_swap_id][:padded_batch_size].reshape(-1,
+                                                          1)
+        block_table = block_table_cpu
+        context_lens = self.decode_context_lens_cpu[
+            self.cur_swap_id][:padded_batch_size]
+
+
+        num_blocks = np.ceil(context_lens.numpy() / self.block_size).astype(
+            np.int32).tolist()
+        block_tables_list = []
+        for i, n in enumerate(num_blocks):
+            seq_block_table = block_table[i, :n].tolist()
+            assert len(seq_block_table) == n
+            block_tables_list.append(seq_block_table)
+
+
+        block_list, block_groups, block_usage = \
+            self.get_habana_paged_attn_buffers(
+            block_tables_list, slot_mapping.tolist(), True)
+
+        logits_indices = torch.zeros(padded_batch_size,
+                                     dtype=torch.int32,
+                                     device='cpu')
+        logits_indices[:batch_size] = torch.tensor(self.arange_np[:batch_size], dtype=torch.int32, device='cpu')
+        num_decode_tokens = torch.tensor(np.sum(context_lens), device='cpu')
+        
+        # CPU<>HPU sync *should not* happen here.
+        token_ids_device = _async_h2d_tensor_copy(input_tokens, self.device)
+        positions_device = _async_h2d_tensor_copy(input_positions, self.device)
+        logits_indices_device = _async_h2d_tensor_copy(logits_indices,
+                                                       self.device)
+        block_list_device = _async_h2d_tensor_copy(block_list, self.device)
+        block_usage_device = _async_h2d_tensor_copy(block_usage, self.device)
+        block_groups_device = _async_h2d_tensor_copy(block_groups, self.device)
+        num_decode_tokens_device = _async_h2d_tensor_copy(
+            num_decode_tokens, self.device)
+        slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
+
+        self.swap_step()
+
+        return DecodeInputData(
+            num_decodes=batch_size,
+            token_ids=token_ids_device,
+            position_ids=positions_device,
+            logits_indices=logits_indices_device,
+            attn_metadata=HPUAttentionMetadataV1.make_decode_metadata(
+                block_list=block_list_device,
+                block_usage=block_usage_device,
+                block_groups=block_groups_device,
+                num_decode_tokens=num_decode_tokens_device,
+                slot_mapping=slot_mapping_device,
+            ))
+
+
     def _prepare_inputs(
             self,
             scheduler_output: "SchedulerOutput",
@@ -1349,7 +1669,8 @@ class HPUModelRunner:
         num_scheduled_tokens = []
         num_prompt_tokens = []
         for idx, req_id in enumerate(self.input_batch.req_ids[:num_reqs]):
-            seq_num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
+            seq_num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
+                req_id]
             seq_num_prompt_tokens = self.input_batch.num_prompt_tokens[idx]
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
@@ -1357,13 +1678,17 @@ class HPUModelRunner:
             if idx < num_decodes:
                 assert seq_num_scheduled_tokens == 1
         prefill_num_tokens = num_scheduled_tokens if self.cache_config.enable_prefix_caching else num_prompt_tokens
+        pd_info = self._get_prompts_and_decodes(scheduler_output)
+        num_decodes = len(pd_info.decode_req_ids)
+        num_prefills = len(pd_info.prompt_req_ids)
+        
         return (
             self._prepare_prefill_inputs(num_prefills, num_decodes,
                                          prefill_num_tokens, bucketing),
+#            self._prepare_decode(pd_info.decode_req_ids)
             self._prepare_decode_inputs(num_decodes, num_scheduled_tokens,
                                         bucketing),
         )
-
 
     def _seq_len(self, attn_metadata):
         return attn_metadata.slot_mapping.size(1)
