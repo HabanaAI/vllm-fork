@@ -681,6 +681,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # to set particular generation threshold or use simpler
         # VLLM_GC_THR_MULTIPLIER to multiply default values.
         default_gc_thrs = list(gc.get_threshold())
+        print(f'default_gc_thrs: {default_gc_thrs}')
         requested_gc_thrs = [0] * len(default_gc_thrs)
         for i in range(len(default_gc_thrs)):
             requested_gc_thrs[i] = int(
@@ -691,6 +692,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             requested_gc_thrs = [
                 t * gc_thr_multiplier for t in default_gc_thrs
             ]
+        print(f'requested_gc_thrs: {requested_gc_thrs}')
         gc.set_threshold(*requested_gc_thrs)
 
         # Multi-modal data support
