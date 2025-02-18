@@ -29,7 +29,7 @@ question = "Describe this image."
 # Prompt example: https://docs.vllm.ai/en/v0.6.2/getting_started/examples/offline_inference_vision_language.html
 if "Qwen2" in mdl:
     llm = LLM(model=mdl, enforce_eager=False)
-    prompt = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{question}<|im_end|>\n<|im_start|>assistant\n"
+    prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{question}g<|im_end|>\n<|im_start|>assistant\n"
 elif "Llama-3.2" in mdl:
     llm = LLM(
         model=mdl,
