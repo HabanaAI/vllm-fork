@@ -699,6 +699,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 t * gc_thr_multiplier for t in default_gc_thrs
             ]
         gc.set_threshold(*requested_gc_thrs)
+
         # Multi-modal data support
         self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
             .create_input_mapper(self.model_config)
