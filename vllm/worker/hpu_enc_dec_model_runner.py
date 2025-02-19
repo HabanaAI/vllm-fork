@@ -490,7 +490,8 @@ class HPUEncoderDecoderModelRunner(
             block_tables=block_tables,
             encoder_seq_data=encoder_dummy_data.seq_data,
             multi_modal_data=decoder_dummy_data.multi_modal_data,
-            multi_modal_placeholders=decoder_dummy_data.multi_modal_placeholders,
+            multi_modal_placeholders=decoder_dummy_data.
+            multi_modal_placeholders,
             cross_block_table=cross_block_table)
 
     def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:
