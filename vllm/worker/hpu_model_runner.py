@@ -2781,8 +2781,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         model_input = self.cached_step_inputs.pop(0)
         delayed_output = self.cached_step_outputs.pop(0).cpu().squeeze(-1).tolist()
         ctx = model_input.async_callback.keywords["ctx"]
-        #assert len(ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
-        if len(ctx.output_queue) > 0:
+        if len(ctx.output_queue) == 0:
+            self.cached_step_inputs.pop(0)
+        elif len(ctx.output_queue) == 1:
             output_data = ctx.output_queue[0]
             assert len(output_data.outputs) == 1
             for fake_out, real_out in zip(output_data.outputs[0], delayed_output):
@@ -2794,3 +2795,5 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # a cache recomputation and we only need to update the last token
                 seq_data.output_token_ids_array[-1] = real_out
                 seq_data._cached_all_token_ids[-1] = real_out
+        else:
+            assert len(ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
