@@ -555,23 +555,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # TODO (rob): refactor block quant into separate class.
         if self.block_quant:
             if current_platform.is_hpu():
-                from vllm.model_executor.layers.quantization.utils.fp8_utils import pad_block_fp8_weight_naive
-                layer.w13_weight, orig_M_w13, orig_N_w13 = pad_block_fp8_weight_naive(
-                    layer.w13_weight,
-                    layer.w13_weight_scale_inv,
-                    self.quant_config.weight_block_size)
-                layer.w2_weight, orig_M_w2, orig_N_w2 = pad_block_fp8_weight_naive(
-                    layer.w2_weight,
-                    layer.w2_weight_scale_inv,
-                    self.quant_config.weight_block_size)
-                orig_M_w13 = torch.nn.Parameter(torch.tensor(orig_M_w13, dtype=torch.int32), requires_grad=False)
-                orig_N_w13 = torch.nn.Parameter(torch.tensor(orig_N_w13, dtype=torch.int32), requires_grad=False)
-                layer.register_parameter("orig_M_w13", orig_M_w13)
-                layer.register_parameter("orig_N_w13", orig_N_w13)
-                orig_M_w2 = torch.nn.Parameter(torch.tensor(orig_M_w2, dtype=torch.int32), requires_grad=False)
-                orig_N_w2 = torch.nn.Parameter(torch.tensor(orig_N_w2, dtype=torch.int32), requires_grad=False)
-                layer.register_parameter("orig_M_w2", orig_M_w2)
-                layer.register_parameter("orig_N_w2", orig_N_w2)
+                # pre-dequant
+                pass
             if current_platform.is_rocm():
                 w13_weight, w13_weight_scale_inv, w13_input_scale = \
                     normalize_e4m3fn_to_e4m3fnuz(
@@ -797,10 +782,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias)
 
-        orig_M_w13 = layer.orig_M_w13.data
-        orig_N_w13 = layer.orig_N_w13.data
-        orig_M_w2 = layer.orig_M_w2.data
-        orig_N_w2 = layer.orig_N_w2.data
         ep_shift = ep_rank * num_experts
         
         if seq_len > 1:
@@ -821,12 +802,12 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 w13_scale_fp8_slice = w13_weight_scale_inv_fp8[i, ...]
                 w2_scale_fp8_slice = w2_weight_scale_inv_fp8[i, ...]
 
-                w13_weight = dequant_block_fp8_weight_naive(w13_weight_fp8_slice, w13_scale_fp8_slice, self.quant_config.weight_block_size, x.dtype, orig_M_w13, orig_N_w13)
+                w13_weight = dequant_block_fp8_weight_naive(w13_weight_fp8_slice, w13_scale_fp8_slice, self.quant_config.weight_block_size, x.dtype)
                 up_gate_states = torch.matmul(x, w13_weight.transpose(0, 1))
                 d = up_gate_states.shape[-1] // 2
                 tmp_states = F.silu(up_gate_states[..., :d]) * up_gate_states[..., d:]
 
-                w2_weight = dequant_block_fp8_weight_naive(w2_weight_fp8_slice, w2_scale_fp8_slice, self.quant_config.weight_block_size, x.dtype, orig_M_w13, orig_N_w13)
+                w2_weight = dequant_block_fp8_weight_naive(w2_weight_fp8_slice, w2_scale_fp8_slice, self.quant_config.weight_block_size, x.dtype)
                 current_hidden_states = torch.matmul(tmp_states, w2_weight.transpose(0, 1))
                 padded_weight = experts_mask[i + ep_shift].unsqueeze(1)
                 final_hidden_states += current_hidden_states * padded_weight
@@ -837,15 +818,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             w13_weight = dequant_block_fp8_weight_naive(w13_weight_fp8,
                                                         w13_weight_scale_inv_fp8,
                                                         block_size=self.quant_config.weight_block_size,
-                                                        dtype=x.dtype,
-                                                        original_M=orig_M_w13,
-                                                        original_N=orig_N_w13)
+                                                        dtype=x.dtype)
             w2_weight = dequant_block_fp8_weight_naive(w2_weight_fp8,
                                                     w2_weight_scale_inv_fp8,
                                                     block_size=self.quant_config.weight_block_size,
-                                                    dtype=x.dtype,
-                                                    original_M=orig_M_w2,
-                                                    original_N=orig_N_w2)
+                                                    dtype=x.dtype)
             final_hidden_states = torch.zeros_like(x)
             for i in range(moe_n_slice):
                 min_expert = i * n_expert_slice

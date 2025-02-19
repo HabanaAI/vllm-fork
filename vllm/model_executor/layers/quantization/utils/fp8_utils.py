@@ -159,7 +159,7 @@ def pad_block_fp8_weight_naive(weight, weight_scale, block_size):
     return weight, orig_M, orig_N
 
 
-def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype, original_M, original_N, do_unpad=False):
+def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype, original_M=None, original_N=None, do_unpad=False):
     if weight_scale is None:
         return weight
     assert len(block_size) == 2
