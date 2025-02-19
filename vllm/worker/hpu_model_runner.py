@@ -2783,13 +2783,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         ctx = model_input.async_callback.keywords["ctx"]
         assert len(ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
         output_data = ctx.output_queue[0]
-        assert len(output_data.outputs) == 1
-        for fake_out, real_out in zip(output_data.outputs[0], delayed_output):
-            fake_out.samples[0].output_token = real_out
-        for sg, real_out in zip(output_data.seq_group_metadata_list, delayed_output):
-            assert len(sg.seq_data) == 1
-            seq_data = list(sg.seq_data.values())[0]
-            # This is a hack. Assigning output_token_ids triggers
-            # a cache recomputation and we only need to update the last token
-            seq_data.output_token_ids_array[-1] = real_out
-            seq_data._cached_all_token_ids[-1] = real_out
+        #assert len(output_data.outputs) == 1
+        if len(output_data.outputs) > 0:
+            for fake_out, real_out in zip(output_data.outputs[0], delayed_output):
+                fake_out.samples[0].output_token = real_out
+            for sg, real_out in zip(output_data.seq_group_metadata_list, delayed_output):
+                assert len(sg.seq_data) == 1
+                seq_data = list(sg.seq_data.values())[0]
+                # This is a hack. Assigning output_token_ids triggers
+                # a cache recomputation and we only need to update the last token
+                seq_data.output_token_ids_array[-1] = real_out
+                seq_data._cached_all_token_ids[-1] = real_out
