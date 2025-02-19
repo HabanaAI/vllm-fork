@@ -42,6 +42,7 @@ class HPUPoolingModelRunner(
             assert model_input.lora_mapping is not None
             self.set_active_loras(model_input.lora_requests,
                                   model_input.lora_mapping)
+
         input_tokens = model_input.input_tokens
         input_positions = model_input.input_positions
         attn_metadata = model_input.attn_metadata
@@ -66,6 +67,7 @@ class HPUPoolingModelRunner(
             lora_mask, lora_logits_mask = self.create_lora_mask(
                 input_tokens, model_input.lora_ids,
                 attn_metadata.is_prompt)
+
 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         # use an empty tensor instead of `None`` to force Dynamo to pass
