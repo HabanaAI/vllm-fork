@@ -2781,10 +2781,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         model_input = self.cached_step_inputs.pop(0)
         delayed_output = self.cached_step_outputs.pop(0).cpu().squeeze(-1).tolist()
         ctx = model_input.async_callback.keywords["ctx"]
-        assert len(ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
-        output_data = ctx.output_queue[0]
-        #assert len(output_data.outputs) == 1
-        if len(output_data.outputs) > 0:
+        #assert len(ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
+        if len(ctx.output_queue) > 0:
+            output_data = ctx.output_queue[0]
+            assert len(output_data.outputs) == 1
             for fake_out, real_out in zip(output_data.outputs[0], delayed_output):
                 fake_out.samples[0].output_token = real_out
             for sg, real_out in zip(output_data.seq_group_metadata_list, delayed_output):
