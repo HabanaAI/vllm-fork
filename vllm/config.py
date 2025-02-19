@@ -1050,6 +1050,8 @@ class CacheConfig:
         sliding_window: Optional[int] = None,
         enable_prefix_caching: bool = False,
         cpu_offload_gb: float = 0,
+        split_qk_v: bool = False,
+        split_gate_up: bool = False,
         calculate_kv_scales: Optional[bool] = None,
     ) -> None:
         self.block_size = block_size
@@ -1062,6 +1064,8 @@ class CacheConfig:
         self.enable_prefix_caching = enable_prefix_caching
         self.cpu_offload_gb = cpu_offload_gb
         self.calculate_kv_scales = calculate_kv_scales
+        self.split_qk_v = split_qk_v
+        self.split_gate_up = split_gate_up
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()
