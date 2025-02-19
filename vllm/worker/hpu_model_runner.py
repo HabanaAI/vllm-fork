@@ -864,9 +864,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         return htorch.hpu.wrap_in_hpu_graph(
-            HpuModelAdapter(*args, **kwargs), disable_tensor_cache=True, dry_run=False
-        ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-            *args, **kwargs)
+            HpuModelAdapter(*args, **kwargs),
+            disable_tensor_cache=True,
+            dry_run=False) if htorch.utils.internal.is_lazy(
+            ) else HpuModelAdapter(*args, **kwargs)
 
     def get_model(self) -> nn.Module:
         if isinstance(self.model, HpuModelAdapter):
