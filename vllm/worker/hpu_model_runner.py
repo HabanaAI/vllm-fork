@@ -723,6 +723,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.model: torch.nn.Module = None
         self.inc_initialized_successfully = False
 
+        # CPU affinity
+        rank = int(os.getenv('HABANA_VISIBLE_DEVICES', '0'))
+        pid = os.getenv()
+        logger.info("Starting rank %d - PID %d", rank, pid)
+        logger.info("[%d] %s", rank, str(os.sched_getaffinity(pid)))
+
         # Profiler stats
         self.profiler = HabanaHighLevelProfiler()
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
