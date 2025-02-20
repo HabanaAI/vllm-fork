@@ -78,19 +78,6 @@ VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING', 'false').lower()
 DUMMY_TOKEN_ID = -1
 
 
-def binarize(data):
-    result = []
-    while len(data) > 0:
-        chunk = data[:8]
-        data = data[8:]
-        coef = 1
-        acc = 0
-        for d in reversed(chunk):
-            acc += coef * int(d)
-            coef *= 2
-        result.append(acc)
-    return result
-
 def subtuple(obj: object,
              typename: str,
              to_copy: List[str],
@@ -1495,7 +1482,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                        for bt, lbu in zip(block_tables, last_block_usage)
                        if bt]
 
-        real_batch_size = sum(1 for bt in block_tables if len(bt) > 0)
         block_list = flatten(block_tables)
         block_groups = flatten(block_groups)
         block_usage = flatten(block_usage)
@@ -1508,17 +1494,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = max(max(block_list) + 1, len(block_list))
             block_bucket_size = self.bucketing_ctx.get_padded_decode_num_blocks(
                 block_bucket_size)
-            used_blocks = set(block_list)
-            #block_map = [i in used_blocks for i in range(3072)]
-            #block_map = ''.join(format(d, '02x') for d in binarize(block_map))
-            block_map = ''
-            print('num_blocks:', len(block_list),
-                  'max_block:', max(block_list),
-                  #'min_block:', min(block_list),
-                  'padded_blocks:', block_bucket_size,
-                  'batch_size:', input_positions.size(0),
-                  'real_batch_size:', real_batch_size,
-                  'block_map', block_map)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
