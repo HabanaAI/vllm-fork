@@ -51,7 +51,9 @@ def prompt_fsdpa(
     value = value.transpose(1, 2)
     softmax_mode = 'fast'
     recompute_mode = True
-    attn_weights = fsdpa_op(query, key, value, attn_bias, 0.0, False,
+    # Passing attn_bias and is_causal=True to enable triangular softmax with fused add
+    is_causal = True
+    attn_weights = fsdpa_op(query, key, value, attn_bias, 0.0, is_causal,
                             scale, softmax_mode, recompute_mode, None,
                             'right')
     attn_weights = attn_weights.transpose(1, 2)
