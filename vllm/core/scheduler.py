@@ -1399,13 +1399,9 @@ class Scheduler:
         scheduler_start_time = time.perf_counter()
         scheduler_outputs: SchedulerOutputs = self._schedule()
 
-        for _ in range(VLLM_DEFRAGMENT_BLOCK_IDS):
-            selected_blocks = self.block_manager.defragment()
-            if not selected_blocks:
-                break
+        if VLLM_DEFRAGMENT_BLOCK_IDS > 0:
+            selected_blocks = self.block_manager.try_defragmenting(VLLM_DEFRAGMENT_BLOCK_IDS)
             scheduler_outputs.blocks_to_copy.extend(selected_blocks)
-        if len(scheduler_outputs.blocks_to_copy) > 0:
-            print('Defragmenting {} blocks'.format(len(scheduler_outputs.blocks_to_copy)))
 
         now = time.time()
 
