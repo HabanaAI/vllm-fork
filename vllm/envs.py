@@ -89,6 +89,7 @@ if TYPE_CHECKING:
     VLLM_RAY_PER_WORKER_GPUS: float = 1.0
     VLLM_RAY_BUNDLE_INDICES: str = ""
     VLLM_CUDART_SO_PATH: Optional[str] = None
+    VLLM_STEP0_FIRST_TOKEN: bool = False
 
 
 def get_default_cache_root():
@@ -585,6 +586,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # specify the path through environment variable VLLM_CUDART_SO_PATH.
     "VLLM_CUDART_SO_PATH":
     lambda: os.getenv("VLLM_CUDART_SO_PATH", None),
+    # If set, return first token as soon as generated
+    "VLLM_STEP0_FIRST_TOKEN":
+    lambda: bool(int(os.getenv("VLLM_STEP0_FIRST_TOKEN", "0"))),
 }
 
 # end-env-vars-definition

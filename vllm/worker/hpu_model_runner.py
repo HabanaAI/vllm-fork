@@ -86,6 +86,7 @@ VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 VLLM_BUCKETING_SCHEME = os.environ.get('VLLM_BUCKETING_SCHEME', 'legacy')
 VLLM_STRICT_BUCKETS = os.environ.get('VLLM_STRICT_BUCKETS', 'false') == 'true'
+VLLM_STEP0_FIRST_TOKEN = bool(int(os.environ.get('VLLM_STEP0_FIRST_TOKEN', '0')))
 DUMMY_TOKEN_ID = -1
 
 
@@ -2634,6 +2635,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert attn_metadata is not None
             is_prompt = attn_metadata.is_prompt
             assert is_prompt is not None
+            force_sample = is_prompt if VLLM_STEP0_FIRST_TOKEN else False
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
@@ -2672,7 +2674,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
-            if num_steps > 1 or use_delayed_sampling:
+            if num_steps > 1 or (use_delayed_sampling and not force_sample):
                 # in case of multi-step scheduling
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
@@ -2742,7 +2744,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     continue
 
-                if use_delayed_sampling:
+                if use_delayed_sampling and not force_sample:
                     fake_output = self._delayed_sampler_outputs(model_input)
                 elif model_input.async_callback is not None:
                     model_input.async_callback()
@@ -2761,10 +2763,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
-                        self._patch_prev_output()
-                        output = self._pad_to_max_num_seqs(
+                        if force_sample:
+                            assert len(output.outputs[0].samples) == 1
+                            output.sampled_token_ids=torch.tensor([[output.outputs[0].samples[0].output_token]], device=self.device)
+                        else:
+                            self._patch_prev_output()
+                        step_output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
-                        self.cached_step_outputs.append(output)
+                        self.cached_step_outputs.append(step_output)
                         self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
                 if use_delayed_sampling \
@@ -2863,7 +2869,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if model_input.is_prompt:
                         output.prefill_hidden_states = hidden_states
                     output.hidden_states = hidden_states
-                if use_delayed_sampling:
+                if use_delayed_sampling and not force_sample:
                     if self.is_driver_worker:
                         return [fake_output]
                     else:

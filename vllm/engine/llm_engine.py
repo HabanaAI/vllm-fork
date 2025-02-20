@@ -1425,6 +1425,12 @@ class LLMEngine:
                     outputs[0], seq_group_metadata_list,
                     scheduler_outputs.scheduled_seq_groups)
 
+                # Return the first token from the first step
+                if envs.VLLM_STEP0_FIRST_TOKEN:
+                    for seq_group in seq_group_metadata_list:
+                        if seq_group.is_prompt and len(ctx.output_queue) > 0:
+                            self._process_model_outputs(ctx=ctx)
+
             # Check if need to run the usual non-async path
             if not allow_async_output_proc:
                 self._process_model_outputs(ctx=ctx)
