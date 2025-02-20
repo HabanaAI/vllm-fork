@@ -733,6 +733,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         affinity = list(os.sched_getaffinity(pid))
 
         if len(affinity) == 224:
+            affinity.sort()
             affinity = affinity[::2] # no threads
             mod_id_to_cpu = {0:2, 1:3, 2:6, 3:7, 4:0, 5:1, 6:4, 7:5}
             cpu = mod_id_to_cpu[rank]
