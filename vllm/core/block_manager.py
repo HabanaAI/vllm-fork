@@ -132,7 +132,6 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
             bt = self.block_tables[seq_id]
             bt.update(bt.blocks)
         changed_block_ids = list(zip(block_ids, new_block_ids))
-        print('DEFRAG:', changed_block_ids)
         return changed_block_ids
 
     def can_allocate(self,
