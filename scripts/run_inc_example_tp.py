@@ -14,6 +14,7 @@ model_path = "/data/models/DeepSeek-R1/"
 # model_path = "deepseek-ai/DeepSeek-V2-Lite"
 model_path = "/software/users/yiliu4/HF_HOME/hub/deepseekv3-bf16-4l-real"
 
+model_path = "/mnt/workdisk/dohayon/Projects/R1/DeepSeek-R1-fp8/"
 
 # Parse the command-line arguments.
 parser = argparse.ArgumentParser()
@@ -187,13 +188,24 @@ if __name__ == "__main__":
     sampling_params = SamplingParams(temperature=0, max_tokens=args.osl)
     model = args.model
     if args.tp_size == 1:
-        llm = LLM(
-            model=model, 
-            tokenizer=args.tokenizer,
-            trust_remote_code=True,
-            dtype="bfloat16",
-            max_model_len=16384,
-        )
+        if quant_inc:
+
+            llm = LLM(
+                model=model, 
+                tokenizer=args.tokenizer,
+                trust_remote_code=True,
+                quantization="inc",
+                dtype="bfloat16",
+                max_model_len=16384,
+            )
+        else:
+            llm = LLM(
+                model=model, 
+                tokenizer=args.tokenizer,
+                trust_remote_code=True,
+                dtype="bfloat16",
+                max_model_len=16384,
+            )
     else:
         if quant_inc:
             llm = LLM(
@@ -218,6 +230,7 @@ if __name__ == "__main__":
             )
             
 
+    print(llm.llm_engine.model_executor.driver_worker.worker.model_runner.model.model)
     # Generate texts from the prompts. The output is a list of RequestOutput objects
     # that contain the prompt, generated text, and other information.
     outputs = llm.generate(prompts, sampling_params)

@@ -163,7 +163,7 @@ def modify_model_layers(module: torch.nn.Module,
     """
 
     def forward_hook(module, args, output):
-        htorch.core.mark_step()
+        # htorch.core.mark_step()
         return output
 
     if counter is None:
@@ -748,7 +748,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     max_position_embeddings=max_pos_embeddings,
                 )
                 self.model = self.lora_manager.create_lora_manager(self.model)
-            if self.model_config.quantization == 'inc':
+            if self.model_config.quantization == 'inc' or (os.getenv("USE_INC", "false")=="true"):
+                print("\n\n Using INC \n\n")
                 logger.info("Preparing model with INC..")
                 with HabanaMemoryProfiler() as m_inc:
                     from neural_compressor.torch.quantization import (
@@ -1600,8 +1601,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
-        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
-                             False, True)
+        # self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
+        #                      False, True)
         return
 
     def warmup_scenario(self,
@@ -1949,7 +1950,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         finalize_calibration(self.model.model)
 
     def shutdown_inc(self):
-        can_finalize_inc = (self.model_config.quantization == 'inc') and \
+        # breakpoint()
+        can_finalize_inc = ((self.model_config.quantization == 'inc') or (self.model_config.quantization == 'fp8')) and \
             (self.model.model is not None) and \
             self.inc_initialized_successfully and \
             not getattr(self, "_is_inc_finalized", False)

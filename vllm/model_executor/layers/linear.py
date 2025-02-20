@@ -212,6 +212,11 @@ class ReplicatedLinear(LinearBase):
                          prefix=prefix)
 
         # All the linear layer supports quant method.
+        # M, N = self.weight.shape[-2:]
+        orig_M = torch.nn.Parameter(torch.tensor(output_size, dtype=torch.int32), requires_grad=False)
+        orig_N = torch.nn.Parameter(torch.tensor(input_size, dtype=torch.int32), requires_grad=False)
+        self.register_parameter("orig_M", orig_M)
+        self.register_parameter("orig_N", orig_N)
         assert self.quant_method is not None
         self.quant_method.create_weights(self,
                                          self.input_size, [self.output_size],
@@ -244,6 +249,7 @@ class ReplicatedLinear(LinearBase):
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         bias = self.bias if not self.skip_bias_add else None
         assert self.quant_method is not None
+        print("in ReplicatedLinear")
         output = self.quant_method.apply(self, x, bias)
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
@@ -376,6 +382,7 @@ class ColumnParallelLinear(LinearBase):
 
     def forward(self, input_):
         bias = self.bias if not self.skip_bias_add else None
+        print("in ColumnParallelLinear")
 
         # Matrix multiply.
         assert self.quant_method is not None
@@ -1137,6 +1144,7 @@ class RowParallelLinear(LinearBase):
 
     def forward(self, input_):
         input_parallel = self.resolve_input(input_)
+        print("in RowParallelLinear")
 
         # Matrix multiply.
         assert self.quant_method is not None

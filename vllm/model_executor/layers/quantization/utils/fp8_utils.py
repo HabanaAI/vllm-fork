@@ -117,6 +117,7 @@ def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype, orig
     else:
         raise ValueError("Only support original weight shape is either 2 or 3")
 
+    # print(dequant_weight.shape, original_M, original_N)
     dequant_weight = unpad_weight(dequant_weight, original_M, original_N, keep_first_dim=keep_first_dim)
 
     return dequant_weight
@@ -137,6 +138,8 @@ def apply_block_fp8_linear_hpu(
     input_2d = input.view(-1, input.shape[-1])
     original_M = original_M.data
     original_N = original_N.data
+    assert original_N is not None
+    assert original_M is not None
     output_shape = [*input.shape[:-1], original_M]
     dequant_weight = dequant_block_fp8_weight_naive(weight, weight_scale, block_size, input_2d.dtype, original_M, original_N)
     output = torch.nn.functional.linear(input_2d, dequant_weight, bias=None)
