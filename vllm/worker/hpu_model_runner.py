@@ -724,7 +724,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.inc_initialized_successfully = False
 
         # CPU affinity
-        rank = int(os.getenv('HABANA_VISIBLE_DEVICES', '0'))
+        try:
+            rank = int(os.getenv('HABANA_VISIBLE_DEVICES', '0'))
+        except:
+            rank = 0
         pid = os.getenv()
         logger.info("Starting rank %d - PID %d", rank, pid)
         logger.info("[%d] %s", rank, str(os.sched_getaffinity(pid)))
