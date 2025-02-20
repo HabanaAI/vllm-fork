@@ -730,7 +730,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             rank = 0
         pid = os.getpid()
         logger.info("Starting rank %d - PID %d", rank, pid)
-        logger.info("[%d] %s", rank, str(os.sched_getaffinity(pid)))
+        affinity = list(os.sched_getaffinity(pid))
+
+        if len(affinity) == 224:
+            affinity = affinity[::2] # no threads
+            dev_to_mod_id = {0:3, 1:7, 2:1, 3:5, 4:2, 5:6, 6:4, 7:0}
+            mod_id_to_cpu = {0: 2, 1:3, 2:6, 3:7, 4:0, 5:1, 6:4, 7:5}
+            cpu = mod_id_to_cpu[dev_to_mod_id[rank]]
+            l = len(affinity) // 8
+            new_affinity = affinity[cpu*l:(cpu+1)*l][3:]
+            os.sched_setaffinity(pid, set(new_affinity))
+            logger.info("[%d] Setting custom affinity", rank)
+
+        logger.info("[%d] Affinity: %s", rank, str(os.sched_getaffinity(pid)))
 
         # Profiler stats
         self.profiler = HabanaHighLevelProfiler()
