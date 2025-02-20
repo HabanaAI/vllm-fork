@@ -728,7 +728,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             rank = int(os.getenv('HABANA_VISIBLE_DEVICES', '0'))
         except:
             rank = 0
-        pid = os.getenv()
+        pid = os.getpid()
         logger.info("Starting rank %d - PID %d", rank, pid)
         logger.info("[%d] %s", rank, str(os.sched_getaffinity(pid)))
 
