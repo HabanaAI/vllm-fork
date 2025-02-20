@@ -725,7 +725,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # CPU affinity
         try:
-            rank = int(os.getenv('HABANA_VISIBLE_DEVICES', '0'))
+            rank = int(os.getenv('HABANA_VISIBLE_MODULES', '0'))
         except:
             rank = 0
         pid = os.getpid()
@@ -734,9 +734,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if len(affinity) == 224:
             affinity = affinity[::2] # no threads
-            dev_to_mod_id = {0:3, 1:7, 2:1, 3:5, 4:2, 5:6, 6:4, 7:0}
-            mod_id_to_cpu = {0: 2, 1:3, 2:6, 3:7, 4:0, 5:1, 6:4, 7:5}
-            cpu = mod_id_to_cpu[dev_to_mod_id[rank]]
+            mod_id_to_cpu = {0:2, 1:3, 2:6, 3:7, 4:0, 5:1, 6:4, 7:5}
+            cpu = mod_id_to_cpu[rank]
             l = len(affinity) // 8
             new_affinity = affinity[cpu*l:(cpu+1)*l][3:]
             os.sched_setaffinity(pid, set(new_affinity))
