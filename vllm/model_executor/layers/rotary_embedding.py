@@ -830,12 +830,7 @@ class MRotaryEmbedding(RotaryEmbedding):
             key: [num_tokens, num_kv_heads * head_size]
         """
         assert positions.ndim == 1 or positions.ndim == 2
-        if positions.ndim == 2 and positions.shape[0] != 3:
-            # HPU positions are [batch_size, num_tokens]
-            # if they are not [3, num_tokens], we will
-            # reshape it to be [num_tokens, ]
-            positions = positions.view(-1)
-
+        # print(f"positions {positions.shape} query {query.shape} key {key.shape}")
         num_tokens = positions.shape[-1]
         cos_sin = self.cos_sin_cache[positions]
         cos, sin = cos_sin.chunk(2, dim=-1)
