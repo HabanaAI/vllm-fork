@@ -411,11 +411,9 @@ class HpuModelAdapter:
             current_module.prepare_cos_sin(
                 positions, recompute_cos_sin=self.recompute_cos_sin)
         else:
-            pass
-            # dont raise error for qwen2.5-vl
-            #raise AttributeError(
-            #    "The module at the end of the path does not have \
-            #    a 'prepare_cos_sin' method.")
+            raise AttributeError(
+               "The module at the end of the path does not have \
+               a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -429,9 +427,10 @@ class HpuModelAdapter:
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
-        if 'lora_mask' in kwargs:
-            LoraMask.setLoraMask(kwargs.pop('lora_mask'))
-        if self.layer_names is not None:
+        LoraMask.setLoraMask(kwargs.pop('lora_mask'))
+        model_config = getattr(self.model, "config", None)
+        model_is_mrope = uses_mrope(model_config)
+        if self.layer_names is not None and not model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
 
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
@@ -908,7 +907,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     ) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
-        input_mrope_positions: List[List[int]] = [[] for _ in range(3)]
+        input_mrope_positions: List[List[int]] = []
         slot_mapping: List[List[int]] = []
         lora_index_mapping: List[List[int]] = []
         lora_prompt_mapping: List[List[int]] = []
@@ -979,6 +978,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
 
+            batch_input_mrope_positions = None
             if seq_group_metadata.multi_modal_data:
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
@@ -993,7 +993,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         seq_group_metadata.mm_processor_kwargs,
                     )
 
-                mrope_positions = None
                 if self.model_is_mrope:
                     image_grid_thw = mm_kwargs.get("image_grid_thw", None)
                     video_grid_thw = mm_kwargs.get("video_grid_thw", None)
@@ -1013,17 +1012,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             second_per_grid_ts=second_per_grid_ts,
                             context_len=context_len,
                         )
+                    assert mrope_positions is not None
                     seq_data.mrope_position_delta = mrope_position_delta
-                    if mrope_positions:
-                        for idx in range(3):
-                            input_mrope_positions[idx].extend(mrope_positions[idx])
-
+                    batch_input_mrope_positions = [[] for _ in range(3)]
+                    for idx in range(3):
+                        batch_input_mrope_positions[idx].extend(mrope_positions[idx])
 
                 multi_modal_kwargs_list.append(mm_kwargs)
 
                 for modality, placeholder_map in placeholder_maps.items():
                     multi_modal_placeholder_maps[modality].extend(
                         placeholder_map)
+
+            input_mrope_positions.append(batch_input_mrope_positions)
 
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
@@ -1057,11 +1058,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_offset = i % self.block_size
                     slot = block_number * self.block_size + block_offset
                     slot_mapping[-1].append(slot)
-
-        if any(input_mrope_positions):
-            input_positions = None  # type: ignore
-        else:
-            input_mrope_positions = None  # type: ignore
 
         max_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
@@ -1115,11 +1111,40 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                    dtype=torch.long,
                                                    device='cpu')
 
-        input_positions = make_tensor_with_pad(input_positions or input_mrope_positions,
-                                               max_len=max_prompt_len,
-                                               pad=0,
-                                               dtype=torch.long,
-                                               device='cpu')
+        mrope_input_positions: Optional[List[List[int]]] = None
+        if any(mrope_position is not None
+               for mrope_position in input_mrope_positions):
+            assert self.model_is_mrope
+            mrope_input_positions = [[] for _ in range(3)]
+            for idx in range(3):
+                for b_idx, input_mrope_position in enumerate(input_mrope_positions):
+                    if input_mrope_position is None:
+                        positions = input_positions[b_idx]
+                    else:
+                        positions = input_mrope_position[idx]
+                    # print(f"positions {len(positions)}")
+                    padded_positions = make_tensor_with_pad([positions],
+                                                        max_len=max_prompt_len,
+                                                        pad=0,
+                                                        dtype=torch.long,
+                                                        device='cpu').flatten().tolist()
+                    mrope_input_positions[idx].extend(padded_positions)
+            input_positions = None  # type: ignore
+            input_positions_tensor = torch.tensor(mrope_input_positions,
+                                                  dtype=torch.long,
+                                                  device='cpu',
+                                                  )
+        else:
+            input_mrope_positions = None  # type: ignore
+            input_positions_tensor = make_tensor_with_pad(input_positions,
+                                                max_len=max_prompt_len,
+                                                pad=0,
+                                                dtype=torch.long,
+                                                device='cpu')
+            if self.model_is_mrope:
+                # Qwen 2.5 vl works with flatten input_positions
+                input_positions_tensor = input_positions_tensor.flatten()
+
 
         slot_mapping = make_tensor_with_pad(slot_mapping,
                                             max_len=max_prompt_len,
@@ -1148,7 +1173,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
         input_tokens_tensor = input_tokens_tensor.to(  # type: ignore
             self.device, non_blocking=True)
-        input_positions = input_positions.to(  # type: ignore
+        input_positions_tensor = input_positions_tensor.to(  # type: ignore
             self.device, non_blocking=True)
         slot_mapping = slot_mapping.to(  # type: ignore
             self.device, non_blocking=True)
@@ -1183,7 +1208,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.device, non_blocking=True)
 
         return PreparePromptMetadata(input_tokens=input_tokens_tensor,
-                                     input_positions=input_positions,
+                                     input_positions=input_positions_tensor,
                                      attn_metadata=attn_metadata,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
@@ -1247,17 +1272,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
-                if seq_data.mrope_position_delta is not None:
-                    context_len = seq_data.get_num_computed_tokens()
-                    next_pos = MRotaryEmbedding.get_next_input_positions(
-                        seq_data.mrope_position_delta,
-                        context_len,
-                        seq_len,
-                    )
-                    for idx in range(3):
-                        input_mrope_positions[idx].extend(next_pos[idx])
-                else:
-                    input_positions.append([position])
+                # FIXME: Why do we need to change the decode? 
+                # I didn't find a similar example on the GPU code
+                # only on the CPU 
+                #
+                # if seq_data.mrope_position_delta is not None:
+                #     context_len = seq_data.get_num_computed_tokens()
+                #     next_pos = MRotaryEmbedding.get_next_input_positions(
+                #         seq_data.mrope_position_delta,
+                #         context_len,
+                #         seq_len,
+                #     )
+                #     for idx in range(3):
+                #         input_mrope_positions[idx].extend(next_pos[idx])
+                # else:
+                input_positions.append([position])
 
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -1303,6 +1332,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_positions = torch.tensor(input_positions or input_mrope_positions,
                                        dtype=torch.long,
                                        device='cpu')
+
+        if self.model_is_mrope:
+            # Qwen 2.5 vl works with flatten input_positions
+            input_positions = input_positions.flatten()
 
         num_decode_tokens = len(seq_lens)
 
@@ -1708,6 +1741,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
+        # TODO: Add dummy data with metadata info
+        # encoder_dummy_data \
+        #     = self.input_registry.dummy_data_for_profiling(
+        #         self.model_config,
+        #                                 seq_len,
+        #                                 self.mm_registry,
+        #                                 is_encoder_data=True)        
         if is_prompt:
             input_len = seq_len
             output_len = 0
