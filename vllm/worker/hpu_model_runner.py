@@ -214,6 +214,7 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
+
 class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
 
     def generate_prompt_buckets(self):
@@ -1460,7 +1461,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_tables.append(block_table)
 
       if output is None:
-            input_tokens = torch.tensor(input_tokens,
+        input_tokens = torch.tensor(input_tokens,
                                         dtype=torch.long,
                                         device='cpu')
         else:
