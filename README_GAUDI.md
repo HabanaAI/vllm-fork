@@ -395,38 +395,38 @@ However, disabling this feature in production environments is not recommended, a
 
 # Long context support
 **Environment variable's setting**
-Environment variables for OOM/functional issues avoiding.
+Environment variables for avoiding OOM/functional issues.
 VLLM_ENGINE_ITERATION_TIMEOUT_S=3600
 VLLM_RPC_TIMEOUT=100000
 VLLM_PROMPT_USE_FUSEDSDPA=1
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true
 PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-Other environment variables setting is depending on context length.
+Other environment variables settings depend on context length.
 
 32K context length flags example:
-VLLM_GRAPH_RESERVED_MEM. it's value depends on model and long context. VLLM_GRAPH_RESERVED_MEM=0.02 for llama3.1-8b. VLLM_GRAPH_RESERVED_MEM=0.1 for llama3.1-70b.
-VLLM_PROMPT_BS_BUCKET_MIN=1 # proposal for usage. depends on model. Can be increased if no OOM
-VLLM_PROMPT_BS_BUCKET_STEP=16 # proposal for usage. depends on model. Can be increased until no OOM or decreased if OOM
-VLLM_PROMPT_BS_BUCKET_MAX=16 # proposal for usage. depends on model. Can be increased until no OOM or decreased if OOM
-VLLM_PROMPT_SEQ_BUCKET_MIN=24576 # proposal for usage. depends on warmup results
-VLLM_PROMPT_SEQ_BUCKET_STEP=2048 # proposal for usage. depends on warmup results
-VLLM_PROMPT_SEQ_BUCKET_MAX=32768 # context length 32K, 16384 for 16K
-VLLM_DECODE_BLOCK_BUCKET_MIN=1024 # proposal for usage. depends on warmup results
-VLLM_DECODE_BLOCK_BUCKET_STEP=1024 # proposal for usage. depends on warmup results
-VLLM_DECODE_BLOCK_BUCKET_MAX=33792 # max_num_seqs * max_decode_seq // self.block_size, where max_decode_seq is input + output # i.e. 128*((32+1)* 1024)/128 or 32*((32+1)*1024)/128
+VLLM_GRAPH_RESERVED_MEM. Its value depends on model and context length settings. Use VLLM_GRAPH_RESERVED_MEM=0.02 for llama3.1-8b or VLLM_GRAPH_RESERVED_MEM=0.1 for llama3.1-70b.
+VLLM_PROMPT_BS_BUCKET_MIN=1 # Suggested value, depends on a model. You can increase it until you reach an OOM error, or decrease it if OOM occurs.
+VLLM_PROMPT_BS_BUCKET_STEP=16 # Suggested value, depends on a model. Increasing the step value results in fewer buckets, so if the user gets OOM, they should increase the value.
+VLLM_PROMPT_BS_BUCKET_MAX=16 # Suggested value, depends on a model. You can increase it until you reach an OOM error, or decrease it if OOM occurs.
+VLLM_PROMPT_SEQ_BUCKET_MIN=24576 # Suggested value, depends on warmup results.
+VLLM_PROMPT_SEQ_BUCKET_STEP=2048 # Suggested value, depends on warmup results.
+VLLM_PROMPT_SEQ_BUCKET_MAX=32768 # This is for context length of 32K. Use 16384 for 16K.
+VLLM_DECODE_BLOCK_BUCKET_MIN=1024 # Suggested value, depends on warmup results.
+VLLM_DECODE_BLOCK_BUCKET_STEP=1024 # Suggested value, depends on warmup results.
+VLLM_DECODE_BLOCK_BUCKET_MAX=33792 # max_num_seqs * max_decode_seq // self.block_size, where max_decode_seq is input + output, i.e. 128*((32+1)* 1024)/128 or 32*((32+1)*1024)/128.
 
-**Batch size setting**
-Usage of default batch_size=256 is not optimal for long context 8K+. Recompilation can occur due to not enough KV cache space for some sequence group.
+**Batch size settings**
+Usage of default batch_size=256 is not optimal for long context (8K+). Recompilations can occur if there is not enough KV cache space for some sequence groups.
 
 Please decrease batch_size if recompialtion or next recomputation warning occurs during inference run:
-recompilation message example: "Configuration: (dprompt, 1, 36864) was not warmed-up!"
+recompilation message example: "Configuration: (prompt, 1, 36864) was not warmed-up!"
 warning example: "Sequence group cmpl-3cbf19b0c6d74b3f90b5d5db2ed2385e-0 is preempted by PreemptionMode.RECOMPUTE mode because there is not enough KV cache space. This can affect the end-to-end performance. Increase gpu_memory_utilization or tensor_parallel_size to provide more KV cache memory."
 
 **Usage of Multi-Step Scheduling feature**
-It is recommended to enable "Multi-Step Scheduling feature" feature for better decode performance. More details about feature: https://github.com/vllm-project/vllm/issues/6854
+It is recommended to enable Multi-Step Scheduling for better decode performance. Here are more details about the feature: vllm-project#6854
 
-**Gaudi3 usage**
+**Gaudi3**
 All steps above are valid for gaudi3.
 It is recommended only to change VLLM_PROMPT_SEQ_BUCKET_STEP to higher value for faster warmup.
 
