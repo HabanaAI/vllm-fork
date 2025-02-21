@@ -1460,8 +1460,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
-      if output is None:
-        input_tokens = torch.tensor(input_tokens,
+        if output is None:
+            input_tokens = torch.tensor(input_tokens,
                                         dtype=torch.long,
                                         device='cpu')
         else:
