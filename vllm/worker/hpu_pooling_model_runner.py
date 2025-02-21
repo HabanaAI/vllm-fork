@@ -93,7 +93,6 @@ class HPUPoolingModelRunner(
             super().trim_attn_metadata(model_input.attn_metadata),
             "intermediate_tensors": intermediate_tensors,
             "lora_mask": lora_mask,
-            "intermediate_tensors": intermediate_tensors,
         }
 
         if htorch.utils.internal.is_lazy():
