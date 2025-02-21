@@ -2274,6 +2274,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                            graph_free_mem)
                 decode_available_memory = (graph_free_mem -
                                            prompt_available_memory)
+                if int(os.environ.get('VLLM_NUM_HPU_BLOCKS', '0')) > 0:
+                    prompt_available_memory = graph_free_mem
+                    decode_available_memory = graph_free_mem
                 msg = (
                     f"Using {format_bytes(graph_free_mem)}"
                     f"/{format_bytes(free_mem)} "
