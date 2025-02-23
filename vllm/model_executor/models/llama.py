@@ -493,6 +493,7 @@ class LlamaDecoderLayer(nn.Module):
                                         hidden_states=hidden_states,
                                         kv_cache=kv_cache,
                                         attn_metadata=attn_metadata)
+        htorch.core.mark_step()
         
         # Calculate real seq_len from product of inaccurate batch_size and seq_len
         seq_len = (batch_size_fake*seq_len_fake)//batch_size
