@@ -345,26 +345,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 f"{format_bytes(cache_size_bytes)} reserved for KV cache")
             logger.info(msg)
             num_hpu_blocks = int(cache_size_bytes // cache_block_size)
-        graph_reserved_mem = (float(
-            os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.1'))
-                              if not self.model_config.enforce_eager else 0)
-        graph_headroom = 1 - graph_reserved_mem
-        available_hpu_memory = free_hpu_memory * \
-            self.cache_config.gpu_memory_utilization
-        hpu_memory_margin = free_hpu_memory * (
-            1 - self.cache_config.gpu_memory_utilization)
-        self.model_runner.mem_margin = hpu_memory_margin
-        cache_size_bytes = available_hpu_memory * graph_headroom
-        graph_headroom_bytes = available_hpu_memory * (1 - graph_headroom)
-        msg = (
-            f"Free device memory: {format_bytes(free_hpu_memory)}, "
-            f"{format_bytes(available_hpu_memory)} usable "
-            f"(gpu_memory_utilization={self.cache_config.gpu_memory_utilization}),"
-            f" {format_bytes(graph_headroom_bytes)} reserved for HPUGraphs "
-            f"(VLLM_GRAPH_RESERVED_MEM={graph_reserved_mem}), "
-            f"{format_bytes(cache_size_bytes)} reserved for KV cache")
-        logger.info(msg)
-        num_hpu_blocks = int(cache_size_bytes // cache_block_size)
         num_cpu_blocks = int(self.cache_config.swap_space_bytes //
                              cache_block_size)
         num_hpu_blocks = max(num_hpu_blocks, 0)
