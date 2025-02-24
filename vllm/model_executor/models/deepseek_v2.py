@@ -111,10 +111,6 @@ class DeepseekV2MoE(nn.Module):
         self.routed_scaling_factor = config.routed_scaling_factor
         self.n_shared_experts = config.n_shared_experts
         self.routed_scaling_factor = config.routed_scaling_factor
-        if self.tp_size > config.n_routed_experts:
-            raise ValueError(
-                f"Tensor parallel size {self.tp_size} is greater than "
-                f"the number of experts {config.n_routed_experts}.")
 
         if config.hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {config.hidden_act}. "
@@ -142,7 +138,7 @@ class DeepseekV2MoE(nn.Module):
             use_grouped_topk=True,
             num_expert_group=config.n_group,
             topk_group=config.topk_group,
-            tp_size=self.tp_size // self.ep_size,
+            tp_size=self.tp_size,
             ep_size=self.ep_size,
             prefix=f"{prefix}.experts",
             scoring_func=config.scoring_func,
