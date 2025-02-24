@@ -75,7 +75,7 @@ _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING', 'false').lower() == 'true'
-VLLM_BUCKETING_SCHEME = os.environ.get('VLLM_BUCKETING_SCHEME', 'polynomial')
+VLLM_BUCKETING_SCHEME = os.environ.get('VLLM_BUCKETING_SCHEME', 'legacy')
 VLLM_STRICT_BUCKETS = os.environ.get('VLLM_STRICT_BUCKETS', 'false') == 'true'
 DUMMY_TOKEN_ID = -1
 
@@ -245,7 +245,41 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
         print(msg)
 
 
-class PolynomialBucketingScheme:
+class BucketingScheme:
+    def find_bucket(self, real_bs, real_blocks):
+        for bs, blocks in self.buckets:
+            if bs < real_bs:
+                continue
+            for b in blocks:
+                if b < real_blocks:
+                    continue
+                return (bs, b)
+        assert False, "Couldn't find bucket for {} {}".format(real_bs, real_blocks)
+
+    def list_buckets(self):
+        buckets = [[(bs, b) for b in blocks] for bs, blocks in self.buckets]
+        buckets = list(itertools.chain(*buckets))
+        return buckets
+
+
+class FileBucketingScheme(BucketingScheme):
+    def __init__(self, filename, max_bs, max_blocks):
+        self.buckets = self._read_buckets(filename, max_bs, max_blocks)
+        logger.info('Decode buckets [file]: {}'.format(self.list_buckets()))
+
+    def _read_buckets(self, filename, max_bs, max_blocks):
+        buckets = {}
+        with open(filename) as f:
+            for line in f.readlines():
+                bs, blocks = line.strip().split(':')
+                bs = min(int(bs), max_bs)
+                blocks = set(min(int(b), max_blocks) for b in blocks.split())
+                buckets.setdefault(bs, set())
+                buckets[bs].update(blocks)
+        return [(bs, list(sorted(buckets[bs]))) for bs in sorted(buckets.keys())]
+
+
+class PolynomialBucketingScheme(BucketingScheme):
     def __init__(self, max_bs, max_blocks):
         min_blocks_per_seq = 2
         max_blocks_per_seq = 8
@@ -256,6 +290,7 @@ class PolynomialBucketingScheme:
         bs_div = 4
         bs_range = self._gen_bs_range(min_bs, max_bs, bs_div)
         self.buckets = self._gen_buckets(bs_range, max_block_steps, min_blocks_per_seq, max_blocks_per_seq, max_blocks, block_beta, block_rounding)
+        logger.info('Decode buckets [polynomial]: {}'.format(self.list_buckets()))
 
     def _poly_fn(self, min_val, max_val, alpha, beta):
         z = (max_val - min_val) * beta
@@ -303,21 +338,6 @@ class PolynomialBucketingScheme:
             block_range = self._apply(gen_fn, block_steps, block_rounding)
             buckets.append((bs, block_range))
         return buckets
-
-    def list_buckets(self):
-        buckets = [[(bs, b) for b in blocks] for bs, blocks in self.buckets]
-        buckets = list(itertools.chain(*buckets))
-        return buckets
-
-    def find_bucket(self, real_bs, real_blocks):
-        for bs, blocks in self.buckets:
-            if bs < real_bs:
-                continue
-            for b in blocks:
-                if b < real_blocks:
-                    continue
-                return (bs, b)
-        assert False, "Couldn't find bucket for {} {}".format(real_bs, real_blocks)
 
 
 class DummyBucketingScheme:
@@ -892,6 +912,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if VLLM_BUCKETING_SCHEME == 'polynomial':
             self.bucketing_ctx.prompt_scheme = LegacyPromptBucketingScheme(legacy_ctx)
             self.bucketing_ctx.decode_scheme = PolynomialBucketingScheme(self.max_num_seqs, max_blocks)
+        elif VLLM_BUCKETING_SCHEME.startswith('file:'):
+            _, filename = VLLM_BUCKETING_SCHEME.split(':')
+            self.bucketing_ctx.prompt_scheme = LegacyPromptBucketingScheme(legacy_ctx)
+            self.bucketing_ctx.decode_scheme = FileBucketingScheme(filename, self.max_num_seqs, max_blocks)
         else:
             self.bucketing_ctx.prompt_scheme = LegacyPromptBucketingScheme(legacy_ctx)
             self.bucketing_ctx.decode_scheme = LegacyDecodeBucketingScheme(legacy_ctx, max_blocks)
