@@ -389,7 +389,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         # NOTE(kzawora): We should use virtual engine index here
         # for pipeline parallelism. Using 0 for now.
         assert self.hpu_cache is not None
-        self.model_runner.warmup_model(self.hpu_cache[0])
+        self.model_runner.warmup_model(self.hpu_cache[0], self.model_runner.mem_margin)
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)

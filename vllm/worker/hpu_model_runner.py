@@ -1801,7 +1801,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     @torch.inference_mode()
-    def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
+    def warmup_model(self, kv_caches: List[torch.Tensor], mem_margin_val: Optional[float] = None) -> None:
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
             is_prompt = phase == 'prompt'
@@ -1855,6 +1855,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     kv_caches)
 
             if not self.enforce_eager and htorch.utils.internal.is_lazy():
+                if self.mem_margin is None:
+                   self.mem_margin = mem_margin_val
                 assert self.mem_margin is not None, \
                     ("HabanaWorker.determine_num_available_blocks needs "
                     "to be called before warming up the model.")
