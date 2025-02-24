@@ -34,7 +34,7 @@ set_numactl(){
     done
     CORES_STR=$(IFS="," ; echo "${CORES[*]}")
 
-    NUMA_CTL="numactl -C $CORES_STR -m ${NODE_MEM[0]}"
+    NUMA_CTL="numactl -C $CORES_STR -l"
     MODULES_STR=$(IFS=',' ; echo "${MODULES[@]}")
     echo "using '$NUMA_CTL' for module #.$MODULES_STR"
 }

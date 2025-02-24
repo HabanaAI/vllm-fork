@@ -4,7 +4,7 @@
 # Usage:
 #    # Do work and commit your work.
 
-#    # Format files that differ from origin/main.
+#    # Format files that differ from ${MAIN_BRANCH}.
 #    bash format.sh
 
 #    # Commit changed files with message 'Run yapf and ruff'
@@ -15,6 +15,8 @@
 
 # Cause the script to exit if a single command fails
 set -eo pipefail
+
+MAIN_BRANCH=prc_main
 
 # this stops git rev-parse from failing if we run this from the .git directory
 builtin cd "$(dirname "${BASH_SOURCE:-$0}")"
@@ -83,7 +85,7 @@ format_changed() {
     #
     # `diff-filter=ACM` and $MERGEBASE is to ensure we only format files that
     # exist on both branches.
-    MERGEBASE="$(git merge-base origin/main HEAD)"
+    MERGEBASE="$(git merge-base ${MAIN_BRANCH} HEAD)"
 
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
         git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 \
@@ -113,7 +115,7 @@ echo 'vLLM yapf: Done'
 
 # Run mypy
 echo 'vLLM mypy:'
-tools/mypy.sh
+bash tools/mypy.sh
 echo 'vLLM mypy: Done'
 
 
@@ -141,7 +143,7 @@ spell_check_changed() {
     #
     # `diff-filter=ACM` and $MERGEBASE is to ensure we only lint files that
     # exist on both branches.
-    MERGEBASE="$(git merge-base origin/main HEAD)"
+    MERGEBASE="$(git merge-base ${MAIN_BRANCH} HEAD)"
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
         git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs \
             codespell "${CODESPELL_EXCLUDES[@]}"
@@ -178,7 +180,7 @@ lint_changed() {
     #
     # `diff-filter=ACM` and $MERGEBASE is to ensure we only lint files that
     # exist on both branches.
-    MERGEBASE="$(git merge-base origin/main HEAD)"
+    MERGEBASE="$(git merge-base ${MAIN_BRANCH} HEAD)"
 
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
         git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs \
@@ -219,7 +221,7 @@ isort_check_changed() {
     #
     # `diff-filter=ACM` and $MERGEBASE is to ensure we only lint files that
     # exist on both branches.
-    MERGEBASE="$(git merge-base origin/main HEAD)"
+    MERGEBASE="$(git merge-base ${MAIN_BRANCH} HEAD)"
 
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
         git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs \
@@ -267,7 +269,7 @@ clang_format_changed() {
     #
     # `diff-filter=ACM` and $MERGEBASE is to ensure we only format files that
     # exist on both branches.
-    MERGEBASE="$(git merge-base origin/main HEAD)"
+    MERGEBASE="$(git merge-base ${MAIN_BRANCH} HEAD)"
 
     # Get the list of changed files, excluding the specified ones
     changed_files=$(git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.h' '*.cpp' '*.cu' '*.cuh' | (grep -vFf <(printf "%s\n" "${CLANG_FORMAT_EXCLUDES[@]}") || echo -e))
@@ -294,7 +296,7 @@ fi
 echo 'vLLM clang-format: Done'
 
 echo 'vLLM actionlint:'
-tools/actionlint.sh -color
+bash tools/actionlint.sh -color
 echo 'vLLM actionlint: Done'
 
 echo 'vLLM shellcheck:'
