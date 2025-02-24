@@ -1003,7 +1003,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             context_lens.append(context_len)
             query_lens.append(seq_len - context_len)
             input_tokens.append(prompt_tokens)
-            print("tokens", prompt_tokens)
+            # print("tokens", prompt_tokens)
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
@@ -1163,7 +1163,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                   dtype=torch.long,
                                                   device='cpu',
                                                   )
-            print(f" ABC: input positions with MROPE shape is {input_positions_tensor.shape}")
+            # print(f" ABC: input positions with MROPE shape is {input_positions_tensor.shape}")
         else:
             input_mrope_positions = None  # type: ignore
             input_positions_tensor = make_tensor_with_pad(input_positions,
@@ -1174,7 +1174,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self.model_is_mrope:
                 # Qwen 2.5 vl works with flatten input_positions
                 input_positions_tensor = input_positions_tensor.flatten()
-            print(f" ABC: input positions no mrope shape is {input_positions_tensor.shape}")
+            # print(f" ABC: input positions no mrope shape is {input_positions_tensor.shape}")
 
 
         slot_mapping = make_tensor_with_pad(slot_mapping,
