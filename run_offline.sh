@@ -3,7 +3,8 @@ set -ex
 usage() {
     echo "Usage: $0"
     echo "Options:"
-    echo "  --model|-m               Model path lub model stub"
+    echo "  --model|-m                    Model path lub model stub"
+    echo "  --image_type|-i               Type model: snowscat synthetic"
     exit 1
 }
 
@@ -17,13 +18,17 @@ while [[ $# -gt 0 ]]; do
         SKIPWARMUP="On"
         shift 1
         ;;
-    --download_image)
-        Donwload="On"
-        shift 1
-        ;;
     --install_vllm)
         InstallVLLM="On"
         shift 1
+        ;;
+    --multiple_prompts)
+        MultiPrompt="On"
+        shift 1
+        ;;
+    --image_type | -i)
+        ImageType=$2
+        shift 2
         ;;
     --help)
         usage
@@ -35,7 +40,7 @@ if [[ -n $HELP ]]; then
     usage
 fi
 
-if [[ -n $Donwload ]]; then
+if [[ $ImageType == "snowscat" ]] && [[ ! $(md5sum /tmp/snowscat-H3oXiq7_bII-unsplash.jpg | cut -d" " -f1) == "3ad5657658d1a7684e35541778d30204" ]]; then
     python3 -c "import requests; from PIL import Image; url = 'https://huggingface.co/alkzar90/ppaine-landscape/resolve/main/assets/snowscat-H3oXiq7_bII-unsplash.jpg'; filename = url.split('/')[-1]; r = requests.get(url, allow_redirects=True); open(filename, 
 'wb').write(r.content); image = Image.open(f'./{filename}'); image = image.resize((1200, 600)); image.save(f'/tmp/{filename}')"
 fi
@@ -68,10 +73,17 @@ else
     export VLLM_DECODE_BLOCK_BUCKET_STEP=1024
 fi
 
+EXTRAARGS=" "
+if [[ -n "$MultiPrompt" ]]; then
+    EXTRAARGS=" --multiple_prompts"
+fi
+
 #export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
 #export EXPERIMENTAL_WEIGHT_SHARING=0
 
 if [[ "$model" == *"Qwen2"* ]]; then
     export WORKAROUND=1
 fi
-python offline_inferece.py -m $model
+
+ARGS="-m $model -i $ImageType $EXTRAARGS"
+python offline_inferece.py $ARGS
