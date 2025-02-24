@@ -435,28 +435,6 @@ class DefaultModelLoader(BaseModelLoader):
                     logger.warning(warning_msg)
 
             _process_weights_after_loading(model, model_config, target_device)
-            for _, module in model.named_modules():
-                quant_method = getattr(module, "quant_method", None)
-                if isinstance(quant_method, QuantizeMethodBase):
-                    # When quant methods need to process weights after loading
-                    # (for repacking, quantizing, etc), they expect parameters
-                    # to be on the global target device. This scope is for the
-                    # case where cpu offloading is used, where we will move the
-                    # parameters onto device for processing and back off after.
-                    with device_loading_context(module, target_device):
-                        quant_method.process_weights_after_loading(module)
-                    if is_hpu:
-                        hpu_distributed_barrier()
-
-                if isinstance(module, Attention) and \
-                    hasattr(module, "process_weights_after_loading"):
-                    # When attention modules need to process weights after
-                    # currently only used by MLA
-                    # TODO(lucas): see if there is a way to unify the signatures
-                    # of process_weights_after_loading
-                    module.process_weights_after_loading(model_config.dtype)
-                    if is_hpu:
-                        hpu_distributed_barrier()
         if vllm_config.cache_config.cache_dtype == "fp8_inc":
             from neural_compressor.torch.algorithms.fp8_quant._quant_common.helper_modules import PatchedVLLMKVCache
             from neural_compressor.torch.algorithms.fp8_quant._quant_common.quant_config import Fp8cfg
@@ -486,9 +464,9 @@ class DefaultModelLoader(BaseModelLoader):
                 if mod.__class__.__name__ == "VLLMKVCache":
                     mod.__hqt_config__ = cfg
                     mod_extra_config = ModuleExtraConfig(
-                        inputs=[QuantInput(lp_dtype=torch.float8_e4m3fn, hp_dtype=torch.bfloat16, scale_inv=torch.tensor(1., device='hpu:0', dtype=torch.bfloat16))],
-                        outputs=[DequantOutput(lp_dtype=torch.float8_e4m3fn, hp_dtype=torch.bfloat16, scale=torch.tensor(1., device='hpu:0', dtype=torch.bfloat16))],
-                        scale=ModuleConfig(inputs=[torch.tensor(1., device='hpu:0', dtype=torch.bfloat16)], outputs=[torch.tensor(1., device='hpu:0', dtype=torch.bfloat16)]),
+                        inputs=[QuantInput(lp_dtype=torch.float8_e4m3fn, hp_dtype=torch.bfloat16, scale_inv=torch.tensor(1., device=load_device, dtype=torch.bfloat16))],
+                        outputs=[DequantOutput(lp_dtype=torch.float8_e4m3fn, hp_dtype=torch.bfloat16, scale=torch.tensor(1., device=load_device, dtype=torch.bfloat16))],
+                        scale=ModuleConfig(inputs=[torch.tensor(1., device=load_device, dtype=torch.bfloat16)], outputs=[torch.tensor(1., device=load_device, dtype=torch.bfloat16)]),
                         config_params={"lp_dtype": torch.float8_e4m3fn, "hp_dtype": torch.bfloat16},
                     )
                     parent = parent_child_mod_dict[mod].parent
