@@ -1011,6 +1011,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             context_lens.append(context_len)
             query_lens.append(seq_len - context_len)
             input_tokens.append(prompt_tokens)
+            print("tokens", prompt_tokens)
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
@@ -1159,7 +1160,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         positions = input_positions[b_idx]
                     else:
                         positions = input_mrope_position[idx]
-                    # print(f"positions {len(positions)}")
                     padded_positions = make_tensor_with_pad([positions],
                                                         max_len=max_prompt_len,
                                                         pad=0,
@@ -1171,6 +1171,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                   dtype=torch.long,
                                                   device='cpu',
                                                   )
+            print(f" ABC: input positions with MROPE shape is {input_positions_tensor.shape}")
         else:
             input_mrope_positions = None  # type: ignore
             input_positions_tensor = make_tensor_with_pad(input_positions,
@@ -1181,6 +1182,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self.model_is_mrope:
                 # Qwen 2.5 vl works with flatten input_positions
                 input_positions_tensor = input_positions_tensor.flatten()
+            print(f" ABC: input positions no mrope shape is {input_positions_tensor.shape}")
 
 
         slot_mapping = make_tensor_with_pad(slot_mapping,
@@ -1309,21 +1311,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
-                # FIXME: Why do we need to change the decode? 
-                # I didn't find a similar example on the GPU code
-                # only on the CPU 
-                #
-                # if seq_data.mrope_position_delta is not None:
-                #     context_len = seq_data.get_num_computed_tokens()
-                #     next_pos = MRotaryEmbedding.get_next_input_positions(
-                #         seq_data.mrope_position_delta,
-                #         context_len,
-                #         seq_len,
-                #     )
-                #     for idx in range(3):
-                #         input_mrope_positions[idx].extend(next_pos[idx])
-                # else:
+
                 input_positions.append([position])
+
+                if seq_data.mrope_position_delta is not None:
+                    context_len = seq_data.get_num_computed_tokens()
+                    pos_for_mrope = MRotaryEmbedding.get_next_input_positions(
+                        seq_data.mrope_position_delta,
+                        context_len,
+                        seq_len,
+                    )
+                else:
+                    pos_for_mrope = [[position]] * 3
+
+                for idx in range(3):
+                    input_mrope_positions[idx].extend(pos_for_mrope[idx])
 
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -1361,18 +1363,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_tokens = output[:real_batch_size].clone()
 
 
-        if any(input_mrope_positions):
-            input_positions = None  # type: ignore
+        if self.model_is_mrope:
+            input_positions = None
         else:
-            input_mrope_positions = None  # type: ignore
+            input_mrope_positions = None
 
         input_positions = torch.tensor(input_positions or input_mrope_positions,
                                        dtype=torch.long,
                                        device='cpu')
-
-        if self.model_is_mrope:
-            # Qwen 2.5 vl works with flatten input_positions
-            input_positions = input_positions.flatten()
 
         num_decode_tokens = len(seq_lens)
 

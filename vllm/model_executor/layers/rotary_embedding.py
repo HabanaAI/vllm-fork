@@ -830,7 +830,7 @@ class MRotaryEmbedding(RotaryEmbedding):
             key: [num_tokens, num_kv_heads * head_size]
         """
         assert positions.ndim == 1 or positions.ndim == 2
-        # print(f"positions {positions.shape} query {query.shape} key {key.shape}")
+        print(f" rotary_emd positions {positions.shape} query {query.shape} key {key.shape}")
         num_tokens = positions.shape[-1]
         cos_sin = self.cos_sin_cache[positions]
         cos, sin = cos_sin.chunk(2, dim=-1)
