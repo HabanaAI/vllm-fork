@@ -1045,7 +1045,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = len(seq_group_metadata_list)
         seq_data = [list(sgm.seq_data.values())[0] for sgm in seq_group_metadata_list]
         if is_prompt:
-            max_seq_len = max(len(sd.prompt_token_ids) + len(sd.output_token_ids) for sd in seq_data)
+            if self.enable_merged_prefill:
+                max_seq_len = sum(len(sd.prompt_token_ids) + len(sd.output_token_ids) for sd in seq_data)
+            else:
+                max_seq_len = max(len(sd.prompt_token_ids) + len(sd.output_token_ids) for sd in seq_data)
             return self.bucketing_ctx.find_prompt_bucket, real_batch_size, max_seq_len
         block_tables = [list(sgm.block_tables.values())[0] for sgm in seq_group_metadata_list]
         if self.use_contiguous_pa:
