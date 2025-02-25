@@ -9,11 +9,14 @@ usage() {
     echo
     echo "  -c    - path to the test data config (e.g. configs/small-models.txt)"
     echo "  -t    - tensor parallel size"
+    echo "  -a    - enable automatic prefix caching"
+
     echo
 }
 
 SUCCESS=0
-
+APC_ENABLED="false"
+TP_SIZE=1
 while getopts "c:t:" OPT; do
   case ${OPT} in
     c ) 
@@ -21,6 +24,9 @@ while getopts "c:t:" OPT; do
         ;;
     t )
         TP_SIZE="$OPTARG"
+        ;;
+    a )
+        APC_ENABLED="true"
         ;;
     \? )
         usage
@@ -40,6 +46,7 @@ do
 
     export LM_EVAL_TEST_DATA_FILE=$PWD/configs/${MODEL_CONFIG}
     export LM_EVAL_TP_SIZE=$TP_SIZE
+    export LM_EVAL_APC_ENABLED=$APC_ENABLED
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     export VLLM_SKIP_WARMUP=true
     export TQDM_BAR_FORMAT="{desc}: {percentage:3.0f}% {bar:10} | {n_fmt}/{total_fmt} [{elapsed}<{remaining}]" 
