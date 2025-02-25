@@ -118,7 +118,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
-        self.total_copied_blocks = 0
+        self.total_num_copied_blocks = 0
+        self.total_block_copies = 0
 
     def full_trace_handler(self, dir_name, use_gzip=False):
 
@@ -454,9 +455,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         if (worker_input.blocks_to_copy is not None
                 and worker_input.blocks_to_copy.numel() > 0):
             num_blocks = worker_input.blocks_to_copy.numel()
-            self.total_copied_blocks += num_blocks
+            self.total_num_copied_blocks += num_blocks
+            self.total_block_copies += 1
             self.model_runner.profiler.record_counter(self.model_runner.profiler.get_timestamp_us(), {
-                "total_copied_blocks": self.total_copied_blocks,
+                "total_num_copied_blocks": self.total_num_copied_blocks,
+                "total_block_copies": self.total_block_copies,
             })
             self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
 
