@@ -27,7 +27,7 @@ ENABLE_ARTIFICIAL_PREEMPT = bool(
     os.getenv("VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT", False))  # noqa
 ARTIFICIAL_PREEMPTION_PROB = 0.5
 ARTIFICIAL_PREEMPTION_MAX_CNT = 500
-
+VLLM_DEFRAGMENT_BLOCK_IDS = int(os.getenv("VLLM_DEFRAGMENT_BLOCK_IDS", "0"))
 
 class PreemptionMode(enum.Enum):
     """Preemption modes.
@@ -1397,8 +1397,12 @@ class Scheduler:
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
         scheduler_start_time = time.perf_counter()
-
         scheduler_outputs: SchedulerOutputs = self._schedule()
+
+        if VLLM_DEFRAGMENT_BLOCK_IDS > 0:
+            selected_blocks = self.block_manager.try_defragmenting(VLLM_DEFRAGMENT_BLOCK_IDS)
+            scheduler_outputs.blocks_to_copy.extend(selected_blocks)
+
         now = time.time()
 
         if not self.cache_config.enable_prefix_caching:
