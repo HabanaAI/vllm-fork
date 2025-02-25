@@ -13,6 +13,8 @@ parser.add_argument("-i", "--image", help="type of image")
 parser.add_argument(
     "--multiple_prompts", action="store_true", help="to run with multiple prompts"
 )
+parser.add_argument("--iter", help="number of iterations to run")
+
 # Parse the arguments
 args = parser.parse_args()
 
@@ -75,8 +77,10 @@ elif "Llama-3.2" in mdl:
 else:
     print(f"{mdl} is not known model?")
 
-outputs = llm.generate(batch_data)
+for i in range(int(args.iter)):
+    print(f"==ITER : [{i}]")
+    outputs = llm.generate(batch_data)
 
-for o in outputs:
-    generated_text = o.outputs[0].text
-    print(generated_text)
+    for o in outputs:
+        generated_text = o.outputs[0].text
+        print(generated_text)

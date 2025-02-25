@@ -5,6 +5,7 @@ usage() {
     echo "Options:"
     echo "  --model|-m                    Model path lub model stub"
     echo "  --image_type|-i               Type model: snowscat synthetic"
+    echo "  --iter                        number of iterations(Default:1)"
     exit 1
 }
 
@@ -30,11 +31,19 @@ while [[ $# -gt 0 ]]; do
         ImageType=$2
         shift 2
         ;;
+    --iter)
+        iter=$2
+        shift 2
+        ;;
     --help)
         usage
         ;;
     esac
 done
+
+#Set Default values
+iter=${iter:-1}
+ImageType=${ImageType:-"snowscat"}
 
 if [[ -n $HELP ]]; then
     usage
@@ -68,9 +77,9 @@ else
     export VLLM_PROMPT_BS_BUCKET_MAX=4
     export VLLM_DECODE_BS_BUCKET_MIN=64
     export VLLM_DECODE_BS_BUCKET_STEP=64
-    export VLLM_DECODE_BS_BUCKET_MAX=64
+    export VLLM_DECODE_BS_BUCKET_MAX=2048
     export VLLM_DECODE_BLOCK_BUCKET_MAX=2048
-    export VLLM_DECODE_BLOCK_BUCKET_STEP=1024
+    export VLLM_DECODE_BLOCK_BUCKET_STEP=2048
 fi
 
 EXTRAARGS=" "
@@ -85,5 +94,5 @@ if [[ "$model" == *"Qwen2"* ]]; then
     export WORKAROUND=1
 fi
 
-ARGS="-m $model -i $ImageType $EXTRAARGS"
+ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
 python offline_inferece.py $ARGS

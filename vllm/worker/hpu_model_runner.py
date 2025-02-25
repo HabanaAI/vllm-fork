@@ -925,6 +925,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if len(seq_group_metadata_list) == 0:
             return PreparePromptMetadata.empty()
 
+        #import pdb;pdb.set_trace()
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
