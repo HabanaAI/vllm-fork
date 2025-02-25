@@ -1630,41 +1630,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             batch_type = BatchType.DECODE
 
-        metadata_dict = {
-            "input_tokens":
-            input_tokens,
-            "input_positions":
-            input_positions,
-            "selected_token_indices":
-            sampling_metadata.selected_token_indices
-            if sampling_metadata else None,
-            "lora_requests":
-            lora_requests,
-            "lora_mapping":
-            lora_mapping,
-            "multi_modal_kwargs":
-            multi_modal_kwargs,
-            "num_prefill_tokens":
-            num_prefill_tokens,
-            "num_decode_tokens":
-            num_decode_tokens,
-            "slot_mapping":
-            slot_mapping,
-            "num_prefills":
-            num_prefills,
-            "batch_type":
-            batch_type,
-            "seq_lens":
-            seq_lens,
-            "query_lens":
-            query_lens
-        }
-        if prefill_attn_metadata is not None:
-            metadata_dict.update(prefill_attn_metadata.asdict_zerocopy())
-        else:
-            assert decode_attn_metadata is not None
-            metadata_dict.update(decode_attn_metadata.asdict_zerocopy())
-
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata
 
