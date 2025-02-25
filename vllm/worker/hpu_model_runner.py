@@ -1520,7 +1520,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         lora_mapping = None
         lora_requests = None
         multi_modal_kwargs = None
-        batch_type = None
         seq_lens = None
         query_lens = None
         real_batch_size = None
@@ -1575,7 +1574,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             assert (len(prefill_reqs) and len(decode_reqs)) == 0
 
         num_prefills = len(seq_lens)
-        num_prefill_tokens = len(input_tokens)
         num_decode_tokens = len(decode_input_tokens)
 
         # NOTE(kzawora): Here we diverge from GPU code - we don't
@@ -1587,7 +1585,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if num_decode_tokens > 0:
             input_tokens = decode_input_tokens
             input_positions = decode_input_positions
-            slot_mapping = decode_slot_mapping
             lora_index_mapping = decode_lora_index_mapping
             lora_prompt_mapping = decode_lora_prompt_mapping
             lora_requests = decode_lora_requests
@@ -1627,7 +1624,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if (prefill_attn_metadata is not None
                 and decode_attn_metadata is not None):
-            batch_type = BatchType.MIXED
             raise NotImplementedError("Mixed batch is not supported on HPU")
         elif prefill_attn_metadata is not None:
             batch_type = BatchType.PREFILL
@@ -1683,7 +1679,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      real_batch_size=real_batch_size,
                                      batch_size_padded=batch_size_padded,
                                      lora_ids=lora_ids), \
-                                        sampling_metadata
+                                    sampling_metadata
 
     def _seq_len(self, attn_metadata):
         if attn_metadata.num_prefills != 0:
