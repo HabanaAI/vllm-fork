@@ -49,17 +49,30 @@ if [[ -n $HELP ]]; then
     usage
 fi
 
+# VLLM Variables
+export VLLM_GRAPH_RESERVED_MEM=0.05 # default 0.1
+export VLLM_GRAPH_PROMPT_RATIO=0.3 # 0.3 default
+export VLLM_PROMPT_SEQ_BUCKET_MIN=128
+export VLLM_PROMPT_SEQ_BUCKET_STEP=256
+export VLLM_PROMPT_SEQ_BUCKET_MAX=1024 # suggested max-model-len
+export VLLM_DECODE_BLOCK_BUCKET_STEP=32
+export VLLM_DECODE_BLOCK_BUCKET_MAX=128
+export VLLM_DECODE_BS_BUCKET_MIN=64
+export VLLM_DECODE_BS_BUCKET_STEP=64
+export VLLM_DECODE_BS_BUCKET_MAX=128
+
+
+export VLLM_HPU_LOG_STEP_GRAPH_COMPILATION=true
+export PT_HPU_METRICS_GC_DETAILS=1
+export VLLM_HPU_LOG_STEP_CPU_FALLBACKS=1
+
 if [[ $ImageType == "snowscat" ]] && [[ ! $(md5sum /tmp/snowscat-H3oXiq7_bII-unsplash.jpg | cut -d" " -f1) == "3ad5657658d1a7684e35541778d30204" ]]; then
     python3 -c "import requests; from PIL import Image; url = 'https://huggingface.co/alkzar90/ppaine-landscape/resolve/main/assets/snowscat-H3oXiq7_bII-unsplash.jpg'; filename = url.split('/')[-1]; r = requests.get(url, allow_redirects=True); open(filename, 
 'wb').write(r.content); image = Image.open(f'./{filename}'); image = image.resize((1200, 600)); image.save(f'/tmp/{filename}')"
 fi
 
 if [[ -n $InstallVLLM ]]; then
-    if [[ "$model" == *"Qwen2"* ]]; then
-        git clone https://github.com/HabanaAI/vllm-fork.git -b sarkar/qwen2
-    elif [[ "$model" == *"Llama-3.2"* ]]; then
-        git clone https://github.com/HabanaAI/vllm-fork.git -b v1.20.0
-    fi
+    git clone https://github.com/HabanaAI/vllm-fork.git -b sarkar/qwen2
     cd vllm-fork
     pip install -r requirements-hpu.txt -q
     python setup.py develop
@@ -72,23 +85,13 @@ fi
 if [[ -n "$SKIPWARMUP" ]]; then
     export VLLM_SKIP_WARMUP=true
 else
-    export VLLM_PROMPT_SEQ_BUCKET_MIN=1024
-    export VLLM_PROMPT_SEQ_BUCKET_MAX=1024
-    export VLLM_PROMPT_BS_BUCKET_MAX=4
-    export VLLM_DECODE_BS_BUCKET_MIN=64
-    export VLLM_DECODE_BS_BUCKET_STEP=64
-    export VLLM_DECODE_BS_BUCKET_MAX=2048
-    export VLLM_DECODE_BLOCK_BUCKET_MAX=2048
-    export VLLM_DECODE_BLOCK_BUCKET_STEP=2048
+    export VLLM_SKIP_WARMUP=false
 fi
 
 EXTRAARGS=" "
 if [[ -n "$MultiPrompt" ]]; then
     EXTRAARGS=" --multiple_prompts"
 fi
-
-#export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
-#export EXPERIMENTAL_WEIGHT_SHARING=0
 
 if [[ "$model" == *"Qwen2"* ]]; then
     export WORKAROUND=1
