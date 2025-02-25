@@ -452,7 +452,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 worker_input.blocks_to_swap_out)
         if (worker_input.blocks_to_copy is not None
                 and worker_input.blocks_to_copy.numel() > 0):
-            self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
+            with self.model_runner.profiler.record_event('internal', 'copying blocks'):
+                self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
