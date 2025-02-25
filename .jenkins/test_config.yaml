@@ -16,10 +16,10 @@ stages:
         command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2
   - name: test_gsm8k_small_models_apc
     steps:
-      - name: gsm8k_small_g3_tp1
+      - name: gsm8k_small_g3_tp1_apc
         flavor: g3
         command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
-      - name: gsm8k_small_g2_tp1
+      - name: gsm8k_small_g2_tp1_apc
         flavor: g2
         command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
   - name: test_gsm8k_large_models
