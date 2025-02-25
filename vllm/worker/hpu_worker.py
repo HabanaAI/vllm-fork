@@ -118,6 +118,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+        self.total_copied_blocks = 0
 
     def full_trace_handler(self, dir_name, use_gzip=False):
 
@@ -452,8 +453,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 worker_input.blocks_to_swap_out)
         if (worker_input.blocks_to_copy is not None
                 and worker_input.blocks_to_copy.numel() > 0):
-            with self.model_runner.profiler.record_event('internal', 'copying blocks'):
-                self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
+            num_blocks = worker_input.blocks_to_copy.numel()
+            self.total_copied_blocks += num_blocks
+            self.model_runner.profiler.record_counter(self.model_runner.profiler.get_timestamp_us(), {
+                "total_copied_blocks": self.total_copied_blocks,
+            })
+            self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
