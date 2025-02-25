@@ -118,7 +118,7 @@ class EngineArgs:
     enable_prefix_caching: Optional[bool] = None
     disable_sliding_window: bool = False
     use_v2_block_manager: bool = True
-    use_padding_aware_scheduling: bool = False
+    use_padding_aware_scheduling: bool = True
     swap_space: float = 4  # GiB
     cpu_offload_gb: float = 0  # GiB
     gpu_memory_utilization: float = 0.90
@@ -1269,6 +1269,8 @@ class EngineArgs:
                 "SelfAttnBlockSpaceManager (i.e. block manager v2),"
                 " please file an issue with detailed information.")
 
+        if self.enable_chunked_prefill:
+            self.use_padding_aware_scheduling = False
         scheduler_config = SchedulerConfig(
             runner_type=model_config.runner_type,
             max_num_batched_tokens=self.max_num_batched_tokens,

@@ -98,6 +98,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     decode_block_indices: Optional[torch.Tensor] = None
     decode_block_offsets: Optional[torch.Tensor] = None
     decode_attn_bias: Optional[torch.Tensor] = None
+    chunk_prefill_enabled: bool = False
 
 
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
@@ -199,7 +200,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             mask, -math.inf))
         return attn_bias
 
-    def forward(
+    def forward_chunked_prefill(
         self,
         layer: AttentionLayer,
         query: torch.Tensor,
@@ -371,20 +372,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_bias = single_attn_bias
                     else:
                         attn_bias = torch.cat((single_attn_bias, attn_bias), dim=0)
-                '''out = HPUPagedAttention.forward_prefix(
-                    query=prefill_query.view(query_shape),
-                    key=prefill_key.view(kv_shape),
-                    value=prefill_value.view(kv_shape),
-                    key_cache=prefill_key_cache,
-                    value_cache=prefill_value_cache,
-                    block_list=attn_metadata.block_list,
-                    attn_bias=attn_bias,
-                    scale=self.scale,
-                    matmul_qk_op=self.matmul_qk,
-                    matmul_av_op=self.matmul_av,
-                    softmax_op=self.softmax,
-                    keys_fetch_func=self.k_cache.fetch_from_cache,
-                    values_fetch_func=self.v_cache.fetch_from_cache)'''
                 out = ops.prompt_attention(
                     prefill_query.view(query_shape),
                     self.k_cache.fetch_from_cache(prefill_key_cache, attn_metadata.block_list).view(kv_shape),
@@ -437,6 +424,152 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             output = torch.cat((prompt_output, decode_output))
             htorch.core.mark_step()
             return output
+
+    def forward(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: torch.Tensor,
+        attn_metadata: HPUAttentionMetadata,
+        k_scale: float = 1.0,
+        v_scale: float = 1.0,
+        attn_type: str = AttentionType.DECODER,
+        output: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Forward pass with xFormers and PagedAttention.
+
+        Args:
+            query: shape = [num_tokens, num_heads * head_size]
+            key: shape = [num_tokens, num_kv_heads * head_size]
+            value: shape = [num_tokens, num_kv_heads * head_size]
+            kv_cache = [2, num_blocks, block_size * num_kv_heads * head_size]
+            attn_metadata: Metadata for attention.
+        Returns:
+            shape = [num_tokens, num_heads * head_size]
+        """
+        if attn_metadata.chunk_prefill_enabled:
+            return self.forward_chunked_prefill(
+                query=query,
+                key=key,
+                value=value,
+                kv_cache=kv_cache,
+                attn_metadata=attn_metadata,
+                k_scale=k_scale,
+                v_scale=v_scale,
+                attn_type=attn_type,
+                output=output,
+            )
+        if (attn_type != AttentionType.DECODER
+                and attn_type != AttentionType.ENCODER_DECODER):
+            raise NotImplementedError("Encoder self-attention "
+                                      "is not implemented for "
+                                      "HPUAttentionImpl")
+        if attn_type == AttentionType.ENCODER_DECODER:
+            return self.forward_encoder_decoder(
+                query=query,
+                key=key,
+                value=value,
+                kv_cache=kv_cache,
+                attn_metadata=attn_metadata,
+                k_scale=k_scale,
+                v_scale=v_scale,
+            )
+
+        batch_size, seq_len, hidden_size = query.shape
+        _, seq_len_kv, _ = key.shape
+
+        query = query.view(-1, self.num_heads, self.head_size)
+        key = key.view(-1, self.num_kv_heads, self.head_size)
+        value = value.view(-1, self.num_kv_heads, self.head_size)
+        block_indices = attn_metadata.block_indices
+        block_offsets = attn_metadata.block_offsets
+        if attn_metadata.is_prompt:
+            key = key.unflatten(0, (block_indices.size(0), -1))
+            value = value.unflatten(0, (block_indices.size(0), -1))
+        if kv_cache is not None:
+            key_cache, value_cache = HPUPagedAttention.split_kv_cache(
+                kv_cache, self.num_kv_heads, self.head_size)
+
+            # Reshape the input keys and values and store them in the cache.
+            # If kv_cache is not provided, the new key and value tensors are
+            # not cached. This happens during the initial memory profiling run.
+            key_cache = self.k_cache(key, key_cache, block_indices,
+                                     block_offsets)
+            value_cache = self.v_cache(value, value_cache, block_indices,
+                                       block_offsets)
+
+        if attn_metadata.is_prompt:
+            # Prompt run.
+            query_shape = (batch_size, seq_len, self.num_heads, self.head_size)
+            kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
+                        self.head_size)
+            if attn_metadata is None or attn_metadata.block_list is None:
+                if not self.prefill_use_fusedsdpa:
+                    # TODO: move this outside of model
+                    assert attn_metadata.attn_bias is not None, \
+                            'attn_bias must be set before calling model.forward'
+                    attn_bias = attn_metadata.attn_bias
+                    if self.alibi_slopes is not None:
+                        position_bias = _make_alibi_bias(
+                            self.alibi_slopes, self.num_kv_heads,
+                            attn_bias.dtype, attn_bias.shape[-1])
+                        attn_bias = attn_bias.tile(
+                            (1, self.num_kv_heads, 1, 1))
+                        attn_bias.add_(position_bias)
+                else:
+                    attn_bias = None
+
+                out = ops.prompt_attention(
+                    query.view(query_shape),
+                    key.view(kv_shape),
+                    value.view(kv_shape),
+                    attn_bias=attn_bias,
+                    p=0.0,
+                    scale=self.scale,
+                    matmul_qk_op=self.matmul_qk,
+                    softmax_op=self.softmax,
+                    matmul_av_op=self.matmul_av,
+                    valid_seq_lengths=attn_metadata.seq_lens_tensor,
+                    fsdpa_op=self.fused_scaled_dot_product_attention,
+                )
+            else:
+                # TODO: enable FusedSDPA
+                out = HPUPagedAttention.forward_prefix(
+                    query=query.view(query_shape),
+                    key=key.view(kv_shape),
+                    value=value.view(kv_shape),
+                    key_cache=key_cache,
+                    value_cache=value_cache,
+                    block_list=attn_metadata.block_list,
+                    attn_bias=attn_metadata.attn_bias,
+                    scale=self.scale,
+                    matmul_qk_op=self.matmul_qk,
+                    matmul_av_op=self.matmul_av,
+                    softmax_op=self.softmax,
+                    keys_fetch_func=self.k_cache.fetch_from_cache,
+                    values_fetch_func=self.v_cache.fetch_from_cache)
+            output = out.reshape(batch_size, seq_len, hidden_size)
+        else:
+            # Decoding run.
+            output = HPUPagedAttention.forward_decode(
+                query=query,
+                key_cache=key_cache,
+                value_cache=value_cache,
+                block_list=attn_metadata.block_list,
+                block_mapping=attn_metadata.block_mapping,
+                block_bias=attn_metadata.attn_bias,
+                block_scales=attn_metadata.block_scales,
+                block_groups=attn_metadata.block_groups,
+                scale=self.scale,
+                matmul_qk_op=self.matmul_qk,
+                matmul_av_op=self.matmul_av,
+                batch2block_matmul_op=self.batch2block_matmul,
+                block2batch_matmul_op=self.block2batch_matmul,
+                keys_fetch_func=self.k_cache.fetch_from_cache,
+                values_fetch_func=self.v_cache.fetch_from_cache)
+        # Reshape the output tensor.
+        return output.view(batch_size, seq_len, hidden_size)
 
     def forward_encoder_decoder(
         self,
