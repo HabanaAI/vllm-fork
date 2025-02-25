@@ -66,7 +66,7 @@ vLLM releases are being performed periodically to align with Intel® Gaudi® sof
 ```{.console}
 $ git clone https://github.com/HabanaAI/vllm-fork.git
 $ cd vllm-fork
-$ git checkout v0.6.4.post2+Gaudi-1.19.0
+$ git checkout v0.6.6.post1+Gaudi-1.20.0
 $ pip install -r requirements-hpu.txt
 $ python setup.py develop
 ```
