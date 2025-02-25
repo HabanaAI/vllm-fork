@@ -454,7 +454,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 worker_input.blocks_to_swap_out)
         if (worker_input.blocks_to_copy is not None
                 and worker_input.blocks_to_copy.numel() > 0):
-            num_blocks = worker_input.blocks_to_copy.numel()
+            num_blocks = worker_input.blocks_to_copy.numel() / 2
             self.total_num_copied_blocks += num_blocks
             self.total_block_copies += 1
             self.model_runner.profiler.record_counter(self.model_runner.profiler.get_timestamp_us(), {
