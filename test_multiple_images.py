@@ -1,4 +1,5 @@
-import requests
+import argparse
+import os
 from PIL import Image
 from io import BytesIO
 ##from examples.offline_inference.vision_language import run_qwen2_5_vl
@@ -32,21 +33,15 @@ def run_qwen2_5_vl(question: str):
     return llm, prompt, stop_token_ids
 
 
-def fetch_image(url):
-    """Fetch an image from a URL."""
-    img_question = "What is the content of this image?"
-    response = requests.get(url)
-    if response.status_code == 200:
-        image = Image.open(BytesIO(response.content)).convert("RGB")
-        # Input image and question
-        return image, img_question
-    else:
-        raise Exception(f"Failed to fetch image from {url}")
-
-def test_image_processing(url):
+def test_image_processing(image_path):
+    question = "What is the content of this image?"
     """Test the image processing function with an image from a URL."""
     try:
-        image, question = fetch_image(url)
+        image = Image.open(image_path)
+        # Get image dimensions
+        width, height = image.size
+        print(f"Image size: {width}x{height} pixels")
+
         llm, prompt, stop_token_ids = run_qwen2_5_vl(question)
 
         # We set temperature to 0.2 so that outputs can be different
@@ -67,14 +62,16 @@ def test_image_processing(url):
 
         for o in outputs:
             generated_text = o.outputs[0].text
+            print("Result:")
             print(generated_text)
 
-        print(f"Pass: {url}")
+        print(f"Pass: {image_path} \n")
     except Exception as e:
-        print(f"Fail: {url}")
-        print(f"Error processing {url}: {e}")
+        print(f"Fail: {image_path}")
+        print(f"Error processing {image_path}: {e} \n")
 
-def main():
+def main(args):
+    '''
     # List of image URLs with different sizes
     image_urls = [
         "https://picsum.photos/32/32",    # Small image (32x32 pixels)
@@ -84,6 +81,18 @@ def main():
     ]
     for url in image_urls:
         test_image_processing(url)
+    '''
+    image_folder = args.image_folder
+    
+    # List all image files in the folder
+    image_files = [f for f in os.listdir(image_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
+    for image_file in image_files:
+        image_path = os.path.join(image_folder, image_file)
+        print(f"Processing {image_path}")
+        test_image_processing(image_path)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image_folder", help="Path to the folder containing images")
+    args = parser.parse_args()
+    main(args)
