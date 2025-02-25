@@ -109,6 +109,27 @@ class NaiveBlockAllocator(BlockAllocator):
 
         return blocks
 
+    def _can_defragment_all(self, block_ids):
+        block_ids = list(sorted(block_ids))
+        num_blocks = len(block_ids)
+        if len(self._free_block_indices) < num_blocks:
+            return False
+        free_block_ids = heapq.nsmallest(num_blocks, self._free_block_indices)
+        return free_block_ids[-1] < block_ids[0]
+
+    def _reassign_block_id(self, block):
+        prev_block_id = block.block_id
+        self._free_block_id(block)
+        block.block_id = self._allocate_block_id()
+        new_block_id = block.block_id
+        return (prev_block_id, new_block_id)
+
+    def defragment_all(self, blocks):
+        if not self._can_defragment_all([b.block_id for b in blocks]):
+            return []
+        return [self._reassign_block_id(b) for b in blocks]
+
+
     def allocate_mutable_block(self,
                                prev_block: Optional[Block],
                                extra_hash: Optional[int] = None,

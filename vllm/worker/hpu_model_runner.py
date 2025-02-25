@@ -84,6 +84,8 @@ VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
                                        'false').lower() == 'true'
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
+VLLM_BUCKETING_SCHEME = os.environ.get('VLLM_BUCKETING_SCHEME', 'legacy')
+VLLM_STRICT_BUCKETS = os.environ.get('VLLM_STRICT_BUCKETS', 'false') == 'true'
 DUMMY_TOKEN_ID = -1
 
 
@@ -239,8 +241,20 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
+# File bucketing scheme minimal
+def read_buckets(filename, max_bs, max_blocks):
+    buckets = {}
+    with open(filename) as f:
+        for line in f.readlines():
+            bs, blocks = line.strip().split(':')
+            bs = min(int(bs), max_bs)
+            blocks = set(min(int(b), max_blocks) for b in blocks.split())
+            buckets.setdefault(bs, set())
+            buckets[bs].update(blocks)
+    buckets_nested = [(bs, list(sorted(buckets[bs]))) for bs in sorted(buckets.keys())]
+    return [(bs, bucket) for bs, bucket_list in buckets_nested for bucket in bucket_list]
 
-class HpuModelAdapter(torch.nn.Module):
+class HpuModelAdapter:
 
     def __init__(self, model, vllm_config, layer_names):
         super().__init__()
@@ -719,6 +733,27 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.cached_step_inputs: List[
             ModelInputForHPUWithSamplingMetadata] = []
 
+    def _init_buckets(self, max_blocks):
+        if self.enable_merged_prefill:
+            legacy_ctx = HPUBucketingContextWithMergedPrefill(
+                self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
+                self.max_num_batched_tokens)
+        else:
+            legacy_ctx = HPUBucketingContext(
+                self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
+                self.max_num_batched_tokens)
+
+        if VLLM_BUCKETING_SCHEME == 'polynomial':
+            self.bucketing_ctx.prompt_scheme = LegacyPromptBucketingScheme(legacy_ctx)
+            self.bucketing_ctx.decode_scheme = PolynomialBucketingScheme(self.max_num_seqs, max_blocks)
+        elif VLLM_BUCKETING_SCHEME.startswith('file:'):
+            _, filename = VLLM_BUCKETING_SCHEME.split(':')
+            self.bucketing_ctx.prompt_scheme = LegacyPromptBucketingScheme(legacy_ctx)
+            self.bucketing_ctx.decode_scheme = FileBucketingScheme(filename, self.max_num_seqs, max_blocks)
+        else:
+            self.bucketing_ctx.prompt_scheme = LegacyPromptBucketingScheme(legacy_ctx)
+            self.bucketing_ctx.decode_scheme = LegacyDecodeBucketingScheme(legacy_ctx, max_blocks)
+
     def _set_gc_threshold(self) -> None:
         """
         Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -858,14 +893,33 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         msg = f"Loading model weights took in total {m.get_summary_string()}"
         logger.info(msg)
 
-    def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
+    def _get_bucketing_input(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
-        batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
-            real_batch_size, is_prompt)
+        seq_data = [list(sgm.seq_data.values())[0] for sgm in seq_group_metadata_list]
+        if is_prompt:
+            if self.enable_merged_prefill:
+                max_seq_len = sum(len(sd.prompt_token_ids) + len(sd.output_token_ids) for sd in seq_data)
+            else:
+                max_seq_len = max(len(sd.prompt_token_ids) + len(sd.output_token_ids) for sd in seq_data)
+            return self.bucketing_ctx.find_prompt_bucket, real_batch_size, max_seq_len
+        block_tables = [list(sgm.block_tables.values())[0] for sgm in seq_group_metadata_list]
+        if self.use_contiguous_pa:
+            max_block_id = max(max(bt) if bt else 0 for bt in block_tables) + 1
+            return self.bucketing_ctx.find_decode_bucket, real_batch_size, max_block_id
+        else:
+            total_blocks = sum(len(bt) for bt in block_tables)
+            return self.bucketing_ctx.find_decode_bucket, real_batch_size, total_blocks
+
+    def find_bucket(self, seq_group_metadata_list, is_prompt):
+        bucketing_fn, real_batch_size, blocks_or_seq_len = self._get_bucketing_input(seq_group_metadata_list, is_prompt)
+        return bucketing_fn(real_batch_size, blocks_or_seq_len)
+
+    def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
+        bucketing_fn, real_batch_size, blocks_or_seq_len = self._get_bucketing_input(seq_group_metadata_list, is_prompt)
+        batch_size_padded, _ = bucketing_fn(real_batch_size, blocks_or_seq_len)
         batch_size_padding = batch_size_padded - real_batch_size
 
         seq_group_metadata_list = seq_group_metadata_list.copy()
-
         if batch_size_padding > 0:
             if self.is_pooler:
                 temperature = None
@@ -875,7 +929,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for seq_group_metadata in seq_group_metadata_list)
                 temperature = 0.0 if has_greedy_samples else 1.0
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
-                -1, 0, is_prompt, temperature=temperature)
+                -1, 0, is_prompt, _PAD_BLOCK_ID, temperature=temperature)
             seq_group_metadata_list.extend(dummy_seq_group_metadata
                                            for _ in range(batch_size_padding))
         return seq_group_metadata_list, real_batch_size, batch_size_padded
@@ -1491,19 +1545,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             encoder_seq_lens_tensor = None
 
         padding_fn = None
+        real_batch_size = len(seq_group_metadata_list)
+        padded_bs, block_bucket_size = self.find_bucket(seq_group_metadata_list, False)
         if self.use_contiguous_pa:
-            block_bucket_size = max(max(block_list) + 1, len(block_list))
-            block_bucket_size = self.bucketing_ctx.get_padded_decode_num_blocks(
-                block_bucket_size)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
                 indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
+            _, _, max_block_id = self._get_bucketing_input(seq_group_metadata_list, False)
+            self.profiler.record_counter(self.profiler.get_timestamp_us(), {
+                "cache_max_block_id": max_block_id,
+            })
         else:
-            block_bucket_size = self.bucketing_ctx.get_padded_decode_num_blocks(
-                len(block_list))
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
@@ -1923,6 +1978,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         group_id,
                                         seq_len,
                                         is_prompt,
+                                        block_id,
                                         lora_request=None,
                                         temperature=0):
         if self.is_pooler:
@@ -1938,7 +1994,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             input_len = seq_len - 1
             output_len = 1
-            block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
+            block_tables = {group_id: [block_id] * num_blocks}
         prompt_token_ids = [0] * input_len
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
@@ -2009,6 +2065,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     i,
                     seq_len,
                     is_prompt,
+                    _PAD_BLOCK_ID,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature) for i in range(batch_size)
@@ -2022,6 +2079,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     i,
                     b * self.block_size - 1,
                     is_prompt,
+                    seq_len - 1,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature) for i, b in enumerate(blocks)
@@ -2192,6 +2250,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not self.is_pooler:
             max_blocks = kv_caches[0][0].size(0)
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
+            # File bucketing scheme
+            if VLLM_BUCKETING_SCHEME.startswith('file:'):
+                _, filename = VLLM_BUCKETING_SCHEME.split(':')
+                self.bucketing_ctx.global_state.decode_buckets = read_buckets(filename, self.max_num_seqs, max_blocks)
+                logger.info(f"Overriding bucketing scheme with file-bucketing {self.bucketing_ctx.global_state.decode_buckets}")
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
@@ -2237,7 +2300,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                            'Please update Gaudi Software Suite.')
         with compile_only_mode_context(
         ) if can_use_compile_only_mode else contextlib.nullcontext():
-            self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
+            self.warmup_all_buckets(self.bucketing_ctx.list_prompt_buckets(), True,
                                     kv_caches)
             if not self.is_pooler:
                 self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,

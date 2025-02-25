@@ -3,6 +3,8 @@
 from typing import Dict, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Tuple
+import heapq
+import itertools
 
 from vllm.core.block.block_table import BlockTable
 from vllm.core.block.cpu_gpu_block_allocator import CpuGpuBlockAllocator
@@ -105,6 +107,33 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
             self.block_allocator, self.block_size, self.enable_caching)
         self._last_access_blocks_tracker = LastAccessBlocksTracker(
             self.block_allocator)
+
+    def try_defragmenting(self, num_blocks):
+        if len(self.block_tables) == 0:
+            return []
+        block_heap = []
+
+        for seq_id, block_table in self.block_tables.items():
+            for block in block_table.blocks:
+                item = (block.block_id, block, seq_id)
+                if len(block_heap) < num_blocks:
+                    heapq.heappush(block_heap, item)
+                else:
+                    heapq.heappushpop(block_heap, item)
+        if len(block_heap) < num_blocks:
+            return []
+
+        block_ids, blocks, block_seq_ids = zip(*block_heap)
+        allocator = self.block_allocator._allocators[Device.GPU]
+        if not allocator.defragment_all(blocks):
+            return []
+
+        new_block_ids = [b.block_id for b in blocks]
+        for seq_id in set(block_seq_ids):
+            bt = self.block_tables[seq_id]
+            bt.update(bt.blocks)
+        changed_block_ids = list(zip(block_ids, new_block_ids))
+        return changed_block_ids
 
     def can_allocate(self,
                      seq_group: SequenceGroup,

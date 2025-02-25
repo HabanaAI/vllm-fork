@@ -124,6 +124,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+        self.total_num_copied_blocks = 0
+        self.total_block_copies = 0
 
     def full_trace_handler(self, dir_name, use_gzip=False):
 
@@ -328,28 +330,36 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         # At this point we should've allocated the maximum workspace for all
         # recipes we will use the extra memory for graphs/blocks
         free_hpu_memory = torch.hpu.mem_get_info()[0]
-
+        manual_num_blocks = int(os.environ.get('VLLM_NUM_HPU_BLOCKS', '0'))
         cache_block_size = self.get_cache_block_size_bytes()
-        graph_reserved_mem = (float(
-            os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.1'))
-                              if not self.model_config.enforce_eager else 0)
-        graph_headroom = 1 - graph_reserved_mem
-        available_hpu_memory = free_hpu_memory * \
-            self.cache_config.gpu_memory_utilization
-        hpu_memory_margin = free_hpu_memory * (
-            1 - self.cache_config.gpu_memory_utilization)
-        self.model_runner.mem_margin = hpu_memory_margin
-        cache_size_bytes = available_hpu_memory * graph_headroom
-        graph_headroom_bytes = available_hpu_memory * (1 - graph_headroom)
-        msg = (
-            f"Free device memory: {format_bytes(free_hpu_memory)}, "
-            f"{format_bytes(available_hpu_memory)} usable "
-            f"(gpu_memory_utilization={self.cache_config.gpu_memory_utilization}),"
-            f" {format_bytes(graph_headroom_bytes)} reserved for HPUGraphs "
-            f"(VLLM_GRAPH_RESERVED_MEM={graph_reserved_mem}), "
-            f"{format_bytes(cache_size_bytes)} reserved for KV cache")
-        logger.info(msg)
-        num_hpu_blocks = int(cache_size_bytes // cache_block_size)
+        if manual_num_blocks > 0:
+            num_hpu_blocks = manual_num_blocks
+            msg = (
+                f"Free device memory: {format_bytes(free_hpu_memory)}. "
+                f"Using {num_hpu_blocks} HPU blocks. No OOM protection!")
+            logger.info(msg)
+            self.model_runner.mem_margin = 0.0
+        else:
+            graph_reserved_mem = (float(
+                os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.1'))
+                                if not self.model_config.enforce_eager else 0)
+            graph_headroom = 1 - graph_reserved_mem
+            available_hpu_memory = free_hpu_memory * \
+                self.cache_config.gpu_memory_utilization
+            hpu_memory_margin = free_hpu_memory * (
+                1 - self.cache_config.gpu_memory_utilization)
+            self.model_runner.mem_margin = hpu_memory_margin
+            cache_size_bytes = available_hpu_memory * graph_headroom
+            graph_headroom_bytes = available_hpu_memory * (1 - graph_headroom)
+            msg = (
+                f"Free device memory: {format_bytes(free_hpu_memory)}, "
+                f"{format_bytes(available_hpu_memory)} usable "
+                f"(gpu_memory_utilization={self.cache_config.gpu_memory_utilization}),"
+                f" {format_bytes(graph_headroom_bytes)} reserved for HPUGraphs "
+                f"(VLLM_GRAPH_RESERVED_MEM={graph_reserved_mem}), "
+                f"{format_bytes(cache_size_bytes)} reserved for KV cache")
+            logger.info(msg)
+            num_hpu_blocks = int(cache_size_bytes // cache_block_size)
         num_cpu_blocks = int(self.cache_config.swap_space_bytes //
                              cache_block_size)
         num_hpu_blocks = max(num_hpu_blocks, 0)
@@ -460,6 +470,13 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 worker_input.blocks_to_swap_out)
         if (worker_input.blocks_to_copy is not None
                 and worker_input.blocks_to_copy.numel() > 0):
+            num_blocks = worker_input.blocks_to_copy.numel() / 2
+            self.total_num_copied_blocks += num_blocks
+            self.total_block_copies += 1
+            self.model_runner.profiler.record_counter(self.model_runner.profiler.get_timestamp_us(), {
+                "total_num_copied_blocks": self.total_num_copied_blocks,
+                "total_block_copies": self.total_block_copies,
+            })
             self.cache_engine[virtual_engine].copy(worker_input.blocks_to_copy)
 
     def add_lora(self, lora_request: LoRARequest) -> bool:

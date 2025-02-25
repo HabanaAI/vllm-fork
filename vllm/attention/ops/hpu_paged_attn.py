@@ -9,9 +9,40 @@ from typing import List, Optional, Tuple
 
 import torch
 from vllm_hpu_extension import cache_ops, ops
+import habana_frameworks.torch as htorch
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
 _PARTITION_SIZE = 512
+
+
+def _graphed(fn):
+    class Graphed(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, *args, **kwargs):
+            return fn(*args, **kwargs)
+    graph = htorch.hpu.wrap_in_hpu_graph(Graphed(), disable_tensor_cache=True)
+
+    def wrapper(*args, **kwargs):
+        return graph.forward(*args, **kwargs)
+    return wrapper
+
+
+@_graphed
+def _copy_blocks(key_caches, value_caches, block_mapping):
+    if key_caches[0].device.type == 'hpu':
+        htorch.core.mark_step()
+    block_mapping = block_mapping.transpose(0, 1)
+    src = block_mapping[0]
+    dst = block_mapping[1]
+
+    for key_cache, value_cache in zip(key_caches, value_caches):
+        key_cache.index_copy_(0, dst, key_cache.index_select(0, src))
+        value_cache.index_copy_(0, dst, value_cache.index_select(0, src))
+
+    if key_caches[0].device.type == 'hpu':
+        htorch.core.mark_step()
 
 
 @dataclass
@@ -82,6 +113,8 @@ class HPUPagedAttention:
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
         src_to_dsts: torch.Tensor,
     ) -> None:
+        if src_to_dsts.numel() == 0:
+            return
         key_caches = [kv_cache[0] for kv_cache in kv_caches]
         value_caches = [kv_cache[1] for kv_cache in kv_caches]
-        cache_ops.copy_blocks(key_caches, value_caches, src_to_dsts)
+        _copy_blocks(key_caches, value_caches, src_to_dsts)
