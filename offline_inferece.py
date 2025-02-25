@@ -73,7 +73,9 @@ elif "Llama-3.2" in mdl:
         num_scheduler_steps=32,
         max_num_prefill_seqs=4,
     )
-    prompt = f"<|image|><|begin_of_text|>{question}"
+    from vllm import TextPrompt
+    batch_data = TextPrompt(prompt=f"<|image|><|begin_of_text|>{question}")
+    batch_data["multi_modal_data"] = {"image": image}
 else:
     print(f"{mdl} is not known model?")
 
