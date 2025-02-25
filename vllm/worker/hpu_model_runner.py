@@ -1676,6 +1676,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
+            _, _, max_block_id = self._get_bucketing_input(seq_group_metadata_list, False)
+            self.profiler.record_counter(self.profiler.get_timestamp_us(), {
+                "cache_max_block_id": max_block_id,
+            })
         else:
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
