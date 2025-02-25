@@ -19,7 +19,6 @@ def _graphed(fn):
             super().__init__()
 
         def forward(self, *args, **kwargs):
-            print('graphed', fn)
             return fn(*args, **kwargs)
     graph = htorch.hpu.wrap_in_hpu_graph(Graphed(), disable_tensor_cache=True)
 

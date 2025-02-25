@@ -1399,10 +1399,6 @@ class Scheduler:
         scheduler_start_time = time.perf_counter()
         scheduler_outputs: SchedulerOutputs = self._schedule()
 
-        if VLLM_DEFRAGMENT_BLOCK_IDS > 0:
-            selected_blocks = self.block_manager.try_defragmenting(VLLM_DEFRAGMENT_BLOCK_IDS)
-            scheduler_outputs.blocks_to_copy.extend(selected_blocks)
-
         now = time.time()
 
         if not self.cache_config.enable_prefix_caching:
@@ -1546,6 +1542,10 @@ class Scheduler:
 
         # Move to next cache (if exists)
         self.cache_id = self.next_cache_id
+
+        if VLLM_DEFRAGMENT_BLOCK_IDS > 0:
+            selected_blocks = self.block_manager.try_defragmenting(VLLM_DEFRAGMENT_BLOCK_IDS)
+            scheduler_outputs.blocks_to_copy.extend(selected_blocks)
 
         # Return results
         return (seq_group_metadata_list, scheduler_outputs,
