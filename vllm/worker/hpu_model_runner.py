@@ -165,6 +165,9 @@ def get_target_layer_suffix_list(model_type) -> list[str]:
         decoder_layer_table.get(model_type, "DecoderLayer"), "EncoderLayer"
     ]
 
+def get_hpu_disable_tensor_cache():
+    env_var = os.environ.get('HPU_DISABLE_TENSOR_CACHE', 'true')
+    return env_var.lower() == 'true'
 
 def modify_model_layers(module: torch.nn.Module,
                         suffix_list: list[str],
@@ -223,6 +226,27 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
+def build_and_pad_mrope_positions(input_positions: List[List[int]],
+                                  input_mrope_positions: List[List[List[int]]],
+                                  max_prompt_len) -> Optional[List[List[int]]]:
+    # Qwen2.5vl expects 3 lists of positions, we are going to pad each
+    # seq_data in the list using either MRope values for multi-modal
+    # or regular position for text only inputs
+    mrope_input_positions = [[] for _ in range(3)]
+    for idx in range(3):
+        for b_idx, input_mrope_position in enumerate(input_mrope_positions):
+            if input_mrope_position is not None:
+                positions = input_mrope_position[idx]
+            else:
+                # use regular positions as default
+                positions = input_positions[b_idx]  
+            padded_positions = make_tensor_with_pad([positions],
+                                                max_len=max_prompt_len,
+                                                pad=0,
+                                                dtype=torch.long,
+                                                device='cpu').flatten().tolist()
+            mrope_input_positions[idx].extend(padded_positions)
+    return mrope_input_positions
 
 class HpuModelAdapter:
 
@@ -433,7 +457,8 @@ class HpuModelAdapter:
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
-        LoraMask.setLoraMask(kwargs.pop('lora_mask'))
+        if 'lora_mask' in kwargs:
+            LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         model_config = getattr(self.model, "config", None)
         model_is_mrope = uses_mrope(model_config)
         if self.layer_names is not None and not model_is_mrope:
@@ -876,10 +901,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        import os
-        workaround = os.environ.get('WORKAROUND', '0') == '1'  # there is also a flag provided for disabletensorcache
+        disable_tensor_cache = get_hpu_disable_tensor_cache()
         return htorch.hpu.wrap_in_hpu_graph(
-            HpuModelAdapter(*args, **kwargs), disable_tensor_cache=not workaround # orig code its set to True
+            HpuModelAdapter(*args, **kwargs),
+            disable_tensor_cache=disable_tensor_cache,
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
@@ -930,13 +955,34 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
                 batch_size, seq_len, num_blocks)
 
+    def _get_mrope_positions_and_delta(self, seq_data, mm_kwargs, context_len):
+        image_grid_thw = mm_kwargs.get("image_grid_thw", None)
+        video_grid_thw = mm_kwargs.get("video_grid_thw", None)
+        second_per_grid_ts = mm_kwargs.get("second_per_grid_ts", None)
+        assert image_grid_thw is not None or video_grid_thw is not None, (
+            "mrope embedding type requires multi-modal input mapper "
+            "returns 'image_grid_thw' or 'video_grid_thw'.")
+        hf_config = self.model_config.hf_config
+        token_ids = seq_data.get_token_ids()
+        mrope_positions, mrope_position_delta = \
+            MRotaryEmbedding.get_input_positions(
+                token_ids,
+                hf_config=hf_config,
+                image_grid_thw=image_grid_thw,
+                video_grid_thw=video_grid_thw,
+                second_per_grid_ts=second_per_grid_ts,
+                context_len=context_len,
+            )
+        assert mrope_positions is not None
+        return mrope_positions, mrope_position_delta
+
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
-        input_mrope_positions: List[List[int]] = []
+        input_mrope_positions: List[List[List[int]]] = []
         slot_mapping: List[List[int]] = []
         lora_index_mapping: List[List[int]] = []
         lora_prompt_mapping: List[List[int]] = []
@@ -1003,12 +1049,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             context_lens.append(context_len)
             query_lens.append(seq_len - context_len)
             input_tokens.append(prompt_tokens)
-            # print("tokens", prompt_tokens)
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
 
-            batch_input_mrope_positions = None
+            seq_data_mrope_positions = None
             if seq_group_metadata.multi_modal_data:
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
@@ -1023,30 +1068,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         seq_group_metadata.mm_processor_kwargs,
                     )
 
+                # special processing for mrope position deltas.
                 if self.model_is_mrope:
-                    image_grid_thw = mm_kwargs.get("image_grid_thw", None)
-                    video_grid_thw = mm_kwargs.get("video_grid_thw", None)
-                    second_per_grid_ts = mm_kwargs.get("second_per_grid_ts", None)
-                    assert image_grid_thw is not None or video_grid_thw is not None, (
-                        "mrope embedding type requires multi-modal input mapper "
-                        "returns 'image_grid_thw' or 'video_grid_thw'.")
-
-                    hf_config = self.model_config.hf_config
-                    token_ids = seq_data.get_token_ids()
                     mrope_positions, mrope_position_delta = \
-                        MRotaryEmbedding.get_input_positions(
-                            token_ids,
-                            hf_config=hf_config,
-                            image_grid_thw=image_grid_thw,
-                            video_grid_thw=video_grid_thw,
-                            second_per_grid_ts=second_per_grid_ts,
-                            context_len=context_len,
-                        )
+                        self._get_mrope_positions_and_delta(
+                            seq_data=seq_data,
+                            mm_kwargs=mm_kwargs,
+                            context_len=context_len)
                     assert mrope_positions is not None
                     seq_data.mrope_position_delta = mrope_position_delta
-                    batch_input_mrope_positions = [[] for _ in range(3)]
+                    seq_data_mrope_positions = [[] for _ in range(3)]
                     for idx in range(3):
-                        batch_input_mrope_positions[idx].extend(mrope_positions[idx])
+                        seq_data_mrope_positions[idx] \
+                            .extend(mrope_positions[idx])
 
                 multi_modal_kwargs_list.append(mm_kwargs)
 
@@ -1054,7 +1088,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     multi_modal_placeholder_maps[modality].extend(
                         placeholder_map)
 
-            input_mrope_positions.append(batch_input_mrope_positions)
+            input_mrope_positions.append(seq_data_mrope_positions)
 
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
@@ -1141,29 +1175,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                    dtype=torch.long,
                                                    device='cpu')
 
-        mrope_input_positions: Optional[List[List[int]]] = None
-        if any(mrope_position is not None
-               for mrope_position in input_mrope_positions):
-            assert self.model_is_mrope
-            mrope_input_positions = [[] for _ in range(3)]
-            for idx in range(3):
-                for b_idx, input_mrope_position in enumerate(input_mrope_positions):
-                    if input_mrope_position is None:
-                        positions = input_positions[b_idx]
-                    else:
-                        positions = input_mrope_position[idx]
-                    padded_positions = make_tensor_with_pad([positions],
-                                                        max_len=max_prompt_len,
-                                                        pad=0,
-                                                        dtype=torch.long,
-                                                        device='cpu').flatten().tolist()
-                    mrope_input_positions[idx].extend(padded_positions)
+        if self.model_is_mrope:
+            padded_input_mrope_positions = \
+                build_and_pad_mrope_positions(input_positions=input_positions,
+                                              input_mrope_positions=input_mrope_positions,
+                                              max_prompt_len=max_prompt_len)
             input_positions = None  # type: ignore
-            input_positions_tensor = torch.tensor(mrope_input_positions,
+            input_positions_tensor = torch.tensor(padded_input_mrope_positions,
                                                   dtype=torch.long,
-                                                  device='cpu',
-                                                  )
-            # print(f" ABC: input positions with MROPE shape is {input_positions_tensor.shape}")
+                                                  device='cpu')
         else:
             input_mrope_positions = None  # type: ignore
             input_positions_tensor = make_tensor_with_pad(input_positions,
@@ -1171,11 +1191,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                 pad=0,
                                                 dtype=torch.long,
                                                 device='cpu')
-            if self.model_is_mrope:
-                # Qwen 2.5 vl works with flatten input_positions
-                input_positions_tensor = input_positions_tensor.flatten()
-            # print(f" ABC: input positions no mrope shape is {input_positions_tensor.shape}")
-
 
         slot_mapping = make_tensor_with_pad(slot_mapping,
                                             max_len=max_prompt_len,
@@ -1303,21 +1318,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
-
                 input_positions.append([position])
 
-                if seq_data.mrope_position_delta is not None:
-                    context_len = seq_data.get_num_computed_tokens()
-                    pos_for_mrope = MRotaryEmbedding.get_next_input_positions(
-                        seq_data.mrope_position_delta,
-                        context_len,
-                        seq_len,
-                    )
-                else:
-                    pos_for_mrope = [[position]] * 3
-
-                for idx in range(3):
-                    input_mrope_positions[idx].extend(pos_for_mrope[idx])
+                if self.model_is_mrope:
+                    if seq_data.mrope_position_delta is not None:
+                        pos_for_mrope = MRotaryEmbedding \
+                            .get_next_input_positions(
+                                seq_data.mrope_position_delta,
+                                seq_data.get_num_computed_tokens(),
+                                seq_len)
+                    else:
+                        pos_for_mrope = [[position]] * 3
+                    for idx in range(3):
+                        input_mrope_positions[idx].extend(pos_for_mrope[idx])
 
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -1594,10 +1607,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs)
-        sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
-                                                     seq_lens, query_lens,
-                                                     self.device,
-                                                     self.pin_memory)
+
+        if not self.is_pooler:
+            sampling_metadata = SamplingMetadata.prepare(
+                seq_group_metadata_list, seq_lens, query_lens, self.device,
+                self.pin_memory)
 
         if not self.scheduler_config.chunked_prefill_enabled:
             assert (len(prefill_reqs) and len(decode_reqs)) == 0
@@ -1768,13 +1782,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
-        # TODO: Add dummy data with metadata info
-        # encoder_dummy_data \
-        #     = self.input_registry.dummy_data_for_profiling(
-        #         self.model_config,
-        #                                 seq_len,
-        #                                 self.mm_registry,
-        #                                 is_encoder_data=True)        
         if is_prompt:
             input_len = seq_len
             output_len = 0
