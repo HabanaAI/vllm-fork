@@ -1,10 +1,11 @@
-set -ex
+# set -ex
 
 usage() {
     echo "Usage: $0"
     echo "Options:"
     echo "  --model|-m                    Model path lub model stub"
     echo "  --image_type|-i               Type model: snowscat synthetic"
+    echo "  --video                       URL of the video file"
     echo "  --iter                        number of iterations(Default:1)"
     exit 1
 }
@@ -31,6 +32,15 @@ while [[ $# -gt 0 ]]; do
         ImageType=$2
         shift 2
         ;;
+    --video | -v)
+        if [[ -n "$2" && ! "$2" =~ ^- ]]; then    # Assign URL if provided
+            video=$2
+            shift 2
+        else
+            video="https://huggingface.co/spaces/merve/llava-interleave/resolve/main/cats_1.mp4"   # video set to default video URL file
+            shift 1
+        fi
+        ;;  
     --iter)
         iter=$2
         shift 2
@@ -44,6 +54,7 @@ done
 #Set Default values
 iter=${iter:-1}
 ImageType=${ImageType:-"snowscat"}
+video=${video} 
 
 if [[ -n $HELP ]]; then
     usage
@@ -69,6 +80,13 @@ export VLLM_HPU_LOG_STEP_CPU_FALLBACKS=1
 if [[ $ImageType == "snowscat" ]] && [[ ! $(md5sum /tmp/snowscat-H3oXiq7_bII-unsplash.jpg | cut -d" " -f1) == "3ad5657658d1a7684e35541778d30204" ]]; then
     python3 -c "import requests; from PIL import Image; url = 'https://huggingface.co/alkzar90/ppaine-landscape/resolve/main/assets/snowscat-H3oXiq7_bII-unsplash.jpg'; filename = url.split('/')[-1]; r = requests.get(url, allow_redirects=True); open(filename, 
 'wb').write(r.content); image = Image.open(f'./{filename}'); image = image.resize((1200, 600)); image.save(f'/tmp/{filename}')"
+fi
+
+if [[ -n "$video" ]]; then
+    filename=$(basename "$video")
+    echo "Downloading Video $filename from $video"
+    wget -O /tmp/$filename "$video"
+    videofile="/tmp/$filename"
 fi
 
 if [[ -n $InstallVLLM ]]; then
@@ -97,5 +115,11 @@ if [[ "$model" == *"Qwen2"* ]]; then
     export WORKAROUND=1
 fi
 
-ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
+if [[ -n "$video" ]]; then
+    ARGS="-m $model -v $videofile --iter $iter $EXTRAARGS"
+else
+    ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
+fi
+
+
 python offline_inferece.py $ARGS
