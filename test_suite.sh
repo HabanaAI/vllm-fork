@@ -13,3 +13,6 @@ bash run_offline.sh -m $ModelName -i synthetic --multiple_prompts
 bash run_offline.sh -m $ModelName -i synthetic
 bash run_offline.sh -m $ModelName -v
 bash run_offline.sh -m $ModelName -v --multiple_prompts
+
+#pytests
+pytest tests/models/decoder_only/vision_language/test_models.py -s -v -k "[qwen2_5"

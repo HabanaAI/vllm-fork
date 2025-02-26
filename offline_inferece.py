@@ -23,6 +23,7 @@ args = parser.parse_args()
 
 # Process video input and select specified number of evenly distributed frames
 
+
 def sample_frames(path, num_frames):
     video = cv2.VideoCapture(path)
     total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -38,6 +39,7 @@ def sample_frames(path, num_frames):
             frames.append(pil_img)
     video.release()
     return frames[:num_frames]
+
 
 # Load the image / Video
 
@@ -66,12 +68,11 @@ multiple_prompt = args.multiple_prompts
 
 if args.video:
     question = "Describe this video."
-    llm = LLM(model=mdl,
-        enforce_eager=True,
-        dtype='bfloat16' ,
-        gpu_memory_utilization=0.6)
+    llm = LLM(
+        model=mdl, enforce_eager=True, dtype="bfloat16", gpu_memory_utilization=0.6
+    )
 
-    prompt = f'<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>{question}<|im_end|>\n<|im_start|>assistant\n'
+    prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>{question}<|im_end|>\n<|im_start|>assistant\n"
 
     if multiple_prompt:
         batch_data = [
@@ -84,7 +85,7 @@ if args.video:
     else:
         batch_data = {"prompt": prompt, "multi_modal_data": {"video": video}}
 
-else :
+else:
     question = "Describe this image."
     # Prompt example: https://docs.vllm.ai/en/v0.6.2/getting_started/examples/offline_inference_vision_language.html
     if "Qwen2" in mdl:
