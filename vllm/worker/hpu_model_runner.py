@@ -902,6 +902,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         disable_tensor_cache = get_hpu_disable_tensor_cache()
+        if self.model_is_mrope:
+            logger.warning(
+                "Setting HPU_DISABLE_TENSOR_CACHE to False for this model"
+                )
+            disable_tensor_cache = False
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
             disable_tensor_cache=disable_tensor_cache,
