@@ -1060,7 +1060,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def find_bucket(self, seq_group_metadata_list, is_prompt):
         bucketing_fn, real_batch_size, blocks_or_seq_len = self._get_bucketing_input(seq_group_metadata_list, is_prompt)
-        return bucketing_fn(real_batch_size, blocks_or_seq_len)
+        padded_bs, padded_blocks_or_seq = bucketing_fn(real_batch_size, blocks_or_seq_len)
+        phase = "prompt" if is_prompt else "decode"
+        self.profiler.record_counter(self.profiler.get_timestamp_us(), {
+            f"{phase}_padding_bs": padded_bs - real_batch_size,
+            f"{phase}_padding_blocks": padded_blocks_or_seq - blocks_or_seq_len,
+        })
+        return padded_bs, padded_blocks_or_seq
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         bucketing_fn, real_batch_size, blocks_or_seq_len = self._get_bucketing_input(seq_group_metadata_list, is_prompt)
