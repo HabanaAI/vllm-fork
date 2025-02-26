@@ -226,7 +226,7 @@ def build_and_pad_mrope_positions(input_positions: List[List[int]],
     # Qwen2.5vl expects 3 lists of positions, we are going to pad each
     # seq_data in the list using either MRope values for multi-modal
     # or regular position for text only inputs
-    mrope_input_positions = [[] for _ in range(3)]
+    mrope_input_positions: List[List[int]] = [[] for _ in range(3)]
     for idx in range(3):
         for b_idx, input_mrope_position in enumerate(input_mrope_positions):
             if input_mrope_position is not None:
@@ -1340,9 +1340,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
         if self.model_is_mrope:
-            input_positions = None
+            input_positions = None  # type: ignore
         else:
-            input_mrope_positions = None
+            input_mrope_positions = None  # type: ignore
 
         input_positions = torch.tensor(input_positions or input_mrope_positions,
                                        dtype=torch.long,
