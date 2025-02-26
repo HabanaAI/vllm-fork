@@ -580,7 +580,7 @@ class Qwen2VisionTransformer(nn.Module):
             hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
             wpos_ids = torch.arange(w).unsqueeze(0).expand(h, -1)
             hpos_ids = hpos_ids.reshape(
-                h // self.spatial_merge_size,  # buggy... 62/2 is yielding 0 .. seems its ok wo hpu graphs
+                h // self.spatial_merge_size,
                 self.spatial_merge_size,
                 w // self.spatial_merge_size,
                 self.spatial_merge_size,
@@ -1112,14 +1112,6 @@ class Qwen2VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 raise ValueError(f"{name} should be 2D or batched 3D tensor. "
                                  f"Got ndim: {mm_input.ndim} "
                                  f"(shape={mm_input.shape})")
-            # sasarkar buggy  ... seems an issue with hpu graph?
-            '''
-            (Pdb) (list(mm_input))
-[tensor([[ 1, 62, 92]], device='hpu:0')]
-(Pdb) torch.concat(list(mm_input))
-tensor([[0, 0, 0]], device='hpu:0')
-
-            '''
             return torch.concat(list(mm_input))
         else:
             return torch.concat(mm_input)
@@ -1134,13 +1126,10 @@ tensor([[0, 0, 0]], device='hpu:0')
             return None
 
         if pixel_values is not None:
-            # sasarkar: _validate_and_reshape_mm_tensor seems to be messing up the values some how
-            #pixel_values = self._validate_and_reshape_mm_tensor(
-            #    pixel_values, "image pixel values")
-            #image_grid_thw = self._validate_and_reshape_mm_tensor(
-            #    image_grid_thw, "image grid_thw")
-            pixel_values = pixel_values.view(-1, pixel_values.shape[-1])
-            image_grid_thw = image_grid_thw.view(-1, image_grid_thw.shape[-1])
+            pixel_values = self._validate_and_reshape_mm_tensor(
+                pixel_values, "image pixel values")
+            image_grid_thw = self._validate_and_reshape_mm_tensor(
+                image_grid_thw, "image grid_thw")
 
             if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of image pixel values. "
@@ -1151,7 +1140,6 @@ tensor([[0, 0, 0]], device='hpu:0')
                                            image_grid_thw=image_grid_thw)
 
         if image_embeds is not None:
-            assert False, "Call me if this is hit"
             image_embeds = self._validate_and_reshape_mm_tensor(
                 image_embeds, "image embeds")
             image_grid_thw = self._validate_and_reshape_mm_tensor(
@@ -1369,15 +1357,6 @@ tensor([[0, 0, 0]], device='hpu:0')
                     video_input=video_input)
                 input_ids = None
 
-        '''
-        During "warmup": ... have switched off warmup memory for now
-        hpu:
-        input_ids, positions: 32x1024
-
-        CPU:
-        input_ids is None
-        positions: 3x1451:
-        '''
         hidden_states = self.language_model.model(
             input_ids=input_ids,
             positions=positions,
