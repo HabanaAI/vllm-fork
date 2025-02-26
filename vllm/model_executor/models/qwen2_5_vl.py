@@ -1066,6 +1066,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 in seconds) for each grid along the temporal dimension in the
                 3D position IDs. `None` if no videos are passed.
         """
+
         if intermediate_tensors is not None:
             inputs_embeds = None
 
