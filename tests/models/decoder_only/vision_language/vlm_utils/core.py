@@ -51,7 +51,7 @@ def run_test(
 
     model_info = HF_EXAMPLE_MODELS.find_hf_info(model)
     model_info.check_available_online(on_fail="skip")
-    model_info.check_transformers_version(on_fail="skip")
+    #model_info.check_transformers_version(on_fail="skip")
 
     vllm_outputs_per_mm = []
     hf_outputs_per_mm = []
