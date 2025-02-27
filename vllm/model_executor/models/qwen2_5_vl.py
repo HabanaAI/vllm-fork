@@ -612,10 +612,10 @@ class Qwen2_5_VisionTransformer(nn.Module):
 
         # windows attention
         window_index, cu_window_seqlens = self.get_window_index(grid_thw)
+
         def remove_duplicates_cpu(a):
-            return [
-                a[i] for i in range(len(a)) if i==0 or a[i-1]!= a[i]
-            ]
+            return [a[i] for i in range(len(a)) if i == 0 or a[i - 1] != a[i]]
+
         cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
