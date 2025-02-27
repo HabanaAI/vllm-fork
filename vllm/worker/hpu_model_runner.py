@@ -223,10 +223,11 @@ def get_path_to_rope(model: torch.nn.Module):
     return path_to_rope
 
 
-def make_mrope_positions_tensor_with_pad(
+def make_mrope_positions_tensor_with_pad( \
         input_positions: List[List[int]],
-        input_mrope_positions: List[List[List[int]]], max_prompt_len: int,
-        pad: int) -> Optional[List[List[int]]]:
+        input_mrope_positions: List[List[List[int]]],
+        max_prompt_len: int,
+        pad: int) -> List[List[int]]:
     # If no mrope positions, returns a flatten (seq_len,)
     if all(mrope_position is None for mrope_position in input_mrope_positions):
         return make_tensor_with_pad(input_positions,
