@@ -19,6 +19,7 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
 from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
+FULL_RANGE = 448.0
 
 current_platform_fp8_dtype = (torch.float8_e4m3fnuz
                               if current_platform.is_rocm() else

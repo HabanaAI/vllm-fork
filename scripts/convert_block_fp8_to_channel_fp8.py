@@ -6,12 +6,16 @@ from compress_pickle import load
 
 from safetensors import safe_open
 from safetensors.torch import save_file
+from tqdm import tqdm
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # CONSTANTS
 SAFETENSORS = "safetensors"
 WEIGHT_SCALE_NAME = "weight_scale_inv"
 MODEL_STATE_DICT_MAPPING_FILENAME = "model.safetensors.index.json"
-FULL_RANGE = 240.0  # torch.finfo(torch.float8_e4m3fnuz).max for Gaudi2
+FULL_RANGE = 448.0  # torch.finfo(torch.float8_e4m3fnuz).max for Gaudi2
 # end constants
 
 def get_input_scales(pkl_path):
@@ -68,7 +72,7 @@ def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype, orig
     assert len(block_size) == 2
     weight_shape_len = len(weight.shape)
     block_size_m, block_size_n = block_size
-    print(f"weight shape is {weight.shape} and weight_scale shape is {weight_scale.shape}")
+    logger.debug(f"weight shape is {weight.shape} and weight_scale shape is {weight_scale.shape}")
     # mul scale
     if weight_shape_len == 2:
         weight_scale_m, weight_scale_n = weight_scale.shape
@@ -102,29 +106,45 @@ def dynamic_quant(data):
 def main(model_path: str, qmodel_path: str, input_scales_path: str) -> None:
     torch.set_grad_enabled(False)
     maybe_create_dir(qmodel_path)
+    # copy all files start with config* and tokenizer* from model_path to qmodel_path
+    for file in os.listdir(model_path):
+        if file.startswith("config") or file.startswith("tokenizer"):
+            logger.info(f"Copying {file} from {model_path} to {qmodel_path}")
+            file_path = os.path.join(model_path, file)
+            os.system(f"cp {file_path} {qmodel_path}")
+    if os.path.exists(os.path.join(qmodel_path, "config.json")):
+        with open(os.path.join(qmodel_path, "config.json"), "r") as f:
+            config = json.load(f)
+        config["quantization_config"] = {
+            "activation_scheme": "static" if input_scales_path is not None else "dynamic",
+            "fmt": "e4m3",
+            "quant_method": "fp8"
+        }
+        with open(os.path.join(qmodel_path, "config.json"), "w") as f:
+            json.dump(config, f, indent=4)
     all_weight_filename = sorted(get_all_weight_filename(model_path))
-    print(f"Got {len(all_weight_filename)} weight files")
+    logger.info(f"Got {len(all_weight_filename)} weight files")
     qtensor_mapping = {}
     weight_map = json.load(open(f"{model_path}/{MODEL_STATE_DICT_MAPPING_FILENAME}"))["weight_map"]
 
     input_scales = get_input_scales(input_scales_path)
 
-    for i, filename in enumerate(all_weight_filename):
-        print(f"Processing {i + 1}/{len(all_weight_filename)}: {filename}")
+    for i, filename in tqdm(enumerate(all_weight_filename), total=len(all_weight_filename)):
+        logger.debug(f"Processing {i + 1}/{len(all_weight_filename)}: {filename}")
         file_path = os.path.join(model_path, filename)
         qmodel_file_path = os.path.join(qmodel_path, filename)
         qtensors = {}
 
         with safe_open(file_path, framework="pt", device="cpu") as f:
             for name in f.keys():
-                print(f"[{i+1}/{len(all_weight_filename)}] Processing {name}")
+                logger.debug(f"[{i+1}/{len(all_weight_filename)}] Processing {name}")
                 if "model.layers.61" in name:
-                    print(f"Ignoring {name}")
+                    logger.debug(f"Ignoring {name}")
                     continue
                 elif "proj" in name and "scale_inv" in name:
                     weight_scale_name = name
                     weight_name = name[: -len("_scale_inv")]
-                    print(f"Begin quantizing weight: {weight_name} with scale: {weight_scale_name}")
+                    logger.debug(f"Begin quantizing weight: {weight_name} with scale: {weight_scale_name}")
 
                     scale = f.get_tensor(name)
                     scale_file = weight_map.get(weight_scale_name)
@@ -152,23 +172,23 @@ def main(model_path: str, qmodel_path: str, input_scales_path: str) -> None:
                         qtensors[input_scale_name] = input_scale
                         qtensor_mapping[input_scale_name] = filename
                     
-                    print(f"Completed quantizing weight: {weight_name} with scale: {weight_scale_name}")
+                    logger.debug(f"Completed quantizing weight: {weight_name} with scale: {weight_scale_name}")
                 elif "proj" in name and not ("scale_inv" in name) and not ("eh_" in name):
-                    print(f"Ignoring {name}")
+                    logger.debug(f"Ignoring {name}")
                     continue
                 else:
-                    print(f"Skipping quantization for {name}")
+                    logger.debug(f"Skipping quantization for {name}")
                     weight_name = name
                     weight = f.get_tensor(weight_name)
                     qtensors[weight_name] = weight
                     qtensor_mapping[weight_name] = filename
 
-        print(f"[{i+1}/{len(all_weight_filename)}] Saving {len(qtensors)} tensors to {qmodel_file_path}")
+        logger.info(f"[{i+1}/{len(all_weight_filename)}] Saving {len(qtensors)} tensors to {qmodel_file_path}")
         save_file(qtensors, qmodel_file_path)
     if input_scales.keys():
-        print(f"warning: the following input_scales are unused:")
+        logger.warning(f"warning: the following input_scales are unused:")
         for k in input_scales.keys():
-            print(k)
+            logger.warning(k)
 
     model_state_dict_mapping_file_path = os.path.join(qmodel_path, MODEL_STATE_DICT_MAPPING_FILENAME)
     print(f"Saving tensor mapping to {model_state_dict_mapping_file_path}")
@@ -186,6 +206,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--qmodel_path", type=str, required=True)
-    parser.add_argument("--input_scales_path", type=str, default=None)
+    parser.add_argument("--input_scales_path", type=str, default = None)
     args = parser.parse_args()
+
+    if os.path.exists(args.qmodel_path):
+        raise ValueError(f"{args.qmodel_path} already exists, please remove or backup.")
     main(args.model_path, args.qmodel_path, args.input_scales_path)
+
+    print("Conversion is completed.")
