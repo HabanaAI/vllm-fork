@@ -621,7 +621,8 @@ class Qwen2_5_VisionTransformer(nn.Module):
             cu_window_seqlens,
             device=hidden_states.device,
             dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32)
-        # This is not a static operation, removing duplicates earlier on CPU
+        # NOTE: unique_consecutive is a dynamic operation
+        # we are replacing it with the `remove_duplicates_cpu` above
         #cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = hidden_states.size()
