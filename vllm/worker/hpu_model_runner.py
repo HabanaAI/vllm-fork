@@ -42,8 +42,8 @@ from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
-from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
@@ -165,9 +165,11 @@ def get_target_layer_suffix_list(model_type) -> list[str]:
         decoder_layer_table.get(model_type, "DecoderLayer"), "EncoderLayer"
     ]
 
+
 def get_hpu_disable_tensor_cache():
     env_var = os.environ.get('HPU_DISABLE_TENSOR_CACHE', 'true')
     return env_var.lower() == 'true'
+
 
 def modify_model_layers(module: torch.nn.Module,
                         suffix_list: list[str],
@@ -226,10 +228,11 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
-def make_mrope_positions_tensor_with_pad(input_positions: List[List[int]],
-                                  input_mrope_positions: List[List[List[int]]],
-                                  max_prompt_len: int,
-                                  pad: int) -> Optional[List[List[int]]]:
+
+def make_mrope_positions_tensor_with_pad(
+        input_positions: List[List[int]],
+        input_mrope_positions: List[List[List[int]]], max_prompt_len: int,
+        pad: int) -> Optional[List[List[int]]]:
     # If no mrope positions, returns a flatten (seq_len,)
     if all(mrope_position is None for mrope_position in input_mrope_positions):
         return make_tensor_with_pad(input_positions,
@@ -252,9 +255,8 @@ def make_mrope_positions_tensor_with_pad(input_positions: List[List[int]],
             padded_positions = positions \
                 + (max_prompt_len - len(positions)) * [pad]
             mrope_input_positions[idx].extend(padded_positions)
-    return torch.tensor(mrope_input_positions,
-                        dtype=torch.long,
-                        device='cpu')
+    return torch.tensor(mrope_input_positions, dtype=torch.long, device='cpu')
+
 
 class HpuModelAdapter:
 
@@ -450,7 +452,7 @@ class HpuModelAdapter:
                 positions, recompute_cos_sin=self.recompute_cos_sin)
         else:
             raise AttributeError(
-               "The module at the end of the path does not have \
+                "The module at the end of the path does not have \
                a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
@@ -912,8 +914,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         disable_tensor_cache = get_hpu_disable_tensor_cache()
         if self.model_is_mrope:
             logger.warning(
-                "Setting HPU_DISABLE_TENSOR_CACHE to False for this model"
-                )
+                "Setting HPU_DISABLE_TENSOR_CACHE to False for this model")
             disable_tensor_cache = False
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
@@ -1066,7 +1067,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
 
-            seq_data_mrope_positions : Optional[List[List[int]]] = None
+            seq_data_mrope_positions: Optional[List[List[int]]] = None
             if seq_group_metadata.multi_modal_data:
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
@@ -1101,7 +1102,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     multi_modal_placeholder_maps[modality].extend(
                         placeholder_map)
 
-            input_mrope_positions.append(seq_data_mrope_positions)
+            input_mrope_positions.append(
+                seq_data_mrope_positions)  # type: ignore
 
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
@@ -1197,11 +1199,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_positions = None  # type: ignore
         else:
             input_mrope_positions = None  # type: ignore
-            input_positions_tensor = make_tensor_with_pad(input_positions,
-                                                max_len=max_prompt_len,
-                                                pad=0,
-                                                dtype=torch.long,
-                                                device='cpu')
+            input_positions_tensor = make_tensor_with_pad(
+                input_positions,
+                max_len=max_prompt_len,
+                pad=0,
+                dtype=torch.long,
+                device='cpu')
 
         slot_mapping = make_tensor_with_pad(slot_mapping,
                                             max_len=max_prompt_len,
@@ -1378,13 +1381,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             real_batch_size = len(seq_group_metadata_list)
             input_tokens = output[:real_batch_size].clone()
 
-
         if self.model_is_mrope:
             input_positions = None  # type: ignore
         else:
             input_mrope_positions = None  # type: ignore
 
-        input_positions = torch.tensor(input_positions or input_mrope_positions,
+        input_positions = torch.tensor(input_positions
+                                       or input_mrope_positions,
                                        dtype=torch.long,
                                        device='cpu')
 
