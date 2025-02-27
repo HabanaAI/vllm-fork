@@ -220,27 +220,35 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
-def build_and_pad_mrope_positions(input_positions: List[List[int]],
+def make_mrope_positions_tensor_with_pad(input_positions: List[List[int]],
                                   input_mrope_positions: List[List[List[int]]],
-                                  max_prompt_len) -> Optional[List[List[int]]]:
-    # Qwen2.5vl expects 3 lists of positions, we are going to pad each
-    # seq_data in the list using either MRope values for multi-modal
-    # or regular position for text only inputs
+                                  max_prompt_len: int,
+                                  pad: int) -> Optional[List[List[int]]]:
+    # If no mrope positions, returns a flatten (seq_len,)
+    if all(mrope_position is None for mrope_position in input_mrope_positions):
+        return make_tensor_with_pad(input_positions,
+                                    max_len=max_prompt_len,
+                                    pad=0,
+                                    dtype=torch.long,
+                                    device='cpu').flatten()
+    # Otherwise, Qwen2.5-VL expects positions in a (3, seq_len)
+    # we are going to pad each seq_data in the list
+    # using either MRope values or regular position
     mrope_input_positions: List[List[int]] = [[] for _ in range(3)]
     for idx in range(3):
         for b_idx, input_mrope_position in enumerate(input_mrope_positions):
             if input_mrope_position is not None:
                 positions = input_mrope_position[idx]
             else:
-                # use regular positions as default
-                positions = input_positions[b_idx]  
-            padded_positions = make_tensor_with_pad([positions],
-                                                max_len=max_prompt_len,
-                                                pad=0,
-                                                dtype=torch.long,
-                                                device='cpu').flatten().tolist()
+                positions = input_positions[b_idx]
+            padding_size = max_prompt_len - len(positions)
+            assert padding_size >= 0
+            padded_positions = positions \
+                + (max_prompt_len - len(positions)) * [pad]
             mrope_input_positions[idx].extend(padded_positions)
-    return mrope_input_positions
+    return torch.tensor(mrope_input_positions,
+                        dtype=torch.long,
+                        device='cpu')
 
 class HpuModelAdapter:
 
@@ -1152,14 +1160,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                    device='cpu')
 
         if self.model_is_mrope:
-            padded_input_mrope_positions = \
-                build_and_pad_mrope_positions(input_positions=input_positions,
+            input_positions_tensor = \
+                make_mrope_positions_tensor_with_pad(input_positions=input_positions,
                                               input_mrope_positions=input_mrope_positions,
-                                              max_prompt_len=max_prompt_len)
+                                              max_prompt_len=max_prompt_len,
+                                              pad=0)
             input_positions = None  # type: ignore
-            input_positions_tensor = torch.tensor(padded_input_mrope_positions,
-                                                  dtype=torch.long,
-                                                  device='cpu')
         else:
             input_mrope_positions = None  # type: ignore
             input_positions_tensor = make_tensor_with_pad(input_positions,
