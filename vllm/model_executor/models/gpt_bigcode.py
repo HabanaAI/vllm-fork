@@ -78,14 +78,40 @@ class GPTBigCodeAttention(nn.Module):
             total_num_kv_heads = total_num_heads
             self.num_kv_heads = self.num_heads
         self.kv_dim = self.head_dim * self.num_kv_heads
-        self.c_attn = QKVParallelLinear(
-            self.hidden_size,
-            self.head_dim,
-            total_num_heads,
-            total_num_kv_heads,
-            bias=True,
-            quant_config=quant_config,
-        )
+
+        self.split_qk_v = True # cache_config.split_qk_v
+
+        if self.split_qk_v:
+            self.q_proj = ColumnParallelLinear(input_size=self.hidden_size,
+                                               output_size=self.hidden_size,
+                                               bias=True,
+                                               gather_output=False,
+                                               skip_bias_add=False,
+                                               params_dtype=None,
+                                               quant_config=quant_config)
+            self.k_proj = ColumnParallelLinear(input_size=self.hidden_size,
+                                               output_size=self.kv_dim * self.tensor_model_parallel_world_size,
+                                               bias=True,
+                                               gather_output=False,
+                                               skip_bias_add=False,
+                                               params_dtype=None,
+                                               quant_config=quant_config)
+            self.v_proj = ColumnParallelLinear(input_size=self.hidden_size,
+                                               output_size=self.kv_dim * self.tensor_model_parallel_world_size,
+                                               bias=True,
+                                               gather_output=False,
+                                               skip_bias_add=False,
+                                               params_dtype=None,
+                                               quant_config=quant_config)
+        else:
+            self.c_attn = QKVParallelLinear(
+                self.hidden_size,
+                self.head_dim,
+                total_num_heads,
+                total_num_kv_heads,
+                bias=True,
+                quant_config=quant_config,
+            )
 
         self.c_proj = RowParallelLinear(
             self.hidden_size,
@@ -107,14 +133,19 @@ class GPTBigCodeAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        qkv, _ = self.c_attn(hidden_states)
-        q, k, v = qkv.split(
-            [
-                self.hidden_size // self.tensor_model_parallel_world_size,
-                self.kv_dim, self.kv_dim
-            ],
-            dim=-1,
-        )
+        if self.split_qk_v:
+            q, _ = self.q_proj(hidden_states)
+            k, _ = self.k_proj(hidden_states)
+            v, _ = self.v_proj(hidden_states)
+        else:
+            qkv, _ = self.c_attn(hidden_states)
+            q, k, v = qkv.split(
+                [
+                    self.hidden_size // self.tensor_model_parallel_world_size,
+                    self.kv_dim, self.kv_dim
+                ],
+                dim=-1,
+            )
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         attn_output, _ = self.c_proj(attn_output)
         return attn_output
@@ -302,6 +333,7 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self.sampler = get_sampler()
         self.make_empty_intermediate_tensors = (
             self.transformer.make_empty_intermediate_tensors)
+        self.split_qk_v = True #cache_config.split_qk_v
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.transformer.get_input_embeddings(input_ids)
