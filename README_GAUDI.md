@@ -421,12 +421,11 @@ Set the following environment variables to avoid OOM/functional issues.  Additio
    in fewer buckets. If an OOM error occurs, the value should be increased.
 - `VLLM_PROMPT_BS_BUCKET_MAX=16` -  Suggested value, depends on the model.  You can increase it until you reach an OOM error or decrease it if OOM occurs.
 - `VLLM_PROMPT_SEQ_BUCKET_MIN=24576` -  Suggested value, depends on warmup results.
-- `VLLM_PROMPT_SEQ_BUCKET_STEP=2048` - Suggested value, depends on warmup results. It is recommended to increase it to a higher value for faster warmup.
+- `VLLM_PROMPT_SEQ_BUCKET_STEP=2048` - Suggested value, depends on warmup results. It is recommended to increase it to a higher value for faster warmup. `VLLM_PROMPT_SEQ_BUCKET_STEP=16384` - Suggested value for Intel Gaudi 3.
 - `VLLM_PROMPT_SEQ_BUCKET_MAX=32768` - Value for context length of 32K. Use 16384 for 16K.
 - `VLLM_DECODE_BLOCK_BUCKET_MIN=1024` - Suggested value, depends on warmup results.
 - `VLLM_DECODE_BLOCK_BUCKET_STEP=1024` - Suggested value, depends on warmup results.
-- `VLLM_DECODE_BLOCK_BUCKET_MAX=33792` - `max_num_seqs * max_decode_seq // self.block_size`, where `max_decode_seq` represents the sum of input and output sequences.
-   For example:
+- `VLLM_DECODE_BLOCK_BUCKET_MAX=33792` - `max_num_seqs * max_decode_seq // self.block_size`, where `max_decode_seq` represents the sum of input and output sequences. For example:
    - 128 * ((32 + 1) * 1024) / 128
    - 32 * ((32 + 1) * 1024) / 128
 
