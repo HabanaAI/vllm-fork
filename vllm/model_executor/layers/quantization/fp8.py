@@ -864,31 +864,35 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             e_score_correction_bias=e_score_correction_bias)
 
         ep_shift = ep_rank * num_experts
-        
-        if seq_len > 1:
-            use_static_moe = False
-        else:
-            use_static_moe = self.use_static_moe
+        use_static_moe = self.use_static_moe
 
-        def do_static_moe_with_blockdequant(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, total_num_experts, num_experts, w13_weight_scale_inv_fp8=None, w2_weight_scale_inv_fp8=None):
+        def do_static_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, total_num_experts, num_experts, w13_weight_scale_inv_fp8=None, w2_weight_scale_inv_fp8=None):
             x_fp8, x_scale = dynamic_quant(x)
-            final_hidden_states = torch.zeros_like(x_fp8)
             # padded_weights shape is (total_num_experts, num_tokens)
-            experts_mask = torch.zeros((x_fp8.size(0), total_num_experts), dtype=x_fp8.dtype, device=x_fp8.device)
+            experts_mask = torch.zeros((x.size(0), total_num_experts), dtype=x.dtype, device=x.device)
             experts_mask.scatter_(-1, topk_ids, topk_weights)
             experts_mask = experts_mask.transpose(0, 1)
+
+            if seq_len > 1:
+                mask_weights = torch.zeros((x_fp8.size(0), total_num_experts), dtype=x_fp8.dtype, device=x_fp8.device)
+                mask_weights.scatter_(-1, topk_ids, 1)
+                mask_weights = mask_weights.transpose(0, 1)
 
             for i in range(num_experts):
                 w13_weight_fp8_slice = w13_weight_fp8[i, ...]
                 w2_weight_fp8_slice = w2_weight_fp8[i, ...]
+                w13_scale_fp8_slice = w13_weight_scale_inv_fp8[i, ...]
+                w2_scale_fp8_slice = w2_weight_scale_inv_fp8[i, ...]
 
-                if not self.pre_dequant:
-                    w13_scale_fp8_slice = w13_weight_scale_inv_fp8[i, ...]
-                    w13_weight = dequant_block_fp8_weight_naive(w13_weight_fp8_slice, w13_scale_fp8_slice, self.quant_config.weight_block_size, x_fp8.dtype)
+                if seq_len > 1:
+                    mask_weight = mask_weights[i + ep_shift].unsqueeze(1)
+                    current_state_static = x_fp8 * mask_weight
+                else:
+                    current_state_static = x_fp8
                 up_gate_states = torch.ops.hpu.fp8_gemm_v2(
-                    x_fp8,
+                    current_state_static,
                     False,
-                    w13_weight,
+                    w13_weight_fp8_slice,
                     True,
                     None,
                     torch.bfloat16,
@@ -900,14 +904,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 d = up_gate_states.shape[-1] // 2
                 current_state_static = F.silu(up_gate_states[..., :d]) * up_gate_states[..., d:]
 
-                if not self.pre_dequant:
-                    w2_scale_fp8_slice = w2_weight_scale_inv_fp8[i, ...]
-                    w2_weight = dequant_block_fp8_weight_naive(w2_weight_fp8_slice, w2_scale_fp8_slice, self.quant_config.weight_block_size, x_fp8.dtype)
                 current_state_static, current_state_static_scale = dynamic_quant(current_state_static)
                 current_hidden_states = torch.ops.hpu.fp8_gemm_v2(
                     current_state_static,
                     False,
-                    w2_weight,
+                    w2_weight_fp8_slice,
                     True,
                     None,
                     torch.bfloat16,
@@ -917,12 +918,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     False,
                 )
                 padded_weight = experts_mask[i + ep_shift].unsqueeze(1)
-                final_hidden_states += current_hidden_states * padded_weight
+                if i == 0:
+                    final_hidden_states = current_hidden_states * padded_weight
+                else:
+                    final_hidden_states.add_(current_hidden_states * padded_weight)
 
             return final_hidden_states
 
-        def do_static_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, total_num_experts, num_experts, w13_weight_scale_inv_fp8=None, w2_weight_scale_inv_fp8=None):
-            final_hidden_states = torch.zeros_like(x)
+        def do_static_moe_with_blockdequant(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, total_num_experts, num_experts, w13_weight_scale_inv_fp8=None, w2_weight_scale_inv_fp8=None):
             # padded_weights shape is (total_num_experts, num_tokens)
             experts_mask = torch.zeros((x.size(0), total_num_experts), dtype=x.dtype, device=x.device)
             experts_mask.scatter_(-1, topk_ids, topk_weights)
@@ -944,7 +947,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     w2_weight = dequant_block_fp8_weight_naive(w2_weight_fp8_slice, w2_scale_fp8_slice, self.quant_config.weight_block_size, x.dtype)
                 current_hidden_states = torch.matmul(tmp_states, w2_weight.transpose(0, 1))
                 padded_weight = experts_mask[i + ep_shift].unsqueeze(1)
-                final_hidden_states += current_hidden_states * padded_weight
+                if i == 0:
+                    final_hidden_states = current_hidden_states * padded_weight
+                else:
+                    final_hidden_states.add_(current_hidden_states * padded_weight)
 
             return final_hidden_states
 
@@ -957,7 +963,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                                     w2_weight_scale_inv_fp8,
                                                     block_size=self.quant_config.weight_block_size,
                                                     dtype=x.dtype) if not self.pre_dequant else w2_weight_fp8
-            final_hidden_states = torch.zeros_like(x)
             for i in range(moe_n_slice):
                 min_expert = i * n_expert_slice
                 max_expert = (i + 1) * n_expert_slice
@@ -965,7 +970,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 w13_list_slice = [w13_weight[j] for j in range(min_expert, max_expert)]
                 w2_list_slice = [w2_weight[j] for j in range(min_expert, max_expert)]
 
-                final_hidden_states += torch.ops.hpu.mixture_of_experts(
+                current_hidden_states = torch.ops.hpu.mixture_of_experts(
                                             hidden_states=x,
                                             expert_routing_table=topk_ids.to(torch.int64),
                                             router_weights=topk_weights.to(x.dtype),
@@ -975,13 +980,15 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                             activation="silu",
                                             experts_min=min_expert + ep_shift,
                                             experts_max=max_expert - 1 + ep_shift)
-                htorch.core.mark_step()
+                if i == 0:
+                    final_hidden_states = current_hidden_states
+                else:
+                    final_hidden_states.add_(current_hidden_states)
             return final_hidden_states
 
         def do_dynamic_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8, w2_input_scale):
             x_scale = layer.w13_input_scale.data
             x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
-            final_hidden_states = torch.zeros_like(x)
             for i in range(moe_n_slice):
                 min_expert = i * n_expert_slice
                 max_expert = (i + 1) * n_expert_slice
@@ -992,7 +999,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 w2_weight_scale = [w2_weight_scale_inv_fp8[i,...] for i in range(min_expert, max_expert)]
                 w2_input_scale = [w2_input_scale.unsqueeze(0).repeat(num_experts)[i] for i in range(num_experts)]
 
-                final_hidden_states += torch.ops.hpu.mixture_of_experts(
+                current_hidden_states = torch.ops.hpu.mixture_of_experts(
                                             hidden_states=x_fp8,
                                             expert_routing_table=topk_ids.to(torch.int64),
                                             router_weights=topk_weights.to(x.dtype),
@@ -1006,12 +1013,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                             activation="silu",
                                             experts_min=min_expert + ep_shift,
                                             experts_max=max_expert - 1 + ep_shift)
-                htorch.core.mark_step()
+                if i == 0:
+                    final_hidden_states = current_hidden_states
+                else:
+                    final_hidden_states.add_(current_hidden_states)
             return final_hidden_states
 
         def do_dynamic_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8=None, w2_weight_scale_inv_fp8=None):
             x_fp8, x_scale = dynamic_quant(x, single_scale=True)
-            final_hidden_states = torch.zeros_like(x)
             for i in range(moe_n_slice):
                 min_expert = i * n_expert_slice
                 max_expert = (i + 1) * n_expert_slice
@@ -1021,7 +1030,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 w13_weight_scale = [w13_weight_scale_inv_fp8[i, ...] for i in range(min_expert, max_expert)]
                 w2_weight_scale = [w2_weight_scale_inv_fp8[i,...] for i in range(min_expert, max_expert)]
 
-                final_hidden_states += torch.ops.hpu.mixture_of_experts(
+                current_hidden_states = torch.ops.hpu.mixture_of_experts(
                                             hidden_states=x_fp8,
                                             expert_routing_table=topk_ids.to(torch.int64),
                                             router_weights=topk_weights.to(x.dtype),
@@ -1034,7 +1043,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                             activation="silu",
                                             experts_min=min_expert + ep_shift,
                                             experts_max=max_expert - 1 + ep_shift)
-                htorch.core.mark_step()
+                if i == 0:
+                    final_hidden_states = current_hidden_states
+                else:
+                    final_hidden_states.add_(current_hidden_states)
             return final_hidden_states
 
         if use_partial_experts:

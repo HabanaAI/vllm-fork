@@ -479,7 +479,7 @@ class DefaultModelLoader(BaseModelLoader):
                     )
                     parent = parent_child_mod_dict[mod].parent
                     name = parent_child_mod_dict[mod].name
-                    kwargs = {"mod": mod, "mod_extra_config": mod_extra_config}
+                    kwargs = {"mod": mod, "mod_extra_config": mod_extra_config, "parent": parent}
                     patched_mod = PatchedVLLMKVCache(**kwargs)
                     setattr(parent, name, patched_mod)
 
