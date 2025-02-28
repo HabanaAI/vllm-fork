@@ -170,11 +170,6 @@ def get_target_layer_suffix_list(model_type) -> list[str]:
     ]
 
 
-def get_hpu_disable_tensor_cache():
-    env_var = os.environ.get('HPU_DISABLE_TENSOR_CACHE', 'true')
-    return env_var.lower() == 'true'
-
-
 def modify_model_layers(module: torch.nn.Module,
                         suffix_list: list[str],
                         n=1,
@@ -920,14 +915,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        disable_tensor_cache = get_hpu_disable_tensor_cache()
-        if self.model_is_mrope:
-            logger.warning(
-                "Setting HPU_DISABLE_TENSOR_CACHE to False for this model")
-            disable_tensor_cache = False
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
-            disable_tensor_cache=disable_tensor_cache,
+            disable_tensor_cache=True,
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
