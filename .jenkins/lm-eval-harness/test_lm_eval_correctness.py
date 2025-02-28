@@ -30,7 +30,7 @@ lm_eval_logger = logging.getLogger('lm-eval')
 lm_eval_logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter('%(name)s - %(levelname)s - %(asctime)s - %(message)s')
 handler.setFormatter(formatter)
 lm_eval_logger.addHandler(handler)
 
