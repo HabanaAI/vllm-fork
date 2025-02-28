@@ -17,7 +17,7 @@ usage() {
 SUCCESS=0
 APC_ENABLED="false"
 TP_SIZE=1
-while getopts "c:t:a:" OPT; do
+while getopts "c:t:a" OPT; do
   case ${OPT} in
     c ) 
         CONFIG="$OPTARG"
