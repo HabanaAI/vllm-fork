@@ -635,7 +635,6 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 device=hidden_states.device,
                 dtype=grid_thw.dtype
                 if torch.jit.is_tracing() else torch.int32)
-
             cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = hidden_states.size()
