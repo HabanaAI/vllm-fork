@@ -30,6 +30,7 @@ REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
 
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
+LORA_ADAPTER_PATH = os.environ.get("LORA_ADAPTER_PATH", None)
 
 def setup_fp8():
     os.environ[
@@ -62,9 +63,8 @@ def launch_lm_eval(eval_config):
         model_args += \
             f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
 
-    lora_adapter = eval_config.get("LORA_ADAPTER")
-    if lora_adapter:
-        model_args += f",peft={lora_adapter}"
+    if LORA_ADAPTER_PATH:
+        model_args += f",peft={LORA_ADAPTER_PATH}"
 
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
