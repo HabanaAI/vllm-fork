@@ -112,7 +112,7 @@ if [[ -n "$MultiPrompt" ]]; then
 fi
 
 if [[ "$model" == *"Qwen2"* ]]; then
-    export WORKAROUND=1
+    export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false
 fi
 
 if [[ -n "$video" ]]; then

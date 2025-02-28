@@ -914,7 +914,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             disable_tensor_cache = False
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
-            disable_tensor_cache=disable_tensor_cache,
+            disable_tensor_cache=True,
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
