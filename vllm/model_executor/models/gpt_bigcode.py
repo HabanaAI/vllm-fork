@@ -134,18 +134,20 @@ class GPTBigCodeAttention(nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         if self.split_qk_v:
-            q, _ = self.q_proj(hidden_states)
-            k, _ = self.k_proj(hidden_states)
-            v, _ = self.v_proj(hidden_states)
+            q, _ = self.q_proj(hidden_states) # torch.Size([32, 1024, 6144])
+            k, _ = self.k_proj(hidden_states) # torch.Size([32, 1024, 128])
+            v, _ = self.v_proj(hidden_states) # torch.Size([32, 1024, 128])
         else:
             qkv, _ = self.c_attn(hidden_states)
+            # qkv=torch.Size([32, 1024, 6400])
             q, k, v = qkv.split(
                 [
-                    self.hidden_size // self.tensor_model_parallel_world_size,
-                    self.kv_dim, self.kv_dim
+                    self.hidden_size // self.tensor_model_parallel_world_size, #6144//1
+                    self.kv_dim, self.kv_dim #128
                 ],
                 dim=-1,
             )
+            # q=torch.Size([32, 1024, 6144]) k,v = torch.Size([32, 1024, 128])
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         attn_output, _ = self.c_proj(attn_output)
         return attn_output
@@ -333,7 +335,7 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self.sampler = get_sampler()
         self.make_empty_intermediate_tensors = (
             self.transformer.make_empty_intermediate_tensors)
-        self.split_qk_v = True #cache_config.split_qk_v
+        self.split_qk_v = True # vllm_config.cache_config.split_qk_v
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.transformer.get_input_embeddings(input_ids)
@@ -371,6 +373,14 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
+        if self.split_qk_v:
+            stacked_params_mapping = [
+            # (param_name, shard_name)
+            ]
+            stacked_params_mapping.append((".q_proj", ".c_attn"))
+            stacked_params_mapping.append((".k_proj", ".c_attn"))
+            stacked_params_mapping.append((".v_proj", ".c_attn"))
+
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
@@ -382,7 +392,14 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                 continue
             if is_pp_missing_parameter(name, self):
                 continue
-            param = params_dict[name]
+            if ".c_attn" in name and self.split_qk_v:
+                # attn.c_attn.weight torch.Size([6400, 6144])
+                # attn.c_attn.bias torch.Size([6400])
+                for param_name, weight_name in stacked_params_mapping:
+                    new_name = name.replace(weight_name, param_name)
+                    param = params_dict[new_name]
+            else:
+                param = params_dict[name]
             weight_loader = getattr(param, "weight_loader",
                                     default_weight_loader)
             # TODO (@robertgshaw2-neuralmagic): move to fp8 linear method
