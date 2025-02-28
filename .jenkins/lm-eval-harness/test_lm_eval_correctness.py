@@ -12,6 +12,7 @@ import itertools
 import os
 import statistics
 import time
+import logging
 from pathlib import Path
 
 import lm_eval
@@ -19,6 +20,19 @@ import numpy
 import yaml
 
 import vllm
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configure lm_eval logging
+lm_eval_logger = logging.getLogger('lm-eval')
+lm_eval_logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+lm_eval_logger.addHandler(handler)
 
 RTOL = 0.06
 TEST_DATA_FILE = os.environ.get(
@@ -31,6 +45,7 @@ REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
 LORA_ADAPTER_PATH = os.environ.get("LORA_ADAPTER_PATH", None)
+
 
 def setup_fp8():
     os.environ[
