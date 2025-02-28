@@ -165,6 +165,10 @@ def _process_weights_after_loading(model: nn.Module, model_config: ModelConfig,
             # parameters onto device for processing and back off after.
             with device_loading_context(module, target_device):
                 quant_method.process_weights_after_loading(module)
+            if current_platform.is_hpu():
+                torch.hpu.synchronize()
+                if torch.distributed.is_initialized():
+                    torch.distributed.barrier()
 
     # Currently only used by MLA.
     # NOTE: This intentionally happens after other modules so we can easily
@@ -175,6 +179,10 @@ def _process_weights_after_loading(model: nn.Module, model_config: ModelConfig,
             # TODO(lucas): see if there is a way to unify the signatures
             # of process_weights_after_loading
             module.process_weights_after_loading(model_config.dtype)
+            if current_platform.is_hpu():
+                torch.hpu.synchronize()
+                if torch.distributed.is_initialized():
+                    torch.distributed.barrier()
 
 
 class BaseModelLoader(ABC):

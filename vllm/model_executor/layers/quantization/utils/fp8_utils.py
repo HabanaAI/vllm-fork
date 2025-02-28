@@ -158,6 +158,14 @@ def pad_block_fp8_weight_naive(weight, weight_scale, block_size):
 
     return weight, orig_M, orig_N
 
+def dynamic_quant(data, single_scale = False):
+    if single_scale:
+        scale = ((torch.abs(data)).max() + 1e-8) / 240.0
+    else:
+        scale = ((torch.abs(data)).max(dim=1).values + 1e-8) / 240.0 #torch.finfo(torch.float8_e4m3fn).max
+        scale = scale.unsqueeze(-1)
+    data_fp8 = torch.ops.hpu.cast_to_fp8_v2(data, 1.0 / scale, False, False, torch.float8_e4m3fn)[0]
+    return data_fp8, scale.float()
 
 def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype=torch.bfloat16, original_M=None, original_N=None, do_unpad=False):
     if weight_scale is None:
@@ -192,7 +200,7 @@ def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype=torch
     return dequant_weight
 
 
-def apply_block_fp8_linear_hpu(
+def apply_block_fp8_linear_hpu_dequant(
     input: torch.Tensor,
     weight: torch.Tensor,
     block_size: List[int],
@@ -215,6 +223,36 @@ def apply_block_fp8_linear_hpu(
     if bias is not None:
         output = output + bias
     return output.to(dtype=input.dtype).view(*input.shape[:-1], -1)
+
+
+def apply_block_fp8_linear_hpu_dynamic(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    input_scale: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    # View input as 2D matrix for fp8 methods
+    input_2d = input.view(-1, input.shape[-1])
+    output_shape = [*input.shape[:-1], weight.shape[0]]
+
+    x_fp8, x_scale = dynamic_quant(input_2d)
+
+    output = torch.ops.hpu.fp8_gemm_v2(
+        x_fp8,
+        False,
+        weight,
+        True,
+        None,
+        torch.bfloat16,
+        x_scale,
+        weight_scale,
+        None,
+        False
+    )
+    if bias is not None:
+        output = output + bias
+    return output.to(dtype=input.dtype).view(*output_shape)
 
 
 def input_to_float8(
