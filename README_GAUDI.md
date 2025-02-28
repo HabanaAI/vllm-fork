@@ -413,11 +413,9 @@ Set the following environment variables to avoid OOM/functional issues.  Additio
 - `PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1`
 - `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1`
 
-Lines 407-417:
-
 **32K context length flags examples:**
 
-- `VLLM_GRAPH_RESERVED_MEM` - The value depends on the model and context length settings. Use `VLLM_GRAPH_RESERVED_MEM=0.02` for llama3.1-8b or `VLLM_GRAPH_RESERVED_MEM=0.1` for llama3.1-70b.
+- `VLLM_GRAPH_RESERVED_MEM` - The value depends on the model and context length settings. Use `VLLM_GRAPH_RESERVED_MEM=0.02` for Llama3.1-8B or `VLLM_GRAPH_RESERVED_MEM=0.1` for Llama3.1-70B.
 - `VLLM_PROMPT_BS_BUCKET_MIN=1` - Suggested value, depends on the model. You can increase it until you reach an OOM error or decrease it if OOM occurs.
 - `VLLM_PROMPT_BS_BUCKET_STEP=16` -  Suggested value, depends on the model. Increasing the step value results 
    in fewer buckets. If an OOM error occurs, the value should be increased.
