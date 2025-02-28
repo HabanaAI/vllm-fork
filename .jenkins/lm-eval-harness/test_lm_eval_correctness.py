@@ -4,7 +4,7 @@ LM eval harness on model to compare vs HF baseline computed offline.
 Configs are found in configs/$MODEL.yaml
 
 * export LM_EVAL_TEST_DATA_FILE=configs/Meta-Llama-3-70B-Instruct.yaml
-* export LM_EVAL_TP_SIZE=4 
+* export LM_EVAL_TP_SIZE=4
 * pytest -s test_lm_eval_correctness.py
 """
 import atexit
@@ -52,13 +52,20 @@ def launch_lm_eval(eval_config):
                  f"max_model_len=4096," \
                  f"max_num_seqs={max_num_seqs}," \
                  f"trust_remote_code={trust_remote_code}"
+
     if eval_config.get("fp8"):
         model_args += ",quantization=inc," \
             "kv_cache_dtype=fp8_inc," \
             "weights_load_device=cpu"
+
     if eval_config.get("num_scheduler_steps"):
         model_args += \
             f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
+
+    lora_adapter = eval_config.get("LORA_ADAPTER")
+    if lora_adapter:
+        model_args += f",peft={lora_adapter}"
+
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
         kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']

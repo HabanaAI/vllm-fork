@@ -210,6 +210,8 @@ class EngineArgs:
 
     additional_config: Optional[Dict[str, Any]] = None
 
+    peft: Optional[str] = None
+
     def __post_init__(self):
         if not self.tokenizer:
             self.tokenizer = self.model
