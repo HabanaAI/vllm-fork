@@ -391,7 +391,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         """
         num_gpu_blocks, num_cpu_blocks = (
             self.scorer_worker.determine_num_available_blocks())
-
+        """Calling the determine_num_available_blocks for
+        draft model to calculate mem_margin
+        """
+        self.proposer_worker.determine_num_available_blocks()
         scorer_cache_block_size_bytes = (
             self.scorer_worker.get_cache_block_size_bytes())
         proposer_cache_block_size_bytes = (
