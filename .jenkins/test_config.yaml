@@ -18,10 +18,10 @@ stages:
     steps:
       - name: gsm8k_small_g3_tp1_apc
         flavor: g3
-        command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
+        command: export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
       - name: gsm8k_small_g2_tp1_apc
         flavor: g2
-        command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
+        command: export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
   - name: test_gsm8k_large_models
     steps:
       - name: gsm8k_large_g3_tp2
