@@ -611,7 +611,6 @@ class FusedMoE(torch.nn.Module):
                     tp_rank=tp_rank,
                     expert_id=expert_id)
             elif current_platform.is_hpu():
-                print(f"quant_method is {quant_method}")
                 self._load_per_channel_weight_scale(
                     shard_id=shard_id,
                     shard_dim=shard_dim,

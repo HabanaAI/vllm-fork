@@ -33,6 +33,8 @@ else:
 os.environ["VLLM_MLA_DISABLE_REQUANTIZATION"] = "1"
 os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
 
+os.environ['VLLM_DMOE_DYNAMIC_SCALE']='1'
+
 if __name__ == "__main__":
 
     from lm_eval.models.vllm_causallms import VLLM

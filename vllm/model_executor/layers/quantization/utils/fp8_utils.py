@@ -132,7 +132,6 @@ def pad_weight(weight, block_size):
     if pad_M == 0 and pad_N == 0:
         return weight, M, N  # No padding needed
     padded_weight = torch.nn.functional.pad(weight, (0, pad_N, 0, pad_M), mode='constant', value=0)
-    padded_weight = torch.nn.Parameter(padded_weight, requires_grad=False)
     return padded_weight, M, N  # Return original dimensions for unpadding
 
 def unpad_weight(weight, original_M, original_N, keep_first_dim=False):
@@ -163,7 +162,7 @@ def dynamic_quant(data, single_scale = False):
     if single_scale:
         scale = ((torch.abs(data)).max() + 1e-8) / 240.0
     else:
-        scale = ((torch.abs(data)).max(dim=1).values + 1e-8) / 240.0 #torch.finfo(torch.float8_e4m3fn).max
+        scale = ((torch.abs(data)).max(dim=-1).values + 1e-8) / 240.0 #torch.finfo(torch.float8_e4m3fn).max
         scale = scale.unsqueeze(-1)
     data_fp8 = torch.ops.hpu.cast_to_fp8_v2(data, 1.0 / scale, False, False, torch.float8_e4m3fn)[0]
     return data_fp8, scale.float()
@@ -199,31 +198,6 @@ def dequant_block_fp8_weight_naive(weight, weight_scale, block_size, dtype=torch
         dequant_weight = unpad_weight(dequant_weight, original_M, original_N, keep_first_dim=keep_first_dim)
 
     return dequant_weight
-
-
-def apply_block_fp8_linear_hpu_dequant(
-    input: torch.Tensor,
-    weight: torch.Tensor,
-    block_size: List[int],
-    weight_scale: torch.Tensor,
-    input_scale: Optional[torch.Tensor] = None,
-    bias: Optional[torch.Tensor] = None,
-    original_M: Optional[torch.Tensor] = None,
-    original_N: Optional[torch.Tensor] = None,
-    do_dequant: bool = True,
-    do_unpad: bool = False,
-) -> torch.Tensor:
-    assert input_scale is None
-    # View input as 2D matrix for fp8 methods
-    input_2d = input.view(-1, input.shape[-1])
-    if do_dequant:
-        original_M = original_M.data.item()
-        original_N = original_N.data.item()
-        weight = dequant_block_fp8_weight_naive(weight, weight_scale, block_size, input.dtype, original_M, original_N, do_unpad)
-    output = torch.nn.functional.linear(input_2d, weight, bias=None)
-    if bias is not None:
-        output = output + bias
-    return output.to(dtype=input.dtype).view(*input.shape[:-1], -1)
 
 
 def apply_block_fp8_linear_hpu_dynamic(
