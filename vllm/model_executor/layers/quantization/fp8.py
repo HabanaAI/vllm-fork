@@ -1002,19 +1002,15 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             actual_num_experts = num_experts
             moe_n_slice = self.moe_n_slice
 
-
-        if use_static_moe:
-            if self.quant_config.activation_scheme == "dynamic":
-                final_hidden_states = do_static_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, actual_total_experts, actual_num_experts, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8)
-            else:
-                raise ValueError("Static MoE with static scaling is not supported, please use dynamic MOE.")
-        else:
-            if self.quant_config.activation_scheme == "dynamic" and self.enable_dmoe_dynamic_scale:
+        if self.quant_config.activation_scheme == "dynamic":
+            if not use_static_moe and self.enable_dmoe_dynamic_scale:
                 final_hidden_states = do_dynamic_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8)
-            elif self.quant_config.activation_scheme == "static":
-                final_hidden_states = do_dynamic_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8, layer.w2_input_scale)
             else:
-                raise ValueError("Dynamic MoE with dynamic scaling is not supported if VLLM_DMOE_DYNAMIC_SCALE is not set to true.")
+                final_hidden_states = do_static_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, actual_total_experts, actual_num_experts, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8)
+        elif self.quant_config.activation_scheme == "static":
+            final_hidden_states = do_dynamic_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8, layer.w2_input_scale)
+        else:
+            raise ValueError("Unknown activation scheme")
 
         return final_hidden_states.view(-1, x.shape[1])
 
