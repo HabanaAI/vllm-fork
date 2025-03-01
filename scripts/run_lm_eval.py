@@ -5,7 +5,7 @@ import os
 import json
 import time
 
-model_path = "/data/models/DeepSeek-R1/"
+model_path = "/data/models/DeepSeek-R1-static/"
 #model_path = "/mnt/workdisk/dohayon/Projects/R1/DeepSeek-R1-fp8/"
 # model_path = "deepseek-ai/DeepSeek-V2-Lite"
 
@@ -15,8 +15,9 @@ parser.add_argument("--model", type=str, default=model_path, help="The model pat
 parser.add_argument("--task", type=str, default="gsm8k", help="The model path.")
 parser.add_argument("--tokenizer", type=str, default=model_path, help="The model path.")
 parser.add_argument("--tp_size", type=int, default=8, help="Tensor Parallelism size.")
-parser.add_argument("--ep_size", type=int, default=1, help="Expert Parallelism size.")
-parser.add_argument("-l", "--limit", type=int, default=4, help="test request counts.")
+parser.add_argument("--ep_size", type=int, default=8, help="Expert Parallelism size.")
+parser.add_argument("-l", "--limit", type=int, default=32, help="test request counts.")
+parser.add_argument("--batch_size", type=int, default=32, help="The batch size.")
 args = parser.parse_args()
 
 os.environ["VLLM_SKIP_WARMUP"] = "true"
@@ -46,6 +47,7 @@ if __name__ == "__main__":
             dtype="bfloat16",
             max_model_len=16384,
             gpu_memory_utilization=0.8,
+            batch_size=args.batch_size,
         )
     else:
         llm = VLLM(
@@ -57,6 +59,7 @@ if __name__ == "__main__":
             max_model_len=16384,
             dtype="bfloat16",
             gpu_memory_utilization=0.8,
+            batch_size=args.batch_size,
         )
 
     
