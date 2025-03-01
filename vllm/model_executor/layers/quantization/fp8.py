@@ -867,7 +867,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             experts_mask = experts_mask.transpose(0, 1)
 
             if seq_len > 1:
-                mask_weights = torch.zeros((x_fp8.size(0), total_num_experts), dtype=x_fp8.dtype, device=x_fp8.device)
+                mask_weights = torch.zeros((x_fp8.size(0), total_num_experts), dtype=x.dtype, device=x.device)
                 mask_weights.scatter_(-1, topk_ids, 1)
                 mask_weights = mask_weights.transpose(0, 1)
 
@@ -879,21 +879,22 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
                 if seq_len > 1:
                     mask_weight = mask_weights[i + ep_shift].unsqueeze(1)
-                    current_state_static = x_fp8 * mask_weight
+                    current_state_static = x_fp8 * mask_weight.to(torch.float8_e4m3fn)
                 else:
                     current_state_static = x_fp8
+
                 up_gate_states = torch.ops.hpu.fp8_gemm_v2(
-                    current_state_static,
-                    False,
-                    w13_weight_fp8_slice,
-                    True,
-                    None,
-                    torch.bfloat16,
-                    x_scale,
-                    w13_scale_fp8_slice,
-                    None,
-                    False,
-                )
+                    A=current_state_static,
+                    trans_A=False,
+                    B=w13_weight_fp8_slice,
+                    trans_B=True,
+                    D=None,
+                    out_dtype=torch.bfloat16,
+                    A_scale_inv=x_scale,
+                    B_scale_inv=w13_scale_fp8_slice,
+                    bias=None,
+                    accumulate=False)
+
                 d = up_gate_states.shape[-1] // 2
                 current_state_static = F.silu(up_gate_states[..., :d]) * up_gate_states[..., d:]
 
