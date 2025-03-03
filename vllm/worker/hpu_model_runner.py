@@ -1027,7 +1027,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert max_query_len > 0
 
         max_prompt_len = max(
-            self.bucketing_ctx.get_padded_prompt_seq_len(max(seq_lens)),
+            self.bucketing_ctx.get_padded_prompt_seq_len(max_query_len),
             self.block_size)
 
         lora_ids: List[int] = []
