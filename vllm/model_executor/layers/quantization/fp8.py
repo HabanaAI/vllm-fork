@@ -970,6 +970,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                             activation="silu",
                                             experts_min=min_expert + ep_shift,
                                             experts_max=max_expert - 1 + ep_shift)
+                htorch.core.mark_step()
                 if i == 0:
                     final_hidden_states = current_hidden_states
                 else:
@@ -1000,6 +1001,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                             activation="silu",
                                             experts_min=min_expert + ep_shift,
                                             experts_max=max_expert - 1 + ep_shift)
+                htorch.core.mark_step()
                 if i == 0:
                     final_hidden_states = current_hidden_states
                 else:
@@ -1032,6 +1034,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                             activation="silu",
                                             experts_min=min_expert + ep_shift,
                                             experts_max=max_expert - 1 + ep_shift)
+                htorch.core.mark_step()
                 if i == 0:
                     final_hidden_states = current_hidden_states
                 else:
