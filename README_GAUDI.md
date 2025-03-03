@@ -393,8 +393,8 @@ However, disabling this feature in production environments is not recommended, a
 > - `VLLM_ENGINE_ITERATION_TIMEOUT_S` - to adjust the vLLM server timeout. You can set the value in seconds, e.g., 600 equals 10 minutes.
 > - `VLLM_RPC_TIMEOUT` - to adjust the RPC protocol timeout used by the OpenAI-compatible API. This value is in microseconds, e.g., 600000 equals 10 minutes.
 
-# Long context support
-Adding support for token context window for more than 32k token long. Supported models below:
+# Long Context Support
+Long context feature enables support for a token context window exceeding 32K tokens. It is supported by the following models:
 - [meta-llama/Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b)
 - [meta-llama/Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b)
 - [meta-llama/Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)
