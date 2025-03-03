@@ -5,7 +5,7 @@ import os
 import json
 import time
 
-model_path = "/data/models/DeepSeek-R1-static/"
+model_path = "/data/models/DeepSeek-R1/"
 #model_path = "/mnt/workdisk/dohayon/Projects/R1/DeepSeek-R1-fp8/"
 # model_path = "deepseek-ai/DeepSeek-V2-Lite"
 
@@ -30,10 +30,11 @@ else:
     os.environ["VLLM_MOE_N_SLICE"] = "4"
     os.environ["VLLM_EP_SIZE"] = "1"
 
-os.environ["VLLM_MLA_DISABLE_REQUANTIZATION"] = "0"
+os.environ["VLLM_MLA_DISABLE_REQUANTIZATION"] = "1"
 os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
 
-os.environ['VLLM_DMOE_DYNAMIC_SCALE']='1'
+#os.environ['VLLM_DMOE_DYNAMIC_SCALE']='1'
+os.environ['VLLM_ENABLE_RUNTIME_DEQUANT']='1'
 
 if __name__ == "__main__":
 
