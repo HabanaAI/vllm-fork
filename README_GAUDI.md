@@ -394,6 +394,7 @@ However, disabling this feature in production environments is not recommended, a
 > - `VLLM_RPC_TIMEOUT` - to adjust the RPC protocol timeout used by the OpenAI-compatible API. This value is in microseconds, e.g., 600000 equals 10 minutes.
 
 # Long Context Support
+
 Long context feature enables support for a token context window exceeding 32K tokens. It is supported by the following models:
 - [meta-llama/Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b)
 - [meta-llama/Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b)
@@ -425,9 +426,8 @@ Set the following environment variables to avoid OOM/functional issues.  Additio
 - `VLLM_DECODE_BLOCK_BUCKET_MIN=1024` - Suggested value, depends on warmup results.
 - `VLLM_DECODE_BLOCK_BUCKET_STEP=1024` - Suggested value, depends on warmup results.
 - `VLLM_DECODE_BLOCK_BUCKET_MAX=33792` - `max_num_seqs * max_decode_seq // self.block_size`, where `max_decode_seq` represents the sum of input and output sequences. For example:
-   - 128 * ((32 + 1) * 1024) / 128
-   - 32 * ((32 + 1) * 1024) / 128
-
+  - 128 *((32 + 1)* 1024) / 128
+  - 32 *((32 + 1)* 1024) / 128
 
 ## Batch Size Settings
 
@@ -436,11 +436,13 @@ The default `batch_size=256` is not optimal for long contexts (8K+). Recompilati
 If recompilation or next recomputation warnings appear during inference, reduce `batch_size` to improve stability.
 
 **Recompilation message example:**
+
 ```bash
 Configuration: (prompt, 1, 36864) was not warmed-up!
 ```
 
 **Warning message example:**
+
 ```bash
 Sequence group cmpl-3cbf19b0c6d74b3f90b5d5db2ed2385e-0 is preempted by PreemptionMode.RECOMPUTE mode because there is not enough KV cache space. This can affect the end-to-end performance. Increase gpu_memory_utilization or tensor_parallel_size to provide more KV cache memory.
 ```
