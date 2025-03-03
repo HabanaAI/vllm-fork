@@ -80,8 +80,8 @@ _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
 class PhaseType(Enum):
-    UNCACHED_PREFILL = 'prefill'
-    CACHED_PREFILL = 'prefix_prefill'
+    PREFILL = 'prefill'
+    PREFIX_PREFILL = 'prefix_prefill'
     DECODE = 'decode'
 
 
