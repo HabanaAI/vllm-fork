@@ -426,8 +426,8 @@ Set the following environment variables to avoid OOM/functional issues.  Additio
 - `VLLM_DECODE_BLOCK_BUCKET_MIN=1024` - Suggested value, depends on warmup results.
 - `VLLM_DECODE_BLOCK_BUCKET_STEP=1024` - Suggested value, depends on warmup results.
 - `VLLM_DECODE_BLOCK_BUCKET_MAX=33792` - `max_num_seqs * max_decode_seq // self.block_size`, where `max_decode_seq` represents the sum of input and output sequences. For example:
-  - 128 *((32 + 1)* 1024) / 128
-  - 32 *((32 + 1)* 1024) / 128
+  - `128 *((32 + 1)* 1024) / 128`
+  - `32 *((32 + 1)* 1024) / 128`
 
 ## Batch Size Settings
 
