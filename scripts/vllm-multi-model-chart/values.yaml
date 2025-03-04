@@ -1,0 +1,131 @@
+# Default values for vllm-multi-model-chart.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  # -- Repository and name of the docker image
+  repository: 
+  # -- Tag of the docker image
+  tag: 
+  # -- Determines when the kubelet will pull the image to the worker nodes. Choose from: `IfNotPresent`, `Always`, or `Never`. If updates to the image have been made, use `Always` to ensure the newest image is used.
+  pullPolicy: IfNotPresent
+
+secret:
+  # -- Hugging Face token
+  hfToken: 
+
+# -- Optional [image pull secret](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/) to pull from a private registry
+imagePullSecrets: []
+
+# -- Entrypoint to run bash commands defined in the args 
+command: ["bash", "-c"]
+
+# -- Entrypoint script to define the models to serve, calculate the memory allocation based on the number of models being served, and start the vLLM server
+args:
+  - >-
+    set -x
+
+    models=("mistralai/Mistral-7B-Instruct-v0.3" "meta-llama/Llama-3.1-8B-Instruct")
+    mem_ratio=$(awk -v n1=$(expr 9 / ${#models[@]}) 'BEGIN {printf "%.2f", n1 / 10}')
+
+    python3 -m vllm.entrypoints.openai.mm_api_server \
+      --models ${models[@]} \
+      --port 8000 \
+      --device hpu \
+      --dtype bfloat16 \
+      --gpu-memory-utilization=$mem_ratio \
+      --use-v2-block-manager \
+      --max-model-len 4096
+
+# -- Pod [annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/) to attach metadata to the job
+podAnnotations: {}
+
+# -- Specify a pod security context to run as a non-root user
+podSecurityContext: {}
+  # runAsUser: 1000
+  # runAsGroup: 3000
+  # fsGroup: 2000
+
+# -- Optionally specify [security context](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/) settings
+securityContext:
+  capabilities:
+    add: ["SYS_NICE"]
+
+# -- Optionally define a config map's data as container environment variables
+envFrom: []
+
+# -- Define environment variables to set in the container
+env:
+- name: VLLM_CONTIGUOUS_PA
+  value: "false"
+- name: VLLM_SKIP_WARMUP
+  value: "true"
+- name: OMPI_MCA_btl_vader_single_copy_mechanism
+  value: "none"
+
+service:
+  # -- Expose the model inference endpoint on the specified port
+  port: 80
+  # -- Port where vLLM is running within the pod
+  targetPort: 8000
+
+# -- Specify resource limits and requests for the deployment
+resources:
+  limits:
+    cpu: "20"
+    memory: 128G
+    habana.ai/gaudi: 1
+    hugepages-2Mi: 4000Mi
+  requests:
+    cpu: "20"
+    memory: 128G
+    habana.ai/gaudi: 1
+    hugepages-2Mi: 4000Mi
+
+storage:
+  # -- Name of the storage class to use for the persistent volume claim. To list the available storage classes use: `kubectl get storageclass`.
+  storageClassName: default
+  # -- [Access modes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes) for the persistent volume.
+  accessModes:
+  - "ReadWriteOnce"
+  # -- Storage [resources](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#resources)
+  resources:
+    requests:
+      storage: 60Gi
+  # -- Locaton where the PVC will be mounted in the deployment pod
+  pvcMountPath: /root/.cache/huggingface
+
+# -- Endpoint to verify health of the container and determine if it should be restarted
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 24
+
+# -- Probe to determine when the deployment is ready
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+# -- Probe to determine if the application has started
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 120
+
+# -- Optionally use the [nodeSelector](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/) to target nodes with a specified label 
+nodeSelector: {}
+
+# -- Optionally specify [tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/) to run on tainted nodes
+tolerations: []
+
+# -- Optionally specify an [affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity) to contrain deployment pod to nodes with specific labels
+affinity: {}
