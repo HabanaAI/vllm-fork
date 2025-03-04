@@ -951,7 +951,19 @@ class MllamaTextCrossAttention(nn.Module):
         attention_mask = attention_mask.view(1, 1, q_len, kv_len)
         if current_platform.is_hpu():
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
-            output = FusedSDPA.apply(q, k, v, attention_mask)
+            from vllm_hpu_extension.utils import ModuleFusedSDPA
+            fsdpa_op = ModuleFusedSDPA(FusedSDPA)
+            # use fp32 as softmax_mode for better accuracy
+            output = fsdpa_op(q,
+                    k,
+                    v,
+                    attention_mask,
+                    dropout_p=0.0,
+                    is_causal=False,
+                    scale=None,
+                    softmax_mode="fast",
+                    recompute_mode=None,
+                    valid_sequence_lengths=None)
             output = output.permute(2, 0, 1, 3).reshape(
                 q_len, self.num_local_heads * self.head_dim)
             return output
