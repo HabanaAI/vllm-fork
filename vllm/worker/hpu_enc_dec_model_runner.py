@@ -452,17 +452,14 @@ class HPUEncoderDecoderModelRunner(
         sampling_params = SamplingParams(temperature=temperature)
         num_blocks = math.ceil(seq_len / self.block_size)
         cross_block_table: Optional[List[int]] = None
+        max_mm_tokens = self.mm_registry.get_max_multimodal_tokens(
+            self.model_config)
         encoder_dummy_data \
             = self.input_registry.dummy_data_for_profiling(
             self.model_config,
-            seq_len,
+            max_mm_tokens,
             self.mm_registry,
             is_encoder_data=True)
-        mm_counts = self.mm_registry.get_mm_limits_per_prompt(
-            self.model_config)
-        num_images = mm_counts["image"]
-        max_mm_tokens = self.mm_registry.get_max_multimodal_tokens(
-            self.model_config) * num_images
         seq_len = max(seq_len, 1)
         if is_prompt:
             input_len = seq_len
