@@ -32,6 +32,14 @@ while [[ $# -gt 0 ]]; do
         ImageType=$2
         shift 2
         ;;
+    --image_width)
+        ImageWidth=$2
+        shift 2
+        ;;
+    --image_height)
+        ImageHeight=$2
+        shift 2
+        ;;
     --text_only | -t)
         TextOnly="On"
         shift 1
@@ -65,8 +73,12 @@ if [[ -n $HELP ]]; then
 fi
 
 if [[ $ImageType == "snowscat" ]] && [[ ! $(md5sum /tmp/snowscat-H3oXiq7_bII-unsplash.jpg | cut -d" " -f1) == "3ad5657658d1a7684e35541778d30204" ]]; then
-    python3 -c "import requests; from PIL import Image; url = 'https://huggingface.co/alkzar90/ppaine-landscape/resolve/main/assets/snowscat-H3oXiq7_bII-unsplash.jpg'; filename = url.split('/')[-1]; r = requests.get(url, allow_redirects=True); open(filename, 
-'wb').write(r.content); image = Image.open(f'./{filename}'); image = image.resize((1200, 600)); image.save(f'/tmp/{filename}')"
+    python3 -c "import requests; from PIL import Image; url = 'https://huggingface.co/alkzar90/ppaine-landscape/resolve/main/assets/snowscat-H3oXiq7_bII-unsplash.jpg'; filename = f'"'/tmp/{url.split("'"/"'")[-1]}'"'; r = requests.get(url, allow_redirects=True); open(filename,'wb').write(r.content);"
+    ImageWidth=${ImageWidth:-"1200"}
+    ImageHeight=${ImageHeight:-"600"}
+elif [[ $ImageType == "synthetic" ]]; then
+    ImageWidth=${ImageWidth:-"250"}
+    ImageHeight=${ImageHeight:-"250"}
 fi
 
 if [[ -n "$video" ]]; then
@@ -123,7 +135,8 @@ if [[ -n "$video" ]]; then
 elif [[ -n "$TextOnly" ]]; then
     ARGS="-m $model -t --iter $iter $EXTRAARGS"
 else
-    ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
+    ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS --image_width $ImageWidth --image_height $ImageHeight"
 fi
 
-python offline_inferece.py $ARGS
+cmd="python offline_inferece.py $ARGS"
+echo $cmd && eval $cmd

@@ -14,6 +14,8 @@ parser.add_argument("-m", "--model", help="model name or path")
 parser.add_argument("-i", "--image", help="type of image")
 parser.add_argument("-v", "--video", help="Video Input")
 parser.add_argument("-t", "--text_only", action="store_true", help="Text only pormpts")
+parser.add_argument("--image_width", type=int, default=250, help="Image width size")
+parser.add_argument("--image_height", type=int, default=250, help="Image width size")
 parser.add_argument(
     "--multiple_prompts", action="store_true", help="to run with multiple prompts"
 )
@@ -46,11 +48,11 @@ def sample_frames(path, num_frames):
 
 if args.image == "synthetic":
     image = ImageAsset("stop_sign").pil_image
-    newsize = (225, 225)
-    image = image.resize(newsize)
+    image = image.resize((args.image_width, args.image_height))
 elif args.image == "snowscat":
     filename = "/tmp/snowscat-H3oXiq7_bII-unsplash.jpg"
     image = PIL.Image.open(filename)
+    image = image.resize((args.image_width, args.image_height))
 elif args.video:
     video = sample_frames(args.video, 50)
 elif args.text_only:
