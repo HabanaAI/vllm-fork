@@ -46,6 +46,9 @@ TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
 LORA_ADAPTER_PATH = os.environ.get("LORA_ADAPTER_PATH", None)
 
+INFERENCE_SERVING = os.environ.get("INFERENCE_SERVING", False)
+
+NUM_CONCURRENT = os.environ.get("NUM_CONCURRENT", 128)
 
 def setup_fp8():
     os.environ[
@@ -78,8 +81,10 @@ def launch_lm_eval(eval_config):
         model_args += \
             f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
 
+    # if LORA_ADAPTER_PATH:
+    #     model_args += f",peft={LORA_ADAPTER_PATH}"
     if LORA_ADAPTER_PATH:
-        model_args += f",peft={LORA_ADAPTER_PATH}"
+        model_args += f",lora_local_path={LORA_ADAPTER_PATH}"
 
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
@@ -94,6 +99,19 @@ def launch_lm_eval(eval_config):
         limit=eval_config["limit"],
         batch_size="auto",
         **kwargs)
+    
+    if INFERENCE_SERVING:
+        model_args = \
+            f"model={eval_config['model_name']}," \
+            "base_url=http://0.0.0.0:8080/v1/completions," \
+            f"num_concurrent={NUM_CONCURRENT}," \
+            "max_retries=3"
+
+        results = lm_eval.simple_evaluate(
+            model="local-completions",
+            model_args=model_args,
+            tasks=[task["name"] for task in eval_config["tasks"]]
+        )
 
     return results
 
