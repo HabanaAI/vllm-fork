@@ -34,8 +34,8 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
 from vllm.config import DeviceConfig, VllmConfig
-from vllm.distributed import broadcast_tensor_dict, tensor_model_parallel_all_reduce
-from vllm.distributed.parallel_state import get_world_group, get_tp_group, get_tensor_model_parallel_world_size, get_tensor_model_parallel_rank
+from vllm.distributed import broadcast_tensor_dict
+from vllm.distributed.parallel_state import get_world_group
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
@@ -2324,6 +2324,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
+        assert model_input.input_tokens is not None
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
             num_cached = len(self.cached_step_outputs)
@@ -2687,8 +2688,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
     def _patch_prev_output(self):
         assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
-            f'''Inputs and outputs are out of sync! {len(self.cached_step_inputs)} 
-            vs {len(self.cached_step_outputs)}'''
+            f'''Inputs and outputs are out of sync!
+            {len(self.cached_step_inputs)} vs {len(self.cached_step_outputs)}'''
         if len(self.cached_step_inputs) == 0:
             return
         model_input = self.cached_step_inputs.pop(0)
