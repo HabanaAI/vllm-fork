@@ -79,12 +79,12 @@ def launch_lm_eval(eval_config):
 
     if eval_config.get("num_scheduler_steps"):
         model_args += \
-            f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
+            f"num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
 
     # if LORA_ADAPTER_PATH:
     #     model_args += f",peft={LORA_ADAPTER_PATH}"
     if LORA_ADAPTER_PATH:
-        model_args += f",lora_local_path={LORA_ADAPTER_PATH}"
+        model_args += f"enable_lora=True,lora_local_path={LORA_ADAPTER_PATH}"
 
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
