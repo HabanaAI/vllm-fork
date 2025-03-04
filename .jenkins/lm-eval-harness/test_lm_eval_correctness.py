@@ -46,7 +46,7 @@ TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
 LORA_ADAPTER_PATH = os.environ.get("LORA_ADAPTER_PATH", None)
 
-INFERENCE_SERVING = os.environ.get("INFERENCE_SERVING", False)
+INFERENCE_SERVING = os.environ.get("INFERENCE_SERVING", "false") in ['1', 'true']
 
 NUM_CONCURRENT = os.environ.get("NUM_CONCURRENT", 128)
 
@@ -91,14 +91,6 @@ def launch_lm_eval(eval_config):
         kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']
     if 'apply_chat_template' in eval_config:
         kwargs['apply_chat_template'] = eval_config['apply_chat_template']
-    results = lm_eval.simple_evaluate(
-        model="vllm",
-        model_args=model_args,
-        tasks=[task["name"] for task in eval_config["tasks"]],
-        num_fewshot=eval_config["num_fewshot"],
-        limit=eval_config["limit"],
-        batch_size="auto",
-        **kwargs)
     
     if INFERENCE_SERVING:
         model_args = \
@@ -112,6 +104,15 @@ def launch_lm_eval(eval_config):
             model_args=model_args,
             tasks=[task["name"] for task in eval_config["tasks"]]
         )
+    else:
+        results = lm_eval.simple_evaluate(
+            model="vllm",
+            model_args=model_args,
+            tasks=[task["name"] for task in eval_config["tasks"]],
+            num_fewshot=eval_config["num_fewshot"],
+            limit=eval_config["limit"],
+            batch_size="auto",
+            **kwargs)
 
     return results
 
