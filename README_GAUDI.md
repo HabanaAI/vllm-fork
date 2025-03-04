@@ -379,7 +379,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 
 > [!NOTE]
 > Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described
-  in the [vllm-hpu-extention](https://github.com/HabanaAI/vllm-hpu-extension/tree/main/calibration/README.md) package.
+  in the [vllm-hpu-extention](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.20.0/calibration/README.md) package.
 
 Once you have completed the model calibration process and collected the measurements, you can run FP8 inference with vLLM using the following command:
 ```bash
