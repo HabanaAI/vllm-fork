@@ -99,6 +99,9 @@ def launch_lm_eval(eval_config):
             f"num_concurrent={NUM_CONCURRENT}," \
             "max_retries=3"
 
+        if LORA_ADAPTER_PATH:
+            model_args += f",enable_lora=True,lora_local_path={LORA_ADAPTER_PATH}"
+
         results = lm_eval.simple_evaluate(
             model="local-completions",
             model_args=model_args,
