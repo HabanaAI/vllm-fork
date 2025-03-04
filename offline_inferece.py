@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-m", "--model", help="model name or path")
 parser.add_argument("-i", "--image", help="type of image")
 parser.add_argument("-v", "--video", help="Video Input")
+parser.add_argument("-t", "--text_only", action="store_true", help="Text only pormpts")
 parser.add_argument(
     "--multiple_prompts", action="store_true", help="to run with multiple prompts"
 )
@@ -52,8 +53,10 @@ elif args.image == "snowscat":
     image = PIL.Image.open(filename)
 elif args.video:
     video = sample_frames(args.video, 50)
+elif args.text_only:
+    print(f"Running in text-only mode")
 else:
-    print(f"unknow image/Video Input {args.image} {args.video}")
+    print(f"Unknow image/Video Input {args.image} {args.video}")
     exit
 
 sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
@@ -66,27 +69,31 @@ tested_models = [
 mdl = args.model
 multiple_prompt = args.multiple_prompts
 
+question_list = [
+    "Describe this video.",
+    "Tell me about future of global warming.",
+    "Can you describe Bernoulli's Equation?",
+    "How does deepspeed work?",
+]
+
 if args.video:
-    question = "Describe this video."
     llm = LLM(
         model=mdl, enforce_eager=True, dtype="bfloat16", gpu_memory_utilization=0.6
     )
 
-    prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>{question}<|im_end|>\n<|im_start|>assistant\n"
+    prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"
 
     if multiple_prompt:
         batch_data = [
             {"prompt": prompt, "multi_modal_data": {"video": video}},
             {
-                "prompt": "<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\ntell me about future of global warming.<|im_end|>\n<|im_start|>assistant\n"
+                "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"
             },
             {"prompt": prompt, "multi_modal_data": {"video": video}},
         ]
     else:
         batch_data = {"prompt": prompt, "multi_modal_data": {"video": video}}
-
 else:
-    question = "Describe this image."
     # Prompt example: https://docs.vllm.ai/en/v0.6.2/getting_started/examples/offline_inference_vision_language.html
     if "Qwen2" in mdl:
         llm = LLM(
@@ -96,18 +103,39 @@ else:
             max_num_seqs=5,
             limit_mm_per_prompt={"image": 1},
         )
-        prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{question}g<|im_end|>\n<|im_start|>assistant\n"
+
+        prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"
 
         if multiple_prompt:
-            batch_data = [
-                {"prompt": prompt, "multi_modal_data": {"image": image}},
-                {
-                    "prompt": "<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\nTell me about you.<|im_end|>\n<|im_start|>assistant\n"
-                },
-                {"prompt": prompt, "multi_modal_data": {"image": image}},
-            ]
+            if args.text_only:
+                batch_data = [
+                    {
+                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
+                    },
+                    {
+                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[2]}<|im_end|>\n<|im_start|>assistant\n"
+                    },
+                    {
+                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[3]}<|im_end|>\n<|im_start|>assistant\n"
+                    },
+                ]
+            else:
+                batch_data = [
+                    {"prompt": prompt, "multi_modal_data": {"image": image}},
+                    {
+                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
+                    },
+                    {"prompt": prompt, "multi_modal_data": {"image": image}},
+                ]
         else:
-            batch_data = {"prompt": prompt, "multi_modal_data": {"image": image}}
+            if args.text_only:
+                batch_data = [
+                    {
+                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
+                    }
+                ]
+            else:
+                batch_data = {"prompt": prompt, "multi_modal_data": {"image": image}}
 
     elif "Llama-3.2" in mdl:
         llm = LLM(
@@ -123,7 +151,8 @@ else:
         print(f"{mdl} is not known model?")
 
 for i in range(int(args.iter)):
-    print(f"==ITER : [{i}]")
+    print(f"------ iteration: [{i}]")
+    print(batch_data)
     outputs = llm.generate(batch_data)
 
     for o in outputs:

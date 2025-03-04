@@ -6,6 +6,8 @@ bash run_offline.sh -m $ModelName -i synthetic --multiple_prompts --skip_warmup
 bash run_offline.sh -m $ModelName -i synthetic --skip_warmup
 bash run_offline.sh -m $ModelName -v --skip_warmup
 bash run_offline.sh -m $ModelName -v --multiple_prompts --skip_warmup
+bash run_offline.sh -m $ModelName -t --skip_warmup
+bash run_offline.sh -m $ModelName -t --multiple_prompts --skip_warmup
 # with warmups
 bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts
 bash run_offline.sh -m $ModelName -i snowscat
@@ -13,6 +15,7 @@ bash run_offline.sh -m $ModelName -i synthetic --multiple_prompts
 bash run_offline.sh -m $ModelName -i synthetic
 bash run_offline.sh -m $ModelName -v
 bash run_offline.sh -m $ModelName -v --multiple_prompts
-
+bash run_offline.sh -m $ModelName -t
+bash run_offline.sh -m $ModelName -t --multiple_prompts
 #pytests
 pytest tests/models/decoder_only/vision_language/test_models.py -s -v -k "[qwen2_5"

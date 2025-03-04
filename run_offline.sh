@@ -32,15 +32,19 @@ while [[ $# -gt 0 ]]; do
         ImageType=$2
         shift 2
         ;;
+    --text_only | -t)
+        TextOnly="On"
+        shift 1
+        ;;
     --video | -v)
-        if [[ -n "$2" && ! "$2" =~ ^- ]]; then    # Assign URL if provided
+        if [[ -n "$2" && ! "$2" =~ ^- ]]; then # Assign URL if provided
             video=$2
             shift 2
         else
-            video="https://huggingface.co/spaces/merve/llava-interleave/resolve/main/cats_1.mp4"   # video set to default video URL file
+            video="https://huggingface.co/spaces/merve/llava-interleave/resolve/main/cats_1.mp4" # video set to default video URL file
             shift 1
         fi
-        ;;  
+        ;;
     --iter)
         iter=$2
         shift 2
@@ -54,7 +58,7 @@ done
 #Set Default values
 iter=${iter:-1}
 ImageType=${ImageType:-"snowscat"}
-video=${video} 
+video=${video}
 
 if [[ -n $HELP ]]; then
     usage
@@ -83,13 +87,12 @@ if [[ -n $InstallVLLM ]]; then
     cd ..
 fi
 
-
 if false; then
-	export VLLM_GRAPH_RESERVED_MEM=0.05 # default 0.1
-	export VLLM_GRAPH_PROMPT_RATIO=0.3 # 0.3 default
-	export VLLM_HPU_LOG_STEP_GRAPH_COMPILATION=true
-	export PT_HPU_METRICS_GC_DETAILS=1
-	export VLLM_HPU_LOG_STEP_CPU_FALLBACKS=1
+    export VLLM_GRAPH_RESERVED_MEM=0.05 # default 0.1
+    export VLLM_GRAPH_PROMPT_RATIO=0.3  # 0.3 default
+    export VLLM_HPU_LOG_STEP_GRAPH_COMPILATION=true
+    export PT_HPU_METRICS_GC_DETAILS=1
+    export VLLM_HPU_LOG_STEP_CPU_FALLBACKS=1
 fi
 
 if [[ -n "$SKIPWARMUP" ]]; then
@@ -117,9 +120,10 @@ fi
 
 if [[ -n "$video" ]]; then
     ARGS="-m $model -v $videofile --iter $iter $EXTRAARGS"
+elif [[ -n "$TextOnly" ]]; then
+    ARGS="-m $model -t --iter $iter $EXTRAARGS"
 else
     ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
 fi
-
 
 python offline_inferece.py $ARGS
