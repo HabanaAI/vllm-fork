@@ -2696,6 +2696,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         delayed_output = self.cached_step_outputs.pop(0).cpu().squeeze(
             -1).tolist()
         assert model_input.async_callback is not None
+        assert model_input.async_callback.keywords is not None
         ctx = model_input.async_callback.keywords["ctx"]
         assert len(
             ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
