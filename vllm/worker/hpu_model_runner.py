@@ -14,7 +14,7 @@ import math
 import os
 import time
 from array import array
-from enum import IntEnum, Enum
+from enum import Enum, IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -78,6 +78,7 @@ _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
+
 
 class PhaseType(Enum):
     PREFILL = 'prefill'
@@ -916,8 +917,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
             phase = phase.value
-            logger.warning("Configuration: (%s, %s, %s, %s) was not warmed-up!",
-                           phase, batch_size, seq_len, num_blocks)
+            logger.warning(
+                "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
+                batch_size, seq_len, num_blocks)
 
     def _prepare_prompt(
         self,
