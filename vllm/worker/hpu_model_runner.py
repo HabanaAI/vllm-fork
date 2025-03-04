@@ -2324,7 +2324,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
-        if use_delayed_sampling and not model_input.is_prompt and self.is_driver_worker:
+        if use_delayed_sampling and not model_input.is_prompt and \
+                self.is_driver_worker:
             num_cached = len(self.cached_step_outputs)
             assert num_cached > 0
             cur_seq_ids = self._get_seq_ids(model_input)
@@ -2365,8 +2366,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 self.set_active_loras(model_input.lora_requests,
                                       model_input.lora_mapping)
             # Rank!=0 workers has is_prompt==None
-            if use_delayed_sampling and not model_input.is_prompt and model_input.input_tokens.size(
-                    1) == 1:
+            if use_delayed_sampling and not model_input.is_prompt and \
+                    model_input.input_tokens.size(1) == 1:
                 if self.is_driver_worker:
                     model_kwargs_broadcast_data = {
                         "input_tokens": model_input.input_tokens
@@ -2686,7 +2687,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
     def _patch_prev_output(self):
         assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
-            f'Inputs and outputs are out of sync! {len(self.cached_step_inputs)} vs {len(self.cached_step_outputs)}'
+            f'''Inputs and outputs are out of sync! {len(self.cached_step_inputs)} 
+            vs {len(self.cached_step_outputs)}'''
         if len(self.cached_step_inputs) == 0:
             return
         model_input = self.cached_step_inputs.pop(0)
