@@ -327,7 +327,7 @@ class OPTModel(nn.Module):
                             intermediate_tensors,
                             inputs_embeds=inputs_embeds)
 
-
+from neural_compressor.torch.utils import get_used_hpu_mem_MB, get_used_cpu_mem_MB, logger
 class OPTForCausalLM(nn.Module, SupportsPP):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
@@ -413,8 +413,11 @@ class OPTForCausalLM(nn.Module, SupportsPP):
                 if is_pp_missing_parameter(name, self):
                     continue
                 param = params_dict[name]
+                print('===qkv', name, loaded_weight.shape, param.shape)
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
+                # print('===qkv', param.data)
+                logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB()), 3)} MiB")
                 break
             else:
                 # Skip loading extra bias for GPTQ models.
@@ -423,8 +426,12 @@ class OPTForCausalLM(nn.Module, SupportsPP):
                 if is_pp_missing_parameter(name, self):
                     continue
                 param = params_dict[name]
+                print('===others', name, loaded_weight.shape, param.shape)
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
+                # print('===others', param.data)
+                logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB()), 3)} MiB")
             loaded_params.add(name)
+            # breakpoint()
         return loaded_params

@@ -847,4 +847,7 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
                                             default_weight_loader)
                     weight_loader(param, loaded_weight)
             loaded_params.add(name)
+            from neural_compressor.torch.utils import get_used_hpu_mem_MB, get_used_cpu_mem_MB, logger
+            print('===default', name, loaded_weight.shape, param.shape)
+            logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB()), 3)} MiB")
         return loaded_params

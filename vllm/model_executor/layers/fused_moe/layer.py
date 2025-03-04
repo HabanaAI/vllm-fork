@@ -11,7 +11,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
-from vllm.model_executor.utils import set_weight_attrs
+from vllm.model_executor.utils import set_weight_attrs, use_mmap, set_param_data
 from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
 
@@ -488,7 +488,12 @@ class FusedMoE(torch.nn.Module):
         else:
             assert shard_id == "w3"
             expert_data = expert_data.narrow(shard_dim, shard_size, shard_size)
-        expert_data.copy_(loaded_weight)
+        if not use_mmap:
+            expert_data.copy_(loaded_weight)
+        else:
+            param = orig_exp_data
+            param_data = loaded_weight
+            set_param_data(param, param_data)
 
         if is_hpu:
             self.hpu_fused_moe.MoeOp.w13_list[expert_id].set_weight(
@@ -512,7 +517,12 @@ class FusedMoE(torch.nn.Module):
                                                  shard_size * tp_rank,
                                                  shard_size)
         # w2, down_proj: Load into only logical weight of w2.
-        expert_data.copy_(loaded_weight)
+        if not use_mmap:
+            expert_data.copy_(loaded_weight)
+        else:
+            param = expert_data
+            param_data = loaded_weight
+            set_param_data(param, param_data)
         if is_hpu:
             self.hpu_fused_moe.MoeOp.w2_list[expert_id].set_weight(expert_data)
             # print(f"loaded w2 for hpu for expert_id: {expert_id}, expert_data.shape: {expert_data.shape}")

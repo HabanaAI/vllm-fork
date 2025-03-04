@@ -667,6 +667,7 @@ class DeepseekV3Model(nn.Module):
         return hidden_states
 
 
+from neural_compressor.torch.utils import get_used_hpu_mem_MB, get_used_cpu_mem_MB, logger
 class DeepseekV3ForCausalLM(nn.Module, SupportsPP):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
@@ -788,7 +789,10 @@ class DeepseekV3ForCausalLM(nn.Module, SupportsPP):
 
                 param = params_dict[name]
                 weight_loader = param.weight_loader
+                print('===qkv', name, loaded_weight.shape, param.shape, loaded_weight.dtype, param.dtype, weight_loader)
                 weight_loader(param, loaded_weight, shard_id)
+                # print('===qkv', param.data)
+                logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB()), 3)} MiB")
                 break
             else:
                 for mapping in expert_params_mapping:
@@ -805,11 +809,14 @@ class DeepseekV3ForCausalLM(nn.Module, SupportsPP):
 
                     param = params_dict[name]
                     weight_loader = param.weight_loader
+                    print('===expert', name, loaded_weight.shape, param.shape, weight_loader)
                     weight_loader(param,
                                   loaded_weight,
                                   name,
                                   shard_id=shard_id,
                                   expert_id=expert_id)
+                    # print('===qkv', param.data)
+                    logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB()), 3)} MiB")
                     break
                 else:
                     # Skip loading extra bias for GPTQ models.
@@ -825,6 +832,8 @@ class DeepseekV3ForCausalLM(nn.Module, SupportsPP):
                     param = params_dict[name]
                     weight_loader = getattr(param, "weight_loader",
                                             default_weight_loader)
+                    print('===default', name, loaded_weight.shape, param.shape, weight_loader)
                     weight_loader(param, loaded_weight)
+                    logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB()), 3)} MiB")
             loaded_params.add(name)
         return loaded_params

@@ -766,7 +766,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
             elif not is_fake_hpu():
-                self.model = self.model.to("hpu")
+                # self.model = self.model.to("hpu")
                 htcore.mark_step()
 
             hidden_layer_markstep_interval = int(
@@ -814,6 +814,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
+        return HpuModelAdapter(*args, **kwargs)
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs), disable_tensor_cache=True
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
@@ -1610,6 +1611,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
                         temperature=0) -> None:
+        return
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -2250,9 +2252,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if previous_hidden_states is not None:
                 execute_model_kwargs.update(
                     {"previous_hidden_states": previous_hidden_states})
-            if htorch.utils.internal.is_lazy():
-                execute_model_kwargs.update(
-                    {"bypass_hpu_graphs": not use_graphs})
+            # if htorch.utils.internal.is_lazy():
+            #     execute_model_kwargs.update(
+            #         {"bypass_hpu_graphs": not use_graphs})
 
             htorch.core.mark_step()
             if self.is_driver_worker:

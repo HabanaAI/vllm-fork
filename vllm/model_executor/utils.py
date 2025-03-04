@@ -2,11 +2,34 @@
 from typing import Any, Dict, Optional
 
 import torch
+import os
+
+use_mmap = os.getenv("USE_MMAP", "0") == "1"
 
 
 def set_random_seed(seed: int) -> None:
     from vllm.platforms import current_platform
     current_platform.seed_everything(seed)
+
+
+def to(self, *args, **kwargs):
+    """function to overwrite Parameter.to() method, used by use_mmap."""
+    concatenated = torch.cat(self.cached_tensors, dim=0).to(*args, **kwargs)
+    self.data.copy_(concatenated).to(*args, **kwargs)
+    return self.data
+
+
+def set_param_data(param, param_data):
+    """function to avoid copy for tensors to concatenate, used by use_mmap."""
+    if param.data.shape != param_data.shape:
+        from types import MethodType
+        setattr(param, "to", MethodType(to, param))
+        if not hasattr(param, "cached_tensors"):
+            setattr(param, "cached_tensors", [param_data])
+        else:
+            param.cached_tensors.append(param_data)
+    else:
+        param.data = param_data
 
 
 def set_weight_attrs(
