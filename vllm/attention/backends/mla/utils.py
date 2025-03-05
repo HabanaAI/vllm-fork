@@ -26,7 +26,7 @@ from vllm.model_executor.layers.quantization.fp8 import Fp8LinearMethod
 from vllm.model_executor.layers.quantization.utils.fp8_utils import (
     apply_fp8_linear_generic, current_platform_fp8_dtype, is_fp8)
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
-    scaled_quantize)
+    scaled_quantize, scaled_dequantize)
 from vllm.model_executor.layers.rotary_embedding import (
     DeepseekScalingRotaryEmbedding, RotaryEmbedding)
 
@@ -223,6 +223,15 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                 .view(-1, self.num_heads, self.kv_lora_rank)
 
     def process_weights_after_loading(self, act_dtype: torch.dtype):
+        def is_layer_fp8(layer: LinearBase) -> bool:
+            return isinstance(layer.quant_method, Fp8LinearMethod) or\
+                (isinstance(layer.quant_method, CompressedTensorsLinearMethod)\
+                and isinstance(layer.scheme, CompressedTensorsW8A8Fp8))
+
+        def get_scales(layer: LinearBase) -> torch.Tensor:
+            if hasattr(layer, "weight_scale_inv"):
+                return layer.weight_scale_inv
+            return layer.weight_scale
         # TODO(lucas) This is very gross, we need a more wide scale refactor of
         # all the FP8 code with a more standard way of
         # defining schemes/group-shapes, we should also potentially force
@@ -239,6 +248,8 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                     return (1, weight_block_size[-1]), weight_block_size
                 else:
                     return (-1, -1), (-1, -1)  # per-tensor, per-tensor
+            elif current_platform.is_hpu():
+                return (-1, -1), (-1, 1)  # per-tensor, per-channel
             elif isinstance(layer.quant_method, CompressedTensorsLinearMethod)\
                 and isinstance(layer.scheme, CompressedTensorsW8A8Fp8):
                 # this is hacky but we always assume the for
@@ -270,6 +281,25 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                     f"Layer '{layer}' has neither weight nor qweight")
 
         def get_and_maybe_dequant_weights(layer: LinearBase):
+            if is_layer_fp8(layer):
+                if isinstance(layer.quant_method, \
+                    CompressedTensorsLinearMethod) and \
+                    isinstance(layer.scheme, CompressedTensorsW8A8Fp8):
+                    # NOTE(lucas): note sure why but `CompressedTensorsW8A8Fp8`
+                    # seems to store weights as (input, output) instead of
+                    # (output, input) so we need to transpose
+                    weight = layer.weight.T  # standardize to (output, input)
+                else:
+                    weight = layer.weight
+                # TODO@yangulei: check if needs to restore it
+                scales = get_scales(layer)
+                if len(scales.shape) > 1:
+                    _, weight_scale_group_shape = \
+                        get_scale_group_shapes_for_fp8(layer)
+                    return scaled_dequantize(weight, scales,
+                                             weight_scale_group_shape)
+                else:
+                    return weight.to(torch.float32) * scales.unsqueeze(1)
             if not isinstance(layer.quant_method, UnquantizedLinearMethod):
                 # NOTE: This should only be used offline, since it's O(N^3)
                 eye = torch.eye(layer.input_size_per_partition,
