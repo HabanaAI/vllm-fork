@@ -2697,7 +2697,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             -1).tolist()
         ctx = model_input.async_callback.keywords["ctx"]  # type: ignore
         # If there's no output to patch with, which is usually the case when
-        # we're starting a new request after all in-flight requests are completed.
+        # we're starting a new request after all requests are completed.
         if len(ctx.output_queue) == 0:
             return
         assert len(
