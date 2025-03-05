@@ -396,7 +396,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         """
         try:
             self.proposer_worker.determine_num_available_blocks()
-        except NotImplementedError as e:
+        except NotImplementedError:
             logger.info(
                 "determine_num_available_blocks method is not implemented : ",
                 type(self.proposer_worker))
