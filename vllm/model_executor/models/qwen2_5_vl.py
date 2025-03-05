@@ -313,10 +313,14 @@ class Qwen2_5_VisionAttention(nn.Module):
                 v_i = v[:, start_idx:end_idx]
                 q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                  for x in [q_i, k_i, v_i])
-                output_i = F.scaled_dot_product_attention(q_i,
-                                                          k_i,
-                                                          v_i,
-                                                          dropout_p=0.0)
+                if current_platform.is_hpu():
+                    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
+                else:
+                    output_i = F.scaled_dot_product_attention(q_i,
+                                                            k_i,
+                                                            v_i,
+                                                            dropout_p=0.0)
                 output_i = rearrange(output_i, "b h s d -> b s h d ")
                 outputs.append(output_i)
             context_layer = torch.cat(outputs, dim=1)
