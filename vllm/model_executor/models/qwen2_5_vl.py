@@ -616,6 +616,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
 
         # windows attention
+        print(f" JUST BEFORE ATTENTION WINDOW {grid_thw.shape}")
         window_index, cu_window_seqlens = self.get_window_index(grid_thw)
 
         if is_hpu:
@@ -1061,6 +1062,10 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors]:
+        print(f" qwen2_5_vl.py forward input_ids {input_ids.shape} and positions {positions.shape}")
+        if kwargs and "pixel_values" in kwargs:
+            print(f" pixel_values {kwargs['pixel_values'].shape}")
+            print(f" image_grid_thw {kwargs['image_grid_thw']}")
         """Run forward pass for Qwen2.5-VL.
 
         Args:
@@ -1101,6 +1106,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     assert positions.ndim == 2 and positions.size(0) == 3, (
                         "multimodal section rotary embedding requires "
                         f"(3, seq_len) positions, but got {positions.size()}")
+                print(f" -- Calculate input embeddings_v0 input_ids {input_ids.shape}")
+                print(f" --                             image input {image_input['pixel_values'].shape}")
                 inputs_embeds = self.get_input_embeddings_v0(
                     input_ids,
                     image_input=image_input,

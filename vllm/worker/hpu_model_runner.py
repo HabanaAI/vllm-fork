@@ -893,7 +893,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
-            disable_tensor_cache=True,
+            disable_tensor_cache=False,
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
@@ -1758,6 +1758,60 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ])
         return attention_metadata
 
+    def create_dummy_multi_modal_seq_group_metadata(self,
+                                                    group_id,
+                                                    seq_len,
+                                                    lora_request,
+                                                    temperature):
+
+        from vllm.multimodal.profiling import MultiModalProfiler
+        from vllm.multimodal.utils import cached_get_tokenizer
+
+        print("USING MY DUMMY MULTI MODAL")
+        if self.is_pooler:
+            sampling_params = None
+        else:
+            sampling_params = SamplingParams(temperature=temperature)
+
+        assert self.mm_registry.has_processor(self.model_config)
+        tokenizer = cached_get_tokenizer(
+            self.model_config.tokenizer,
+            trust_remote_code=self.model_config.trust_remote_code,
+        )
+        processor = self.mm_registry.create_processor(self.model_config, tokenizer)
+        mm_counts = self.mm_registry.get_mm_limits_per_prompt(self.model_config)
+        factory = processor.dummy_inputs
+        processor_inputs = factory.get_dummy_processor_inputs(
+            seq_len=seq_len,
+            mm_counts=mm_counts,
+            image_width=1024,
+            image_height=1024,
+        )
+        mm_inputs = processor.apply(
+            prompt=processor_inputs.prompt_text,
+            mm_data=processor_inputs.mm_data,
+            hf_processor_mm_kwargs=processor_inputs.hf_processor_mm_kwargs,
+        )
+
+        prompt_token_ids = mm_inputs["prompt_token_ids"]
+        placeholders_by_modality = mm_inputs["mm_placeholders"]        
+
+        prompt_token_ids.extend([0] * (seq_len - len(prompt_token_ids)))
+        seq_data = SequenceData.from_seqs(prompt_token_ids)
+
+        return SequenceGroupMetadata(
+            request_id=str(group_id),
+            is_prompt=True,
+            seq_data={group_id: seq_data},
+            sampling_params=sampling_params,
+            block_tables=None,
+            lora_request=lora_request[group_id]
+            if lora_request else None,
+            multi_modal_data=mm_inputs["mm_kwargs"],
+            multi_modal_placeholders=placeholders_by_modality,
+        )
+
+
     def create_dummy_seq_group_metadata(self,
                                         group_id,
                                         seq_len,
@@ -1796,12 +1850,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
             [kv_caches])
-        _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
-        max_batch_size = min(self.max_num_seqs,
-                             self.max_num_batched_tokens // max_seq_len)
-
-        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
-                             False, True)
+        # FIXME Going to set this to on big batch indepedent of bucketing_ctx
+        # _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
+        # max_batch_size = min(self.max_num_seqs,
+        #                      self.max_num_batched_tokens // max_seq_len)
+        max_batch_size = 1
+        max_seq_len = self.max_num_batched_tokens
+        self.warmup_scenario(
+            batch_size=max_batch_size,
+            seq_len=max_seq_len,
+            is_prompt=True,
+            kv_caches=kv_caches,
+            is_pt_profiler_run=False,
+            is_lora_profile_run=True,
+            multimodal_seqs_group_metada=True,
+        )
         return
 
     def warmup_scenario(self,
@@ -1811,6 +1874,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         kv_caches,
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
+                        multimodal_seqs_group_metada=False,
                         temperature=0) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
@@ -1843,7 +1907,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
-        if is_prompt:
+        if multimodal_seqs_group_metada:
+            seqs = [
+                self.create_dummy_multi_modal_seq_group_metadata(
+                    group_id=i,
+                    seq_len=seq_len,
+                    lora_request=dummy_lora_requests_per_seq[i]
+                    if dummy_lora_requests_per_seq else None,
+                    temperature=temperature,
+                ) for i in range(batch_size)
+            ]
+        elif is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
                     i,
@@ -1946,6 +2020,25 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
+        num_image_resolutions = 5
+        # TODO: The plan here is loop over a couple of image 
+        # resolutions and see if that helps during the warmup
+        # somehow indepedent of the batch_size, seq_len
+        # might need to mark.step() somewhere to split the
+        # HPU graph for video and language model
+        for i in range(num_image_resolutions):
+            max_batch_size = 1
+            max_seq_len = self.max_num_batched_tokens
+            self.log_warmup('Image', i, num_image_resolutions, max_batch_size, max_seq_len)
+            self.warmup_scenario(
+                batch_size=max_batch_size,
+                seq_len=max_seq_len,
+                is_prompt=True,
+                kv_caches=kv_caches,
+                is_pt_profiler_run=False,
+                is_lora_profile_run=True,
+                multimodal_seqs_group_metada=True,
+            )
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
@@ -2743,9 +2836,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     else:
                         return []
 
+                from habana_frameworks.torch.hpu.metrics import metric_global
+                gc_metric = metric_global("graph_compilation")
+                print(" -------- graph_compilation: ", gc_metric.stats())
+
                 return [output] if self.is_driver_worker else []
             else:
                 return []
+
+        from habana_frameworks.torch.hpu.metrics import metric_global
+        gc_metric = metric_global("graph_compilation")
+        print(" -------- graph_compilation: ", gc_metric.stats())
 
         return output if type(output) is list else [output]
 

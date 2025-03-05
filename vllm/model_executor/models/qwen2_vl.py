@@ -918,6 +918,8 @@ class Qwen2VLDummyInputsBuilder(BaseDummyInputsBuilder[Qwen2VLProcessingInfo]):
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
+        image_width: Optional[int] = None,
+        image_height: Optional[int] = None,
     ) -> ProcessorInputs:
         num_images = mm_counts.get("image", 0)
         num_videos = mm_counts.get("video", 0)
@@ -926,10 +928,23 @@ class Qwen2VLDummyInputsBuilder(BaseDummyInputsBuilder[Qwen2VLProcessingInfo]):
         image_token: str = hf_processor.image_token
         video_token: str = hf_processor.video_token
 
-        target_width, target_height = \
-            self.info.get_image_size_with_most_features()
-        target_num_frames = \
-            self.info.get_num_frames_with_most_features(seq_len)
+        if image_width or image_height:
+            assert image_width is not None
+            assert image_height is not None
+            max_image_size, _ = self.info._get_vision_info(
+                image_width=image_width,
+                image_height=image_height,
+                image_processor=None,
+            )
+            target_width, target_height = max_image_size
+            # TODO: Get target num frames from
+            target_num_frames = 1
+        else:
+            # gets largest dimensions for image and video
+            target_width, target_height = \
+                self.info.get_image_size_with_most_features()
+            target_num_frames = \
+                self.info.get_num_frames_with_most_features(seq_len)
 
         mm_data = {
             "image":
