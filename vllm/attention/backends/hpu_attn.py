@@ -176,30 +176,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
-    def _set_attn_bias(self, seq_len, context_len, query_len, device, dtype):
-        con_len = context_len.item()
-        past_mask = torch.arange(0,
-                                con_len,
-                                dtype=torch.int32,
-                                device=device)
-        past_mask = (past_mask.view(1, -1).expand(1, -1).ge(
-            con_len).view(1, 1, -1).expand(
-                1, seq_len, -1).view(1, 1, seq_len, -1))
-
-        len_mask = (torch.arange(0, seq_len - con_len, device=device,
-                                dtype=torch.int32).view(1, seq_len - con_len).ge(
-                                    query_len.unsqueeze(-1)).view(
-                                        1, 1, 1, seq_len - con_len))
-        causal_mask = torch.triu(torch.ones((1, 1, seq_len, seq_len - con_len),
-                                            device=device,
-                                            dtype=torch.bool),
-                                diagonal=1)
-        mask = causal_mask.logical_or(len_mask)
-        mask = torch.concat((past_mask, mask), dim=-1)
-        attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -math.inf))
-        return attn_bias
-
     def forward_chunked_prefill(
         self,
         layer: AttentionLayer,
@@ -272,9 +248,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory profiling run.
                 prefill_key_cache = self.k_cache(prefill_key, key_cache, block_indices,
-                                        block_offsets)
+                                        block_offsets, chunk_prefill_enabled=True)
                 prefill_value_cache = self.v_cache(prefill_value, value_cache, block_indices,
-                                        block_offsets)
+                                        block_offsets, chunk_prefill_enabled=True)
             htorch.core.mark_step()
         if attn_metadata.num_decode_tokens > 0:
             # decode preprocessing
@@ -301,9 +277,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory profiling run.
                 decode_key_cache = self.k_cache(decode_key, key_cache, block_indices,
-                                        block_offsets)
+                                        block_offsets, chunk_prefill_enabled=True)
                 decode_value_cache = self.v_cache(decode_value, value_cache, block_indices,
-                                        block_offsets)
+                                        block_offsets, chunk_prefill_enabled=True)
             htorch.core.mark_step()
         
 
@@ -362,21 +338,11 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             else:
                 # TODO: enable FusedSDPA
-                seq_lens_t = attn_metadata.seq_lens_tensor
-                context_lens_t = attn_metadata.context_lens_tensor
-                query_lens_t = seq_lens_t - context_lens_t
-                attn_bias = None
-                for i in range(batch_size):
-                    single_attn_bias = self._set_attn_bias(int(seq_len), context_lens_t[i], query_lens_t[i], query.device, query.dtype)
-                    if attn_bias == None:
-                        attn_bias = single_attn_bias
-                    else:
-                        attn_bias = torch.cat((single_attn_bias, attn_bias), dim=0)
                 out = ops.prompt_attention(
                     prefill_query.view(query_shape),
-                    self.k_cache.fetch_from_cache(prefill_key_cache, attn_metadata.block_list).view(kv_shape),
-                    self.v_cache.fetch_from_cache(prefill_value_cache, attn_metadata.block_list).view(kv_shape),
-                    attn_bias=attn_bias,
+                    self.k_cache.fetch_from_cache_chunked_prefill(prefill_key_cache, attn_metadata.block_list).view(kv_shape),
+                    self.v_cache.fetch_from_cache_chunked_prefill(prefill_value_cache, attn_metadata.block_list).view(kv_shape),
+                    attn_bias=attn_metadata.attn_bias,
                     p=0.0,
                     scale=self.scale,
                     matmul_qk_op=self.matmul_qk,
