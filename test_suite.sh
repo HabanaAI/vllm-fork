@@ -1,7 +1,7 @@
 ModelName=Qwen/Qwen2.5-VL-3B-Instruct
 RunBasic=true
 RunPytests=true
-RunLargeImages=false
+RunLargeImages=true
 
 #Basic tests
 if $RunBasic; then
@@ -28,9 +28,10 @@ fi
 #pytests
 if $RunPytests; then pytest tests/models/decoder_only/vision_language/test_models.py -s -v -k "[qwen2_5"; fi
 
-# larger image sizes (currently failing)
+# larger image sizes
 if $RunLargeImages; then
 	bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts --skip_warmup --image_width 1800 --image_height 1200
 	bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts --skip_warmup --image_width 3600 --image_height 2400
+	VLLM_GRAPH_RESERVED_MEM=0.2 bash run_offline.sh -m $ModelName -i snowscat --skip_warmup --image_width 3600 --image_height 3600
 	bash run_offline.sh -m $ModelName -i synthetic --skip_warmup --image_width 1800 --image_height 1200
 fi

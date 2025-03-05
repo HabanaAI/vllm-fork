@@ -154,7 +154,6 @@ else:
 
 for i in range(int(args.iter)):
     print(f"------ iteration: [{i}]")
-    print(batch_data)
     outputs = llm.generate(batch_data)
 
     for o in outputs:
