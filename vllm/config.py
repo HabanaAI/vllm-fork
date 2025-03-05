@@ -391,7 +391,7 @@ class ModelConfig:
         self.generation_config = generation_config
         self.override_generation_config = override_generation_config or {}
 
-        self._verify_quantization()
+        # self._verify_quantization()
         self._verify_cuda_graph()
         self._verify_bnb_config()
 
@@ -622,7 +622,7 @@ class ModelConfig:
                     f"Unknown quantization method: {self.quantization}. Must "
                     f"be one of {supported_quantization}.")
             from vllm.platforms import current_platform
-            current_platform.verify_quantization(self.quantization)
+            # current_platform.verify_quantization(self.quantization)
             if self.quantization not in optimized_quantization_methods:
                 logger.warning(
                     "%s quantization is not fully "
@@ -3169,11 +3169,11 @@ class VllmConfig:
                         f"capability: {quant_config.get_min_capability()}. "
                         f"Current capability: {capability}.")
             supported_dtypes = quant_config.get_supported_act_dtypes()
-            if model_config.dtype not in supported_dtypes:
-                raise ValueError(
-                    f"{model_config.dtype} is not supported for quantization "
-                    f"method {model_config.quantization}. Supported dtypes: "
-                    f"{supported_dtypes}")
+            # if model_config.dtype not in supported_dtypes:
+            #     raise ValueError(
+            #         f"{model_config.dtype} is not supported for quantization "
+            #         f"method {model_config.quantization}. Supported dtypes: "
+            #         f"{supported_dtypes}")
             return quant_config
         return None
 

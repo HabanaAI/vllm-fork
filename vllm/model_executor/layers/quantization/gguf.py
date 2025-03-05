@@ -174,7 +174,7 @@ class GGUFLinearMethod(LinearMethodBase):
                 q_idx = layer.qweight.shard_id_map[idx]
                 qweight_type = layer.qweight_type.shard_weight_type[idx]
                 result.append(_fuse_mul_mat(x, qweight[q_idx], qweight_type))
-            out = torch.cat(result, axis=1)
+            out = torch.cat(result, axis=len(result[0].shape)-1)
         else:
             qweight = layer.qweight
             qweight_type = layer.qweight_type.weight_type
@@ -216,9 +216,24 @@ class GGUFUninitializedParameter(UninitializedParameter):
         assert len(dtype) == 1, ValueError(
             f"Data container has mixed dtypes: {dtype}")
         dtype = next(iter(dtype))
-        nested_data = torch.nested.nested_tensor(self.data_container,
-                                                 device=self.device,
-                                                 dtype=dtype)
+        # nested_data = torch.nested.nested_tensor(self.data_container,
+        #                                          device=self.device,
+        #                                          dtype=dtype)
+        
+        for i in range(len(self.data_container)):
+            print(self.data_container[i].shape)
+
+        max_rows = max(tensor.size(0) for tensor in self.data_container)
+        max_cols = max(tensor.size(1) for tensor in self.data_container)
+
+        padded_data = [torch.cat([tensor.to(device=self.device),torch.zeros(max_rows-tensor.size(0), tensor.size(1), device=self.device, dtype=dtype)],dim=0) for tensor in self.data_container]
+
+        padded_data = [torch.cat([tensor.to(device=self.device), torch.zeros(tensor.size(0), max_cols-tensor.size(1), device=self.device, dtype=dtype)],dim=1) for tensor in padded_data]
+
+        nested_data = torch.stack(padded_data)
+        print("Nested_data shape  = ", nested_data.shape)
+        print("--------------------------------------------")
+
         self.data_container.clear()
         param = torch.Tensor._make_subclass(self.cls_to_become,
                                             nested_data,
