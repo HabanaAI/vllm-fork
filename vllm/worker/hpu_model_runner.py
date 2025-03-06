@@ -248,12 +248,16 @@ class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
             prompt_seq_bucket_cfg,
             self.max_num_batched_tokens)
 
-        self.global_state.prompt_buckets = list(filter(lambda bucket: bucket[1] <= origin_max_prompt_len and bucket[0] == 1, prompt_buckets))
+        self.global_state.prompt_buckets = list(
+            filter(
+                lambda bucket: bucket[1] <= origin_max_prompt_len and bucket[0]
+                == 1, prompt_buckets))
 
         msg = (f"Generated {len(self.global_state.prompt_buckets)} "
                f"prompt buckets [bs, seq]: "
                f"{list(sorted(self.global_state.prompt_buckets))}")
         print(msg)
+
 
 class HpuModelAdapter:
 
@@ -360,11 +364,7 @@ class HpuModelAdapter:
         return attn_metadata
 
     def _set_merged_attn_bias(
-        self,
-        attn_metadata,
-        max_seq_len,
-        device,
-        dtype
+        self, attn_metadata, max_seq_len, device, dtype
     ):  # create a 2D causal attn mask to ensure I can only attend to the past
         if attn_metadata is None or not attn_metadata.is_prompt:
             return attn_metadata
@@ -372,16 +372,28 @@ class HpuModelAdapter:
             return attn_metadata
         #TODO: Support batch_size > 1
         # get length of each sequence
-        repeated_idx = attn_metadata.repeated_idx_tensor.view(1,-1).expand(max_seq_len, -1)
+        repeated_idx = attn_metadata.repeated_idx_tensor.view(1, -1).expand(
+            max_seq_len, -1)
         # create tensor with all indices from 0 to T-1 repeated T times along dimesion 1
-        mask_indices = torch.arange(0, max_seq_len, dtype=torch.long, device=device).view(-1,1).expand(-1, max_seq_len)
+        mask_indices = torch.arange(0,
+                                    max_seq_len,
+                                    dtype=torch.long,
+                                    device=device).view(-1, 1).expand(
+                                        -1, max_seq_len)
         # create causal mask and additionally mask out all tokens from preceeding sequences
         mask = mask_indices.le(repeated_idx)
-        causal_mask = torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device).tril()
+        causal_mask = torch.ones(max_seq_len,
+                                 max_seq_len,
+                                 dtype=torch.bool,
+                                 device=device).tril()
         causal_mask = causal_mask.logical_and(mask)
-        causal_attn_mask_tensor = torch.zeros_like(causal_mask, device=device, dtype=dtype).masked_fill_(~causal_mask, -math.inf)
+        causal_attn_mask_tensor = torch.zeros_like(causal_mask,
+                                                   device=device,
+                                                   dtype=dtype).masked_fill_(
+                                                       ~causal_mask, -math.inf)
         causal_attn_mask_tensor = causal_attn_mask_tensor.view(
-            1, 1, causal_attn_mask_tensor.shape[0], causal_attn_mask_tensor.shape[1])
+            1, 1, causal_attn_mask_tensor.shape[0],
+            causal_attn_mask_tensor.shape[1])
 
         attn_metadata = attn_metadata._replace(
             attn_bias=causal_attn_mask_tensor)
@@ -444,8 +456,7 @@ class HpuModelAdapter:
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
         if attn_metadata.is_prompt and attn_metadata.enable_merged_prefill:
-            attn_metadata = self._set_merged_attn_bias(attn_metadata,
-                                                       seq_len,
+            attn_metadata = self._set_merged_attn_bias(attn_metadata, seq_len,
                                                        device, dtype)
         elif attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
@@ -1366,7 +1377,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 slot_mapping[-1].append(slot)
 
         slot_mapping_merged = list(itertools.chain.from_iterable(slot_mapping))
-        slot_mapping_merged = [i for i in slot_mapping_merged if i != _PAD_SLOT_ID]
+        slot_mapping_merged = [
+            i for i in slot_mapping_merged if i != _PAD_SLOT_ID
+        ]
         slot_mapping = [slot_mapping_merged]
         input_tokens_merged = list(itertools.chain.from_iterable(input_tokens))
         input_tokens_merged = [input_tokens_merged]
@@ -1380,17 +1393,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_num_seqs = len(total_query_lens)
         assert max_query_len > 0
 
-
         merged_prompt_len = max(
             self.bucketing_ctx.get_padded_prompt_seq_len(max(total_seq_lens)),
             self.block_size)
         # get cumsum of seq_lens
-        repeated_idx = list(itertools.accumulate(seq_lens)) 
-        repeated_idx = [[idx - 1] * seq_len for idx, seq_len in zip(repeated_idx, seq_lens)]
-        repeated_idx = list(itertools.chain.from_iterable(repeated_idx)) + [merged_prompt_len] * (merged_prompt_len - sum(seq_lens))
+        repeated_idx = list(itertools.accumulate(seq_lens))
+        repeated_idx = [[idx - 1] * seq_len
+                        for idx, seq_len in zip(repeated_idx, seq_lens)]
+        repeated_idx = list(
+            itertools.chain.from_iterable(repeated_idx)
+        ) + [merged_prompt_len] * (merged_prompt_len - sum(seq_lens))
         prefix_block_list_tensor = None
 
-        repeated_idx_tensor = torch.tensor(repeated_idx, dtype=torch.long, device='cpu')
+        repeated_idx_tensor = torch.tensor(repeated_idx,
+                                           dtype=torch.long,
+                                           device='cpu')
         input_tokens_tensor = make_tensor_with_pad(input_tokens_merged,
                                                    max_len=merged_prompt_len,
                                                    pad=0,
@@ -1415,7 +1432,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_prefill_bs = int(os.environ.get('VLLM_PROMPT_BS_BUCKET_MAX', '8'))
         max_prefill_bs = max(max_prefill_bs, len(seq_lens))
         seq_lens = seq_lens + [0] * (max_prefill_bs - len(seq_lens))
-        context_lens = context_lens + [0] * (max_prefill_bs - len(context_lens))
+        context_lens = context_lens + [0
+                                       ] * (max_prefill_bs - len(context_lens))
         seq_lens_tensor = torch.tensor(seq_lens,
                                        dtype=torch.long,
                                        device='cpu')
@@ -1437,7 +1455,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = seq_lens_tensor.to(self.device, non_blocking=True)
         context_lens_tensor = context_lens_tensor.to(self.device,
                                                      non_blocking=True)
-        repeated_idx_tensor = repeated_idx_tensor.to(self.device, non_blocking=True)
+        repeated_idx_tensor = repeated_idx_tensor.to(self.device,
+                                                     non_blocking=True)
         actual_num_prefills_tensor = actual_num_prefills_tensor.to(
             self.device, non_blocking=True)
 
@@ -1844,22 +1863,25 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             paddings_prompt_logprobs = []
 
             if not self.is_pooler:
-                for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-                        if seq_group_metadata.sampling_params \
-                        and seq_group_metadata.sampling_params.prompt_logprobs \
-                            is not None and seq_group_metadata.is_prompt:
-                            paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
+                for i, seq_group_metadata in enumerate(
+                        seq_group_metadata_list):
+                    if seq_group_metadata.sampling_params \
+                    and seq_group_metadata.sampling_params.prompt_logprobs \
+                        is not None and seq_group_metadata.is_prompt:
+                        paddings_prompt_logprobs += ([paddings[i]] *
+                                                     seq_lens[i])
 
                 paddings = torch.tensor(
-                        paddings_prompt_logprobs
+                    paddings_prompt_logprobs
                     if paddings_prompt_logprobs else paddings,
-                        dtype=sampling_metadata.selected_token_indices.dtype,
-                        device=sampling_metadata.selected_token_indices.device)
-                    sampling_metadata.selected_token_indices.add_(paddings)
+                    dtype=sampling_metadata.selected_token_indices.dtype,
+                    device=sampling_metadata.selected_token_indices.device)
+                sampling_metadata.selected_token_indices.add_(paddings)
             else:
-            sampling_metadata = None
+                sampling_metadata = None
         else:
-            paddings = [0] * (num_prefills - sampling_metadata.selected_token_indices.size(0))
+            paddings = [0] * (num_prefills -
+                              sampling_metadata.selected_token_indices.size(0))
             paddings = torch.tensor(
                 paddings,
                 dtype=sampling_metadata.selected_token_indices.dtype,
@@ -2824,9 +2846,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         selected_token_indices)
 
                 # change the selected_token_indices shape after fwd, so hpu graph capture can use exactly same shape
-                if execute_model_kwargs['attn_metadata'].actual_num_prefills is not None:
-                    actual_num_prefills = execute_model_kwargs['attn_metadata'].actual_num_prefills
-                    sampling_metadata.selected_token_indices = sampling_metadata.selected_token_indices[:actual_num_prefills]
+                if execute_model_kwargs[
+                        'attn_metadata'].actual_num_prefills is not None:
+                    actual_num_prefills = execute_model_kwargs[
+                        'attn_metadata'].actual_num_prefills
+                    sampling_metadata.selected_token_indices = sampling_metadata.selected_token_indices[:
+                                                                                                        actual_num_prefills]
                     hidden_states = hidden_states[:actual_num_prefills]
                 if self.lora_config:
                     LoraMask.setLoraMask(
