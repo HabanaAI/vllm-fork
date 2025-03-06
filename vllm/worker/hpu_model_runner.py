@@ -2465,6 +2465,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
                 htorch.core.mark_step()
+                # Force synchronization between HPU and CPU for more precise TTFT measurement
+                torch.hpu.synchronize() 
+                
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
