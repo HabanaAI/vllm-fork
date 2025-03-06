@@ -285,7 +285,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     if self.alibi_slopes is not None:
                         position_bias = _make_alibi_bias(
                             self.alibi_slopes, self.num_kv_heads,
-                            attn_bias.dtype, attn_bias.shape[-1])
+                            attn_bias.dtype, attn_bias.shape[-1]) 
                         attn_bias = attn_bias.tile(
                             (1, self.num_kv_heads, 1, 1))
                         attn_bias.add_(position_bias)

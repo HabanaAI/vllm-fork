@@ -13,7 +13,6 @@ import itertools
 import math
 import os
 import time
-import copy
 from array import array
 from enum import Enum, IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
@@ -24,7 +23,8 @@ import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 import torch.nn as nn
 import vllm_hpu_extension.environment as environment
-from vllm_hpu_extension.bucketing import HPUBucketingContext, generate_prompt_buckets
+from vllm_hpu_extension.bucketing import (HPUBucketingContext, 
+                                          generate_prompt_buckets)
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.ops import batch2block, block2batch
@@ -231,10 +231,6 @@ def get_path_to_rope(model: torch.nn.Module):
 class HPUBucketingContextWithMergedPrefill(HPUBucketingContext):
 
     def generate_prompt_buckets(self):
-        print(
-            "HPUBucketingContextWithMergedPrefill - generate_prompt_buckets is called"
-        )
-
         prompt_bs_bucket_cfg = self.global_state.prompt_bs_bucket_cfg
         prompt_seq_bucket_cfg = self.global_state.prompt_seq_bucket_cfg
         origin_max_prompt_len = prompt_seq_bucket_cfg[2]
@@ -374,13 +370,13 @@ class HpuModelAdapter:
         # get length of each sequence
         repeated_idx = attn_metadata.repeated_idx_tensor.view(1, -1).expand(
             max_seq_len, -1)
-        # create tensor with all indices from 0 to T-1 repeated T times along dimesion 1
+        # create tensor with indices from 0 to T-1, T times along dimesion 1
         mask_indices = torch.arange(0,
                                     max_seq_len,
                                     dtype=torch.long,
                                     device=device).view(-1, 1).expand(
                                         -1, max_seq_len)
-        # create causal mask and additionally mask out all tokens from preceeding sequences
+        # create causal mask and mask out tokens from preceeding sequences
         mask = mask_indices.le(repeated_idx)
         causal_mask = torch.ones(max_seq_len,
                                  max_seq_len,
@@ -1801,7 +1797,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 decode_reqs.append(seq_group_meta)
 
         # Prepare input tensors.
-        prepare_prompt_impl = self._prepare_prompt_merged if self.enable_merged_prefill else self._prepare_prompt
+        prepare_prompt_impl = self._prepare_prompt_merged \
+            if self.enable_merged_prefill else self._prepare_prompt
         (
             input_tokens,
             input_positions,
@@ -1887,7 +1884,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 dtype=sampling_metadata.selected_token_indices.dtype,
                 device=sampling_metadata.selected_token_indices.device)
             sampling_metadata.selected_token_indices = \
-                torch.cat((sampling_metadata.selected_token_indices, paddings), dim=0)
+                torch.cat((sampling_metadata.selected_token_indices, paddings), 
+                          dim=0)
 
         if self.lora_config:
             lora_mapping = LoRAMapping(
@@ -2845,13 +2843,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         selected_token_indices=sampling_metadata.
                         selected_token_indices)
 
-                # change the selected_token_indices shape after fwd, so hpu graph capture can use exactly same shape
+                # change the selected_token_indices shape after fwd, \
+                # so hpu graph capture can use exactly same shape
                 if execute_model_kwargs[
                         'attn_metadata'].actual_num_prefills is not None:
                     actual_num_prefills = execute_model_kwargs[
                         'attn_metadata'].actual_num_prefills
-                    sampling_metadata.selected_token_indices = sampling_metadata.selected_token_indices[:
-                                                                                                        actual_num_prefills]
+                    sampling_metadata.selected_token_indices = \
+                        sampling_metadata.selected_token_indices[:actual_num_prefills]
                     hidden_states = hidden_states[:actual_num_prefills]
                 if self.lora_config:
                     LoraMask.setLoraMask(
