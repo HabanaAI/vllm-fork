@@ -21,9 +21,6 @@ import yaml
 
 import vllm
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Configure lm_eval logging
 lm_eval_logger = logging.getLogger('lm_eval')
