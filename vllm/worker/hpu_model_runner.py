@@ -902,8 +902,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        disable_cache = os.environ.get('PT_HPUGRAPH_DISABLE_TENSOR_CACHE', 'true')
-        disable_cache = disable_cache.lower() in ('true', '1')
+        disable_cache_var = os.environ.get('PT_HPUGRAPH_DISABLE_TENSOR_CACHE', 'true')
+        disable_cache: bool = disable_cache_var.lower() in ('true', '1')
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
             disable_tensor_cache=disable_cache,
