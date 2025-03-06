@@ -877,8 +877,6 @@ class MllamaTextCrossAttention(nn.Module):
             # During cross-attention decode, key & value will be None,
             # we don't need to cache them.
             if (k is not None) and (v is not None):
-                from vllm_hpu_extension.utils import VLLMKVCache
-
                 from vllm.attention.ops.hpu_paged_attn import HPUPagedAttention
                 key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                     kv_cache, self.num_local_key_value_heads, self.head_dim)
@@ -886,11 +884,9 @@ class MllamaTextCrossAttention(nn.Module):
                 cached_v = torch.cat([v[s:e] for s, e in kv_range_for_decode])
                 block_indices = attn_metadata.cross_block_indices
                 block_offsets = attn_metadata.cross_block_offsets
-                k_cache = VLLMKVCache()
-                v_cache = VLLMKVCache()
-                key_cache = k_cache(cached_k, key_cache, block_indices,
+                key_cache = self.attn.impl.k_cache(cached_k, key_cache, block_indices,
                                     block_offsets)
-                value_cache = v_cache(cached_v, value_cache, block_indices,
+                value_cache = self.attn.impl.v_cache(cached_v, value_cache, block_indices,
                                       block_offsets)
         elif len(kv_cache.shape) > 1:
             i = torch.ones(1, dtype=torch.float32)
