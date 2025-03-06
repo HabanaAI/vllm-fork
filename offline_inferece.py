@@ -80,7 +80,7 @@ question_list = [
 
 if args.video:
     llm = LLM(
-        model=mdl, enforce_eager=True, dtype="bfloat16", gpu_memory_utilization=0.6
+        model=mdl, enforce_eager=False, dtype="bfloat16", gpu_memory_utilization=0.6
     )
 
     prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"

@@ -926,7 +926,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _use_graphs(self, batch_size, seq_len, is_prompt):
         if self.enforce_eager:
             return False
-        if os.getenv('VLLM_LIMIT_HPU_GRAPH','true').lower() == 'true' and is_prompt:
+        if os.getenv('VLLM_LIMIT_HPU_GRAPH','false').lower() == 'true' and is_prompt:
             return False
         if self.skip_warmup:
             return True
