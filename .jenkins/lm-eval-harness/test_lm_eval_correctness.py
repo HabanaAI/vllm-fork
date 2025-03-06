@@ -4,7 +4,7 @@ LM eval harness on model to compare vs HF baseline computed offline.
 Configs are found in configs/$MODEL.yaml
 
 * export LM_EVAL_TEST_DATA_FILE=configs/Meta-Llama-3-70B-Instruct.yaml
-* export LM_EVAL_TP_SIZE=4 
+* export LM_EVAL_TP_SIZE=4
 * pytest -s test_lm_eval_correctness.py
 """
 import atexit
@@ -42,6 +42,7 @@ REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
 LORA_ADAPTER_PATH = os.environ.get("LORA_ADAPTER_PATH", None)
+
 
 def setup_fp8():
     os.environ[
