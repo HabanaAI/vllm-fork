@@ -59,7 +59,7 @@ def test_models(
     with vllm_runner(
             model,
             dtype=dtype,
-            # max_num_batched_tokens=max_num_batched_tokens,
+            max_num_batched_tokens=max_num_batched_tokens,
             enable_chunked_prefill=True,
             tensor_parallel_size=tensor_parallel_size,
             enforce_eager=enforce_eager,
