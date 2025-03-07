@@ -198,11 +198,19 @@ class RayDistributedExecutor(DistributedExecutorBase):
                 )(RayWorkerWrapper).remote(vllm_config=self.vllm_config,
                                            rpc_rank=rank)
             else:
+                def retain_envs(var_name):
+                    retain_var_list = ['VLLM_PROMPT_BS_BUCKET_STEP', 'VLLM_PROMPT_BS_BUCKET_MIN', 'VLLM_PROMPT_BS_BUCKET_MAX',
+                                        'VLLM_PROMPT_SEQ_BUCKET_STEP', 'VLLM_PROMPT_SEQ_BUCKET_MIN', 'VLLM_PROMPT_SEQ_BUCKET_MAX',
+                                        'VLLM_DECODE_BS_BUCKET_MIN', 'VLLM_DECODE_BS_BUCKET_STEP', 'VLLM_DECODE_BS_BUCKET_MAX',
+                                        'VLLM_DECODE_BLOCK_BUCKET_MIN', 'VLLM_DECODE_BLOCK_BUCKET_STEP', 'VLLM_DECODE_BLOCK_BUCKET_MAX']
+                    return (var_name in retain_var_list)
+                runtime_env_vars = {k:v for k, v in os.environ.items() if retain_envs(k)}
                 worker = ray.remote(
                     num_cpus=0,
                     num_gpus=0,
                     resources={current_platform.ray_device_key: num_gpus},
                     scheduling_strategy=scheduling_strategy,
+                    runtime_env={"env_vars": runtime_env_vars},
                     **ray_remote_kwargs,
                 )(RayWorkerWrapper).remote(vllm_config=self.vllm_config,
                                            rpc_rank=rank)
