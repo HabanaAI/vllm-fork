@@ -561,6 +561,42 @@ def precompute_freqs_cis_2d(
     )
     return torch.polar(torch.ones_like(freqs_2d), freqs_2d)
 
+def precompute_freqs_2d_real(
+    dim: int,
+    height: int,
+    width: int,
+    theta: float,
+) -> torch.Tensor:
+    """
+    freqs: 2D tensor of shape (height, width, dim // 2, 2, 2)
+        to be indexed by (height, width) position tuples
+    """
+    # (dim / 2) frequency bases
+    freqs = 1.0 / (theta**(torch.arange(0, dim, 2).float() / dim))
+
+    h = torch.arange(height, device=freqs.device)
+    w = torch.arange(width, device=freqs.device)
+
+    freqs_h = torch.outer(h, freqs[::2]).float()
+    freqs_w = torch.outer(w, freqs[1::2]).float()
+    freqs_2d = torch.cat(
+        [
+            freqs_h[:, None, :].repeat(1, width, 1),
+            freqs_w[None, :, :].repeat(height, 1, 1),
+        ],
+        dim=-1,
+    )
+
+    # Expand frequencies to rotation sub-matrices.
+    # Here every frequency is converted to 2x2 matrix:
+    # [ cos(freq_i), -sin(freq_i)
+    #   sin(freq_i), cos(freq_i) ]
+    cos = torch.cos(freqs_2d)
+    sin = torch.sin(freqs_2d)
+    stacked = torch.stack((cos, -sin, sin, cos), dim=3)
+    interleaved = torch.flatten(stacked)
+    return interleaved.view(freqs_2d.shape[0], freqs_2d.shape[1], freqs_2d.shape[2], 2, 2)
+    
 
 def apply_rotary_emb_vit(
     xq: torch.Tensor,
@@ -574,6 +610,40 @@ def apply_rotary_emb_vit(
     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
     return xq_out.type_as(xq), xk_out.type_as(xk)
+
+def apply_rotary_emb_vit_real(
+    xq: torch.Tensor,
+    xk: torch.Tensor,
+    freqs_cis: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    assert freqs_cis.dtype != torch.complex64
+    # xq: (bsz, seq_len, n_heads, head_dim)
+    assert xq.ndim == 4, xq.ndim
+    assert freqs_cis.shape[:-2] == (xq.shape[1], xq.shape[-1] // 2), (
+        freqs_cis.shape[:-2],
+        (xq.shape[1], xq.shape[-1]),
+    )
+
+    # TODO: handle bsz != 1
+    # Add n_heads dim:
+    # (seq_len, head_dim // 2, 2, 2) -> (seq_len, 1(n_heads), head_dim // 2, 2, 2)
+    freqs_cis = freqs_cis.unsqueeze(1)
+    print(f"{freqs_cis.shape=} {freqs_cis.device=}")
+    # Repeat along n_heads dim
+    freqs_cis = freqs_cis.repeat(1, xq.shape[2], 1, 1, 1)
+    print(f"{freqs_cis.shape=}")
+    # Down to 3 dims for batched matmul
+    freqs_cis = freqs_cis.view(-1, 2, 2)
+    print(f"{freqs_cis.shape=}")
+
+    xq_ = xq.float().view(-1, 2, 1)
+    xk_ = xk.float().view(-1, 2, 1)
+    assert freqs_cis.dtype == xq_.dtype, (freqs_cis.dtype, xq_.dtype)
+    print(f"{xq_.shape=}")
+
+    xq_out = torch.bmm(freqs_cis, xq_)
+    xk_out = torch.bmm(freqs_cis, xk_)
+    return xq_out.view(xq.shape).type_as(xq), xk_out.view(xk.shape).type_as(xk)
 
 
 class FeedForward(nn.Module):
@@ -622,8 +692,23 @@ class Attention(nn.Module):
         k = k.reshape(batch, patches, self.n_heads, self.head_dim)
         v = v.reshape(batch, patches, self.n_heads, self.head_dim)
 
-        q, k = apply_rotary_emb_vit(q, k, freqs_cis=freqs_cis)
-        out = xops.memory_efficient_attention(q, k, v, attn_bias=mask)
+        if "hpu" in freqs_cis.device.type:
+            q, k = apply_rotary_emb_vit_real(q, k, freqs_cis=freqs_cis)
+        else:
+            q, k = apply_rotary_emb_vit(q, k, freqs_cis=freqs_cis)
+
+        if USE_XFORMERS_OPS:
+            out = xops.memory_efficient_attention(q, k, v, mask)
+        else:
+            # scaled_dot_product_attention expects different tensors layout rather xops.memory_efficient_attention
+            print(f"{q.shape=}, {k.shape=}, {v.shape=}, {mask.shape=}")
+            q = torch.transpose(q, 1, 2)
+            k = torch.transpose(k, 1, 2)
+            v = torch.transpose(v, 1, 2)
+            print(f"transposed: {q.shape=}, {k.shape=}, {v.shape=}, {mask.shape=}")
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v, mask)
+            out = torch.transpose(out, 1, 2)
+        
         out = out.reshape(batch, patches, self.n_heads * self.head_dim)
         return self.wo(out)
 
@@ -719,7 +804,12 @@ class VisionTransformer(nn.Module):
     @property
     def freqs_cis(self) -> torch.Tensor:
         if self._freqs_cis is None:
-            self._freqs_cis = precompute_freqs_cis_2d(
+            precompute_freqs_fn = precompute_freqs_cis_2d
+            if "hpu" in self.device.type:
+                # HPU doesn't support complex numbers at the moment
+                precompute_freqs_fn = precompute_freqs_2d_real
+
+            self._freqs_cis = precompute_freqs_fn(
                 dim=self.args.hidden_size // self.args.num_attention_heads,
                 height=self.max_patches_per_side,
                 width=self.max_patches_per_side,
@@ -766,8 +856,11 @@ class VisionTransformer(nn.Module):
             mask = xops.fmha.attn_bias.BlockDiagonalMask.from_seqlens(
                 [p.shape[-2] * p.shape[-1] for p in patch_embeds_list], )
         else:
-            raise ImportError("Xformers is required for Pixtral inference "
-                              "with the Mistral format")
+            from transformers.models.pixtral.modeling_pixtral import (
+                generate_block_attention_mask)
+            mask = generate_block_attention_mask(
+                [p.shape[-2] * p.shape[-1] for p in patch_embeds_list],
+                patch_embeds)
         out = self.transformer(patch_embeds, mask=mask, freqs_cis=freqs_cis)
 
         # squeeze dim 0 and split into separate tensors for each image
