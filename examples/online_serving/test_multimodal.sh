@@ -29,6 +29,7 @@ wait_for_server() {
 
 export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
 export VLLM_SKIP_WARMUP=true
+export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false
 # pip install video requirements
 ##pip install -e "../../[video]"
 
@@ -39,9 +40,9 @@ vllm serve "Qwen/Qwen2.5-VL-7B-Instruct" --task generate --trust-remote-code &
 wait_for_server 8000
 
 # serve requests
-output_text=$(python3 ./openai_chat_completion_client_for_multimodal.py -c text-only)
+##output_text=$(python3 ./openai_chat_completion_client_for_multimodal.py -c text-only)
 echo "-------------------------------------"
-echo "Output of text request: $output_text"
+##echo "Output of text request: $output_text"
 echo "-------------------------------------"
 #output_video=$(python3 ./openai_chat_completion_client_for_multimodal.py -c video)
 #echo "-------------------------------------"

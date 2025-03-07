@@ -127,13 +127,15 @@ def run_single_image() -> None:
     print("Chat completion output from base64 encoded image:", result)
 
 # Single-image input inference
-def run_single_image_qwen(image_files:List[str]) -> None:
+def run_single_image_qwen() -> None:
     ## Use base64 encoded image in the payload
     print("INSIDE single image qwen")
     print(image_files)
-    image_base64 = encode_base64_content_from_localimg(image_files[1])
+    image_base64 = encode_base64_content_from_localimg(image_files[2])
     chat_completion_from_base64 = client.chat.completions.create(
-        messages=[{
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {
             "role":
             "user",
             "content": [
@@ -158,11 +160,13 @@ def run_single_image_qwen(image_files:List[str]) -> None:
 
 
 # Multi-image input inference
-def run_multi_image_qwen(image_files:List[str]) -> None:
+def run_multi_image_qwen() -> None:
     image_url_duck = encode_base64_content_from_localimg(image_files[1])# "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
     image_url_lion = encode_base64_content_from_localimg(image_files[2])#"https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
     chat_completion_from_url = client.chat.completions.create(
-        messages=[{
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {
             "role":
             "user",
             "content": [
@@ -193,8 +197,8 @@ def run_multi_image_qwen(image_files:List[str]) -> None:
 
 # Multi-image input inference
 def run_multi_image() -> None:
-    image_url_duck = encode_base64_content_from_localimg(image_files[1])# "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
-    image_url_lion = encode_base64_content_from_localimg(image_files[2])#"https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
+    image_url_duck ="https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
+    image_url_lion = "https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
     chat_completion_from_url = client.chat.completions.create(
         messages=[{
             "role":
@@ -225,42 +229,8 @@ def run_multi_image() -> None:
     print("Multi-Image Chat completion output:", result)
 
 
-# Multi-image input inference
-def run_multi_image_qwen() -> None:
-    image_url_duck = "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
-    image_url_lion = "https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
-    chat_completion_from_url = client.chat.completions.create(
-        messages=[{
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": "What are the animals in these images?"
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": image_url_duck
-                    },
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": image_url_lion
-                    },
-                },
-            ],
-        }],
-        model=model,
-        max_completion_tokens=64,
-    )
-
-    result = chat_completion_from_url.choices[0].message.content
-    print("Chat completion output:", result)
-
 # Video input inference
-def run_video(image_files:List[str]) -> None:
+def run_video() -> None:
     video_url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"
     video_base64 = encode_base64_content_from_url(video_url)
 
@@ -283,7 +253,7 @@ def run_video(image_files:List[str]) -> None:
             ],
         }],
         model=model,
-        max_completion_tokens=64,
+        #max_completion_tokens=64,
     )
 
     result = chat_completion_from_url.choices[0].message.content
@@ -414,11 +384,12 @@ example_function_map = {
 def main(args) -> None:
     # List all image files in the folder
     image_folder = args.image_folder
+    global image_files
     image_files = [os.path.join(image_folder,f) for f in os.listdir(image_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
     print(f"IMAGES from {image_folder}:", image_files)
-    
+
     chat_type = args.chat_type
-    example_function_map[chat_type](image_files)
+    example_function_map[chat_type]()
 
 if __name__ == "__main__":
     ##import pdb;pdb.set_trace()
