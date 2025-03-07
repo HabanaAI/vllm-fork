@@ -14,8 +14,8 @@ parser.add_argument("-m", "--model", help="model name or path")
 parser.add_argument("-i", "--image", help="type of image")
 parser.add_argument("-v", "--video", help="Video Input")
 parser.add_argument("-t", "--text_only", action="store_true", help="Text only pormpts")
-parser.add_argument("--image_width", type=int, default=250, help="Image width size")
-parser.add_argument("--image_height", type=int, default=250, help="Image width size")
+parser.add_argument("--image_width", type=int, help="Image width size")
+parser.add_argument("--image_height", type=int, help="Image width size")
 parser.add_argument(
     "--multiple_prompts", action="store_true", help="to run with multiple prompts"
 )
@@ -45,14 +45,18 @@ def sample_frames(path, num_frames):
 
 
 # Load the image / Video
+if args.image:
+    if args.image == "synthetic":
+        image = ImageAsset("stop_sign").pil_image
+    elif args.image == "snowscat":
+        filename = "/tmp/snowscat-H3oXiq7_bII-unsplash.jpg"
+        image = PIL.Image.open(filename)
+    elif args.image:
+        image = PIL.Image.open(args.image)
 
-if args.image == "synthetic":
-    image = ImageAsset("stop_sign").pil_image
-    image = image.resize((args.image_width, args.image_height))
-elif args.image == "snowscat":
-    filename = "/tmp/snowscat-H3oXiq7_bII-unsplash.jpg"
-    image = PIL.Image.open(filename)
-    image = image.resize((args.image_width, args.image_height))
+    if args.image_width and args.image_height:
+        image = image.resize((args.image_width, args.image_height))
+
 elif args.video:
     video = sample_frames(args.video, 50)
 elif args.text_only:
@@ -148,7 +152,9 @@ else:
             num_scheduler_steps=32,
             max_num_prefill_seqs=4,
         )
-        prompt = f"<|image|><|begin_of_text|>{question}"
+        from vllm import TextPrompt
+        batch_data = TextPrompt(prompt=f"<|image|><|begin_of_text|>{question_list[0]}")
+        batch_data["multi_modal_data"] = {"image": image}
     else:
         print(f"{mdl} is not known model?")
 

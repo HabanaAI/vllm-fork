@@ -135,7 +135,10 @@ if [[ -n "$video" ]]; then
 elif [[ -n "$TextOnly" ]]; then
     ARGS="-m $model -t --iter $iter $EXTRAARGS"
 else
-    ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS --image_width $ImageWidth --image_height $ImageHeight"
+    ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
+    if [ -n "$ImageWidth" ] && [ -n "$ImageHeight" ]; then
+        ARGS="$ARGS --image_width $ImageWidth --image_height $ImageHeight"
+    fi
 fi
 
 cmd="python offline_inferece.py $ARGS"
