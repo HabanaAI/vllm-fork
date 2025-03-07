@@ -79,7 +79,7 @@ class GPTBigCodeAttention(nn.Module):
             self.num_kv_heads = self.num_heads
         self.kv_dim = self.head_dim * self.num_kv_heads
 
-        self.split_qk_v = True # cache_config.split_qk_v
+        self.split_qk_v = cache_config.split_qk_v
 
         if self.split_qk_v:
             self.q_proj = ColumnParallelLinear(input_size=self.hidden_size,
@@ -134,20 +134,18 @@ class GPTBigCodeAttention(nn.Module):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         if self.split_qk_v:
-            q, _ = self.q_proj(hidden_states) # torch.Size([32, 1024, 6144])
-            k, _ = self.k_proj(hidden_states) # torch.Size([32, 1024, 128])
-            v, _ = self.v_proj(hidden_states) # torch.Size([32, 1024, 128])
+            q, _ = self.q_proj(hidden_states)
+            k, _ = self.k_proj(hidden_states)
+            v, _ = self.v_proj(hidden_states)
         else:
             qkv, _ = self.c_attn(hidden_states)
-            # qkv=torch.Size([32, 1024, 6400])
             q, k, v = qkv.split(
                 [
-                    self.hidden_size // self.tensor_model_parallel_world_size, #6144//1
-                    self.kv_dim, self.kv_dim #128
+                    self.hidden_size // self.tensor_model_parallel_world_size,
+                    self.kv_dim, self.kv_dim
                 ],
                 dim=-1,
             )
-            # q=torch.Size([32, 1024, 6144]) k,v = torch.Size([32, 1024, 128])
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         attn_output, _ = self.c_proj(attn_output)
         return attn_output
@@ -335,7 +333,19 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self.sampler = get_sampler()
         self.make_empty_intermediate_tensors = (
             self.transformer.make_empty_intermediate_tensors)
-        self.split_qk_v = True # vllm_config.cache_config.split_qk_v
+        self.split_qk_v = vllm_config.cache_config.split_qk_v
+        if self.split_qk_v:
+            self.multi_query = self.config.multi_query
+            if self.multi_query:
+                self.num_kv_heads = 1
+            else:
+                self.num_kv_heads = self.num_heads
+            self.total_num_heads = self.config.num_attention_heads
+            self.tensor_model_parallel_world_size = (
+                get_tensor_model_parallel_world_size())
+            self.head_dim = self.config.hidden_size // self.total_num_heads
+            self.num_heads = (self.total_num_heads //
+                          self.tensor_model_parallel_world_size)
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.transformer.get_input_embeddings(input_ids)
@@ -375,11 +385,11 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                                                    torch.Tensor]]) -> Set[str]:
         if self.split_qk_v:
             stacked_params_mapping = [
-            # (param_name, shard_name)
+            # (new_name, orig_name, shard_id)
             ]
-            stacked_params_mapping.append((".q_proj", ".c_attn"))
-            stacked_params_mapping.append((".k_proj", ".c_attn"))
-            stacked_params_mapping.append((".v_proj", ".c_attn"))
+            stacked_params_mapping.append((".q_proj", ".c_attn", "q"))
+            stacked_params_mapping.append((".k_proj", ".c_attn", "k"))
+            stacked_params_mapping.append((".v_proj", ".c_attn", "v"))
 
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         loaded_params: Set[str] = set()
@@ -393,11 +403,23 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             if is_pp_missing_parameter(name, self):
                 continue
             if ".c_attn" in name and self.split_qk_v:
-                # attn.c_attn.weight torch.Size([6400, 6144])
-                # attn.c_attn.bias torch.Size([6400])
-                for param_name, weight_name in stacked_params_mapping:
+                weight = {}
+                weight['q'], weight['k'], weight['v'] = loaded_weight.split(
+                    [
+                        self.num_heads * self.head_dim * self.tensor_model_parallel_world_size,
+                        self.num_kv_heads * self.head_dim * self.tensor_model_parallel_world_size,
+                        self.num_kv_heads * self.head_dim * self.tensor_model_parallel_world_size,
+                    ],
+                    dim = 0
+                )
+                for param_name, weight_name, shard_id in stacked_params_mapping:
                     new_name = name.replace(weight_name, param_name)
                     param = params_dict[new_name]
+                    weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
+                    weight_loader(param, weight[shard_id])
+                    loaded_params.add(new_name)
+                continue
             else:
                 param = params_dict[name]
             weight_loader = getattr(param, "weight_loader",
