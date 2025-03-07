@@ -628,18 +628,14 @@ def apply_rotary_emb_vit_real(
     # Add n_heads dim:
     # (seq_len, head_dim // 2, 2, 2) -> (seq_len, 1(n_heads), head_dim // 2, 2, 2)
     freqs_cis = freqs_cis.unsqueeze(1)
-    print(f"{freqs_cis.shape=} {freqs_cis.device=}")
     # Repeat along n_heads dim
     freqs_cis = freqs_cis.repeat(1, xq.shape[2], 1, 1, 1)
-    print(f"{freqs_cis.shape=}")
     # Down to 3 dims for batched matmul
     freqs_cis = freqs_cis.view(-1, 2, 2)
-    print(f"{freqs_cis.shape=}")
 
     xq_ = xq.float().view(-1, 2, 1)
     xk_ = xk.float().view(-1, 2, 1)
     assert freqs_cis.dtype == xq_.dtype, (freqs_cis.dtype, xq_.dtype)
-    print(f"{xq_.shape=}")
 
     xq_out = torch.bmm(freqs_cis, xq_)
     xk_out = torch.bmm(freqs_cis, xk_)
@@ -679,6 +675,11 @@ class Attention(nn.Module):
         self.wv = nn.Linear(args.hidden_size, args.hidden_size, bias=False)
         self.wo = nn.Linear(args.hidden_size, args.hidden_size, bias=False)
 
+        if USE_XFORMERS_OPS:
+            self.attention_fn = xops.memory_efficient_attention
+        else:
+            self.attention_fn = self.call_attention
+
     def forward(
         self,
         x: torch.Tensor,
@@ -697,20 +698,27 @@ class Attention(nn.Module):
         else:
             q, k = apply_rotary_emb_vit(q, k, freqs_cis=freqs_cis)
 
-        if USE_XFORMERS_OPS:
-            out = xops.memory_efficient_attention(q, k, v, mask)
-        else:
-            # scaled_dot_product_attention expects different tensors layout rather xops.memory_efficient_attention
-            print(f"{q.shape=}, {k.shape=}, {v.shape=}, {mask.shape=}")
-            q = torch.transpose(q, 1, 2)
-            k = torch.transpose(k, 1, 2)
-            v = torch.transpose(v, 1, 2)
-            print(f"transposed: {q.shape=}, {k.shape=}, {v.shape=}, {mask.shape=}")
-            out = torch.nn.functional.scaled_dot_product_attention(q, k, v, mask)
-            out = torch.transpose(out, 1, 2)
+        out = self.attention_fn(q, k, v, mask)
         
         out = out.reshape(batch, patches, self.n_heads * self.head_dim)
         return self.wo(out)
+
+    def call_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: torch.Tensor
+    ) -> torch.Tensor:
+        # scaled_dot_product_attention expects different tensors layout rather xops.memory_efficient_attention
+        q = torch.transpose(q, 1, 2)
+        k = torch.transpose(k, 1, 2)
+        v = torch.transpose(v, 1, 2)
+
+        # IMPROVEMENT: Replace with fusedSDPA for HPU
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, mask)
+
+        return torch.transpose(out, 1, 2)
 
 
 class TransformerBlock(nn.Module):
