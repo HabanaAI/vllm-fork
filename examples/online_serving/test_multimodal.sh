@@ -33,8 +33,8 @@ export VLLM_SKIP_WARMUP=true
 ##pip install -e "../../[video]"
 
 # Launch the server
-vllm serve "Qwen/Qwen2.5-VL-72B-Instruct" --task generate --trust-remote-code --tensor-parallel-size 8 &
-
+#vllm serve "Qwen/Qwen2.5-VL-72B-Instruct" --task generate --trust-remote-code --tensor-parallel-size 8 &
+vllm serve "Qwen/Qwen2.5-VL-7B-Instruct" --task generate --trust-remote-code &
 # wait until instance is ready
 wait_for_server 8000
 
@@ -48,7 +48,7 @@ echo "-------------------------------------"
 #echo "Output of video request:$output_video"
 #echo "-------------------------------------"
 
-output_single=$(python3 ./openai_chat_completion_client_for_multimodal.py -c single-image --image_folder ../../images)
+output_single=$(python3 ./openai_chat_completion_client_for_multimodal.py -c single-image --image-folder ../../images)
 #output_single=$(curl http://localhost:8000/v1/chat/completions \
 #    -H "Content-Type: application/json" \
 #    -d '{
@@ -76,7 +76,7 @@ echo "-------------------------------------"
 #    ]}
 #    ]
 #    }')
-output_single=$(python3 ./openai_chat_completion_client_for_multimodal.py -c multi-image --image_folder ../../images)
+output_multi=$(python3 ./openai_chat_completion_client_for_multimodal.py -c multi-image --image-folder ../../images)
 echo "-------------------------------------"
 echo "Output of multi image request:$output_multi"
 echo "-------------------------------------"

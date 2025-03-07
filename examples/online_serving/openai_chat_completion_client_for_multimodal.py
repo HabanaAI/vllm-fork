@@ -15,9 +15,10 @@ vllm serve microsoft/Phi-3.5-vision-instruct --task generate \
 vllm serve fixie-ai/ultravox-v0_5-llama-3_2-1b --max-model-len 4096
 """
 import base64
-
+import os
 import requests
 from openai import OpenAI
+from typing import List
 
 from vllm.utils import FlexibleArgumentParser
 
@@ -126,9 +127,11 @@ def run_single_image() -> None:
     print("Chat completion output from base64 encoded image:", result)
 
 # Single-image input inference
-def run_single_image_qwen() -> None:
+def run_single_image_qwen(image_files:List[str]) -> None:
     ## Use base64 encoded image in the payload
-    image_base64 = encode_base64_content_from_localimg(image_files[0])
+    print("INSIDE single image qwen")
+    print(image_files)
+    image_base64 = encode_base64_content_from_localimg(image_files[1])
     chat_completion_from_base64 = client.chat.completions.create(
         messages=[{
             "role":
@@ -152,6 +155,40 @@ def run_single_image_qwen() -> None:
 
     result = chat_completion_from_base64.choices[0].message.content
     print("Single Image Chat completion output from base64 encoded image:", result)
+
+
+# Multi-image input inference
+def run_multi_image_qwen(image_files:List[str]) -> None:
+    image_url_duck = encode_base64_content_from_localimg(image_files[1])# "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
+    image_url_lion = encode_base64_content_from_localimg(image_files[2])#"https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
+    chat_completion_from_url = client.chat.completions.create(
+        messages=[{
+            "role":
+            "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "What are the animals in these images?"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_url_duck}"
+                    },
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_url_lion}"
+                    },
+                },
+            ],
+        }],
+        model=model,
+    )
+
+    result = chat_completion_from_url.choices[0].message.content
+    print("Multi-Image Chat completion output:", result)
 
 
 # Multi-image input inference
@@ -223,7 +260,7 @@ def run_multi_image_qwen() -> None:
     print("Chat completion output:", result)
 
 # Video input inference
-def run_video() -> None:
+def run_video(image_files:List[str]) -> None:
     video_url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"
     video_base64 = encode_base64_content_from_url(video_url)
 
@@ -375,16 +412,16 @@ example_function_map = {
 
 
 def main(args) -> None:
-    chat_type = args.chat_type
-    example_function_map[chat_type]()
-    image_folder = args.image_folder
-    
     # List all image files in the folder
-    image_files = [f for f in os.listdir(image_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
-
-
+    image_folder = args.image_folder
+    image_files = [os.path.join(image_folder,f) for f in os.listdir(image_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))]
+    print(f"IMAGES from {image_folder}:", image_files)
+    
+    chat_type = args.chat_type
+    example_function_map[chat_type](image_files)
 
 if __name__ == "__main__":
+    ##import pdb;pdb.set_trace()
     parser = FlexibleArgumentParser(
         description='Demo on using OpenAI client for online serving with '
         'multimodal language models served with vLLM.')
@@ -394,6 +431,6 @@ if __name__ == "__main__":
                         default="single-image",
                         choices=list(example_function_map.keys()),
                         help='Conversation type with multimodal data.')
-    parser.add_argument("--image_folder", help="Path to the folder containing images")
+    parser.add_argument("--image-folder", help="Path to the folder containing images")
     args = parser.parse_args()
     main(args)
