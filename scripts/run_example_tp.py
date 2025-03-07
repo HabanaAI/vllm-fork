@@ -13,7 +13,8 @@ import argparse
 file_path = os.path.abspath(__file__)
 dataset_path = os.path.join(os.path.dirname(file_path), "../benchmarks")
 
-model_path = "/data/models/DeepSeek-R1-static/"
+model_path = "/software/users/jmaksymczuk/DeepSeek-R1-static/"
+#model_path = "/data/models/DeepSeek-R1-static/"
 
 # Parse the command-line arguments.
 parser = argparse.ArgumentParser()
@@ -21,6 +22,7 @@ parser.add_argument("--model", type=str, default=model_path, help="The model pat
 parser.add_argument("--tokenizer", type=str, default=model_path, help="The model path.")
 parser.add_argument("--tp_size", type=int, default=8, help="The number of threads.")
 parser.add_argument("--ep_size", type=int, default=8, help="The number of threads.")
+parser.add_argument("--pp_size", type=int, default=1, help="The number of threads.")
 parser.add_argument("--dataset", type=str, default=None, help="The dataset.")
 parser.add_argument("--isl", type=int, default=1024, help="input sequence length.")
 parser.add_argument("--osl", type=int, default=1024, help="output sequence length.")
@@ -185,6 +187,19 @@ if __name__ == "__main__":
             trust_remote_code=True,
             dtype="bfloat16",
             max_model_len=16384,
+            gpu_memory_utilization=0.8,
+            **param
+        )
+    elif args.pp_size > 1:
+        llm = LLM(
+            model=model,
+            tokenizer=args.tokenizer,
+            tensor_parallel_size=args.tp_size,
+            pipeline_parallel_size=args.pp_size,
+            distributed_executor_backend='mp',
+            trust_remote_code=True,
+            max_model_len=16384,
+            dtype="bfloat16",
             gpu_memory_utilization=0.8,
             **param
         )
