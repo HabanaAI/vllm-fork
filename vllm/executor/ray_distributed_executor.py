@@ -198,6 +198,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
                 )(RayWorkerWrapper).remote(vllm_config=self.vllm_config,
                                            rpc_rank=rank)
             else:
+
                 def retain_envs(var_name):
                     retain_var_list = [
                         'VLLM_PROMPT_BS_BUCKET_STEP',
