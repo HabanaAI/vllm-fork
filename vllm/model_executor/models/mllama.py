@@ -949,7 +949,7 @@ class MllamaTextCrossAttention(nn.Module):
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
             from vllm_hpu_extension.utils import ModuleFusedSDPA
             fsdpa_op = ModuleFusedSDPA(FusedSDPA)
-            # use fp32 as softmax_mode for better accuracy
+            # use fast as softmax_mode for better accuracy
             output = fsdpa_op(q,
                     k,
                     v,

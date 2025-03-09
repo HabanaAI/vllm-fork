@@ -462,12 +462,11 @@ class HPUEncoderDecoderModelRunner(
             is_encoder_data=True)
         seq_len = max(seq_len, 1)
         if is_prompt:
-            input_len = seq_len
             output_len = 0
             block_tables = None
             cross_block_table = None
         else:
-            input_len = seq_len - 1
+            seq_len = seq_len - 1
             output_len = 1
             block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
             # limit cross blocks to the number of available blocks
