@@ -763,7 +763,7 @@ class ModelConfig:
     def is_deepseek_mla(self) -> bool:
         return (hasattr(self.hf_text_config, "model_type")) \
                 and (self.hf_text_config.model_type in \
-                    ('deepseek_v2', 'deepseek_v3'))\
+                    ('deepseek_v2', 'deepseek_v3', 'deepseek_mtp'))\
                 and (self.hf_text_config.kv_lora_rank is not None)
 
     def get_head_size(self) -> int:
@@ -856,8 +856,12 @@ class ModelConfig:
     def get_layers_start_end_indices(
             self, parallel_config: "ParallelConfig") -> Tuple[int, int]:
         from vllm.distributed.utils import get_pp_indices
-        total_num_hidden_layers = getattr(self.hf_text_config,
-                                          "num_hidden_layers", 0)
+        if self.hf_text_config.model_type == "deepseek_mtp":
+            total_num_hidden_layers = getattr(self.hf_text_config,
+                                              "num_nextn_predict_layers", 0)
+        else:
+            total_num_hidden_layers = getattr(self.hf_text_config,
+                                              "num_hidden_layers", 0)
         pp_rank = parallel_config.rank // parallel_config.tensor_parallel_size
         pp_size = parallel_config.pipeline_parallel_size
         start, end = get_pp_indices(total_num_hidden_layers, pp_rank, pp_size)
@@ -1664,6 +1668,18 @@ class SpeculativeConfig:
         return hash_str
 
     @staticmethod
+    def hf_config_override(hf_config: PretrainedConfig) -> PretrainedConfig:
+        if hf_config.model_type == "deepseek_v3":
+            hf_config.model_type = "deepseek_mtp"
+        if hf_config.model_type == "deepseek_mtp":
+            n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
+            hf_config.update({
+                "n_predict": n_predict,
+                "architectures": ["DeepSeekMTPModel"]
+            })
+        return hf_config
+
+    @staticmethod
     def maybe_create_spec_config(
         target_model_config: ModelConfig,
         target_parallel_config: ParallelConfig,
@@ -1748,9 +1764,16 @@ class SpeculativeConfig:
 
         if speculative_model is None:
             if num_speculative_tokens is not None:
-                raise ValueError("num_speculative_tokens was provided without "
-                                 "speculative_model.")
-            return None
+                if target_model_config.hf_text_config.model_type \
+                        == "deepseek_v3":
+                    # use the draft model from the same model:
+                    speculative_model = target_model_config.model
+                else:
+                    raise ValueError(
+                        "num_speculative_tokens was provided without "
+                        "speculative_model.")
+            else:
+                return None
 
         if (speculative_disable_by_batch_size is not None
                 and speculative_disable_by_batch_size < 2):
@@ -1804,9 +1827,18 @@ class SpeculativeConfig:
                 max_seq_len_to_capture=target_model_config.
                 max_seq_len_to_capture,
                 max_logprobs=target_model_config.max_logprobs,
+                hf_overrides=SpeculativeConfig.hf_config_override,
             )
 
             draft_hf_config = draft_model_config.hf_config
+            # Detect EAGLE prefix to replace hf_config for EAGLE draft_model
+            if "eagle-" in draft_model_config.model.lower():
+                from vllm.transformers_utils.configs.eagle import EAGLEConfig
+                if isinstance(draft_model_config.hf_config, EAGLEConfig):
+                    pass
+                else:
+                    eagle_config = EAGLEConfig(draft_model_config.hf_config)
+                    draft_model_config.hf_config = eagle_config
 
             if (num_speculative_tokens is not None
                     and hasattr(draft_hf_config, "num_lookahead_tokens")):
@@ -1925,8 +1957,9 @@ class SpeculativeConfig:
                 speculative_draft_tensor_parallel_size = 1
                 if target_parallel_config.tensor_parallel_size > 1:
                     logger.warning(
-                        "MLPSpeculator cannot currently be run with tp>1; "
-                        "setting speculative_draft_tensor_parallel_size=1")
+                        "%s cannot currently be run with tp>1; "
+                        "setting speculative_draft_tensor_parallel_size=1",
+                        draft_hf_config.model_type)
             else:
                 speculative_draft_tensor_parallel_size = \
                     target_parallel_config.tensor_parallel_size
