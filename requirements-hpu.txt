@@ -11,4 +11,6 @@ setuptools-scm>=8
 vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@3fd0250
 opentelemetry-api
 opentelemetry-sdk
+opentelemetry-exporter-otlp
+opentelemetry-semantic-conventions-ai
 
