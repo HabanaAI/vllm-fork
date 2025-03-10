@@ -222,7 +222,8 @@ class EngineArgs:
         # Override the default value of contiguous pa if using apc
         if self.enable_prefix_caching is True:
             os.environ.setdefault("VLLM_CONTIGUOUS_PA", "False")
-            assert not os.environ.get("VLLM_CONTIGUOUS_PA").lower() == "true", "Contiguous PA doesn't support Automatic Prefix Caching. Please disable one of them"
+            assert not os.environ.get("VLLM_CONTIGUOUS_PA").lower(
+            ) == "true", "Contiguous PA doesn't support Automatic Prefix Caching. Please disable one of them"
 
         # Override max_num_seqs if it's not set by user.
         if self.max_num_seqs is None:
