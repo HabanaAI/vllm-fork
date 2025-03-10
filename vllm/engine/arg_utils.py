@@ -3,6 +3,7 @@
 import argparse
 import dataclasses
 import json
+import os
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Any, Dict, List, Literal, Mapping, Optional,
                     Tuple, Type, Union, cast, get_args)
@@ -222,8 +223,8 @@ class EngineArgs:
         # Override the default value of contiguous pa if using apc
         if self.enable_prefix_caching is True:
             os.environ.setdefault("VLLM_CONTIGUOUS_PA", "False")
-            assert not os.environ.get("VLLM_CONTIGUOUS_PA").lower(
-            ) == "true", "Contiguous PA doesn't support Automatic Prefix Caching. Please disable one of them"
+            assert os.environ.get("VLLM_CONTIGUOUS_PA").lower(
+            ) != "true", "Contiguous PA doesn't support APC"
 
         # Override max_num_seqs if it's not set by user.
         if self.max_num_seqs is None:
