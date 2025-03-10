@@ -2929,8 +2929,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if i < num_steps - 1:
                     if i == 0:
                         if model_input.async_callback is not None:
-                            ctx = model_input.async_callback.keywords[  # type: ignore
-                                "ctx"]
+                            assert isinstance(model_input.async_callback, functools.partial)
+                            ctx = model_input.async_callback.keywords["ctx"]
                             seq_group_metadata_list = \
                                 ctx.seq_group_metadata_list
                         elif seqs is not None:
@@ -3051,8 +3051,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             if i < num_outputs - 1 and use_async_out_proc:
                 assert model_input.async_callback is not None
-                ctx = model_input.async_callback.keywords[  # type: ignore
-                    "ctx"]
+                ctx = model_input.async_callback.keywords["ctx"]
                 ctx.append_output(
                     outputs=[sampler_output],
                     seq_group_metadata_list=ctx.seq_group_metadata_list,
@@ -3097,7 +3096,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         model_input = self.cached_step_inputs.pop(0)
         delayed_output = self.cached_step_outputs.pop(0).cpu().squeeze(
             -1).tolist()
-        ctx = model_input.async_callback.keywords["ctx"]  # type: ignore
+        assert model_input.async_callback is not None
+        assert getattr(model_input.async_callback, 'keywords', None) is not None
+        assert isinstance(model_input.async_callback, functools.partial)
+        ctx = model_input.async_callback.keywords["ctx"]
         # If there's no output to patch with, which is usually the case when
         # we're starting a new request after all requests are completed.
         if len(ctx.output_queue) == 0:
