@@ -59,7 +59,7 @@ from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            SequenceOutput)
 from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
-                        make_tensor_with_pad)
+                        make_tensor_with_pad, make_mrope_positions_tensor_with_pad)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -222,36 +222,6 @@ def get_path_to_rope(model: torch.nn.Module):
 
     # Return the result if found, otherwise None
     return path_to_rope
-
-
-def make_mrope_positions_tensor_with_pad( \
-        input_positions: List[List[int]],
-        input_mrope_positions: List[List[List[int]]],
-        max_prompt_len: int,
-        pad: int) -> List[List[int]]:
-    # If no mrope positions, returns a flatten (seq_len,)
-    if all(mrope_position is None for mrope_position in input_mrope_positions):
-        return make_tensor_with_pad(input_positions,
-                                    max_len=max_prompt_len,
-                                    pad=0,
-                                    dtype=torch.long,
-                                    device='cpu').flatten()
-    # Otherwise, Qwen2.5-VL expects positions in a (3, seq_len)
-    # we are going to pad each seq_data in the list
-    # using either MRope values or regular position
-    mrope_input_positions: List[List[int]] = [[] for _ in range(3)]
-    for idx in range(3):
-        for b_idx, input_mrope_position in enumerate(input_mrope_positions):
-            if input_mrope_position is not None:
-                positions = input_mrope_position[idx]
-            else:
-                positions = input_positions[b_idx]
-            padding_size = max_prompt_len - len(positions)
-            assert padding_size >= 0
-            padded_positions = positions \
-                + (max_prompt_len - len(positions)) * [pad]
-            mrope_input_positions[idx].extend(padded_positions)
-    return torch.tensor(mrope_input_positions, dtype=torch.long, device='cpu')
 
 
 class HpuModelAdapter:
@@ -1182,15 +1152,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                    device='cpu')
 
         if self.model_is_mrope:
-            input_positions_tensor = \
+            input_positions = \
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
                                               input_mrope_positions=input_mrope_positions,
                                               max_prompt_len=max_prompt_len,
                                               pad=0)
-            input_positions = None  # type: ignore
         else:
-            input_mrope_positions = None  # type: ignore
-            input_positions_tensor = make_tensor_with_pad(
+            input_positions = make_tensor_with_pad(
                 input_positions,
                 max_len=max_prompt_len,
                 pad=0,
@@ -1224,7 +1192,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
         input_tokens_tensor = input_tokens_tensor.to(  # type: ignore
             self.device, non_blocking=True)
-        input_positions_tensor = input_positions_tensor.to(  # type: ignore
+        input_positions = input_positions.to(  # type: ignore
             self.device, non_blocking=True)
         slot_mapping = slot_mapping.to(  # type: ignore
             self.device, non_blocking=True)
@@ -1259,7 +1227,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.device, non_blocking=True)
 
         return PreparePromptMetadata(input_tokens=input_tokens_tensor,
-                                     input_positions=input_positions_tensor,
+                                     input_positions=input_positions,
                                      attn_metadata=attn_metadata,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
@@ -1372,13 +1340,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             real_batch_size = len(seq_group_metadata_list)
             input_tokens = output[:real_batch_size].clone()
 
-        if self.model_is_mrope:
-            input_positions = None  # type: ignore
-        else:
-            input_mrope_positions = None  # type: ignore
-
-        input_positions = torch.tensor(input_positions
-                                       or input_mrope_positions,
+        input_positions = torch.tensor(input_mrope_positions
+                                       if self.model_is_mrope
+                                       else input_positions,
                                        dtype=torch.long,
                                        device='cpu')
 
