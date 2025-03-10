@@ -59,7 +59,8 @@ from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            SequenceOutput)
 from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
-                        make_tensor_with_pad, make_mrope_positions_tensor_with_pad)
+                        make_mrope_positions_tensor_with_pad,
+                        make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -1166,12 +1167,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               max_prompt_len=max_prompt_len,
                                               pad=0)
         else:
-            input_positions = make_tensor_with_pad(
-                input_positions,
-                max_len=max_prompt_len,
-                pad=0,
-                dtype=torch.long,
-                device='cpu')
+            input_positions = make_tensor_with_pad(input_positions,
+                                                   max_len=max_prompt_len,
+                                                   pad=0,
+                                                   dtype=torch.long,
+                                                   device='cpu')
 
         slot_mapping = make_tensor_with_pad(slot_mapping,
                                             max_len=max_prompt_len,
@@ -1348,11 +1348,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             real_batch_size = len(seq_group_metadata_list)
             input_tokens = output[:real_batch_size].clone()
 
-        input_positions = torch.tensor(input_mrope_positions
-                                       if self.model_is_mrope
-                                       else input_positions,
-                                       dtype=torch.long,
-                                       device='cpu')
+        input_positions = torch.tensor(
+            input_mrope_positions if self.model_is_mrope else input_positions,
+            dtype=torch.long,
+            device='cpu')
 
         num_decode_tokens = len(seq_lens)
 
