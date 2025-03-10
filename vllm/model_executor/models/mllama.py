@@ -884,10 +884,12 @@ class MllamaTextCrossAttention(nn.Module):
                 cached_v = torch.cat([v[s:e] for s, e in kv_range_for_decode])
                 block_indices = attn_metadata.cross_block_indices
                 block_offsets = attn_metadata.cross_block_offsets
-                key_cache = self.attn.impl.k_cache(cached_k, key_cache, block_indices,
-                                    block_offsets)
-                value_cache = self.attn.impl.v_cache(cached_v, value_cache, block_indices,
-                                      block_offsets)
+                key_cache = self.attn.impl.k_cache(cached_k, key_cache,
+                                                   block_indices,
+                                                   block_offsets)
+                value_cache = self.attn.impl.v_cache(cached_v, value_cache,
+                                                     block_indices,
+                                                     block_offsets)
         elif len(kv_cache.shape) > 1:
             i = torch.ones(1, dtype=torch.float32)
             if self.attn.backend in (_Backend.FLASH_ATTN,
@@ -951,15 +953,15 @@ class MllamaTextCrossAttention(nn.Module):
             fsdpa_op = ModuleFusedSDPA(FusedSDPA)
             # use fast as softmax_mode for better accuracy
             output = fsdpa_op(q,
-                    k,
-                    v,
-                    attention_mask,
-                    dropout_p=0.0,
-                    is_causal=False,
-                    scale=None,
-                    softmax_mode="fast",
-                    recompute_mode=None,
-                    valid_sequence_lengths=None)
+                              k,
+                              v,
+                              attention_mask,
+                              dropout_p=0.0,
+                              is_causal=False,
+                              scale=None,
+                              softmax_mode="fast",
+                              recompute_mode=None,
+                              valid_sequence_lengths=None)
             output = output.permute(2, 0, 1, 3).reshape(
                 q_len, self.num_local_heads * self.head_dim)
             return output

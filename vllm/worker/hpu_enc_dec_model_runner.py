@@ -3,13 +3,11 @@ import dataclasses
 import gc
 import itertools
 import math
-from array import array
 from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union, cast
 
 import habana_frameworks.torch as htorch
 import torch
-from PIL import Image
 from vllm_hpu_extension.ops import batch2block, block2batch
 
 from vllm.attention import AttentionMetadata
@@ -20,9 +18,8 @@ from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
-                           Logprob, SequenceData, SequenceGroupMetadata,
-                           SequenceOutput)
-from vllm.utils import is_fake_hpu, is_list_of
+                           Logprob, SequenceGroupMetadata, SequenceOutput)
+from vllm.utils import is_fake_hpu
 from vllm.worker.hpu_model_runner import (HpuModelAdapter, HPUModelRunnerBase,
                                           ModelInputForHPUWithSamplingMetadata,
                                           setup_profiler, subtuple)
@@ -489,9 +486,11 @@ class HPUEncoderDecoderModelRunner(
             sampling_params=sampling_params,
             block_tables=block_tables,
             encoder_seq_data=encoder_dummy_data.seq_data,
-            multi_modal_data=decoder_dummy_data.multi_modal_data or encoder_dummy_data.multi_modal_data,
+            multi_modal_data=decoder_dummy_data.multi_modal_data
+            or encoder_dummy_data.multi_modal_data,
             multi_modal_placeholders=decoder_dummy_data.
-            multi_modal_placeholders or encoder_dummy_data.multi_modal_placeholders,
+            multi_modal_placeholders
+            or encoder_dummy_data.multi_modal_placeholders,
             cross_block_table=cross_block_table)
 
     def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:

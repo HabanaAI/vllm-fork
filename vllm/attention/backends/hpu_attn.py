@@ -176,8 +176,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             assert alibi_slopes is None, \
                 'Non-contiguous PA not supported with alibi slopes!'
 
-        suppored_head_sizes = HPUPagedAttention.get_supported_head_sizes()
-        if head_size not in suppored_head_sizes:
+        supported_head_sizes = HPUPagedAttention.get_supported_head_sizes()
+        if head_size not in supported_head_sizes:
             raise ValueError(
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {supported_head_sizes}.")
