@@ -7,7 +7,6 @@ import random
 import time
 from functools import cache
 from typing import Dict, List, Optional, Tuple
-import os
 
 import torch
 import uvloop
@@ -104,20 +103,8 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         raise ValueError("output_len too small")
 
     # Load the dataset.
-    if os.path.splitext(dataset_path)[1] == ".json":
-        with open(dataset_path) as f:
-            dataset = json.load(f)
-    elif os.path.splitext(dataset_path)[1] == ".pkl":
-        import pandas as pd
-        dataset = pd.read_pickle(dataset_path)
-        dataset = dataset[['input', 'output']].to_dict(orient="records")
-        for data in dataset:
-            data["conversations"] = [{
-                "value": data["input"]
-            }, {
-                "value": data["output"]
-            }]
-
+    with open(dataset_path) as f:
+        dataset = json.load(f)
     # Filter out the conversations with less than 2 turns.
     dataset = [data for data in dataset if len(data["conversations"]) >= 2]
     # Shuffle the dataset.
@@ -125,14 +112,10 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
 
     # Filter out sequences that are too long or too short
     filtered_dataset: List[SampleRequest] = []
-    prompt_lens = []
     for data in tqdm(dataset,
                      total=len(filtered_dataset),
                      desc="sampling requests"):
         if len(filtered_dataset) == num_requests:
-            if args.sort_by_len:
-                filtered_dataset = sorted(filtered_dataset,
-                                          key=lambda x: x.prompt_len)
             break
 
         # Only keep the first two turns of each conversation.
@@ -179,11 +162,7 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
                           expected_output_len=output_len,
                           multi_modal_data=multi_modal_data,
                           lora_request=lora_request))
-        prompt_lens.append(prompt_len)
-    print("!!!!prompt length are: ", pd.Series(prompt_lens).describe())
 
-    # for i, data in enumerate(filtered_dataset):
-    #     print(i, data.prompt)
     return filtered_dataset
 
 
@@ -512,10 +491,6 @@ if __name__ == "__main__":
                         action='store_true',
                         default=False,
                         help="Disable decoupled async engine frontend.")
-    parser.add_argument("--sort-by-len", action='store_true', default=False)
-    parser.add_argument("--bucket-selective",
-                        action='store_true',
-                        default=False)
     # LoRA
     parser.add_argument(
         "--lora-path",
