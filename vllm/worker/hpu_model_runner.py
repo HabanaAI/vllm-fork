@@ -1900,13 +1900,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                           "deepseek_mtp"):
                 input_tokens = inputs.input_tokens
                 assert input_tokens is not None
-                bs = inputs.input_tokens.shape[0]
-                seq_len = inputs.input_tokens.shape[1]
+                bs = input_tokens.shape[0]
+                seq_len = input_tokens.shape[1]
                 hidden_size = self.model_config.get_hidden_size()
 
                 previous_hidden_states = torch.zeros(
                     (bs, seq_len, hidden_size),
-                    device=inputs.input_tokens.device,
+                    device=input_tokens.device,
                     dtype=self.model_config.dtype)
                 additional_inputs = {
                     "previous_hidden_states": previous_hidden_states
