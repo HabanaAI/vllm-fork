@@ -200,8 +200,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
                     allow_zero_draft_token_step = False
                 # Load lm_head weight for eagle in init_device
-                 if draft_model_config.hf_config.model_type == "eagle":
-                     enable_lm_head_weight_load = True
+                if draft_model_config.hf_config.model_type == "eagle":
+                    enable_lm_head_weight_load = True
 
                 proposer_worker = MultiStepWorker(**draft_worker_kwargs)
                 if draft_model_config.hf_config.model_type == "deepseek_mtp":
