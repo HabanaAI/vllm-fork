@@ -543,6 +543,7 @@ class HPUEncoderDecoderModelRunner(
             'cross_block_scales',
             'cross_block_usage',
             'cross_attn_bias',
+            'chunk_prefill_enabled',
         ])
         return attention_metadata
 

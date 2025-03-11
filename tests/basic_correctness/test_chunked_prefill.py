@@ -20,7 +20,7 @@ from ..utils import multi_gpu_test
 
 MODELS = [
     "facebook/opt-125m",
-    "meta-llama/Llama-3.2-1B",
+    "meta-llama/Llama-3.2-1B-Instruct",
 ]
 
 
