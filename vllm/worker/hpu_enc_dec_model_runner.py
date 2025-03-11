@@ -463,7 +463,6 @@ class HPUEncoderDecoderModelRunner(
             block_tables = None
             cross_block_table = None
         else:
-            seq_len = seq_len - 1
             output_len = 1
             block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
             # limit cross blocks to the number of available blocks
@@ -477,6 +476,9 @@ class HPUEncoderDecoderModelRunner(
                                       self.mm_registry,
                                       is_encoder_data=False)
         seq_data = decoder_dummy_data.seq_data
+        if not is_prompt:
+            # subtract 1 here to avoid warning
+            seq_data._prompt_token_ids = seq_data._prompt_token_ids[:-1]
         seq_data.output_token_ids = output_token_ids
 
         return SequenceGroupMetadata(
