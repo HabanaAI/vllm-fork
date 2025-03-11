@@ -962,18 +962,15 @@ class MllamaTextCrossAttention(nn.Module):
                               softmax_mode="fast",
                               recompute_mode=None,
                               valid_sequence_lengths=None)
-            output = output.permute(2, 0, 1, 3).reshape(
-                q_len, self.num_local_heads * self.head_dim)
-            return output
         else:
             output = F.scaled_dot_product_attention(q,
                                                     k,
                                                     v,
                                                     attn_mask=attention_mask,
                                                     is_causal=False)
-            output = output.permute(2, 0, 1, 3).reshape(
-                q_len, self.num_local_heads * self.head_dim)
-            return output
+        output = output.permute(2, 0, 1, 3).reshape(
+            q_len, self.num_local_heads * self.head_dim)
+        return output
 
 
 class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
@@ -1038,13 +1035,14 @@ class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
         # TODO: Change input_tokens tensor at the beginning of model execution
         # to 2D tensor to align with public vllm input_tokens shape. But this
         # will face the graph building failure issue, still need to investigate.
-        assert len(residual.shape) == 3
-        if len(hidden_states.shape) == 2:
-            hidden_states = hidden_states.view(residual.size(0),
-                                               residual.size(1),
-                                               residual.size(2))
-        full_text_row_masked_out_mask = full_text_row_masked_out_mask.view(
-            hidden_states.size(0), -1, 1)
+        if current_platform.is_hpu():
+            assert len(residual.shape) == 3
+            if len(hidden_states.shape) == 2:
+                hidden_states = hidden_states.view(residual.size(0),
+                                                   residual.size(1),
+                                                   residual.size(2))
+            full_text_row_masked_out_mask = full_text_row_masked_out_mask.view(
+                hidden_states.size(0), -1, 1)
         hidden_states = full_text_row_masked_out_mask * hidden_states
         hidden_states = residual + self.cross_attn_attn_gate.tanh(
         ) * hidden_states
@@ -1361,7 +1359,6 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal):
         num_tokens_per_tile: int,
         dtype: torch.dtype,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        token_ids = []
         if is_hpu:
             # input_ids is not flatten yet for hpu
             token_ids = input_ids.flatten().tolist()

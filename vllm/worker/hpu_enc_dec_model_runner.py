@@ -360,7 +360,7 @@ class HPUEncoderDecoderModelRunner(
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [
-            torch.tensor([], dtype=torch.bfloat16, device=self.device)
+            torch.tensor([], dtype=self.model_config.dtype, device=self.device)
             for _ in range(num_layers)
         ]
         max_batch_size = self.max_num_prefill_seqs
@@ -488,11 +488,9 @@ class HPUEncoderDecoderModelRunner(
             sampling_params=sampling_params,
             block_tables=block_tables,
             encoder_seq_data=encoder_dummy_data.seq_data,
-            multi_modal_data=decoder_dummy_data.multi_modal_data
-            or encoder_dummy_data.multi_modal_data,
+            multi_modal_data=decoder_dummy_data.multi_modal_data,
             multi_modal_placeholders=decoder_dummy_data.
-            multi_modal_placeholders
-            or encoder_dummy_data.multi_modal_placeholders,
+            multi_modal_placeholders,
             cross_block_table=cross_block_table)
 
     def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:
