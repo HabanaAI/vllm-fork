@@ -1950,10 +1950,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
+
+            additional_inputs = {}
+            if self.model_config.hf_config.model_type in ("medusa", "mlp_speculator", "eagle", "deepseek_mtp"):
+                bs = inputs.input_tokens.shape[0]
+                seq_len = inputs.input_tokens.shape[1]
+                hidden_size = self.model_config.get_hidden_size()
+
+                previous_hidden_states = torch.zeros((bs, seq_len, hidden_size),
+                                                    device=inputs.input_tokens.device,
+                                                    dtype=self.model_config.dtype)
+                additional_inputs = {"previous_hidden_states": previous_hidden_states}
+
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
-                self.execute_model(inputs, kv_caches, warmup_mode=True)
+                self.execute_model(inputs, kv_caches, warmup_mode=True, **additional_inputs)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
@@ -1962,7 +1974,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    kv_caches,
                                    warmup_mode=True,
                                    num_steps=2,
-                                   seqs=seqs)
+                                   seqs=seqs,
+                                   **additional_inputs)
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=False,
                                              is_last_step=True)
@@ -1970,7 +1983,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    kv_caches,
                                    warmup_mode=True,
                                    num_steps=2,
-                                   seqs=seqs)
+                                   seqs=seqs,
+                                   **additional_inputs)
             torch.hpu.synchronize()
             if profiler:
                 profiler.step()
@@ -2518,6 +2532,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
