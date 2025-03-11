@@ -1378,11 +1378,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             i for i in slot_mapping_merged if i != _PAD_SLOT_ID
         ]
         slot_mapping = [slot_mapping_merged]
-        input_tokens_merged = list(itertools.chain.from_iterable(input_tokens))
-        input_tokens_merged = [input_tokens_merged]
-        input_positions_merged = list(
-            itertools.chain.from_iterable(input_positions))
-        input_positions_merged = [input_positions_merged]
+        input_tokens_merged = [list(itertools.chain.from_iterable(input_tokens))]
+        input_positions_merged = [list(
+            itertools.chain.from_iterable(input_positions))]
         total_seq_lens = [sum(seq_lens)]
         total_query_lens = [sum(query_lens)]
 
@@ -1394,9 +1392,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.bucketing_ctx.get_padded_prompt_seq_len(max(total_seq_lens)),
             self.block_size)
         # get cumsum of seq_lens
-        repeated_idx = list(itertools.accumulate(seq_lens))
+        repeated_idx_tmp = list(itertools.accumulate(seq_lens))
         repeated_idx = [[idx - 1] * seq_len
-                        for idx, seq_len in zip(repeated_idx, seq_lens)]
+                        for idx, seq_len in zip(repeated_idx_tmp, seq_lens)]
         repeated_idx = list(
             itertools.chain.from_iterable(repeated_idx)
         ) + [merged_prompt_len] * (merged_prompt_len - sum(seq_lens))
