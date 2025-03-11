@@ -117,7 +117,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         num_expert_group: Optional[int] = None,
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
-        e_score_correction_bias: Optional[torch.Tensor] = None
+        e_score_correction_bias: Optional[torch.Tensor] = None,
+        ep_rank=None,  # TODO(zhenwei): support this argument
     ) -> torch.Tensor:
         return self.forward(x=x,
                             layer=layer,
@@ -178,6 +179,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None
     ):
+        x = x.squeeze(0) # TODO(zhenwei): unhardcode this
         assert len(x.shape) == 2
         import habana_frameworks.torch as htorch
         htorch.core.mark_step()

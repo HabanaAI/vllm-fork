@@ -873,3 +873,4 @@ def get_spec_layer_idx_from_weight_name(config: PretrainedConfig,
             if weight_name.startswith(f"model.layers.{layer_idx+i}."):
                 return layer_idx + i
     return None
+
