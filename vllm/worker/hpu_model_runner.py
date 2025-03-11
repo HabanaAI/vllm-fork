@@ -13,7 +13,6 @@ import itertools
 import math
 import os
 import time
-import copy
 from array import array
 from enum import Enum, IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
@@ -371,13 +370,13 @@ class HpuModelAdapter:
         # get length of each sequence
         repeated_idx = attn_metadata.repeated_idx_tensor.view(1, -1).expand(
             max_seq_len, -1)
-        # create tensor with indices from 0 to T-1, T times along dimesion 1
+        # create tensor with indices from 0 to T-1, T times along dimension 1
         mask_indices = torch.arange(0,
                                     max_seq_len,
                                     dtype=torch.long,
                                     device=device).view(-1, 1).expand(
                                         -1, max_seq_len)
-        # create causal mask and mask out tokens from preceeding sequences
+        # create causal mask and mask out tokens from preceding sequences
         mask = mask_indices.le(repeated_idx)
         causal_mask = torch.ones(max_seq_len,
                                  max_seq_len,
@@ -1378,7 +1377,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             i for i in slot_mapping_merged if i != _PAD_SLOT_ID
         ]
         slot_mapping = [slot_mapping_merged]
-        input_tokens_merged = [list(itertools.chain.from_iterable(input_tokens))]
+        input_tokens_merged = [
+        list(itertools.chain.from_iterable(input_tokens))
+        ]
         input_positions_merged = [list(
             itertools.chain.from_iterable(input_positions))]
         total_seq_lens = [sum(seq_lens)]
@@ -2902,7 +2903,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if i < num_steps - 1:
                     if i == 0:
                         if model_input.async_callback is not None:
-                            assert isinstance(model_input.async_callback, functools.partial)
+                            assert isinstance(model_input.async_callback, 
+                                              functools.partial)
                             ctx = model_input.async_callback.keywords["ctx"]
                             seq_group_metadata_list = \
                                 ctx.seq_group_metadata_list

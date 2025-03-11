@@ -6,7 +6,6 @@
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
-import os
 
 import torch
 import vllm_hpu_extension.kernels as kernels
@@ -266,9 +265,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
             key_cache = self.k_cache(key, key_cache, block_indices,
-                                    block_offsets)
+                                     block_offsets)
             value_cache = self.v_cache(value, value_cache, block_indices,
-                                    block_offsets)
+                                       block_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -304,19 +303,19 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     else:
                         prompt_attn_func = ops.prompt_attention
                     out = prompt_attn_func(
-                            query.view(query_shape),
-                            key.view(kv_shape),
-                            value.view(kv_shape),
-                            attn_bias=attn_bias,
-                            p=0.0,
-                            scale=self.scale,
-                            matmul_qk_op=self.matmul_qk,
-                            softmax_op=self.softmax,
-                            matmul_av_op=self.matmul_av,
-                            valid_seq_lengths=attn_metadata.seq_lens_tensor,
-                            fsdpa_op=self.fused_scaled_dot_product_attention
-                            if self.prefill_use_fusedsdpa else None,
-                        )
+                        query.view(query_shape),
+                        key.view(kv_shape),
+                        value.view(kv_shape),
+                        attn_bias=attn_bias,
+                        p=0.0,
+                        scale=self.scale,
+                        matmul_qk_op=self.matmul_qk,
+                        softmax_op=self.softmax,
+                        matmul_av_op=self.matmul_av,
+                        valid_seq_lengths=attn_metadata.seq_lens_tensor,
+                        fsdpa_op=self.fused_scaled_dot_product_attention
+                        if self.prefill_use_fusedsdpa else None,
+                    )
                 else:
                     out = ops.flex_attention(
                         query.view(query_shape),
