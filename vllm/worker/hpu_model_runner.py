@@ -1894,20 +1894,29 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             inputs = self.prepare_model_input(seqs)
 
             additional_inputs = {}
-            if self.model_config.hf_config.model_type in ("medusa", "mlp_speculator", "eagle", "deepseek_mtp"):
+            if self.model_config.hf_config.model_type in ("medusa",
+                                                          "mlp_speculator",
+                                                          "eagle",
+                                                          "deepseek_mtp"):
                 bs = inputs.input_tokens.shape[0]
                 seq_len = inputs.input_tokens.shape[1]
                 hidden_size = self.model_config.get_hidden_size()
 
-                previous_hidden_states = torch.zeros((bs, seq_len, hidden_size),
-                                                    device=inputs.input_tokens.device,
-                                                    dtype=self.model_config.dtype)
-                additional_inputs = {"previous_hidden_states": previous_hidden_states}
+                previous_hidden_states = torch.zeros(
+                    (bs, seq_len, hidden_size),
+                    device=inputs.input_tokens.device,
+                    dtype=self.model_config.dtype)
+                additional_inputs = {
+                    "previous_hidden_states": previous_hidden_states
+                }
 
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
-                self.execute_model(inputs, kv_caches, warmup_mode=True, **additional_inputs)
+                self.execute_model(inputs,
+                                   kv_caches,
+                                   warmup_mode=True,
+                                   **additional_inputs)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
