@@ -23,7 +23,7 @@ import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 import torch.nn as nn
 import vllm_hpu_extension.environment as environment
-from vllm_hpu_extension.bucketing import (HPUBucketingContext, 
+from vllm_hpu_extension.bucketing import (HPUBucketingContext,
                                           generate_prompt_buckets)
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.ops import LoraMask as LoraMask
@@ -1378,10 +1378,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ]
         slot_mapping = [slot_mapping_merged]
         input_tokens_merged = [
-        list(itertools.chain.from_iterable(input_tokens))
+            list(itertools.chain.from_iterable(input_tokens))
         ]
-        input_positions_merged = [list(
-            itertools.chain.from_iterable(input_positions))]
+        input_positions_merged = [
+            list(itertools.chain.from_iterable(input_positions))
+        ]
         total_seq_lens = [sum(seq_lens)]
         total_query_lens = [sum(query_lens)]
 
@@ -1478,8 +1479,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=
             None,  # FIXME(kzawora): mutli-modality will not work here
-            enable_kv_scales_calculation=False
-        )
+            enable_kv_scales_calculation=False)
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         for t in multi_modal_kwargs:
             if torch.is_tensor(multi_modal_kwargs[t]):
@@ -1885,7 +1885,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 dtype=sampling_metadata.selected_token_indices.dtype,
                 device=sampling_metadata.selected_token_indices.device)
             sampling_metadata.selected_token_indices = \
-                torch.cat((sampling_metadata.selected_token_indices, paddings), 
+                torch.cat((sampling_metadata.selected_token_indices, paddings),
                           dim=0)
 
         if self.lora_config:
@@ -2903,7 +2903,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if i < num_steps - 1:
                     if i == 0:
                         if model_input.async_callback is not None:
-                            assert isinstance(model_input.async_callback, 
+                            assert isinstance(model_input.async_callback,
                                               functools.partial)
                             ctx = model_input.async_callback.keywords["ctx"]
                             seq_group_metadata_list = \
@@ -3072,7 +3072,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         delayed_output = self.cached_step_outputs.pop(0).cpu().squeeze(
             -1).tolist()
         assert model_input.async_callback is not None
-        assert getattr(model_input.async_callback, 'keywords', None) is not None
+        assert getattr(model_input.async_callback, 'keywords',
+                       None) is not None
         assert isinstance(model_input.async_callback, functools.partial)
         ctx = model_input.async_callback.keywords["ctx"]
         # If there's no output to patch with, which is usually the case when
