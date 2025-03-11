@@ -1898,6 +1898,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                           "mlp_speculator",
                                                           "eagle",
                                                           "deepseek_mtp"):
+                input_tokens = inputs.input_tokens
+                assert input_tokens is not None
                 bs = inputs.input_tokens.shape[0]
                 seq_len = inputs.input_tokens.shape[1]
                 hidden_size = self.model_config.get_hidden_size()
