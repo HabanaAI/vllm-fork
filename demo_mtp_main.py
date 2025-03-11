@@ -5,7 +5,7 @@ prompts = [
 ]
 sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 
-llm = LLM(model="/mnt/weka/data/pytorch/DeepSeek-V3-bf16/", dtype=torch.bfloat16, tensor_parallel_size=1, trust_remote_code=True, enforce_eager=True, max_model_len=10)
+llm = LLM(model="/mnt/disk9/models/DeepSeek-R1-BF16/", dtype=torch.bfloat16, tensor_parallel_size=1, trust_remote_code=True, enforce_eager=True, max_model_len=10)
 
 outputs = llm.generate(prompts, sampling_params)
 

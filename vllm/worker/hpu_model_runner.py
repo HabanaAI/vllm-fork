@@ -371,6 +371,8 @@ class HpuModelAdapter:
         current_module = self.model  # Start from the top level of the model
 
         for layer in self.layer_names:
+            if layer == '61':
+                layer = '0'
             if layer.isdigit():  # Check if the layer is an index
                 layer = int(layer)
 
@@ -381,6 +383,7 @@ class HpuModelAdapter:
                 current_module = getattr(current_module, layer)
             elif isinstance(layer,
                             int):  # Indexed-based access (like ModuleList)
+                print("layer:", layer)
                 current_module = list(current_module._modules.values())[layer]
 
         # At the end, we should be at the RotaryEmbedding layer.
