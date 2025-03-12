@@ -40,6 +40,7 @@ class HPUTP1DraftModelRunner(ModelRunnerWrapperBase):
         super().__init__(*args, **kwargs)
 
         self.indices_of_seq_with_bonus_tokens = None
+        super().skip_warmup = True
 
     @torch.inference_mode()
     def execute_model(
