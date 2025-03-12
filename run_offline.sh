@@ -134,7 +134,8 @@ if [[ -n "$MultiPrompt" ]]; then
 fi
 
 if [[ "$model" == *"Qwen2"* ]]; then
-    export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false
+    export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false; unset VLLM_QWEN_SPLIT_GRAPHS
+    #export VLLM_QWEN_SPLIT_GRAPHS=true; unset PT_HPUGRAPH_DISABLE_TENSOR_CACHE
 fi
 
 if [[ -n "$video" ]]; then

@@ -14,6 +14,7 @@ import math
 import os
 import time
 from array import array
+from functools import partial
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
@@ -277,6 +278,13 @@ class HpuModelAdapter:
                 self.model = torch.compile(self.model,
                                            backend='hpu_backend',
                                            dynamic=False)
+        if "Qwen2.5-VL" in self.vllm_config.model_config.model and os.getenv('VLLM_QWEN_SPLIT_GRAPHS','false').lower() in ['1', 'true']:
+            # We only wrap the language model in HPU graph because some Ops in
+            # vision model will fallback to CPU and cause the graph building fail.
+            if htorch.utils.internal.is_lazy() and hasattr(self.model,
+                                                        "language_model"):
+                self.model.language_model = htorch.hpu.wrap_in_hpu_graph(
+                    self.model.language_model, disable_tensor_cache=True)
 
     def _regional_compilation(self,
                               module,
@@ -458,6 +466,14 @@ class HpuModelAdapter:
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
+        if "Qwen2.5-VL" in self.vllm_config.model_config.model and os.getenv('VLLM_QWEN_SPLIT_GRAPHS','false').lower() in ['1', 'true']:
+            if htorch.utils.internal.is_lazy() and hasattr(self.model,
+                                                        "language_model"):
+                bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
+                self.model.language_model.forward = partial(
+                    self.model.language_model.forward,
+                    bypass_hpu_graphs=bypass_hpu_graphs)
+
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         model_config = getattr(self.model, "config", None)
@@ -904,11 +920,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         disable_cache_var = os.environ.get('PT_HPUGRAPH_DISABLE_TENSOR_CACHE', 'true')
         disable_cache: bool = disable_cache_var.lower() in ('true', '1')
-        return htorch.hpu.wrap_in_hpu_graph(
-            HpuModelAdapter(*args, **kwargs),
-            disable_tensor_cache=disable_cache,
-        ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-            *args, **kwargs)
+        if "Qwen2.5-VL" in self.model_config.model and os.getenv('VLLM_QWEN_SPLIT_GRAPHS','false').lower() in ['1', 'true']:
+            return HpuModelAdapter(*args, **kwargs)
+        else:
+            return htorch.hpu.wrap_in_hpu_graph(
+                 HpuModelAdapter(*args, **kwargs),
+                 disable_tensor_cache=disable_cache,
+            ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
+                 *args, **kwargs)
 
     def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
