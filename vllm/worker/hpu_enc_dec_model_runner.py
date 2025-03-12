@@ -482,7 +482,6 @@ class HPUEncoderDecoderModelRunner(
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
         seq_data.output_token_ids = output_token_ids
-        import pdb;pdb.set_trace()
         return SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=is_prompt,

@@ -20,6 +20,9 @@ parser.add_argument(
     "--multiple_prompts", action="store_true", help="to run with multiple prompts"
 )
 parser.add_argument("--iter", help="number of iterations to run")
+parser.add_argument(
+    "-gmu", "--gpu_mem_usage", type=float, default=0.9, help="GPU memory usage value"
+)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -84,7 +87,10 @@ question_list = [
 
 if args.video:
     llm = LLM(
-        model=mdl, enforce_eager=False, dtype="bfloat16", gpu_memory_utilization=0.6
+        model=mdl,
+        enforce_eager=False,
+        dtype="bfloat16",
+        gpu_memory_utilization=args.gpu_mem_usage,
     )
 
     prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"
@@ -107,6 +113,7 @@ else:
             enforce_eager=False,
             max_model_len=32768,
             max_num_seqs=5,
+            gpu_memory_utilization=args.gpu_mem_usage,
             limit_mm_per_prompt={"image": 1},
         )
 
@@ -153,6 +160,7 @@ else:
             max_num_prefill_seqs=4,
         )
         from vllm import TextPrompt
+
         batch_data = TextPrompt(prompt=f"<|image|><|begin_of_text|>{question_list[0]}")
         batch_data["multi_modal_data"] = {"image": image}
     else:

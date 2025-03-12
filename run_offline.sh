@@ -32,6 +32,10 @@ while [[ $# -gt 0 ]]; do
         ImageType=$2
         shift 2
         ;;
+    --gpu_mem_usage | -gmu)
+        GMU=$2
+        shift 2
+        ;;
     --image_width)
         ImageWidth=$2
         shift 2
@@ -86,6 +90,9 @@ if [[ -n "$video" ]]; then
     echo "Downloading Video $filename from $video"
     wget -O /tmp/$filename "$video"
     videofile="/tmp/$filename"
+    GMU=${GMU:-"0.6"}
+else
+    GMU=${GMU:-"0.9"}
 fi
 
 if [[ -n $InstallVLLM ]]; then
@@ -140,6 +147,7 @@ else
         ARGS="$ARGS --image_width $ImageWidth --image_height $ImageHeight"
     fi
 fi
+if [[ -n "$GMU" ]]; then ARGS="$ARGS --gpu_mem_usage $GMU"; fi
 
 cmd="python offline_inferece.py $ARGS"
 echo $cmd && eval $cmd
