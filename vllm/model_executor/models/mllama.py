@@ -459,7 +459,7 @@ class MllamaVisionSdpaAttention(nn.Module):
                    self.head_dim).transpose(1, 2)
 
         # TODO: remove padding in image encoder
-        if current_platform.is_hpu():
+        if is_hpu:
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
             attn_output = FusedSDPA.apply(q, k, v, attention_mask, 0.0)
         else:
@@ -947,7 +947,7 @@ class MllamaTextCrossAttention(nn.Module):
                                               kv_len,
                                               self.head_dim).contiguous()
         attention_mask = attention_mask.view(1, 1, q_len, kv_len)
-        if current_platform.is_hpu():
+        if is_hpu:
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
             from vllm_hpu_extension.utils import ModuleFusedSDPA
             fsdpa_op = ModuleFusedSDPA(FusedSDPA)
@@ -1035,7 +1035,7 @@ class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
         # TODO: Change input_tokens tensor at the beginning of model execution
         # to 2D tensor to align with public vllm input_tokens shape. But this
         # will face the graph building failure issue, still need to investigate.
-        if current_platform.is_hpu():
+        if is_hpu:
             assert len(residual.shape) == 3
             if len(hidden_states.shape) == 2:
                 hidden_states = hidden_states.view(residual.size(0),

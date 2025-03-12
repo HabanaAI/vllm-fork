@@ -356,7 +356,6 @@ class HPUEncoderDecoderModelRunner(
 
         return attn_metadata
 
-    @torch.inference_mode()
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [
