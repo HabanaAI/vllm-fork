@@ -40,6 +40,10 @@ class HPUTP1DraftModelRunner(ModelRunnerWrapperBase):
         super().__init__(*args, **kwargs)
 
         self.indices_of_seq_with_bonus_tokens = None
+        # TODO: Currently, we skip warmup for TP1DraftModelRunner
+        # because in spec_decode_worker determine_num_available_blocks()
+        # is not called, so that warmup will fail. Simply adding this call
+        # does not work since other proposers do not implement this method.
         super().skip_warmup = True
 
     @torch.inference_mode()
