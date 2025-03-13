@@ -58,7 +58,7 @@ class HPUPoolingModelRunner(
         batch_size = input_tokens.size(0)
         seq_len = self._seq_len(attn_metadata)
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
-        super()._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+        super()._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         # use an empty tensor instead of `None`` to force Dynamo to pass
@@ -69,6 +69,7 @@ class HPUPoolingModelRunner(
             torch.tensor([], dtype=torch.float32, device=self.device)
             for _ in range(num_layers)
         ]
+        import pdb;pdb.set_trace()
         multi_modal_kwargs = model_input.multi_modal_kwargs or {}
         execute_model_kwargs = {
             "input_ids": model_input.input_tokens,
@@ -143,7 +144,7 @@ class HPUPoolingModelRunner(
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
-
+            import pdb;pdb.set_trace()
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
             assert model_input.input_tokens is not None and \

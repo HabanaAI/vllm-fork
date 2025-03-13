@@ -1104,17 +1104,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     "Prefix caching is currently not supported with "
                     "sliding window attention")
                 start_idx = max(0, seq_len - self.sliding_window)
-            for i in range(context_len, seq_len):
-                if i < start_idx:
-                    slot_mapping[-1].append(_PAD_SLOT_ID)
-                    continue
-                # For encoder-only models, the block_table is None,
-                # and there is no need to initialize the slot_mapping.
-                if block_table is not None:
-                    block_number = block_table[i // self.block_size]
-                    block_offset = i % self.block_size
-                    slot = block_number * self.block_size + block_offset
-                    slot_mapping[-1].append(slot)
+            if self.is_pooler is False:
+                for i in range(context_len, seq_len):
+                    if i < start_idx:
+                        slot_mapping[-1].append(_PAD_SLOT_ID)
+                        continue
+                    # For encoder-only models, the block_table is None,
+                    # and there is no need to initialize the slot_mapping.
+                    if block_table is not None:
+                        block_number = block_table[i // self.block_size]
+                        block_offset = i % self.block_size
+                        slot = block_number * self.block_size + block_offset
+                        slot_mapping[-1].append(slot)
 
         max_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
