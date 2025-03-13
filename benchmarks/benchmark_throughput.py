@@ -181,43 +181,48 @@ def run_vllm(
         prompts.append(
             TextPrompt(prompt=request.prompt,
                        multi_modal_data=request.multi_modal_data))
-        sampling_params.append(
-            SamplingParams(
-                n=n,
-                temperature=1.0,
-                top_p=1.0,
-                ignore_eos=True,
-                max_tokens=request.expected_output_len,
-            ))
+        if engine_args.task is not 'embed':
+            sampling_params.append(
+                SamplingParams(
+                    n=n,
+                    temperature=1.0,
+                    top_p=1.0,
+                    ignore_eos=True,
+                    max_tokens=request.expected_output_len,
+                ))
     lora_requests: Optional[List[LoRARequest]] = None
     if engine_args.enable_lora:
         lora_requests = [request.lora_request for request in requests]
 
     use_beam_search = False
-
-    if not use_beam_search:
+    if engine_args.task is 'embed':
         start = time.perf_counter()
-        llm.generate(prompts,
-                     sampling_params,
-                     lora_request=lora_requests,
-                     use_tqdm=True)
+        llm.embed(prompts)
         end = time.perf_counter()
     else:
-        assert lora_requests is None, "BeamSearch API does not support LoRA"
-        prompts = [request.prompt for request in requests]
-        # output_len should be the same for all requests.
-        output_len = requests[0][2]
-        for request in requests:
-            assert request.expected_output_len == output_len
-        start = time.perf_counter()
-        llm.beam_search(
-            prompts,
-            BeamSearchParams(
-                beam_width=n,
-                max_tokens=output_len,
-                ignore_eos=True,
-            ))
-        end = time.perf_counter()
+        if not use_beam_search:
+            start = time.perf_counter()
+            llm.generate(prompts,
+                        sampling_params,
+                        lora_request=lora_requests,
+                        use_tqdm=True)
+            end = time.perf_counter()
+        else:
+            assert lora_requests is None, "BeamSearch API does not support LoRA"
+            prompts = [request.prompt for request in requests]
+            # output_len should be the same for all requests.
+            output_len = requests[0][2]
+            for request in requests:
+                assert request.expected_output_len == output_len
+            start = time.perf_counter()
+            llm.beam_search(
+                prompts,
+                BeamSearchParams(
+                    beam_width=n,
+                    max_tokens=output_len,
+                    ignore_eos=True,
+                ))
+            end = time.perf_counter()
     return end - start
 
 
@@ -498,7 +503,12 @@ if __name__ == "__main__":
         default=None,
         help="Path to the lora adapters to use. This can be an absolute path, "
         "a relative path, or a Hugging Face model identifier.")
-
+    parser.add_argument(
+        "--task",
+        type=str,
+        default='generate',
+        help="Path to the lora adapters to use. This can be an absolute path, "
+        "a relative path, or a Hugging Face model identifier.")
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
     if args.tokenizer is None:
