@@ -36,15 +36,14 @@ if __name__ == "__main__":
                                      max_tokens=20)
 
     # Create an LLM without spec decoding
-    # print("==============Without speculation==================")
-    # llm = LLM(model="JackFram/llama-68m",
-    #           tensor_parallel_size=2)
+    print("==============Without speculation==================")
+    llm = LLM(model="JackFram/llama-68m")
 
-    # ret_non_spec, latency_per_token_non_spec = time_generation(
-    #     llm, prompts, sampling_params)
+    ret_non_spec, latency_per_token_non_spec = time_generation(
+        llm, prompts, sampling_params)
 
-    # del llm
-    # gc.collect()
+    del llm
+    gc.collect()
 
     # Create an LLM with spec decoding
     print("==============With speculation=====================")
@@ -53,7 +52,6 @@ if __name__ == "__main__":
         speculative_model="abhigoyal/vllm-medusa-llama-68m-random",
         num_speculative_tokens=5,
         use_v2_block_manager=True,
-        # tensor_parallel_size=2,
     )
 
     ret_spec, latency_per_token_spec = time_generation(llm, prompts,
@@ -63,8 +61,8 @@ if __name__ == "__main__":
     gc.collect()
     print("================= Summary =====================")
     print("input is ", prompts, "\n")
-    # print("Non Spec Decode - latency_per_token is ",
-    #       latency_per_token_non_spec)
-    # print("Generated Text is :", ret_non_spec, "\n")
+    print("Non Spec Decode - latency_per_token is ",
+          latency_per_token_non_spec)
+    print("Generated Text is :", ret_non_spec, "\n")
     print("Spec Decode - latency_per_token is ", latency_per_token_spec)
     print("Generated Text is :", ret_spec)

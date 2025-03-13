@@ -44,7 +44,7 @@ class HPUTP1DraftModelRunner(ModelRunnerWrapperBase):
         # because in spec_decode_worker determine_num_available_blocks()
         # is not called, so that warmup will fail. Simply adding this call
         # does not work since other proposers do not implement this method.
-        super().skip_warmup = True
+        self.model_runner.skip_warmup = True
 
     @torch.inference_mode()
     def execute_model(
