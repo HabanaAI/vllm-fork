@@ -44,6 +44,7 @@ from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
@@ -420,7 +421,7 @@ class HpuModelAdapter:
         if hasattr(current_module, 'prepare_cos_sin'):
             current_module.prepare_cos_sin(
                 positions, recompute_cos_sin=self.recompute_cos_sin)
-        else:
+        elif isinstance(current_module, RotaryEmbedding):
             raise AttributeError(
                 "The module at the end of the path does not have \
                 a 'prepare_cos_sin' method.")
