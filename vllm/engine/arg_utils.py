@@ -541,6 +541,14 @@ class EngineArgs:
             default=None,
             help='If specified, ignore GPU profiling result and use this number'
             ' of GPU blocks. Used for testing preemption.')
+        parser.add_argument('--split-qk-v',
+                            action='store_true',
+                            default=EngineArgs.split_qk_v,
+                            help='Whether to separate qk and v calculations.')
+        parser.add_argument('--split-gate-up',
+                            action='store_true',
+                            default=EngineArgs.split_gate_up,
+                            help='Whether to separate gate and up calculations.')
         parser.add_argument('--max-num-batched-tokens',
                             type=int,
                             default=EngineArgs.max_num_batched_tokens,
