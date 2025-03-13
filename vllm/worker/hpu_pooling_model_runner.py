@@ -69,7 +69,7 @@ class HPUPoolingModelRunner(
             torch.tensor([], dtype=torch.float32, device=self.device)
             for _ in range(num_layers)
         ]
-        import pdb;pdb.set_trace()
+
         multi_modal_kwargs = model_input.multi_modal_kwargs or {}
         execute_model_kwargs = {
             "input_ids": model_input.input_tokens,
@@ -144,7 +144,7 @@ class HPUPoolingModelRunner(
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
-            import pdb;pdb.set_trace()
+
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
             assert model_input.input_tokens is not None and \

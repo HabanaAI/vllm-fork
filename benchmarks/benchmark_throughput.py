@@ -181,7 +181,7 @@ def run_vllm(
         prompts.append(
             TextPrompt(prompt=request.prompt,
                        multi_modal_data=request.multi_modal_data))
-        if engine_args.task is not 'embed':
+        if engine_args.task != 'embed':
             sampling_params.append(
                 SamplingParams(
                     n=n,
@@ -195,7 +195,7 @@ def run_vllm(
         lora_requests = [request.lora_request for request in requests]
 
     use_beam_search = False
-    if engine_args.task is 'embed':
+    if engine_args.task == 'embed':
         start = time.perf_counter()
         llm.embed(prompts)
         end = time.perf_counter()
@@ -503,13 +503,8 @@ if __name__ == "__main__":
         default=None,
         help="Path to the lora adapters to use. This can be an absolute path, "
         "a relative path, or a Hugging Face model identifier.")
-    parser.add_argument(
-        "--task",
-        type=str,
-        default='generate',
-        help="Path to the lora adapters to use. This can be an absolute path, "
-        "a relative path, or a Hugging Face model identifier.")
     parser = AsyncEngineArgs.add_cli_args(parser)
+ 
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
