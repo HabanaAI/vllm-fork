@@ -116,8 +116,7 @@ class HPUPoolingModelRunner(
             self.profiler.record_counter(self.event_start, counters)
         if not self.is_driver_worker:
             return []
-        import pdb
-        pdb.set_trace()
+
         return [
             self.model.model._pooler(
                 hidden_states=hidden_states,
