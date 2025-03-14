@@ -1075,8 +1075,7 @@ class SplitQKVParallelLinear(torch.nn.Module):
         q, output_bias = self.q_proj(input_)
         k, _ = self.k_proj(input_)
         v, _ = self.v_proj(input_)
-        qkv = torch.cat((q, k, v), dim=-1)
-        return qkv, output_bias
+        return q, k, v, output_bias
 
 
 class RowParallelLinear(LinearBase):

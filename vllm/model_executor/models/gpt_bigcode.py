@@ -118,14 +118,17 @@ class GPTBigCodeAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        qkv, _ = self.c_attn(hidden_states)
-        q, k, v = qkv.split(
-            [
-                self.hidden_size // self.tensor_model_parallel_world_size,
-                self.kv_dim, self.kv_dim
-            ],
-            dim=-1,
-        )
+        if self.split_qkv:
+            q, k, v, _ = self.c_attn(hidden_states)
+        else:
+            qkv, _ = self.c_attn(hidden_states)
+            q, k, v = qkv.split(
+                [
+                    self.hidden_size // self.tensor_model_parallel_world_size,
+                    self.kv_dim, self.kv_dim
+                ],
+                dim=-1,
+            )
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         attn_output, _ = self.c_proj(attn_output)
         return attn_output
