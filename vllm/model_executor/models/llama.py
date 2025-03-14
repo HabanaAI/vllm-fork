@@ -456,6 +456,10 @@ class LlamaDecoderLayer(nn.Module):
             q = torch.cat(q_list, dim=1)
             k = torch.cat(k_list, dim=1)
             v = torch.cat(v_list, dim=1)
+            # Reshape qkv in case of bs>1 TP>1 prefill
+            q = q.view(batch_size, -1, q.size(2))
+            k = k.view(batch_size, -1, k.size(2))
+            v = v.view(batch_size, -1, v.size(2))
             residual = torch.cat(residual_list_output, dim=1)
             hidden_states_shape = residual.shape
             batch_size_fake, seq_len_fake, hidden_size = hidden_states_shape
@@ -592,6 +596,8 @@ class LlamaModel(nn.Module):
         if is_hpu:
             htorch.core.mark_step()
 
+        batch_size, seq_len, _ = hidden_states.shape
+
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
             hidden_states, residual = layer(positions, hidden_states,
@@ -600,6 +606,8 @@ class LlamaModel(nn.Module):
         if type(hidden_states)==list:
             hidden_states = torch.cat(hidden_states, dim=1)
             residual = torch.cat(residual, dim=1)
+            hidden_states = hidden_states.view(batch_size, seq_len, -1)
+            residual = residual.view(batch_size, seq_len, -1)
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
