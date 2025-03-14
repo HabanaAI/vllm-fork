@@ -538,6 +538,8 @@ class Phi3LongRoPEScaledRotaryEmbedding(nn.Module):
         long_mscale: Optional[float] = None,
     ):
         super().__init__()
+        self.head_size = head_size
+        self.rotary_dim = rotary_dim
 
         if is_neox_style is False:
             raise ValueError(
@@ -601,6 +603,25 @@ class Phi3LongRoPEScaledRotaryEmbedding(nn.Module):
         cache = torch.cat((cos, sin), dim=-1)
         return cache
 
+    def prepare_cos_sin(self,
+                        positions: torch.Tensor,
+                        offsets: Optional[torch.Tensor] = None,
+                        recompute_cos_sin: bool = False):
+        self.recompute_cos_sin = recompute_cos_sin
+        if offsets is not None:
+            offsets = offsets.view(positions.shape[0], -1)
+            positions = positions + offsets
+        positions = positions.flatten()
+        num_tokens = positions.shape[0]
+        cos_sin = self.long_short_cos_sin_cache.index_select(0, positions).view(
+            num_tokens, 1, -1)
+        cos, sin = cos_sin.chunk(2, dim=-1)
+        cos = torch.cat((cos, cos), dim=-1)
+        sin = torch.cat((sin, sin), dim=-1)
+
+        self.register_buffer("cos", cos, persistent=False)
+        self.register_buffer("sin", sin, persistent=False)
+
     def forward(
         self,
         positions: torch.Tensor,
@@ -608,32 +629,42 @@ class Phi3LongRoPEScaledRotaryEmbedding(nn.Module):
         key: torch.Tensor,
         offsets: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        query = query.view(*query.shape[:-1], -1, self.head_size)
-        key = key.view(*key.shape[:-1], -1, self.head_size)
+        from habana_frameworks.torch.hpex.kernels import (
+            RotaryPosEmbeddingMode, apply_rotary_pos_emb)
 
-        k = self.original_max_position_embeddings
-        long_prompt_offset = (torch.any(positions > k).float() *
-                              torch.full_like(positions, k)).long()
-        idx = (torch.add(positions, long_prompt_offset)
-               if long_prompt_offset is not None else positions)
-        idx = torch.add(idx, offsets) if offsets is not None else idx
-        cos_sin = torch.index_select(self.long_short_cos_sin_cache, 0, idx)
+        rope_mode: RotaryPosEmbeddingMode
+        rope_mode = RotaryPosEmbeddingMode.BLOCKWISE
 
-        cos, sin = cos_sin.chunk(2, dim=-1)
-        cos = cos.repeat(1, 2).unsqueeze(-2)
-        sin = sin.repeat(1, 2).unsqueeze(-2)
+        if hasattr(self, "scaling_factors") or self.sin is None:
+            self.prepare_cos_sin(positions, offsets)
+        if self.recompute_cos_sin:
+            self.prepare_cos_sin(positions, offsets, recompute_cos_sin=True)
 
+        sin = self.sin
+        cos = self.cos
+
+        if offsets is not None:
+            offsets = offsets.view(positions.shape[0], -1)
+            positions = positions + offsets
+        positions = positions.flatten()
+        num_tokens = positions.shape[0]
+
+        query_shape = query.shape
+        query = query.view(num_tokens, -1, self.head_size)
         query_rot = query[..., :self.rotary_dim]
         query_pass = query[..., self.rotary_dim:]
-        query_rot = query_rot * cos + _rotate_neox(query_rot) * sin
-        query = torch.cat((query_rot, query_pass), dim=-1)
+        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
+                                         rope_mode)
+        query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
+        key_shape = key.shape
+        key = key.view(num_tokens, -1, self.head_size)
         key_rot = key[..., :self.rotary_dim]
         key_pass = key[..., self.rotary_dim:]
-        key_rot = key_rot * cos + _rotate_neox(key_rot) * sin
-        key = torch.cat((key_rot, key_pass), dim=-1)
+        key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0, rope_mode)
+        key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
 
-        return query.flatten(-2), key.flatten(-2)
+        return query, key
 
 
 def yarn_get_mscale(scale: float = 1, mscale: float = 1) -> float:
