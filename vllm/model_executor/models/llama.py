@@ -71,11 +71,6 @@ def get_split_size(seq_len, batch_size, orig_split_size):
         split_size = orig_split_size
     return split_size
 
-# Use the first override whenever possible
-VLLM_MLP_SIZE_OVERRIDE = int(os.environ.get("VLLM_MLP_SIZE_OVERRIDE", "512"))
-# Use the second override 
-VLLM_MLP_SIZE_OVERRIDE_2 = int(os.environ.get("VLLM_MLP_SIZE_OVERRIDE_2", "384"))
-
 class LlamaMLP(nn.Module):
 
     def __init__(
@@ -129,12 +124,6 @@ class LlamaMLP(nn.Module):
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        batch_size = x.size(0)
-        seq_len = x.size(1)
-        if (seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE==0:
-            x = x.view(-1,VLLM_MLP_SIZE_OVERRIDE,self.hidden_size)
-        elif (seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE_2==0:
-            x = x.view(-1,VLLM_MLP_SIZE_OVERRIDE_2,self.hidden_size)
         if self.split_gate_up:
             x = nn.functional.silu(self.gate_proj(x)[0]) * self.up_proj(x)[0]
         else:
@@ -143,9 +132,6 @@ class LlamaMLP(nn.Module):
 
         # Separate split for down is not implemented yet
         x, _ = self.down_proj(x)
-
-        if ((seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE==0) or ((seq_len*batch_size)%VLLM_MLP_SIZE_OVERRIDE_2==0):
-            x = x.view(batch_size,seq_len,self.hidden_size)
         return x
 
 
