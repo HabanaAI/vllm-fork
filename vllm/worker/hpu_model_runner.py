@@ -14,7 +14,7 @@ import math
 import os
 import time
 from array import array
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -78,6 +78,16 @@ _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
+
+VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
+                                       'false').lower() == 'true'
+DUMMY_TOKEN_ID = -1
+
+
+class PhaseType(Enum):
+    PREFILL = 'prefill'
+    PREFIX_PREFILL = 'prefix_prefill'
+    DECODE = 'decode'
 
 
 def subtuple(obj: object,
@@ -269,7 +279,8 @@ class HpuModelAdapter:
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
-                or (self.prefill_use_fusedsdpa and self.is_causal)
+                or (self.prefill_use_fusedsdpa and self.is_causal
+                    and attn_metadata.block_list is None)
                 or not attn_metadata.is_prompt):
             return attn_metadata
 
@@ -708,24 +719,34 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             raise ValueError(
                 "Speculative decoding is not supported with "
                 "contiguous PA, please set VLLM_CONTIGUOUS_PA=false")
-        # For multi-step scheduling
+        # For both multi-step scheduling and delayed sampling
         self.cached_step_outputs: List[torch.Tensor] = []
         self.is_pooler = False
+        # For delayed sampling
+        self.cached_step_inputs: List[
+            ModelInputForHPUWithSamplingMetadata] = []
 
     def _set_gc_threshold(self) -> None:
-        # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
-        # for comprehensive description of gc generations.
-        # We can either use VLLM_GC_THR_GEN[0-2] (this has higher priority)
-        # to set particular generation threshold or use simpler
-        # VLLM_GC_THR_MULTIPLIER to multiply default values.
-        default_gc_thrs = list(gc.get_threshold())
+        """
+        Read https://docs.python.org/3/library/gc.html#gc.set_threshold
+        for comprehensive description of gc generations.
+        We can either use VLLM_GC_THR_GEN[0-2] (this has higher priority)
+        to set particular generation threshold or use simpler
+        VLLM_GC_THR_MULTIPLIER to multiply default values.
+        """
+
+        # gc.get_threshold default, avoiding potential overflow due to
+        # multiplier and set later (get->mult->set->repeat->...->overflow)
+        default_gc_thrs = [700, 10, 10]
+
         requested_gc_thrs = [0] * len(default_gc_thrs)
         for i in range(len(default_gc_thrs)):
             requested_gc_thrs[i] = int(
                 os.environ.get(f'VLLM_GC_THR_GEN{i}', default_gc_thrs[i]))
         if requested_gc_thrs == default_gc_thrs:
-            gc_thr_multiplier = int(os.environ.get('VLLM_GC_THR_MULTIPLIER',
-                                                   2))
+            # 16*threshold is rare enough for gc to not cause perf issues
+            gc_thr_multiplier = int(
+                os.environ.get('VLLM_GC_THR_MULTIPLIER', 16))
             requested_gc_thrs = [
                 t * gc_thr_multiplier for t in default_gc_thrs
             ]
@@ -850,7 +871,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for seq_group_metadata in seq_group_metadata_list)
                 temperature = 0.0 if has_greedy_samples else 1.0
             dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
-                0, 0, is_prompt, temperature=temperature)
+                -1, 0, is_prompt, temperature=temperature)
             seq_group_metadata_list.extend(dummy_seq_group_metadata
                                            for _ in range(batch_size_padding))
         return seq_group_metadata_list, real_batch_size, batch_size_padded
@@ -876,14 +897,37 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
 
-    def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
-        cfg = (batch_size, seq_len, is_prompt)
+    def _num_blocks(self, attn_metadata):
+        if attn_metadata.block_list is None:
+            return 0
+        return attn_metadata.block_list.numel()
+
+    def _phase(self, attn_metadata):
+        phase_type: PhaseType
+        is_prompt = attn_metadata.is_prompt
+        is_prefix_prefill = is_prompt and attn_metadata.block_list is not None
+        if is_prompt and is_prefix_prefill:
+            phase_type = PhaseType.PREFIX_PREFILL
+        elif is_prompt and not is_prefix_prefill:
+            phase_type = PhaseType.PREFILL
+        elif not is_prompt:
+            phase_type = PhaseType.DECODE
+        else:
+            raise ValueError("Unrecognized pass type, likely due to malformed "
+                             "attention metadata")
+        return phase_type
+
+    def _check_config(self, batch_size, seq_len, attn_metadata, warmup_mode):
+        phase = self._phase(attn_metadata)
+        num_blocks = self._num_blocks(attn_metadata)
+        cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            phase = 'prompt' if is_prompt else 'decode'
-            logger.warning("Configuration: (%s, %s, %s) was not warmed-up!",
-                           phase, batch_size, seq_len)
+            phase = phase.value
+            logger.warning(
+                "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
+                batch_size, seq_len, num_blocks)
 
     def _prepare_prompt(
         self,
@@ -1020,7 +1064,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert max_query_len > 0
 
         max_prompt_len = max(
-            self.bucketing_ctx.get_padded_prompt_seq_len(max(seq_lens)),
+            self.bucketing_ctx.get_padded_prompt_seq_len(max_query_len),
             self.block_size)
 
         lora_ids: List[int] = []
@@ -1900,10 +1944,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
                                  True)
             raise AssertionError("Finished profiling")
-
-        self.bucketing_ctx.generate_prompt_buckets()
         if not self.is_pooler:
             max_blocks = kv_caches[0][0].size(0)
+        self.bucketing_ctx.generate_prompt_buckets()
+        if not self.is_pooler:
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -2288,6 +2332,21 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         return lora_mask, lora_logits_mask
 
+    def _get_seq_ids(self, model_input):
+        return ([
+            sg.seq_ids[0] for sg in model_input.sampling_metadata.seq_groups
+        ])
+
+    def _pad_to_max_num_seqs(self, tensor, value):
+        padding_needed = self.max_num_seqs - tensor.size(0)
+        if padding_needed:
+            padding = torch.full((padding_needed, *tensor.shape[1:]),
+                                 value,
+                                 device=tensor.device,
+                                 dtype=tensor.dtype)
+            tensor = torch.cat([tensor, padding])
+        return tensor
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -2299,6 +2358,36 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
+        assert not (use_delayed_sampling and num_steps != 1), \
+            'Delayed sampling is not compatible with MSS!'
+        assert model_input.input_tokens is not None
+        if use_delayed_sampling and not model_input.is_prompt and \
+                self.is_driver_worker:
+            num_cached = len(self.cached_step_outputs)
+            assert num_cached > 0
+            cur_seq_ids = self._get_seq_ids(model_input)
+            cur_seq_id_pos = {
+                sid: idx
+                for idx, sid in enumerate(cur_seq_ids) if sid >= 0
+            }
+            htorch.core.mark_step()
+            for i in range(num_cached):
+                prev_seq_ids = self._get_seq_ids(self.cached_step_inputs[i])
+                target_indices = [
+                    cur_seq_id_pos.get(psi, -1) for psi in prev_seq_ids
+                ]
+                padding = self.cached_step_outputs[i].size(0) - len(
+                    target_indices)
+                target_indices.extend([-1] * padding)
+                target_indices = torch.tensor(
+                    target_indices,
+                    device=model_input.input_tokens.device,
+                    dtype=model_input.input_tokens.dtype)
+                model_input.input_tokens.index_copy_(
+                    0, target_indices, self.cached_step_outputs[i])
+                htorch.core.mark_step()
+
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
@@ -2314,7 +2403,21 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 assert model_input.lora_mapping is not None
                 self.set_active_loras(model_input.lora_requests,
                                       model_input.lora_mapping)
-            input_tokens = model_input.input_tokens
+            # Rank!=0 workers has is_prompt==None
+            if use_delayed_sampling and not model_input.is_prompt and \
+                    model_input.input_tokens.size(1) == 1:
+                if self.is_driver_worker:
+                    model_kwargs_broadcast_data = {
+                        "input_tokens": model_input.input_tokens
+                    }
+                    broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+                    input_tokens = model_input.input_tokens
+
+                else:
+                    model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
+                    input_tokens = model_kwargs_broadcast_data["input_tokens"]
+            else:
+                input_tokens = model_input.input_tokens
             input_positions = model_input.input_positions
             attn_metadata = model_input.attn_metadata
             sampling_metadata = model_input.sampling_metadata
@@ -2329,7 +2432,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
-            self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+            self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
@@ -2365,7 +2468,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
-            if num_steps > 1:
+            if num_steps > 1 or use_delayed_sampling:
                 # in case of multi-step scheduling
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
@@ -2433,9 +2536,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     continue
 
-                if model_input.async_callback is not None:
-                    model_input.async_callback()
-                # Sample the next token.
+                if use_delayed_sampling:
+                    fake_output = self._delayed_sampler_outputs(model_input)
+
                 with self.profiler.record_event(
                         'internal', ('sample_'
                                      f'{"prompt" if is_prompt else "decode"}_'
@@ -2448,9 +2551,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     )
                     if num_steps > 1:
                         output = output.sampled_token_ids
-                        self.cached_step_outputs.append(
-                            output.detach().clone())
+                        self.cached_step_outputs.append(output)
+                    if use_delayed_sampling and self.is_driver_worker:
+                        self._patch_prev_output()
+                        output = self._pad_to_max_num_seqs(
+                            output.sampled_token_ids, DUMMY_TOKEN_ID)
+                        self.cached_step_outputs.append(output)
+                        self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
+                if model_input.async_callback is not None:
+                    model_input.async_callback()
                 if i < num_steps - 1:
                     if i == 0:
                         if model_input.async_callback is not None:
@@ -2544,11 +2654,24 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if model_input.is_prompt:
                         output.prefill_hidden_states = hidden_states
                     output.hidden_states = hidden_states
+                if use_delayed_sampling:
+                    if self.is_driver_worker:
+                        return [fake_output]
+                    else:
+                        return []
+
                 return [output] if self.is_driver_worker else []
             else:
                 return []
 
         return output if type(output) is list else [output]
+
+    def _delayed_sampler_outputs(self, model_input):
+        next_token_ids = [[DUMMY_TOKEN_ID]] * len(
+            model_input.sampling_metadata.seq_groups)
+        sampler_output = self._make_decode_output(
+            next_token_ids, model_input.sampling_metadata.seq_groups)
+        return sampler_output
 
     def _decode_sampler_outputs(self, model_input):
         use_async_out_proc = model_input.async_callback is not None
@@ -2599,3 +2722,32 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             sampler_outputs.append(
                 CompletionSequenceGroupOutput(seq_outputs, None))
         return SamplerOutput(sampler_outputs)
+
+    def _patch_prev_output(self):
+        assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
+            f'''Inputs and outputs are out of sync!
+            {len(self.cached_step_inputs)} vs {len(self.cached_step_outputs)}'''
+        if len(self.cached_step_inputs) == 0:
+            return
+        model_input = self.cached_step_inputs.pop(0)
+        delayed_output = self.cached_step_outputs.pop(0).cpu().squeeze(
+            -1).tolist()
+        ctx = model_input.async_callback.keywords["ctx"]  # type: ignore
+        # If there's no output to patch with, which is usually the case when
+        # we're starting a new request after all requests are completed.
+        if len(ctx.output_queue) == 0:
+            return
+        assert len(
+            ctx.output_queue) == 1, 'There should be exactly 1 output waiting!'
+        output_data = ctx.output_queue[0]
+        assert len(output_data.outputs) == 1
+        for fake_out, real_out in zip(output_data.outputs[0], delayed_output):
+            fake_out.samples[0].output_token = real_out
+        for sg, real_out in zip(output_data.seq_group_metadata_list,
+                                delayed_output):
+            assert len(sg.seq_data) == 1
+            seq_data = list(sg.seq_data.values())[0]
+            # This is a hack. Assigning output_token_ids triggers
+            # a cache recomputation and we only need to update the last token
+            seq_data.output_token_ids_array[-1] = real_out
+            seq_data._cached_all_token_ids[-1] = real_out
