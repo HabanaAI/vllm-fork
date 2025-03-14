@@ -14,9 +14,9 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.multimodal import MultiModalPlaceholderMap, NestedTensors
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.utils import is_pin_memory_available
-from vllm.platforms import current_platform
 
 is_hpu = current_platform.is_hpu()
 
@@ -378,6 +378,7 @@ def _merge_multimodal_embeddings(
     inputs_embeds[is_multimodal] = flattened
     return inputs_embeds
 
+
 def _merge_multimodal_embeddings_hpu(
     input_ids: torch.Tensor,
     inputs_embeds: torch.Tensor,
@@ -385,7 +386,8 @@ def _merge_multimodal_embeddings_hpu(
     multimodal_embeddings: NestedTensors,
 ) -> torch.Tensor:
     """
-    Used when device is hpu. Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
+    Used when device is hpu. 
+    Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
     positions in ``inputs_embeds`` corresponding to placeholder tokens in
     ``input_ids``.
 
@@ -396,17 +398,20 @@ def _merge_multimodal_embeddings_hpu(
     if isinstance(placeholder_token_id, list):
         placeholder_token_id = torch.tensor(placeholder_token_id,
                                             device=input_ids.device)
-        is_multimodal = [torch.isin(input_ids.reshape(-1), placeholder_token_id)]
+        is_multimodal = [
+            torch.isin(input_ids.reshape(-1), placeholder_token_id)
+        ]
     else:
-        is_multimodal = [input_ids.reshape(-1)== placeholder_token_id]
-     
+        is_multimodal = [input_ids.reshape(-1) == placeholder_token_id]
+        
     batch_size, seq_length, hidden_size = inputs_embeds.shape
-    inputs_embeds = inputs_embeds.reshape(-1,hidden_size)
-    multimodal_embeddings = multimodal_embeddings.reshape(-1,hidden_size)
+    inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
+    multimodal_embeddings = multimodal_embeddings.reshape(-1, hidden_size)
     inputs_embeds.index_put_(is_multimodal, multimodal_embeddings)
     inputs_embeds = inputs_embeds.reshape(batch_size, seq_length, hidden_size)
     return inputs_embeds
-       
+
+    
 def embed_multimodal(
     input_ids: torch.Tensor,
     multimodal_token_id: int,
@@ -474,14 +479,14 @@ def merge_multimodal_embeddings(
     Note:
         This updates ``inputs_embeds`` in place.
     """
-    
+
     if is_hpu:
         return _merge_multimodal_embeddings_hpu(
             input_ids,
             inputs_embeds,
             placeholder_token_id,
             multimodal_embeddings,
-        ) 
+        )
     else:
         if isinstance(placeholder_token_id, list):
             placeholder_token_id = torch.tensor(placeholder_token_id,
