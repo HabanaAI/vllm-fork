@@ -918,16 +918,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return phase_type
 
     def _check_config(self, batch_size, seq_len, attn_metadata, warmup_mode):
-        phase = self._phase(attn_metadata)
-        num_blocks = self._num_blocks(attn_metadata)
-        cfg = (batch_size, seq_len, num_blocks, phase)
+        is_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
+        if is_prefix_caching:
+            phase = self._phase(attn_metadata)
+            num_blocks = self._num_blocks(attn_metadata)
+            cfg = (batch_size, seq_len, num_blocks, phase)
+        else:
+            phase = 'prompt' if attn_metadata.is_prompt else 'decode'
+            cfg = (batch_size, seq_len, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            phase = phase.value
-            logger.warning(
-                "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
-                batch_size, seq_len, num_blocks)
+            cfg_log = (phase.value, batch_size, seq_len,
+                       num_blocks) if is_prefix_caching else (phase,
+                                                              batch_size,
+                                                              seq_len)
+            logger.warning("Configuration: %s was not warmed-up!", cfg_log)
 
     def _prepare_prompt(
         self,
