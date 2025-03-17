@@ -193,7 +193,7 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
                     ground_truth)
                 record_property(f"{task['name']}_{metric['name']}_measured",
                                 measured_value)
-                if measured_value < ground_truth 
+                if measured_value < ground_truth:
                     assert numpy.isclose(ground_truth, measured_value, rtol=RTOL)
     except Exception as exc:
         # nasty workaround for a nasty HPU PT bridge bug (SW-204785)
