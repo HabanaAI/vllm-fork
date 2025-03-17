@@ -923,17 +923,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             phase = self._phase(attn_metadata)
             num_blocks = self._num_blocks(attn_metadata)
             cfg = (batch_size, seq_len, num_blocks, phase)
+            phase = phase.value
         else:
             phase = 'prompt' if attn_metadata.is_prompt else 'decode'
             cfg = (batch_size, seq_len, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            cfg_log = (phase.value, batch_size, seq_len,
-                       num_blocks) if is_prefix_caching else (phase,
-                                                              batch_size,
-                                                              seq_len)
-            logger.warning("Configuration: %s was not warmed-up!", cfg_log)
+            logger.warning("Configuration: (%s, %s, %s%s) was not warmed-up!",
+                           phase, batch_size, seq_len,
+                           f", {num_blocks}" if is_prefix_caching else "")
 
     def _prepare_prompt(
         self,
