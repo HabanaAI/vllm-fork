@@ -80,7 +80,7 @@ def load_general_plugins():
             is_lazy = lazy_mode_env_var == '1'
             if lazy_mode_env_var is None:
                 import habana_frameworks.torch as htorch
-                is_lazy = htorch.utils.internal.is_lazy{}
+                is_lazy = htorch.utils.internal.is_lazy()
             if is_lazy:
                 torch._dynamo.config.disable = True
                 env_update_dict['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = 'true'
