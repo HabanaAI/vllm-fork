@@ -919,6 +919,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _check_config(self, batch_size, seq_len, attn_metadata, warmup_mode):
         is_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
+        cfg = None
         if is_prefix_caching:
             phase = self._phase(attn_metadata)
             num_blocks = self._num_blocks(attn_metadata)
