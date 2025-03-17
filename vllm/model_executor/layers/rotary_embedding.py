@@ -517,7 +517,8 @@ class YaRNScalingRotaryEmbedding(RotaryEmbedding):
         return cache
 
 
-class Phi3LongRoPEScaledRotaryEmbedding(nn.Module):
+@CustomOp.register("phi3_long_rope_scaled_rotary_embedding")
+class Phi3LongRoPEScaledRotaryEmbedding(CustomOp):
     """Phi3 family of models scaled rotary embedding.
 
     Based on the original RotaryEmbedding implementation.
@@ -622,7 +623,41 @@ class Phi3LongRoPEScaledRotaryEmbedding(nn.Module):
         self.register_buffer("cos", cos, persistent=False)
         self.register_buffer("sin", sin, persistent=False)
 
-    def forward(
+    def forward_native(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        offsets: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        query = query.view(*query.shape[:-1], -1, self.head_size)
+        key = key.view(*key.shape[:-1], -1, self.head_size)
+
+        k = self.original_max_position_embeddings
+        long_prompt_offset = (torch.any(positions > k).float() *
+                              torch.full_like(positions, k)).long()
+        idx = (torch.add(positions, long_prompt_offset)
+               if long_prompt_offset is not None else positions)
+        idx = torch.add(idx, offsets) if offsets is not None else idx
+        cos_sin = torch.index_select(self.long_short_cos_sin_cache, 0, idx)
+
+        cos, sin = cos_sin.chunk(2, dim=-1)
+        cos = cos.repeat(1, 2).unsqueeze(-2)
+        sin = sin.repeat(1, 2).unsqueeze(-2)
+
+        query_rot = query[..., :self.rotary_dim]
+        query_pass = query[..., self.rotary_dim:]
+        query_rot = query_rot * cos + _rotate_neox(query_rot) * sin
+        query = torch.cat((query_rot, query_pass), dim=-1)
+
+        key_rot = key[..., :self.rotary_dim]
+        key_pass = key[..., self.rotary_dim:]
+        key_rot = key_rot * cos + _rotate_neox(key_rot) * sin
+        key = torch.cat((key_rot, key_pass), dim=-1)
+
+        return query.flatten(-2), key.flatten(-2)
+
+    def forward_hpu(
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
