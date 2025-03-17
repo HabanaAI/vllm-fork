@@ -87,7 +87,7 @@ def load_general_plugins():
         finally:
             os.environ.clear()
             os.environ.update(_environ)
-            os.environ.update(update_dict)
+            os.environ.update(env_update_dict)
     plugins = load_plugins_by_group(group='vllm.general_plugins')
     # general plugins, we only need to execute the loaded functions
     for func in plugins.values():
