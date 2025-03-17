@@ -76,7 +76,7 @@ def load_general_plugins():
             # see https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html # noqa: E501
             # this does nothing for eager/t.compile
             os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = 'true'
-            lazy_mode_env_var = os.environ('PT_HPU_LAZY_MODE', None)
+            lazy_mode_env_var = os.environ.get('PT_HPU_LAZY_MODE', None)
             is_lazy = lazy_mode_env_var == '1'
             if lazy_mode_env_var is None:
                 import habana_frameworks.torch as htorch
