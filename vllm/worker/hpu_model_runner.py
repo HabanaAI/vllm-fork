@@ -919,8 +919,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _check_config(self, batch_size, seq_len, attn_metadata, warmup_mode):
         is_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
-        cfg : Optional[tuple] = None
-        assert cfg == None, "Configs changed between 2D and 3D"
+        cfg: Optional[tuple] = None
+        assert cfg is None, "Configs changed between 2D and 3D"
         if is_prefix_caching:
             phase = self._phase(attn_metadata)
             num_blocks = self._num_blocks(attn_metadata)
@@ -932,7 +932,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            logger.warning(f"Configuration: ({cfg}) was not warmed-up!")
+            logger.warning("Configuration: %s was not warmed-up!",
+                           (phase.value, batch_size, seq_len,
+                            num_blocks) if is_prefix_caching else
+                           (phase, batch_size, seq_len))
 
     def _prepare_prompt(
         self,
