@@ -485,7 +485,7 @@ class LlamaDecoderLayer(nn.Module):
                                         hidden_states=hidden_states,
                                         kv_cache=kv_cache,
                                         attn_metadata=attn_metadata)
-        
+
         # Calculate real seq_len from product of inaccurate batch_size and seq_len
         seq_len = (batch_size_fake*seq_len_fake)//batch_size
         split_size = get_split_size(seq_len, batch_size, self.split_size)
@@ -603,7 +603,7 @@ class LlamaModel(nn.Module):
             hidden_states, residual = layer(positions, hidden_states,
                                             kv_caches[i - self.start_layer],
                                             attn_metadata, residual)
-        if type(hidden_states)==list:
+        if isinstance(hidden_states, list):
             hidden_states = torch.cat(hidden_states, dim=1)
             residual = torch.cat(residual, dim=1)
             hidden_states = hidden_states.view(batch_size, seq_len, -1)
