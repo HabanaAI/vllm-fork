@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import habana_frameworks.torch as htorch
 import torch
-
+import numpy as np
 from vllm.model_executor.pooling_metadata import PoolingMetadata
 from vllm.multimodal import MultiModalKwargs
 from vllm.pooling_params import PoolingParams
@@ -49,6 +49,7 @@ class HPUPoolingModelRunner(
         #sampling_metadata = model_input.sampling_metadata
         real_batch_size = model_input.real_batch_size
         batch_size_padded = model_input.batch_size_padded
+        #print("libin debug execute_model padded batch ", model_input.batch_size_padded-model_input.real_batch_size)
         assert input_tokens is not None
         assert input_positions is not None
         #assert sampling_metadata is None
@@ -81,7 +82,7 @@ class HPUPoolingModelRunner(
             **MultiModalKwargs.as_kwargs(multi_modal_kwargs,
                                          device=self.device),
         }
-
+        #print("libin debug ", model_input.input_tokens.shape)
         if htorch.utils.internal.is_lazy():
             execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
 
@@ -152,13 +153,15 @@ class HPUPoolingModelRunner(
                 model_input.batch_size_padded is not None and \
                 model_input.attn_metadata.seq_lens_tensor is not None
 
-            prompt_offsets = [
-                i * model_input.input_tokens.shape[1]
-                for i in range(model_input.batch_size_padded)
-            ]
+            if model_input.attn_metadata.enable_merged_prefill:
+                prompt_offsets = np.insert(np.cumsum(model_input.attn_metadata.seq_lens[:-1]), 0, 0)
+            else:
+                prompt_offsets = [
+                    i * model_input.input_tokens.shape[1]
+                    for i in range(model_input.batch_size_padded)
+                ]
             prompt_offsets_tensor = torch.tensor(prompt_offsets).to(
                 model_input.input_tokens.device)
-
             pooling_metadata = self._prepare_pooling(
                 seq_group_metadata_list,
                 prompt_lens=model_input.attn_metadata.seq_lens_tensor,

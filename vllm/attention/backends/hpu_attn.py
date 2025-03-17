@@ -25,7 +25,38 @@ from vllm.distributed import get_tensor_model_parallel_rank
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
+HPUFusedSDPA = None
+try:
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+    HPUFusedSDPA = FusedSDPA
+except ImportError:
+    logger.warning("Could not import HPU FusedSDPA kernel. "
+                   "vLLM will use native implementation.")
 
+
+def prompt_fsdpa(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    p: float = 0.0,
+    scale: Optional[float] = None,
+    matmul_qk_op=torch.matmul,
+    softmax_op=torch.softmax,
+    matmul_av_op=torch.matmul,
+    valid_seq_lengths: Optional[torch.Tensor] = None,
+    fsdpa_op=None,
+) -> torch.Tensor:
+    #print("libin debug call prompt_fsdpa")
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+    softmax_mode = 'fast'
+    recompute_mode = True
+    attn_weights = fsdpa_op(query, key, value, attn_bias, 0.0, False, scale,
+                            softmax_mode, recompute_mode, None, 'right')
+    attn_weights = attn_weights.transpose(1, 2)
+    return attn_weights
 
 class HPUAttentionBackend(AttentionBackend):
 
@@ -80,6 +111,9 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     attn_bias: Optional[torch.Tensor]
     seq_lens_tensor: Optional[torch.Tensor]
     context_lens_tensor: Optional[torch.Tensor]
+    enable_merged_prefill: bool = False
+    actual_num_prefills: Optional[torch.Tensor] = None
+    repeated_idx_tensor: Optional[torch.Tensor] = None
     seq_lens: Optional[List[int]] = None
     encoder_seq_lens: Optional[List[int]] = None
     encoder_seq_lens_tensor: Optional[torch.Tensor] = None
@@ -260,10 +294,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         query = query.view(-1, self.num_heads, self.head_size)
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
+        enable_merged_prefill = attn_metadata.enable_merged_prefill
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
+        attn_bias = attn_metadata.attn_bias
         if attn_metadata.is_prompt and self.attn_type \
-            is not AttentionType.ENCODER_ONLY:
+            is not AttentionType.ENCODER_ONLY and not enable_merged_prefill:
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
@@ -314,11 +350,19 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                             attn_bias.size(-1)),
                                 dtype=self.alibi_slopes.dtype,
                             )
+                elif enable_merged_prefill:
+                    position_bias = None
+                    pass
                 else:
                     attn_bias = attn_metadata.attn_bias
                     position_bias = None
 
                 if not self.prefill_use_flex_attention:
+                    #print("libin debug enable_merged_prefill", enable_merged_prefill)
+                    if enable_merged_prefill and self.prefill_use_fusedsdpa:
+                        prompt_attn_func = prompt_fsdpa
+                    else:
+                        prompt_attn_func = ops.prompt_attention
                     out = ops.prompt_attention(
                         query.view(query_shape),
                         key.view(kv_shape),

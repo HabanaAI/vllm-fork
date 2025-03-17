@@ -852,6 +852,7 @@ class MRotaryEmbedding(RotaryEmbedding):
                             dim=-1)
 
         query_shape = query.shape
+        import pdb;pdb.set_trace()
         query = query.view(num_tokens, -1, self.head_size)
         query_rot = query[..., :self.rotary_dim]
         query_pass = query[..., self.rotary_dim:]
