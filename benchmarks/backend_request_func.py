@@ -432,8 +432,7 @@ async def async_request_openai_embedding(
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
     assert api_url.endswith(
-        ("embeddings")
-    ), "OpenAI embedding API URL must end with 'embeddings'."
+        "embeddings"), "OpenAI embedding API URL must end with 'embeddings'."
 
     async with aiohttp.ClientSession(trust_env=True,
                                      timeout=AIOHTTP_TIMEOUT) as session:
@@ -465,7 +464,8 @@ async def async_request_openai_embedding(
                         if chunk != "[DONE]":
                             data = json.loads(chunk)
                             if data_embedding := data.get("data"):
-                                output.output_tokens = len(data_embedding[0].get("embedding"))
+                                output.output_tokens = len(
+                                    data_embedding[0].get("embedding"))
                                 timestamp = time.perf_counter()
                                 # First token
                                 if not first_chunk_received:
