@@ -363,7 +363,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         prompt_attn_func = prompt_fsdpa
                     else:
                         prompt_attn_func = ops.prompt_attention
-                    out = ops.prompt_attention(
+                    out = prompt_attn_func(
                         query.view(query_shape),
                         key.view(kv_shape),
                         value.view(kv_shape),
