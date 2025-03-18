@@ -27,6 +27,14 @@ wait_for_server() {
     done" && return 0 || return 1
 }
 
+set_intel_proxy() {
+        export HTTPS_PROXY=http://proxy-dmz.intel.com:912
+        export HTTP_PROXY=http://proxy-dmz.intel.com:912
+        export no_proxy=0.0.0.0,localhost,intel.com,.intel.com,10.0.0.0/8,192.168.0.0/16
+}
+
+set_intel_proxy
+
 export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
 export VLLM_SKIP_WARMUP=true
 export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false 
