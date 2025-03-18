@@ -328,7 +328,7 @@ class HpuModelAdapter:
         len_mask = (torch.arange(0, seq_len, device=device,
                                  dtype=torch.int32).view(1, seq_len).ge(
                                      query_lens_t.unsqueeze(-1)).view(
-                                         batch_size, 1, 1, seq_len))
+                                         batch_size, 1
         if self.is_causal:
             attn_mask = torch.triu(torch.ones(
                 (batch_size, 1, seq_len, seq_len),
@@ -365,7 +365,6 @@ class HpuModelAdapter:
         # get length of each sequence
         repeated_idx = attn_metadata.repeated_idx_tensor.view(1, -1).expand(
             max_seq_len, -1)
-        #import pdb;pdb.set_trace()
         # create tensor with indices from 0 to T-1, T times along dimension 1
         len_mask = torch.arange(0,
                                     max_seq_len,
@@ -375,17 +374,17 @@ class HpuModelAdapter:
         # create mask and mask out tokens from preceding sequences
         len_mask = len_mask.le(repeated_idx)
 
-        if self.is_causal:
-            attn_mask = torch.ones(max_seq_len,
-                                    max_seq_len,
-                                    dtype=torch.bool,
-                                    device=device).tril()
-        else:
-            attn_mask = torch.zeros((max_seq_len, max_seq_len),
+        attn_mask = torch.ones((max_seq_len, max_seq_len),
                                     device=device,
                                     dtype=torch.bool)
-        mask = attn_mask.logical_or(len_mask)    
+        if self.is_causal:
+            attn_mask = attn_mask.tril()
+        mask = attn_mask.logical_and(len_mask)
         if self.is_pooler:
+            len_mask_v = (torch.arange(0, max_seq_len
+                                       dtype=torch.long,
+                                       device=device).view(max_seq_len,1).lt(torch.sum(attn_metadata.seq_tensor)))
+            mask = mask.logical_and(len_mask_v)
             off_value = -3E38  #small number, avoid nan and overflow      
         else:
             off_value = -math.inf
