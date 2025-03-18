@@ -425,8 +425,7 @@ async def async_request_openai_chat_completions(
         pbar.update(1)
     return output
 
-# VLLM_SKIP_WARMUP=true VLLM_PROMPT_USE_FUSEDSDPA=true python3 -m vllm.entrypoints.openai.api_server --port 8080 --model Alibaba-NLP/gte-Qwen2-7B-instruct --task embed --dtype bfloat16
-# python benchmark_serving.py --backend embed --model Alibaba-NLP/gte-Qwen2-7B-instruct  --dataset-name sonnet --dataset-path ./sonnet.txt  --request-rate 512 --num-prompts 1000  --port 8080 --sonnet-input-len 2048
+
 async def async_request_openai_embedding(
     request_func_input: RequestFuncInput,
     pbar: Optional[tqdm] = None,
@@ -454,10 +453,6 @@ async def async_request_openai_embedding(
         try:
             async with session.post(url=api_url, json=payload,
                                     headers=headers) as response:
-            # b'{"id":"embd-648ac8f5f09046928dca50c724f51ef5","object":"list","created":1742239785,
-            # "model":"Alibaba-NLP/gte-Qwen2-7B-instruct",
-            # "data":[{"index":0,"object":"embedding","embedding":[-0.00921630859375,...]}],
-            # "usage":{"prompt_tokens":2016,"total_tokens":2016,"completion_tokens":0,"prompt_tokens_details":null}}'
                 if response.status == 200:
                     first_chunk_received = False
                     async for chunk_bytes in response.content:
