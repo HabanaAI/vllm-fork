@@ -71,6 +71,8 @@ def launch_lm_eval(eval_config):
         num_fewshot=eval_config["num_fewshot"],
         limit=eval_config["limit"],
         batch_size="auto",
+        random_seed=10,
+        torch_random_seed=10,
         **kwargs)
 
     return results
