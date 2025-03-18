@@ -3,7 +3,6 @@
 ###############################################################################
 # Copyright (C) 2025 Habana Labs, Ltd. an Intel Company
 ###############################################################################
-
 import dataclasses
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
@@ -11,6 +10,7 @@ import habana_frameworks.torch as htorch
 import torch
 
 from vllm.model_executor.pooling_metadata import PoolingMetadata
+from vllm.multimodal import MultiModalKwargs
 from vllm.pooling_params import PoolingParams
 from vllm.sequence import (IntermediateTensors, PoolerOutput, SequenceData,
                            SequenceGroupMetadata)
@@ -58,7 +58,7 @@ class HPUPoolingModelRunner(
         batch_size = input_tokens.size(0)
         seq_len = self._seq_len(attn_metadata)
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
-        super()._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+        super()._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         # use an empty tensor instead of `None`` to force Dynamo to pass
@@ -70,6 +70,7 @@ class HPUPoolingModelRunner(
             for _ in range(num_layers)
         ]
 
+        multi_modal_kwargs = model_input.multi_modal_kwargs or {}
         execute_model_kwargs = {
             "input_ids": model_input.input_tokens,
             "positions": model_input.input_positions,
@@ -77,6 +78,8 @@ class HPUPoolingModelRunner(
             "attn_metadata":
             super().trim_attn_metadata(model_input.attn_metadata),
             "intermediate_tensors": intermediate_tensors,
+            **MultiModalKwargs.as_kwargs(multi_modal_kwargs,
+                                         device=self.device),
         }
 
         if htorch.utils.internal.is_lazy():
@@ -144,7 +147,6 @@ class HPUPoolingModelRunner(
 
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
-
             assert model_input.input_tokens is not None and \
                 model_input.attn_metadata is not None and \
                 model_input.batch_size_padded is not None and \

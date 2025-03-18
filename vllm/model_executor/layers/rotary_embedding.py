@@ -610,6 +610,9 @@ class Phi3LongRoPEScaledRotaryEmbedding(nn.Module):
         idx = (torch.add(positions, long_prompt_offset)
                if long_prompt_offset is not None else positions)
         idx = torch.add(idx, offsets) if offsets is not None else idx
+
+        if idx.dim() > 1:
+            idx = idx[0, :]
         cos_sin = torch.index_select(self.long_short_cos_sin_cache, 0, idx)
 
         cos, sin = cos_sin.chunk(2, dim=-1)
