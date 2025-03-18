@@ -203,9 +203,9 @@ def run_vllm(
         if not use_beam_search:
             start = time.perf_counter()
             llm.generate(prompts,
-                        sampling_params,
-                        lora_request=lora_requests,
-                        use_tqdm=True)
+                         sampling_params,
+                         lora_request=lora_requests,
+                         use_tqdm=True)
             end = time.perf_counter()
         else:
             assert lora_requests is None, "BeamSearch API does not support LoRA"
@@ -504,7 +504,7 @@ if __name__ == "__main__":
         help="Path to the lora adapters to use. This can be an absolute path, "
         "a relative path, or a Hugging Face model identifier.")
     parser = AsyncEngineArgs.add_cli_args(parser)
- 
+
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
