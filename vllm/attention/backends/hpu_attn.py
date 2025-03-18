@@ -39,6 +39,7 @@ def prompt_fsdpa(
     key: torch.Tensor,
     value: torch.Tensor,
     attn_bias: Optional[torch.Tensor] = None,
+    position_bias: Optional[torch.Tensor] = None,
     p: float = 0.0,
     scale: Optional[float] = None,
     matmul_qk_op=torch.matmul,
