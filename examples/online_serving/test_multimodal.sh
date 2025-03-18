@@ -33,7 +33,7 @@ export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false
 
 # Launch the server
 #vllm serve "Qwen/Qwen2.5-VL-72B-Instruct" --task generate --trust-remote-code --tensor-parallel-size 8 &
-vllm serve "Qwen/Qwen2.5-VL-7B-Instruct" --task generate --trust-remote-code &
+vllm serve "Qwen/Qwen2.5-VL-7B-Instruct" --task generate --trust-remote-code --limit-mm-per-prompt image=2 &
 # wait until instance is ready
 wait_for_server 8000
 
@@ -59,22 +59,11 @@ output_single=$(python3 ./openai_chat_completion_client_for_multimodal.py -c sin
 echo "-------------------------------------"
 echo "Output of single image request: $output_single"
 echo "-------------------------------------"
-#output_multi=$(curl http://localhost:8000/v1/chat/completions \
-#    -H "Content-Type: application/json" \
-#    -d '{
-#    "model": "Qwen/Qwen2.5-VL-72B-Instruct",
-#    "messages": [
-#    {"role": "system", "content": "You are a helpful assistant."},
-#    {"role": "user", "content": [
-#        {"type": "image_url", "image_url": {"url": "https://modelscope.oss-cn-beijing.aliyuncs.com/resource/qwen.png"}},
-#        {"type": "text", "text": "What is the text in the illustrate?"}
-#    ]}
-#    ]
-#    }')
-##output_multi=$(python3 ./openai_chat_completion_client_for_multimodal.py -c multi-image --image-folder ../../images)
-##echo "-------------------------------------"
-##echo "Output of multi image request:$output_multi"
-##echo "-------------------------------------"
+
+output_multi=$(python3 ./openai_chat_completion_client_for_multimodal.py -c multi-image --image-folder ../../images)
+echo "-------------------------------------"
+echo "Output of multi image request:$output_multi"
+echo "-------------------------------------"
 
 # pip install video requirements
 ##pip install -e "../../[video]"

@@ -129,8 +129,8 @@ def run_single_image() -> None:
 # Single-image input inference
 def run_single_image_qwen(image_files:List[str]) -> None:
     ## Use base64 encoded image in the payload
-    print("INSIDE single image qwen")
-    print(image_files)
+    print("Single image qwen inference")
+    print(image_files[1])
     image_base64 = encode_base64_content_from_localimg(image_files[1])
     chat_completion_from_base64 = client.chat.completions.create(
         messages=[{
@@ -159,8 +159,11 @@ def run_single_image_qwen(image_files:List[str]) -> None:
 
 # Multi-image input inference
 def run_multi_image_qwen(image_files:List[str]) -> None:
-    image_url_duck = encode_base64_content_from_localimg(image_files[1])# "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
-    image_url_lion = encode_base64_content_from_localimg(image_files[2])#"https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
+    print("Multi image qwen inference")
+    print(image_files[1])
+    print(image_files[2])
+    image_url_1 = encode_base64_content_from_localimg(image_files[1])# "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
+    image_url_2 = encode_base64_content_from_localimg(image_files[2])#"https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
     chat_completion_from_url = client.chat.completions.create(
         messages=[{
             "role":
@@ -168,18 +171,18 @@ def run_multi_image_qwen(image_files:List[str]) -> None:
             "content": [
                 {
                     "type": "text",
-                    "text": "What are the animals in these images?"
+                    "text": "What are the differences in these images?"
                 },
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_url_duck}"
+                        "url": f"data:image/jpeg;base64,{image_url_1}"
                     },
                 },
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_url_lion}"
+                        "url": f"data:image/jpeg;base64,{image_url_2}"
                     },
                 },
             ],
@@ -193,40 +196,6 @@ def run_multi_image_qwen(image_files:List[str]) -> None:
 
 # Multi-image input inference
 def run_multi_image() -> None:
-    image_url_duck = encode_base64_content_from_localimg(image_files[1])# "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
-    image_url_lion = encode_base64_content_from_localimg(image_files[2])#"https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
-    chat_completion_from_url = client.chat.completions.create(
-        messages=[{
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": "What are the animals in these images?"
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_url_duck}"
-                    },
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_url_lion}"
-                    },
-                },
-            ],
-        }],
-        model=model,
-    )
-
-    result = chat_completion_from_url.choices[0].message.content
-    print("Multi-Image Chat completion output:", result)
-
-
-# Multi-image input inference
-def run_multi_image_qwen() -> None:
     image_url_duck = "https://upload.wikimedia.org/wikipedia/commons/d/da/2015_Kaczka_krzy%C5%BCowka_w_wodzie_%28samiec%29.jpg"
     image_url_lion = "https://upload.wikimedia.org/wikipedia/commons/7/77/002_The_lion_king_Snyggve_in_the_Serengeti_National_Park_Photo_by_Giles_Laurent.jpg"
     chat_completion_from_url = client.chat.completions.create(
@@ -241,23 +210,23 @@ def run_multi_image_qwen() -> None:
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": image_url_duck
+                        "url": f"data:image/jpeg;base64,{image_url_duck}"
                     },
                 },
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": image_url_lion
+                        "url": f"data:image/jpeg;base64,{image_url_lion}"
                     },
                 },
             ],
         }],
         model=model,
-        max_completion_tokens=64,
     )
 
     result = chat_completion_from_url.choices[0].message.content
-    print("Chat completion output:", result)
+    print("Multi-Image Chat completion output:", result)
+
 
 # Video input inference
 def run_video(image_files:List[str]) -> None:
@@ -287,9 +256,10 @@ def run_video(image_files:List[str]) -> None:
     )
 
     result = chat_completion_from_url.choices[0].message.content
-    print("Chat completion output from image url:", result)
+    print("Chat completion output from video url:", result)
 
     ## Use base64 encoded video in the payload
+    '''
     chat_completion_from_base64 = client.chat.completions.create(
         messages=[{
             "role":
@@ -312,8 +282,8 @@ def run_video(image_files:List[str]) -> None:
     )
 
     result = chat_completion_from_base64.choices[0].message.content
-    print("Chat completion output from base64 encoded image:", result)
-
+    print("Chat completion output from base64 encoded video:", result)
+    '''
 
 # Audio input inference
 def run_audio() -> None:
@@ -418,10 +388,12 @@ def main(args) -> None:
     print(f"IMAGES from {image_folder}:", image_files)
     
     chat_type = args.chat_type
-    example_function_map[chat_type](image_files)
+    if chat_type=="text-only":
+        example_function_map[chat_type]()
+    else:
+        example_function_map[chat_type](image_files)
 
 if __name__ == "__main__":
-    ##import pdb;pdb.set_trace()
     parser = FlexibleArgumentParser(
         description='Demo on using OpenAI client for online serving with '
         'multimodal language models served with vLLM.')
@@ -431,6 +403,6 @@ if __name__ == "__main__":
                         default="single-image",
                         choices=list(example_function_map.keys()),
                         help='Conversation type with multimodal data.')
-    parser.add_argument("--image-folder", help="Path to the folder containing images")
+    parser.add_argument("--image-folder", help="Path to the folder containing images", default="../../images")
     args = parser.parse_args()
     main(args)
