@@ -75,6 +75,8 @@ def set_forward_context(attn_metadata: Any,
                 # for v0 attention backends
                 batchsize = attn_metadata.num_prefill_tokens + \
                     attn_metadata.num_decode_tokens
+            elif hasattr(attn_metadata, "slot_mapping"):
+                batchsize = attn_metadata.slot_mapping.numel()
             else:
                 # for v1 attention backends
                 batchsize = attn_metadata.num_input_tokens
@@ -107,6 +109,8 @@ def set_forward_context(attn_metadata: Any,
                 # for v0 attention backends
                 batchsize = attn_metadata.num_prefill_tokens + \
                     attn_metadata.num_decode_tokens
+            elif hasattr(attn_metadata, "slot_mapping"):
+                batchsize = attn_metadata.slot_mapping.numel()
             else:
                 # for v1 attention backends
                 batchsize = attn_metadata.num_input_tokens
