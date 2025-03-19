@@ -907,7 +907,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         ep_rank=0,
     ):
         batch_size, seq_len, hidden_dim = x.shape
-        num_experts = layer.num_experts
+        num_experts = layer.local_num_experts
         n_expert_slice = num_experts // self.moe_n_slice
         # num_experts = layer.w13_weight.shape[0]
         # n_expert_slice = layer.w13_weight.shape[0] // self.moe_n_slice
