@@ -215,6 +215,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         value = value.view(-1, self.num_kv_heads, self.head_size)
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
+        key_cache = None
+        value_cache = None
         if attn_metadata.is_prompt and self.attn_type \
             is not AttentionType.ENCODER_ONLY:
             key = key.unflatten(0, (block_indices.size(0), -1))
@@ -254,7 +256,27 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 else:
                     attn_bias = attn_metadata.attn_bias
 
-                if not self.prefill_use_flex_attention:
+                if 'merged_prefill' in enabled_flags():
+                    out = ops.merged_prefill(
+                        query.view(query_shape),
+                        key.view(kv_shape),
+                        value.view(kv_shape),
+                        scale=self.scale,
+                        key_cache=key_cache,
+                        value_cache=value_cache,
+                        cached_blocks=None,
+                        attn_bias=attn_bias,
+                        fsdpa_op=self.fused_scaled_dot_product_attention,
+                        keys_fetch_func=self.k_cache.fetch_from_cache,
+                        values_fetch_func=self.k_cache.fetch_from_cache)
+                elif self.prefill_use_flex_attention:
+                    out = ops.flex_attention(
+                        query.view(query_shape),
+                        key.view(kv_shape),
+                        value.view(kv_shape),
+                        scale=self.scale,
+                    )
+                else:
                     out = ops.prompt_attention(
                         query.view(query_shape),
                         key.view(kv_shape),
@@ -269,14 +291,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         fsdpa_op=self.fused_scaled_dot_product_attention
                         if self.prefill_use_fusedsdpa else None,
                     )
-                else:
-                    out = ops.flex_attention(
-                        query.view(query_shape),
-                        key.view(kv_shape),
-                        value.view(kv_shape),
-                        scale=self.scale,
-                    )
-
             else:
                 # TODO: enable FusedSDPA
                 out = HPUPagedAttention.forward_prefix(
