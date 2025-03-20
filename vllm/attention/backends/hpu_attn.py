@@ -135,8 +135,21 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.k_cache = VLLMKVCache()
         self.v_cache = VLLMKVCache()
         HPUFusedSDPA = kernels.fsdpa()
-        self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
-            else ModuleFusedSDPA(HPUFusedSDPA)
+
+        self.prefill_use_fusedsdpa = "fsdpa,-flex_attention" in enabled_flags()
+        self.prefill_use_flex_attention = "-fsdpa,flex_attention" in enabled_flags()
+        self.fused_scaled_dot_product_attention = None
+
+        self.prefill_impl = 'naive'
+        if self.prefill_use_flex_attention:
+            self.prefill_impl = 'flex'
+        elif self.prefill_use_fusedsdpa:
+            assert HPUFusedSDPA is not None, 'Cannot use fsdpa without fsdpa kernel!'
+            assert alibi_slopes is None, \
+                'Prefill with FusedSDPA not supported with alibi slopes!'
+            self.fused_scaled_dot_product_attention = HPUFusedSDPA.apply
+            self.prefill_impl = 'fsdpa'
+
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
         self.alibi_slopes = alibi_slopes
@@ -146,20 +159,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             self.alibi_slopes = alibi_slopes_tensor
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
-
-        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
-        if self.prefill_use_fusedsdpa:
-            assert alibi_slopes is None, \
-                'Prefill with FusedSDPA not supported with alibi slopes!'
-            try:
-                from habana_frameworks.torch.hpex.kernels import FusedSDPA
-                self.fused_scaled_dot_product_attention = ModuleFusedSDPA(
-                    FusedSDPA)
-            except ImportError:
-                logger().warning("Could not import HPU FusedSDPA kernel. "
-                                 "vLLM will use native implementation.")
-
-        self.prefill_use_flex_attention = "flex_attention" in enabled_flags()
 
         suppored_head_sizes = HPUPagedAttention.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
@@ -218,7 +217,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         key_cache = None
         value_cache = None
         if attn_metadata.is_prompt and self.attn_type \
-            is not AttentionType.ENCODER_ONLY:
+           is not AttentionType.ENCODER_ONLY:
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
@@ -244,7 +243,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         and not self.prefill_use_flex_attention):
                     # TODO: move this outside of model
                     assert attn_metadata.attn_bias is not None, \
-                            'attn_bias must be set before calling model.forward'
+                        'attn_bias must be set before calling model.forward'
                     attn_bias = attn_metadata.attn_bias
                     if self.alibi_slopes is not None:
                         position_bias = _make_alibi_bias(
@@ -256,41 +255,15 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 else:
                     attn_bias = attn_metadata.attn_bias
 
-                if 'merged_prefill' in enabled_flags():
-                    out = ops.merged_prefill(
-                        query.view(query_shape),
-                        key.view(kv_shape),
-                        value.view(kv_shape),
-                        scale=self.scale,
-                        key_cache=key_cache,
-                        value_cache=value_cache,
-                        cached_blocks=None,
-                        attn_bias=attn_bias,
-                        fsdpa_op=self.fused_scaled_dot_product_attention,
-                        keys_fetch_func=self.k_cache.fetch_from_cache,
-                        values_fetch_func=self.k_cache.fetch_from_cache)
-                elif self.prefill_use_flex_attention:
-                    out = ops.flex_attention(
-                        query.view(query_shape),
-                        key.view(kv_shape),
-                        value.view(kv_shape),
-                        scale=self.scale,
-                    )
-                else:
-                    out = ops.prompt_attention(
-                        query.view(query_shape),
-                        key.view(kv_shape),
-                        value.view(kv_shape),
-                        attn_bias=attn_bias,
-                        p=0.0,
-                        scale=self.scale,
-                        matmul_qk_op=self.matmul_qk,
-                        softmax_op=self.softmax,
-                        matmul_av_op=self.matmul_av,
-                        valid_seq_lengths=attn_metadata.seq_lens_tensor,
-                        fsdpa_op=self.fused_scaled_dot_product_attention
-                        if self.prefill_use_fusedsdpa else None,
-                    )
+                out = ops.prompt_attention(
+                    impl=self.prefill_impl,
+                    query=query.view(query_shape),
+                    key=key.view(kv_shape),
+                    value=value.view(kv_shape),
+                    scale=self.scale,
+                    attn_bias=attn_bias,
+                    valid_seq_lengths=attn_metadata.seq_lens_tensor,
+                    fsdpa_op=self.fused_scaled_dot_product_attention)
             else:
                 # TODO: enable FusedSDPA
                 out = HPUPagedAttention.forward_prefix(
