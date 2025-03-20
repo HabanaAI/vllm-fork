@@ -36,6 +36,7 @@ if $RunLargeImages; then
 	if [[ "$ModelName" == *"Qwen"* ]]; then
 		VLLM_GRAPH_RESERVED_MEM=0.2 bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts --skip_warmup --image_width 1800 --image_height 1200
 		VLLM_GRAPH_RESERVED_MEM=0.4 bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts --skip_warmup --image_width 2400 --image_height 1800
+		VLLM_GRAPH_RESERVED_MEM=0.6 bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts --skip_warmup --image_width 2400 --image_height 1800 --iter 5
 		VLLM_LIMIT_HPU_GRAPH=true bash run_offline.sh -m $ModelName -i snowscat --skip_warmup --image_width 3600 --image_height 2400
 		VLLM_GRAPH_RESERVED_MEM=0.2 bash run_offline.sh -m $ModelName -i synthetic --skip_warmup --image_width 1800 --image_height 1200
 	elif [[ "$ModelName" == *"Llama"* ]]; then
