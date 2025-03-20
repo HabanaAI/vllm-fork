@@ -799,7 +799,9 @@ class FusedMoE(torch.nn.Module):
 
     def naive_multicast(self, x: torch.Tensor,
                         cu_tokens_across_dp_cpu: torch.Tensor):
-        assert (len(x.shape) == 2)
+        assert (len(x.shape) == 2 or len(x.shape) == 3)
+        if len(x.shape) == 3:
+            x = x.view(-1, x.size(2))
         buffer = torch.empty((cu_tokens_across_dp_cpu[-1], x.size(1)),
                              device=x.device,
                              dtype=x.dtype)
@@ -827,6 +829,7 @@ class FusedMoE(torch.nn.Module):
                      router_logits: torch.Tensor):
         assert self.quant_method is not None
 
+        origin_hidden_states_shape = hidden_states.shape
         if self.dp_size > 1:
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
@@ -861,6 +864,11 @@ class FusedMoE(torch.nn.Module):
 
             all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
             final_hidden_states = all_hidden_states[start:end, :]
+            # Need to reshape back to the original shape. However, Fp8MoEMethod
+            # will always view the hidden_states as 2D tensor and i don't know
+            # why it won't be reshaped back to the original shape.
+            # if len(origin_hidden_states_shape) == 3:
+            #     final_hidden_states = final_hidden_states.view(origin_hidden_states_shape)
 
         if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1):
             # Default set to False. (May have to add shared expert outputs.)
