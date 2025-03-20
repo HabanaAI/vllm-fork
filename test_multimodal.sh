@@ -55,9 +55,10 @@ wait_for_server() {
 }
 
 set_intel_proxy() {
-        export HTTPS_PROXY=http://proxy-dmz.intel.com:912
-        export HTTP_PROXY=http://proxy-dmz.intel.com:912
-        export no_proxy=0.0.0.0,localhost,intel.com,.intel.com,10.0.0.0/8,192.168.0.0/16
+	echo "-------------------------------------"
+	echo "Warnning: Set Intel Proxies (if needed) before proceeding"
+	echo "-------------------------------------"
+	sleep 5
 }
 
 set_intel_proxy
