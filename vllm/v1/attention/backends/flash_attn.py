@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
+import os
 import numpy as np
 import torch
 import triton
@@ -14,9 +15,11 @@ from vllm.attention.backends.utils import get_flash_attn_version
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.utils import cdiv
+from vllm.attention.backends.torch_paged_attention import paged_attention_var_len
 
 if current_platform.is_cuda():
     from vllm.vllm_flash_attn import flash_attn_varlen_func
+
 
 logger = init_logger(__name__)
 
@@ -136,6 +139,7 @@ class FlashAttentionImpl(AttentionImpl):
                                       "are not implemented for "
                                       "FlashAttentionImpl")
         self.vllm_flash_attn_version = get_flash_attn_version()
+        self.use_pytorch_paged_attention = os.getenv("USE_PYTORCH_PAGED_ATTENTION", False)
 
     def forward(
         self,
@@ -194,7 +198,17 @@ class FlashAttentionImpl(AttentionImpl):
         # Compute attention and update output up to `num_actual_tokens`.
         if not attn_metadata.use_cascade:
             # Regular attention (common case).
-            flash_attn_varlen_func(
+            fn = flash_attn_varlen_func
+            kwargs = {}
+            if self.use_pytorch_paged_attention:
+                fn = paged_attention_var_len
+                kwargs = {
+                    'chunk_size_q': 16,
+                    'chunk_size_k':16
+                }
+
+            # Regular attention (common case).
+            fn(
                 q=query[:num_actual_tokens],
                 k=key_cache,
                 v=value_cache,
@@ -210,6 +224,7 @@ class FlashAttentionImpl(AttentionImpl):
                 block_table=attn_metadata.block_table,
                 softcap=self.logits_soft_cap,
                 fa_version=self.vllm_flash_attn_version,
+                **kwargs
             )
             return output
 

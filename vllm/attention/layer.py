@@ -364,6 +364,7 @@ def unified_attention_with_output(
     forward_context: ForwardContext = get_forward_context()
     attn_metadata = forward_context.attn_metadata
     self = forward_context.attn_layers[layer_name]
+    setattr(self.impl, 'layer_name', layer_name)
     kv_cache = self.kv_cache[forward_context.virtual_engine]
     self.impl.forward(self,
                       query,

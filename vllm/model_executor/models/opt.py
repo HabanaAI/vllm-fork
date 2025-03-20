@@ -292,7 +292,7 @@ class OPTDecoder(nn.Module):
         return hidden_states
 
 
-@support_torch_compile
+#@support_torch_compile
 class OPTModel(nn.Module):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
