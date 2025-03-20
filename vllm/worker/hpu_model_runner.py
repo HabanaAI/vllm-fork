@@ -258,6 +258,14 @@ class HpuModelAdapter:
                                            backend='hpu_backend',
                                            dynamic=False)
 
+        # We only wrap the self.model in HPU graph because some Ops in
+        # HpuModelAdapter for multimodal processing will not work with disable_tensor_cache
+        '''
+        if htorch.utils.internal.is_lazy() and supports_multimodal(self.model):
+            self.model = htorch.hpu.wrap_in_hpu_graph(
+                self.model, disable_tensor_cache=True)
+        '''
+
     def _regional_compilation(self,
                               module,
                               parent_module=None,
@@ -446,6 +454,42 @@ class HpuModelAdapter:
         model_is_mrope = uses_mrope(model_config)
         if self.layer_names is not None and not model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
+
+        if model_is_mrope:
+            # For Qwen2.5-VL multimodal embedding,
+            # This embedding part should be always executed with PT_COMPILE_ONLY_MODE off
+            # at all time. We are turning it off here since it will be on during warmup run.
+            # Also, we are moving this code block to here from model.forward() since we don't want
+            # to wrap this with hpu_graph. This block has issue with disable_tensor_cache=true.
+            compile_only_mode_context = functools.partial(
+                bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
+
+            with compile_only_mode_context():
+                #calculate embedding for multimodal
+                image_input = self.model._parse_and_validate_image_input(
+                    **kwargs)
+                video_input = self.model._parse_and_validate_video_input(
+                    **kwargs)
+                htorch.core.mark_step()
+
+                if image_input is None and video_input is None:
+                    inputs_embeds = None
+                else:
+                    '''
+                    if htorch.utils.internal.is_lazy():
+                        self.model.visual = htorch.hpu.wrap_in_hpu_graph(self.model.visual,
+                            disable_tensor_cache=True)#, dry_run=False)
+                    '''
+                    inputs_embeds = self.model.get_input_embeddings_v0(
+                        input_ids,
+                        image_input=image_input,
+                        video_input=video_input)
+                    input_ids = None
+
+            kwargs.update({
+                "input_ids": input_ids,
+                "inputs_embeds": inputs_embeds
+            })
 
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
                                  virtual_engine):
@@ -894,8 +938,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         return htorch.hpu.wrap_in_hpu_graph(
-            HpuModelAdapter(*args, **kwargs),
-            disable_tensor_cache=False,
+            HpuModelAdapter(*args, **kwargs), disable_tensor_cache=False
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 

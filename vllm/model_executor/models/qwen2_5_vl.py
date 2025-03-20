@@ -877,6 +877,9 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         image_embeds = kwargs.pop("image_embeds", None)
         image_grid_thw = kwargs.pop("image_grid_thw", None)
 
+        #TODO: Explore option to move the grid_thw operation to CPU.
+        #image_grid_thw = image_grid_thw.to("cpu") if image_grid_thw is not None and image_grid_thw.numel() > 0 else None
+
         if pixel_values is None and image_embeds is None:
             return None
 
@@ -1081,9 +1084,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        print(
-            f" qwen2_5_vl.py forward input_ids {input_ids.shape} and positions {positions.shape}"
-        )
+        #print(f" qwen2_5_vl.py forward input_ids {input_ids.shape} and positions {positions.shape}"        )
         """Run forward pass for Qwen2.5-VL.
 
         Args:
@@ -1113,41 +1114,26 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         # `get_multimodal_embeddings` and `get_input_embeddings`, this
         # condition is only for v0 compatibility.
         elif inputs_embeds is None:
+            image_input = self._parse_and_validate_image_input(**kwargs)
+            video_input = self._parse_and_validate_video_input(**kwargs)
 
-            if is_hpu:
-                # Disable PT_COMPILE_ONLY_MODE for the qwen2.5-VL for embedding
-                # This part will be move to model_runner in V1.
-                import functools
+            if image_input is None and video_input is None:
+                inputs_embeds = None
+            else:
+                if uses_mrope(self.config):
+                    assert positions.ndim == 2 and positions.size(0) == 3, (
+                        "multimodal section rotary embedding requires "
+                        f"(3, seq_len) positions, but got {positions.size()}")
 
-                import habana_frameworks.torch.internal.bridge_config as bc
+                inputs_embeds = self.get_input_embeddings_v0(
+                    input_ids,
+                    image_input=image_input,
+                    video_input=video_input)
+                input_ids = None
 
-                compile_only_mode_context = functools.partial(
-                    bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
-
-            with compile_only_mode_context(
-            ) if is_hpu else contextlib.nullcontext():
-
-                image_input = self._parse_and_validate_image_input(**kwargs)
-                video_input = self._parse_and_validate_video_input(**kwargs)
-
-                if image_input is None and video_input is None:
-                    inputs_embeds = None
-                else:
-                    if uses_mrope(self.config):
-                        assert positions.ndim == 2 and positions.size(0) == 3, (
-                            "multimodal section rotary embedding requires "
-                            f"(3, seq_len) positions, but got {positions.size()}"
-                        )
-
-                    inputs_embeds = self.get_input_embeddings_v0(
-                        input_ids,
-                        image_input=image_input,
-                        video_input=video_input)
-                    input_ids = None
-
-                print(
-                    f"LanguageModel: inputs[{inputs_embeds.shape if inputs_embeds is not None else input_ids.shape}], positions[{positions.shape}]],"
-                )
+            print(
+                f"LanguageModel: inputs[{inputs_embeds.shape if inputs_embeds is not None else input_ids.shape}], positions[{positions.shape}]],"
+            )
 
         hidden_states = self.language_model.model(
             input_ids=input_ids,
