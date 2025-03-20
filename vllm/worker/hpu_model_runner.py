@@ -1178,6 +1178,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             # TODO: pad to proper len
             if self.scheduler_config.chunked_prefill_enabled:
+                if max_prompt_len < max_num_block * self.block_size:
+                    max_prompt_len = max_num_block * self.block_size
                 pad_len = len(prefix_block_list)
                 prefix_block_list = pad_list(prefix_block_list, pad_len,
                                              _PAD_BLOCK_ID)
@@ -1602,13 +1604,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs)
 
+        temp_query_lens = query_lens.copy()
         if self.scheduler_config.enable_chunked_prefill:
             for i in range(len(decode_input_tokens)):
-                query_lens.append(1)
+                temp_query_lens.append(1)
 
         if not self.is_pooler:
             sampling_metadata = SamplingMetadata.prepare(
-                seq_group_metadata_list, seq_lens, query_lens, self.device,
+                seq_group_metadata_list, seq_lens, temp_query_lens, self.device,
                 self.pin_memory)
 
         if not self.scheduler_config.chunked_prefill_enabled:
@@ -1675,12 +1678,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is not None and seq_group_metadata.is_prompt:
                     paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
 
-            paddings = torch.tensor(
-                paddings_prompt_logprobs
-                if paddings_prompt_logprobs else paddings,
-                dtype=sampling_metadata.selected_token_indices.dtype,
-                device=sampling_metadata.selected_token_indices.device)
-            sampling_metadata.selected_token_indices.add_(paddings)
+            if not self.scheduler_config.chunked_prefill_enabled:
+                paddings = torch.tensor(
+                    paddings_prompt_logprobs
+                    if paddings_prompt_logprobs else paddings,
+                    dtype=sampling_metadata.selected_token_indices.dtype,
+                    device=sampling_metadata.selected_token_indices.device)
+                sampling_metadata.selected_token_indices.add_(paddings)
         else:
             sampling_metadata = None
 
