@@ -2462,7 +2462,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         # Delayed sampling is only supported for single step scheduling
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode \
-            and self.is_single_step
+            and self.is_single_step and not is_fake_hpu()
         assert model_input.input_tokens is not None
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
