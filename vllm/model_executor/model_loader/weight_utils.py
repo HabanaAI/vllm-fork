@@ -502,6 +502,8 @@ def gguf_quant_weights_iterator(
             if weight_type.name != "F32":
                 name = name.replace("weight", "qweight")
             param = torch.tensor(weight)
+            print(param.shape)
+            print(f"{name} === {weight_type.name} == {param.dtype}")
             yield name, param
 
 
