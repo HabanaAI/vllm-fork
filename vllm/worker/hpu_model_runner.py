@@ -258,13 +258,22 @@ class HpuModelAdapter:
                                            backend='hpu_backend',
                                            dynamic=False)
 
-        # We only wrap the self.model in HPU graph because some Ops in
-        # HpuModelAdapter for multimodal processing will not work with disable_tensor_cache
-        '''
-        if htorch.utils.internal.is_lazy() and supports_multimodal(self.model):
+        model_config = getattr(self.model, "config", None)
+        self.model_is_mrope = uses_mrope(model_config)
+
+        # For qwen2.5-VL model, we wrap visual model with disable_tensor_cache
+        # off due to handling of grid_thw. For langauge model, we wrap it with
+        # disable_tensor_cache on to save memory. Here we can either wrap it with
+        # self.model or self.model.language_model.model.
+        self.split_graph = self.model_is_mrope and os.getenv(
+            'VLLM_QWEN_SPLIT_GRAPHS', 'false').lower() in ['1', 'true']
+
+        if htorch.utils.internal.is_lazy() and self.split_graph:
+            print("Split Graph to Visual and Language")
+            self.model.visual = htorch.hpu.wrap_in_hpu_graph(
+                self.model.visual, disable_tensor_cache=False)
             self.model = htorch.hpu.wrap_in_hpu_graph(
                 self.model, disable_tensor_cache=True)
-        '''
 
     def _regional_compilation(self,
                               module,
@@ -450,12 +459,19 @@ class HpuModelAdapter:
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
 
-        model_config = getattr(self.model, "config", None)
-        model_is_mrope = uses_mrope(model_config)
-        if self.layer_names is not None and not model_is_mrope:
+        if self.layer_names is not None and not self.model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
 
-        if model_is_mrope:
+        if self.model_is_mrope:
+            if self.split_graph:
+                # Carry bypass_hpu_graphs to visual model forward.
+                bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
+                self.model.visual.forward = functools.partial(
+                    self.model.visual.forward,
+                    bypass_hpu_graphs=bypass_hpu_graphs)
+                self.model.forward = functools.partial(
+                    self.model.forward, bypass_hpu_graphs=bypass_hpu_graphs)
+
             # For Qwen2.5-VL multimodal embedding,
             # This embedding part should be always executed with PT_COMPILE_ONLY_MODE off
             # at all time. We are turning it off here since it will be on during warmup run.
@@ -470,16 +486,10 @@ class HpuModelAdapter:
                     **kwargs)
                 video_input = self.model._parse_and_validate_video_input(
                     **kwargs)
-                htorch.core.mark_step()
 
                 if image_input is None and video_input is None:
                     inputs_embeds = None
                 else:
-                    '''
-                    if htorch.utils.internal.is_lazy():
-                        self.model.visual = htorch.hpu.wrap_in_hpu_graph(self.model.visual,
-                            disable_tensor_cache=True)#, dry_run=False)
-                    '''
                     inputs_embeds = self.model.get_input_embeddings_v0(
                         input_ids,
                         image_input=image_input,
@@ -937,10 +947,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        return htorch.hpu.wrap_in_hpu_graph(
-            HpuModelAdapter(*args, **kwargs), disable_tensor_cache=False
-        ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-            *args, **kwargs)
+        self.split_graph = self.model_is_mrope and os.getenv(
+            'VLLM_QWEN_SPLIT_GRAPHS', 'false').lower() in ['1', 'true']
+        if htorch.utils.internal.is_lazy() and not self.split_graph:
+            return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
+                *args, **kwargs),
+                                                disable_tensor_cache=True)
+        else:
+            return HpuModelAdapter(*args, **kwargs)
 
     def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
@@ -950,11 +964,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _use_graphs(self, batch_size, seq_len, is_prompt):
         if self.enforce_eager:
             return False
-
-        if os.getenv('VLLM_LIMIT_HPU_GRAPH',
-                     'false').lower() == 'true' and is_prompt:
-            return False
-
         if self.skip_warmup:
             return True
         return (batch_size, seq_len, is_prompt) in self.graphed_buckets
