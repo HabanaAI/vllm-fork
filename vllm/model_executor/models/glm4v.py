@@ -35,17 +35,12 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         MultiModalFieldConfig,
                                         PromptReplacement)
 from vllm.multimodal.profiling import BaseDummyInputsBuilder, ProcessorInputs
-from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import ChatGLMConfig
 
 from .chatglm import ChatGLMBaseModel, ChatGLMModel
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
 from .utils import flatten_bn, merge_multimodal_embeddings
-
-is_hpu = current_platform.is_hpu()
-if is_hpu:
-    from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 
 class GLMVImagePixelInputs(TypedDict):
@@ -86,39 +81,6 @@ class EVA2CLIPPatchEmbedding(nn.Module):
         return x
 
 
-class HPUMultiHeadAttention(nn.Module):
-
-    def __init__(
-        self,
-        num_heads: int,
-        head_size: int,
-        num_kv_heads: Optional[int] = None,
-    ):
-        super().__init__()
-        self.num_heads_per_rank = num_heads
-        self.head_dim = head_size
-
-    def forward(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-    ) -> torch.Tensor:
-        """Input shape: batch_size x seq_len x hidden_size"""
-        B, L, _ = query.size()
-        query = query.reshape(B, L, self.num_heads_per_rank,
-                              self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
-        key = key.reshape(B, L, self.num_heads_per_rank,
-                          self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
-        value = value.reshape(B, L, self.num_heads_per_rank,
-                              self.head_dim).permute(0, 2, 1, 3)  # B, H, L, D
-
-        out = FusedSDPA.apply(query, key, value, None, 0., False, None, 'fast',
-                              True, None, 'right')
-        out = out.transpose(1, 2).reshape(B, L, -1)
-        return out
-
-
 class EVA2CLIPAttention(nn.Module):
 
     def __init__(
@@ -147,13 +109,9 @@ class EVA2CLIPAttention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.dense",
         )
-        if is_hpu:
-            self.attn = HPUMultiHeadAttention(self.num_heads_per_rank,
-                                              self.head_dim)
 
-        else:
-            self.attn = MultiHeadAttention(self.num_heads_per_rank,
-                                           self.head_dim, self.scale)
+        self.attn = MultiHeadAttention(self.num_heads_per_rank, self.head_dim,
+                                       self.scale)
         self.output_dropout = torch.nn.Dropout(config.dropout_prob)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -662,36 +620,17 @@ class GLM4VForCausalLM(ChatGLMBaseModel, SupportsLoRA, SupportsPP,
     ) -> torch.Tensor:
         inputs_embeds = self.transformer.get_input_embeddings(input_ids)
 
-        placeholder_token_id = [
-            self.config.boi_token_id,
-            self.config.pad_token_id,
-            self.config.eoi_token_id,
-        ]
         if multimodal_embeddings is not None:
-            if is_hpu:  # remove dynamic on hpu
-                batch_size, seq_length, hidden_size = inputs_embeds.shape
-                inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
-                multimodal_embeddings = multimodal_embeddings.reshape(
-                    -1, hidden_size)
-                placeholder_token_id = torch.tensor(placeholder_token_id,
-                                                    device=input_ids.device)
-
-                mask = torch.isin(input_ids.reshape(-1), placeholder_token_id)
-                inputs_embeds.index_put_((mask, ), multimodal_embeddings)
-                inputs_embeds = inputs_embeds.reshape(batch_size, seq_length,
-                                                      hidden_size)
-            else:
-                inputs_embeds = merge_multimodal_embeddings(
-                    input_ids=input_ids,
-                    inputs_embeds=inputs_embeds,
-                    multimodal_embeddings=multimodal_embeddings,
-                    placeholder_token_id=[
-                        self.config.boi_token_id,
-                        self.config.pad_token_id,
-                        self.config.eoi_token_id,
-                    ],
-                )
-
+            inputs_embeds = merge_multimodal_embeddings(
+                input_ids=input_ids,
+                inputs_embeds=inputs_embeds,
+                multimodal_embeddings=multimodal_embeddings,
+                placeholder_token_id=[
+                    self.config.boi_token_id,
+                    self.config.pad_token_id,
+                    self.config.eoi_token_id,
+                ],
+            )
         return inputs_embeds
 
     def forward(
