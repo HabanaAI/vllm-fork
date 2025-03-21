@@ -1284,7 +1284,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
 
         for seq_group_metadata in seq_group_metadata_list:
-            assert not seq_group_metadata.is_prompt
+            if seq_group_metadata.is_prompt and self.vllm_config.cache_config.enable_prefix_caching:
+                print("APC + fully cached")
+                #TODO
+            else:
+                assert not seq_group_metadata.is_prompt
             assert seq_group_metadata.token_chunk_size == 1
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
@@ -1566,7 +1570,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prefill_reqs = []
         decode_reqs = []
         for seq_group_meta in seq_group_metadata_list:
-            if seq_group_meta.is_prompt:
+            if seq_group_meta.computed_block_nums is not None and self.vllm_config.cache_config.enable_prefix_caching:
+                prefix_cached_len = len(
+                    seq_group_meta.computed_block_nums) * self.block_size
+                seq_len = seq_group_meta.seq_data[list(
+                    seq_group_meta.seq_data.keys())[0]].get_len()
+                is_seq_prompt = prefix_cached_len >= seq_len
+            else:
+                is_seq_prompt = seq_group_meta.is_prompt
+            if is_seq_prompt:
                 prefill_reqs.append(seq_group_meta)
             else:
                 decode_reqs.append(seq_group_meta)
