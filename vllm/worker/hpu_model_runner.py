@@ -148,6 +148,48 @@ def pad_list(input, k, v):
     return input + [v] * padding
 
 
+def _get_multimodal_bucket(curr_num_image_patches):
+    FIXED_MULTIMODAL_BUCKETS = [1600, 3200, 4800, 6400, 9600]
+    for mm_bucket in FIXED_MULTIMODAL_BUCKETS:
+        if curr_num_image_patches <= mm_bucket:
+            return mm_bucket
+    return curr_num_image_patches
+
+
+def pad_multimodal_data(mm_data):
+    pixel_values = mm_data["pixel_values"]
+    image_grid_thw = mm_data["image_grid_thw"]
+    assert pixel_values.shape[
+        0] % 2 == 0, '[testing version] needs even resolution'
+
+    desired_number_of_pixels = _get_multimodal_bucket(pixel_values.shape[0])
+    padding_len = desired_number_of_pixels - pixel_values.shape[0]
+    if padding_len <= 0:
+        return mm_data
+
+    logger.info(
+        f"[MM_BUCKETING] Padding current number pixel {pixel_values.shape[0]} to {desired_number_of_pixels}"
+    )
+    # needs to make sure padding_len is even
+    assert padding_len % 2 == 0, '[testing version] padding needs to be even'
+
+    constant_value = -100
+    pixel_values = torch.cat([
+        pixel_values,
+        torch.ones((padding_len, pixel_values.shape[1])) * constant_value
+    ])
+
+    image_grid_thw = torch.cat(
+        [image_grid_thw,
+         torch.tensor([[1, 2, padding_len // 2]])])
+
+    assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
+
+    mm_data["pixel_values"] = pixel_values
+    mm_data["image_grid_thw"] = image_grid_thw
+    return mm_data
+
+
 def gather_list(input, indices, v):
     return [input[i] if i is not None else v for i in indices]
 
@@ -1123,6 +1165,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         seq_group_metadata.mm_processor_kwargs,
                     )
 
+                # padding image patches (pixel_values, image_grid_thw)
+                mm_kwargs = pad_multimodal_data(mm_kwargs)
+
                 # special processing for mrope position deltas.
                 if self.model_is_mrope:
                     mrope_positions, mrope_position_delta = \
@@ -1903,6 +1948,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_request=lora_request)
 
     def profile_run(self) -> None:
+        return
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
