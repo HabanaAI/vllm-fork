@@ -149,7 +149,7 @@ def pad_list(input, k, v):
 
 
 def _get_multimodal_bucket(curr_num_image_patches):
-    FIXED_MULTIMODAL_BUCKETS = [1600, 3200, 4800, 6400, 9600]
+    FIXED_MULTIMODAL_BUCKETS = [16, 1600, 3200, 4800, 6400, 9600]
     for mm_bucket in FIXED_MULTIMODAL_BUCKETS:
         if curr_num_image_patches <= mm_bucket:
             return mm_bucket
@@ -314,8 +314,8 @@ class HpuModelAdapter:
             print("Split Graph to Visual and Language")
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                 self.model.visual, disable_tensor_cache=False)
-            self.model = htorch.hpu.wrap_in_hpu_graph(
-                self.model, disable_tensor_cache=True)
+            self.model.language_model.model = htorch.hpu.wrap_in_hpu_graph(
+                self.model.language_model.model, disable_tensor_cache=True)
 
     def _regional_compilation(self,
                               module,
@@ -504,15 +504,18 @@ class HpuModelAdapter:
         if self.layer_names is not None and not self.model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
 
-        if self.model_is_mrope:
+        if self.model_is_mrope:  # and self.split_graph:
             if self.split_graph:
                 # Carry bypass_hpu_graphs to visual model forward.
                 bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
                 self.model.visual.forward = functools.partial(
                     self.model.visual.forward,
                     bypass_hpu_graphs=bypass_hpu_graphs)
-                self.model.forward = functools.partial(
-                    self.model.forward, bypass_hpu_graphs=bypass_hpu_graphs)
+                self.model.language_model.model.forward = functools.partial(
+                    self.model.language_model.model.forward,
+                    bypass_hpu_graphs=bypass_hpu_graphs)
+                #self.model.forward = functools.partial(
+                #    self.model.forward, bypass_hpu_graphs=bypass_hpu_graphs)
 
             # For Qwen2.5-VL multimodal embedding,
             # This embedding part should be always executed with PT_COMPILE_ONLY_MODE off
@@ -811,7 +814,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                  self.block_size,
                                                  self.max_num_batched_tokens)
         self.graphed_buckets: Set[Any] = set()
-        self.multimodal_buckets = []
+        self.multimodal_buckets = []  #This should be use HPUBucketingContext
+        self.graphed_multimodal_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
         if self.vllm_config.cache_config.enable_prefix_caching:
@@ -1003,12 +1007,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, batch_size, seq_len, is_prompt):
+    def _use_graphs(self, batch_size, seq_len, is_prompt, is_multimodal):
         if self.enforce_eager:
             return False
         if self.skip_warmup:
             return True
-        return (batch_size, seq_len, is_prompt) in self.graphed_buckets
+        if not is_multimodal or not self.graphed_multimodal_buckets:
+            return (batch_size, seq_len, is_prompt) in self.graphed_buckets
+        else:
+            #TODO:For now return TRUE for development
+            #This needs to be updated later with proper bucket detections.
+            #return (batch_size, height, weight) in self.graphed_multimodal_buckets
+            return True
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -1981,7 +1991,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         temperature=0,
                         height=None,
                         width=None) -> None:
-        use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+        use_graphs = self._use_graphs(batch_size, seq_len, is_prompt,
+                                      multimodal_seqs_group_metada)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
                          f"bs{batch_size}_"
@@ -2169,7 +2180,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
-            self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
+            #self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
+            if is_prompt:
+                self.warmup_scenario(batch_size,
+                                     seq_len,
+                                     is_prompt,
+                                     kv_caches,
+                                     multimodal_seqs_group_metada=True,
+                                     height=28,
+                                     width=28)
+            else:
+                self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
 
     def warmup_graphs(self,
                       strategy,
@@ -2208,12 +2229,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.graphed_buckets.add(graphed_bucket)
             self.log_warmup(phase, idx, num_candidates, batch_size, seq_len)
             with HabanaMemoryProfiler() as mem_prof:
-                self.warmup_scenario(batch_size,
-                                     seq_len,
-                                     is_prompt,
-                                     kv_caches,
-                                     temperature=1.0 if batch_size
-                                     not in warmed_random_sampler_bs else 0)
+                self.warmup_scenario(
+                    batch_size,
+                    seq_len,
+                    is_prompt,
+                    kv_caches,
+                    temperature=1.0
+                    if batch_size not in warmed_random_sampler_bs else 0,
+                    multimodal_seqs_group_metada=True if is_prompt else False,
+                    height=28,
+                    width=28)
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
@@ -2221,7 +2246,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             total_mem += used_mem
             total_batch_seq += batch_seq
 
-        #TODO: Multimodal HPU graph warmup
+        # TODO: Multimodal HPU graph warmup need to be also check Memory,
+        # and drop some buckets if memory is not sufficient.
+        print("WARMUP MULTIMODAL IMAGE GRAPH")
+        for idx, (h, w) in enumerate(self.multimodal_buckets):
+            graphed_multimodal_buckets = (1, h, w)
+            if graphed_multimodal_buckets in self.graphed_multimodal_buckets:
+                continue
+            self.graphed_multimodal_buckets.add(graphed_multimodal_buckets)
+
+        for i, (b, h, w) in enumerate(self.graphed_multimodal_buckets):
+            max_batch_size = 1  #TODO: For now we hardcoded batch 1.
+            max_seq_len = 2048  #TODO: set with VLLM_PROMPT_SEQ_BUCKET_MAX (1680x1680 error on HPU GRAPH)
+            self.log_warmup_multimodal('Graph/Image', i, max_seq_len,
+                                       max_batch_size, max_seq_len, h, w)
+            self.warmup_scenario(
+                batch_size=max_batch_size,
+                seq_len=max_seq_len,
+                is_prompt=True,
+                kv_caches=kv_caches,
+                #is_pt_profiler_run=False,
+                #is_lora_profile_run=True,
+                multimodal_seqs_group_metada=True,
+                height=h,
+                width=w)
 
         return total_mem, total_batch_seq, captured_all
 
@@ -2255,11 +2303,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if supports_multimodal(self.model.model):
             #TODO:
-            # 1. Need also temporal for Video. For now we are experimenting just for the images.
-            # 2. Generating bucket with fixed batch, this should be combined with seq_len.
-            # 3. Need to move to HPUBucketingContext.
+            # Multimodal buckets are based on H,W , it should be changed to be aligned with multimodal paddings.
+            # Also need to move to HPUBucketingContext.
+            #Multimodal bucket : [[560, 560], [560, 1120], [560, 1680], [1120, 560], [1120, 1120], [1120, 1680], [1680, 560], [1680, 1120], [1680, 1680]]
             VLLM_MULTIMODAL_BUCKET = 560  #Pick number divisible by 28(patchsize*mergesize), this can be env.
-            max_seq_len = 2048  #self.max_num_batched_tokens
+            max_seq_len = 1120  #2048  #self.max_num_batched_tokens
             bucket = VLLM_MULTIMODAL_BUCKET
             self.multimodal_buckets = [
                 [h, w] for h in range(bucket, max_seq_len + 1, bucket)
@@ -2752,7 +2800,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt,
+                                          self.model_is_mrope)
             self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None

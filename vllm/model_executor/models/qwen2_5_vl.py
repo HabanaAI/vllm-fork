@@ -372,6 +372,7 @@ class Qwen2_5_VisionBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, cu_seqlens: torch.Tensor,
                 rotary_pos_emb: torch.Tensor) -> torch.Tensor:
+        #print(f"VisionBlock : x[{x.shape}], cu_seqlens[{cu_seqlens.shape}, rotary_pos_emb{[rotary_pos_emb.shape]}]")
         x = x + self.attn(self.norm1(x),
                           cu_seqlens=cu_seqlens,
                           rotary_pos_emb=rotary_pos_emb)
@@ -615,7 +616,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         x: torch.Tensor,
         grid_thw: torch.Tensor,
     ) -> torch.Tensor:
-        print(f"VisionTransformer: x-[{x.shape}, grid_thw-[{grid_thw}]")
+        #print(f"VisionTransformer: x-[{x.shape}, grid_thw-[{grid_thw}]")
         # patchify
         hidden_states = x.to(device=self.device, dtype=self.dtype)
         hidden_states = self.patch_embed(hidden_states)
@@ -663,6 +664,9 @@ class Qwen2_5_VisionTransformer(nn.Module):
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
+
+        #import habana_frameworks.torch as htorch
+        #htorch.core.mark_step()
 
         # transformers
         hidden_states = hidden_states.unsqueeze(1)
@@ -923,6 +927,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         video_grid_thw = kwargs.pop("video_grid_thw", None)
         second_per_grid_ts = kwargs.pop("second_per_grid_ts", None)
 
+        #video_grid_thw = video_grid_thw.to("cpu") if video_grid_thw is not None and video_grid_thw.numel() > 0 else None
+
         if pixel_values_videos is None and video_embeds is None:
             return None
 
@@ -1084,7 +1090,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        #print(f" qwen2_5_vl.py forward input_ids {input_ids.shape} and positions {positions.shape}"        )
+        #print(f"qwen2_5_vl.py forward inputs[{inputs_embeds.shape if inputs_embeds is not None else input_ids.shape}] and positions {positions.shape}")
         """Run forward pass for Qwen2.5-VL.
 
         Args:
@@ -1131,10 +1137,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     video_input=video_input)
                 input_ids = None
 
-            print(
-                f"LanguageModel: inputs[{inputs_embeds.shape if inputs_embeds is not None else input_ids.shape}], positions[{positions.shape}]],"
-            )
-
         hidden_states = self.language_model.model(
             input_ids=input_ids,
             positions=positions,
@@ -1143,7 +1145,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
         )
-        print("Final output of hidden_states :", hidden_states.shape)
         return hidden_states
 
     def compute_logits(
