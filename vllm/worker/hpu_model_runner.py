@@ -380,6 +380,7 @@ class HpuModelAdapter:
                                      attn_bias=attn_bias)
         return metadata
 
+
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
 
@@ -1207,8 +1208,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_positions = input_positions.to(  # type: ignore
             self.device, non_blocking=True)
         slot_mapping_HPU = slot_mapping.to(  # type: ignore
+<<<<<<< HEAD
             self.device,  # type: ignore
             non_blocking=True)  # type: ignore
+=======
+            self.device, non_blocking=True)
+>>>>>>> a6f715447 (- linter fixes)
         seq_lens_tensor = seq_lens_tensor.to(self.device, non_blocking=True)
         context_lens_tensor = context_lens_tensor.to(self.device,
                                                      non_blocking=True)
@@ -1533,8 +1538,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             self.block_size,
                             rounding_mode="floor")
         offsets = torch.fmod(slot_mapping, self.block_size)
+<<<<<<< HEAD
         attn_metadata.block_offsets = offsets.to(self.device,
                                                  non_blocking=True)
+=======
+        attn_metadata.block_offsets = offsets.to(
+            self.device,  # type: ignore
+            non_blocking=True)
+>>>>>>> a6f715447 (- linter fixes)
         attn_metadata.block_indices = indices.to(  # type: ignore
             self.device,  # type: ignore
             non_blocking=True)
