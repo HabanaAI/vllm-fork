@@ -1283,8 +1283,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         dummy_slots = itertools.cycle(
             range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
 
-        for seq_group_metadata in seq_group_metadata_list:
-            if seq_group_metadata.is_prompt and self.vllm_config.cache_config.enable_prefix_caching:
+        is_apc = self.vllm_config.cache_config.enable_prefix_caching
+
+        for seq_group_metadata in seq_group_metadata_list:            
+            if seq_group_metadata.is_prompt and is_apc:
                 print("APC + fully cached")
                 #TODO
             else:
@@ -1570,7 +1572,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prefill_reqs = []
         decode_reqs = []
         for seq_group_meta in seq_group_metadata_list:
-            if seq_group_meta.computed_block_nums is not None and self.vllm_config.cache_config.enable_prefix_caching:
+            if seq_group_meta.computed_block_nums is not None and len(
+                    seq_group_meta.computed_block_nums
+            ) > 0 and self.vllm_config.cache_config.enable_prefix_caching:
                 prefix_cached_len = len(
                     seq_group_meta.computed_block_nums) * self.block_size
                 seq_len = seq_group_meta.seq_data[list(
