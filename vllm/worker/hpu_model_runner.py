@@ -1304,7 +1304,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         is_apc = self.vllm_config.cache_config.enable_prefix_caching
 
-        for seq_group_metadata in seq_group_metadata_list:            
+	for seq_group_metadata in seq_group_metadata_list:            
             if seq_group_metadata.is_prompt and is_apc:
                 print("APC + fully cached")
                 #TODO
