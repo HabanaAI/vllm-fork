@@ -314,7 +314,10 @@ def modify_decoder_layer(module: torch.nn.Module, suffix="DecoderLayer"):
 class HpuModelAdapter:
 
     def __init__(self, model, vllm_config):
-        self.model = model
+        if htorch.utils.internal.is_lazy():
+            self.model = htorch.hpu.wrap_in_hpu_graph(model, disable_tensor_cache=True)
+        else:
+            self.model = model
         self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
                                                '0').lower() in ['1', 'true']
         self.vllm_config = vllm_config
@@ -771,8 +774,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
-                self.model = _maybe_wrap_in_hpu_graph(
-                    self.model, vllm_config=self.vllm_config)
+                self.model = HpuModelAdapter(self.model, vllm_config=self.vllm_config)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
 
