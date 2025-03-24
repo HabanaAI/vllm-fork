@@ -34,7 +34,6 @@ jobs:
             echo "❌ User $COMMENTER is not authorized to trigger tests."
             exit 1
           fi
-          echo "User $COMMENTER is authorized to trigger tests."
       - name: Extract PR Number
         id: extract_pr
         run: |
