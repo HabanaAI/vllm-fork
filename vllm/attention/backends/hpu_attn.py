@@ -135,8 +135,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.v_cache = VLLMKVCache()
         HPUFusedSDPA = kernels.fsdpa()
 
-        self.prefill_use_fusedsdpa = "fsdpa,-flex_attention" in enabled_flags()
-        self.prefill_use_flex_attention = "-fsdpa,flex_attention" in enabled_flags()
+        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
+        self.prefill_use_flex_attention = "flex_attention" in enabled_flags()
         self.fused_scaled_dot_product_attention = None
 
         self.prefill_impl = 'naive'
