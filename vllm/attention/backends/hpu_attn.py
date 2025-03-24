@@ -367,12 +367,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
             if (key is not None) and (value is not None):
-                # During cross-attention decode, key & value will be None,
-                # we don't need to cache them.
+                # Cross-attention prompt - key and value is not None
                 key_cache = self.k_cache(key, key_cache, block_indices,
                                          block_offsets)
                 value_cache = self.v_cache(value, value_cache, block_indices,
                                            block_offsets)
+            else:
+                # Cross-attention decode - key and values are None, return key_cache unchanged
+                # get_cache method is used for INC compatibility
+                key_cache = self.k_cache.get_cache(key_cache)
+                value_cache = self.v_cache.get_cache(value_cache)
 
         if attn_metadata.is_prompt:
             # Prompt run.
