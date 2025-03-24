@@ -143,7 +143,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         if self.prefill_use_flex_attention:
             self.prefill_impl = 'flex'
         elif self.prefill_use_fusedsdpa:
-            assert HPUFusedSDPA is not None, 'Cannot use fsdpa without fsdpa kernel!'
+            assert HPUFusedSDPA is not None, \
+                'Cannot use fsdpa without fsdpa kernel!'
             assert alibi_slopes is None, \
                 'Prefill with FusedSDPA not supported with alibi slopes!'
             self.fused_scaled_dot_product_attention = HPUFusedSDPA
@@ -239,7 +240,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         self.head_size)
 
             attn_bias = attn_metadata.attn_bias
-            if self.alibi_slopes is not None:
+            if attn_bias is not None and self.alibi_slopes is not None:
                 position_bias = _make_alibi_bias(
                     self.alibi_slopes, self.num_kv_heads,
                     attn_bias.dtype, attn_bias.shape[-1])
