@@ -1304,7 +1304,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         is_apc = self.vllm_config.cache_config.enable_prefix_caching
 
-        for seq_group_metadata in seq_group_metadata_list:            
+        for seq_group_metadata in seq_group_metadata_list:
             if seq_group_metadata.is_prompt and is_apc:
                 print("APC + fully cached")
                 #TODO
@@ -1598,7 +1598,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     seq_group_meta.computed_block_nums) * self.block_size
                 seq_len = seq_group_meta.seq_data[list(
                     seq_group_meta.seq_data.keys())[0]].get_len()
-                is_seq_prompt = prefix_cached_len >= seq_len
+                is_seq_prompt = prefix_cached_len > seq_len
             else:
                 is_seq_prompt = seq_group_meta.is_prompt
             if is_seq_prompt:
