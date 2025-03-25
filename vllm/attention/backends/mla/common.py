@@ -1075,79 +1075,27 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                                   fa_version=self.vllm_flash_attn_version)
 
     def _v_up_proj_and_o_proj(self, x):
-        if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
-            if is_fp8(self.W_UV_O):
-                output_parallel = self.fp8_linear_generic.apply(
-                    x.flatten(start_dim=1), self.W_UV_O, self.W_UV_O_scales,
-                    self.reqaunt_input_group_shape,
-                    self.reqaunt_weight_group_shape)
-            else:
-                output_parallel = torch.matmul(x.flatten(start_dim=1),
-                                               self.W_UV_O)
-            if self.tp_size > 1:
-                output = tensor_model_parallel_all_reduce(output_parallel)
-            else:
-                output = output_parallel
-            return output
-        else:
-            x = torch.einsum("bnl,lnv->bnv", x, self.W_UV)
-            return self.o_proj(x.reshape(-1,
-                                         self.num_heads * self.v_head_dim))[0]
+        # Convert from (B, N, L) to (N, B, L)
+        x = x.view(-1, self.num_heads, self.kv_lora_rank).transpose(0, 1)
+        # Multiply (N, B, L) x (N, L, V) -> (N, B, V)
+        x = torch.bmm(x, self.W_UV)
+        # Convert from (N, B, V) to (B, N * V)
+        x = x.transpose(0, 1).reshape(-1, self.num_heads * self.v_head_dim)
+        return self.o_proj(x)[0]
 
     def _q_proj_and_k_up_proj(self, x):
-        if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
-            if is_fp8(self.W_Q_UK):
-                return self.fp8_linear_generic.apply(
-                    x, self.W_Q_UK, self.W_Q_UK_scales,
-                    self.reqaunt_input_group_shape,
-                    self.reqaunt_weight_group_shape).view(
-                        -1, self.num_heads, self.kv_lora_rank)
-            return torch.matmul(x, self.W_Q_UK)\
-                .view(-1, self.num_heads, self.kv_lora_rank)
-        else:
-            x = torch.matmul(x, self.W_Q)\
-                .view(-1, self.num_heads, self.qk_nope_head_dim)
-            return torch.einsum("bnp,lnp->bnl", x, self.W_UK)\
-                .view(-1, self.num_heads, self.kv_lora_rank)
+        q_nope, q_pe = self.q_proj(x)[0]\
+            .view(-1, self.num_heads, self.qk_head_dim)\
+            .split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+
+        # Convert from (B, N, P) to (N, B, P)
+        q_nope = q_nope.transpose(0, 1)
+        # Multiply (N, B, P) x (N, P, L) -> (N, B, L)
+        ql_nope = torch.bmm(q_nope, self.W_UK_T)
+        # Convert from (N, B, L) to (B, N, L)
+        return ql_nope.transpose(0, 1), q_pe
 
     def process_weights_after_loading(self, act_dtype: torch.dtype):
-
-        # TODO(lucas) This is very gross, we need a more wide scale refactor of
-        # all the FP8 code with a more standard way of
-        # defining schemes/group-shapes, we should also potentially force
-        # quant_methods to support a decompress function
-        #
-        # returns input_group_shape, weight_group_shape
-        def get_scale_group_shapes_for_fp8(layer: LinearBase) -> \
-            Tuple[Tuple[int, int], Tuple[int, int]]:
-            if isinstance(layer.quant_method, Fp8LinearMethod):
-                if layer.quant_method.block_quant:
-                    weight_block_size = \
-                        layer.quant_method.quant_config.weight_block_size
-                    # per-token-group (1, X), block-quantized (X, Y)
-                    return (1, weight_block_size[-1]), weight_block_size
-                else:
-                    return (-1, -1), (-1, -1)  # per-tensor, per-tensor
-            elif isinstance(layer.quant_method, CompressedTensorsLinearMethod)\
-                and isinstance(layer.scheme, CompressedTensorsW8A8Fp8):
-                # this is hacky but we always assume the for
-                # CompressedTensorsW8A8Fp8 the input is dynamic per-token
-                # we ignore if it is static-per-tensor since we are going to
-                # requantize after later anyways
-                strategy = layer.scheme.strategy
-                if strategy == QuantizationStrategy.TENSOR:
-                    return (1, -1), (-1, -1)  # per-token, per-tensor
-                elif strategy == QuantizationStrategy.CHANNEL:
-                    return (1, -1), (-1, 1)  # per-token, per-channel
-                else:
-                    raise NotImplementedError(
-                        f"QuantizationStrategy.{strategy} is not supported for "
-                        "fp8 MLA, please run with VLLM_MLA_DISABLE=1")
-            else:
-                raise NotImplementedError(
-                    "Can't determine scale group shapes for "
-                    f"{layer.quant_method}, please run with VLLM_MLA_DISABLE=1"
-                )
 
         def get_layer_weight(layer):
             WEIGHT_NAMES = ("weight", "qweight", "weight_packed")
@@ -1160,19 +1108,6 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
 
         def get_and_maybe_dequant_weights(layer: LinearBase):
             if not isinstance(layer.quant_method, UnquantizedLinearMethod):
-                if current_platform.is_hpu() and \
-                    layer.quant_method.quant_config.activation_scheme \
-                        == "static":
-
-                    def get_scales(layer: LinearBase) -> torch.Tensor:
-                        if hasattr(layer, "weight_scale_inv"):
-                            return layer.weight_scale_inv
-                        return layer.weight_scale
-
-                    scales = get_scales(layer)
-                    if len(scales.shape) == 1:
-                        ret = layer.weight.to(act_dtype) * scales.unsqueeze(1)
-                        return ret
                 # NOTE: This should only be used offline, since it's O(N^3)
                 eye = torch.eye(layer.input_size_per_partition,
                                 dtype=act_dtype,
@@ -1184,11 +1119,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                 # standardize to (output, input)
                 return dequant_weights.T
             return layer.weight
-
-        weight_dtype = get_layer_weight(self.kv_b_proj).dtype
-        assert get_layer_weight(self.o_proj).dtype == weight_dtype
-        assert get_layer_weight(self.q_proj).dtype == weight_dtype
-
+        
         kv_b_proj_weight = get_and_maybe_dequant_weights(self.kv_b_proj).T
         assert kv_b_proj_weight.shape == (
             self.kv_lora_rank,
@@ -1203,93 +1134,14 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
             self.num_heads,
             self.qk_nope_head_dim + self.v_head_dim,
         )
-
         W_UK, W_UV = kv_b_proj_weight.split(
             [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
 
-        q_proj_weight = get_and_maybe_dequant_weights(self.q_proj).T\
-                .view(-1, self.num_heads, self.qk_head_dim)
+        # Convert from (L, N, V) to (N, L, V)
+        self.W_UV = W_UV.transpose(0, 1)
+        # Convert from (L, N, P) to (N, P, L)
+        self.W_UK_T = W_UK.permute(1, 2, 0)
 
-        # can be W_Q or W_UQ depending q_lora_rank, the former if
-        # q_lora_rank is None, the latter otherwise. From the Attention backend
-        # perspective though we call these both W_Q and rely on the layer
-        # to pass in the correct matrix
-        W_Q = q_proj_weight[..., :self.qk_nope_head_dim]
-        self.W_QR = q_proj_weight[..., self.qk_nope_head_dim:]\
-            .flatten(start_dim=1).contiguous()
-
-        # W_QR is small so for simplicity we dont bother requantizing it
-        self.W_QR = self.W_QR.to(act_dtype)
-
-        if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
-            requantization_enabled = not envs.VLLM_MLA_DISABLE_REQUANTIZATION
-            if is_fp8(weight_dtype) and requantization_enabled:
-                # This assumes it wise to requantize using the same group shapes
-                # (i.e. strategy, per-tensor, per-channel, block etc.) that the
-                # weights were originally quantized
-                requant_input_group_shape, requant_weight_group_shape = \
-                    get_scale_group_shapes_for_fp8(self.q_proj)
-                assert (requant_input_group_shape, requant_weight_group_shape)\
-                    == get_scale_group_shapes_for_fp8(self.kv_b_proj)
-                assert (requant_input_group_shape, requant_weight_group_shape)\
-                    == get_scale_group_shapes_for_fp8(self.o_proj)
-                self.reqaunt_input_group_shape = requant_input_group_shape
-                self.reqaunt_weight_group_shape = requant_weight_group_shape
-
-            #
-            # Perform matrix-absorption following
-            #     https://github.com/flashinfer-ai/flashinfer/pull/551
-            # for decode, as a result we end up with absorbed weights for decode
-            # and another copy of raw weights for prefill.
-            #
-            self.W_UK, self.W_UV = kv_b_proj_weight.split(
-                [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
-            # We absorb `W_UK` into `W_Q` resulting in either W_Q_UK or W_UQ_UK
-            # depending q_lora_rank, the former if q_lora_rank is None, the
-            # latter otherwise
-            # basically if q_lora_rank is none we are absorbing into q_proj
-            # instead of UQ
-            W_Q_UK = torch.einsum("qnd,lnd -> qnl", W_Q, W_UK)\
-                .flatten(start_dim=1).contiguous()
-
-            if is_fp8(weight_dtype) and requantization_enabled:
-                W_Q_UK, W_Q_UK_scales = scaled_quantize(
-                    W_Q_UK,
-                    self.reqaunt_weight_group_shape,
-                    quant_dtype=current_platform.fp8_dtype())
-                # For FP8 save the transpose so we can use
-                # `apply_w8a8_block_fp8_linear` directly
-                self.W_Q_UK = W_Q_UK.T.contiguous()
-                self.W_Q_UK_scales = W_Q_UK_scales.T.contiguous()
-            else:
-                self.W_Q_UK = W_Q_UK.to(act_dtype)
-
-            W_O = get_and_maybe_dequant_weights(self.o_proj)\
-                .view(-1, self.num_heads, self.v_head_dim)
-            W_UV_O = torch.einsum("lnd,hnd -> nlh", W_UV, W_O)\
-                .flatten(start_dim=0, end_dim=1).contiguous()
-
-            if is_fp8(weight_dtype) and requantization_enabled:
-                W_UV_O, W_UV_O_scales = scaled_quantize(
-                    W_UV_O,
-                    self.reqaunt_weight_group_shape,
-                    quant_dtype=current_platform.fp8_dtype())
-                # For FP8 save the transpose so we can use
-                # `apply_w8a8_block_fp8_linear` directly
-                self.W_UV_O = W_UV_O.T.contiguous()
-                self.W_UV_O_scales = W_UV_O_scales.T.contiguous()
-            else:
-                self.W_UV_O = W_UV_O.to(act_dtype)
-
-            self.tp_size = get_tensor_model_parallel_world_size()
-        else:
-            if is_fp8(weight_dtype):
-                raise NotImplementedError(
-                    "Currently fp8 requires matrix absorption")
-
-            self.W_UV = W_UV
-            self.W_UK = W_UK
-            self.W_Q = W_Q.flatten(start_dim=1)
 
     def _compute_prefill_context(
         self,
