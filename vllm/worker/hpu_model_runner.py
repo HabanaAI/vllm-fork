@@ -33,7 +33,7 @@ import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed import broadcast_tensor_dict
-from vllm.distributed.parallel_state import get_world_group
+from vllm.distributed.parallel_state import get_world_group, get_dp_group
 from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
@@ -251,6 +251,11 @@ def align_workers(value, op):
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()
 
+def align_dp_groups(value, op):
+    group = get_dp_group().cpu_group
+    value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
+    torch.distributed.all_reduce(value_t, op=op, group=group)
+    return value_t.item()
 
 def setup_profiler():
     schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1)
@@ -321,6 +326,8 @@ class HpuModelAdapter:
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
         enforce_eager = vllm_config.model_config.enforce_eager
+        self.dp_size = self.vllm_config.parallel_config.data_parallel_size
+        self.dp_awared_padding = True if self.dp_size > 1 and htorch.utils.internal.is_lazy() and not enforce_eager else False
 
         if not htorch.utils.internal.is_lazy() and not enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -428,7 +435,7 @@ class HpuModelAdapter:
                                               input_ids.device, self.dtype)
         LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         with set_forward_context(attn_metadata, self.vllm_config,
-                                 virtual_engine):
+                                 virtual_engine, dp_awared_padding=self.dp_awared_padding):
             hidden_states = self.model(*args, **kwargs)
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
             hidden_states = hidden_states.index_select(0,
@@ -677,6 +684,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.cached_step_outputs: List[torch.Tensor] = []
         self.cached_step_inputs: List[
             ModelInputForHPUWithSamplingMetadata] = []
+
+        # Data Parallel
+        self.dp_size = vllm_config.parallel_config.data_parallel_size
+        if self.dp_size > 1:
+            self.dp_rank = vllm_config.parallel_config.data_parallel_rank
+            self.dp_awared_padding = True if htorch.utils.internal.is_lazy() and not self.enforce_eager else False
 
     def _set_gc_threshold(self) -> None:
         # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -952,6 +965,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.bucketing_global_state.prompt_seq_bucket_cfg),
             self.block_size)
 
+        if self.dp_size > 1 and self.dp_awared_padding:
+            align_dp_groups(max_prompt_len, torch.distributed.ReduceOp.MAX)
+
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
                                                    context_lens):
@@ -1119,6 +1135,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = find_bucket(
                 block_bucket_size,
                 self.bucketing_global_state.decode_block_bucket_cfg)
+            if self.dp_size > 1 and self.dp_awared_padding:
+                align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -1129,6 +1147,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = find_bucket(
                 len(block_list),
                 self.bucketing_global_state.decode_block_bucket_cfg)
+            if self.dp_size > 1 and self.dp_awared_padding:
+                align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
@@ -1206,6 +1226,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         bucket_cfg = self.bucketing_global_state.prompt_bs_bucket_cfg \
             if is_prompt else self.bucketing_global_state.decode_bs_bucket_cfg
         batch_size_padded = find_bucket(real_batch_size, bucket_cfg)
+        if self.dp_size > 1 and self.dp_awared_padding:
+            align_dp_groups(batch_size_padded, torch.distributed.ReduceOp.MAX)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         if batch_size_padding > 0:

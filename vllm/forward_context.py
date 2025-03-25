@@ -57,7 +57,8 @@ def get_forward_context() -> ForwardContext:
 def set_forward_context(attn_metadata: Any,
                         vllm_config: VllmConfig,
                         virtual_engine: int = 0,
-                        num_tokens: int = 0):
+                        num_tokens: int = 0,
+                        dp_awared_padding: bool = False):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
@@ -82,13 +83,19 @@ def set_forward_context(attn_metadata: Any,
                 batchsize = attn_metadata.num_input_tokens
         else:
             batchsize = num_tokens
-        num_tokens_across_dp = [0] * dp_size
-        num_tokens_across_dp[dp_rank] = batchsize
-        num_tokens_tensor = torch.tensor(num_tokens_across_dp,
-                                         device="cpu",
-                                         dtype=torch.int32)
-        from vllm.distributed.parallel_state import get_dp_group
-        dist.all_reduce(num_tokens_tensor, group=get_dp_group().cpu_group)
+        if dp_awared_padding:
+            num_tokens_across_dp = [batchsize] * dp_size
+            num_tokens_tensor = torch.tensor(num_tokens_across_dp,
+                                            device="cpu",
+                                            dtype=torch.int32)
+        else:
+            num_tokens_across_dp = [0] * dp_size
+            num_tokens_across_dp[dp_rank] = batchsize
+            num_tokens_tensor = torch.tensor(num_tokens_across_dp,
+                                            device="cpu",
+                                            dtype=torch.int32)
+            from vllm.distributed.parallel_state import get_dp_group
+            dist.all_reduce(num_tokens_tensor, group=get_dp_group().cpu_group)
         cu_tokens_across_dp_cpu = torch.cumsum(num_tokens_tensor, dim=0)
         dp_metadata = DPMetadata(cu_tokens_across_dp_cpu)
 
