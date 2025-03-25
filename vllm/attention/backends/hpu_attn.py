@@ -135,13 +135,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.v_cache = VLLMKVCache()
         self.fused_scaled_dot_product_attention = kernels.fsdpa()
 
-        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
-        self.prefill_use_flex_attention = "flex_attention" in enabled_flags()
-
         self.prefill_impl = 'naive'
-        if self.prefill_use_flex_attention:
+        if "flex_attention" in enabled_flags():
             self.prefill_impl = 'flex'
-        elif self.prefill_use_fusedsdpa:
+        if "fsdpa" in enabled_flags():
             assert alibi_slopes is None, \
                 'Prefill with FusedSDPA not supported with alibi slopes!'
             self.prefill_impl = 'fsdpa'
