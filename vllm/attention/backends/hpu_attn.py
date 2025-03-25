@@ -287,6 +287,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             'fsdpa_op': fsdpa_op,
             'keys_fetch_func': self.k_cache.fetch_from_cache,
             'values_fetch_func': self.v_cache.fetch_from_cache,
+            'softmax_op': self.softmax,
         }
 
     def forward_encoder_decoder(
