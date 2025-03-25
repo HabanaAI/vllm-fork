@@ -92,7 +92,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     cross_attn_bias: Optional[torch.Tensor] = None
 
 
-def update_kv_cache(cache, input, block_indices, block_offsets, slot_mapping):
+def update_cache(cache, input, block_indices, block_offsets, flat_indices_with_offsets):
     if block_offsets is None:
         cache.index_copy_(0, block_indices, input)
         return cache
@@ -101,7 +101,7 @@ def update_kv_cache(cache, input, block_indices, block_offsets, slot_mapping):
     block_size = cache.shape[1]
     cache_flat = cache.view(num_blocks * block_size, *cache.shape[2:])
 
-    cache_flat.index_copy_(0, slot_mapping.squeeze(-1), input)
+    cache_flat.index_copy_(0, flat_indices_with_offsets, input)
     cache_flat = cache_flat.view(num_blocks, block_size, *cache.shape[2:])
     return cache_flat
 
@@ -242,10 +242,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = update_kv_cache(key_cache, key, block_indices,
-                                        block_offsets, slot_mapping)
-            value_cache = update_kv_cache(value_cache, value, block_indices,
-                                          block_offsets, slot_mapping)
+            key_cache = update_cache(key_cache, key, block_indices,
+                                     block_offsets, slot_mapping.squeeze(-1))
+            value_cache = update_cache(value_cache, value, block_indices,
+                                       block_offsets, slot_mapping.squeeze(-1))
 
         if attn_metadata.is_prompt:
             # Prompt run.
