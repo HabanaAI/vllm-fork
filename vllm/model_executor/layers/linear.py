@@ -1512,7 +1512,7 @@ class QKVCrossParallelLinear(LinearBase):
             v for _, v in layer.named_parameters()
             if self._is_same_param(param, v)
         ]
-        assert len(target_param_list) == 1
+        assert len(target_param_list) == 1, f"len(target_param_list) {len(target_param_list)} param.name {param.name}"
         target_param = target_param_list[0]
         return target_param
 
