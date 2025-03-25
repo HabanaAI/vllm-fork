@@ -120,17 +120,16 @@ def align_workers(value, op):
 
 
 def setup_profiler():
-    schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1)
     activities = [
         torch.profiler.ProfilerActivity.CPU,
         torch.profiler.ProfilerActivity.HPU
     ]
     profiler = torch.profiler.profile(
-        schedule=schedule,
+        #schedule=schedule,
         activities=activities,
         on_trace_ready=torch.profiler.tensorboard_trace_handler('.',
                                                                 use_gzip=True),
-        record_shapes=False,
+        record_shapes=True,
         with_stack=True)
     return profiler
 
@@ -726,6 +725,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # For delayed sampling
         self.cached_step_inputs: List[
             ModelInputForHPUWithSamplingMetadata] = []
+        self.profile_execute_model_prompt = os.environ.get(
+            'VLLM_PROFILE_EXECUTE_MODEL_PROMPT',
+            'false').lower() in ['true', '1']
+        self.profile_execute_model_decode = os.environ.get(
+            'VLLM_PROFILE_EXECUTE_MODEL_DECODE',
+            'false').lower() in ['true', '1']
+        self.profile_execute_model = \
+            self.profile_execute_model_prompt or \
+                self.profile_execute_model_decode
 
     def _set_gc_threshold(self) -> None:
         """
@@ -854,7 +862,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.model_memory_usage = m.consumed_device_memory
         msg = f"Loading model weights took in total {m.get_summary_string()}"
         logger.info(msg)
-        logger.info(f"")
+        logger.info("")
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -1447,8 +1455,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=None,
             enable_kv_scales_calculation=False,
-            input_positions=input_positions
-        )
+            input_positions=input_positions)
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -1797,7 +1804,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             inputs = self.prepare_model_input(seqs)
             if time_index == 0:
                 if self.is_driver_worker:
-                    broadcast_tensor_dict({"input_tokens": inputs.input_tokens}, src=0)
+                    broadcast_tensor_dict(
+                        {"input_tokens": inputs.input_tokens}, src=0)
                 else:
                     broadcast_tensor_dict(src=0)
             is_single_step = \
@@ -2516,6 +2524,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_batch_size': real_batch_size
                 }
 
+                profiler = None
+                if self.profile_execute_model and \
+                    not warmup_mode and self.is_driver_worker and \
+                        (self.profile_execute_model_prompt and is_prompt or \
+                        self.profile_execute_model_decode and not is_prompt):
+                    profiler = setup_profiler()
+                    profiler.start()
                 with self.profiler.record_event('internal',
                                                 model_event_name,
                                                 args=profiler_args):
@@ -2569,6 +2584,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(output)
                         self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
+                if profiler:
+                    profiler.step()
+                    profiler.stop()
+                    raise ValueError("Profile completed")
                 if model_input.async_callback is not None:
                     model_input.async_callback()
                 if i < num_steps - 1:
