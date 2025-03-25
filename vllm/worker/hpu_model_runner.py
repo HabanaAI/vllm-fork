@@ -966,7 +966,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.block_size)
 
         if self.dp_size > 1 and self.dp_awared_padding:
-            align_dp_groups(max_prompt_len, torch.distributed.ReduceOp.MAX)
+            max_prompt_len = align_dp_groups(max_prompt_len, torch.distributed.ReduceOp.MAX)
 
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
@@ -1136,7 +1136,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_bucket_size,
                 self.bucketing_global_state.decode_block_bucket_cfg)
             if self.dp_size > 1 and self.dp_awared_padding:
-                align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -1148,7 +1148,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 len(block_list),
                 self.bucketing_global_state.decode_block_bucket_cfg)
             if self.dp_size > 1 and self.dp_awared_padding:
-                align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
@@ -1227,7 +1227,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if is_prompt else self.bucketing_global_state.decode_bs_bucket_cfg
         batch_size_padded = find_bucket(real_batch_size, bucket_cfg)
         if self.dp_size > 1 and self.dp_awared_padding:
-            align_dp_groups(batch_size_padded, torch.distributed.ReduceOp.MAX)
+            batch_size_padded = align_dp_groups(batch_size_padded, torch.distributed.ReduceOp.MAX)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         if batch_size_padding > 0:
