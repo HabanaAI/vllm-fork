@@ -327,7 +327,7 @@ class EVA2CLIPModel(nn.Module):
 
         b, s, h = x.shape
         grid_size = int(s**0.5)
-        x = x.reshape(b, grid_size, grid_size, h).permute(0, 3, 1, 2)
+        x = x.view(b, grid_size, grid_size, h).permute(0, 3, 1, 2)
         x = self.conv(x)
 
         x = x.flatten(2).transpose(1, 2)
