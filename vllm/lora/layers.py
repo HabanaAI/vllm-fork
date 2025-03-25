@@ -18,6 +18,7 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               tensor_model_parallel_all_gather,
                               tensor_model_parallel_all_reduce)
 from vllm.distributed.utils import divide
+from vllm.model_executor.custom_op import CustomOp
 # yapf: disable
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                LinearBase,
@@ -247,7 +248,7 @@ class VocabParallelEmbeddingWithLoRA(CustomOp):
         indices = embeddings_indices[0].view_as(x)
         full_output = self.base_layer.forward(
             x.add_(indices * added_tokens_mask))
-  
+
         full_output_org = full_output
         if full_output.ndim == 3:
             full_output = full_output.view(
