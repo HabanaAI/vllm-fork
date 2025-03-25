@@ -89,7 +89,7 @@ def main(args, dp_size, dp_rank, dp_master_ip, dp_master_port, GPUs_per_dp_rank)
         dtype="bfloat16",
         gpu_memory_utilization=0.6,
         enable_expert_parallel=True,
-        enforce_eager=True
+        # enforce_eager=True
     )
 
     # Generate texts from the prompts. The output is a list of RequestOutput objects
