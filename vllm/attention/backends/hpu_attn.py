@@ -133,21 +133,17 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.block2batch_matmul = Matmul()
         self.k_cache = VLLMKVCache()
         self.v_cache = VLLMKVCache()
-        HPUFusedSDPA = kernels.fsdpa()
+        self.fused_scaled_dot_product_attention = kernels.fsdpa()
 
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.prefill_use_flex_attention = "flex_attention" in enabled_flags()
-        self.fused_scaled_dot_product_attention = None
 
         self.prefill_impl = 'naive'
         if self.prefill_use_flex_attention:
             self.prefill_impl = 'flex'
         elif self.prefill_use_fusedsdpa:
-            assert HPUFusedSDPA is not None, \
-                'Cannot use fsdpa without fsdpa kernel!'
             assert alibi_slopes is None, \
                 'Prefill with FusedSDPA not supported with alibi slopes!'
-            self.fused_scaled_dot_product_attention = HPUFusedSDPA
             self.prefill_impl = 'fsdpa'
 
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
@@ -361,21 +357,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             query_shape = (batch_size, -1, self.num_heads, self.head_size)
             kv_shape = (batch_size, -1, self.num_kv_heads, self.head_size)
-            # Just a workaround, to make ops.prompt_attention go into the
-            # torch ops assembly path.
-            # TODO: add new prompt_attention op in vllm_hpu_extension
-            # which calls FusedSDPA with causal = False.
-            # TODO: now it's possible, just need to test it
-            attn_bias = torch.zeros((batch_size, 1, 1, 1),
-                                    device=query.device,
-                                    dtype=torch.bool)
-
             out = ops.prompt_attention(
-                impl='naive',
+                impl=self.prefill_impl,
                 query=query.view(query_shape),
                 key=key.view(kv_shape),
                 value=value.view(kv_shape),
-                attn_bias=attn_bias,
+                attn_bias=None,
                 is_causal=False,
                 **self.common_attention_args())
             output = out.reshape(batch_size, seq_len, hidden_size)
