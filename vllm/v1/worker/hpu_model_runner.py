@@ -8,8 +8,7 @@ import os
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set,
-                    Tuple, Union)
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
@@ -24,9 +23,11 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
+from vllm.attention.selector import get_attn_backend
 from vllm.config import VllmConfig
 from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
+from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
@@ -35,8 +36,7 @@ from vllm.sampling_params import SamplingType
 from vllm.transformers_utils.tokenizer_group import init_tokenizer_from_configs
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LayerBlockType, cdiv,
                         is_fake_hpu, is_pin_memory_available)
-from vllm.v1.attention.backends.hpu_attn import (HPUAttentionBackendV1,
-                                                 HPUAttentionMetadataV1)
+from vllm.v1.attention.backends.hpu_attn import HPUAttentionMetadataV1
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 from vllm.v1.outputs import LogprobsTensors, ModelRunnerOutput
@@ -60,9 +60,9 @@ class PhaseType(Enum):
 
 @dataclass
 class PromptDecodeInfo:
-    prompt_req_ids: List[str]
-    decode_req_ids: List[str]
-    prompt_scheduled_tokens: List[int]
+    prompt_req_ids: list[str]
+    decode_req_ids: list[str]
+    prompt_scheduled_tokens: list[int]
 
 
 @dataclass
@@ -82,12 +82,12 @@ class DecodeData:
 #TODO(kzawora): remove this
 @dataclass
 class PrefillInputData:
-    request_ids: List
-    prompt_lens: List
-    token_ids: List
-    position_ids: List
-    attn_metadata: List
-    logits_indices: List
+    request_ids: list
+    prompt_lens: list
+    token_ids: list
+    position_ids: list
+    attn_metadata: list
+    logits_indices: list
 
     def zipped(self):
         return zip(self.request_ids, self.prompt_lens, self.token_ids,
@@ -222,10 +222,12 @@ def swap_positions(b: InputBatch, id_1, id_2):
     b.presence_penalties_cpu[ids] = b.presence_penalties_cpu[rev_ids]
     b.repetition_penalties_cpu[ids] = b.repetition_penalties_cpu[rev_ids]
 
-    b.min_tokens[id_1], b.min_tokens[id_2] = b.min_tokens[id_2], b.min_tokens[
-        id_1]
-    b.stop_token_ids[id_1], b.stop_token_ids[id_2] = b.stop_token_ids[
-        id_2], b.stop_token_ids[id_1]
+    min_tokens_1 = b.min_tokens.pop(id_1, None)
+    min_tokens_2 = b.min_tokens.pop(id_2, None)
+    if min_tokens_1 is not None:
+        b.min_tokens[id_2] = min_tokens_1
+    if min_tokens_2 is not None:
+        b.min_tokens[id_1] = min_tokens_2
 
     gen_1 = b.generators.pop(id_1, None)
     gen_2 = b.generators.pop(id_2, None)
@@ -369,7 +371,7 @@ class HpuModelAdapter:
                               module,
                               parent_module=None,
                               module_name=None):
-        if isinstance(module, torch.nn.ModuleList):
+        if isinstance(module, torch.nn.Modulelist):
             for children_name, children_module in module.named_children():
                 self._compile_region(module, children_name, children_module)
         elif any(
@@ -505,7 +507,7 @@ class HpuModelAdapter:
                     str) and not isinstance(layer, int):  # Name-based access
                 current_module = getattr(current_module, layer)
             elif isinstance(layer,
-                            int):  # Indexed-based access (like ModuleList)
+                            int):  # Indexed-based access (like Modulelist)
                 current_module = list(current_module._modules.values())[layer]
 
         # At the end, we should be at the RotaryEmbedding layer.
@@ -530,7 +532,10 @@ class HpuModelAdapter:
             input_ids.device, self.dtype)
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
-        with set_forward_context(kwargs['attn_metadata'], self.vllm_config):
+        attn_meta = kwargs.pop('attn_metadata')
+        if 'kv_caches' in kwargs:
+            kwargs.pop('kv_caches')
+        with set_forward_context(attn_meta, self.vllm_config):
             hidden_states = self.model(*args, **kwargs)
         return hidden_states
 
@@ -558,8 +563,8 @@ def _maybe_wrap_in_hpu_graph(*args, **kwargs):
 
 def subtuple(obj: object,
              typename: str,
-             to_copy: List[str],
-             to_override: Optional[Dict[str, object]] = None):
+             to_copy: list[str],
+             to_override: Optional[dict[str, object]] = None):
     if obj is None:
         return None
     if to_override is None:
@@ -678,12 +683,21 @@ class HPUModelRunner:
         self.head_size = self.model_config.get_head_size()
         self.hidden_size = self.model_config.get_hidden_size()
 
+        self.attn_backend = get_attn_backend(
+            self.head_size,
+            self.dtype,
+            self.kv_cache_dtype,
+            self.block_size,
+            self.model_config.is_attention_free,
+            use_mla=self.model_config.use_mla,
+        )
+
         # Lazy initialization
-        # self.model: nn.Module  # Set after load_model
-        self.kv_caches: List[torch.Tensor] = []
+        # self.model: nn.Module  # set after load_model
+        self.kv_caches: list[torch.Tensor] = []
 
         # Request states.
-        self.requests: Dict[str, CachedRequestState] = {}
+        self.requests: dict[str, CachedRequestState] = {}
         # Persistent batch.
         self.input_batch = InputBatch(
             max_num_reqs=self.scheduler_config.max_num_seqs,
@@ -720,7 +734,7 @@ class HPUModelRunner:
             self.bucketing_ctx = HPUBucketingContext(
                 self.max_num_seqs, self.max_prefill_batch_size,
                 self.block_size, self.scheduler_config.max_num_batched_tokens)
-            self.graphed_buckets: Set[Any] = set()
+            self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
         self._PAD_SLOT_ID = -1
@@ -731,29 +745,33 @@ class HPUModelRunner:
             parallel_config=vllm_config.parallel_config,
             lora_config=vllm_config.lora_config).tokenizer
 
-    def get_kv_cache_spec(self) -> KVCacheSpec:
+    def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
-        Generates the KVCacheSpec by parsing the kv cache format from each 
+        Generates the KVCacheSpec by parsing the kv cache format from each
         Attention module in the static forward context.
         Returns:
-            KVCacheSpec: A dictionary mapping layer names to their KV cache 
+            KVCacheSpec: A dictionary mapping layer names to their KV cache
             format. Layers that do not need KV cache are not included.
         """
 
         forward_ctx = self.vllm_config.compilation_config.static_forward_context
         block_size = self.vllm_config.cache_config.block_size
-        kv_cache_spec: KVCacheSpec = {}
+        use_mla = self.vllm_config.model_config.use_mla
+        kv_cache_spec: dict[str, KVCacheSpec] = {}
         for layer_name, attn_module in forward_ctx.items():
+            if isinstance(attn_module, FusedMoE):
+                continue
+
             # TODO: Support other attention modules, e.g., sliding window,
-            # cross-attention, MLA.
+            # cross-attention
             assert isinstance(attn_module, Attention)
             if attn_module.attn_type == AttentionType.DECODER:
                 kv_cache_spec[layer_name] = FullAttentionSpec(
                     block_size=block_size,
                     num_kv_heads=attn_module.num_kv_heads,
                     head_size=attn_module.head_size,
-                    dtype=attn_module.dtype,
-                )
+                    dtype=self.kv_cache_dtype,
+                    use_mla=use_mla)
             elif attn_module.attn_type in (AttentionType.ENCODER,
                                            AttentionType.ENCODER_ONLY):
                 # encoder-only attention does not need KV cache.
@@ -773,21 +791,19 @@ class HPUModelRunner:
         The updated states are used by the `_prepare_inputs` function to create
         the input GPU tensors for the model.
 
-        Returns:
-            True if there is a new/resumed/paused/finished request in the batch.
-            If False, we can skip copying SamplingMetadata to the GPU.
+        The SamplingMetadata is updated and copied to the GPU if there is a
+        new/resumed/paused/finished request in the batch.
         """
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             self.requests.pop(req_id, None)
-
         # Remove the finished requests from the persistent batch.
         # NOTE(woosuk): There could be an edge case where finished_req_ids and
         # scheduled_req_ids overlap. This happens when a request is aborted and
         # then resubmitted with the same ID. In this case, we treat them as two
         # distinct requests - clearing the cached states for the first request
         # and handling the second as a new request.
-        removed_req_indices: List[int] = []
+        removed_req_indices: list[int] = []
         for req_id in scheduler_output.finished_req_ids:
             req_index = self.input_batch.remove_request(req_id)
             if req_index is not None:
@@ -810,7 +826,7 @@ class HPUModelRunner:
             assert req_index is not None
             removed_req_indices.append(req_index)
 
-        req_ids_to_add: List[str] = []
+        req_ids_to_add: list[str] = []
         # Add new requests to the cached states.
         for new_req_data in scheduler_output.scheduled_new_reqs:
             req_id = new_req_data.req_id
@@ -841,7 +857,20 @@ class HPUModelRunner:
             req_id = req_data.req_id
             req_state = self.requests[req_id]
             # Update the cached states.
-            req_state.num_computed_tokens = req_data.num_computed_tokens
+            num_computed_tokens = req_data.num_computed_tokens
+            req_state.num_computed_tokens = num_computed_tokens
+            # Add the sampled token(s) from the previous step (if any).
+            # This doesn't include "unverified" tokens like spec decode tokens.
+            num_new_tokens = (num_computed_tokens +
+                              len(req_data.new_token_ids) -
+                              req_state.num_tokens)
+            if num_new_tokens == 1:
+                # Avoid slicing list in most common case.
+                req_state.output_token_ids.append(req_data.new_token_ids[-1])
+            elif num_new_tokens > 0:
+                req_state.output_token_ids.extend(
+                    req_data.new_token_ids[-num_new_tokens:])
+            # Update the block IDs.
             if not req_data.resumed_from_preemption:
                 # Append the new blocks to the existing block IDs.
                 req_state.block_ids.extend(req_data.new_block_ids)
@@ -860,11 +889,30 @@ class HPUModelRunner:
 
             # Update the persistent batch.
             self.input_batch.num_computed_tokens_cpu[req_index] = (
-                req_data.num_computed_tokens)
-            start_index = len(req_state.block_ids) - len(
-                req_data.new_block_ids)
-            self.input_batch.block_table.append_row(req_index, start_index,
-                                                    req_data.new_block_ids)
+                num_computed_tokens)
+            self.input_batch.block_table.append_row(req_data.new_block_ids,
+                                                    req_index)
+            # Add new_token_ids to token_ids_cpu.
+            start_token_index = num_computed_tokens
+            end_token_index = num_computed_tokens + len(req_data.new_token_ids)
+            self.input_batch.token_ids_cpu[
+                req_index,
+                start_token_index:end_token_index] = req_data.new_token_ids
+            self.input_batch.num_tokens_no_spec[req_index] = end_token_index
+            # Add spec_token_ids to token_ids_cpu.
+            spec_token_ids = scheduler_output.scheduled_spec_decode_tokens.get(
+                req_id, ())
+            if spec_token_ids:
+                start_index = end_token_index
+                end_token_index += len(spec_token_ids)
+                self.input_batch.token_ids_cpu[
+                    req_index, start_index:end_token_index] = spec_token_ids
+            # NOTE(woosuk): `num_tokens` here may include spec decode tokens.
+            self.input_batch.num_tokens[req_index] = end_token_index
+
+        # Check if the batch has changed. If not, we can skip copying the
+        # sampling metadata from CPU to GPU.
+        batch_changed = len(removed_req_indices) > 0 or len(req_ids_to_add) > 0
 
         # Add the new or resumed requests to the persistent batch.
         # The smaller empty indices are filled first.
@@ -882,8 +930,11 @@ class HPUModelRunner:
         # Condense the batched states if there are empty indices.
         if removed_req_indices:
             self.input_batch.condense(removed_req_indices)
-        return (len(unscheduled_req_ids) > 0 or len(req_ids_to_add) > 0
-                or len(scheduler_output.finished_req_ids) > 0)
+
+        if batch_changed:
+            self.input_batch.refresh_sampling_metadata()
+
+        return batch_changed
 
     def get_model(self) -> torch.nn.Module:
         assert self.model is not None
@@ -941,10 +992,10 @@ class HPUModelRunner:
 
     def _prepare_sampling(self,
                           batch_changed: bool,
-                          request_ids: Union[None, List[str]] = None,
+                          request_ids: Union[None, list[str]] = None,
                           pad_to: Optional[int] = None) -> SamplingMetadata:
         # Create the sampling metadata.
-        req_id_output_token_ids: Dict[str, List[int]] = \
+        req_id_output_token_ids: dict[str, list[int]] = \
             {req_id: req.output_token_ids \
                 for req_id, req in self.requests.items()}
         if request_ids is not None:
@@ -986,7 +1037,7 @@ class HPUModelRunner:
                 block_bucket_size = \
                     self.bucketing_ctx.get_padded_decode_num_blocks(
                     block_bucket_size)
-            indices: List[Any]
+            indices: list[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
                 indices[bid] = i
@@ -1085,7 +1136,7 @@ class HPUModelRunner:
     def _prepare_prefill_inputs(self,
                                 total_num_prefills,
                                 num_decodes,
-                                num_scheduled_tokens: List[int],
+                                num_scheduled_tokens: list[int],
                                 bucketing=True) -> PrefillInputData:
         # Each prefill run separately with shape [1, padded_prompt_len].
         # So we create lists that will be used in execute_model().
@@ -1331,7 +1382,7 @@ class HPUModelRunner:
                                                          self.block_size))
         block_offsets = padded_index % self.block_size
         slot_mapping = block_number * self.block_size + block_offsets
-        # Set an out of range value for the padding tokens so that they
+        # set an out of range value for the padding tokens so that they
         # are ignored when inserting into the KV cache.
         slot_mapping = slot_mapping[:padded_batch_size]
         dummy_slots = itertools.cycle(
@@ -1400,7 +1451,7 @@ class HPUModelRunner:
             num_prefills,
             num_decodes,
             bucketing=True
-    ) -> Tuple[PrefillInputData, Optional[DecodeInputData]]:
+    ) -> tuple[PrefillInputData, Optional[DecodeInputData]]:
 
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         assert total_num_scheduled_tokens > 0
@@ -1637,13 +1688,13 @@ class HPUModelRunner:
         # Discard garbage tokens from prefills and/or decodes
         if prefill_output_cpu is not None and decode_output_cpu is not None:
             sampled_token_ids_cpu = torch.cat(
-                (decode_output_cpu[:num_decodes],
-                 prefill_output_cpu[:num_prefills]),
+                (decode_output_cpu[:num_decodes].flatten(),
+                 prefill_output_cpu[:num_prefills].flatten()),
                 dim=0)
         else:
-            sampled_token_ids_cpu = decode_output_cpu[:num_decodes] \
+            sampled_token_ids_cpu = decode_output_cpu[:num_decodes].flatten() \
                 if decode_output_cpu is not None \
-                    else prefill_output_cpu[:num_prefills]
+                    else prefill_output_cpu[:num_prefills].flatten()
 
         sampled_token_ids_list = sampled_token_ids_cpu.tolist()
 
@@ -1665,20 +1716,22 @@ class HPUModelRunner:
                 req_state.output_token_ids.append(token_id)
             else:
                 sampled_token_ids_list[i] = 0
-
         ################## RETURN ##################
         # Create output.
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
-        prompt_logprobs_dict: Dict[str, Optional[LogprobsTensors]] = {}
+        prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
         for req_id in all_req_ids:
             prompt_logprobs_dict[req_id] = None
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
 
+        # in spec decode, multiple tokens can be returned, and I suspect
+        # scheduler expects a list of tokens per seq here
         model_runner_output = ModelRunnerOutput(
             req_ids=all_req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
-            sampled_token_ids=sampled_token_ids_list,
+            sampled_token_ids=[[i] for i in sampled_token_ids_list],
             logprobs=None,
+            spec_token_ids=None,
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
         )
 
@@ -1879,8 +1932,8 @@ class HPUModelRunner:
         idx = 0
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
         num_candidates = len(buckets)
-        ordering : Union[Callable[[Any], Tuple[Any, Any]], \
-            Callable[[Any], Tuple[Any, Any, Any]]]
+        ordering : Union[Callable[[Any], tuple[Any, Any]], \
+            Callable[[Any], tuple[Any, Any, Any]]]
         if strategy == 'min_tokens':
             ordering = lambda b: (b[0] * b[1], b[1], b[0])
         elif strategy == 'max_bs':
@@ -2071,39 +2124,44 @@ class HPUModelRunner:
         """
         Initialize KV cache based on `kv_cache_config`.
         Args:
-            kv_cache_config: Configuration for the KV cache, including the KV 
+            kv_cache_config: Configuration for the KV cache, including the KV
             cache size of each layer
         """
-        if len(kv_cache_config.groups) > 1:
+        if len(kv_cache_config.kv_cache_groups) > 1:
             raise NotImplementedError(
                 "Hybrid models with more than one KV cache type are not "
                 "supported yet.")
 
-        kv_caches: Dict[str, torch.Tensor] = {}
-        for layer_name, layer_spec in kv_cache_config.kv_cache_spec.items():
-            tensor_config = kv_cache_config.tensors[layer_name]
-            assert tensor_config.size % layer_spec.page_size_bytes == 0
-            num_blocks = tensor_config.size // layer_spec.page_size_bytes
-            if isinstance(layer_spec, FullAttentionSpec):
-                # NOTE(kzawora): We allocate one block more than specified,
-                # the last one will be used as scratch space for padded
-                # sequences. This should never produce any OOM errors, as
-                # the additional memory needed for the scratch space was
-                # taken into account in the `determine_available_memory` method.
-                kv_cache_shape = HPUAttentionBackendV1.get_kv_cache_shape(
-                    num_blocks + 1, layer_spec.block_size,
-                    layer_spec.num_kv_heads, layer_spec.head_size)
-                dtype = layer_spec.dtype
-                if dtype == torch.float8_e4m3fn:
-                    dtype = torch.uint8
-                key_cache = torch.zeros(kv_cache_shape,
-                                        dtype=dtype,
-                                        device=self.device)
-                value_cache = torch.zeros_like(key_cache)
+        kv_caches: dict[str, torch.Tensor] = {}
 
-                kv_caches[layer_name] = (key_cache, value_cache)
-            else:
-                raise NotImplementedError
+        for kv_cache_group in kv_cache_config.kv_cache_groups:
+            kv_cache_spec = kv_cache_group.kv_cache_spec
+            for layer_name in kv_cache_group.layer_names:
+                tensor_config = kv_cache_config.tensors[layer_name]
+                assert tensor_config.size % kv_cache_spec.page_size_bytes == 0
+                num_blocks = tensor_config.size // kv_cache_spec.page_size_bytes
+                # `num_blocks` is the number of blocks the model runner can use.
+                # `kv_cache_config.num_blocks` is the number of blocks that
+                # KVCacheManager may allocate.
+                # Since different GPUs may have different number of layers and
+                # different memory capacities, `num_blocks` can be different on
+                # different GPUs, and `kv_cache_config.num_blocks` is set to
+                # the min of all `num_blocks`. Verify it here.
+                assert num_blocks >= kv_cache_config.num_blocks
+                if isinstance(kv_cache_spec, FullAttentionSpec):
+                    kv_cache_shape = self.attn_backend.get_kv_cache_shape(
+                        num_blocks + 1, kv_cache_spec.block_size,
+                        kv_cache_spec.num_kv_heads, kv_cache_spec.head_size)
+                    dtype = kv_cache_spec.dtype
+                    key_cache = torch.zeros(kv_cache_shape,
+                                            dtype=dtype,
+                                            device=self.device)
+                    value_cache = torch.zeros_like(key_cache)
+                    kv_caches[layer_name] = (key_cache, value_cache)
+                else:
+                    # TODO: add new branches when introducing more types of
+                    # KV cache specs.
+                    raise ValueError("Unknown KV cache spec type.")
 
         bind_kv_cache(
             kv_caches,
