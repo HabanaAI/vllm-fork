@@ -92,6 +92,20 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     cross_attn_bias: Optional[torch.Tensor] = None
 
 
+def update_kv_cache(cache, input, block_indices, block_offsets, slot_mapping):
+    if block_offsets is None:
+        cache.index_copy_(0, block_indices, input)
+        return cache
+
+    num_blocks = cache.shape[0]
+    block_size = cache.shape[1]
+    cache_flat = cache.view(num_blocks * block_size, *cache.shape[2:])
+
+    cache_flat.index_copy_(0, slot_mapping.squeeze(-1), input)
+    cache_flat = cache_flat.view(num_blocks, block_size, *cache.shape[2:])
+    return cache_flat
+
+
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
@@ -216,8 +230,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         value = value.view(-1, self.num_kv_heads, self.head_size)
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
+        slot_mapping = attn_metadata.slot_mapping
         if attn_metadata.is_prompt and self.attn_type \
-            is not AttentionType.ENCODER_ONLY:
+                is not AttentionType.ENCODER_ONLY:
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
@@ -227,10 +242,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices,
-                                     block_offsets)
-            value_cache = self.v_cache(value, value_cache, block_indices,
-                                       block_offsets)
+            key_cache = update_kv_cache(key_cache, key, block_indices,
+                                        block_offsets, slot_mapping)
+            value_cache = update_kv_cache(value_cache, value, block_indices,
+                                          block_offsets, slot_mapping)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -243,7 +258,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         and not self.prefill_use_flex_attention):
                     # TODO: move this outside of model
                     assert attn_metadata.attn_bias is not None, \
-                            'attn_bias must be set before calling model.forward'
+                        'attn_bias must be set before calling model.forward'
                     attn_bias = attn_metadata.attn_bias
                     if self.alibi_slopes is not None:
                         position_bias = _make_alibi_bias(
