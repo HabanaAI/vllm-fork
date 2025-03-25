@@ -1,0 +1,1 @@
+{"mode": "QUANTIZE","observer": "maxabs","scale_method": "maxabs_hw","scale_format": "scalar","device_for_scales": "Gaudi2","allowlist": {"types": [],"names": []},"blocklist": {"types": [],"names": ["lm_head", "batch2block_matmul", "block2batch_matmul"]},"dump_stats_path": "quant_files/inc/meta-llama-3.1-70b-instruct/g3/inc_output"}

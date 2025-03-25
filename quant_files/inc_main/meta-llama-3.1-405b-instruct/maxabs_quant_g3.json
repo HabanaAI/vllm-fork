@@ -1,0 +1,1 @@
+{"mode": "QUANTIZE","observer": "maxabs","scale_method": "maxabs_hw","allowlist": {"types": [],"names": []},"blocklist": {"types": [],"names": ["lm_head"]},"dump_stats_path": "quant_files/inc_main/meta-llama-3.1-405b-instruct/g3/inc_output"}

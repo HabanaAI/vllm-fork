@@ -1,0 +1,116 @@
+diff --git a/torch/algorithms/fp8_quant/_quant_common/helper_modules.py b/torch/algorithms/fp8_quant/_quant_common/helper_modules.py
+index ee24abff9..4e2fdc0ae 100644
+--- a/torch/algorithms/fp8_quant/_quant_common/helper_modules.py
++++ b/torch/algorithms/fp8_quant/_quant_common/helper_modules.py
+@@ -113,6 +113,7 @@ class PatchedMatmul(PatchedModuleBase):
+                                  out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                                  scale_input_inv=self.scale_input,
+                                  scale_other_inv=self.scale_other)
++        torch.hpu.synchronize()
+         return output
+ 
+     def forward_qdq(self, input, other):
+@@ -202,6 +203,7 @@ class PatchedLinear(PatchedModuleBase):
+                             out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                             scale_input_inv=self.scale_input,
+                             scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
+         output = y + self.bias if (self.bias is not None) else y
+         return output
+ 
+@@ -213,6 +215,7 @@ class PatchedLinear(PatchedModuleBase):
+                             out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                             scale_input_inv=scale_input,
+                             scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
+         output = y + self.bias if (self.bias is not None) else y
+         return output
+ 
+@@ -259,6 +262,7 @@ class PatchedParallelLMHead(PatchedModuleBase):
+             scale_input_inv=self.scale_input,
+             scale_other_inv=self.scale_weight,
+         )
++        torch.hpu.synchronize()
+         output = y + bias if (bias is not None) else y
+         return output
+ 
+@@ -311,6 +315,7 @@ class PatchedReplicatedLinear(PatchedModuleBase):
+                             out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                             scale_input_inv=self.scale_input,
+                             scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
+         output = y + bias if (bias is not None) else y
+         output_bias = self.bias if self.skip_bias_add else None
+         return output, output_bias
+@@ -357,6 +362,7 @@ class PatchedLinearAllReduce(PatchedModuleBase):
+                                  out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                                  scale_input_inv=self.scale_input,
+                                  scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
+         dqoutput = self.dequant_output(output)
+         if not self.scoped_version:
+             self.all_reduce(dqoutput)
+@@ -439,11 +445,13 @@ class PatchedRowParallelLinear(PatchedModuleBase):
+         """
+         resolved_input = self.resolve_input(input)
+         matmul_input_lp = self.quant_input(resolved_input)
+-        return self.matmul_fp8(matmul_input_lp,
++        output = self.matmul_fp8(matmul_input_lp,
+                                self.weight,
+                                out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                                scale_input_inv=self.scale_input,
+                                scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
++        return output
+ 
+     def forward_quant_no_reduce(self, input):
+         matmul_output_hp = self.lp_matmul_hp(input)
+@@ -559,6 +567,8 @@ class PatchedColumnParallelLinear(PatchedModuleBase):
+                                  out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                                  scale_input_inv=self.scale_input,
+                                  scale_other_inv=self.scale_weight)
++        print("#### sync, self.scale_input ", self.scale_input, " self.scale_weight ", self.scale_weight)
++        torch.hpu.synchronize()
+         dqoutput = self.dequant_output(output)
+         dqoutput, dqoutput_bias = self.add_bias(dqoutput)
+         if self.gather_output:
+@@ -627,6 +637,7 @@ class PatchedLmHeadLinearAllreduce(PatchedModuleBase):
+                                  out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                                  scale_input_inv=self.scale_input,
+                                  scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
+         dqoutput = self.dequant_output(output)
+ 
+         if self.mp_group is not None:
+@@ -705,6 +716,7 @@ class PatchedMoeMatmul(PatchedModuleBase):
+                             out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                             scale_input_inv=self.scale_input,
+                             scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
+         return y
+ 
+     def forward_measure(self, input, *args, **kwargs):
+@@ -1056,6 +1068,7 @@ class PatchedSoftmax(PatchedModuleBase):
+ 
+     def forward_quant(self, x, dim=None, invAttnHead=None):
+         output = self.softmax_fp8(x, dim, self.scale_input, self.scale_output, invAttnHead)
++        torch.hpu.synchronize()
+         return self.dequant_output(output)
+ 
+     def forward_measure(self, x, dim=None, invAttnHead=None):
+@@ -1097,6 +1110,7 @@ class PatchedLoRACompatibleLinear(PatchedModuleBase):
+                             out_dtype=self._mod_extra_config.config_params["hp_dtype"],
+                             scale_input_inv=self.scale_input,
+                             scale_other_inv=self.scale_weight)
++        torch.hpu.synchronize()
+         output = y + self.bias if (self.bias is not None) else y
+         if self.lora_layer is not None:
+             # TODO SW-174899 support lora layer quantization
+@@ -1261,6 +1275,7 @@ class PatchedModuleFusedSDPA(PatchedModuleBase):
+             valid_seq_len=valid_seq_len,
+             seq_padding_type=seq_padding_type,
+         )
++        torch.hpu.synchronize()
+         output = results[0]
+         d_out = self.dequant_output(output)
+         return d_out
