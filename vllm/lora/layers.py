@@ -137,7 +137,7 @@ class BaseLayerWithLoRA(nn.Module):
 
 
 @CustomOp.register("vocab_parallel_embedding_with_lora")
-class VocabParallelEmbeddingWithLoRA(CustomOp):
+class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA, CustomOp):
 
     def __init__(self, base_layer: VocabParallelEmbedding) -> None:
         super().__init__()
