@@ -11,8 +11,7 @@ import torch
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.flags import enabled_flags
-from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
-                                      VLLMKVCache)
+from vllm_hpu_extension.utils import (Matmul, Softmax, VLLMKVCache)
 
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
@@ -234,11 +233,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             attn_bias = attn_metadata.attn_bias
             if attn_bias is not None and self.alibi_slopes is not None:
-                position_bias = _make_alibi_bias(
-                    self.alibi_slopes, self.num_kv_heads,
-                    attn_bias.dtype, attn_bias.shape[-1])
-                attn_bias = attn_bias.tile(
-                    (1, self.num_kv_heads, 1, 1))
+                position_bias = _make_alibi_bias(self.alibi_slopes, self.num_kv_heads,
+                                                 attn_bias.dtype, attn_bias.shape[-1])
+                attn_bias = attn_bias.tile((1, self.num_kv_heads, 1, 1))
                 attn_bias.add_(position_bias)
             if attn_metadata is None or attn_metadata.block_list is None:
                 out = ops.prompt_attention(
@@ -354,14 +351,13 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             query_shape = (batch_size, -1, self.num_heads, self.head_size)
             kv_shape = (batch_size, -1, self.num_kv_heads, self.head_size)
-            out = ops.prompt_attention(
-                impl=self.prefill_impl,
-                query=query.view(query_shape),
-                key=key.view(kv_shape),
-                value=value.view(kv_shape),
-                attn_bias=None,
-                is_causal=False,
-                **self.common_attention_args())
+            out = ops.prompt_attention(impl=self.prefill_impl,
+                                       query=query.view(query_shape),
+                                       key=key.view(kv_shape),
+                                       value=value.view(kv_shape),
+                                       attn_bias=None,
+                                       is_causal=False,
+                                       **self.common_attention_args())
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Enc/dec cross-attention KVs match encoder sequence length;
