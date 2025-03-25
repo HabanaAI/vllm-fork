@@ -11,7 +11,7 @@ import torch
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.flags import enabled_flags
-from vllm_hpu_extension.utils import (Matmul, Softmax, VLLMKVCache)
+from vllm_hpu_extension.utils import Matmul, Softmax, VLLMKVCache
 
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
@@ -233,8 +233,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             attn_bias = attn_metadata.attn_bias
             if attn_bias is not None and self.alibi_slopes is not None:
-                position_bias = _make_alibi_bias(self.alibi_slopes, self.num_kv_heads,
-                                                 attn_bias.dtype, attn_bias.shape[-1])
+                position_bias = _make_alibi_bias(self.alibi_slopes,
+                                                 self.num_kv_heads,
+                                                 attn_bias.dtype,
+                                                 attn_bias.shape[-1])
                 attn_bias = attn_bias.tile((1, self.num_kv_heads, 1, 1))
                 attn_bias.add_(position_bias)
             if attn_metadata is None or attn_metadata.block_list is None:
