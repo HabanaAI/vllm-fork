@@ -26,20 +26,15 @@ def profile_ctx():
         )
 
 def get_slice(t, slice_type, start_idx, end_idx, rearrange_outside):
-    if rearrange_outside:
-        if slice_type == 'original':
-            return t[:, :, start_idx:end_idx]
-        elif slice_type == 'index_select':
-            return torch.index_select(t, 2, torch.arange(start_idx, end_idx, device=t.device, dtype=torch.int32))
-        else:
-            assert False
+    if slice_type == 'original':
+            return t[:, :, start_idx:end_idx] if rearrange_outside else t[:, start_idx:end_idx]
+    elif slice_type == 'index_select':
+        return torch.index_select(t, 2 if rearrange_outside else 1, torch.arange(start_idx, end_idx, device=t.device, dtype=torch.int32))
+    elif slice_type == 'reshape':
+        return t[:, :, start_idx//64] if rearrange_outside else t[:, start_idx//64]
     else:
-        if slice_type == 'original':
-            return t[:, start_idx:end_idx]
-        elif slice_type == 'index_select':
-            return torch.index_select(t, 1, torch.arange(start_idx, end_idx, device=t.device, dtype=torch.int32))
-        else:
-            assert False
+        assert False
+
 
 def attention_split(attn_type, index_type, warmup, islist, rearrange_outside):
     batch_size = 1
@@ -72,6 +67,19 @@ def attention_split(attn_type, index_type, warmup, islist, rearrange_outside):
     t1 = time.time()
     if rearrange_outside:
         q, k, v = (rearrange(x, "b s h d -> b h s d") for x in [q, k, v])
+    if index_type == 'reshape':
+        if rearrange_outside:
+            b, h, s, d = q.shape
+        else:
+            b, s, h, d = q.shape
+        if rearrange_outside:
+            q = q.reshape([b, h, -1, 64, d])
+            k = k.reshape([b, h, -1, 64, d])
+            v = v.reshape([b, h, -1, 64, d])
+        else:
+            q = q.reshape([b, -1, 64, h, d])
+            k = k.reshape([b, -1, 64, h, d])
+            v = v.reshape([b, -1, 64, h, d])
     for i in range(1, len(cu_seq_lens)):
         start_idx = cu_seq_lens[i - 1]#.item()
         end_idx = cu_seq_lens[i]#.item()
@@ -156,5 +164,18 @@ Fixed timing.. moved it after the sum()
  python attention_split.py -a split_diffres -i original -l
  1915.210 ms
  hoisted:  python attention_split.py -a split_diffres -i original -l -r
- 1285.474
+ 1285.474 ms
+
+ For "reshape" based indexing (which can only work with split_uniform)
+ python attention_split.py -a split_uniform -i reshape -l  -r
+reshape: 16.727
+original: 13.235
+Obv this is not expected to be anything great (infact its slowing it down). if it was on the last dimension then maybe...
+
+
+Why are these 2 overall times so different:
+python attention_split.py -a split_uniform -i original -l  -r
+13.235
+python attention_split.py -a split_diffres -i original -l -r
+1285.474 ms
 '''
