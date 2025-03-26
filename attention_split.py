@@ -25,15 +25,23 @@ def profile_ctx():
             on_trace_ready=torch.profiler.tensorboard_trace_handler("log_dir"),
         )
 
-def get_slice(t, slice_type, start_idx, end_idx):
-    if slice_type == 'original':
-        return t[:, start_idx:end_idx]
-    elif slice_type == 'index_select':
-        return torch.index_select(t, 1, torch.arange(start_idx, end_idx, device=t.device, dtype=torch.int32))
+def get_slice(t, slice_type, start_idx, end_idx, rearrange_outside):
+    if rearrange_outside:
+        if slice_type == 'original':
+            return t[:, :, start_idx:end_idx]
+        elif slice_type == 'index_select':
+            return torch.index_select(t, 2, torch.arange(start_idx, end_idx, device=t.device, dtype=torch.int32))
+        else:
+            assert False
     else:
-        assert False
+        if slice_type == 'original':
+            return t[:, start_idx:end_idx]
+        elif slice_type == 'index_select':
+            return torch.index_select(t, 1, torch.arange(start_idx, end_idx, device=t.device, dtype=torch.int32))
+        else:
+            assert False
 
-def attention_split(attn_type, index_type, warmup, islist):
+def attention_split(attn_type, index_type, warmup, islist, rearrange_outside):
     batch_size = 1
     seq_len = 6400
     attn_heads = 16
@@ -62,16 +70,19 @@ def attention_split(attn_type, index_type, warmup, islist):
     print(f"-------- graph_compilation before start: ", gc_metric.stats()[0][1])
     outputs = []
     t1 = time.time()
+    if rearrange_outside:
+        q, k, v = (rearrange(x, "b s h d -> b h s d") for x in [q, k, v])
     for i in range(1, len(cu_seq_lens)):
         start_idx = cu_seq_lens[i - 1]#.item()
         end_idx = cu_seq_lens[i]#.item()
 
         #print(f"-------- graph_compilation {i}: ", gc_metric.stats()[0][1])
-        q_i = get_slice(q, index_type, start_idx, end_idx)
-        k_i = get_slice(k, index_type, start_idx, end_idx)
-        v_i = get_slice(v, index_type, start_idx, end_idx)
+        q_i = get_slice(q, index_type, start_idx, end_idx, rearrange_outside)
+        k_i = get_slice(k, index_type, start_idx, end_idx, rearrange_outside)
+        v_i = get_slice(v, index_type, start_idx, end_idx, rearrange_outside)
         #print(f"-------- graph_compilation {i}: ", gc_metric.stats()[0][1], q_i.shape)
-        q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d") for x in [q_i, k_i, v_i])
+        if not rearrange_outside:
+            q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d") for x in [q_i, k_i, v_i])
 
         if device == "hpu":
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
@@ -82,14 +93,16 @@ def attention_split(attn_type, index_type, warmup, islist):
                 q_i, k_i, v_i, dropout_p=0.0
             )
 
-        output_i = rearrange(output_i, "b h s d -> b s h d ")
+        if not rearrange_outside:
+            output_i = rearrange(output_i, "b h s d -> b s h d ")
         outputs.append(output_i)
 
-    t2 = time.time()
-
-    context_layer = torch.cat(outputs, dim=1)
+    context_layer = torch.cat(outputs, dim=2 if rearrange_outside else 1)
+    if rearrange_outside:
+        context_layer = rearrange(context_layer, "b h s d -> b s h d ")
     x = context_layer.sum().item()
     print('Final sum', x)
+    t2 = time.time()
     if not warmup:
         golden = {"split_diffres": -2587.10302734375, "split_uniform": -2511.75732421875, "nosplit": -2134.07568359375}
         assert x == golden[attn_type], x # for seed set to 0
@@ -104,17 +117,19 @@ def attention_split(attn_type, index_type, warmup, islist):
 def main():
     parser = argparse.ArgumentParser(description="A simple example of argparse")
     parser.add_argument("-a", "--attn_type", type=str, help="options for cu_seq_lens", choices=['split_uniform', 'split_diffres', 'nosplit'])
-    parser.add_argument("-i", "--index_type", type=str, help="options for indexing", choices=['original', 'index_select'])
+    parser.add_argument("-i", "--index_type", type=str, help="options for indexing", choices=['original', 'index_select', 'reshape'])
     parser.add_argument("-p", "--profile", action='store_true', help='Profile')
     parser.add_argument("-w", "--warmup_exact", action='store_true', help='warmup with exact shapes as actual run')
     parser.add_argument("-l", "--list", action='store_true', help='cu_seq_lens is a list, else its a tensor by default')
+    parser.add_argument("-r", "--rearrange_outside", action='store_true', help='hoist rearrange out of loop')
     args = parser.parse_args()
     if args.attn_type == 'split_diffres' and args.index_type == 'reshape':
         assert False, 'These cant go together. Use split_uniform with reshape'
+        # TODO implement reshape based slicing
     ctx = profile_ctx if args.profile else contextlib.nullcontext
-    attention_split(args.attn_type, args.index_type, (not args.warmup_exact), args.list)  ## warmup
+    attention_split(args.attn_type, args.index_type, (not args.warmup_exact), args.list, args.rearrange_outside)  ## warmup
     with ctx() as p:
-        attention_split(args.attn_type, args.index_type, False, args.list)
+        attention_split(args.attn_type, args.index_type, False, args.list, args.rearrange_outside)
     print('Test done')
 
 if __name__ == "__main__":
@@ -132,8 +147,14 @@ python attention_split.py -a split_diffres -i index_select -w
 
 
 python attention_split.py -a split_diffres -i index_select -l
-no recomps, very fast
+no recomps
 
 python attention_split.py -a split_diffres -i original -l
-no recomps, very fast
+no recomps
+
+Fixed timing.. moved it after the sum()
+ python attention_split.py -a split_diffres -i original -l
+ 1915.210 ms
+ hoisted
+ 1285.474
 '''
