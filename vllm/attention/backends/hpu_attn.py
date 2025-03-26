@@ -92,20 +92,6 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     cross_attn_bias: Optional[torch.Tensor] = None
 
 
-def update_cache(cache, input, block_indices, block_offsets, flat_indices_with_offsets):
-    if block_offsets is None:
-        cache.index_copy_(0, block_indices, input)
-        return cache
-
-    num_blocks = cache.shape[0]
-    block_size = cache.shape[1]
-    cache_flat = cache.view(num_blocks * block_size, *cache.shape[2:])
-
-    cache_flat.index_copy_(0, flat_indices_with_offsets, input)
-    cache_flat = cache_flat.view(num_blocks, block_size, *cache.shape[2:])
-    return cache_flat
-
-
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
@@ -229,7 +215,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         value = value.view(-1, self.num_kv_heads, self.head_size)
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
-        slot_mapping = attn_metadata.slot_mapping
+        flat_indices_with_offsets = attn_metadata.slot_mapping.squeeze(
+            -1) if block_offsets is not None else None
         if attn_metadata.is_prompt and self.attn_type \
             is not AttentionType.ENCODER_ONLY \
             and attn_metadata.block_list is None:
@@ -242,10 +229,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = update_cache(key_cache, key, block_indices,
-                                     block_offsets, slot_mapping.squeeze(-1))
-            value_cache = update_cache(value_cache, value, block_indices,
-                                       block_offsets, slot_mapping.squeeze(-1))
+            key_cache = self.k_cache(key_cache, key, block_indices,
+                                     flat_indices_with_offsets)
+            value_cache = self.v_cache(value_cache, value, block_indices,
+                                       flat_indices_with_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
