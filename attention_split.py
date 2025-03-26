@@ -27,7 +27,7 @@ def profile_ctx():
 def get_slice(t, slice_type, start_idx, end_idx):
     if slice_type == 'original':
         return t[:, start_idx:end_idx]
-    elif slice_type == 'index_get':
+    elif slice_type == 'index_select':
         return torch.index_select(t, 1, torch.arange(start_idx, end_idx, device=t.device, dtype=torch.int32))
     else:
         assert False
@@ -94,7 +94,7 @@ def attention_split(attn_type, index_type, warmup):
 def main():
     parser = argparse.ArgumentParser(description="A simple example of argparse")
     parser.add_argument("-a", "--attn_type", type=str, help="options for cu_seq_lens", choices=['split_uniform', 'split_diffres', 'nosplit'])
-    parser.add_argument("-i", "--index_type", type=str, help="options for indexing", choices=['original', 'index_get'])
+    parser.add_argument("-i", "--index_type", type=str, help="options for indexing", choices=['original', 'index_select'])
     parser.add_argument("-p", "--profile", action='store_true', help='Profile')
     parser.add_argument("-w", "--warmup_exact", action='store_true', help='warmup with exact shapes as actual run')
     args = parser.parse_args()
@@ -109,9 +109,9 @@ if __name__ == "__main__":
 
 '''
 We see recompilation in both these cases, which is not ideal
-python attention_split.py -a split_diffres -i index_get
+python attention_split.py -a split_diffres -i index_select
 python attention_split.py -a split_diffres -i original
 
 If we ran with exact shapes, ie if we set the True->False in the warmup run, we wouldnt get recompilations as expected, ie:
-python attention_split.py -a split_diffres -i index_get -w
+python attention_split.py -a split_diffres -i index_select -w
 '''
