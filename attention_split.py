@@ -155,6 +155,6 @@ no recomps
 Fixed timing.. moved it after the sum()
  python attention_split.py -a split_diffres -i original -l
  1915.210 ms
- hoisted
+ hoisted:  python attention_split.py -a split_diffres -i original -l -r
  1285.474
 '''
