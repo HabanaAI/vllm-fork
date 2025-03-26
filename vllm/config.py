@@ -1019,6 +1019,7 @@ class CacheConfig:
             prefix caching enabled.
         enable_prefix_caching: Whether to enable prefix caching.
         cpu_offload_gb: Size of the CPU offload buffer in GiB.
+        split_qkv: Whether to split the QKV calculations.
     """
 
     def compute_hash(self) -> str:
@@ -1051,6 +1052,7 @@ class CacheConfig:
         enable_prefix_caching: bool = False,
         cpu_offload_gb: float = 0,
         calculate_kv_scales: Optional[bool] = None,
+        split_qkv: bool = False,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -1062,6 +1064,7 @@ class CacheConfig:
         self.enable_prefix_caching = enable_prefix_caching
         self.cpu_offload_gb = cpu_offload_gb
         self.calculate_kv_scales = calculate_kv_scales
+        self.split_qkv = split_qkv
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()
@@ -1512,6 +1515,8 @@ class SchedulerConfig:
         return hash_str
 
     def __post_init__(self) -> None:
+        if envs.VLLM_USE_V1:
+            self.use_padding_aware_scheduling = False
         if self.max_num_batched_tokens is None:
             if self.enable_chunked_prefill:
                 if self.num_scheduler_steps > 1:
@@ -2358,7 +2363,7 @@ def _get_and_verify_dtype(
 
             if current_platform.is_hpu() and config_dtype == torch.float16:
                 logger.info(
-                    "For HPU, we cast models to bfloat16 instead of"
+                    "For HPU, we cast models to bfloat16 instead of "
                     "using float16 by default. Please specify `dtype` if you "
                     "want to use float16.")
                 torch_dtype = torch.bfloat16
@@ -3231,7 +3236,8 @@ class VllmConfig:
         if self.compilation_config is None:
             self.compilation_config = CompilationConfig()
         if envs.VLLM_USE_V1 and self.model_config is not None and \
-            not self.model_config.enforce_eager:
+            not self.model_config.enforce_eager and \
+                not current_platform.is_hpu():
             # NOTE(woosuk): Currently, we use inductor because the piecewise
             # CUDA graphs do not work properly with the custom CUDA kernels.
             # FIXME(woosuk): Disable inductor to reduce the compilation time
