@@ -91,7 +91,8 @@ def attention_split(attn_type, index_type, warmup, islist):
     x = context_layer.sum().item()
     print('Final sum', x)
     if not warmup:
-        assert x == -2587.10302734375, x # for seed set to 0
+        golden = {"split_diffres": -2587.10302734375, "split_uniform": -2511.75732421875, "nosplit": -2134.07568359375}
+        assert x == golden[attn_type], x # for seed set to 0
     # print(context_layer)
     print(f"attn_type: {attn_type}: Time Taken = {(t2 - t1) * 1000:.3f} ms")
     print(f'cu_seq_lens = {cu_seq_lens}')
