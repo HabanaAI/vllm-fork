@@ -155,6 +155,8 @@ class HPUPoolingModelRunner(
 
             if model_input.attn_metadata.enable_merged_prefill:
                 prompt_offsets = np.insert(np.cumsum(model_input.attn_metadata.seq_lens[:-1]), 0, 0)
+                #TODO: check if we can set this to None
+                #prompt_offsets_tensor = None
             else:
                 prompt_offsets = [
                     i * model_input.input_tokens.shape[1]

@@ -365,41 +365,34 @@ class HpuModelAdapter:
         # get length of each sequence
         repeated_idx = attn_metadata.repeated_idx_tensor.view(1, -1).expand(
             max_seq_len, -1)
-        #import pdb;pdb.set_trace()
         # create tensor with indices from 0 to T-1, T times along dimension 1
-        len_mask = torch.arange(0,
-                                    max_seq_len,
-                                    dtype=torch.long,
-                                    device=device).view(-1, 1).expand(
-                                        -1, max_seq_len)
+        mask_indices = torch.arange(0, max_seq_len, dtype=torch.int32, device=device).view(-1,1).expand(-1, max_seq_len)
         # create mask and mask out tokens from preceding sequences
-        len_mask = len_mask.le(repeated_idx)
+
+        mask = mask_indices.le(repeated_idx)
 
         if self.is_causal:
-            attn_mask = torch.ones(max_seq_len,
-                                    max_seq_len,
-                                    dtype=torch.bool,
-                                    device=device).tril()
+            attn_mask = torch.ones(max_seq_len, max_seq_len, dtype=torch.bool, device=device).tril()
+            attn_mask = attn_mask.logical_and(mask)
         else:
-            attn_mask = torch.zeros((max_seq_len, max_seq_len),
-                                    device=device,
-                                    dtype=torch.bool)
-        mask = attn_mask.logical_or(len_mask)    
+            mask_indices_offset = torch.arange(0,max_seq_len).view(1, -1).expand(max_seq_len,max_seq_len).to(device)
+            repeated_idx_offset = torch.tensor(attn_metadata.repeated_idx_tensor).view(-1, 1 ).expand(max_seq_len, max_seq_len).to(device)
+            mask_offset = mask_indices_offset.le(repeated_idx_offset)
+            attn_mask = mask.logical_and(mask_offset)
+
         if self.is_pooler:
+            mask_v = (torch.arange(0, max_seq_len, dtype=torch.int32,
+                            device=device).view(max_seq_len,1).lt(torch.sum(attn_metadata.seq_lens_tensor)))
+            attn_mask = attn_mask.logical_and(mask_v)
             off_value = -3E38  #small number, avoid nan and overflow      
         else:
             off_value = -math.inf
-            
-        attn_bias = torch.zeros_like(mask,
-                                    device=device,
-                                    dtype=dtype).masked_fill_(
-                                    ~mask, off_value)
-        attn_bias = attn_bias.view(
-            1, 1, attn_bias.shape[0],
-            attn_bias.shape[1])
+        attn_mask_tensor = torch.zeros_like(attn_mask, device=device, dtype=dtype).masked_fill_(~attn_mask, off_value)
+        attn_mask_tensor = attn_mask_tensor.view(
+            1, 1, attn_mask_tensor.shape[0], attn_mask_tensor.shape[1])
 
         attn_metadata = attn_metadata._replace(
-            attn_bias=attn_bias)
+            attn_bias=attn_mask_tensor)
         return attn_metadata
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
         mask = torch.arange(0,
@@ -1483,6 +1476,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         repeated_idx = list(
             itertools.chain.from_iterable(repeated_idx)
         ) + [merged_prompt_len] * (merged_prompt_len - sum(seq_lens))
+
         prefix_block_list_tensor = None
 
         repeated_idx_tensor = torch.tensor(repeated_idx,

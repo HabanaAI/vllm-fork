@@ -150,10 +150,10 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
                          ) if fixed_output_len is None else fixed_output_len
-        if prompt_len < 4 or output_len < 4:
+        if prompt_len < args.min_input_len or output_len < 4:
             # Prune too short sequences.
             continue
-        if prompt_len > 1024 or prompt_len + output_len > 2048:
+        if prompt_len > args.max_input_len or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
         filtered_dataset.append(
@@ -479,6 +479,14 @@ if __name__ == "__main__":
                         type=int,
                         default=1000,
                         help="Number of prompts to process.")
+    parser.add_argument("--min-input-len",
+                        type=int,
+                        default=4,
+                        help="Min input prompt len in dataset to process.")
+    parser.add_argument("--max-input-len",
+                        type=int,
+                        default=1024,
+                        help="Max input prompt len in dataset to process.")
     parser.add_argument("--hf-max-batch-size",
                         type=int,
                         default=None,
