@@ -229,9 +229,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key_cache, key, block_indices,
+            key_cache = self.k_cache(key, key_cache, block_indices,
                                      flat_indices_with_offsets)
-            value_cache = self.v_cache(value_cache, value, block_indices,
+            value_cache = self.v_cache(value, value_cache, block_indices,
                                        flat_indices_with_offsets)
 
         if attn_metadata.is_prompt:
