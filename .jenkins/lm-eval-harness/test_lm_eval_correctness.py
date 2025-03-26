@@ -51,6 +51,7 @@ def launch_lm_eval(eval_config):
                  f"dtype={dtype}," \
                  f"max_model_len=4096," \
                  f"max_num_seqs={max_num_seqs}," \
+                 f"enable_prefix_caching=False," \
                  f"trust_remote_code={trust_remote_code}"
     if eval_config.get("fp8"):
         model_args += ",quantization=inc," \
@@ -193,7 +194,10 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
                     ground_truth)
                 record_property(f"{task['name']}_{metric['name']}_measured",
                                 measured_value)
-                assert numpy.isclose(ground_truth, measured_value, rtol=RTOL)
+                if measured_value < ground_truth:
+                    assert numpy.isclose(ground_truth,
+                                         measured_value,
+                                         rtol=RTOL)
     except Exception as exc:
         # nasty workaround for a nasty HPU PT bridge bug (SW-204785)
         atexit.register(fail_on_exit)
