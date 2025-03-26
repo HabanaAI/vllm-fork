@@ -7,6 +7,7 @@ from habana_frameworks.torch.hpu.metrics import metric_global
 import argparse
 import habana_frameworks.torch.core as htcore
 import contextlib
+torch.manual_seed(0)
 
 def profile_ctx():
         activities = [
@@ -32,7 +33,7 @@ def get_slice(t, slice_type, start_idx, end_idx):
     else:
         assert False
 
-def attention_split(attn_type, index_type, warmup):
+def attention_split(attn_type, index_type, warmup, islist):
     batch_size = 1
     seq_len = 6400
     attn_heads = 16
@@ -54,18 +55,22 @@ def attention_split(attn_type, index_type, warmup):
             cu_seq_lens = torch.tensor(list(range(0,5185,64)) + list(range(5200,6401,16)), device=device)
     else:
         cu_seq_lens = torch.tensor([0, seq_len], dtype=torch.int32, device=device)
+    if islist:
+        cu_seq_lens = list(cu_seq_lens.cpu().numpy())
     htcore.mark_step(sync=True) # make sure the tensors are created and ready on device
     gc_metric = metric_global("graph_compilation")
     print(f"-------- graph_compilation before start: ", gc_metric.stats()[0][1])
     outputs = []
     t1 = time.time()
     for i in range(1, len(cu_seq_lens)):
-        start_idx = cu_seq_lens[i - 1].item()
-        end_idx = cu_seq_lens[i].item()
+        start_idx = cu_seq_lens[i - 1]#.item()
+        end_idx = cu_seq_lens[i]#.item()
 
+        #print(f"-------- graph_compilation {i}: ", gc_metric.stats()[0][1])
         q_i = get_slice(q, index_type, start_idx, end_idx)
         k_i = get_slice(k, index_type, start_idx, end_idx)
         v_i = get_slice(v, index_type, start_idx, end_idx)
+        #print(f"-------- graph_compilation {i}: ", gc_metric.stats()[0][1], q_i.shape)
         q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d") for x in [q_i, k_i, v_i])
 
         if device == "hpu":
@@ -83,11 +88,15 @@ def attention_split(attn_type, index_type, warmup):
     t2 = time.time()
 
     context_layer = torch.cat(outputs, dim=1)
+    x = context_layer.sum().item()
+    print('Final sum', x)
+    if not warmup:
+        assert x == -2587.10302734375, x # for seed set to 0
     # print(context_layer)
     print(f"attn_type: {attn_type}: Time Taken = {(t2 - t1) * 1000:.3f} ms")
     print(f'cu_seq_lens = {cu_seq_lens}')
     gc_metric = metric_global("graph_compilation")
-    print(f"-------- graph_compilation before start: ", gc_metric.stats()[0][1])
+    print(f"-------- graph_compilation at end: ", gc_metric.stats()[0][1])
 
 
 # # Run the test
@@ -97,11 +106,15 @@ def main():
     parser.add_argument("-i", "--index_type", type=str, help="options for indexing", choices=['original', 'index_select'])
     parser.add_argument("-p", "--profile", action='store_true', help='Profile')
     parser.add_argument("-w", "--warmup_exact", action='store_true', help='warmup with exact shapes as actual run')
+    parser.add_argument("-l", "--list", action='store_true', help='cu_seq_lens is a list, else its a tensor by default')
     args = parser.parse_args()
+    if args.attn_type == 'split_diffres' and args.index_type == 'reshape':
+        assert False, 'These cant go together. Use split_uniform with reshape'
     ctx = profile_ctx if args.profile else contextlib.nullcontext
-    attention_split(args.attn_type, args.index_type, (not args.warmup_exact))  ## warmup
+    attention_split(args.attn_type, args.index_type, (not args.warmup_exact), args.list)  ## warmup
     with ctx() as p:
-        attention_split(args.attn_type, args.index_type, False)
+        attention_split(args.attn_type, args.index_type, False, args.list)
+    print('Test done')
 
 if __name__ == "__main__":
     main()
@@ -114,4 +127,12 @@ python attention_split.py -a split_diffres -i original
 
 If we ran with exact shapes, ie if we set the True->False in the warmup run, we wouldnt get recompilations as expected, ie:
 python attention_split.py -a split_diffres -i index_select -w
+
+
+
+python attention_split.py -a split_diffres -i index_select -l
+no recomps, very fast
+
+python attention_split.py -a split_diffres -i original -l
+no recomps, very fast
 '''
