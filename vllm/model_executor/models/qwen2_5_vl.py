@@ -305,14 +305,15 @@ class Qwen2_5_VisionAttention(nn.Module):
         elif self.attn_backend == _Backend.TORCH_SDPA:
             # Execute attention entry by entry for speed & less VRAM.
             outputs = []
+            q, k, v = (rearrange(x, "b s h d -> b h s d") for x in [q, k, v])
             for i in range(1, len(cu_seqlens)):
                 start_idx = cu_seqlens[i - 1]
                 end_idx = cu_seqlens[i]
-                q_i = q[:, start_idx:end_idx]
-                k_i = k[:, start_idx:end_idx]
-                v_i = v[:, start_idx:end_idx]
-                q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
-                                 for x in [q_i, k_i, v_i])
+                q_i = q[:, :, start_idx:end_idx]
+                k_i = k[:, :, start_idx:end_idx]
+                v_i = v[:, :, start_idx:end_idx]
+                #q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
+                #                 for x in [q_i, k_i, v_i])
                 if is_hpu:
                     from habana_frameworks.torch.hpex.kernels import FusedSDPA
                     output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
@@ -321,9 +322,10 @@ class Qwen2_5_VisionAttention(nn.Module):
                                                               k_i,
                                                               v_i,
                                                               dropout_p=0.0)
-                output_i = rearrange(output_i, "b h s d -> b s h d ")
+                #output_i = rearrange(output_i, "b h s d -> b s h d ")
                 outputs.append(output_i)
-            context_layer = torch.cat(outputs, dim=1)
+            context_layer = torch.cat(outputs, dim=2)
+            context_layer = rearrange(context_layer, "b h s d -> b s h d ")
         elif self.attn_backend == _Backend.XFORMERS:
             from xformers import ops as xops
             from xformers.ops.fmha.attn_bias import BlockDiagonalMask
