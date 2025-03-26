@@ -57,6 +57,10 @@ while [[ $# -gt 0 ]]; do
             shift 1
         fi
         ;;
+    --random_image_size | -ris)
+        RandomImageSize="On"
+        shift 1
+        ;;
     --iter)
         iter=$2
         shift 2
@@ -135,7 +139,8 @@ fi
 
 if [[ "$model" == *"Qwen2"* ]]; then
     #export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false; unset VLLM_QWEN_SPLIT_GRAPHS
-    export VLLM_QWEN_SPLIT_GRAPHS=true; unset PT_HPUGRAPH_DISABLE_TENSOR_CACHE
+    export VLLM_QWEN_SPLIT_GRAPHS=true
+    unset PT_HPUGRAPH_DISABLE_TENSOR_CACHE
 fi
 
 if [[ -n "$video" ]]; then
@@ -146,6 +151,9 @@ else
     ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
     if [ -n "$ImageWidth" ] && [ -n "$ImageHeight" ]; then
         ARGS="$ARGS --image_width $ImageWidth --image_height $ImageHeight"
+    fi
+    if [ -n "$RandomImageSize" ]; then
+        ARGS="$ARGS --random_img_size"
     fi
 fi
 if [[ -n "$GMU" ]]; then ARGS="$ARGS --gpu_mem_usage $GMU"; fi

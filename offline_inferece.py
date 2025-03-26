@@ -4,6 +4,7 @@ from vllm.assets.image import ImageAsset
 import PIL
 import cv2
 from PIL import Image
+import random
 
 import argparse
 
@@ -23,6 +24,7 @@ parser.add_argument("--iter", help="number of iterations to run")
 parser.add_argument(
     "-gmu", "--gpu_mem_usage", type=float, default=0.9, help="GPU memory usage value"
 )
+parser.add_argument("-ris", "--random_img_size", action="store_true", help="Text only pormpts")
 
 # Parse the arguments
 args = parser.parse_args()
@@ -60,6 +62,11 @@ if args.image:
     if args.image_width and args.image_height:
         image = image.resize((args.image_width, args.image_height))
 
+    if args.random_img_size:
+        rand_width = random.randint(0.5 * args.image_width, 1 * args.image_width)
+        rand_height = random.randint(0.5 * args.image_height, 1 * args.image_height)
+        image2 = image.resize((rand_width, rand_height))
+
 elif args.video:
     video = sample_frames(args.video, 50)
 elif args.text_only:
@@ -68,7 +75,7 @@ else:
     print(f"Unknow image/Video Input {args.image} {args.video}")
     exit
 
-sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
+sampling_params = SamplingParams(temperature=0.0, max_tokens=100)
 
 tested_models = [
     "meta-llama/Llama-3.2-11B-Vision-Instruct",
@@ -140,6 +147,14 @@ else:
                     },
                     {"prompt": prompt, "multi_modal_data": {"image": image}},
                 ]
+                if args.random_img_size:
+                    batch_data2 = [
+                        {"prompt": prompt, "multi_modal_data": {"image": image}},
+                        {
+                            "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
+                        },
+                        {"prompt": prompt, "multi_modal_data": {"image": image2}},
+                    ]
         else:
             if args.text_only:
                 batch_data = [
@@ -149,6 +164,11 @@ else:
                 ]
             else:
                 batch_data = {"prompt": prompt, "multi_modal_data": {"image": image}}
+                if args.random_img_size:
+                    batch_data2 = {
+                        "prompt": prompt,
+                        "multi_modal_data": {"image": image2},
+                    }
 
     elif "Llama-3.2" in mdl:
         llm = LLM(
@@ -168,7 +188,7 @@ else:
 
 for i in range(int(args.iter)):
     print(f"------ iteration: [{i}]")
-    outputs = llm.generate(batch_data)
+    outputs = llm.generate(batch_data if i < 2 else batch_data2, sampling_params)
 
     for o in outputs:
         generated_text = o.outputs[0].text

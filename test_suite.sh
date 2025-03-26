@@ -5,6 +5,7 @@ RunPytests=true
 RunLargeImages=true
 RunOnlineTests=True
 RunMemBenchAnalysis=False
+RandomizedImage=True
 
 #Basic tests
 if $RunBasic; then
@@ -63,4 +64,10 @@ if $RunMemBenchAnalysis; then
 		cmd="VLLM_GRAPH_RESERVED_MEM=.2 bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts --skip_warmup --image_width 1800 --image_height 1200 --iter 5 -gmu $i"
 		echo $cmd >>$filename && eval $cmd 2>&1 | tee -a $filename
 	done
+fi
+
+# Tests with randomized image sizes
+if $RandomizedImage; then
+	bash run_offline.sh -m $ModelName -i snowscat --multiple_prompts --random_image_size --iter 5
+	bash run_offline.sh -m $ModelName -i snowscat --random_image_size --iter 5
 fi
