@@ -30,25 +30,12 @@ from vllm.model_executor.utils import set_weight_attrs
 logger = init_logger(__name__)
 
 WEIGHT_LOADER_V2_SUPPORTED = [
-    "CompressedTensorsLinearMethod",
-    "AWQMarlinLinearMethod",
-    "AWQLinearMethod",
-    "GPTQMarlinLinearMethod",
-    "Fp8LinearMethod",
-    "MarlinLinearMethod",
-    "QQQLinearMethod",
-    "GPTQMarlin24LinearMethod",
-    "TPUInt8LinearMethod",
-    "GPTQLinearMethod",
-    "FBGEMMFp8LinearMethod",
-    "ModelOptFp8LinearMethod",
-    "IPEXAWQLinearMethod",
-    "IPEXGPTQLinearMethod",
-    "HQQMarlinMethod",
-    "QuarkLinearMethod",
-    "ModelOptNvFp4LinearMethod",
-    "AWQHPULinearMethod",
-    "GPTQHPULinearMethod",
+    "CompressedTensorsLinearMethod", "AWQMarlinLinearMethod",
+    "AWQLinearMethod", "GPTQMarlinLinearMethod", "Fp8LinearMethod",
+    "MarlinLinearMethod", "QQQLinearMethod", "GPTQMarlin24LinearMethod",
+    "TPUInt8LinearMethod", "GPTQLinearMethod", "FBGEMMFp8LinearMethod",
+    "ModelOptFp8LinearMethod", "IPEXAWQLinearMethod", "IPEXGPTQLinearMethod",
+    "HQQMarlinMethod", "QuarkLinearMethod"
 ]
 
 
@@ -392,7 +379,6 @@ class ColumnParallelLinear(LinearBase):
                          return_bias=return_bias)
 
         self.gather_output = gather_output
-        self.collective_func = tensor_model_parallel_all_gather
 
         if output_sizes is None:
             output_sizes = [output_size]
@@ -477,7 +463,7 @@ class ColumnParallelLinear(LinearBase):
         output_parallel = self.quant_method.apply(self, input_, bias)
         if self.gather_output:
             # All-gather across the partitions.
-            output = self.collective_func(output_parallel)
+            output = tensor_model_parallel_all_gather(output_parallel)
         else:
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
@@ -1110,73 +1096,6 @@ class QKVParallelLinear(ColumnParallelLinear):
         param_data.copy_(loaded_weight)
 
 
-class SplitQKVParallelLinear(torch.nn.Module):
-
-    def __init__(self,
-                 hidden_size: int,
-                 head_size: int,
-                 total_num_heads: int,
-                 total_num_kv_heads: Optional[int] = None,
-                 bias: bool = True,
-                 skip_bias_add: bool = False,
-                 params_dtype: Optional[torch.dtype] = None,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
-        super().__init__()
-
-        self.hidden_size = hidden_size
-        self.head_size = head_size
-        self.total_num_heads = total_num_heads
-        if total_num_kv_heads is None:
-            total_num_kv_heads = total_num_heads
-        self.total_num_kv_heads = total_num_kv_heads
-        # Divide the weight matrix along the last dimension.
-        tp_size = get_tensor_model_parallel_world_size()
-        self.num_heads = divide(self.total_num_heads, tp_size)
-        if tp_size >= self.total_num_kv_heads:
-            self.num_kv_heads = 1
-            self.num_kv_head_replicas = divide(tp_size,
-                                               self.total_num_kv_heads)
-        else:
-            self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
-            self.num_kv_head_replicas = 1
-
-        input_size = self.hidden_size
-        q_size = self.num_heads * self.head_size * tp_size
-        kv_size = self.num_kv_heads * self.head_size * tp_size
-
-        self.q_proj = ColumnParallelLinear(input_size=input_size,
-                                           output_size=q_size,
-                                           bias=bias,
-                                           gather_output=False,
-                                           skip_bias_add=skip_bias_add,
-                                           params_dtype=params_dtype,
-                                           quant_config=quant_config,
-                                           prefix=prefix)
-        self.k_proj = ColumnParallelLinear(input_size=input_size,
-                                           output_size=kv_size,
-                                           bias=bias,
-                                           gather_output=False,
-                                           skip_bias_add=skip_bias_add,
-                                           params_dtype=params_dtype,
-                                           quant_config=quant_config,
-                                           prefix=prefix)
-        self.v_proj = ColumnParallelLinear(input_size=input_size,
-                                           output_size=kv_size,
-                                           bias=bias,
-                                           gather_output=False,
-                                           skip_bias_add=skip_bias_add,
-                                           params_dtype=params_dtype,
-                                           quant_config=quant_config,
-                                           prefix=prefix)
-
-    def forward(self, input_):
-        q, output_bias = self.q_proj(input_)
-        k, _ = self.k_proj(input_)
-        v, _ = self.v_proj(input_)
-        return q, k, v, output_bias
-
-
 class RowParallelLinear(LinearBase):
     """Linear layer with row parallelism.
 
@@ -1234,7 +1153,6 @@ class RowParallelLinear(LinearBase):
 
         self.input_is_parallel = input_is_parallel
         self.reduce_results = reduce_results
-        self.collective_func = tensor_model_parallel_all_reduce
 
         assert self.quant_method is not None
         self.quant_method.create_weights(
@@ -1310,7 +1228,9 @@ class RowParallelLinear(LinearBase):
 
         param.load_row_parallel_weight(loaded_weight=loaded_weight)
 
-    def resolve_input(self, input_):
+    def forward(
+        self, input_
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
         if self.input_is_parallel:
             input_parallel = input_
         else:
@@ -1318,12 +1238,6 @@ class RowParallelLinear(LinearBase):
             splitted_input = split_tensor_along_last_dim(
                 input_, num_partitions=self.tp_size)
             input_parallel = splitted_input[tp_rank].contiguous()
-        return input_parallel
-
-    def forward(
-        self, input_
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
-        input_parallel = self.resolve_input(input_)
 
         # Matrix multiply.
         assert self.quant_method is not None
@@ -1512,7 +1426,7 @@ class QKVCrossParallelLinear(LinearBase):
             v for _, v in layer.named_parameters()
             if self._is_same_param(param, v)
         ]
-        assert len(target_param_list) == 1, f"len(target_param_list) {len(target_param_list)} param {type(param)} {param.__dict__.items()} {layer.named_parameters()}"
+        assert len(target_param_list) == 1
         target_param = target_param_list[0]
         return target_param
 
