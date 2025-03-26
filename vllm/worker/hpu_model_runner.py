@@ -1306,13 +1306,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         for seq_group_metadata in seq_group_metadata_list:
             print(seq_group_metadata.token_chunk_size)
-            if is_apc:
+            if seq_group_metadata.is_prompt and is_apc:
                 print("APC + fully cached")
                 seq_group_metadata.token_chunk_size = 1
+                seq_group_metadata.is_prompt = False
                 #seq_group_meta.computed_block_nums 
             else:
                 assert not seq_group_metadata.is_prompt
-            assert seq_group_metadata.token_chunk_size == 1
+                assert seq_group_metadata.token_chunk_size == 1
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
             lora_id = seq_group_metadata.lora_int_id
@@ -1560,6 +1561,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         print("toks", input_tokens, "posits", input_positions, "cached shit", attn_metadata.block_list)
 
+        print(PrepareDecodeMetadata(input_tokens=input_tokens,
+                                     input_positions=input_positions,
+                                     attn_metadata=attn_metadata,
+                                     lora_index_mapping=lora_index_mapping,
+                                     lora_prompt_mapping=lora_prompt_mapping,
+                                     lora_requests=lora_requests,
+                                     slot_mapping=slot_mapping,
+                                     lora_ids=lora_ids))
+
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -1611,8 +1621,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if is_seq_prompt:
                 prefill_reqs.append(seq_group_meta)
             else:
-                seq_group_meta.is_prompt = False
+                #seq_group_meta.is_prompt = False
                 decode_reqs.append(seq_group_meta)
+
+        #import pdb; pdb.set_trace()
+        print("@@@@@@@@@@", len(prefill_reqs), len(decode_reqs))
 
         # Prepare input tensors.
         (
