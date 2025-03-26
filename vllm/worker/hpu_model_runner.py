@@ -1305,9 +1305,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         is_apc = self.vllm_config.cache_config.enable_prefix_caching
 
         for seq_group_metadata in seq_group_metadata_list:
-            if seq_group_metadata.is_prompt and is_apc:
+            print(seq_group_metadata.token_chunk_size)
+            if is_apc:
                 print("APC + fully cached")
-                #TODO
+                seq_group_metadata.token_chunk_size = 1
+                #seq_group_meta.computed_block_nums 
             else:
                 assert not seq_group_metadata.is_prompt
             assert seq_group_metadata.token_chunk_size == 1
@@ -1333,10 +1335,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if output is None:
                     generation_token = seq_data.get_last_token_id()
                     input_tokens.append([generation_token])
+                    print(input_tokens)
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
                 input_positions.append([position])
+                print(input_positions)
 
                 if self.model_is_mrope:
                     if seq_data.mrope_position_delta is not None:
@@ -1553,6 +1557,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_placeholder_index_maps=None,
             enable_kv_scales_calculation=False,
         )
+
+        print("toks", input_tokens, "posits", input_positions, "cached shit", attn_metadata.block_list)
+
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -1604,6 +1611,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if is_seq_prompt:
                 prefill_reqs.append(seq_group_meta)
             else:
+                seq_group_meta.is_prompt = False
                 decode_reqs.append(seq_group_meta)
 
         # Prepare input tensors.
