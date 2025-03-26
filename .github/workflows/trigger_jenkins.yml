@@ -128,32 +128,50 @@ jobs:
           id: fetch_job_id
           with:
             script: |
-              async function getJobIdWithRetry(retries = 5, delay = 5000) {
+              async function getJobIdWithPagination(retries = 3, delay = 5000) {
                 const run_id = context.runId;
                 const matrix_test_name = process.env.MATRIX_TEST_NAME;
 
                 console.log(`Searching for job: Test / ${matrix_test_name} in run: ${run_id}`);
 
-                for (let i = 0; i < retries; i++) {
-                  console.log(`Attempt ${i + 1}...`);
+                for (let attempt = 0; attempt < retries; attempt++) {
+                  let page = 1;
+                  let per_page = 100; // Max allowed
+                  let job_id = null;
 
-                  const response = await github.rest.actions.listJobsForWorkflowRun({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    run_id: run_id
-                  });
+                  while (true) {
+                    console.log(`Fetching page ${page}...`);
 
-                  console.log("All Jobs:", response.data.jobs.map(j => j.name));
+                    const response = await github.rest.actions.listJobsForWorkflowRun({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run_id,
+                      per_page: per_page,
+                      page: page
+                    });
 
-                  // Match job with correct naming convention
-                  const job = response.data.jobs.find(j => 
-                    j.name.trim() === `Test / ${matrix_test_name}`
-                  );
+                    if (response.data.jobs.length === 0) {
+                      console.log(`No more jobs found, stopping at page ${page}.`);
+                      break;
+                    }
 
-                  if (job) {
-                    console.log(`Found Job ID: ${job.id}`);
-                    return job.id;
+                    console.log(`Fetched ${response.data.jobs.length} jobs from page ${page}`);
+
+                    // Find the correct job
+                    const job = response.data.jobs.find(j => 
+                      j.name.trim() === `Test / ${matrix_test_name}`
+                    );
+
+                    if (job) {
+                      console.log(`Found Job ID: ${job.id}`);
+                      job_id = job.id;
+                      break;
+                    }
+
+                    page++; // Move to the next page
                   }
+
+                  if (job_id) return job_id;
 
                   console.log(`Job not found, retrying in ${delay / 1000} seconds...`);
                   await new Promise(res => setTimeout(res, delay));
@@ -162,7 +180,7 @@ jobs:
                 throw new Error(`Job ID not found after ${retries} attempts`);
               }
 
-              const job_id = await getJobIdWithRetry();
+              const job_id = await getJobIdWithPagination();
               core.setOutput("job_id", job_id);
           env:
             MATRIX_TEST_NAME: ${{ matrix.tests.name }}      
@@ -202,14 +220,13 @@ jobs:
             RELEASED_SYNAPSE_VERSION: ${{ vars.RELEASED_SYNAPSE_VERSION }}
             BASE_BRANCH: ${{ needs.read_codeowners.outputs.pr_branch }}      
           run: |
-            if [[ $TARGET_BRANCH == "habana_main" ]]; then
-              synapse_version=${RELEASED_SYNAPSE_VERSION#v}
-            elif [[ $TARGET_BRANCH =~ v*.*.* ]]; then
+            version_regex='^v([0-9]+)\.([0-9]+)\.([0-9]+)$'
+            if [[ $TARGET_BRANCH =~ $version_regex ]]; then
               synapse_version=${TARGET_BRANCH#v}
             else
-              echo "Can't Calculate Synapse Version, Failing The Test"
-              exit 1
+              synapse_version=${RELEASED_SYNAPSE_VERSION#v}
             fi
+            echo "Using SynapseAI version ${synapse_version}"            
             synapse_build=$(curl "https://dms.habana-labs.com/api/v1.1/branch/info/v$synapse_version" | jq -r ".release_id")
             pt_version=${{ vars.PT_VERSION }}
             BUILD_TAG="Github-vLLM-Fork-${{ github.event.number }}-${{github.run_number}}"
@@ -273,7 +290,7 @@ jobs:
       name: Summarize Test Results
       runs-on: generic-runner
       needs: [TestRun,read_codeowners]
-      if: always()
+      if: always() && needs.TestRun.result != 'skipped' && needs.read_codeowners.result != 'skipped'
       steps:
         - name: Checkout Repository
           uses: actions/checkout@v4
