@@ -242,6 +242,8 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA, CustomOp):
         added_tokens_mask = x > self.base_layer.org_vocab_size - 1
         embeddings_indices = self.punica_wrapper.embeddings_indices
         indices = embeddings_indices[1].view_as(x)
+        print(f"{embeddings_indices[1].shape} {x.shape}")
+        print(f"{embeddings_indices[0].shape}")
         full_lora_a_embeddings = F.embedding(
             x + indices,
             self.lora_a_stacked_2d,
