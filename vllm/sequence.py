@@ -1142,7 +1142,7 @@ class IntermediateTensors:
 
     def __eq__(self, other: object):
         return isinstance(other, self.__class__) and self
-
+    
     def __repr__(self) -> str:
         return f"IntermediateTensors(tensors={self.tensors})"
 
