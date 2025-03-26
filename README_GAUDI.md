@@ -377,8 +377,8 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
 > Model config may report very high max_model_len,
 > please set it to max input_tokens+output_tokens rounded up to multiple of block_size as per actual requirements.
 
--  `VLLM_HANDLE_TOPK_DUPLICATES`, if ``true`` - handles duplicates that are outside of top-k. `false` by default.
--  `VLLM_CONFIG_HIDDEN_LAYERS` - configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. The default is 1.
+- `VLLM_HANDLE_TOPK_DUPLICATES`, if ``true`` - handles duplicates that are outside of top-k. `false` by default.
+- `VLLM_CONFIG_HIDDEN_LAYERS` - configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. The default is 1.
     It helps improve throughput by reducing inter-token latency limitations in some models.
 
 Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM execution:
