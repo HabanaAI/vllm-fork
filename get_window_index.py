@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-
+import argparse
 
 class TestClass:
     def __init__(self):
@@ -60,17 +60,56 @@ class TestClass:
         return window_index, cu_window_seqlens
 
 
+def make_multiple_of_28(n):
+    return ((n + 27) // 28) * 28
+
+def generate_image(h,w):
+    from vllm.assets.image import ImageAsset
+    import PIL
+    from transformers import AutoProcessor  # noqa: F401
+    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
+
+    # image to pixel values
+    image_processor = processor.image_processor
+
+    image = ImageAsset("stop_sign").pil_image
+    image = image.resize((w, h))
+
+    preprocess_result = image_processor \
+        .preprocess(images=image, return_tensors="pt") \
+        .data
+    pixel_values = preprocess_result["pixel_values"]
+    image_grid_thw = preprocess_result["image_grid_thw"]
+
+    print("pixel_values :", {pixel_values.shape})
+    print("image_grid_thw :", {image_grid_thw})
+
+    return pixel_values, image_grid_thw
+
+
+#def main():
+parser = argparse.ArgumentParser(description="Process get_window_index from image")
+parser.add_argument('--width', type=int, required=True, help='Width of the image')
+parser.add_argument('--height', type=int, required=True, help='Height of the image')
+
+args = parser.parse_args()
+
+print(f"Image Height: {args.height}, Width: {args.width},")
+
 # Create an instance of the class
 test_instance = TestClass()
 
-# Create a tensor for testing
-grid_thw = torch.tensor([[1, 7, 86]])
-#grid_thw = torch.tensor([[1, 72, 72], [1, 2, 608]])
+w=args.width
+h=args.height
+
+pixel_values, grid_thw = generate_image(h,w)
+
 
 # Run the abc method
 window_index, cu_window_seqlens = test_instance.get_window_index(grid_thw)
 cu_window_seqlens_delta = (
     torch.tensor(cu_window_seqlens)[1:] - torch.tensor(cu_window_seqlens)[:-1]
 )
+
 for i in ["window_index", "cu_window_seqlens", "cu_window_seqlens_delta"]:
     print(f"var {i}: {globals()[i]}")
