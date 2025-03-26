@@ -2,6 +2,7 @@
 
 from abc import abstractmethod
 from enum import Enum
+import os
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -472,6 +473,8 @@ class FusedMoE(torch.nn.Module):
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
         self.activation = activation
+        self.use_hpu_multicast = current_platform.is_hpu() and os.environ.get('VLLM_DP_HPU_MULTICAST', 'false').lower() == 'true'
+        self.multicast_fn = self.hpu_multicast if self.use_hpu_multicast else self.naive_multicast
 
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
             raise ValueError("Only softmax scoring function is supported for "
@@ -817,6 +820,13 @@ class FusedMoE(torch.nn.Module):
 
         return buffer
 
+    def hpu_multicast(self, x: torch.Tensor,
+                      cu_tokens_across_dp_cpu: torch.Tensor):
+        # WA: View Handling...
+        buffer = get_dp_group().all_gather(x.clone(), 0)
+
+        return buffer.clone()
+
     def forward(self, hidden_states: torch.Tensor,
                 router_logits: torch.Tensor):
         if self.use_direct_call:
@@ -834,10 +844,10 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
-            hidden_states = self.naive_multicast(hidden_states,
-                                                 cu_tokens_across_dp_cpu)
-            router_logits = self.naive_multicast(router_logits,
-                                                 cu_tokens_across_dp_cpu)
+            hidden_states = self.multicast_fn(hidden_states,
+                                              cu_tokens_across_dp_cpu)
+            router_logits = self.multicast_fn(router_logits,
+                                              cu_tokens_across_dp_cpu)
 
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
