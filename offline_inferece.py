@@ -1,37 +1,18 @@
 from vllm import LLM
 from vllm import SamplingParams
 from vllm.assets.image import ImageAsset
-import PIL
-import cv2
 from PIL import Image
+import time
+import cv2
 import random
-
 import argparse
 
-parser = argparse.ArgumentParser()
+MODALITY_VIDEO = "video"
+MODALITY_IMAGE = "image"
+MODALITY_TEXT = "text"
 
-# Add arguments
-parser.add_argument("-m", "--model", help="model name or path")
-parser.add_argument("-i", "--image", help="type of image")
-parser.add_argument("-v", "--video", help="Video Input")
-parser.add_argument("-t", "--text_only", action="store_true", help="Text only pormpts")
-parser.add_argument("--image_width", type=int, help="Image width size")
-parser.add_argument("--image_height", type=int, help="Image width size")
-parser.add_argument(
-    "--multiple_prompts", action="store_true", help="to run with multiple prompts"
-)
-parser.add_argument("--iter", help="number of iterations to run")
-parser.add_argument(
-    "-gmu", "--gpu_mem_usage", type=float, default=0.9, help="GPU memory usage value"
-)
-parser.add_argument("-ris", "--random_img_size", action="store_true", help="Text only pormpts")
-
-# Parse the arguments
-args = parser.parse_args()
 
 # Process video input and select specified number of evenly distributed frames
-
-
 def sample_frames(path, num_frames):
     video = cv2.VideoCapture(path)
     total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -49,147 +30,229 @@ def sample_frames(path, num_frames):
     return frames[:num_frames]
 
 
-# Load the image / Video
-if args.image:
-    if args.image == "synthetic":
-        image = ImageAsset("stop_sign").pil_image
-    elif args.image == "snowscat":
-        filename = "/tmp/snowscat-H3oXiq7_bII-unsplash.jpg"
-        image = PIL.Image.open(filename)
-    elif args.image:
-        image = PIL.Image.open(args.image)
-
-    if args.image_width and args.image_height:
-        image = image.resize((args.image_width, args.image_height))
-
-    if args.random_img_size:
-        rand_width = random.randint(0.5 * args.image_width, 1 * args.image_width)
-        rand_height = random.randint(0.5 * args.image_height, 1 * args.image_height)
-        image2 = image.resize((rand_width, rand_height))
-
-elif args.video:
-    video = sample_frames(args.video, 50)
-elif args.text_only:
-    print(f"Running in text-only mode")
-else:
+def get_multi_modal_prompt(args, modality, index=0):
+    if modality == MODALITY_IMAGE:
+        image_prompt = (
+            f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n"
+            f"<|vision_start|><|image_pad|><|vision_end|>"
+            f"Describe this image"
+            f"<|im_end|>\n<|im_start|>assistant\n")
+        if args.image == "synthetic":
+            image = ImageAsset("stop_sign").pil_image
+        elif args.image == "snowscat":
+            filename = "/tmp/snowscat-H3oXiq7_bII-unsplash.jpg"
+            image = Image.open(filename)
+        elif args.image:
+            image = Image.open(args.image)
+        if args.image_width and args.image_height:
+            image = image.resize((args.image_width, args.image_height))
+        prompts = [
+            {
+                "prompt": image_prompt,
+                "multi_modal_data": {
+                    "image": image
+                }
+            },
+        ]
+        if args.random_img_size:
+            rand_width = random.randint(int(0.5 * args.image_width),
+                                        1 * args.image_width)
+            rand_height = random.randint(int(0.5 * args.image_height),
+                                         1 * args.image_height)
+            rand_width = 1000
+            rand_height = 1020
+            image2 = image.resize((rand_width, rand_height))
+            prompts = [
+                {
+                    "prompt": image_prompt,
+                    "multi_modal_data": {
+                        "image": image
+                    }
+                },
+                {
+                    "prompt": image_prompt,
+                    "multi_modal_data": {
+                        "image": image
+                    }
+                },
+                {
+                    "prompt": image_prompt,
+                    "multi_modal_data": {
+                        "image": image2
+                    }
+                },
+                {
+                    "prompt": image_prompt,
+                    "multi_modal_data": {
+                        "image": image2
+                    }
+                },
+            ]
+        if args.two_images_prompt:
+            image_prompt_with_2 = (
+                f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+                f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|vision_start|>"
+                f"<|image_pad|><|vision_end|>"
+                f"Identify the similarities between these images."
+                f"<|im_end|>\n<|im_start|>assistant\n")
+            image2 = ImageAsset("stop_sign").pil_image
+            image2 = image2.resize((140, 140))
+            prompts = [{
+                "prompt": image_prompt_with_2,
+                "multi_modal_data": {
+                    "image": [image, image2]
+                }
+            }]
+        return prompts[index % len(prompts)]
+    if modality == MODALITY_VIDEO:
+        video_prompt = (
+            f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n"
+            f"<|vision_start|><|video_pad|><|vision_end|>"
+            f"Describe this video."
+            f"<|im_end|>\n<|im_start|>assistant\n")
+        video = sample_frames(args.video, 50)
+        return {"prompt": video_prompt, "multi_modal_data": {"video": video}}
+    if modality == MODALITY_TEXT:
+        question_list = [
+            "Tell me about future of global warming.",
+            "Can you describe Bernoulli's Equation?",
+            "How does deepspeed work?",
+        ]
+        return {"prompt": question_list[index % len(question_list)]}
     print(f"Unknow image/Video Input {args.image} {args.video}")
     exit
 
-sampling_params = SamplingParams(temperature=0.0, max_tokens=100)
 
-tested_models = [
-    "meta-llama/Llama-3.2-11B-Vision-Instruct",
-    "Qwen/Qwen2.5-VL-3B-Instruct",
-    "Qwen/Qwen2-VL-7B-Instruct",
-]
-mdl = args.model
-multiple_prompt = args.multiple_prompts
-
-question_list = [
-    "Describe this video.",
-    "Tell me about future of global warming.",
-    "Can you describe Bernoulli's Equation?",
-    "How does deepspeed work?",
-]
-
-if args.video:
-    llm = LLM(
-        model=mdl,
+def get_llm(args):
+    model = args.model
+    assert "Qwen2" in model
+    return LLM(
+        model=model,
         enforce_eager=False,
-        dtype="bfloat16",
+        max_model_len=32768,
+        max_num_seqs=5,
         gpu_memory_utilization=args.gpu_mem_usage,
+        limit_mm_per_prompt={
+            "image": args.limit_mm_image,
+            "video": args.limit_mm_video
+        },
     )
 
-    prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|video_pad|><|vision_end|>{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"
 
-    if multiple_prompt:
-        batch_data = [
-            {"prompt": prompt, "multi_modal_data": {"video": video}},
-            {
-                "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"
-            },
-            {"prompt": prompt, "multi_modal_data": {"video": video}},
-        ]
-    else:
-        batch_data = {"prompt": prompt, "multi_modal_data": {"video": video}}
-else:
-    # Prompt example: https://docs.vllm.ai/en/v0.6.2/getting_started/examples/offline_inference_vision_language.html
-    if "Qwen2" in mdl:
-        llm = LLM(
-            model=mdl,
-            enforce_eager=False,
-            max_model_len=32768,
-            max_num_seqs=5,
-            gpu_memory_utilization=args.gpu_mem_usage,
-            limit_mm_per_prompt={"image": 1},
+def get_modality_from_args(args):
+    if args.text_only:
+        return MODALITY_TEXT
+    if args.image:
+        return MODALITY_IMAGE
+    if args.video:
+        return MODALITY_VIDEO
+    return MODALITY_TEXT
+
+
+def prepare_input_data(args):
+    first_modality = get_modality_from_args(args)
+    input_data = [get_multi_modal_prompt(args, first_modality, index=0)]
+    print(f"PROMPT is modal {first_modality}")
+    modalities = [first_modality]
+    if args.mix_prompts:
+        modalities.append(MODALITY_TEXT)  # just mix with text for now
+    for prompt_index in range(args.prompts - 1):
+        i = prompt_index + 1
+        print(f"PROMPT is modal {modalities[i % len(modalities)]}")
+        new_input_data = get_multi_modal_prompt(
+            args,
+            modalities[i % len(modalities)],
+            index=i,
         )
+        input_data.append(new_input_data)
+    return input_data
 
-        prompt = f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{question_list[0]}<|im_end|>\n<|im_start|>assistant\n"
 
-        if multiple_prompt:
-            if args.text_only:
-                batch_data = [
-                    {
-                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
-                    },
-                    {
-                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[2]}<|im_end|>\n<|im_start|>assistant\n"
-                    },
-                    {
-                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[3]}<|im_end|>\n<|im_start|>assistant\n"
-                    },
-                ]
-            else:
-                batch_data = [
-                    {"prompt": prompt, "multi_modal_data": {"image": image}},
-                    {
-                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
-                    },
-                    {"prompt": prompt, "multi_modal_data": {"image": image}},
-                ]
-                if args.random_img_size:
-                    batch_data2 = [
-                        {"prompt": prompt, "multi_modal_data": {"image": image}},
-                        {
-                            "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
-                        },
-                        {"prompt": prompt, "multi_modal_data": {"image": image2}},
-                    ]
+def main(args) -> int:
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=100)
+    llm = get_llm(args)
+    print(" ========= LLM started =========")
+
+    input_data = prepare_input_data(args)
+    print(f"Input data:", input_data)
+
+    for i in range(args.iter):
+        print(f"------ iteration: [{i}]")
+
+        if args.multiple_prompts:
+            iter_input_data = input_data
+            print(f" -- Run batch with {len(input_data)} prompts")
         else:
-            if args.text_only:
-                batch_data = [
-                    {
-                        "prompt": f"<|im_start|>system\nYou are a nice person.<|im_end|>\n<|im_start|>user\n{question_list[1]}<|im_end|>\n<|im_start|>assistant\n"
-                    }
-                ]
-            else:
-                batch_data = {"prompt": prompt, "multi_modal_data": {"image": image}}
-                if args.random_img_size:
-                    batch_data2 = {
-                        "prompt": prompt,
-                        "multi_modal_data": {"image": image2},
-                    }
+            iter_input_data = input_data[i % len(input_data)]
+            print(f" -- Run single prompt: {iter_input_data}")
 
-    elif "Llama-3.2" in mdl:
-        llm = LLM(
-            model=mdl,
-            max_model_len=2048,
-            max_num_seqs=64,
-            tensor_parallel_size=1,
-            num_scheduler_steps=32,
-            max_num_prefill_seqs=4,
+        start_time = time.time()
+        outputs = llm.generate(iter_input_data,
+                               sampling_params=sampling_params)
+        elapsed_time = time.time() - start_time
+
+        num_tokens = sum(len(o.prompt_token_ids) for o in outputs)
+        throughput = num_tokens / elapsed_time
+        print(
+            f"-- generate time = {elapsed_time:0.2f}, throughput = {throughput:0.2f}"
         )
-        from vllm import TextPrompt
 
-        batch_data = TextPrompt(prompt=f"<|image|><|begin_of_text|>{question_list[0]}")
-        batch_data["multi_modal_data"] = {"image": image}
-    else:
-        print(f"{mdl} is not known model?")
+        for o in outputs:
+            generated_text = o.outputs[0].text
+            print(generated_text)
 
-for i in range(int(args.iter)):
-    print(f"------ iteration: [{i}]")
-    outputs = llm.generate(batch_data if i < 2 else batch_data2, sampling_params)
 
-    for o in outputs:
-        generated_text = o.outputs[0].text
-        print(generated_text)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    # Add arguments
+    parser.add_argument("-m",
+                        "--model",
+                        default="Qwen/Qwen2.5-VL-3B-Instruct",
+                        help="model name or path")
+    parser.add_argument("-i", "--image", help="type of image")
+    parser.add_argument("-v", "--video", help="Video Input")
+    parser.add_argument("-t",
+                        "--text_only",
+                        action="store_true",
+                        help="Text only pormpts")
+    parser.add_argument("--image_width", type=int, help="Image width size")
+    parser.add_argument("--image_height", type=int, help="Image width size")
+    parser.add_argument("--two_images_prompt",
+                        action="store_true",
+                        help="Prompt with two images")
+    parser.add_argument("--mix_prompts",
+                        action="store_true",
+                        help="Run prompts with multiple modalities")
+    parser.add_argument("--multiple_prompts",
+                        action="store_true",
+                        help="Run multiple prompts")
+    parser.add_argument("--iter",
+                        type=int,
+                        default=1,
+                        help="number of iterations to run")
+    parser.add_argument("--prompts",
+                        type=int,
+                        default=4,
+                        help="number of prompts")
+    parser.add_argument("--limit_mm_image",
+                        type=int,
+                        default=1,
+                        help="limit num of images")
+    parser.add_argument("--limit_mm_video",
+                        type=int,
+                        default=1,
+                        help="limit num of images")
+    parser.add_argument("-gmu",
+                        "--gpu_mem_usage",
+                        type=float,
+                        default=0.9,
+                        help="GPU memory usage value")
+    parser.add_argument("-ris",
+                        "--random_img_size",
+                        action="store_true",
+                        help="Randomly resize image")
+
+    # Parse the arguments
+    args = parser.parse_args()
+    print(args)
+    main(args)
