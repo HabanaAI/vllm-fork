@@ -612,8 +612,8 @@ class Phi3LongRoPEScaledRotaryEmbedding(CustomOp):
             positions = positions + offsets
         positions = positions.flatten()
         num_tokens = positions.shape[0]
-        cos_sin = self.long_short_cos_sin_cache.index_select(0, positions).view(
-            num_tokens, 1, -1)
+        cos_sin = self.long_short_cos_sin_cache.index_select(
+            0, positions).view(num_tokens, 1, -1)
         cos, sin = cos_sin.chunk(2, dim=-1)
         cos = torch.cat((cos, cos), dim=-1)
         sin = torch.cat((sin, sin), dim=-1)
