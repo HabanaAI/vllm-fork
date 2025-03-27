@@ -850,7 +850,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.model.embedding_padding_modules,
                     max_position_embeddings=max_pos_embeddings,
                 )
-                self.model = self.lora_manager.create_lora_manager(self.model)
+                self._model = self.lora_manager.create_lora_manager(self.model)
 
             if self.model_config.quantization == 'inc':
                 logger.info("Preparing model with INC..")
@@ -860,16 +860,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", ""))
                     if config.measure:
-                        self.model = prepare(self.model, config)
+                        self._model = prepare(self.model, config)
                     elif config.quantize:
-                        self.model = convert(self.model, config)
+                        self._model = convert(self.model, config)
                     htcore.hpu_initialize(self.model,
                                           mark_only_scales_as_const=True)
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
             elif not is_fake_hpu():
-                self.model = self.model.to("hpu")
+                self._model = self.model.to("hpu")
                 htcore.mark_step()
 
             hidden_layer_markstep_interval = int(
@@ -885,7 +885,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
-                self.model = self._maybe_wrap_in_hpu_graph(
+                self._model = self._maybe_wrap_in_hpu_graph(
                     self.model,
                     vllm_config=self.vllm_config,
                     layer_names=path_to_rope)
