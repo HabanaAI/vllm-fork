@@ -448,6 +448,8 @@ class HpuModelAdapter:
                a 'prepare_cos_sin' method.")
 
     def __getattr__(self, name):
+        if hasattr(self, name):
+            return object.__getattribute__(self, name)
         return getattr(self.model, name)
 
     def forward(self, *args, **kwargs):
