@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
+import habana_frameworks.torch.core as htcore
 from vllm.attention.backends.mla.utils import MLACommonImpl
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
@@ -111,6 +112,11 @@ def flat_pa_mla(query, key_cache, value_cache, block_list, block_mapping,
         key = key.transpose(2, 3)
 
     attn = matmul_qk_op(query, key)
+
+    if "fp32_softmax" in enabled_flags():
+        attn = attn.float()
+        htcore.mark_step()
+
     attn = attn + block_bias
     attn = ops.pipelined_pa(attn, value, block_groups, block_mapping, block_scales=block_scales,
                         batch_size=batch_size, matmul_av_op=matmul_av_op,
