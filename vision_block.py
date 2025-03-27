@@ -122,6 +122,8 @@ def apply_rotary_pos_emb_vision(t: torch.Tensor,
     return output
 
 
+### COPY AND PASTE from qwen2_5_vl.py
+
 class Qwen2_5_VisionMLP(nn.Module):
 
     def __init__(self,
@@ -668,6 +670,9 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
+
+### Copy and paste END
 
 
 def generate_image(h, w):
