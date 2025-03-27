@@ -327,7 +327,11 @@ class HpuModelAdapter:
         self.dtype = vllm_config.model_config.dtype
         enforce_eager = vllm_config.model_config.enforce_eager
         self.dp_size = self.vllm_config.parallel_config.data_parallel_size
-        self.dp_awared_padding = True if self.dp_size > 1 and htorch.utils.internal.is_lazy() else False
+        self.dp_awared_padding = True if self.dp_size > 1 and htorch.utils.internal.is_lazy() and not enforce_eager else False
+        self.use_hpu_multicast = os.environ.get('VLLM_DP_HPU_MULTICAST', 'true') 
+        if not self.dp_awared_padding and self.use_hpu_multicast:
+            raise NotImplementedError(
+                "Set VLLM_DP_HPU_MULTICAST=false along with enforce_eager mode.")
 
         if not htorch.utils.internal.is_lazy() and not enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -689,7 +693,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.dp_size = vllm_config.parallel_config.data_parallel_size
         if self.dp_size > 1:
             self.dp_rank = vllm_config.parallel_config.data_parallel_rank
-            self.dp_awared_padding = True if htorch.utils.internal.is_lazy() else False
+            self.dp_awared_padding = True if htorch.utils.internal.is_lazy() and not self.enforce_eager else False
 
     def _set_gc_threshold(self) -> None:
         # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
