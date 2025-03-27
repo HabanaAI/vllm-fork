@@ -45,6 +45,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip, dp_master_
     os.environ["PT_HPU_LAZY_MODE"] = "1"
     os.environ["VLLM_SKIP_WARMUP"] = "true"
     os.environ["PT_HPU_ENABLE_LAZY_COLLECTIVES"] = "true"
+    os.environ["VLLM_DP_HPU_MULTICAST"] = "true"
     os.environ["VLLM_MOE_N_SLICE"] = "8"
     os.environ["VLLM_EP_SIZE"] = str(dp_size * GPUs_per_dp_rank)
     os.environ["VLLM_MLA_DISABLE_REQUANTIZATION"] = "1"

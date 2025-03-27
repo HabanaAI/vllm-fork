@@ -473,7 +473,7 @@ class FusedMoE(torch.nn.Module):
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
         self.activation = activation
-        self.use_hpu_multicast = current_platform.is_hpu() and os.environ.get('VLLM_DP_HPU_MULTICAST', 'false').lower() == 'true'
+        self.use_hpu_multicast = current_platform.is_hpu() and os.environ.get('VLLM_DP_HPU_MULTICAST', 'true').lower() == 'true'
         self.multicast_fn = self.hpu_multicast if self.use_hpu_multicast else self.naive_multicast
 
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
@@ -822,10 +822,9 @@ class FusedMoE(torch.nn.Module):
 
     def hpu_multicast(self, x: torch.Tensor,
                       cu_tokens_across_dp_cpu: torch.Tensor):
-        # WA: View Handling...
-        buffer = get_dp_group().all_gather(x.clone(), 0)
+        buffer = get_dp_group().all_gather(x, 0)
 
-        return buffer.clone()
+        return buffer
 
     def forward(self, hidden_states: torch.Tensor,
                 router_logits: torch.Tensor):
