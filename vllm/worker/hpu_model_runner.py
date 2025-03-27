@@ -931,9 +931,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self._model.model
         return self._model
 
-    @model.setter
-    def model(self, m):
-        self._model = m        
+  #  @model.setter
+  #  def model(self, m):
+  #      self._model = m        
     
     def get_model(self) -> torch.nn.Module:
         return self.model
