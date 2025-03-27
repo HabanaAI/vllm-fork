@@ -217,8 +217,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
         if attn_metadata.is_prompt and self.attn_type \
-            is not AttentionType.ENCODER_ONLY \
-            and (attn_metadata.block_list is None if os.getenv("VLLM_USE_V1") else True):
+                is not AttentionType.ENCODER_ONLY \
+            and (attn_metadata.block_list is None if os.getenv("VLLM_USE_V1") == 1 else True):
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
