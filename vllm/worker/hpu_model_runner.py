@@ -869,7 +869,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
             elif not is_fake_hpu():
-                self._model = self.model.to("hpu")
+                self._model = self._model.to("hpu")
                 htcore.mark_step()
 
             hidden_layer_markstep_interval = int(
