@@ -447,7 +447,7 @@ class HpuModelAdapter:
                 "The module at the end of the path does not have \
                a 'prepare_cos_sin' method.")
 
-    def __getattr__(self, a_name):
+    def __getattr__(self, name):
         return object.__getattribute__(self.model, name)
 
     def forward(self, *args, **kwargs):
