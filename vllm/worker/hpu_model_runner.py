@@ -2560,6 +2560,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if htorch.utils.internal.is_lazy():
                 execute_model_kwargs.update(
                     {"bypass_hpu_graphs": not use_graphs})
+                if use_graphs:
+                    # As we have disable_tensor_cache enabled,
+                    # we need to inform HPU graphs to not free KV cache tensors
+                    execute_model_kwargs.update(
+                        {"cache_tensors_list": kv_caches})
 
             htorch.core.mark_step()
             if self.is_driver_worker:
