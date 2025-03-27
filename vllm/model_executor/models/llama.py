@@ -509,11 +509,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         "output": "lm_head",
         "norm": "model.norm"
     }
-
-
-    def __getattr__(self, name):
-        print(name)
-        return object.__getattribute__(self, name)
+  
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
