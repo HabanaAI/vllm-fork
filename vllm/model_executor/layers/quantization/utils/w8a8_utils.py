@@ -1,6 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from typing import List, Optional, Tuple, Union
 
 import torch
+from vllm_hpu_extension.ops import get_hpu_gaudi2_scale_factor, is_hpu_gaudi2
 
 from vllm import _custom_ops as ops
 from vllm.platforms import current_platform
@@ -13,6 +16,12 @@ if current_platform.is_hpu():
     import habana_frameworks.torch.utils.experimental as htexp
     from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
+# The condition to determine if it is on a platform that supports
+# torch._scaled_mm rowwise feature.
+# The condition is determined once as the operations
+# are time consuming.
+USE_ROWWISE_TORCH_SCALED_MM = (current_platform.is_rocm()
+                               and current_platform.has_device_capability(94))
 
 
 def sparse_cutlass_supported() -> bool:
@@ -33,6 +42,20 @@ def cutlass_fp8_supported() -> bool:
     capability = -1 if capability_tuple is None else capability_tuple.to_int()
 
     return ops.cutlass_scaled_mm_supports_fp8(capability)
+
+
+def cutlass_block_fp8_supported() -> bool:
+    if not current_platform.is_cuda():
+        return False
+
+    capability_tuple = current_platform.get_device_capability()
+    capability = -1 if capability_tuple is None else capability_tuple.to_int()
+
+    return ops.cutlass_scaled_mm_supports_block_fp8(capability)
+
+
+CUTLASS_FP8_SUPPORTED = cutlass_fp8_supported()
+CUTLASS_BLOCK_FP8_SUPPORTED = cutlass_block_fp8_supported()
 
 
 def per_tensor_dequantize(
@@ -79,18 +102,16 @@ def requantize_with_max_scale(
         logical_widths: List[int]) -> Tuple[torch.Tensor, torch.Tensor]:
     # Max scale to be used for requanitzation.
     max_w_scale = weight_scale.max()
-    if current_platform.is_hpu() and htexp._get_device_type(
-    ) == htexp.synDeviceType.synDeviceGaudi2:
-        max_w_scale = max_w_scale * (torch.finfo(torch.float8_e4m3fn).max /
-                                     torch.finfo(torch.float8_e4m3fnuz).max)
+    if is_hpu_gaudi2():
+        max_w_scale = max_w_scale * get_hpu_gaudi2_scale_factor()
     # QKV / MLP is fused in the on disk checkpoint if any of the
     # weight scales are still set to the default since we initialize
     # N weight scales for N shards but we only load 1 weight scale
     # from disk in this case. Skip requantization in this case (since)
     # we already are quantized with the single scale.
     # * Sample Model: nm-testing/Phi-3-mini-128k-instruct-FP8
-    unfused_module_in_checkpoint = (weight_scale[-1] > torch.finfo(
-        torch.float8_e4m3fn).min)
+    unfused_module_in_checkpoint = (weight_scale[-1]
+                                    > torch.finfo(torch.float8_e4m3fn).min)
 
     # If unfused checkpoint, need requanize with the single scale.
     if unfused_module_in_checkpoint:
@@ -113,7 +134,7 @@ def apply_fp8_linear(
     input_scale: Optional[torch.Tensor] = None,
     input_scale_ub: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
-    cutlass_fp8_supported: bool = True,
+    cutlass_fp8_supported: bool = CUTLASS_FP8_SUPPORTED,
     use_per_token_if_dynamic: bool = False,
 ) -> torch.Tensor:
     # ops.scaled_fp8_quant supports both dynamic and static quant.
@@ -172,6 +193,26 @@ def apply_fp8_linear(
 
             return torch.narrow(output, 0, 0,
                                 input_2d.shape[0]).view(*output_shape)
+
+        elif (use_per_token_if_dynamic and not per_tensor_weights
+              and not per_tensor_activations and USE_ROWWISE_TORCH_SCALED_MM):
+            # For now validated on ROCm platform
+            # fp8 rowwise scaling in torch._scaled_mm is introduced in
+            # https://github.com/pytorch/pytorch/pull/144432 using
+            # hipBLASLt and ROCm 6.3, which only exists in torch 2.7 and above.
+            # For CUDA platform please validate if the
+            # torch._scaled_mm support rowwise scaled GEMM
+            # Fused GEMM_DQ Rowwise GEMM
+            output = torch._scaled_mm(qinput,
+                                      weight,
+                                      out_dtype=input.dtype,
+                                      scale_a=x_scale,
+                                      scale_b=weight_scale.t(),
+                                      bias=bias)
+
+            output = torch.narrow(output, 0, 0, input_2d.shape[0])
+            output = output.view(*output_shape)
+            return output
 
         else:
             # Fallback for channelwise case, where we use unfused DQ

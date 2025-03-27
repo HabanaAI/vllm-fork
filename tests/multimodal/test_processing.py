@@ -1,18 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from contextlib import nullcontext
+from types import MethodType
 from typing import cast
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from transformers import ProcessorMixin
 
 from vllm.config import ModelConfig
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.processing import (PlaceholderInfo, PromptReplacement,
+# yapf conflicts with isort for this block
+# yapf: disable
+from vllm.multimodal.processing import (PlaceholderFeaturesInfo,
+                                        PromptReplacement,
                                         find_mm_placeholders,
                                         find_text_matches, find_token_matches,
                                         iter_token_matches,
                                         replace_text_matches,
                                         replace_token_matches)
+# yapf: enable
 from vllm.multimodal.profiling import MultiModalProfiler
 from vllm.multimodal.utils import cached_get_tokenizer
 from vllm.transformers_utils.tokenizer import AnyTokenizer
@@ -433,19 +441,19 @@ def test_find_replace_tokens(
             [1, 9833, 28747, 32000, 9833, 28747, 32000, 32000, 918],
             {
                 "pattern_1": [
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_1",
                         item_idx=0,
                         start_idx=6,
-                        replacement=[32000, 32000],
+                        tokens=[32000, 32000],
                     ),
                 ],
                 "pattern_4": [
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_4",
                         item_idx=0,
                         start_idx=3,
-                        replacement=[32000],
+                        tokens=[32000],
                     ),
                 ],
             }
@@ -455,25 +463,25 @@ def test_find_replace_tokens(
             [1, 32000, 32000, 9833, 28747, 32000, 32000, 1550, 918, 1550],
             {
                 "pattern_1": [
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_1",
                         item_idx=0,
                         start_idx=1,
-                        replacement=[32000, 32000],
+                        tokens=[32000, 32000],
                     ),
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_1",
                         item_idx=1,
                         start_idx=5,
-                        replacement=[32000, 32000],
+                        tokens=[32000, 32000],
                     ),
                 ],
                 "pattern_3": [
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_3",
                         item_idx=0,
                         start_idx=7,
-                        replacement=[1550, 918, 1550],
+                        tokens=[1550, 918, 1550],
                     ),
                 ],
                 # No match for pattern_4 as it has lower priority than pattern_1
@@ -483,33 +491,33 @@ def test_find_replace_tokens(
             [1, 32000, 32000, 32000, 32000, 32000, 1550, 918, 1550],
             {
                 "pattern_1": [
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_1",
                         item_idx=0,
                         start_idx=1,
-                        replacement=[32000, 32000],
+                        tokens=[32000, 32000],
                     ),
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_1",
                         item_idx=1,
                         start_idx=3,
-                        replacement=[32000, 32000],
+                        tokens=[32000, 32000],
                     ),
                 ],
                 "pattern_4": [
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_4",
                         item_idx=0,
                         start_idx=5,
-                        replacement=[32000],
+                        tokens=[32000],
                     ),
                 ],
                 "pattern_3": [
-                    PlaceholderInfo(
+                    PlaceholderFeaturesInfo(
                         modality="pattern_3",
                         item_idx=0,
                         start_idx=6,
-                        replacement=[1550, 918, 1550],
+                        tokens=[1550, 918, 1550],
                     ),
                 ],
             }
@@ -630,3 +638,70 @@ def test_limit_mm_per_prompt_apply(model_id, num_images, limit, is_valid):
             mm_data=mm_data,
             hf_processor_mm_kwargs={},
         )
+
+
+class _ProcessorProxy:
+
+    def __init__(self, processor: ProcessorMixin) -> None:
+        super().__init__()
+
+        self.__processor = processor
+
+    def __getattr__(self, key: str):
+        return getattr(self.__processor, key)
+
+    def __call__(
+        self,
+        text=None,
+        images=None,
+        videos=None,
+        exists=None,
+        return_tensors=None,
+    ):
+        return dict(exists=exists)
+
+
+@pytest.mark.parametrize("model_id", ["Qwen/Qwen2-VL-7B-Instruct"])  # Dummy
+# yapf: disable
+@pytest.mark.parametrize(
+    ("call_kwargs", "expected_kwargs"),
+    [
+        # Should ignore invalid kwargs
+        ({"does_not_exist": 100}, {"exists": None}),
+        ({"exists": 1}, {"exists": 1}),
+        ({"does_not_exist": 100, "exists": 1}, {"exists": 1}),
+    ],
+)
+# yapf: enable
+def test_hf_processor_kwargs(model_id, call_kwargs, expected_kwargs):
+    model_config = ModelConfig(
+        model=model_id,
+        task="auto",
+        tokenizer=model_id,
+        tokenizer_mode="auto",
+        trust_remote_code=False,
+        seed=0,
+        dtype="half",
+        revision=None,
+    )
+
+    processor = MULTIMODAL_REGISTRY.create_processor(
+        model_config,
+        tokenizer=cached_get_tokenizer(model_config.tokenizer),
+    )
+    orig_get_hf_processor = processor.info.get_hf_processor
+
+    def get_hf_processor(self, **kwargs):
+        assert kwargs == call_kwargs
+        return _ProcessorProxy(orig_get_hf_processor())
+
+    processor.info.get_hf_processor = MethodType(get_hf_processor,
+                                                 processor.info)
+
+    out_kwargs = processor._call_hf_processor(
+        prompt="",
+        mm_data={},
+        mm_kwargs=call_kwargs,
+    )
+
+    assert out_kwargs == expected_kwargs

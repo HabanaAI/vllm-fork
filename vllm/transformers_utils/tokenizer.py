@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import contextlib
 import os
 import warnings
@@ -12,6 +14,8 @@ from transformers import (AutoTokenizer, PreTrainedTokenizer,
 from vllm.envs import VLLM_USE_MODELSCOPE
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
+from vllm.transformers_utils.tokenizer_base import (TokenizerBase,
+                                                    TokenizerRegistry)
 from vllm.transformers_utils.tokenizers import MistralTokenizer
 from vllm.transformers_utils.utils import check_gguf_file
 from vllm.utils import make_async
@@ -19,7 +23,7 @@ from vllm.utils import make_async
 logger = init_logger(__name__)
 
 AnyTokenizer = Union[PreTrainedTokenizer, PreTrainedTokenizerFast,
-                     MistralTokenizer]
+                     TokenizerBase]
 
 
 def decode_tokens(
@@ -45,11 +49,7 @@ def encode_tokens(
     Backend-agnostic equivalent of HF's
     :code:`tokenizer.encode(text, add_special_tokens=...)`.
     """
-    if isinstance(tokenizer, MistralTokenizer):
-        return tokenizer.tokenizer.encode(text,
-                                          bos=add_special_tokens,
-                                          eos=add_special_tokens)
-    elif add_special_tokens is not None:
+    if add_special_tokens is not None:
         return tokenizer.encode(text, add_special_tokens=add_special_tokens)
     return tokenizer.encode(text)
 
@@ -67,9 +67,10 @@ def get_cached_tokenizer(tokenizer: AnyTokenizer) -> AnyTokenizer:
     tokenizer_all_special_tokens_extended = (
         tokenizer.all_special_tokens_extended)
     tokenizer_all_special_tokens = set(tokenizer.all_special_tokens)
+    tokenizer_vocab = tokenizer.get_vocab()
     tokenizer_len = len(tokenizer)
 
-    max_token_id = max(tokenizer.get_vocab().values())
+    max_token_id = max(tokenizer_vocab.values())
     # Some tokenizers (e.g., QwenTokenizer) have special tokens that
     # are added and included in the implementation of the vocab_size
     # property, but not in get_vocab(); if there is an implementation
@@ -95,6 +96,9 @@ def get_cached_tokenizer(tokenizer: AnyTokenizer) -> AnyTokenizer:
         @property
         def max_token_id(self):
             return max_token_id
+
+        def get_vocab(self):
+            return tokenizer_vocab
 
         def __len__(self):
             return tokenizer_len
@@ -177,9 +181,17 @@ def get_tokenizer(
             'encoding and decoding.',
             FutureWarning,
             stacklevel=2)
+
+    tokenizer: AnyTokenizer
     if tokenizer_mode == "mistral":
         tokenizer = MistralTokenizer.from_pretrained(str(tokenizer_name),
                                                      revision=revision)
+    elif tokenizer_mode == "custom":
+        tokenizer = TokenizerRegistry.get_tokenizer(str(tokenizer_name),
+                                                    *args,
+                                                    revision=revision,
+                                                    download_dir=download_dir,
+                                                    **kwargs)
     else:
         try:
             tokenizer = AutoTokenizer.from_pretrained(

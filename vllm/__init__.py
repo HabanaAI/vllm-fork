@@ -1,8 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
 """vLLM: a high-throughput and memory-efficient inference engine for LLMs"""
 from vllm.utils import is_fake_hpu, migrate_to_cpu
 
 if is_fake_hpu():
     migrate_to_cpu()
+# The version.py should be independent library, and we always import the
+# version library first.  Such assumption is critical for some customization.
+from .version import __version__, __version_tuple__  # isort:skip
+
+import os
+
+import torch
 
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -19,45 +27,18 @@ from vllm.outputs import (ClassificationOutput, ClassificationRequestOutput,
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
 
-from .version import __version__, __version_tuple__
+# set some common config/environment variables that should be set
+# for all processes created by vllm and all processes
+# that interact with vllm workers.
+# they are executed whenever `import vllm` is called.
 
+# see https://github.com/NVIDIA/nccl/issues/1234
+os.environ['NCCL_CUMEM_ENABLE'] = '0'
 
-def configure_as_vllm_process():
-    """
-    set some common config/environment variables that should be set
-    for all processes created by vllm and all processes
-    that interact with vllm workers.
-    """
-    import os
-
-    import torch
-
-    # see https://github.com/NVIDIA/nccl/issues/1234
-    os.environ['NCCL_CUMEM_ENABLE'] = '0'
-
-    # see https://github.com/vllm-project/vllm/issues/10480
-    os.environ['TORCHINDUCTOR_COMPILE_THREADS'] = '1'
-    # see https://github.com/vllm-project/vllm/issues/10619
-    torch._inductor.config.compile_threads = 1
-
-    from vllm.platforms import current_platform
-
-    if current_platform.is_xpu():
-        # see https://github.com/pytorch/pytorch/blob/43c5f59/torch/_dynamo/config.py#L158
-        torch._dynamo.config.disable = True
-    elif current_platform.is_hpu():
-        # NOTE(kzawora): PT HPU lazy backend (PT_HPU_LAZY_MODE = 1)
-        # does not support torch.compile
-        # Eager backend (PT_HPU_LAZY_MODE = 0) must be selected for
-        # torch.compile support
-        is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '1') == '1'
-        if is_lazy:
-            torch._dynamo.config.disable = True
-            # NOTE(kzawora) multi-HPU inference with HPUGraphs (lazy-only)
-            # requires enabling lazy collectives
-            # see https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html # noqa: E501
-            os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = 'true'
-
+# see https://github.com/vllm-project/vllm/issues/10480
+os.environ['TORCHINDUCTOR_COMPILE_THREADS'] = '1'
+# see https://github.com/vllm-project/vllm/issues/10619
+torch._inductor.config.compile_threads = 1
 
 __all__ = [
     "__version__",
@@ -84,5 +65,4 @@ __all__ = [
     "AsyncEngineArgs",
     "initialize_ray_cluster",
     "PoolingParams",
-    "configure_as_vllm_process",
 ]

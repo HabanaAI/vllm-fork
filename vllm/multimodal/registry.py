@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 import functools
 from collections import UserDict
 from dataclasses import dataclass
@@ -6,6 +8,7 @@ from typing import (TYPE_CHECKING, Any, Dict, Generic, Mapping, Optional,
 
 import torch.nn as nn
 
+from vllm.envs import VLLM_MM_INPUT_CACHE_SIZE
 from vllm.inputs import InputProcessingContext
 from vllm.logger import init_logger
 from vllm.transformers_utils.tokenizer import AnyTokenizer
@@ -17,7 +20,7 @@ from .image import ImagePlugin
 from .inputs import MultiModalDataDict, MultiModalKwargs, NestedTensors
 from .processing import (BaseMultiModalProcessor, BaseProcessingInfo,
                          ProcessingCache)
-from .profiling import BaseDummyInputsBuilder
+from .profiling import BaseDummyInputsBuilder, MultiModalProfiler
 from .utils import cached_get_tokenizer
 from .video import VideoPlugin
 
@@ -25,9 +28,6 @@ if TYPE_CHECKING:
     from vllm.config import ModelConfig
 
 logger = init_logger(__name__)
-
-# TODO: Tune the MM cache size
-MM_CACHE_SIZE = 256
 
 N = TypeVar("N", bound=Type[nn.Module])
 _I = TypeVar("_I", bound=BaseProcessingInfo)
@@ -119,7 +119,7 @@ class MultiModalRegistry:
 
         self._limits_by_model = _MultiModalLimits()
 
-        self._processing_cache = ProcessingCache(MM_CACHE_SIZE)
+        self._processing_cache = ProcessingCache(VLLM_MM_INPUT_CACHE_SIZE)
 
     def register_plugin(self, plugin: MultiModalPlugin) -> None:
         """
@@ -262,7 +262,9 @@ class MultiModalRegistry:
             )
             processor = self.create_processor(model_config, tokenizer)
             seq_len = model_config.max_model_len
-            return processor.info.get_mm_max_tokens_per_item(seq_len)
+            mm_limits = self.get_mm_limits_per_prompt(model_config)
+            return processor.info.get_mm_max_tokens_per_item(
+                seq_len, mm_limits)
 
         return {
             key: plugin.get_max_multimodal_tokens(model_config)
@@ -282,13 +284,13 @@ class MultiModalRegistry:
             This is currently directly used only in V1 for profiling the memory 
             usage of a model.
         """
-        limits_per_plugin = self._limits_by_model[model_config]
+        mm_limits = self.get_mm_limits_per_prompt(model_config)
 
         return {
             key: max_tokens_per_mm_item
             for key, max_tokens_per_mm_item in
             self.get_max_tokens_per_item_by_modality(model_config).items()
-            if limits_per_plugin[key] > 0
+            if mm_limits[key] > 0
         }
 
     def get_max_tokens_by_modality(
@@ -304,10 +306,10 @@ class MultiModalRegistry:
         Note:
             This should be called after :meth:`init_mm_limits_per_prompt`.
         """
-        limits_per_plugin = self._limits_by_model[model_config]
+        mm_limits = self.get_mm_limits_per_prompt(model_config)
 
         return {
-            key: limits_per_plugin[key] * max_tokens_per_mm_item
+            key: mm_limits[key] * max_tokens_per_mm_item
             for key, max_tokens_per_mm_item in
             self.get_max_tokens_per_item_by_modality(model_config).items()
         }
@@ -371,6 +373,15 @@ class MultiModalRegistry:
         Note:
             This should be called after :meth:`init_mm_limits_per_prompt`.
         """
+        if self.has_processor(model_config):
+            tokenizer = cached_get_tokenizer(
+                model_config.tokenizer,
+                trust_remote_code=model_config.trust_remote_code,
+            )
+            processor = self.create_processor(model_config, tokenizer)
+            profiler = MultiModalProfiler(processor)
+            return profiler.get_mm_limits()
+
         return self._limits_by_model[model_config]
 
     def register_processor(
