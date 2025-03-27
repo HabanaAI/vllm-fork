@@ -316,6 +316,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             cache_block_size = self.get_cache_block_size_bytes()
             fake_hpu_cache_alloc = 4 * 2**30  # take 4 GiB flat on fake hpu
             num_fake_hpu_blocks = fake_hpu_cache_alloc // cache_block_size
+            self.model_runner.bucketing_ctx.generate_prompt_buckets()
             self.model_runner.bucketing_ctx.num_hpu_blocks = num_fake_hpu_blocks
             return num_fake_hpu_blocks, 0
         with HabanaMemoryProfiler() as m:
