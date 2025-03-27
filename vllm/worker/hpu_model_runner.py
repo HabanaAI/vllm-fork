@@ -728,7 +728,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.seen_configs: set = set()
         self._mem_margin: Optional[int] = None
         self.use_exponential_bucketing = os.environ.get(
-            'VLLM_EXPONENTIAL_BUCKETING', 'true').lower() == 'true'
+            'VLLM_EXPONENTIAL_BUCKETING', 'false').lower() == 'true'
         if self.use_exponential_bucketing:
             from vllm_hpu_extension.bucketing.exponential import (
                 HPUExponentialBucketingContext as HPUBucketingContext)
