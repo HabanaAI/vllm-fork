@@ -249,8 +249,10 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA, CustomOp):
             self.lora_a_stacked_2d,
         )
         indices = embeddings_indices[0].view_as(x)
-        full_output = self.base_layer.forward(
-            x.add_(indices * added_tokens_mask))
+        f = x.add_(indices * added_tokens_mask)
+        print(f"{f.shape}")
+        print(f"{self.base_layer}")
+        full_output = self.base_layer.forward(f)
 
         full_output_org = full_output
         if full_output.ndim == 3:
