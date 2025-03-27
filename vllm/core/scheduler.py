@@ -133,7 +133,7 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
 
     def _hpu_padding_fn(self, batch_size, max_seq_len):
         use_exponential_bucketing = os.environ.get(
-            'VLLM_EXPONENTIAL_BUCKETING', 'true').lower() == 'true'
+            'VLLM_EXPONENTIAL_BUCKETING', 'false').lower() == 'true'
         if use_exponential_bucketing:
             from vllm_hpu_extension.bucketing.exponential import (
                 HPUExponentialBucketingContext as HPUBucketingContext)
