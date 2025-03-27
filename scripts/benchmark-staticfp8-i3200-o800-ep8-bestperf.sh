@@ -1,7 +1,7 @@
 #!/bin/bash
 tp_parrallel=8
-in_len=1024
-out_len=1024
+in_len=3200
+out_len=800
 multi_step=1
 total_len=$((in_len + out_len))
 # if total_len is not multiple of 128, round up to the next multiple of 128
@@ -10,9 +10,9 @@ if [ $((total_len % 128)) -ne 0 ]; then
     total_len=$(((total_len / 128 +  1) * 128 ))
 fi
 gpu_utils=0.95
-bs=448
-num_prompts=448
-request_rate=inf
+bs=224
+num_prompts=224
+request_rate=128
 log_name="online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
 in_len_aligned=$((in_len + 127 / 128 * 128))
@@ -57,7 +57,8 @@ python -m vllm.entrypoints.openai.api_server \
     --use-v2-block-manager \
     --num_scheduler_steps ${multi_step}\
     --max-model-len 8192 \
-    --max-num-batched-tokens 8192\
+    --max_num_prefill_seqs 4 \
+    --max-num-batched-tokens 12800\
     --distributed_executor_backend mp \
     --gpu_memory_utilization ${gpu_utils} \
     --kv_cache_dtype fp8_inc \
@@ -85,3 +86,4 @@ sleep 10
 
 
 kill ${pid}
+#--backend openai-chat --endpoint "v1/chat/completions"
