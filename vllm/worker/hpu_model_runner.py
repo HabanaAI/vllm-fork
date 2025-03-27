@@ -730,7 +730,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
-        self.model: torch.nn.Module = None
+        self._model: torch.nn.Module = None
         self.inc_initialized_successfully = False
 
         # Profiler stats
@@ -811,7 +811,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             htcore.hpu_set_env()
         with HabanaMemoryProfiler() as m:
             with HabanaMemoryProfiler() as m_getmodel:
-                self.model = get_model(vllm_config=self.vllm_config)
+                self._model = get_model(vllm_config=self.vllm_config)
             msg = ("Pre-loading model weights on "
                    f"{next(self.model.parameters()).device} "
                    f"took {m_getmodel.get_summary_string()}")
@@ -925,9 +925,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
+    @property
+    def model(self):
+        if isinstance(self._model, HpuModelAdapter):
+            return self._model.model
+        return self._model
+
+    @model.setter
+    def model(self, m):
+        self._model = m        
+    
     def get_model(self) -> torch.nn.Module:
-        if isinstance(self.model, HpuModelAdapter):
-            return self.model.model
         return self.model
 
     def _use_graphs(self, batch_size, seq_len, is_prompt):
