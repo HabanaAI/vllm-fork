@@ -26,7 +26,6 @@ import math
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
-import torch.nn as nn
 from transformers import PretrainedConfig
 
 from vllm.model_executor.custom_op import CustomOp
