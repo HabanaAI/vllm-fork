@@ -10,67 +10,16 @@ from einops import rearrange, repeat
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLVisionConfig
 
 from vllm.model_executor import set_random_seed
-from vllm.distributed import tensor_model_parallel_all_gather, parallel_state
+from vllm.distributed import tensor_model_parallel_all_gather
 from vllm.distributed import utils as dist_utils
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
 from vllm.model_executor.layers.activation import _ACTIVATION_REGISTRY
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import (ColumnParallelLinear,
-                                               RowParallelLinear)
-from vllm.config import ParallelConfig
+from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.platforms import _Backend
-from vllm.utils import hpu_backend_string, hpu_device_string, get_distributed_init_method, get_open_port, get_ip
 
 is_hpu = True
-
-
-def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
-    rank: int,
-    distributed_init_method: Optional[str] = None,
-    local_rank: int = -1,
-) -> None:
-    """Initialize the distributed environment."""
-    backend = hpu_backend_string()
-    init_distributed_environment(parallel_config.world_size,
-                                 rank,
-                                 distributed_init_method,
-                                 local_rank,
-                                 backend=backend)
-
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
-
-    if torch.distributed.is_initialized():
-        torch_world_size = torch.distributed.get_world_size()
-        if torch_world_size != parallel_config.world_size:
-            raise RuntimeError(
-                "torch.distributed is already initialized but the torch world "
-                "size does not match parallel_config.world_size "
-                f"({torch_world_size} vs. {parallel_config.world_size}).")
-    elif not distributed_init_method:
-        raise ValueError(
-            "distributed_init_method must be set if torch.distributed "
-            "is not already initialized")
-    else:
-        backend = hpu_backend_string()
-        torch.distributed.init_process_group(
-            backend=backend,
-            world_size=parallel_config.world_size,
-            rank=rank,
-            init_method=distributed_init_method,
-        )
-
-    # A small all_reduce for warmup & checking conformance.
-    device = hpu_device_string()
-    dummy_tensor_hpu = torch.ones(1).to(device)
-    torch.distributed.all_reduce(dummy_tensor_hpu)
-    assert dummy_tensor_hpu.item() == parallel_config.world_size
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
 
 
 def rotate_half(x: torch.Tensor, interleaved: bool = False) -> torch.Tensor:
@@ -134,17 +83,17 @@ class Qwen2_5_VisionMLP(nn.Module):
                  quant_config: Optional[QuantizationConfig] = None,
                  prefix: str = ""):
         super().__init__()
-        self.gate_proj = ColumnParallelLinear(in_features,
+        self.gate_proj = ReplicatedLinear(in_features,
                                               hidden_features,
                                               bias=bias,
                                               quant_config=quant_config,
                                               prefix=f"{prefix}.gate_proj")
-        self.up_proj = ColumnParallelLinear(in_features,
+        self.up_proj = ReplicatedLinear(in_features,
                                             hidden_features,
                                             bias=bias,
                                             quant_config=quant_config,
                                             prefix=f"{prefix}.up_proj")
-        self.down_proj = RowParallelLinear(hidden_features,
+        self.down_proj = ReplicatedLinear(hidden_features,
                                            in_features,
                                            bias=bias,
                                            quant_config=quant_config,
@@ -171,18 +120,20 @@ class Qwen2_5_VisionAttention(nn.Module):
     ) -> None:
         super().__init__()
         # Per attention head and per partition values.
-        self.tp_size = parallel_state.get_tensor_model_parallel_world_size()
-        self.tp_rank = parallel_state.get_tensor_model_parallel_rank()
+        # self.tp_size = parallel_state.get_tensor_model_parallel_world_size()
+        # self.tp_rank = parallel_state.get_tensor_model_parallel_rank()
+        self.tp_size = 1
+        self.tp_rank = 0
         self.hidden_size_per_attention_head = dist_utils.divide(
             projection_size, num_heads)
         self.num_attention_heads_per_partition = dist_utils.divide(
             num_heads, self.tp_size)
 
-        self.qkv = ColumnParallelLinear(input_size=embed_dim,
+        self.qkv = ReplicatedLinear(input_size=embed_dim,
                                         output_size=3 * projection_size,
                                         quant_config=quant_config,
                                         prefix=f"{prefix}.qkv")
-        self.proj = RowParallelLinear(input_size=projection_size,
+        self.proj = ReplicatedLinear(input_size=projection_size,
                                       output_size=embed_dim,
                                       quant_config=quant_config,
                                       prefix=f"{prefix}.proj")
@@ -383,13 +334,13 @@ class Qwen2_5_VisionPatchMerger(nn.Module):
             norm_layer = partial(nn.LayerNorm, eps=1e-6)
         self.ln_q = norm_layer(context_dim)
         self.mlp = nn.ModuleList([
-            ColumnParallelLinear(self.hidden_size,
+            ReplicatedLinear(self.hidden_size,
                                  self.hidden_size,
                                  bias=True,
                                  quant_config=quant_config,
                                  prefix=f"{prefix}.mlp.0"),
             nn.GELU(),
-            RowParallelLinear(self.hidden_size,
+            ReplicatedLinear(self.hidden_size,
                               d_model,
                               bias=True,
                               quant_config=quant_config,
@@ -566,6 +517,11 @@ class Qwen2_5_VisionTransformer(nn.Module):
             cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
             window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
         window_index = torch.cat(window_index, dim=0)
+        print("=========== window_index ==================")
+        print(window_index)
+        print("=========== cu_window_seqlens ==================")
+        print(cu_window_seqlens)
+        print("=============================")
         return window_index, cu_window_seqlens
 
     def forward(
@@ -607,6 +563,9 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 if torch.jit.is_tracing() else torch.int32)
             cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
+        print("========= fwd: cu_window_seqlens =================")
+        print(cu_window_seqlens)
+        print("=============================")
         seq_len, _ = hidden_states.size()
         hidden_states = hidden_states.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
@@ -620,10 +579,19 @@ class Qwen2_5_VisionTransformer(nn.Module):
         cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2],
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
+
+        print("========= fwd: before padding cu_seqlens =================")
+        print(cu_seqlens)
+        print("=============================")
+        
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
         #import habana_frameworks.torch as htorch
         #htorch.core.mark_step()
+
+        print("========= fwd: after padding cu_seqlens =================")
+        print(cu_seqlens)
+        print("=============================")
 
         # transformers
         hidden_states = hidden_states.unsqueeze(1)
@@ -672,9 +640,6 @@ class Qwen2_5_VisionTransformer(nn.Module):
         return loaded_params
 
 
-### Copy and paste END
-
-
 def generate_image(h, w):
     #import PIL
     from vllm.assets.image import ImageAsset
@@ -714,14 +679,6 @@ def get_model():
 def init_device():
     device = torch.device("hpu")
     torch.hpu.set_device(device)
-    parallel_config = ParallelConfig()
-    rank = 0
-    local_rank = 0
-    distributed_init_method = get_distributed_init_method(
-        get_ip(), get_open_port())
-    init_worker_distributed_environment(parallel_config, rank,
-                                        distributed_init_method, local_rank)
-    # Set random seed.
     set_random_seed(0)
     return device
 
@@ -737,7 +694,7 @@ def main():
     pixel_values = pixel_values.to(device)
     grid_thw = grid_thw.to(device)
 
-    print(pixel_values)
+    print(pixel_values, grid_thw)
     image_embeds = visual(pixel_values, grid_thw=grid_thw)
 
     print(image_embeds)
