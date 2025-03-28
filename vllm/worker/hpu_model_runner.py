@@ -853,6 +853,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        align_worker = False,
     ) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
@@ -970,7 +971,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.block_size)
 
         if self.dp_size > 1 and self.dp_awared_padding:
-            max_prompt_len = align_dp_groups(max_prompt_len, torch.distributed.ReduceOp.MAX)
+            rank = torch.distributed.get_rank()
+            if self.is_driver_worker:
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_dp_groups max_prompt_len {max_prompt_len}")
+                max_prompt_len = align_dp_groups(max_prompt_len, torch.distributed.ReduceOp.MAX)
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups max_prompt_len {max_prompt_len}")
+            if align_worker:
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers max_prompt_len {max_prompt_len}")
+                max_prompt_len = align_workers(max_prompt_len, torch.distributed.ReduceOp.MAX)
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers max_prompt_len {max_prompt_len}")
 
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
@@ -1048,6 +1057,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _prepare_decode(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        align_worker = False,
     ) -> PrepareDecodeMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
@@ -1140,7 +1150,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_bucket_size,
                 self.bucketing_global_state.decode_block_bucket_cfg)
             if self.dp_size > 1 and self.dp_awared_padding:
-                block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                rank = torch.distributed.get_rank()
+                if self.is_driver_worker:
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_dp_groups block_bucket_size {block_bucket_size}")
+                    block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups block_bucket_size {block_bucket_size}")
+                if align_worker:
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers block_bucket_size {block_bucket_size}")
+                    block_bucket_size = align_workers(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers block_bucket_size {block_bucket_size}")
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -1152,7 +1170,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 len(block_list),
                 self.bucketing_global_state.decode_block_bucket_cfg)
             if self.dp_size > 1 and self.dp_awared_padding:
-                block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                rank = torch.distributed.get_rank()
+                if self.is_driver_worker:
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_dp_groups block_bucket_size {block_bucket_size}")
+                    block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups block_bucket_size {block_bucket_size}")
+                if align_worker:
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers block_bucket_size {block_bucket_size}")
+                    block_bucket_size = align_workers(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers block_bucket_size {block_bucket_size}")
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
@@ -1206,6 +1232,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def prepare_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        align_worker = False,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
@@ -1231,7 +1258,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if is_prompt else self.bucketing_global_state.decode_bs_bucket_cfg
         batch_size_padded = find_bucket(real_batch_size, bucket_cfg)
         if self.dp_size > 1 and self.dp_awared_padding:
-            batch_size_padded = align_dp_groups(batch_size_padded, torch.distributed.ReduceOp.MAX)
+            rank = torch.distributed.get_rank()
+            if self.is_driver_worker:
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_dp_groups batch_size_padded {batch_size_padded}")
+                batch_size_padded = align_dp_groups(batch_size_padded, torch.distributed.ReduceOp.MAX)
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups batch_size_padded {batch_size_padded}")
+            if align_worker:
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers batch_size_padded {batch_size_padded}")
+                batch_size_padded = align_workers(batch_size_padded, torch.distributed.ReduceOp.MAX)
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers batch_size_padded {batch_size_padded}")
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         if batch_size_padding > 0:
@@ -1261,7 +1296,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_kwargs,
             slot_mapping,
             lora_ids,
-        ) = self._prepare_prompt(prefill_reqs)
+        ) = self._prepare_prompt(prefill_reqs, align_worker)
         (
             decode_input_tokens,
             decode_input_positions,
@@ -1271,7 +1306,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_lora_requests,
             decode_slot_mapping,
             decode_lora_ids,
-        ) = self._prepare_decode(decode_reqs)
+        ) = self._prepare_decode(decode_reqs, align_worker)
         sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
                                                      seq_lens, query_lens,
                                                      self.device,
@@ -1447,7 +1482,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _dummy_run(self,
                    max_num_batched_tokens: int) -> None:
         assert max_num_batched_tokens == 1
-        self.warmup_scenario(max_num_batched_tokens, 1, True, False, True, 1)
+        rank = torch.distributed.get_rank()
+        print(f"rank {rank} is_driver_worker {self.is_driver_worker} trigger dummy run")
+        self.warmup_scenario(max_num_batched_tokens, 1, False, False, True, 1, True)
         return
 
     def warmup_scenario(self,
@@ -1456,7 +1493,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_prompt,
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
-                        iters = 3) -> None:
+                        iters = 3,
+                        align_worker = False) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -1517,7 +1555,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler = setup_profiler()
             profiler.start()
         for _ in range(times):
-            inputs = self.prepare_model_input(seqs)
+            inputs = self.prepare_model_input(seqs, align_worker)
             additional_inputs = {}
             if self.model_type in ("medusa", "mlp_speculator", "eagle",
                                    "deepseek_mtp"):
