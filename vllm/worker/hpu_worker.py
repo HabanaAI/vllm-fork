@@ -14,10 +14,10 @@ import time
 from typing import List, Optional, Set, Tuple, Type
 
 import habana_frameworks.torch as htorch  # noqa:F401
-from habana_frameworks.torch.utils.debug.logger import (
-    refresh_logging_folder_path)
 import torch
 import torch.distributed
+from habana_frameworks.torch.utils.debug.logger import (
+    refresh_logging_folder_path)
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
