@@ -616,6 +616,7 @@ def test_packed_loras(dist_init, dummy_model_gate_up, device):
     assert model_lora.get_lora("gate_proj") is None
     assert model_lora.get_lora("up_proj") is None
     assert model_lora1.get_lora("up_proj") is None
+
     packed_lora = model_lora.get_lora("gate_up_proj")
     assert packed_lora and isinstance(packed_lora, PackedLoRALayerWeights)
 
@@ -633,6 +634,7 @@ def test_packed_loras(dist_init, dummy_model_gate_up, device):
 
     assert packed_lora1.lora_a[0] is None
     assert packed_lora1.lora_b[0] is None
+
     torch.testing.assert_close(packed_lora1.lora_a[1],
                                model_lora_clone1.get_lora("up_proj").lora_a)
     torch.testing.assert_close(packed_lora1.lora_b[1],
