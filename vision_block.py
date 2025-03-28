@@ -656,10 +656,16 @@ def get_model():
                                            in_chans=3,
                                            spatial_patch_size=14,
                                            tokens_per_second=2)
-    return Qwen2_5_VisionTransformer(
+    vllmvis =  Qwen2_5_VisionTransformer(
         vision_config,
         norm_eps=1e-6,
     )
+    from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+    hfmodel = Qwen2_5_VLForConditionalGeneration.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct", device_map="auto")
+    hfvis = hfmodel.visual
+    vllmvis.load_state_dict(hfvis.state_dict())
+
+    return vllmvis
 
 
 def init_device():
@@ -690,7 +696,7 @@ def main():
     grid_thw = grid_thw.to(device)
 
     image_embeds = visual(pixel_values, grid_thw=grid_thw)
-    # print(image_embeds)
+    print(image_embeds)
 
 if __name__ == "__main__":
     main()
