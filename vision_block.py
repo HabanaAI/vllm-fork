@@ -1,14 +1,15 @@
-from functools import partial
-from typing import (Callable, Iterable, Optional, Set, Tuple)
-
+import argparse
 import habana_frameworks.torch as htorch
 import torch
 import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
+import logging
+
+from functools import partial
+from typing import (Callable, Iterable, Optional, Set, Tuple)
 from einops import rearrange, repeat
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLVisionConfig
-
 from vllm.model_executor import set_random_seed
 from vllm.distributed import tensor_model_parallel_all_gather
 from vllm.distributed import utils as dist_utils
@@ -18,6 +19,11 @@ from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.platforms import _Backend
+
+
+logger = logging.getLogger("vllm")
+logger.setLevel(logging.ERROR)
+logger.propagate = False
 
 is_hpu = True
 
@@ -140,7 +146,6 @@ class Qwen2_5_VisionAttention(nn.Module):
 
         # Detect attention implementation.
         self.attn_backend: _Backend = _Backend.TORCH_SDPA
-        print("set back end to TORCH_SDPA")
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -517,11 +522,6 @@ class Qwen2_5_VisionTransformer(nn.Module):
             cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
             window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
         window_index = torch.cat(window_index, dim=0)
-        print("=========== window_index ==================")
-        print(window_index)
-        print("=========== cu_window_seqlens ==================")
-        print(cu_window_seqlens)
-        print("=============================")
         return window_index, cu_window_seqlens
 
     def forward(
@@ -563,9 +563,6 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 if torch.jit.is_tracing() else torch.int32)
             cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
-        print("========= fwd: cu_window_seqlens =================")
-        print(cu_window_seqlens)
-        print("=============================")
         seq_len, _ = hidden_states.size()
         hidden_states = hidden_states.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
@@ -580,18 +577,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
 
-        print("========= fwd: before padding cu_seqlens =================")
-        print(cu_seqlens)
-        print("=============================")
-        
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
-
-        #import habana_frameworks.torch as htorch
-        #htorch.core.mark_step()
-
-        print("========= fwd: after padding cu_seqlens =================")
-        print(cu_seqlens)
-        print("=============================")
 
         # transformers
         hidden_states = hidden_states.unsqueeze(1)
@@ -684,21 +670,27 @@ def init_device():
 
 
 def main():
-    h, w = 112, 112
+    parser = argparse.ArgumentParser(description="Process get_window_index from image")
+    parser.add_argument('--width', type=int, default=112, help='Width of the image')
+    parser.add_argument('--height', type=int, default=112, help='Height of the image')
+
+    args = parser.parse_args()
+
+    h, w = args.height, args.width
     device = init_device()
 
     visual = get_model()
     visual.to(device)
 
+    print(f"[h, w]: {h, w}")
     pixel_values, grid_thw = generate_image(h, w)
+    print(f"pixel shape: {pixel_values.shape} grid_thw: {grid_thw}")
+
     pixel_values = pixel_values.to(device)
     grid_thw = grid_thw.to(device)
 
-    print(pixel_values, grid_thw)
     image_embeds = visual(pixel_values, grid_thw=grid_thw)
-
-    print(image_embeds)
-
+    # print(image_embeds)
 
 if __name__ == "__main__":
     main()
