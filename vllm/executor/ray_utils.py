@@ -5,6 +5,7 @@ import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
+import habana_frameworks.torch.distributed.hccl as hccl
 import msgspec
 
 import vllm.platforms
@@ -39,6 +40,14 @@ try:
 
         def __init__(self, *args, **kwargs) -> None:
             super().__init__(*args, **kwargs)
+            rank = kwargs["rpc_rank"]
+            local_rank = rank % 8
+            vllm_config = kwargs["vllm_config"]
+            world_size = vllm_config.parallel_config.tensor_parallel_size
+            print(f"==> hccl initialized with world_size={world_size}, rank={rank}, local_rank={local_rank}")
+            os.environ["ID"] = str(rank)
+            os.environ["HLS_MODULE_ID"] = str(rank)
+            _ = hccl.initialize_distributed_hpu(world_size=world_size, rank=rank, local_rank=local_rank)
             # Since the compiled DAG runs a main execution
             # in a different thread that calls cuda.set_device.
             # The flag indicates is set_device is called on
