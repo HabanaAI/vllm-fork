@@ -109,12 +109,8 @@ def bucketize_non_masked_tensor(n_non_masked, non_masked):
     """
     b_padded = non_masked.shape[0]
     n_non_masked_bucketed = get_bucketed_n_non_masked(n_non_masked)
-    sorting_indices = torch.argsort(non_masked.to(torch.int), descending=True)
-    mask = torch.arange(b_padded, device=non_masked.device) < n_non_masked_bucketed
-    non_masked_bucketed = torch.zeros(b_padded, dtype=torch.bool, device=non_masked.device)
-    non_masked_bucketed[sorting_indices] = mask
-    return non_masked_bucketed
-
+    sorting_indices = torch.argsort(non_masked.to(torch.int), descending=True)[:n_non_masked_bucketed]
+    return torch.sort(sorting_indices).values
 
 def convert_right_pad_to_left_pad(blocks: torch.Tensor, seq_used: torch.Tensor, block_size: int):
     """ Converts blocks with shape (b, n_blocks) from right padding to left padding along dim=1.
