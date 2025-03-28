@@ -1203,6 +1203,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             rounding_mode="floor")
         indices = indices.unflatten(0, (-1, self.block_size))[:, 0]
 
+        # calculate indices using CPU and locate them on HPU
+        slot_mapping_flat = slot_mapping.flatten()  # type: ignore
+        indices = torch.div(slot_mapping_flat,
+                            self.block_size,
+                            rounding_mode="floor")
+        indices = indices.unflatten(0, (-1, self.block_size))[:, 0]
+
         # Note: num_prefill_tokens is calculated using the length of
         # input_tokens after padding.
         num_prefill_tokens = input_tokens_tensor.numel()
@@ -1481,6 +1488,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     dtype=torch.long,
                                     device='cpu')
 
+        # calculate indices and offsets using CPU and locate them on HPU
+        slot_mapping_flat = slot_mapping.flatten()  # type: ignore
+        indices = torch.div(slot_mapping_flat,
+                            self.block_size,
+                            rounding_mode="floor")
+        offsets = torch.fmod(slot_mapping_flat, self.block_size)
+
         input_tokens = input_tokens.to(  # type: ignore
             self.device, non_blocking=True)
         input_positions = input_positions.to(  # type: ignore
@@ -1500,13 +1514,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
             encoder_seq_lens_tensor = encoder_seq_lens_tensor.to(  # type: ignore
                 self.device, non_blocking=True)
-
-        # calculate indices and offsets using CPU and locate them on HPU
-        slot_mapping_flat = slot_mapping.flatten()  # type: ignore
-        indices = torch.div(slot_mapping_flat,
-                            self.block_size,
-                            rounding_mode="floor")
-        offsets = torch.fmod(slot_mapping_flat, self.block_size)
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
