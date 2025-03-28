@@ -631,6 +631,7 @@ class GLM4VForCausalLM(ChatGLMBaseModel, SupportsLoRA, SupportsPP,
                     self.config.eoi_token_id,
                 ],
             )
+
         return inputs_embeds
 
     def forward(
