@@ -1,1 +1,0 @@
-{"method": "HOOKS","mode": "MEASURE","observer": "maxabs","scale_format": "scalar","device_for_scales": "Gaudi2","whitelist": {"types": [], "names":  []},"blacklist": {"types": [], "names":  []},"quantize_weight": false,"dump_stats_path": "/workspace/llama3.1-405b/pytorch-hpu/quantization/inc/llama-3.1-70b-instruct/g3/inc_output"}

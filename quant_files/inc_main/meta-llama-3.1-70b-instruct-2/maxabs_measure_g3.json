@@ -1,0 +1,1 @@
+{"method": "HOOKS","mode": "MEASURE","observer": "maxabs","scale_format": "scalar","device_for_scales": "Gaudi2","whitelist": {"types": [], "names":  []},"blocklist": {"types": [], "names":  ["lm_head"]},"quantize_weight": false,"dump_stats_path": "quant_files/inc_main/meta-llama-3.1-70b-instruct-2/g3/inc_output"}
