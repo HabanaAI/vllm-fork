@@ -680,7 +680,7 @@ def get_model():
         norm_eps=1e-6,
     )
     from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
-    hfmodel = Qwen2_5_VLForConditionalGeneration.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct", device_map="auto")
+    hfmodel = Qwen2_5_VLForConditionalGeneration.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")#, device_map="auto")
     hfvis = hfmodel.visual
     vllmvis.load_state_dict(hfvis.state_dict())
 
@@ -788,8 +788,6 @@ def test_2_sidebyside_util(setup_fn):
 test slice
 '''
 def test_slice():
-    import habana_frameworks.torch as ht
-
 
     class SliceModule(nn.Module):
         def __init__(self):
@@ -814,7 +812,7 @@ def test_slice():
     print(model(x,slices))
     print(model(x,torch.tensor([[0,3],[3,10]], device='hpu')))
     
-    model = ht.hpu.wrap_in_hpu_graph(model)
+    model = htorch.hpu.wrap_in_hpu_graph(model)
     print(model(x,slices))
     print(model(x,torch.tensor([[0,2],[2,10]], device='hpu')))
     
@@ -853,7 +851,7 @@ def test_rearrange():
     rearrange = rearrange.to('hpu')
     print(model(x,rearrange))
     print(model(x,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
-    model = ht.hpu.wrap_in_hpu_graph(model)
+    model = htorch.hpu.wrap_in_hpu_graph(model)
 
     print(model(x,rearrange))
     print(model(x,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
@@ -925,7 +923,49 @@ def test_block_static_indices():
     res = create_block_diagonal_attention_mask_outerprod(indices)
     print(res)
     
+def test_block_static_indices_hpugraph():
+    def expand_to_max(indices, max_num_images):
+        return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
+
+    class CreateAttnMask(nn.Module):
+        def __init__(self):
+            super(CreateAttnMask, self).__init__()
+
+        def forward(self, indices):
+            maxsize = indices[-1]
+            range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
+            yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+            zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+            xx = torch.logical_and(yy, zz)
+            # can reduce sum externally or as batchmatmul
+            # res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+            res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+            return res
+
     
+    model = htorch.hpu.wrap_in_hpu_graph(CreateAttnMask().to('hpu'))
+
+    # as long as the size of attn mask is same (7 here)
+    # and max num images is same (10 here)
+    # we should be fine
+
+    indices = torch.tensor([0,5,7], device='hpu')
+    indices = expand_to_max(indices, 10)
+    res = model(indices)
+    print(res)
+
+    indices = torch.tensor([0,7], device='hpu')
+    indices = expand_to_max(indices, 10)
+    res = model(indices)
+    print(res)
+
+
+    indices = torch.tensor([0,2,4,7], device='hpu')
+    indices = expand_to_max(indices, 10)
+    res = model(indices)
+    print(res)
+
+
     
     
     
