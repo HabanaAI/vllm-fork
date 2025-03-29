@@ -190,8 +190,8 @@ def load_mllama(question, image_urls: List[str]) -> ModelRequestData:
         limit_mm_per_prompt={"image": len(image_urls)},
     )
 
-    placeholders = "<|image|>" * len(image_urls)
-    prompt = f"{placeholders}<|begin_of_text|>{question}"
+    img_prompt = "Given the first image <|image|> and the second image<|image|>"
+    prompt = f"<|begin_of_text|>{img_prompt}, {question}?"
     return ModelRequestData(
         llm=llm,
         prompt=prompt,
