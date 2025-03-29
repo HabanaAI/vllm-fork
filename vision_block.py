@@ -19,7 +19,7 @@ from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.platforms import _Backend
-
+import pytest
 
 logger = logging.getLogger("vllm")
 logger.setLevel(logging.ERROR)
@@ -626,6 +626,25 @@ class Qwen2_5_VisionTransformer(nn.Module):
         return loaded_params
 
 
+def gen_multi_image(hs, ws):
+    pxl = []
+    grid = []
+    for h, w in zip(hs, ws):
+        pixel_values, image_grid_thw = generate_image(h, w)
+        pxl += [pixel_values]
+        grid += [image_grid_thw]
+    return torch.cat(pxl, dim=0), torch.cat(grid, dim=0)
+
+
+def gen_batch_image(hs, ws):
+    pxl = []
+    grid = []
+    for h, w in zip(hs, ws):
+        pixel_values, image_grid_thw = generate_image(h, w)
+        pxl += [pixel_values.unsqueeze(0)]
+        grid += [image_grid_thw.unsqueeze(0)]
+    return torch.cat(pxl, dim=0), torch.cat(grid, dim=0)
+
 def generate_image(h, w):
     #import PIL
     from vllm.assets.image import ImageAsset
@@ -675,18 +694,31 @@ def init_device():
     return device
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Process get_window_index from image")
-    parser.add_argument('--width', type=int, default=112, help='Width of the image')
-    parser.add_argument('--height', type=int, default=112, help='Height of the image')
+class Setup:
+    def __init__(self):
+        self.device = init_device()
+        self.visual = get_model()
+        self.visual.to(self.device)
 
-    args = parser.parse_args()
+# to load teh model only once for multiple tests
+@pytest.fixture(scope="session")
+def setup_fn():
+    print('setup')
+    yield Setup()
+    print('teardown')
 
-    h, w = args.height, args.width
-    device = init_device()
+def test_main(setup_fn):
+    #parser = argparse.ArgumentParser(description="Process get_window_index from image")
+    #parser.add_argument('--width', type=int, default=112, help='Width of the image')
+    #parser.add_argument('--height', type=int, default=112, help='Height of the image')
 
-    visual = get_model()
-    visual.to(device)
+    #args = parser.parse_args()
+
+    #h, w = args.height, args.width
+    h = 112; w = 112
+
+    visual = setup_fn.visual
+    device = setup_fn.device
 
     print(f"[h, w]: {h, w}")
     pixel_values, grid_thw = generate_image(h, w)
@@ -696,7 +728,184 @@ def main():
     grid_thw = grid_thw.to(device)
 
     image_embeds = visual(pixel_values, grid_thw=grid_thw)
-    print(image_embeds)
+    assert image_embeds.sum().item() == -791.01904296875
 
-if __name__ == "__main__":
-    main()
+
+
+'''
+Same as test_main, but image repeated twice
+Because we pass teh same image side-by-side, we get same answer from model placed-side-by-side
+'''
+def test_2_sidebyside(setup_fn):
+
+    h = 112; w = 112
+
+    visual = setup_fn.visual
+    device = setup_fn.device
+
+    print(f"[h, w]: {h, w}")
+    pixel_values, grid_thw = generate_image(h, w)
+    pixel_values = torch.cat([pixel_values, pixel_values], dim=0)
+    grid_thw = torch.cat([grid_thw, grid_thw], dim=0)
+    print(f"pixel shape: {pixel_values.shape} grid_thw: {grid_thw}")
+
+    pixel_values = pixel_values.to(device)
+    grid_thw = grid_thw.to(device)
+
+
+    image_embeds = visual(pixel_values, grid_thw=grid_thw)
+    assert image_embeds.sum().item() == (-1582.038330078125)
+    assert image_embeds[:16,:].sum().item() == (-791.0191040039062)
+    assert image_embeds[16:,:].sum().item() == (-791.0191040039062)
+
+
+
+'''
+Same as test_2_sidebyside, but using util function
+'''
+def test_2_sidebyside_util(setup_fn):
+
+    h = 112; w = 112
+
+    visual = setup_fn.visual
+    device = setup_fn.device
+
+    print(f"[h, w]: {h, w}")
+    pixel_values, grid_thw = gen_multi_image([h,h], [w,w])
+    print(f"pixel shape: {pixel_values.shape} grid_thw: {grid_thw}")
+
+    pixel_values = pixel_values.to(device)
+    grid_thw = grid_thw.to(device)
+
+
+    image_embeds = visual(pixel_values, grid_thw=grid_thw)
+    assert image_embeds.sum().item() == (-1582.038330078125)
+    assert image_embeds[:16,:].sum().item() == (-791.0191040039062)
+    assert image_embeds[16:,:].sum().item() == (-791.0191040039062)
+
+
+'''
+test slice
+'''
+def test_slice():
+    import habana_frameworks.torch as ht
+
+
+    class SliceModule(nn.Module):
+        def __init__(self):
+            super(SliceModule, self).__init__()
+
+        def forward(self, x, slices):
+            outputs = []
+            for start, end in slices:
+                #sliced_tensor = x[start:end]
+                sliced_tensor = torch.index_select(x, 0, torch.arange(start, end, device=x.device))
+                outputs.append(sliced_tensor.sum().unsqueeze(0))            
+            return torch.cat(outputs, dim=0)
+
+    model = SliceModule()
+    x = torch.arange(10)
+    slices = torch.tensor([[0,5],[5,10]])
+    print(model(x,slices))
+    
+    model = model.to('hpu')
+    x = x.to('hpu')
+    slices = slices.to('hpu')
+    print(model(x,slices))
+    print(model(x,torch.tensor([[0,3],[3,10]], device='hpu')))
+    
+    model = ht.hpu.wrap_in_hpu_graph(model)
+    print(model(x,slices))
+    print(model(x,torch.tensor([[0,2],[2,10]], device='hpu')))
+    
+    '''
+    This test shows  x[start:end] or index_select with arange will not work with hpu graphs
+    '''
+
+
+'''
+ x = x[rearrange]
+ x = torch.gather(x, 0, rearrange)
+ both work with hpu graph
+'''
+def test_rearrange():
+    import habana_frameworks.torch as ht
+
+
+    class RearrangeSliceModule(nn.Module):
+        def __init__(self):
+            super(RearrangeSliceModule, self).__init__()
+
+        def forward(self, x, rearrange):
+            #breakpoint()
+            x = x[rearrange]
+            #x = torch.gather(x, 0, rearrange)
+            outputs = [x[:5].sum().unsqueeze(0), x[5:].sum().unsqueeze(0)]
+            return torch.cat(outputs, dim=0)
+
+    model = RearrangeSliceModule()
+    x = torch.arange(10)*10
+    rearrange = torch.tensor([9,8,7,6,1,2,3,4,0,5])
+    print(model(x,rearrange))
+
+    model = model.to('hpu')
+    x = x.to('hpu')
+    rearrange = rearrange.to('hpu')
+    print(model(x,rearrange))
+    print(model(x,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
+    model = ht.hpu.wrap_in_hpu_graph(model)
+
+    print(model(x,rearrange))
+    print(model(x,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
+    y = x/10
+    print(y)
+    print(model(y,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
+    print(model(y,torch.tensor([0,0,0,0,0,0,0,0,0,0], device='hpu')))
+
+
+
+def test_block():    
+    def create_block_diagonal_attention_mask(indices):
+      max_index = indices[-1]
+      attention_mask = torch.zeros((max_index, max_index))
+
+      for i in range(len(indices)-1):
+          start = indices[i]
+          end = indices[i + 1]
+          attention_mask[start:end, start:end] = 1
+  
+      return attention_mask 
+      
+    slices = torch.tensor([0,5,7])
+    
+    res = create_block_diagonal_attention_mask(slices)
+    print(res)
+    
+    def create_block_diagonal_attention_mask_outerprod(indices):
+        maxsize = indices[-1]
+        range_to_max_for_each_img = torch.arange(maxsize).unsqueeze(0).repeat(indices.shape[0]-1,1)
+        yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+        zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+        xx = torch.logical_and(yy, zz)
+        # can reduce sum externally or as batchmatmul
+        # res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+        return res
+   
+    res = create_block_diagonal_attention_mask_outerprod(torch.tensor([0,5,7,12]))
+    print(res)
+
+
+    
+        
+    
+    
+    
+    
+    
+      
+   
+
+
+#if __name__ == "__main__":
+#    main()
