@@ -864,7 +864,7 @@ def test_rearrange():
 
 
 
-def test_block():    
+def test_block():
     def create_block_diagonal_attention_mask(indices):
       max_index = indices[-1]
       attention_mask = torch.zeros((max_index, max_index))
@@ -873,14 +873,14 @@ def test_block():
           start = indices[i]
           end = indices[i + 1]
           attention_mask[start:end, start:end] = 1
-  
+
       return attention_mask 
-      
+
     slices = torch.tensor([0,5,7])
-    
+
     res = create_block_diagonal_attention_mask(slices)
     print(res)
-    
+
     def create_block_diagonal_attention_mask_outerprod(indices):
         maxsize = indices[-1]
         range_to_max_for_each_img = torch.arange(maxsize).unsqueeze(0).repeat(indices.shape[0]-1,1)
@@ -897,7 +897,33 @@ def test_block():
 
 
     
-        
+def test_block_static_indices():
+
+    def create_block_diagonal_attention_mask_outerprod(indices):
+        maxsize = indices[-1]
+        range_to_max_for_each_img = torch.arange(maxsize).unsqueeze(0).repeat(indices.shape[0]-1,1)
+        yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+        zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+        xx = torch.logical_and(yy, zz)
+        # can reduce sum externally or as batchmatmul
+        # res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+        return res
+
+    def expand_to_max(indices, max_num_images):
+        return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
+
+    indices = torch.tensor([0,5,7,12])
+    indices = expand_to_max(indices, 10)
+
+    res = create_block_diagonal_attention_mask_outerprod(indices)
+    print(res)
+
+    indices = torch.tensor([0,5])
+    indices = expand_to_max(indices, 10)
+
+    res = create_block_diagonal_attention_mask_outerprod(indices)
+    print(res)
     
     
     
