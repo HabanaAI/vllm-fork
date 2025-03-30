@@ -2187,8 +2187,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      is_prompt,
                                      kv_caches,
                                      multimodal_seqs_group_metada=True,
-                                     height=28,
-                                     width=28)
+                                     height=112,
+                                     width=112) # everythign must be 112 aligned (for now)
             else:
                 self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
 
@@ -2237,8 +2237,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     temperature=1.0
                     if batch_size not in warmed_random_sampler_bs else 0,
                     multimodal_seqs_group_metada=True if is_prompt else False,
-                    height=28,
-                    width=28)
+                    height=112,
+                    width=112)  # everythign must be 112 aligned (for now)
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)

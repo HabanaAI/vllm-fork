@@ -76,6 +76,26 @@ is_hpu = current_platform.is_hpu()
 # === Vision Inputs === #
 
 
+def create_block_diagonal_attention_mask_outerprod(indices):
+    maxsize = indices[9] # TODO using -1 here causes crashes.. using hardcoded 9, since for now I assume max num images = 10 ... maybe not revert to -1 when fusedsdpa with attn is resolved
+    #print(indices.shape)
+    #print(indices)
+    #print(maxsize)
+    
+    range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
+    yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+    zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+    xx = torch.logical_and(yy, zz)
+    # can reduce sum externally or as batchmatmul
+    res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+    #breakpoint()
+    #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+    return res.bool()
+
+# TODO pass in the right number for max_num_images, right now using 10 in the call-site
+def expand_to_max(indices, max_num_images):
+    return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
+
 class Qwen2_5_VLImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     pixel_values: torch.Tensor
@@ -216,6 +236,7 @@ class Qwen2_5_VisionAttention(nn.Module):
         self.num_attention_heads_per_partition = dist_utils.divide(
             num_heads, self.tp_size)
 
+
         self.qkv = ColumnParallelLinear(input_size=embed_dim,
                                         output_size=3 * projection_size,
                                         quant_config=quant_config,
@@ -254,13 +275,14 @@ class Qwen2_5_VisionAttention(nn.Module):
         # 3 * [s, b, head * head_dim] -> 3 * [s, b, head, head_dim]
         new_shape = (seq_len, bs, self.num_attention_heads_per_partition,
                      self.hidden_size_per_attention_head)
+        #breakpoint()
         q, k, v = (x.view(*new_shape) for x in (q, k, v))
         return q, k, v
 
     def forward(
         self,
         x: torch.Tensor,
-        cu_seqlens: torch.Tensor,
+        cu_seqlens: Optional[torch.Tensor],
         rotary_pos_emb: torch.Tensor,
     ) -> torch.Tensor:
         # [s, b, c] --> [s, b, head * 3 * head_dim]
@@ -304,26 +326,65 @@ class Qwen2_5_VisionAttention(nn.Module):
                                       b=batch_size)
         elif self.attn_backend == _Backend.TORCH_SDPA:
             # Execute attention entry by entry for speed & less VRAM.
-            outputs = []
-            for i in range(1, len(cu_seqlens)):
-                start_idx = cu_seqlens[i - 1]
-                end_idx = cu_seqlens[i]
-                q_i = q[:, start_idx:end_idx]
-                k_i = k[:, start_idx:end_idx]
-                v_i = v[:, start_idx:end_idx]
-                q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
-                                 for x in [q_i, k_i, v_i])
-                if is_hpu:
-                    from habana_frameworks.torch.hpex.kernels import FusedSDPA
-                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
-                else:
-                    output_i = F.scaled_dot_product_attention(q_i,
-                                                              k_i,
-                                                              v_i,
-                                                              dropout_p=0.0)
-                output_i = rearrange(output_i, "b h s d -> b s h d ")
-                outputs.append(output_i)
-            context_layer = torch.cat(outputs, dim=1)
+            if cu_seqlens is None:
+                outputs = []
+                cu_seqlens = list(range(0, x.shape[0]+1, 64)) # assuming x%64=0 (image is 112 aligned in both h/w dims)
+                #print(cu_seqlens)
+                for i in range(1, len(cu_seqlens)):
+                    start_idx = cu_seqlens[i - 1]
+                    end_idx = cu_seqlens[i]
+                    try:
+                        q_i = q[:, start_idx:end_idx]
+                    except:
+                        breakpoint()
+                        print()
+                    k_i = k[:, start_idx:end_idx]
+                    v_i = v[:, start_idx:end_idx]
+                    q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
+                                    for x in [q_i, k_i, v_i])
+                    if is_hpu:
+                        from habana_frameworks.torch.hpex.kernels import FusedSDPA
+                        output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
+                    else:
+                        output_i = F.scaled_dot_product_attention(q_i,
+                                                                k_i,
+                                                                v_i,
+                                                                dropout_p=0.0)
+                    output_i = rearrange(output_i, "b h s d -> b s h d ")
+                    outputs.append(output_i)
+                context_layer = torch.cat(outputs, dim=1)
+                #breakpoint()
+                #print()
+            else:
+                #breakpoint()
+                from habana_frameworks.torch.hpex.kernels import FusedSDPA
+                # TODO. we only need to create this mask once. all 4 full-attn layers could share it
+                #print(cu_seqlens)
+                fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+                #print(cu_seqlens)
+                #print(fullatt_block_attn_mask)
+                #print(q.shape, fullatt_block_attn_mask.shape, 'x.x.x.x.')
+                q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")for x in [q, k, v])
+                #print('xyxyxy1', q1, k1, v1)
+                #if q1.shape[2] > 1600:
+                #  breakpoint()
+                #  print()
+                fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask, 0.0)
+                #fused_out = FusedSDPA.apply(q1, k1, v1, None, 0.0) ######## this works (no attention)
+                '''
+                [2025-03-30 04:54:26.987] [COMPLEXGUID_LIB] [error] 'tpckernel.sdpa_recomp_core_fwd' op Broadcast of shape [1, 6] not possible at index 1. Dimension 6 incompatible with output shape dimension 3200Broadcast of shape [1, 6] not possible at index 1. Dimension 6 incompatible with output shape dimension 3200
+                [04:54:26.987505][SYN_RECIPE    ][error][tid:17738] compileGraph: Can not compile graph
+                [04:54:26.987522][SYN_RECIPE    ][error][tid:17738] addRecipeHandleAndCompileGraph: Can not compile
+                [04:54:26.987544][SYN_API       ][error][tid:17738] compileGraph: Failed to add recipe handle into Recipe-Singleton status 26[synFail]
+                [04:54:26.987559][SYN_API       ][error][tid:17738] synGraphCompile: SYN_API_CALL failed status: 26[synFail]. graphHandle 0x5df3104fe7a8
+                '''
+                
+                
+                #print('xyxyxy2', fused_out) ###### crashes, why?
+                #fused_out = torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, fullatt_block_attn_mask, 0.0)  ######## this works if used instead of fsdpa
+                context_layer = rearrange(fused_out, "b h s d -> b s h d ")
+                #print('xyxyxy3', context_layer)
+            
         elif self.attn_backend == _Backend.XFORMERS:
             from xformers import ops as xops
             from xformers.ops.fmha.attn_bias import BlockDiagonalMask
@@ -370,7 +431,8 @@ class Qwen2_5_VisionBlock(nn.Module):
                                      quant_config=quant_config,
                                      prefix=f"{prefix}.mlp")
 
-    def forward(self, x: torch.Tensor, cu_seqlens: torch.Tensor,
+    def forward(self, x: torch.Tensor, #cu_seqlens: torch.Tensor,
+                cu_seqlens: Optional[torch.Tensor],
                 rotary_pos_emb: torch.Tensor) -> torch.Tensor:
         #print(f"VisionBlock : x[{x.shape}], cu_seqlens[{cu_seqlens.shape}, rotary_pos_emb{[rotary_pos_emb.shape]}]")
         x = x + self.attn(self.norm1(x),
@@ -664,24 +726,35 @@ class Qwen2_5_VisionTransformer(nn.Module):
     def forward(
             self,
             x: torch.Tensor,
-            cu_seqlens: torch.Tensor,  #canbe removed
-            cu_window_seqlens: torch.Tensor,  #can be removed
+            cu_seqlens: torch.Tensor,
+            #fullatt_block_attn_mask: torch.Tensor,
+            #cu_window_seqlens: torch.Tensor,  #can be removed
             rotary_pos_emb: torch.Tensor) -> torch.Tensor:
+        #cu_window_seqlens = torch.arange(0, x.shape[0]+1, 64, device=x.device) # assuming x%64=0 (image is 112 aligned in both h/w dims)
+        assert x.shape[0] == cu_seqlens[-1] == rotary_pos_emb.shape[0]
         print(
-            f"VisionTransformer: x-[{x.shape}, cu_seqlens[{cu_seqlens.shape}], cu_window_seqlens[{cu_window_seqlens.shape}], rotary_pos_emb[{rotary_pos_emb.shape}]"
+            f"VisionTransformer: x-[{x.shape}, cu_seqlens[{cu_seqlens}], rotary_pos_emb[{rotary_pos_emb.shape}]"
         )
-        #print(f"cu_seqlens {cu_seqlens}, cu_window_seqlens {cu_window_seqlens}")
 
         # transformers
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
+                #fullatt_block_attn_mask = None
             else:
-                cu_seqlens_now = cu_window_seqlens
+                cu_seqlens_now = None
+            #    fullatt_block_attn_mask = None
+            #print('xxx', layer_num, self.fullatt_block_indexes)
+            #print(type(cu_seqlens_now))
+            #print(type(cu_seqlens))
+            #print(cu_seqlens_now)
+            #print((cu_seqlens))
+            
             hidden_states = blk(hidden_states,
                                 cu_seqlens=cu_seqlens_now,
                                 rotary_pos_emb=rotary_pos_emb)
+            #print(hidden_states.sum(), '....')
 
         # adapter
         hidden_states = self.merger(hidden_states)
@@ -989,10 +1062,12 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             #Moved dynamic calculation to pre_attn, and post_attn and keep the visual() block to be static to include only VisionTransformer and VisionMerger.
             pixel_values, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
                 pixel_values, grid_thw)
+            assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
+            #print('.......', cu_seqlens, expand_to_max(cu_seqlens, 10))
             hidden_states = self.visual(pixel_values,
                                         rotary_pos_emb=rot_pos_emb,
-                                        cu_seqlens=cu_seqlens,
-                                        cu_window_seqlens=cu_window_seqlens)
+                                        cu_seqlens=expand_to_max(cu_seqlens, 10),)
+                                        #cu_window_seqlens=cu_window_seqlens)
             image_embeds = self.visual.post_attn(hidden_states, window_index)
             #image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
 
@@ -1020,8 +1095,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 pixel_values_videos, grid_thw)
             hidden_states = self.visual(pixel_values_videos,
                                         rotary_pos_emb=rot_pos_emb,
-                                        cu_seqlens=cu_seqlens,
-                                        cu_window_seqlens=cu_window_seqlens)
+                                        cu_seqlens=expand_to_max(cu_seqlens, 10),)
+                                        #cu_window_seqlens=cu_window_seqlens)
             video_embeds = self.visual.post_attn(hidden_states, window_index)
             #video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
 

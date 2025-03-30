@@ -59,8 +59,8 @@ def get_multi_modal_prompt(args, modality, index=0):
                                         1 * args.image_width)
             rand_height = random.randint(int(0.5 * args.image_height),
                                          1 * args.image_height)
-            rand_width = 1000
-            rand_height = 1020
+            rand_width = 1008
+            rand_height = 1008
             image2 = image.resize((rand_width, rand_height))
             prompts = [
                 {
