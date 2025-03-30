@@ -965,11 +965,100 @@ def test_block_static_indices_hpugraph():
     res = model(indices)
     print(res)
 
+def test_fsdpa():
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+    dim = 1600
+    q1 = torch.rand([1,16,dim,80], device='hpu').bfloat16()
+    k1 = torch.rand([1,16,dim,80], device='hpu').bfloat16()
+    v1 = torch.rand([1,16,dim,80], device='hpu').bfloat16()
+    fullatt_block_attn_mask = torch.ones([dim,dim], device='hpu').bool()
+    fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask, 0.0)
+    print(fused_out.sum())
+    
 
+def test_fsdpa_shapechange():
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+    import habana_frameworks.torch.hpu as ht
+
+    def expand_to_max(indices, max_num_images):
+        return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
+
+    def create_block_diagonal_attention_mask_outerprod(indices):
+        maxsize = indices[-1] # TODO using -1 here causes crashes.. using hardcoded 9, since for now I assume max num images = 10 ... maybe not revert to -1 when fusedsdpa with attn is resolved
+        #print(indices.shape)
+        #print(indices)
+        #print(maxsize)
+        
+        range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
+        yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+        zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+        xx = torch.logical_and(yy, zz)
+        # can reduce sum externally or as batchmatmul
+        res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        #breakpoint()
+        #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+        return res.bool()
+
+    class FSDPAAttnMask(nn.Module):
+        def __init__(self):
+            super(FSDPAAttnMask, self).__init__()
+            self.qkv = nn.Linear(1280, 1280*3)
+
+        def forward(self, x, cu_seqlens):
+            new_shape = [x.shape[0], x.shape[1], 16, 80]
+            qkv = self.qkv(x)
+            q, k, v = qkv.chunk(3, dim=2)
+            #breakpoint()
+            q, k, v = (x.view(*new_shape) for x in (q, k, v)) # [seqlen, batchsz, num_head, head_dim]
+
+            q, k, v = (rearrange(x, "s b ... -> b s ...").contiguous()
+                   for x in (q, k, v))
+
+            fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+            q1, k1, v1 = (rearrange(x, "b s h d -> b h s d") for x in [q, k, v]) ##################### <<<<<
+            # q1/k1/v1 shapes: 1600 16 1 80
+            fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask.bfloat16(), 0.0) #
+
+            #breakpoint()
+            '''
+            N=1600, Hq=H=
+            '''
+            #fused_out = torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, fullatt_block_attn_mask, 0.0) #
+            #torch.nn.functional.scaled_dot_product_attention(q, k, v, fullatt_block_attn_mask, 0.0) 
+            #torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, None, 0.0)
+            #print(fused_out)
+
+            context_layer = rearrange(fused_out, "b h s d -> b s h d ")
+            return context_layer
+
+    dim = 1600
+    device='hpu'
+    cu_seqlens = expand_to_max(torch.tensor([0,dim], device=device), 8)
+    x = torch.randn([dim,1,1280], device=device).bfloat16()
+    #breakpoint()
+    model = FSDPAAttnMask().to(torch.bfloat16).to(device)
+    y = model(x, cu_seqlens)
+    print(y)
+
+
+    dim = 3200
+    cu_seqlens = expand_to_max(torch.tensor([0,dim], device=device), 8)
+    x = torch.randn([dim,1,1280], device=device)
+    y = model(x, cu_seqlens)
+    print(y)
+
+    '''
+    LOG_LEVEL_GC=2 ENABLE_CONSOLE=true pytest -s -v vision_block.py -k test_fsdpa_shapechange
     
-    
-    
-      
+    [2025-03-30 06:47:16.296] [COMPLEXGUID_LIB] [error] 'tpckernel.sdpa_recomp_core_fwd' op Broadcast of shape [1, 10] not possible at index 1. Dimension 10 incompatible with output shape dimension 1800Broadcast of shape [1, 10] not possible at index 1. Dimension 10 incompatible with output shape dimension 1800
+[06:47:16.297048][SYN_RECIPE    ][error][tid:1F6C4] compileGraph: Can not compile graph
+[06:47:16.297059][SYN_RECIPE    ][error][tid:1F6C4] addRecipeHandleAndCompileGraph: Can not compile
+[06:47:16.297077][SYN_API       ][error][tid:1F6C4] compileGraph: Failed to add recipe handle into Recipe-Singleton status 26[synFail]
+[06:47:16.297089][SYN_API       ][error][tid:1F6C4] synGraphCompile: SYN_API_CALL failed status: 26[synFail]. graphHandle 0x60dfefefb308
+FAILED
+
+    '''
+
    
 
 
