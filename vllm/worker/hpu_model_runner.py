@@ -1196,12 +1196,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             for modality, placeholder_map in
             multi_modal_placeholder_maps.items()
         }
-        # calculate indices using CPU and locate them on HPU
-        slot_mapping_flat = slot_mapping.flatten()  # type: ignore
-        indices = torch.div(slot_mapping_flat,
-                            self.block_size,
-                            rounding_mode="floor")
-        indices = indices.unflatten(0, (-1, self.block_size))[:, 0]
 
         # calculate indices using CPU and locate them on HPU
         slot_mapping_flat = slot_mapping.flatten()  # type: ignore
