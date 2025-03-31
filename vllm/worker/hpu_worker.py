@@ -63,6 +63,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
+        self.affine_cpu()
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
@@ -80,7 +81,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 model_config.model) \
             or (speculative_config.draft_model_config.hf_config.model_type
                 not in ["medusa", "mlp_speculator", "eagle"]) \
-                    else {"return_hidden_states": True}
+            else {"return_hidden_states": True}
 
         is_encoder_decoder_model = self._is_encoder_decoder_model()
         ModelRunnerClass: Type[HPUModelRunnerBase] = HPUModelRunner
@@ -123,6 +124,22 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+
+    def affine_cpu(self):
+        # CPU affinity
+        rank = self.rank
+        pid = os.getpid()
+        logger.info("Starting rank %d - PID %d", rank, pid)
+        affinity = list(os.sched_getaffinity(pid))
+
+        affinity.sort()
+        affinity = affinity[::2]  # no threads => skip every 2
+        l = len(affinity) // 8
+        new_affinity = affinity[rank * l:(rank + 1) * l][1:]  # skip one core to leave room for the OS
+        os.sched_setaffinity(pid, set(new_affinity))
+        logger.info("[%d] Setting custom affinity", rank)
+
+        logger.info("[%d] Affinity: %s", rank, str(os.sched_getaffinity(pid)))
 
     def full_trace_handler(self, dir_name, use_gzip=False):
 
@@ -248,7 +265,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         log_cpu_fallbacks = os.environ.get('VLLM_HPU_LOG_STEP_CPU_FALLBACKS',
                                            '0') != '0' or log_cpu_fallbacks_all
         if (log_graph_compilation or log_cpu_fallbacks) and \
-            execute_model_req is not None:
+                execute_model_req is not None:
             from habana_frameworks.torch.hpu.metrics import metric_localcontext
             seq_group_metadata_list = execute_model_req.seq_group_metadata_list
             is_prompt = any([
@@ -274,7 +291,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 "cpu_fallback"
             ) if log_cpu_fallbacks else contextlib.nullcontext()
             with gc_ctx as gc_local_metric, \
-                cpu_fallback_ctx as cpu_fallback_local_metric:
+                    cpu_fallback_ctx as cpu_fallback_local_metric:
                 output = LocalOrDistributedWorkerBase.execute_model(
                     self, execute_model_req)
             if (log_graph_compilation and gc_local_metric.stats()[0][1]
@@ -331,7 +348,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         cache_block_size = self.get_cache_block_size_bytes()
         graph_reserved_mem = (float(
             os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.1'))
-                              if not self.model_config.enforce_eager else 0)
+            if not self.model_config.enforce_eager else 0)
         graph_headroom = 1 - graph_reserved_mem
         available_hpu_memory = free_hpu_memory * \
             self.cache_config.gpu_memory_utilization
@@ -584,7 +601,7 @@ class HPUCacheEngine(CacheEngine):
         kv_cache: List[Tuple[torch.Tensor, torch.Tensor]] = []
         dtype = self.dtype
         if device != 'hpu' and not is_fake_hpu() \
-          and self.dtype == torch.float8_e4m3fn:
+                and self.dtype == torch.float8_e4m3fn:
             dtype = torch.uint8
         for _ in range(self.num_attention_layers):
             key_cache = torch.zeros(kv_cache_shape, dtype=dtype, device=device)

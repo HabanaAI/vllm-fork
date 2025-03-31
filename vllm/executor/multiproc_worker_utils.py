@@ -311,17 +311,17 @@ def set_multiprocessing_worker_envs(parallel_config):
     # core combined with multiprocessing for each GPU can have a negative
     # impact on performance. The contention is amplified when running in a
     # container where CPU limits can cause throttling.
-    default_omp_num_threads = 1
-    if "OMP_NUM_THREADS" not in os.environ and (
-            current_parallelism :=
-            torch.get_num_threads()) > default_omp_num_threads:
-        logger.warning(
-            "Reducing Torch parallelism from %d threads to %d to avoid "
-            "unnecessary CPU contention. Set OMP_NUM_THREADS in the "
-            "external environment to tune this value as needed.",
-            current_parallelism, default_omp_num_threads)
-        os.environ["OMP_NUM_THREADS"] = str(default_omp_num_threads)
-        torch.set_num_threads(default_omp_num_threads)
+    # default_omp_num_threads = 1
+    # if "OMP_NUM_THREADS" not in os.environ and (
+    #         current_parallelism :=
+    #         torch.get_num_threads()) > default_omp_num_threads:
+    #     logger.warning(
+    #         "Reducing Torch parallelism from %d threads to %d to avoid "
+    #         "unnecessary CPU contention. Set OMP_NUM_THREADS in the "
+    #         "external environment to tune this value as needed.",
+    #         current_parallelism, default_omp_num_threads)
+    #     os.environ["OMP_NUM_THREADS"] = str(default_omp_num_threads)
+    #     torch.set_num_threads(default_omp_num_threads)
 
     # workaround for https://github.com/vllm-project/vllm/issues/6103
     if HAS_TRITON and parallel_config.world_size > 1:
