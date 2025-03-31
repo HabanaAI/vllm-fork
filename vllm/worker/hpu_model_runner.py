@@ -25,7 +25,6 @@ import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.ops import LoraMask as LoraMask
-from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 
@@ -247,35 +246,54 @@ class HpuModelAdapter:
             self.set_causal_option(self.model)
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
+            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
+                                  'false').strip().lower() in ("1", "true")
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').lower() == 'true':
                 self.regional_compilation_layers_list = [
                     RMSNorm, VocabParallelEmbedding
                 ]
-                self._regional_compilation(self.model)
+                self._regional_compilation(self.model, fullgraph)
             else:
                 self.model = torch.compile(self.model,
                                            backend='hpu_backend',
+                                           fullgraph=fullgraph,
                                            dynamic=False)
 
     def _regional_compilation(self,
                               module,
+                              fullgraph,
                               parent_module=None,
                               module_name=None):
         if isinstance(module, torch.nn.ModuleList):
             for children_name, children_module in module.named_children():
-                self._compile_region(module, children_name, children_module)
+                self._compile_region(module, fullgraph, children_name,
+                                     children_module)
         elif any(
                 isinstance(module, layer)
                 for layer in self.regional_compilation_layers_list):
-            self._compile_region(parent_module, module_name, module)
+            self._compile_region(
+                parent_module,
+                fullgraph,
+                module_name,
+                module,
+            )
         else:
             for children_name, children_module in module.named_children():
-                self._regional_compilation(children_module, module,
+                self._regional_compilation(children_module, fullgraph, module,
                                            children_name)
 
-    def _compile_region(self, model, name, module):
-        module = torch.compile(module, backend='hpu_backend', dynamic=False)
+    def _compile_region(
+        self,
+        model,
+        fullgraph,
+        name,
+        module,
+    ):
+        module = torch.compile(module,
+                               backend='hpu_backend',
+                               fullgraph=fullgraph,
+                               dynamic=False)
         setattr(model, name, module)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
@@ -362,16 +380,6 @@ class HpuModelAdapter:
                                      attn_bias=attn_bias)
         return metadata
 
-    def _set_block_scales(self, metadata, device):
-        block_mapping = metadata.block_mapping
-        ones = torch.ones((block_mapping.size(0), ),
-                          device=device,
-                          dtype=block_mapping.dtype)
-        sums = batch2block(block2batch(ones, block_mapping), block_mapping)
-        block_scales = torch.reciprocal(torch.maximum(ones, sums))
-        metadata = metadata._replace(block_scales=block_scales)
-        return metadata
-
     def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
         slot_mapping = metadata.slot_mapping.flatten()
         indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
@@ -393,7 +401,6 @@ class HpuModelAdapter:
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-            attn_metadata = self._set_block_scales(attn_metadata, device)
         attn_metadata = self._set_indices_and_offsets(attn_metadata,
                                                       self.block_size,
                                                       attn_metadata.is_prompt)
@@ -1227,7 +1234,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_usage=None,
             block_indices=None,
             block_offsets=None,
-            block_scales=None,
             block_groups=None,
             attn_bias=None,
             seq_lens=seq_lens,
@@ -1511,7 +1517,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_usage=block_usage,
             block_indices=None,
             block_offsets=None,
-            block_scales=None,
             block_groups=block_groups,
             attn_bias=None,
             seq_lens_tensor=None,
@@ -1753,7 +1758,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'is_prompt',
             'block_indices',
             'block_offsets',
-            'block_scales',
             'block_groups',
         ])
         return attention_metadata
