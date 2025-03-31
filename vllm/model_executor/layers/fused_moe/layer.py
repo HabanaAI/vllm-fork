@@ -493,7 +493,6 @@ class FusedMoE(torch.nn.Module):
         expert_data.copy_(loaded_weight)
         if is_hpu:
             self.hpu_fused_moe.MoeOp.w2_list[expert_id].set_weight(expert_data)
-            # print(f"loaded w2 for hpu for expert_id: {expert_id}, expert_data.shape: {expert_data.shape}")
 
     def _load_single_value(self, param: torch.nn.Parameter,
                            loaded_weight: torch.Tensor, expert_id: int):
