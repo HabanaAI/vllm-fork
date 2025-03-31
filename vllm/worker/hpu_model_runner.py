@@ -82,6 +82,8 @@ LORA_WARMUP_RANK = 8
 
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
                                        'false').lower() == 'true'
+VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
+                                     'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
 
 
@@ -153,6 +155,17 @@ def gather_list(input, indices, v):
 
 def flatten(in_list):
     return list(itertools.chain(*in_list))
+
+
+def make_cpu_tensor(data, max_len, pad, dtype, flat):
+    if flat:
+        data = [flatten(data)]
+    result = make_tensor_with_pad(data,
+                                  max_len=max_len,
+                                  pad=pad,
+                                  dtype=dtype,
+                                  device='cpu')
+    return result
 
 
 def get_target_layer_suffix_list(model_type) -> list[str]:
@@ -304,6 +317,9 @@ class HpuModelAdapter:
                 or not attn_metadata.is_prompt):
             return attn_metadata
 
+        if attn_metadata.attn_bias is not None:
+            return attn_metadata
+
         prefill_metadata = attn_metadata
 
         seq_lens_t = prefill_metadata.seq_lens_tensor
@@ -383,7 +399,7 @@ class HpuModelAdapter:
     def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
         slot_mapping = metadata.slot_mapping.flatten()
         indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt:
+        if is_prompt and not VLLM_MERGED_PREFILL:
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
             offsets = None
         else:
@@ -979,6 +995,34 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert mrope_positions is not None
         return mrope_positions, mrope_position_delta
 
+    def make_attn_bias(self, seq_lens, max_prompt_len, dtype):
+        seq_pos = [list(range(sl)) for sl in seq_lens]
+        seq_idx = [[i] * sl for i, sl in enumerate(seq_lens)]
+        seq_pos = make_cpu_tensor(seq_pos,
+                                  max_len=max_prompt_len,
+                                  pad=-1,
+                                  dtype=torch.long,
+                                  flat=VLLM_MERGED_PREFILL)
+        seq_idx = make_cpu_tensor(seq_idx,
+                                  max_len=max_prompt_len,
+                                  pad=-1,
+                                  dtype=torch.long,
+                                  flat=VLLM_MERGED_PREFILL)
+        q_seq_idx = seq_idx.unsqueeze(-1)
+        kv_seq_idx = seq_idx.unsqueeze(-2)
+        q_seq_pos = seq_pos.unsqueeze(-1)
+        kv_seq_pos = seq_pos.unsqueeze(-2)
+        seq_idx = q_seq_idx != kv_seq_idx
+        seq_pos = kv_seq_pos > q_seq_pos
+        attn_mask = seq_idx | seq_pos
+        attn_bias = torch.zeros_like(attn_mask, dtype=dtype)
+        attn_bias.masked_fill_(attn_mask, -math.inf)
+        return attn_bias.unsqueeze(1)
+
+    def move_to_device(self, tensor):
+        return tensor if tensor is None else tensor.to(self.device,
+                                                       non_blocking=True)
+
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -1130,12 +1174,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
 
-        assert max_query_len > 0
+        if VLLM_MERGED_PREFILL:
+            max_prompt_len = sum(query_lens)
+        else:
+            max_prompt_len = max(
+                self.bucketing_ctx.get_padded_prompt_seq_len(max_query_len),
+                self.block_size)
 
-        max_prompt_len = max(
-            self.bucketing_ctx.get_padded_prompt_seq_len(max_query_len),
-            self.block_size)
-
+        # TODO: Check LORA
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
                                                    context_lens):
@@ -1173,37 +1219,44 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             prefix_block_list_tensor = None
 
-        input_tokens_tensor = make_tensor_with_pad(input_tokens,
-                                                   max_len=max_prompt_len,
-                                                   pad=0,
-                                                   dtype=torch.long,
-                                                   device='cpu')
-
+        input_tokens_tensor = make_cpu_tensor(input_tokens,
+                                              max_len=max_prompt_len,
+                                              pad=0,
+                                              dtype=torch.long,
+                                              flat=VLLM_MERGED_PREFILL)
         if self.model_is_mrope:
             input_positions = \
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
-                                              input_mrope_positions=input_mrope_positions,
-                                              max_prompt_len=max_prompt_len,
-                                              pad=0)
+                                                     input_mrope_positions=input_mrope_positions,
+                                                     max_prompt_len=max_prompt_len,
+                                                     pad=0)
         else:
-            input_positions = make_tensor_with_pad(input_positions,
-                                                   max_len=max_prompt_len,
-                                                   pad=0,
-                                                   dtype=torch.long,
-                                                   device='cpu')
+            input_positions = make_cpu_tensor(input_positions,
+                                              max_len=max_prompt_len,
+                                              pad=0,
+                                              dtype=torch.long,
+                                              flat=VLLM_MERGED_PREFILL)
 
-        slot_mapping = make_tensor_with_pad(slot_mapping,
-                                            max_len=max_prompt_len,
-                                            pad=_PAD_SLOT_ID,
-                                            dtype=torch.long,
-                                            device='cpu')
-        seq_lens_tensor = torch.tensor(seq_lens,
+        slot_mapping = make_cpu_tensor(slot_mapping,
+                                       max_len=max_prompt_len,
+                                       pad=_PAD_SLOT_ID,
                                        dtype=torch.long,
-                                       device='cpu')
+                                       flat=VLLM_MERGED_PREFILL)
 
-        context_lens_tensor = torch.tensor(context_lens,
+        attn_bias = None
+        seq_lens_tensor = None
+        context_lens_tensor = None
+
+        if VLLM_MERGED_PREFILL:
+            attn_bias = self.make_attn_bias(seq_lens, max_prompt_len,
+                                            self.model_config.dtype)
+        else:
+            seq_lens_tensor = torch.tensor(seq_lens,
                                            dtype=torch.long,
                                            device='cpu')
+            context_lens_tensor = torch.tensor(context_lens,
+                                               dtype=torch.long,
+                                               device='cpu')
 
         placeholder_index_maps = {
             modality: placeholder_map.index_map()
@@ -1214,18 +1267,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Note: num_prefill_tokens is calculated using the length of
         # input_tokens after padding.
         num_prefill_tokens = input_tokens_tensor.numel()
-        if prefix_block_list_tensor is not None:
-            prefix_block_list_tensor = prefix_block_list_tensor.to(
-                self.device, non_blocking=True)
-        input_tokens_tensor = input_tokens_tensor.to(  # type: ignore
-            self.device, non_blocking=True)
-        input_positions = input_positions.to(  # type: ignore
-            self.device, non_blocking=True)
-        slot_mapping = slot_mapping.to(  # type: ignore
-            self.device, non_blocking=True)
-        seq_lens_tensor = seq_lens_tensor.to(self.device, non_blocking=True)
-        context_lens_tensor = context_lens_tensor.to(self.device,
-                                                     non_blocking=True)
+
+        prefix_block_list_tensor = self.move_to_device(
+            prefix_block_list_tensor)
+        input_tokens_tensor = self.move_to_device(input_tokens_tensor)
+        input_positions = self.move_to_device(input_positions)
+        seq_lens_tensor = self.move_to_device(seq_lens_tensor)
+        slot_mapping = self.move_to_device(slot_mapping)
+        context_lens_tensor = self.move_to_device(context_lens_tensor)
+        attn_bias = self.move_to_device(attn_bias)
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
@@ -1235,9 +1285,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_indices=None,
             block_offsets=None,
             block_groups=None,
-            attn_bias=None,
+            attn_bias=attn_bias,
             seq_lens=seq_lens,
-            seq_lens_tensor=seq_lens_tensor,
+            seq_lens_tensor=self.move_to_device(seq_lens_tensor),
             context_lens_tensor=context_lens_tensor,
             num_prefills=real_num_seqs,
             num_prefill_tokens=num_prefill_tokens,
@@ -1628,29 +1678,32 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             lora_requests = decode_lora_requests
             lora_ids = decode_lora_ids
 
-        # FIXME: We need to adjust selected_token_indices to accommodate
-        # for padding
-        max_len = input_tokens.size(1)
-        paddings = [max_len - q for q in query_lens]
-        paddings = [0] + paddings[:-1]
-        paddings = list(itertools.accumulate(paddings))
-        paddings_prompt_logprobs = []
-
-        if not self.is_pooler:
-            for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-                if seq_group_metadata.sampling_params \
-                    and seq_group_metadata.sampling_params.prompt_logprobs \
-                        is not None and seq_group_metadata.is_prompt:
-                    paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
-
-            paddings = torch.tensor(
-                paddings_prompt_logprobs
-                if paddings_prompt_logprobs else paddings,
-                dtype=sampling_metadata.selected_token_indices.dtype,
-                device=sampling_metadata.selected_token_indices.device)
-            sampling_metadata.selected_token_indices.add_(paddings)
-        else:
+        if self.is_pooler:
             sampling_metadata = None
+        elif not VLLM_MERGED_PREFILL:
+            # FIXME: We need to adjust selected_token_indices to accommodate
+            # for padding
+            max_len = input_tokens.size(1)
+            paddings = [max_len - q for q in query_lens]
+            paddings = [0] + paddings[:-1]
+            paddings = list(itertools.accumulate(paddings))
+            paddings_prompt_logprobs = []
+
+            if not self.is_pooler:
+                for i, seq_group_metadata in enumerate(
+                        seq_group_metadata_list):
+                    if seq_group_metadata.sampling_params \
+                        and seq_group_metadata.sampling_params.prompt_logprobs \
+                            is not None and seq_group_metadata.is_prompt:
+                        paddings_prompt_logprobs += ([paddings[i]] *
+                                                     seq_lens[i])
+
+                paddings = torch.tensor(
+                    paddings_prompt_logprobs
+                    if paddings_prompt_logprobs else paddings,
+                    dtype=sampling_metadata.selected_token_indices.dtype,
+                    device=sampling_metadata.selected_token_indices.device)
+                sampling_metadata.selected_token_indices.add_(paddings)
 
         if self.lora_config:
             lora_mapping = LoRAMapping(
