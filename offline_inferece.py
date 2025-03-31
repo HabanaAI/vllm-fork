@@ -36,7 +36,8 @@ def get_multi_modal_prompt(args, modality, index=0):
             f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n"
             f"<|vision_start|><|image_pad|><|vision_end|>"
             f"Describe this image"
-            f"<|im_end|>\n<|im_start|>assistant\n")
+            f"<|im_end|>\n<|im_start|>assistant\n"
+        )
         if args.image == "synthetic":
             image = ImageAsset("stop_sign").pil_image
         elif args.image == "snowscat":
@@ -47,46 +48,25 @@ def get_multi_modal_prompt(args, modality, index=0):
         if args.image_width and args.image_height:
             image = image.resize((args.image_width, args.image_height))
         prompts = [
-            {
-                "prompt": image_prompt,
-                "multi_modal_data": {
-                    "image": image
-                }
-            },
+            {"prompt": image_prompt, "multi_modal_data": {"image": image}},
         ]
         if args.random_img_size:
-            rand_width = random.randint(int(0.5 * args.image_width),
-                                        1 * args.image_width)
-            rand_height = random.randint(int(0.5 * args.image_height),
-                                         1 * args.image_height)
-            rand_width = 1000
-            rand_height = 1020
+            rand_width = random.randint(
+                int(0.5 * args.image_width), 1 * args.image_width
+            )
+            rand_height = random.randint(
+                int(0.5 * args.image_height), 1 * args.image_height
+            )
+            # rand_width = 112*int(rand_height/112)
+            # rand_height = 112*int(rand_height/112)
+            rand_width = 1008
+            rand_height = 1008
             image2 = image.resize((rand_width, rand_height))
             prompts = [
-                {
-                    "prompt": image_prompt,
-                    "multi_modal_data": {
-                        "image": image
-                    }
-                },
-                {
-                    "prompt": image_prompt,
-                    "multi_modal_data": {
-                        "image": image
-                    }
-                },
-                {
-                    "prompt": image_prompt,
-                    "multi_modal_data": {
-                        "image": image2
-                    }
-                },
-                {
-                    "prompt": image_prompt,
-                    "multi_modal_data": {
-                        "image": image2
-                    }
-                },
+                {"prompt": image_prompt, "multi_modal_data": {"image": image}},
+                {"prompt": image_prompt, "multi_modal_data": {"image": image}},
+                {"prompt": image_prompt, "multi_modal_data": {"image": image2}},
+                {"prompt": image_prompt, "multi_modal_data": {"image": image2}},
             ]
         if args.two_images_prompt:
             image_prompt_with_2 = (
@@ -94,22 +74,24 @@ def get_multi_modal_prompt(args, modality, index=0):
                 f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|vision_start|>"
                 f"<|image_pad|><|vision_end|>"
                 f"Identify the similarities between these images."
-                f"<|im_end|>\n<|im_start|>assistant\n")
+                f"<|im_end|>\n<|im_start|>assistant\n"
+            )
             image2 = ImageAsset("stop_sign").pil_image
             image2 = image2.resize((140, 140))
-            prompts = [{
-                "prompt": image_prompt_with_2,
-                "multi_modal_data": {
-                    "image": [image, image2]
+            prompts = [
+                {
+                    "prompt": image_prompt_with_2,
+                    "multi_modal_data": {"image": [image, image2]},
                 }
-            }]
+            ]
         return prompts[index % len(prompts)]
     if modality == MODALITY_VIDEO:
         video_prompt = (
             f"<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n"
             f"<|vision_start|><|video_pad|><|vision_end|>"
             f"Describe this video."
-            f"<|im_end|>\n<|im_start|>assistant\n")
+            f"<|im_end|>\n<|im_start|>assistant\n"
+        )
         video = sample_frames(args.video, 50)
         return {"prompt": video_prompt, "multi_modal_data": {"video": video}}
     if modality == MODALITY_TEXT:
@@ -134,7 +116,7 @@ def get_llm(args):
         gpu_memory_utilization=args.gpu_mem_usage,
         limit_mm_per_prompt={
             "image": args.limit_mm_image,
-            "video": args.limit_mm_video
+            "video": args.limit_mm_video,
         },
     )
 
@@ -182,75 +164,81 @@ def main(args) -> int:
         if args.multiple_prompts:
             iter_input_data = input_data
             print(f" -- Run batch with {len(input_data)} prompts")
+        elif args.mix_prompt_lenght:
+            iter_lenght = 2 if i != 2 else 1
+            rand_idx = random.randint(0, int(len(input_data) / 2))
+            # : iter_lenght = 2 else: iter_lenght =1
+            iter_input_data = input_data[rand_idx : iter_lenght + rand_idx]
+            print(
+                f" -- Run prompt lenght: {iter_lenght} with prompt: {iter_input_data}"
+            )
         else:
             iter_input_data = input_data[i % len(input_data)]
             print(f" -- Run single prompt: {iter_input_data}")
 
         start_time = time.time()
-        outputs = llm.generate(iter_input_data,
-                               sampling_params=sampling_params)
+        outputs = llm.generate(iter_input_data, sampling_params=sampling_params)
         elapsed_time = time.time() - start_time
 
         num_tokens = sum(len(o.prompt_token_ids) for o in outputs)
         throughput = num_tokens / elapsed_time
-        print(
-            f"-- generate time = {elapsed_time:0.2f}, throughput = {throughput:0.2f}"
-        )
+        print(f"-- generate time = {elapsed_time:0.2f}, throughput = {throughput:0.2f}")
 
         for o in outputs:
             generated_text = o.outputs[0].text
             print(generated_text)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Add arguments
-    parser.add_argument("-m",
-                        "--model",
-                        default="Qwen/Qwen2.5-VL-3B-Instruct",
-                        help="model name or path")
+    parser.add_argument(
+        "-m",
+        "--model",
+        default="Qwen/Qwen2.5-VL-3B-Instruct",
+        help="model name or path",
+    )
     parser.add_argument("-i", "--image", help="type of image")
     parser.add_argument("-v", "--video", help="Video Input")
-    parser.add_argument("-t",
-                        "--text_only",
-                        action="store_true",
-                        help="Text only pormpts")
+    parser.add_argument(
+        "-t", "--text_only", action="store_true", help="Text only pormpts"
+    )
     parser.add_argument("--image_width", type=int, help="Image width size")
     parser.add_argument("--image_height", type=int, help="Image width size")
-    parser.add_argument("--two_images_prompt",
-                        action="store_true",
-                        help="Prompt with two images")
-    parser.add_argument("--mix_prompts",
-                        action="store_true",
-                        help="Run prompts with multiple modalities")
-    parser.add_argument("--multiple_prompts",
-                        action="store_true",
-                        help="Run multiple prompts")
-    parser.add_argument("--iter",
-                        type=int,
-                        default=1,
-                        help="number of iterations to run")
-    parser.add_argument("--prompts",
-                        type=int,
-                        default=4,
-                        help="number of prompts")
-    parser.add_argument("--limit_mm_image",
-                        type=int,
-                        default=1,
-                        help="limit num of images")
-    parser.add_argument("--limit_mm_video",
-                        type=int,
-                        default=1,
-                        help="limit num of images")
-    parser.add_argument("-gmu",
-                        "--gpu_mem_usage",
-                        type=float,
-                        default=0.9,
-                        help="GPU memory usage value")
-    parser.add_argument("-ris",
-                        "--random_img_size",
-                        action="store_true",
-                        help="Randomly resize image")
+    parser.add_argument(
+        "--two_images_prompt", action="store_true", help="Prompt with two images"
+    )
+    parser.add_argument(
+        "--mix_prompts",
+        action="store_true",
+        help="Run prompts with multiple modalities",
+    )
+    parser.add_argument(
+        "--multiple_prompts", action="store_true", help="Run multiple prompts"
+    )
+    parser.add_argument(
+        "--mix_prompt_lenght", action="store_true", help="Run multiple prompts"
+    )
+    parser.add_argument(
+        "--iter", type=int, default=1, help="number of iterations to run"
+    )
+    parser.add_argument("--prompts", type=int, default=4, help="number of prompts")
+    parser.add_argument(
+        "--limit_mm_image", type=int, default=1, help="limit num of images"
+    )
+    parser.add_argument(
+        "--limit_mm_video", type=int, default=1, help="limit num of images"
+    )
+    parser.add_argument(
+        "-gmu",
+        "--gpu_mem_usage",
+        type=float,
+        default=0.9,
+        help="GPU memory usage value",
+    )
+    parser.add_argument(
+        "-ris", "--random_img_size", action="store_true", help="Randomly resize image"
+    )
 
     # Parse the arguments
     args = parser.parse_args()

@@ -6,6 +6,7 @@ RunLargeImages=true
 RunOnlineTests=True
 RunMemBenchAnalysis=False
 RandomizedImage=True
+RandomShuffle=True
 
 #Basic tests
 if $RunBasic; then
@@ -27,6 +28,12 @@ if $RunBasic; then
 	bash run_offline.sh -m $ModelName -v --multiple_prompts
 	bash run_offline.sh -m $ModelName -t
 	bash run_offline.sh -m $ModelName -t --multiple_prompts
+fi
+
+# Run a case with randomized shuffle of input values and len and compare to a reference
+if $RandomShuffle; then
+	VLLM_GRAPH_RESERVED_MEM=0.4 bash run_offline.sh -m Qwen/Qwen2.5-VL-3B-Instruct -i snowscat --random_image_size --iter 5 --image_width 1120 --image_height 1120 --mix_prompt_lenght
+	VLLM_GRAPH_RESERVED_MEM=0.4 bash run_offline.sh -m Qwen/Qwen2.5-VL-3B-Instruct -i snowscat --random_image_size --iter 5 --image_width 1120 --image_height 1120 --multiple_prompts
 fi
 
 #pytests
