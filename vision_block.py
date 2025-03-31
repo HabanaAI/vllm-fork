@@ -1,76 +1,31 @@
-from functools import partial
-from typing import (Callable, Iterable, Optional, Set, Tuple)
-
+import argparse
 import habana_frameworks.torch as htorch
 import torch
 import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
+import logging
+
+from functools import partial
+from typing import (Callable, Iterable, Optional, Set, Tuple)
 from einops import rearrange, repeat
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLVisionConfig
-
 from vllm.model_executor import set_random_seed
-from vllm.distributed import tensor_model_parallel_all_gather, parallel_state
+from vllm.distributed import tensor_model_parallel_all_gather
 from vllm.distributed import utils as dist_utils
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
 from vllm.model_executor.layers.activation import _ACTIVATION_REGISTRY
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import (ColumnParallelLinear,
-                                               RowParallelLinear)
-from vllm.config import ParallelConfig
+from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.platforms import _Backend
-from vllm.utils import hpu_backend_string, hpu_device_string, get_distributed_init_method, get_open_port, get_ip
+import pytest
+
+logger = logging.getLogger("vllm")
+logger.setLevel(logging.ERROR)
+logger.propagate = False
 
 is_hpu = True
-
-
-def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
-    rank: int,
-    distributed_init_method: Optional[str] = None,
-    local_rank: int = -1,
-) -> None:
-    """Initialize the distributed environment."""
-    backend = hpu_backend_string()
-    init_distributed_environment(parallel_config.world_size,
-                                 rank,
-                                 distributed_init_method,
-                                 local_rank,
-                                 backend=backend)
-
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
-
-    if torch.distributed.is_initialized():
-        torch_world_size = torch.distributed.get_world_size()
-        if torch_world_size != parallel_config.world_size:
-            raise RuntimeError(
-                "torch.distributed is already initialized but the torch world "
-                "size does not match parallel_config.world_size "
-                f"({torch_world_size} vs. {parallel_config.world_size}).")
-    elif not distributed_init_method:
-        raise ValueError(
-            "distributed_init_method must be set if torch.distributed "
-            "is not already initialized")
-    else:
-        backend = hpu_backend_string()
-        torch.distributed.init_process_group(
-            backend=backend,
-            world_size=parallel_config.world_size,
-            rank=rank,
-            init_method=distributed_init_method,
-        )
-
-    # A small all_reduce for warmup & checking conformance.
-    device = hpu_device_string()
-    dummy_tensor_hpu = torch.ones(1).to(device)
-    torch.distributed.all_reduce(dummy_tensor_hpu)
-    assert dummy_tensor_hpu.item() == parallel_config.world_size
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
 
 
 def rotate_half(x: torch.Tensor, interleaved: bool = False) -> torch.Tensor:
@@ -134,17 +89,17 @@ class Qwen2_5_VisionMLP(nn.Module):
                  quant_config: Optional[QuantizationConfig] = None,
                  prefix: str = ""):
         super().__init__()
-        self.gate_proj = ColumnParallelLinear(in_features,
+        self.gate_proj = ReplicatedLinear(in_features,
                                               hidden_features,
                                               bias=bias,
                                               quant_config=quant_config,
                                               prefix=f"{prefix}.gate_proj")
-        self.up_proj = ColumnParallelLinear(in_features,
+        self.up_proj = ReplicatedLinear(in_features,
                                             hidden_features,
                                             bias=bias,
                                             quant_config=quant_config,
                                             prefix=f"{prefix}.up_proj")
-        self.down_proj = RowParallelLinear(hidden_features,
+        self.down_proj = ReplicatedLinear(hidden_features,
                                            in_features,
                                            bias=bias,
                                            quant_config=quant_config,
@@ -171,25 +126,26 @@ class Qwen2_5_VisionAttention(nn.Module):
     ) -> None:
         super().__init__()
         # Per attention head and per partition values.
-        self.tp_size = parallel_state.get_tensor_model_parallel_world_size()
-        self.tp_rank = parallel_state.get_tensor_model_parallel_rank()
+        # self.tp_size = parallel_state.get_tensor_model_parallel_world_size()
+        # self.tp_rank = parallel_state.get_tensor_model_parallel_rank()
+        self.tp_size = 1
+        self.tp_rank = 0
         self.hidden_size_per_attention_head = dist_utils.divide(
             projection_size, num_heads)
         self.num_attention_heads_per_partition = dist_utils.divide(
             num_heads, self.tp_size)
 
-        self.qkv = ColumnParallelLinear(input_size=embed_dim,
+        self.qkv = ReplicatedLinear(input_size=embed_dim,
                                         output_size=3 * projection_size,
                                         quant_config=quant_config,
                                         prefix=f"{prefix}.qkv")
-        self.proj = RowParallelLinear(input_size=projection_size,
+        self.proj = ReplicatedLinear(input_size=projection_size,
                                       output_size=embed_dim,
                                       quant_config=quant_config,
                                       prefix=f"{prefix}.proj")
 
         # Detect attention implementation.
         self.attn_backend: _Backend = _Backend.TORCH_SDPA
-        print("set back end to TORCH_SDPA")
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -383,13 +339,13 @@ class Qwen2_5_VisionPatchMerger(nn.Module):
             norm_layer = partial(nn.LayerNorm, eps=1e-6)
         self.ln_q = norm_layer(context_dim)
         self.mlp = nn.ModuleList([
-            ColumnParallelLinear(self.hidden_size,
+            ReplicatedLinear(self.hidden_size,
                                  self.hidden_size,
                                  bias=True,
                                  quant_config=quant_config,
                                  prefix=f"{prefix}.mlp.0"),
             nn.GELU(),
-            RowParallelLinear(self.hidden_size,
+            ReplicatedLinear(self.hidden_size,
                               d_model,
                               bias=True,
                               quant_config=quant_config,
@@ -620,10 +576,8 @@ class Qwen2_5_VisionTransformer(nn.Module):
         cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2],
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
-        cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
-        #import habana_frameworks.torch as htorch
-        #htorch.core.mark_step()
+        cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
         # transformers
         hidden_states = hidden_states.unsqueeze(1)
@@ -672,8 +626,24 @@ class Qwen2_5_VisionTransformer(nn.Module):
         return loaded_params
 
 
-### Copy and paste END
+def gen_multi_image(hs, ws):
+    pxl = []
+    grid = []
+    for h, w in zip(hs, ws):
+        pixel_values, image_grid_thw = generate_image(h, w)
+        pxl += [pixel_values]
+        grid += [image_grid_thw]
+    return torch.cat(pxl, dim=0), torch.cat(grid, dim=0)
 
+
+def gen_batch_image(hs, ws):
+    pxl = []
+    grid = []
+    for h, w in zip(hs, ws):
+        pixel_values, image_grid_thw = generate_image(h, w)
+        pxl += [pixel_values.unsqueeze(0)]
+        grid += [image_grid_thw.unsqueeze(0)]
+    return torch.cat(pxl, dim=0), torch.cat(grid, dim=0)
 
 def generate_image(h, w):
     #import PIL
@@ -705,43 +675,392 @@ def get_model():
                                            in_chans=3,
                                            spatial_patch_size=14,
                                            tokens_per_second=2)
-    return Qwen2_5_VisionTransformer(
+    vllmvis =  Qwen2_5_VisionTransformer(
         vision_config,
         norm_eps=1e-6,
     )
+    from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+    hfmodel = Qwen2_5_VLForConditionalGeneration.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")#, device_map="auto")
+    hfvis = hfmodel.visual
+    vllmvis.load_state_dict(hfvis.state_dict())
+
+    return vllmvis
 
 
 def init_device():
     device = torch.device("hpu")
     torch.hpu.set_device(device)
-    parallel_config = ParallelConfig()
-    rank = 0
-    local_rank = 0
-    distributed_init_method = get_distributed_init_method(
-        get_ip(), get_open_port())
-    init_worker_distributed_environment(parallel_config, rank,
-                                        distributed_init_method, local_rank)
-    # Set random seed.
     set_random_seed(0)
     return device
 
 
-def main():
-    h, w = 112, 112
-    device = init_device()
+class Setup:
+    def __init__(self):
+        self.device = init_device()
+        self.visual = get_model()
+        self.visual.to(self.device)
 
-    visual = get_model()
-    visual.to(device)
+# to load teh model only once for multiple tests
+@pytest.fixture(scope="session")
+def setup_fn():
+    print('setup')
+    yield Setup()
+    print('teardown')
 
+def test_main(setup_fn):
+    #parser = argparse.ArgumentParser(description="Process get_window_index from image")
+    #parser.add_argument('--width', type=int, default=112, help='Width of the image')
+    #parser.add_argument('--height', type=int, default=112, help='Height of the image')
+
+    #args = parser.parse_args()
+
+    #h, w = args.height, args.width
+    h = 112; w = 112
+
+    visual = setup_fn.visual
+    device = setup_fn.device
+
+    print(f"[h, w]: {h, w}")
     pixel_values, grid_thw = generate_image(h, w)
+    print(f"pixel shape: {pixel_values.shape} grid_thw: {grid_thw}")
+
     pixel_values = pixel_values.to(device)
     grid_thw = grid_thw.to(device)
 
-    print(pixel_values)
     image_embeds = visual(pixel_values, grid_thw=grid_thw)
+    assert image_embeds.sum().item() == -791.01904296875
 
-    print(image_embeds)
 
 
-if __name__ == "__main__":
-    main()
+'''
+Same as test_main, but image repeated twice
+Because we pass teh same image side-by-side, we get same answer from model placed-side-by-side
+'''
+def test_2_sidebyside(setup_fn):
+
+    h = 112; w = 112
+
+    visual = setup_fn.visual
+    device = setup_fn.device
+
+    print(f"[h, w]: {h, w}")
+    pixel_values, grid_thw = generate_image(h, w)
+    pixel_values = torch.cat([pixel_values, pixel_values], dim=0)
+    grid_thw = torch.cat([grid_thw, grid_thw], dim=0)
+    print(f"pixel shape: {pixel_values.shape} grid_thw: {grid_thw}")
+
+    pixel_values = pixel_values.to(device)
+    grid_thw = grid_thw.to(device)
+
+
+    image_embeds = visual(pixel_values, grid_thw=grid_thw)
+    assert image_embeds.sum().item() == (-1582.038330078125)
+    assert image_embeds[:16,:].sum().item() == (-791.0191040039062)
+    assert image_embeds[16:,:].sum().item() == (-791.0191040039062)
+
+
+
+'''
+Same as test_2_sidebyside, but using util function
+'''
+def test_2_sidebyside_util(setup_fn):
+
+    h = 112; w = 112
+
+    visual = setup_fn.visual
+    device = setup_fn.device
+
+    print(f"[h, w]: {h, w}")
+    pixel_values, grid_thw = gen_multi_image([h,h], [w,w])
+    print(f"pixel shape: {pixel_values.shape} grid_thw: {grid_thw}")
+
+    pixel_values = pixel_values.to(device)
+    grid_thw = grid_thw.to(device)
+
+
+    image_embeds = visual(pixel_values, grid_thw=grid_thw)
+    assert image_embeds.sum().item() == (-1582.038330078125)
+    assert image_embeds[:16,:].sum().item() == (-791.0191040039062)
+    assert image_embeds[16:,:].sum().item() == (-791.0191040039062)
+
+
+'''
+test slice
+'''
+def test_slice():
+
+    class SliceModule(nn.Module):
+        def __init__(self):
+            super(SliceModule, self).__init__()
+
+        def forward(self, x, slices):
+            outputs = []
+            for start, end in slices:
+                #sliced_tensor = x[start:end]
+                sliced_tensor = torch.index_select(x, 0, torch.arange(start, end, device=x.device))
+                outputs.append(sliced_tensor.sum().unsqueeze(0))            
+            return torch.cat(outputs, dim=0)
+
+    model = SliceModule()
+    x = torch.arange(10)
+    slices = torch.tensor([[0,5],[5,10]])
+    print(model(x,slices))
+    
+    model = model.to('hpu')
+    x = x.to('hpu')
+    slices = slices.to('hpu')
+    print(model(x,slices))
+    print(model(x,torch.tensor([[0,3],[3,10]], device='hpu')))
+    
+    model = htorch.hpu.wrap_in_hpu_graph(model)
+    print(model(x,slices))
+    print(model(x,torch.tensor([[0,2],[2,10]], device='hpu')))
+    
+    '''
+    This test shows  x[start:end] or index_select with arange will not work with hpu graphs
+    '''
+
+
+'''
+ x = x[rearrange]
+ x = torch.gather(x, 0, rearrange)
+ both work with hpu graph
+'''
+def test_rearrange():
+    import habana_frameworks.torch as ht
+
+
+    class RearrangeSliceModule(nn.Module):
+        def __init__(self):
+            super(RearrangeSliceModule, self).__init__()
+
+        def forward(self, x, rearrange):
+            #breakpoint()
+            x = x[rearrange]
+            #x = torch.gather(x, 0, rearrange)
+            outputs = [x[:5].sum().unsqueeze(0), x[5:].sum().unsqueeze(0)]
+            return torch.cat(outputs, dim=0)
+
+    model = RearrangeSliceModule()
+    x = torch.arange(10)*10
+    rearrange = torch.tensor([9,8,7,6,1,2,3,4,0,5])
+    print(model(x,rearrange))
+
+    model = model.to('hpu')
+    x = x.to('hpu')
+    rearrange = rearrange.to('hpu')
+    print(model(x,rearrange))
+    print(model(x,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
+    model = htorch.hpu.wrap_in_hpu_graph(model)
+
+    print(model(x,rearrange))
+    print(model(x,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
+    y = x/10
+    print(y)
+    print(model(y,torch.tensor([0,1,2,3,9,4,5,6,7,8], device='hpu')))
+    print(model(y,torch.tensor([0,0,0,0,0,0,0,0,0,0], device='hpu')))
+
+
+
+def test_block():
+    def create_block_diagonal_attention_mask(indices):
+      max_index = indices[-1]
+      attention_mask = torch.zeros((max_index, max_index))
+
+      for i in range(len(indices)-1):
+          start = indices[i]
+          end = indices[i + 1]
+          attention_mask[start:end, start:end] = 1
+
+      return attention_mask 
+
+    slices = torch.tensor([0,5,7])
+
+    res = create_block_diagonal_attention_mask(slices)
+    print(res)
+
+    def create_block_diagonal_attention_mask_outerprod(indices):
+        maxsize = indices[-1]
+        range_to_max_for_each_img = torch.arange(maxsize).unsqueeze(0).repeat(indices.shape[0]-1,1)
+        yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+        zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+        xx = torch.logical_and(yy, zz)
+        # can reduce sum externally or as batchmatmul
+        # res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+        return res
+   
+    res = create_block_diagonal_attention_mask_outerprod(torch.tensor([0,5,7,12]))
+    print(res)
+
+
+    
+def test_block_static_indices():
+
+    def create_block_diagonal_attention_mask_outerprod(indices):
+        maxsize = indices[-1]
+        range_to_max_for_each_img = torch.arange(maxsize).unsqueeze(0).repeat(indices.shape[0]-1,1)
+        yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+        zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+        xx = torch.logical_and(yy, zz)
+        # can reduce sum externally or as batchmatmul
+        # res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+        return res
+
+    def expand_to_max(indices, max_num_images):
+        return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
+
+    indices = torch.tensor([0,5,7,12])
+    indices = expand_to_max(indices, 10)
+
+    res = create_block_diagonal_attention_mask_outerprod(indices)
+    print(res)
+
+    indices = torch.tensor([0,5])
+    indices = expand_to_max(indices, 10)
+
+    res = create_block_diagonal_attention_mask_outerprod(indices)
+    print(res)
+    
+def test_block_static_indices_hpugraph():
+    def expand_to_max(indices, max_num_images):
+        return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
+
+    class CreateAttnMask(nn.Module):
+        def __init__(self):
+            super(CreateAttnMask, self).__init__()
+
+        def forward(self, indices):
+            maxsize = indices[-1]
+            range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
+            yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+            zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+            xx = torch.logical_and(yy, zz)
+            # can reduce sum externally or as batchmatmul
+            # res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+            res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+            return res
+
+    
+    model = htorch.hpu.wrap_in_hpu_graph(CreateAttnMask().to('hpu'))
+
+    # as long as the size of attn mask is same (7 here)
+    # and max num images is same (10 here)
+    # we should be fine
+
+    indices = torch.tensor([0,5,7], device='hpu')
+    indices = expand_to_max(indices, 10)
+    res = model(indices)
+    print(res)
+
+    indices = torch.tensor([0,7], device='hpu')
+    indices = expand_to_max(indices, 10)
+    res = model(indices)
+    print(res)
+
+
+    indices = torch.tensor([0,2,4,7], device='hpu')
+    indices = expand_to_max(indices, 10)
+    res = model(indices)
+    print(res)
+
+def test_fsdpa():
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+    dim = 1600
+    q1 = torch.rand([1,16,dim,80], device='hpu').bfloat16()
+    k1 = torch.rand([1,16,dim,80], device='hpu').bfloat16()
+    v1 = torch.rand([1,16,dim,80], device='hpu').bfloat16()
+    fullatt_block_attn_mask = torch.ones([dim,dim], device='hpu').bool()
+    fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask, 0.0)
+    print(fused_out.sum())
+    
+
+def test_fsdpa_shapechange():
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+    import habana_frameworks.torch.hpu as ht
+
+    def expand_to_max(indices, max_num_images):
+        return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
+
+    def create_block_diagonal_attention_mask_outerprod(indices):
+        maxsize = indices[-1] # TODO using -1 here causes crashes.. using hardcoded 9, since for now I assume max num images = 10 ... maybe not revert to -1 when fusedsdpa with attn is resolved
+        #print(indices.shape)
+        #print(indices)
+        #print(maxsize)
+        
+        range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
+        yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+        zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+        xx = torch.logical_and(yy, zz)
+        # can reduce sum externally or as batchmatmul
+        res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        #breakpoint()
+        #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+        return res.bool()
+
+    class FSDPAAttnMask(nn.Module):
+        def __init__(self):
+            super(FSDPAAttnMask, self).__init__()
+            self.qkv = nn.Linear(1280, 1280*3)
+
+        def forward(self, x, cu_seqlens):
+            new_shape = [x.shape[0], x.shape[1], 16, 80]
+            qkv = self.qkv(x)
+            q, k, v = qkv.chunk(3, dim=2)
+            #breakpoint()
+            q, k, v = (x.view(*new_shape) for x in (q, k, v)) # [seqlen, batchsz, num_head, head_dim]
+
+            q, k, v = (rearrange(x, "s b ... -> b s ...").contiguous()
+                   for x in (q, k, v))
+
+            fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+            q1, k1, v1 = (rearrange(x, "b s h d -> b h s d") for x in [q, k, v]) ##################### <<<<<
+            # q1/k1/v1 shapes: 1600 16 1 80
+            fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask.bfloat16(), 0.0) #
+
+            #breakpoint()
+            '''
+            N=1600, Hq=H=
+            '''
+            #fused_out = torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, fullatt_block_attn_mask, 0.0) #
+            #torch.nn.functional.scaled_dot_product_attention(q, k, v, fullatt_block_attn_mask, 0.0) 
+            #torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, None, 0.0)
+            #print(fused_out)
+
+            context_layer = rearrange(fused_out, "b h s d -> b s h d ")
+            return context_layer
+
+    dim = 1600
+    device='hpu'
+    cu_seqlens = expand_to_max(torch.tensor([0,dim], device=device), 8)
+    x = torch.randn([dim,1,1280], device=device).bfloat16()
+    #breakpoint()
+    model = FSDPAAttnMask().to(torch.bfloat16).to(device)
+    y = model(x, cu_seqlens)
+    print(y)
+
+
+    dim = 3200
+    cu_seqlens = expand_to_max(torch.tensor([0,dim], device=device), 8)
+    x = torch.randn([dim,1,1280], device=device)
+    y = model(x, cu_seqlens)
+    print(y)
+
+    '''
+    LOG_LEVEL_GC=2 ENABLE_CONSOLE=true pytest -s -v vision_block.py -k test_fsdpa_shapechange
+    
+    [2025-03-30 06:47:16.296] [COMPLEXGUID_LIB] [error] 'tpckernel.sdpa_recomp_core_fwd' op Broadcast of shape [1, 10] not possible at index 1. Dimension 10 incompatible with output shape dimension 1800Broadcast of shape [1, 10] not possible at index 1. Dimension 10 incompatible with output shape dimension 1800
+[06:47:16.297048][SYN_RECIPE    ][error][tid:1F6C4] compileGraph: Can not compile graph
+[06:47:16.297059][SYN_RECIPE    ][error][tid:1F6C4] addRecipeHandleAndCompileGraph: Can not compile
+[06:47:16.297077][SYN_API       ][error][tid:1F6C4] compileGraph: Failed to add recipe handle into Recipe-Singleton status 26[synFail]
+[06:47:16.297089][SYN_API       ][error][tid:1F6C4] synGraphCompile: SYN_API_CALL failed status: 26[synFail]. graphHandle 0x60dfefefb308
+FAILED
+
+    '''
+
+   
+
+
+#if __name__ == "__main__":
+#    main()

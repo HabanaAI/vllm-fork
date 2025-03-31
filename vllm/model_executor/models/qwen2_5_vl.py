@@ -611,12 +611,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         window_index = torch.cat(window_index, dim=0)
         return window_index, cu_window_seqlens
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        grid_thw: torch.Tensor,
-    ) -> torch.Tensor:
-        #print(f"VisionTransformer: x-[{x.shape}, grid_thw-[{grid_thw}]")
+    def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor):
         # patchify
         hidden_states = x.to(device=self.device, dtype=self.dtype)
         hidden_states = self.patch_embed(hidden_states)
@@ -659,17 +654,26 @@ class Qwen2_5_VisionTransformer(nn.Module):
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         rotary_pos_emb = rotary_pos_emb[window_index, :, :]
         rotary_pos_emb = rotary_pos_emb.reshape(seq_len, -1)
-        # compute cu_seqlens
         cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2],
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
-        #import habana_frameworks.torch as htorch
-        #htorch.core.mark_step()
+        return hidden_states, rotary_pos_emb, cu_seqlens, cu_window_seqlens, window_index
+
+    def forward(
+            self,
+            x: torch.Tensor,
+            cu_seqlens: torch.Tensor,  #canbe removed
+            cu_window_seqlens: torch.Tensor,  #can be removed
+            rotary_pos_emb: torch.Tensor) -> torch.Tensor:
+        print(
+            f"VisionTransformer: x-[{x.shape}, cu_seqlens[{cu_seqlens.shape}], cu_window_seqlens[{cu_window_seqlens.shape}], rotary_pos_emb[{rotary_pos_emb.shape}]"
+        )
+        #print(f"cu_seqlens {cu_seqlens}, cu_window_seqlens {cu_window_seqlens}")
 
         # transformers
-        hidden_states = hidden_states.unsqueeze(1)
+        hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
@@ -681,8 +685,14 @@ class Qwen2_5_VisionTransformer(nn.Module):
 
         # adapter
         hidden_states = self.merger(hidden_states)
+
+        return hidden_states
+
+    def post_attn(self, hidden_states: torch.Tensor,
+                  window_index: torch.Tensor):
         reverse_indices = torch.argsort(window_index)
         hidden_states = hidden_states[reverse_indices, :]
+
         return hidden_states
 
     def load_weights(self, weights: Iterable[Tuple[str,
@@ -890,6 +900,9 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if pixel_values is not None:
             #print(f"pixel: {pixel_values.shape}, image_grid_thw:{image_grid_thw}")
             #[[[1,74.74]]] => [[1,74.74]]
+            print(
+                f"pixel: {pixel_values.shape}, image_grid_thw:{image_grid_thw}"
+            )
             pixel_values = self._validate_and_reshape_mm_tensor(
                 pixel_values, "image pixel values")
             image_grid_thw = self._validate_and_reshape_mm_tensor(
@@ -973,7 +986,15 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             image_embeds = image_input["image_embeds"].type(self.visual.dtype)
         else:
             pixel_values = image_input["pixel_values"].type(self.visual.dtype)
-            image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
+            #Moved dynamic calculation to pre_attn, and post_attn and keep the visual() block to be static to include only VisionTransformer and VisionMerger.
+            pixel_values, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
+                pixel_values, grid_thw)
+            hidden_states = self.visual(pixel_values,
+                                        rotary_pos_emb=rot_pos_emb,
+                                        cu_seqlens=cu_seqlens,
+                                        cu_window_seqlens=cu_window_seqlens)
+            image_embeds = self.visual.post_attn(hidden_states, window_index)
+            #image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
 
         # Split concatenated embeddings for each image item.
         merge_size = self.visual.spatial_merge_size
@@ -993,7 +1014,16 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         else:
             pixel_values_videos = video_input["pixel_values_videos"].type(
                 self.visual.dtype)
-            video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
+
+            #Moved dynamic calculation to pre_attn, and post_attn and keep the visual() block to be static to include only VisionTransformer and VisionMerger.
+            pixel_values_videos, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
+                pixel_values_videos, grid_thw)
+            hidden_states = self.visual(pixel_values_videos,
+                                        rotary_pos_emb=rot_pos_emb,
+                                        cu_seqlens=cu_seqlens,
+                                        cu_window_seqlens=cu_window_seqlens)
+            video_embeds = self.visual.post_attn(hidden_states, window_index)
+            #video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
 
         # Split concatenated embeddings for each video item.
         merge_size = self.visual.spatial_merge_size
