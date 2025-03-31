@@ -251,6 +251,17 @@ def align_workers(value, op):
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()
 
+
+def align_tp_workers(value, op):
+    group = get_tp_group().cpu_group
+    world_size = get_tp_group().world_size
+    if world_size <= 1:
+        return value
+    value_t = torch.tensor(value, device='cpu')
+    torch.distributed.all_reduce(value_t, op=op, group=group)
+    return value_t.item()
+
+
 def align_dp_groups(value, op):
     group = get_dp_group().cpu_group
     value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
@@ -977,9 +988,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 max_prompt_len = align_dp_groups(max_prompt_len, torch.distributed.ReduceOp.MAX)
                 print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups max_prompt_len {max_prompt_len}")
             if align_worker:
-                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers max_prompt_len {max_prompt_len}")
-                max_prompt_len = align_workers(max_prompt_len, torch.distributed.ReduceOp.MAX)
-                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers max_prompt_len {max_prompt_len}")
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_tp_workers max_prompt_len {max_prompt_len}")
+                max_prompt_len = align_tp_workers(max_prompt_len, torch.distributed.ReduceOp.MAX)
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_tp_workers max_prompt_len {max_prompt_len}")
 
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
@@ -1156,9 +1167,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
                     print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups block_bucket_size {block_bucket_size}")
                 if align_worker:
-                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers block_bucket_size {block_bucket_size}")
-                    block_bucket_size = align_workers(block_bucket_size, torch.distributed.ReduceOp.MAX)
-                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers block_bucket_size {block_bucket_size}")
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_tp_workers block_bucket_size {block_bucket_size}")
+                    block_bucket_size = align_tp_workers(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_tp_workers block_bucket_size {block_bucket_size}")
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -1176,9 +1187,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_bucket_size = align_dp_groups(block_bucket_size, torch.distributed.ReduceOp.MAX)
                     print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups block_bucket_size {block_bucket_size}")
                 if align_worker:
-                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers block_bucket_size {block_bucket_size}")
-                    block_bucket_size = align_workers(block_bucket_size, torch.distributed.ReduceOp.MAX)
-                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers block_bucket_size {block_bucket_size}")
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_tp_workers block_bucket_size {block_bucket_size}")
+                    block_bucket_size = align_tp_workers(block_bucket_size, torch.distributed.ReduceOp.MAX)
+                    print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_tp_workers block_bucket_size {block_bucket_size}")
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
@@ -1264,9 +1275,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 batch_size_padded = align_dp_groups(batch_size_padded, torch.distributed.ReduceOp.MAX)
                 print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_dp_groups batch_size_padded {batch_size_padded}")
             if align_worker:
-                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_workers batch_size_padded {batch_size_padded}")
-                batch_size_padded = align_workers(batch_size_padded, torch.distributed.ReduceOp.MAX)
-                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_workers batch_size_padded {batch_size_padded}")
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} before align_tp_workers batch_size_padded {batch_size_padded}")
+                batch_size_padded = align_tp_workers(batch_size_padded, torch.distributed.ReduceOp.MAX)
+                print(f"rank {rank} is_driver_worker {self.is_driver_worker} after align_tp_workers batch_size_padded {batch_size_padded}")
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         if batch_size_padding > 0:
@@ -1555,7 +1566,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler = setup_profiler()
             profiler.start()
         for _ in range(times):
-            inputs = self.prepare_model_input(seqs, align_worker)
+            inputs = self.prepare_model_input(seqs, align_worker=align_worker)
             additional_inputs = {}
             if self.model_type in ("medusa", "mlp_speculator", "eagle",
                                    "deepseek_mtp"):
@@ -1980,7 +1991,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
+        align_worker: bool = False,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -1997,7 +2009,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
             model_input, sampling_metadata = self.prepare_input_tensors(
-                seq_group_metadata_list)
+                seq_group_metadata_list, align_worker=align_worker)
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
