@@ -735,7 +735,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_ctx = HPUBucketingContext(self.max_num_seqs,
                                                  self.max_num_prefill_seqs,
                                                  self.block_size,
-                                                 self.max_num_batched_tokens)
+                                                 self.max_num_batched_tokens,
+                                                 VLLM_MERGED_PREFILL)
         self.graphed_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -1171,15 +1172,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     slot = block_number * self.block_size + block_offset
                     slot_mapping[-1].append(slot)
 
-        max_query_len = max(query_lens)
+        if VLLM_MERGED_PREFILL:
+            target_query_len = sum(query_lens)
+        else:
+            target_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
 
-        if VLLM_MERGED_PREFILL:
-            max_prompt_len = sum(query_lens)
-        else:
-            max_prompt_len = max(
-                self.bucketing_ctx.get_padded_prompt_seq_len(max_query_len),
-                self.block_size)
+        max_prompt_len = max(
+            self.bucketing_ctx.get_padded_prompt_seq_len(target_query_len),
+            self.block_size)
 
         # TODO: Check LORA
         lora_ids: List[int] = []
