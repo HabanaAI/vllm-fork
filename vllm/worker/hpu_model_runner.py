@@ -2425,7 +2425,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)
 
-
     def _get_seq_ids(self, model_input):
         return ([
             sg.seq_ids[0] for sg in model_input.sampling_metadata.seq_groups
