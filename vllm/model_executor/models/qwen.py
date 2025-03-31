@@ -355,6 +355,7 @@ class VisionTransformer(nn.Module):
             (output_dim**-0.5) * torch.randn(output_dim, output_dim))
         self.image_start_id = image_start_id
         self.image_end_id = image_start_id + 1
+        self.image_pad_id = image_start_id + 2
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(
@@ -619,12 +620,15 @@ class QWenModel(nn.Module):
                 hidden_states = inputs_embeds
             else:
                 hidden_states = self.get_input_embeddings(input_ids)
-            hidden_states = self.wte(input_ids)
             # Merge the image embeddings into the hidden states if actually have
-            # visual features and the corresponding image tokens
-            if img_pos is not None:
-                for idx, (img_bos, img_eos) in enumerate(img_pos):
-                    hidden_states[img_bos + 1:img_eos] = image_embeds[idx]
+            # visual features and the corresponding image token
+            batch_size, seq_length, hidden_size = hidden_states.shape
+            if pixel_values is not None and self.visual is not None:
+                hidden_states = hidden_states.reshape(-1, hidden_size)
+                image_embeds = image_embeds.reshape(-1, hidden_size)
+                hidden_states[input_ids.reshape(-1) == self.visual.image_pad_id] = image_embeds
+                hidden_states = hidden_states.reshape(batch_size, seq_length,
+                                                      hidden_size)
             residual = None
         else:
             assert intermediate_tensors is not None
