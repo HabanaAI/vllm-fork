@@ -61,9 +61,17 @@ while [[ $# -gt 0 ]]; do
         RandomImageSize="On"
         shift 1
         ;;
+    --mix_prompt_lenght)
+        MixPromptLenght="One"
+        shift 1
+        ;;
     --iter)
         iter=$2
         shift 2
+        ;;
+    --two_images_prompt)
+        TwoImagesPrompt="on"
+        shift 1
         ;;
     --help)
         usage
@@ -134,7 +142,15 @@ fi
 
 EXTRAARGS=" "
 if [[ -n "$MultiPrompt" ]]; then
-    EXTRAARGS=" --multiple_prompts"
+    EXTRAARGS="$EXTRAARGS --multiple_prompts"
+fi
+
+if [[ -n "$TwoImagesPrompt" ]]; then
+    EXTRAARGS="$EXTRAARGS --two_images_prompt --limit_mm_image 2"
+fi
+
+if [[ -n "$MixPromptLenght" ]]; then
+    EXTRAARGS="$EXTRAARGS --mix_prompt_lenght"
 fi
 
 if [[ "$model" == *"Qwen2"* ]]; then
