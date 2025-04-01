@@ -3,10 +3,10 @@ ModelName=Qwen/Qwen2.5-VL-3B-Instruct
 RunBasic=true
 RunPytests=true
 RunLargeImages=true
-RunOnlineTests=True
-RunMemBenchAnalysis=False
-RandomizedImage=True
-RandomShuffle=True
+RunOnlineTests=true
+RunMemBenchAnalysis=false
+RandomizedImage=true
+RandomShuffle=true
 
 #Basic tests
 if $RunBasic; then
