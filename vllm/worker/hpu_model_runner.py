@@ -939,6 +939,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
   #      self._model = m        
     
     def get_model(self) -> torch.nn.Module:
+        if isinstance(self.model, HpuModelAdapter):
+            return self.model.model
         return self.model
 
     def _use_graphs(self, batch_size, seq_len, is_prompt):
