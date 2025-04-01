@@ -18,7 +18,6 @@ import torch.distributed
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.flags import enabled_flags
-from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 from vllm.attention.backends.abstract import AttentionType
@@ -39,7 +38,8 @@ from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LayerBlockType, cdiv,
 from vllm.v1.attention.backends.hpu_attn import HPUAttentionMetadataV1
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
-from vllm.v1.outputs import LogprobsTensors, ModelRunnerOutput
+from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsLists,
+                             LogprobsTensors, ModelRunnerOutput)
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.utils import bind_kv_cache
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
@@ -193,50 +193,6 @@ def _async_h2d_tensor_copy(source, device='hpu'):
     return target
 
 
-def swap_positions(b: InputBatch, id_1, id_2):
-    assert id_1 != id_2
-    req_id_1 = b.req_ids[id_1]
-    req_id_2 = b.req_ids[id_2]
-    assert req_id_1 is not None
-    assert req_id_2 is not None
-    assert id_1 == b.req_id_to_index[req_id_1]
-    assert id_2 == b.req_id_to_index[req_id_2]
-
-    b.req_ids[id_1], b.req_ids[id_2] = b.req_ids[id_2], b.req_ids[id_1]
-    b.req_id_to_index[req_id_1], b.req_id_to_index[
-        req_id_2] = b.req_id_to_index[req_id_2], b.req_id_to_index[req_id_1]
-
-    ids = [id_1, id_2]
-    rev_ids = [id_2, id_1]
-    b.num_tokens[ids] = b.num_tokens[rev_ids]
-    b.token_ids_cpu[ids] = b.token_ids_cpu[rev_ids]
-    b.num_prompt_tokens[ids] = b.num_prompt_tokens[rev_ids]
-    b.num_computed_tokens_cpu[ids] = b.num_computed_tokens_cpu[rev_ids]
-
-    b.block_table.swap_row(id_1, id_2)
-
-    b.temperature_cpu[ids] = b.temperature_cpu[rev_ids]
-    b.top_p_cpu[ids] = b.top_p_cpu[rev_ids]
-    b.top_k_cpu[ids] = b.top_k_cpu[rev_ids]
-    b.frequency_penalties_cpu[ids] = b.frequency_penalties_cpu[rev_ids]
-    b.presence_penalties_cpu[ids] = b.presence_penalties_cpu[rev_ids]
-    b.repetition_penalties_cpu[ids] = b.repetition_penalties_cpu[rev_ids]
-
-    min_tokens_1 = b.min_tokens.pop(id_1, None)
-    min_tokens_2 = b.min_tokens.pop(id_2, None)
-    if min_tokens_1 is not None:
-        b.min_tokens[id_2] = min_tokens_1
-    if min_tokens_2 is not None:
-        b.min_tokens[id_1] = min_tokens_2
-
-    gen_1 = b.generators.pop(id_1, None)
-    gen_2 = b.generators.pop(id_2, None)
-    if gen_1 is not None:
-        b.generators[id_2] = gen_1
-    if gen_2 is not None:
-        b.generators[id_1] = gen_2
-
-
 def ensure_decodes_first(b: InputBatch):
     num_reqs = b.num_reqs
     while True:
@@ -266,7 +222,7 @@ def ensure_decodes_first(b: InputBatch):
             break
 
         # Swap
-        swap_positions(b, first_prompt_index, last_decode_index)
+        b.swap_states(first_prompt_index, last_decode_index)
 
 
 def get_target_layer_suffix_list(model_type) -> list[str]:
@@ -371,7 +327,7 @@ class HpuModelAdapter:
                               module,
                               parent_module=None,
                               module_name=None):
-        if isinstance(module, torch.nn.Modulelist):
+        if isinstance(module, torch.nn.ModuleList):
             for children_name, children_module in module.named_children():
                 self._compile_region(module, children_name, children_module)
         elif any(
@@ -455,16 +411,6 @@ class HpuModelAdapter:
                                      attn_bias=attn_bias)
         return metadata
 
-    def _set_block_scales(self, metadata, device):
-        block_mapping = metadata.block_mapping
-        ones = torch.ones((block_mapping.size(0), ),
-                          device=device,
-                          dtype=block_mapping.dtype)
-        sums = batch2block(block2batch(ones, block_mapping), block_mapping)
-        block_scales = torch.reciprocal(torch.maximum(ones, sums))
-        metadata = metadata._replace(block_scales=block_scales)
-        return metadata
-
     def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
         slot_mapping = metadata.slot_mapping.flatten()
         indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
@@ -485,7 +431,6 @@ class HpuModelAdapter:
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-            attn_metadata = self._set_block_scales(attn_metadata, device)
         attn_metadata = self._set_indices_and_offsets(attn_metadata,
                                                       self.block_size,
                                                       attn_metadata.is_prompt)
@@ -604,7 +549,7 @@ def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
     attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
         'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
         'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt',
-        'block_indices', 'block_offsets', 'block_scales', 'block_groups'
+        'block_indices', 'block_offsets', 'block_groups'
     ])
     return attention_metadata
 
@@ -1541,10 +1486,83 @@ class HPUModelRunner:
                                            attn_metadata=trimmed_attn_metadata,
                                            kv_caches=kv_caches)
         #hidden_states = hidden_states[:num_scheduled_tokens]
+        # NOTE(kzawora): returning hidden_states is required in prompt logprobs
+        # scenarios, as they will do logit processing on their own
+        non_flattened_hidden_states = hidden_states
+
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states[logits_indices]
         logits = self.model.compute_logits(hidden_states, None)
-        return logits
+        return non_flattened_hidden_states, logits
+
+    def _get_prompt_logprobs_dict(
+        self,
+        hidden_states: torch.Tensor,
+        scheduler_output: "SchedulerOutput",
+    ) -> dict[str, Optional[LogprobsTensors]]:
+        num_prompt_logprobs_dict = self.input_batch.num_prompt_logprobs
+        if not num_prompt_logprobs_dict:
+            return {}
+
+        prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
+
+        # Since prompt logprobs are a rare feature, prioritize simple,
+        # maintainable loop over optimal performance.
+        completed_prefill_reqs = []
+        for i, (req_id, num_prompt_logprobs) in enumerate(
+                num_prompt_logprobs_dict.items()):
+
+            num_tokens = scheduler_output.num_scheduled_tokens[req_id]
+
+            # Get metadata for this request.
+            request = self.requests[req_id]
+            num_prompt_tokens = len(request.prompt_token_ids)
+            prompt_token_ids = torch.tensor(request.prompt_token_ids).to(
+                self.device, non_blocking=True)
+
+            # Determine number of logits to retrieve.
+            start_tok = request.num_computed_tokens + 1
+            num_remaining_tokens = num_prompt_tokens - start_tok
+            if num_tokens < num_remaining_tokens:
+                # This is a chunk, more tokens remain.
+                num_logits = num_tokens
+            else:
+                # This is the last chunk of prompt tokens to return.
+                num_logits = num_remaining_tokens
+                completed_prefill_reqs.append(req_id)
+
+            # Get the logits corresponding to this req's prompt tokens.
+            # If this is a partial request (i.e. chunked prefill),
+            # then there is prompt logprob generated for each index.
+            prompt_hidden_states = hidden_states[i, :num_logits]
+            logits = self.model.compute_logits(prompt_hidden_states, None)
+
+            # Get the "target" tokens for each index. For prompt at index i,
+            # the token at prompt index i+1 is the "sampled" token we want
+            # to gather the logprob for.
+            tgt_token_ids = prompt_token_ids[start_tok:start_tok + num_logits]
+
+            # Compute prompt logprobs.
+            logprobs = self.model.sampler.compute_logprobs(logits)
+            token_ids, logprobs, ranks = self.model.sampler.gather_logprobs(
+                logprobs, num_prompt_logprobs, tgt_token_ids)
+
+            # Transfer GPU->CPU async.
+            prompt_logprobs_dict[req_id] = LogprobsTensors(
+                token_ids.to("cpu", non_blocking=True),
+                logprobs.to("cpu", non_blocking=True),
+                ranks.to("cpu", non_blocking=True),
+            )
+
+        # Remove requests that have completed prefill from the batch
+        # num_prompt_logprobs_dict.
+        for req_id in completed_prefill_reqs:
+            del num_prompt_logprobs_dict[req_id]
+
+        # Must synchronize the non-blocking GPU->CPU transfers.
+        torch.hpu.synchronize()
+
+        return prompt_logprobs_dict
 
     @torch.inference_mode()
     def execute_model(
@@ -1607,6 +1625,9 @@ class HPUModelRunner:
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
 
         batch_changed = self._update_states(scheduler_output)
+        if not scheduler_output.total_num_scheduled_tokens:
+            # Return empty ModelRunnerOuptut if there's no work to do.
+            return EMPTY_MODEL_RUNNER_OUTPUT
         # If necessary, swap decodes/prompts to have all decodes on the start
         ensure_decodes_first(self.input_batch)
         # Prepare prompts/decodes info
@@ -1625,9 +1646,12 @@ class HPUModelRunner:
 
         #FIXME(kzawora): Currently there's no handling of logprobs. Fix that
         # later.
-        prefill_output_tokens = []
-        prefill_output_device = None
-        decode_output_device = None
+        prefill_sampler_outputs = []
+        prefill_hidden_states = []
+        decode_sampler_outputs = []
+        prefill_output_tokens_device = None
+        prefill_hidden_states_device = None
+        decode_output_tokens_device = None
         ######################### PREFILLS #########################
         # Prefills run with shape [padded_prefill_bs, padded_prefill_len]
         if num_prefills > 0:
@@ -1636,7 +1660,8 @@ class HPUModelRunner:
                       attn_metadata,
                       logits_indices) in enumerate(prefill_data.zipped()):
                 htorch.core.mark_step()
-                logits_device = self._execute_model_generic(
+                prefill_hidden_states_ts, logits_device = \
+                    self._execute_model_generic(
                     token_ids, position_ids, attn_metadata, logits_indices,
                     self.kv_caches)
                 htorch.core.mark_step()
@@ -1644,17 +1669,19 @@ class HPUModelRunner:
                     batch_changed, req_id, pad_to=logits_device.shape[0])
                 sampler_output = self.model.sample(
                     logits=logits_device, sampling_metadata=sampling_metadata)
-                sampled_token_ids_device = sampler_output.sampled_token_ids
                 htorch.core.mark_step()
-                prefill_output_tokens.extend(sampled_token_ids_device)
-
+                prefill_sampler_outputs.append(sampler_output)
+                if self.input_batch.num_prompt_logprobs:
+                    prefill_hidden_states.append(prefill_hidden_states_ts)
             # sampler returns device tensors, concat will happen on device
-            if len(prefill_output_tokens) > 0:
-                prefill_output_device = torch.tensor(
-                    prefill_output_tokens,
-                    device=prefill_output_tokens[0].device,
-                    dtype=prefill_output_tokens[0].dtype)
+            if len(prefill_sampler_outputs) > 0:
+                prefill_output_tokens_device = torch.tensor(
+                    [o.sampled_token_ids for o in prefill_sampler_outputs],
+                    device=prefill_sampler_outputs[0].sampled_token_ids.device,
+                    dtype=prefill_sampler_outputs[0].sampled_token_ids.dtype)
                 #torch.cat(prefill_output_tokens, dim=0)
+            if len(prefill_hidden_states) > 0:
+                prefill_hidden_states_device = torch.cat(prefill_hidden_states)
             htorch.core.mark_step()
 
         ######################### DECODES #########################
@@ -1662,7 +1689,7 @@ class HPUModelRunner:
         if num_decodes > 0:
             assert decode_data is not None
             htorch.core.mark_step()
-            logits_device = self._execute_model_generic(
+            _, logits_device = self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
                 decode_data.attn_metadata, decode_data.logits_indices,
                 self.kv_caches)
@@ -1673,30 +1700,55 @@ class HPUModelRunner:
                 pad_to=logits_device.shape[0])
             sampler_output = self.model.sample(
                 logits=logits_device, sampling_metadata=sampling_metadata)
-            decode_output_device = sampler_output.sampled_token_ids
+            decode_sampler_outputs.append(sampler_output)
+            decode_output_tokens_device = sampler_output.sampled_token_ids
             htorch.core.mark_step()
 
         # From this point onward, all operations are done on CPU.
         # We already have tokens. Let's copy the data to
         # CPU as is, and then discard padded tokens.
-        prefill_output_cpu = prefill_output_device.cpu(
-        ) if prefill_output_device is not None else None
-        decode_output_cpu = decode_output_device.cpu(
-        ) if decode_output_device is not None else None
+        prefill_output_tokens_cpu = prefill_output_tokens_device.cpu(
+        ) if prefill_output_tokens_device is not None else None
+        decode_output_tokens_cpu = decode_output_tokens_device.cpu(
+        ) if decode_output_tokens_device is not None else None
         # From this point onward, all operations are done on CPU.
 
         # Discard garbage tokens from prefills and/or decodes
-        if prefill_output_cpu is not None and decode_output_cpu is not None:
+        if prefill_output_tokens_cpu is not None \
+            and decode_output_tokens_cpu is not None:
             sampled_token_ids_cpu = torch.cat(
-                (decode_output_cpu[:num_decodes].flatten(),
-                 prefill_output_cpu[:num_prefills].flatten()),
+                (decode_output_tokens_cpu[:num_decodes].flatten(),
+                 prefill_output_tokens_cpu[:num_prefills].flatten()),
                 dim=0)
         else:
-            sampled_token_ids_cpu = decode_output_cpu[:num_decodes].flatten() \
-                if decode_output_cpu is not None \
-                    else prefill_output_cpu[:num_prefills].flatten()
+            sampled_token_ids_cpu = (
+                decode_output_tokens_cpu[:num_decodes].flatten()
+                if decode_output_tokens_cpu is not None else
+                prefill_output_tokens_cpu[:num_prefills].flatten())
 
         sampled_token_ids_list = sampled_token_ids_cpu.tolist()
+        logprobs = None
+        all_outputs = [*prefill_sampler_outputs, *decode_sampler_outputs]
+        # NOTE(kzawora): idk what happens if part of batch doesn't have logprobs
+        has_logprobs = all(
+            [o.logprobs_tensors is not None for o in all_outputs])
+        if has_logprobs:
+            logprob_token_ids = []
+            logprob_values = []
+            selected_token_ranks = []
+            for out in all_outputs:
+                # NOTE(kzawora): this is likely wrong - we're including
+                # padded sequence data here
+                logprob_token_ids.extend(
+                    out.logprobs_tensors.logprob_token_ids.tolist())
+                logprob_values.extend(out.logprobs_tensors.logprobs.tolist())
+                selected_token_ranks.extend(
+                    out.logprobs_tensors.selected_token_ranks.tolist())
+            logprobs = LogprobsLists(
+                logprob_token_ids,
+                logprob_values,
+                selected_token_ranks,
+            )
 
         ######### UPDATE REQUEST STATE WITH GENERATED TOKENS #########
         for i, req_id in enumerate(self.input_batch.req_ids[:num_reqs]):
@@ -1719,9 +1771,12 @@ class HPUModelRunner:
         ################## RETURN ##################
         # Create output.
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
-        prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
-        for req_id in all_req_ids:
-            prompt_logprobs_dict[req_id] = None
+        prompt_logprobs_dict: dict[
+            str, Optional[LogprobsTensors]] = self._get_prompt_logprobs_dict(
+                prefill_hidden_states_device, scheduler_output)
+        #prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
+        #for req_id in all_req_ids:
+        #    prompt_logprobs_dict[req_id] = None
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
 
         # in spec decode, multiple tokens can be returned, and I suspect
@@ -1730,7 +1785,7 @@ class HPUModelRunner:
             req_ids=all_req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
             sampled_token_ids=[[i] for i in sampled_token_ids_list],
-            logprobs=None,
+            logprobs=logprobs,
             spec_token_ids=None,
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
         )
