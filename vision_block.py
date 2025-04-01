@@ -1000,33 +1000,36 @@ def test_fsdpa():
     print(fused_out.sum())
 
 
+
+from habana_frameworks.torch.hpex.kernels import FusedSDPA
+import habana_frameworks.torch.hpu as ht
+
+def expand_to_max(indices, max_num_images):
+    return torch.nn.functional.pad(indices,
+                                   (0, max_num_images - indices.shape[0]),
+                                   value=indices[-1])
+
+def create_block_diagonal_attention_mask_outerprod(indices):
+    maxsize = indices[
+        -1]  # TODO using -1 here causes crashes.. using hardcoded 9, since for now I assume max num images = 10 ... maybe not revert to -1 when fusedsdpa with attn is resolved
+    #print(indices.shape)
+    #print(indices)
+    #print(maxsize)
+
+    range_to_max_for_each_img = torch.arange(
+        maxsize,
+        device=indices.device).unsqueeze(0).repeat(indices.shape[0] - 1, 1)
+    yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+    zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+    xx = torch.logical_and(yy, zz)
+    # can reduce sum externally or as batchmatmul
+    res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+    #breakpoint()
+    #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+    return res.bool()
+
 def test_fsdpa_shapechange():
-    from habana_frameworks.torch.hpex.kernels import FusedSDPA
-    import habana_frameworks.torch.hpu as ht
 
-    def expand_to_max(indices, max_num_images):
-        return torch.nn.functional.pad(indices,
-                                       (0, max_num_images - indices.shape[0]),
-                                       value=indices[-1])
-
-    def create_block_diagonal_attention_mask_outerprod(indices):
-        maxsize = indices[
-            -1]  # TODO using -1 here causes crashes.. using hardcoded 9, since for now I assume max num images = 10 ... maybe not revert to -1 when fusedsdpa with attn is resolved
-        #print(indices.shape)
-        #print(indices)
-        #print(maxsize)
-
-        range_to_max_for_each_img = torch.arange(
-            maxsize,
-            device=indices.device).unsqueeze(0).repeat(indices.shape[0] - 1, 1)
-        yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
-        zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
-        xx = torch.logical_and(yy, zz)
-        # can reduce sum externally or as batchmatmul
-        res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
-        #breakpoint()
-        #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
-        return res.bool()
 
     class FSDPAAttnMask(nn.Module):
 
@@ -1120,6 +1123,165 @@ def test_fsdpa_shapechange():
 FAILED
 
     '''
+
+
+class FSDPAAttnMaskOneshot(nn.Module):
+    def __init__(self, use_fused, with_mask):
+        super(FSDPAAttnMaskOneshot, self).__init__()
+        self.qkv = nn.Linear(1280, 1280 * 3)
+        self.use_FusedSDPA = use_fused
+        self.with_mask = with_mask
+
+    def forward(self, x, cu_seqlens):
+        new_shape = [x.shape[0], x.shape[1], 16, 80]
+        qkv = self.qkv(x)
+        q, k, v = qkv.chunk(3, dim=2)
+        #breakpoint()
+        q, k, v = (x.view(*new_shape) for x in (q, k, v)
+                   )  # [seqlen, batchsz, num_head, head_dim]
+
+        q1, k1, v1 = (rearrange(x, "s b ... -> b s ...").contiguous()
+                      for x in (q, k, v))
+
+        q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
+                      for x in [q1, k1, v1])
+
+        if self.with_mask:
+            fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(
+                cu_seqlens)
+
+            (batch_size, n_heads, seq_len_N_t, head_dim_qk) = q1.shape
+            (batch_size, n_heads, seq_len_N_s, head_dim_qk) = k1.shape
+
+            mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
+
+            print(mask_shape)
+
+            attn_mask = fullatt_block_attn_mask.reshape(
+                batch_size, 1, seq_len_N_t, seq_len_N_s, -1)[:, :, :, :, 0]
+            assert attn_mask.shape == mask_shape
+        else:
+            attn_mask = None
+
+        if self.use_FusedSDPA:
+            fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)
+        else:
+            fused_out = torch.nn.functional.scaled_dot_product_attention(
+                q1, k1, v1, fullatt_block_attn_mask, 0.0)
+
+        context_layer = rearrange(fused_out, "b h s d -> b s h d ")
+        return context_layer
+
+
+def test_fsdpa_compare_fused_unfused():
+    set_random_seed(0)
+    dim = 1600
+    device = 'hpu'
+    cu_seqlens = expand_to_max(torch.tensor([0, dim//2, dim//2 + dim//4, dim], device=device), 8)
+    assert cu_seqlens[-1].item() == dim
+    x = torch.randn([dim, 1, 1280], device=device).bfloat16()
+    model = FSDPAAttnMaskOneshot(True, True).to(torch.bfloat16).to(device)
+    weights = model.state_dict()
+    y_fused = model(x, cu_seqlens).to('cpu')
+
+    device = 'cpu'
+    model = FSDPAAttnMaskOneshot(False, True)
+    model.load_state_dict(weights)
+    model = model.bfloat16().to(device)
+    y_unfused = model(x, cu_seqlens)
+    assert torch.allclose(y_fused, y_unfused, atol = 0.01)
+
+
+class AttentionLongSequence:
+    @staticmethod
+    def forward(q, k, v, mask, q_block_size):
+        """
+        Support long sequence at prompt phase
+        """
+        q_len = q.size(-2)
+        q_tiles = (q_len // q_block_size) if (q_len % q_block_size == 0) else math.ceil(q_len / q_block_size)
+        q_padding = q_tiles * q_block_size - q_len
+        q = F.pad(q, (0, 0, 0, q_padding), "constant", 0)
+        if mask is not None:
+            mask = F.pad(mask, (0, 0, 0, q_padding), "constant", -10000.0)
+        attn_output = torch.zeros_like(q)
+
+        for i in range(q_tiles):
+            s, e = i * q_block_size, (i + 1) * q_block_size
+            row_q = q[:, :, s:e, :]
+            row_mask = mask[:, :, s:e, :]
+            attn_output[:, :, s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0, False, None)
+
+        if q_padding != 0:
+            attn_output = attn_output[:, :, :-q_padding, :]
+
+        return attn_output
+
+class FSDPAAttnMaskChunked(nn.Module):
+    def __init__(self, block_size):
+        super(FSDPAAttnMaskChunked, self).__init__()
+        self.qkv = nn.Linear(1280, 1280 * 3)
+        self.block_size = block_size
+
+    def forward(self, x, cu_seqlens):
+        new_shape = [x.shape[0], x.shape[1], 16, 80]
+        qkv = self.qkv(x)
+        q, k, v = qkv.chunk(3, dim=2)
+
+        q, k, v = (x.view(*new_shape) for x in (q, k, v)
+                   )  # [seqlen, batchsz, num_head, head_dim]
+
+        q1, k1, v1 = (rearrange(x, "s b ... -> b s ...").contiguous()
+                      for x in (q, k, v))
+
+        q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
+                      for x in [q1, k1, v1])
+
+        fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(
+            cu_seqlens)
+
+        (batch_size, n_heads, seq_len_N_t, head_dim_qk) = q1.shape
+        (batch_size, n_heads, seq_len_N_s, head_dim_qk) = k1.shape
+
+        mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
+
+        print(mask_shape)
+
+        attn_mask = fullatt_block_attn_mask.reshape(
+            batch_size, 1, seq_len_N_t, seq_len_N_s, -1)[:, :, :, :, 0]
+        assert attn_mask.shape == mask_shape
+
+        assert seq_len_N_t == seq_len_N_s
+        assert seq_len_N_t % self.block_size == 0
+
+        fused_out = AttentionLongSequence.forward(q1, k1, v1, attn_mask, self.block_size)
+
+        context_layer = rearrange(fused_out, "b h s d -> b s h d ")
+        return context_layer
+
+
+
+def test_fsdpa_chunked():
+    set_random_seed(0)
+    dim = 3072
+    device = 'cpu'
+    x = torch.randn([dim, 1, 1280], device=device).bfloat16()
+    cu_seqlens = expand_to_max(torch.tensor([0, dim//2, dim//2 + dim//4, dim], device=device), 8)
+    assert cu_seqlens[-1].item() == dim
+    model = FSDPAAttnMaskOneshot(False, True).to(torch.bfloat16).to(device)
+    weights = model.state_dict()
+    y_unfused_oneshot = model(x, cu_seqlens)
+    
+    device = 'hpu'
+    model = FSDPAAttnMaskChunked(1024)
+    model.load_state_dict(weights)
+    model = model.to(torch.bfloat16).to(device)
+    y_chunked = model(x.to(device), cu_seqlens.to(device))
+    
+    assert torch.allclose(y_chunked.to('cpu'), y_unfused_oneshot.to('cpu'), atol = 0.01)
+
+    
+
 
 
 #if __name__ == "__main__":
