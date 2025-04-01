@@ -647,6 +647,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.max_num_batched_tokens = \
             self.scheduler_config.max_num_batched_tokens
         self.block_size = self.cache_config.block_size
+        assert not (self.scheduler_config.use_padding_aware_scheduling
+                    and VLLM_MERGED_PREFILL), \
+            'Merged prefill is not compatible with padding aware scheduling!'
 
         self.pin_memory = is_pin_memory_available()
         self.kv_cache_dtype = self.cache_config.cache_dtype
