@@ -161,7 +161,7 @@ Currently, vLLM for HPU supports four execution modes, determined by the selecte
 | 1                  | 1               | PyTorch lazy mode  |
 
 > [!NOTE]
-> Starting with the 1.21.0 release, the torch.compile execution mode became the default for vLLM. HPU Graphs mode remains supported to ensure backward compatibility.
+> Starting with the 1.21.0 Intel Gaudi software release, the torch.compile execution mode became the default for vLLM. HPU Graphs mode remains supported to ensure backward compatibility.
 
 > [!TIP]
 > We recommend experimenting with the PT_HPU_LAZY_MODE environment variable to determine whether HPU Graphs or torch.compile mode performs better for your specific use case. While both modes generally deliver comparable performance, certain edge cases may favor one over the other.
