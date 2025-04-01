@@ -15,8 +15,15 @@ moe_n_slice=1
 gpu_utils=0.92
 bs=448
 num_prompts=448
-request_rate=inf
-log_name="[inc-331-moe-op-maxabs_hw-scalar-online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
+request_rate=16
+log_name="[inc-staticquant-scalar-fp8matmul-split]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
+
+in_len_aligned=$((in_len + 127 / 128 * 128))
+total_len_aligend=$((total_len + 127 / 128 * 128))
+VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len_aligned * bs / 128))
+VLLM_DECODE_BLOCK_BUCKET_MIN=$(((VLLM_DECODE_BLOCK_BUCKET_MIN + 127) / 128 * 128))
+VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len_aligend * bs / 128))
+VLLM_DECODE_BLOCK_BUCKET_MAX=$(((VLLM_DECODE_BLOCK_BUCKET_MAX + 127) / 128 * 128))
 
 VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / 128))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len * bs / 128 + 128))
@@ -30,6 +37,7 @@ model_name="DeepSeek-R1"
 QUANT_CONFIG="inc_quant_with_fp8kv_config.json" \
 VLLM_REQUANT_FP8_INC=1 \
 VLLM_ENABLE_RUNTIME_DEQUANT=1 \
+USE_FP8_MATMUL=true \
 VLLM_DELAYED_SAMPLING=true \
 HABANA_VISIBLE_DEVICES="ALL" \
 VLLM_MOE_N_SLICE=${moe_n_slice} \
