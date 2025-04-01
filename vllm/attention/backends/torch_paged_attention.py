@@ -490,6 +490,45 @@ def calculate_q_slice_write_back_indices(
     return valid_indices, is_last_index_in_slice
 
 
+def index_put_pre_process(t, q_indices, t_slice):
+    indices_shape = q_indices.shape
+    val_shape = t_slice.shape
+    reshaped_indices = q_indices
+    reshaped_val = t_slice
+    if (len(val_shape) > len(t.shape)):
+        #in this case the upper dim sizes of val should exactly match indices shape
+        #e.g: if self shape = (4, 2, 4), indices (3, 4) and values (3, 4, 2, 4),
+        # first, indices have to be reshaped to (12,), values to (12, 2, 4)
+        #then we need to make sure that indices become (4, ) and values (4, 2, 4)
+        # to align with self's shape. This also implies that indices had redundant values.
+        # so, which indices are redundant and which should be picked when a index repeats?
+        # as per CPU behavior, the last occurance of a redundant index is picked and
+        # corresponding position value is taken to fill up the position in self.
+        reshaped_indices = torch.reshape(q_indices, (q_indices.numel(),))
+        val_new_shape = list(reshaped_indices.shape)
+        for i in range (len(indices_shape), len(val_shape)):
+            val_new_shape.append(val_shape[i])
+        reshaped_val = torch.reshape(t_slice, val_new_shape)
+        # Create new tensor for positions in indices
+        ind_ind = torch.arange(reshaped_indices.size(0), device=torch.device('hpu'))
+        # Get unique elements and their inverse indices
+        unique_indices, unique_indices_indices = torch.unique(reshaped_indices, return_inverse = True)
+        # Compute last occurrence indices using max reduction
+        last_indices = torch.zeros_like(unique_indices, dtype=torch.long)
+        last_indices.scatter_reduce_(
+            dim=0,
+            index=unique_indices_indices,
+            src=ind_ind,
+            reduce='amax',
+            include_self=False
+        )
+        # Now that we have last occuring values indices, gather those values
+        # and "index_put" to those unique index locations.
+        gathered_reshaped_val = reshaped_val[last_indices]
+        return gathered_reshaped_val, unique_indices
+    return t_slice, q_indices
+
+
 def write_back_q_slice_to_tensor(
         t: torch.Tensor,
         t_slice: torch.Tensor,
@@ -502,6 +541,8 @@ def write_back_q_slice_to_tensor(
     """
     last_index = t.shape[0] - 1
     t_at_last_index = t[last_index]
+    if t.device == torch.device('hpu:0'):
+        t_slice, q_indices = index_put_pre_process(t, q_indices, t_slice)
     t[q_indices] = t_slice
     t[last_index] = torch.where(is_last_index_in_slice, t_slice[-1, -1], t_at_last_index)
 
