@@ -61,6 +61,8 @@ from vllm.platforms import _Backend, current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 
+from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
 import habana_frameworks.torch.core as htcore
 
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
@@ -77,6 +79,32 @@ is_hpu = current_platform.is_hpu()
 
 # === Vision Inputs === #
 
+
+class AttentionLongSequence:
+    @staticmethod
+    def forward(q, k, v, mask, q_block_size):
+        """
+        Support long sequence at prompt phase
+        """
+        q_len = q.size(-2)
+        assert q_len % q_block_size == 0
+        q_tiles = (q_len // q_block_size) if (q_len % q_block_size == 0) else math.ceil(q_len / q_block_size)
+        #q_padding = q_tiles * q_block_size - q_len
+        #q = F.pad(q, (0, 0, 0, q_padding), "constant", 0)
+        #if mask is not None:
+        #    mask = F.pad(mask, (0, 0, 0, q_padding), "constant", -10000.0)
+        attn_output = torch.zeros_like(q)
+
+        for i in range(q_tiles):
+            s, e = i * q_block_size, (i + 1) * q_block_size
+            row_q = q[:, :, s:e, :]
+            row_mask = mask[:, :, s:e, :]
+            attn_output[:, :, s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0, False, None)
+
+        #if q_padding != 0:
+        #    attn_output = attn_output[:, :, :-q_padding, :]
+
+        return attn_output
 
 def create_block_diagonal_attention_mask_outerprod(indices):
     maxsize = indices[9] # TODO using -1 here causes crashes.. using hardcoded 9, since for now I assume max num images = 10 ... maybe not revert to -1 when fusedsdpa with attn is resolved
@@ -345,7 +373,6 @@ class Qwen2_5_VisionAttention(nn.Module):
                     q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                     for x in [q_i, k_i, v_i])
                     if is_hpu:
-                        from habana_frameworks.torch.hpex.kernels import FusedSDPA
                         output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
                     else:
                         output_i = F.scaled_dot_product_attention(q_i,
@@ -355,22 +382,12 @@ class Qwen2_5_VisionAttention(nn.Module):
                     output_i = rearrange(output_i, "b h s d -> b s h d ")
                     outputs.append(output_i)
                 context_layer = torch.cat(outputs, dim=1)
-                #breakpoint()
-                #print()
             else:
-                #breakpoint()
-                from habana_frameworks.torch.hpex.kernels import FusedSDPA
                 # TODO. we only need to create this mask once. all 4 full-attn layers could share it
                 #print(cu_seqlens)
                 fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
-                #print(cu_seqlens)
-                #print(fullatt_block_attn_mask)
-                #print(q.shape, fullatt_block_attn_mask.shape, 'x.x.x.x.')
                 q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")for x in [q, k, v])
-                #print('xyxyxy1', q1, k1, v1)
-                #if q1.shape[2] > 1600:
-                #  breakpoint()
-                #  print()
+
 
                 (batch_size, n_heads, seq_len_N_t, head_dim_qk) = q1.shape
                 (batch_size, n_heads, seq_len_N_s, head_dim_qk) = k1.shape
@@ -379,22 +396,11 @@ class Qwen2_5_VisionAttention(nn.Module):
                 attn_mask = fullatt_block_attn_mask.reshape(batch_size, 1, seq_len_N_t, seq_len_N_s, -1)[:, :, :, :, 0]
                 assert attn_mask.shape == mask_shape
 
-                fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
-                #fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask, 0.0)
-                #fused_out = FusedSDPA.apply(q1, k1, v1, None, 0.0) ######## this works (no attention)
-                '''
-                [2025-03-30 04:54:26.987] [COMPLEXGUID_LIB] [error] 'tpckernel.sdpa_recomp_core_fwd' op Broadcast of shape [1, 6] not possible at index 1. Dimension 6 incompatible with output shape dimension 3200Broadcast of shape [1, 6] not possible at index 1. Dimension 6 incompatible with output shape dimension 3200
-                [04:54:26.987505][SYN_RECIPE    ][error][tid:17738] compileGraph: Can not compile graph
-                [04:54:26.987522][SYN_RECIPE    ][error][tid:17738] addRecipeHandleAndCompileGraph: Can not compile
-                [04:54:26.987544][SYN_API       ][error][tid:17738] compileGraph: Failed to add recipe handle into Recipe-Singleton status 26[synFail]
-                [04:54:26.987559][SYN_API       ][error][tid:17738] synGraphCompile: SYN_API_CALL failed status: 26[synFail]. graphHandle 0x5df3104fe7a8
-                '''
-                
-                
-                #print('xyxyxy2', fused_out) ###### crashes, why?
+                #fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
                 #fused_out = torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, fullatt_block_attn_mask, 0.0)  ######## this works if used instead of fsdpa
+                fused_out = AttentionLongSequence.forward(q1, k1, v1, attn_mask, 64)  ## TODO change this 64 to something bigger. Need to think carefully about the buckets to use
                 context_layer = rearrange(fused_out, "b h s d -> b s h d ")
-                #print('xyxyxy3', context_layer)
+                
             
         elif self.attn_backend == _Backend.XFORMERS:
             from xformers import ops as xops
@@ -984,9 +990,17 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if pixel_values is not None:
             #print(f"pixel: {pixel_values.shape}, image_grid_thw:{image_grid_thw}")
             #[[[1,74.74]]] => [[1,74.74]]
-            print(
+ 
+            if type(pixel_values) == type([]):
+                print(
+                  f"pixel: {[i.shape for i in pixel_values]}, image_grid_thw:{image_grid_thw}"
+              )
+            else:
+                print(
                 f"pixel: {pixel_values.shape}, image_grid_thw:{image_grid_thw}"
-            )
+                )
+            
+
             pixel_values = self._validate_and_reshape_mm_tensor(
                 pixel_values, "image pixel values")
             image_grid_thw = self._validate_and_reshape_mm_tensor(
