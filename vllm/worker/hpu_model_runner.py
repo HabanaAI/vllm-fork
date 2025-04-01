@@ -262,6 +262,9 @@ class HpuModelAdapter:
                                            fullgraph=fullgraph,
                                            dynamic=False)
 
+    def __getattr__(self, attr):
+        return getattr(self.model_runner, attr)
+      
     def _regional_compilation(self,
                               module,
                               fullgraph,
@@ -730,7 +733,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
-        self._model: torch.nn.Module = None
+        self.model: torch.nn.Module = None
         self.inc_initialized_successfully = False
 
         # Profiler stats
@@ -811,7 +814,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             htcore.hpu_set_env()
         with HabanaMemoryProfiler() as m:
             with HabanaMemoryProfiler() as m_getmodel:
-                self._model = get_model(vllm_config=self.vllm_config)
+                self.model = get_model(vllm_config=self.vllm_config)
             msg = ("Pre-loading model weights on "
                    f"{next(self.model.parameters()).device} "
                    f"took {m_getmodel.get_summary_string()}")
@@ -850,7 +853,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.model.embedding_padding_modules,
                     max_position_embeddings=max_pos_embeddings,
                 )
-                self._model = self.lora_manager.create_lora_manager(self.model)
+                self.model = self.lora_manager.create_lora_manager(self.model)
 
             if self.model_config.quantization == 'inc':
                 logger.info("Preparing model with INC..")
@@ -860,16 +863,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", ""))
                     if config.measure:
-                        self._model = prepare(self.model, config)
+                        self.model = prepare(self.model, config)
                     elif config.quantize:
-                        self._model = convert(self.model, config)
+                        self.model = convert(self.model, config)
                     htcore.hpu_initialize(self.model,
                                           mark_only_scales_as_const=True)
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
             elif not is_fake_hpu():
-                self._model = self._model.to("hpu")
+                self.model = self.model.to("hpu")
                 htcore.mark_step()
 
             hidden_layer_markstep_interval = int(
@@ -885,7 +888,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             torch.hpu.synchronize()
 
             with HabanaMemoryProfiler() as m_wrap:
-                self._model = self._maybe_wrap_in_hpu_graph(
+                self.model = self._maybe_wrap_in_hpu_graph(
                     self.model,
                     vllm_config=self.vllm_config,
                     layer_names=path_to_rope)
@@ -925,11 +928,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
-    @property
-    def model(self):
-        if isinstance(self._model, HpuModelAdapter):
-            return self._model.model
-        return self._model
+   # @property
+   # def model(self):
+   #     if isinstance(self._model, HpuModelAdapter):
+   #         return self._model.model
+   #     return self._model
 
   #  @model.setter
   #  def model(self, m):
