@@ -246,6 +246,7 @@ class HpuModelAdapter(torch.nn.Module):
         if self.is_pooler:
             self.set_causal_option(self.model)
 
+
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
@@ -383,6 +384,13 @@ class HpuModelAdapter(torch.nn.Module):
             raise AttributeError(
                 "The module at the end of the path does not have \
                a 'prepare_cos_sin' method.")
+
+    #@property
+    #def lm_head(self):
+    #    return self.model.lm_head
+    #def __getattr__(self, name):
+    #    return object.__getattribute__(self.model, name)
+        #return getattr(self.model, name)
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -860,6 +868,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             disable_tensor_cache=True,
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
+
+   # @property
+   # def model(self):
+   #     if isinstance(self._model, HpuModelAdapter):
+   #         return self._model.model
+   #     return self._model
+
+  #  @model.setter
+  #  def model(self, m):
+  #      self._model = m        
+    
 
     def _maybe_compile(self, *args, **kwargs):
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(

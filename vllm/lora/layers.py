@@ -18,6 +18,7 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               tensor_model_parallel_all_gather,
                               tensor_model_parallel_all_reduce)
 from vllm.distributed.utils import divide
+from vllm.model_executor.custom_op import CustomOp
 # yapf: disable
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                LinearBase,
@@ -135,7 +136,8 @@ class BaseLayerWithLoRA(nn.Module):
         raise NotImplementedError
 
 
-class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
+@CustomOp.register("vocab_parallel_embedding_with_lora")
+class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA, CustomOp):
 
     def __init__(self, base_layer: VocabParallelEmbedding) -> None:
         super().__init__()
@@ -236,7 +238,43 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
                 assert self.embeddings_weights is not None
                 self.embeddings_weights[:embeddings.shape[0]].copy_(embeddings)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_hpu(self, x: torch.Tensor) -> torch.Tensor:
+        added_tokens_mask = x > self.base_layer.org_vocab_size - 1
+        embeddings_indices = self.punica_wrapper.embeddings_indices
+        indices = embeddings_indices[1].view_as(x)
+        print(f"{embeddings_indices[1].shape} {x.shape}")
+        print(f"{embeddings_indices[0].shape}")
+        full_lora_a_embeddings = F.embedding(
+            x + indices,
+            self.lora_a_stacked_2d,
+        )
+        indices = embeddings_indices[0].view_as(x)
+        f = x.add_(indices * added_tokens_mask)
+        print(f"{f.shape}")
+        print(f"{self.base_layer}")
+        full_output = self.base_layer.forward(f)
+
+        full_output_org = full_output
+        if full_output.ndim == 3:
+            full_output = full_output.view(
+                full_output.shape[0] * full_output.shape[1], -1)
+        if full_lora_a_embeddings.ndim == 3:
+            full_lora_a_embeddings = full_lora_a_embeddings.view(
+                full_lora_a_embeddings.shape[0] *
+                full_lora_a_embeddings.shape[1],
+                -1,
+            )
+        self.punica_wrapper.add_lora_embedding(full_output,
+                                               full_lora_a_embeddings,
+                                               self.lora_b_stacked,
+                                               add_input=True)
+        
+        print(f"{full_output_org.shape}")
+        print(f"{full_output.shape}")
+        return full_output
+      # .view_as(full_output_org)
+
+    def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1,
                                         1, 0)
         embeddings_indices = torch.narrow(
