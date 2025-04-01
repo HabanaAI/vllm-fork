@@ -157,7 +157,7 @@ def flatten(in_list):
     return list(itertools.chain(*in_list))
 
 
-def make_cpu_tensor(data, max_len, pad, dtype, flat):
+def make_cpu_tensor(data, max_len, pad, dtype, flat) -> torch.Tensor:
     if flat:
         data = [flatten(data)]
     result = make_tensor_with_pad(data,
@@ -999,23 +999,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def make_attn_bias(self, seq_lens, max_prompt_len, dtype):
         seq_pos = [list(range(sl)) for sl in seq_lens]
         seq_idx = [[i] * sl for i, sl in enumerate(seq_lens)]
-        seq_pos = make_cpu_tensor(seq_pos,
-                                  max_len=max_prompt_len,
-                                  pad=-1,
-                                  dtype=torch.long,
-                                  flat=VLLM_MERGED_PREFILL)
-        seq_idx = make_cpu_tensor(seq_idx,
-                                  max_len=max_prompt_len,
-                                  pad=-1,
-                                  dtype=torch.long,
-                                  flat=VLLM_MERGED_PREFILL)
-        q_seq_idx = seq_idx.unsqueeze(-1)
-        kv_seq_idx = seq_idx.unsqueeze(-2)
-        q_seq_pos = seq_pos.unsqueeze(-1)
-        kv_seq_pos = seq_pos.unsqueeze(-2)
-        seq_idx = q_seq_idx != kv_seq_idx
-        seq_pos = kv_seq_pos > q_seq_pos
-        attn_mask = seq_idx | seq_pos
+        seq_pos_t = make_cpu_tensor(seq_pos,
+                                    max_len=max_prompt_len,
+                                    pad=-1,
+                                    dtype=torch.long,
+                                    flat=VLLM_MERGED_PREFILL)
+        seq_idx_t = make_cpu_tensor(seq_idx,
+                                    max_len=max_prompt_len,
+                                    pad=-1,
+                                    dtype=torch.long,
+                                    flat=VLLM_MERGED_PREFILL)
+        q_seq_idx_t = seq_idx_t.unsqueeze(-1)
+        kv_seq_idx_t = seq_idx_t.unsqueeze(-2)
+        q_seq_pos_t = seq_pos_t.unsqueeze(-1)
+        kv_seq_pos_t = seq_pos_t.unsqueeze(-2)
+        seq_idx_t = q_seq_idx_t != kv_seq_idx_t
+        seq_pos_t = kv_seq_pos_t > q_seq_pos_t
+        attn_mask = seq_idx_t | seq_pos_t
         attn_bias = torch.zeros_like(attn_mask, dtype=dtype)
         attn_bias.masked_fill_(attn_mask, -math.inf)
         return attn_bias.unsqueeze(1)
@@ -1182,7 +1182,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.bucketing_ctx.get_padded_prompt_seq_len(target_query_len),
             self.block_size)
 
-        # TODO: Check LORA
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
                                                    context_lens):
