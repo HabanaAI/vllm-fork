@@ -81,7 +81,7 @@ _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
-                                       'false').lower() == 'true'
+                                       'true').lower() == 'true'
 DUMMY_TOKEN_ID = -1
 
 
@@ -685,6 +685,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Speculative decoding is not supported with "
                 "contiguous PA, please set VLLM_CONTIGUOUS_PA=false")
         # For both multi-step scheduling and delayed sampling
+        self.is_single_step = \
+            self.vllm_config.scheduler_config.num_scheduler_steps == 1
         self.cached_step_outputs: List[torch.Tensor] = []
         self.is_pooler = False
         # For delayed sampling
@@ -1973,9 +1975,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            is_single_step = \
-                self.vllm_config.scheduler_config.num_scheduler_steps == 1
-            if is_prompt or is_single_step:
+            if is_prompt or self.is_single_step:
                 self.execute_model(inputs, kv_caches, warmup_mode=True)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
@@ -2471,9 +2471,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
-        assert not (use_delayed_sampling and num_steps != 1), \
-            'Delayed sampling is not compatible with MSS!'
+        # Delayed sampling is only supported for single step scheduling
+        use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode \
+            and self.is_single_step and not is_fake_hpu()
         assert model_input.input_tokens is not None
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
