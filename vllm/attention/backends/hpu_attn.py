@@ -160,9 +160,10 @@ class HPUMLAAttentionBackend(HPUAttentionBackend):
         num_kv_heads: int,
         head_size: int,
     ) -> Tuple[int, ...]:
-        return (num_blocks, block_size,
-                head_size // 9 * 1), (num_blocks, block_size,
-                                      head_size // 9 * 8)
+        # return (num_blocks, block_size,
+        #         head_size // 9 * 1), (num_blocks, block_size,
+        #                               head_size // 9 * 8)
+        return (num_blocks, block_size, head_size), None
 
     @staticmethod
     def get_impl_cls() -> Type["HPUMLAImpl"]:
@@ -221,7 +222,9 @@ def _pipelined_pa(attn, value, block_groups, block_mapping, block_scales,
 def flat_pa_mla(query, key_cache, value_cache, block_list, block_mapping,
                 block_bias, block_scales, block_groups, scale, matmul_qk_op,
                 matmul_av_op, batch2block_matmul_op, block2batch_matmul_op,
-                keys_fetch_func, values_fetch_func):
+                keys_fetch_func, values_fetch_func, kv_lora_rank):
+    key_cache = key_cache.unsqueeze(2)
+
     batch_size = query.size(0)
     q_heads = query.size(1)
     kv_heads = key_cache.size(2)
@@ -229,9 +232,18 @@ def flat_pa_mla(query, key_cache, value_cache, block_list, block_mapping,
     query = ops.batch2block(scale * query, block_mapping,
                             batch2block_matmul_op).unsqueeze(-2)
     key = keys_fetch_func(key_cache, block_list)
-    value = values_fetch_func(value_cache, block_list)
-    # get concat key
-    key = torch.concat((value, key), dim=-1)
+    if value_cache is not None:
+        value_cache = value_cache.unsqueeze(2)
+        value = values_fetch_func(value_cache, block_list)
+        key = torch.concat((value, key), dim=-1)
+    else:
+        value = key[..., :kv_lora_rank]
+    # get concat key ##
+    #key 64, value 512 => after concat key 576
+    # 1. save KV-cache transposed into kv: [block_size, 576, num_blocks]
+    # 2. slice key from key tensor
+    # #################
+
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
     block_bias = block_bias.view(key.size(0), 1, 1, -1)
@@ -407,12 +419,17 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
 
         # write the latent and rope to kv cache
         if kv_cache is not None and len(kv_cache) == 2:
-            latent_vec_v = latent_vec_k[..., :self.kv_lora_rank]
-            latent_vec_k = latent_vec_k[..., self.kv_lora_rank:]
-            k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
-                                          block_indices, block_offsets)
-            v_cache = self.latent_cache_v(latent_vec_v, kv_cache[1],
-                                          block_indices, block_offsets)
+            if kv_cache[1] is not None:
+                latent_vec_v = latent_vec_k[..., :self.kv_lora_rank]
+                latent_vec_k = latent_vec_k[..., self.kv_lora_rank:]
+                k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
+                                              block_indices, block_offsets)
+                v_cache = self.latent_cache_v(latent_vec_v, kv_cache[1],
+                                              block_indices, block_offsets)
+            else:
+                k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
+                                              block_indices, block_offsets)
+                v_cache = None
             kv_cache = (k_cache, v_cache)
 
         if is_prefill:
@@ -466,13 +483,11 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
                         attn_metadata: HPUAttentionMetadata,
                         batch_size: int) -> torch.Tensor:
         q = torch.cat([q_nope, q_pe], dim=-1)
-        kv_c_and_k_pe_cache = kv_cache[0].unsqueeze(2)
-        kv_c_cache = kv_cache[1].unsqueeze(2)
 
         output = flat_pa_mla(
             query=q,
-            key_cache=kv_c_and_k_pe_cache,
-            value_cache=kv_c_cache,
+            key_cache=kv_cache[0],
+            value_cache=kv_cache[1],
             block_list=attn_metadata.block_list,
             block_mapping=attn_metadata.block_mapping,
             block_bias=attn_metadata.attn_bias,
@@ -484,7 +499,9 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             batch2block_matmul_op=self.batch2block_matmul,
             block2batch_matmul_op=self.block2batch_matmul,
             keys_fetch_func=self.latent_cache_k.fetch_from_cache,
-            values_fetch_func=self.latent_cache_v.fetch_from_cache)
+            values_fetch_func=self.latent_cache_v.fetch_from_cache,
+            kv_lora_rank=self.kv_lora_rank,
+        )
         output = output.view(batch_size, 1, -1)
         result = self._v_up_proj_and_o_proj(output)
         result = result.view(batch_size, 1, -1)
