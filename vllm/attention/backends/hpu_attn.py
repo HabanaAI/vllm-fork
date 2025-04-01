@@ -215,8 +215,6 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
 
         k_pe = k_pe.view(-1, 1, self.qk_rope_head_dim)
 
-        # Restore head dim (for rotary embedding)
-        # k_pe = k_pe.unsqueeze(1)
         assert hasattr(attn_metadata, "input_positions"), f"attn meta: {attn_metadata}"
 
         if not is_prefill:
@@ -245,21 +243,13 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
 
         latent_vec_k = torch.concat(
                 (k_c_normed, k_pe.view(batch_size, -1, self.qk_rope_head_dim)), dim=-1)
-        # assert layer._k_scale == 0, f"got _k_scale={layer._k_scale}"
         latent_vec_k = latent_vec_k.view(-1, self.qk_rope_head_dim + self.kv_lora_rank)
-        #latent_vec_v = k_c_normed.view(-1, self.kv_lora_rank)
         if is_prefill:
             latent_vec_k = latent_vec_k.unflatten(0, (block_indices.size(0), -1))
-            #latent_vec_v = latent_vec_v.unflatten(0, (block_indices.size(0), -1))
-        # print("latent_vec", latent_vec.shape)
 
 
         # write the latent and rope to kv cache
         if kv_cache is not None and len(kv_cache) == 2:
-            # print(f"k cache shape: {kv_cache[0].shape}")
-            # print(f"v cache shape: {kv_cache[1].shape}")
-            # print(f"latent vec k shape: {latent_vec_k.shape}")
-            # print(f"latent vec v shape: {latent_vec_v.shape}")
             latent_vec_v = latent_vec_k[..., :self.kv_lora_rank]
             latent_vec_k = latent_vec_k[..., self.kv_lora_rank:]
             k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0], block_indices,

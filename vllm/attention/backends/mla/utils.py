@@ -39,7 +39,6 @@ if current_platform.is_cuda_alike():
         from vllm.vllm_flash_attn import flash_attn_varlen_func
     except ImportError:
         from flash_attn import flash_attn_varlen_func
-# from vllm.vllm_flash_attn import flash_attn_varlen_func
 
 
 @dataclass
