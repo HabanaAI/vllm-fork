@@ -203,6 +203,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         os.environ["RANK"] = str(self.rank)
 
     def init_device(self) -> None:
+        print(f"==> vllm-fork -> HPUWorker -> init_device")
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
             torch.hpu.set_device(self.device)
@@ -212,8 +213,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
-        if self.model_config.quantization == 'inc':
-            self._set_env_vars()
+        self._set_env_vars()
         init_worker_distributed_environment(self.parallel_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
@@ -516,6 +516,7 @@ def init_worker_distributed_environment(
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    print("==> vllm-fork -> HPUWorker -> init_worker_distributed_environment")
     backend = hpu_backend_string()
     init_distributed_environment(parallel_config.world_size,
                                  rank,
@@ -523,10 +524,11 @@ def init_worker_distributed_environment(
                                  local_rank,
                                  backend=backend)
 
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
+    # ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
+    #                                   parallel_config.pipeline_parallel_size)
 
     if torch.distributed.is_initialized():
+        print("==> vllm-fork -> HPUWorker -> init_worker_distributed_environment -> is_initialized")
         torch_world_size = torch.distributed.get_world_size()
         if torch_world_size != parallel_config.world_size:
             raise RuntimeError(
@@ -538,7 +540,9 @@ def init_worker_distributed_environment(
             "distributed_init_method must be set if torch.distributed "
             "is not already initialized")
     else:
+        print("==> vllm-fork -> HPUWorker -> init_worker_distributed_environment -> not initialized")
         backend = hpu_backend_string()
+        print(f"==> vllm-fork -> HPUWorker -> init_worker_distributed_environment -> init_process_group: backend={backend}, wold_size={parallel_config.world_size}, rank={rank}, init_method={distributed_init_method}")
         torch.distributed.init_process_group(
             backend=backend,
             world_size=parallel_config.world_size,
@@ -549,7 +553,14 @@ def init_worker_distributed_environment(
     # A small all_reduce for warmup & checking conformance.
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
+    print(
+        f"==> vllm-fork -> HPUWorker -> init_worker_distributed_environment -> dummy_tensor_hpu: {dummy_tensor_hpu}")
+    print(
+        f"==> vllm-fork -> HPUWorker -> init_worker_distributed_environment -> envs before all_reduce: {json.dumps(dict(os.environ), sort_keys=True, indent=4)}")
     torch.distributed.all_reduce(dummy_tensor_hpu)
+    print("==> vllm-fork -> HPUWorker -> init_worker_distributed_environment -> all_reduce")
+    print(
+        f"==> vllm-fork -> HPUWorker -> init_worker_distributed_environment -> dummy_tensor_hpu.item(): {dummy_tensor_hpu.item()}")
     assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)

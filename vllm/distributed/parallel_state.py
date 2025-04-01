@@ -170,6 +170,7 @@ class GroupCoordinator:
         use_message_queue_broadcaster: bool = False,
         group_name: Optional[str] = None,
     ):
+        print(f"==> vllm-fork -> parallel_state -> GroupCoordinator -> init with params: group_ranks: {group_ranks}, local_rank: {local_rank}, torch_distributed_backend: {torch_distributed_backend}, use_pynccl: {use_pynccl}, use_custom_allreduce: {use_custom_allreduce}, use_tpu_communicator: {use_tpu_communicator}, use_hpu_communicator: {use_hpu_communicator}, use_xpu_communicator: {use_xpu_communicator}, use_message_queue_broadcaster: {use_message_queue_broadcaster}, group_name: {group_name}")
         group_name = group_name or "anonymous"
         self.unique_name = _get_unique_name(group_name)
         _register_group(self)
@@ -870,6 +871,7 @@ def init_model_parallel_group(
     use_message_queue_broadcaster: bool = False,
     group_name: Optional[str] = None,
 ) -> GroupCoordinator:
+    print(f"==> vllm-fork -> parallel_state -> init_model_parallel_group -> params: group_ranks={group_ranks}, local_rank={local_rank}, backend={backend}, use_custom_allreduce={use_custom_allreduce}, use_message_queue_broadcaster={use_message_queue_broadcaster}, group_name={group_name}")
     if use_custom_allreduce is None:
         use_custom_allreduce = _ENABLE_CUSTOM_ALL_REDUCE
     from vllm.platforms import current_platform
@@ -958,11 +960,13 @@ def init_distributed_environment(
     local_rank: int = -1,
     backend: str = "nccl",
 ):
+    print(f"==> vllm-fork -> parallel_state -> init_distributed_environment: world_size={world_size}, rank={rank}, distributed_init_method={distributed_init_method}, local_rank={local_rank}, backend={backend}")
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
         distributed_init_method, backend)
     if not torch.distributed.is_initialized():
+        print("==> vllm-fork -> parallel_state -> init_distributed_environment -> initializing distributed environment")
         assert distributed_init_method is not None, (
             "distributed_init_method must be provided when initializing "
             "distributed environment")
@@ -1018,6 +1022,7 @@ def initialize_model_parallel(
     with a total of 16 GPUs, rank 0 to 7 belong to the first box and
     ranks 8 to 15 belong to the second box.
     """
+    print(f"==> vllm-fork -> parallel_state -> initialize_model_parallel: tensor_model_parallel_size={tensor_model_parallel_size}, pipeline_model_parallel_size={pipeline_model_parallel_size}, backend={backend}")
     # Get world size and rank. Ensure some consistencies.
     assert torch.distributed.is_initialized()
     world_size: int = torch.distributed.get_world_size()
@@ -1035,7 +1040,7 @@ def initialize_model_parallel(
             range(i * tensor_model_parallel_size,
                   (i + 1) * tensor_model_parallel_size))
         group_ranks.append(ranks)
-
+    print(f"==> vllm-fork -> parallel_state -> initialize_model_parallel -> group_ranks={group_ranks}")
     # message queue broadcaster is only used in tensor model parallel group
     _TP = init_model_parallel_group(group_ranks,
                                     get_world_group().local_rank,
@@ -1090,18 +1095,23 @@ def ensure_model_parallel_initialized(
     or ensure tensor-parallel and pipeline-parallel sizes are equal to expected
     values if the model parallel groups are initialized.
     """
+    print("==> vllm-fork -> parallel_state -> ensure_model_parallel_initialized")
     backend = backend or torch.distributed.get_backend(
         get_world_group().device_group)
+    print(f"==> vllm-fork -> parallel_state -> ensure_model_parallel_initialized -> backend={backend}")
     if not model_parallel_is_initialized():
+        print("==> vllm-fork -> parallel_state -> ensure_model_parallel_initialized -> initialize_model_parallel")
         initialize_model_parallel(tensor_model_parallel_size,
                                   pipeline_model_parallel_size, backend)
         return
 
+    print(f"==> vllm-fork -> parallel_state -> ensure_model_parallel_initialized -> get_tensor_model_parallel_world_size={get_tensor_model_parallel_world_size()}")
     assert (
         get_tensor_model_parallel_world_size() == tensor_model_parallel_size
     ), ("tensor parallel group already initialized, but of unexpected size: "
         f"{get_tensor_model_parallel_world_size()=} vs. "
         f"{tensor_model_parallel_size=}")
+    print(f"==> vllm-fork -> parallel_state -> ensure_model_parallel_initialized -> get_pipeline_model_parallel_world_size={get_pp_group().world_size}")
     pp_world_size = get_pp_group().world_size
     assert (pp_world_size == pipeline_model_parallel_size), (
         "pipeline parallel group already initialized, but of unexpected size: "

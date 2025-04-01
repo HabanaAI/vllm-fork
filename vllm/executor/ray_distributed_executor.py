@@ -182,12 +182,13 @@ class RayDistributedExecutor(DistributedExecutorBase):
         worker_metadata: List[RayWorkerMetaData] = []
         driver_ip = get_ip()
         for rank, bundle_id in enumerate(bundle_indices):
+            # TODO: possible place for fix in multi-node setup
             scheduling_strategy = PlacementGroupSchedulingStrategy(
                 placement_group=placement_group,
                 placement_group_capture_child_tasks=True,
                 placement_group_bundle_index=bundle_id,
             )
-
+            print(f"==> vllm-fork -> RayDistributedExecutor -> Creating worker {rank} on bundle {bundle_id}")
             if current_platform.ray_device_key == "GPU":
                 # NV+AMD GPUs, and Intel XPUs
                 worker = ray.remote(
@@ -360,6 +361,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
                 or (rank % self.parallel_config.tensor_parallel_size == 0),
             )
             all_kwargs.append(kwargs)
+            # TODO: possible place for fix in multi-node setup
         self._run_workers("init_worker", all_kwargs)
 
         self._run_workers("init_device")
