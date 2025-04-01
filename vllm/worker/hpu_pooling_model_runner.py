@@ -9,13 +9,16 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import habana_frameworks.torch as htorch
 import torch
-
+import os
+import numpy as np
 from vllm.model_executor.pooling_metadata import PoolingMetadata
 from vllm.pooling_params import PoolingParams
 from vllm.sequence import (IntermediateTensors, PoolerOutput, SequenceData,
                            SequenceGroupMetadata)
 from vllm.worker.hpu_model_runner import HPUModelRunnerBase, ModelInputForHPU
 
+VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
+                                     'false').lower() == 'true'
 
 @dataclasses.dataclass(frozen=True)
 class ModelInputForHPUWithPoolingMetadata(ModelInputForHPU):
@@ -150,10 +153,15 @@ class HPUPoolingModelRunner(
                 model_input.batch_size_padded is not None and \
                 model_input.attn_metadata.seq_lens_tensor is not None
 
-            prompt_offsets = [
-                i * model_input.input_tokens.shape[1]
-                for i in range(model_input.batch_size_padded)
-            ]
+            if VLLM_MERGED_PREFILL:
+                prompt_offsets = np.insert(np.cumsum(model_input.attn_metadata.seq_lens[:-1]), 0, 0)
+                #TODO: check if we can set this to None
+                #prompt_offsets_tensor = None
+            else:
+                prompt_offsets = [
+                    i * model_input.input_tokens.shape[1]
+                    for i in range(model_input.batch_size_padded)
+                ]
             prompt_offsets_tensor = torch.tensor(prompt_offsets).to(
                 model_input.input_tokens.device)
 
