@@ -900,9 +900,14 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if pixel_values is not None:
             #print(f"pixel: {pixel_values.shape}, image_grid_thw:{image_grid_thw}")
             #[[[1,74.74]]] => [[1,74.74]]
-            print(
-                f"pixel: {pixel_values.shape}, image_grid_thw:{image_grid_thw}"
-            )
+            if type(pixel_values) == type([]):
+                print(
+                  f"pixel: {[i.shape for i in pixel_values]}, image_grid_thw:{image_grid_thw}"
+              )
+            else:
+                print(
+                    f"pixel: {pixel_values.shape}, image_grid_thw:{image_grid_thw}"
+                )
             pixel_values = self._validate_and_reshape_mm_tensor(
                 pixel_values, "image pixel values")
             image_grid_thw = self._validate_and_reshape_mm_tensor(
