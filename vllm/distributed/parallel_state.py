@@ -976,6 +976,7 @@ def init_distributed_environment(
             init_method=distributed_init_method,
             world_size=world_size,
             rank=rank)
+        print("==> vllm-fork -> parallel_state -> init_distributed_environment -> process group initialized")
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816

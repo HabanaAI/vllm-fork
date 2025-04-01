@@ -45,11 +45,11 @@ try:
             vllm_config = kwargs["vllm_config"]
             world_size = vllm_config.parallel_config.tensor_parallel_size
             print(f"==> vllm-fork -> RayWorkerWrapper initialized with world_size={world_size}, rank={rank}, local_rank={local_rank}")
-            os.environ["ID"] = str(local_rank)
+            os.environ["ID"] = str(rank)
             os.environ["HLS_MODULE_ID"] = str(local_rank)
-            os.environ['WORLD_SIZE'] = str(world_size)
-            os.environ['RANK'] = str(rank)
-            os.environ['LOCAL_RANK'] = str(local_rank)
+            # os.environ['WORLD_SIZE'] = str(world_size)
+            # os.environ['RANK'] = str(rank)
+            # os.environ['LOCAL_RANK'] = str(local_rank)
             _ = hccl.initialize_distributed_hpu(world_size=world_size, rank=rank, local_rank=local_rank)
             # Since the compiled DAG runs a main execution
             # in a different thread that calls cuda.set_device.
