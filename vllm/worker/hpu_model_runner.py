@@ -160,12 +160,11 @@ def flatten(in_list):
 def make_cpu_tensor(data, max_len, pad, dtype, flat) -> torch.Tensor:
     if flat:
         data = [flatten(data)]
-    result = make_tensor_with_pad(data,
-                                  max_len=max_len,
-                                  pad=pad,
-                                  dtype=dtype,
-                                  device='cpu')
-    return result
+    return make_tensor_with_pad(data,
+                                max_len=max_len,
+                                pad=pad,
+                                dtype=dtype,
+                                device='cpu')
 
 
 def get_target_layer_suffix_list(model_type) -> list[str]:
