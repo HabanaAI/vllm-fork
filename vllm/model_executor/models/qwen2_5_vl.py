@@ -371,7 +371,16 @@ class Qwen2_5_VisionAttention(nn.Module):
                 #if q1.shape[2] > 1600:
                 #  breakpoint()
                 #  print()
-                fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask, 0.0)
+
+                (batch_size, n_heads, seq_len_N_t, head_dim_qk) = q1.shape
+                (batch_size, n_heads, seq_len_N_s, head_dim_qk) = k1.shape
+                mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
+                print(mask_shape)
+                attn_mask = fullatt_block_attn_mask.reshape(batch_size, 1, seq_len_N_t, seq_len_N_s, -1)[:, :, :, :, 0]
+                assert attn_mask.shape == mask_shape
+
+                fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
+                #fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask, 0.0)
                 #fused_out = FusedSDPA.apply(q1, k1, v1, None, 0.0) ######## this works (no attention)
                 '''
                 [2025-03-30 04:54:26.987] [COMPLEXGUID_LIB] [error] 'tpckernel.sdpa_recomp_core_fwd' op Broadcast of shape [1, 6] not possible at index 1. Dimension 6 incompatible with output shape dimension 3200Broadcast of shape [1, 6] not possible at index 1. Dimension 6 incompatible with output shape dimension 3200
