@@ -6,6 +6,7 @@ from typing import Dict, Optional, Union
 import torch
 import torch.jit
 import torch.nn as nn
+from vllm.platforms import current_platform
 
 from vllm.platforms import current_platform
 
@@ -95,9 +96,69 @@ class SpecDecodeBaseSampler(nn.Module):
             A tensor containing the accepted token ids. The shape of the 
             tensor is [batch_size, k + num_bonus_tokens]
         """
+        if current_platform.is_hpu():
+            return self._create_output_hpu(accepted, substitute_token_ids, draft_token_ids, bonus_token_ids)
+        return self._create_output_native(accepted, substitute_token_ids, draft_token_ids, bonus_token_ids)
+
+    def _create_output_native(
+            self,
+            accepted: torch.Tensor,  # [batch_size, k]
+            substitute_token_ids: torch.Tensor,  # [batch_size, k]
+            draft_token_ids: torch.Tensor,  # [batch_size, k]
+            bonus_token_ids: torch.Tensor,  # [batch_size]
+    ) -> torch.Tensor:
+        """Native implementation of _create_output that works on all platforms except HPU."""
         batch_size, k = substitute_token_ids.shape
         bonus_token_ids = bonus_token_ids.squeeze(-1)
         # Determine the index of the first False value for each row.
+        limits = (accepted == 0).max(1).indices
+        limits[~(accepted == 0).any(1)] = k
+
+        # Create masks using the indices.
+        indices = torch.arange(k, device=accepted.device).unsqueeze(0)
+        accepted_mask = indices < limits.unsqueeze(1)
+        after_false_mask = indices == limits.unsqueeze(1)
+
+        # Create an extended output tensor
+        output_with_bonus_tokens = -torch.ones(
+            (batch_size, k + self._num_bonus_tokens),
+            dtype=self.token_id_dtype,
+            device=accepted.device)
+        output = output_with_bonus_tokens[:, :k]
+
+        # Fill in the first k columns of the output tensor using masks and data
+        # tensors.
+        output[:, :k] = torch.where(accepted_mask, draft_token_ids,
+                                    -torch.ones_like(draft_token_ids))
+
+        # Fill the last column.
+        # We check output directly as accepted may have True values inconsistent
+        # with causal acceptance.
+        output_with_bonus_tokens[:, -1] = torch.where(output[:, -1] != -1,
+                                                      bonus_token_ids, -1)
+
+        # Fill the recovered token ids.
+        output.mul_(~after_false_mask).add_(
+            substitute_token_ids.mul(after_false_mask))
+
+        self.num_accepted_tokens += accepted.sum()
+        self.num_emitted_tokens += (output_with_bonus_tokens != -1).sum()
+        self.num_draft_tokens += batch_size * k
+
+        return output_with_bonus_tokens
+
+    def _create_output_hpu(
+            self,
+            accepted: torch.Tensor,  # [batch_size, k]
+            substitute_token_ids: torch.Tensor,  # [batch_size, k]
+            draft_token_ids: torch.Tensor,  # [batch_size, k]
+            bonus_token_ids: torch.Tensor,  # [batch_size]
+    ) -> torch.Tensor:
+        """HPU-specific implementation of _create_output that handles boolean tensor max operation correctly."""
+        batch_size, k = substitute_token_ids.shape
+        bonus_token_ids = bonus_token_ids.squeeze(-1)
+        # Determine the index of the first False value for each row.
+        # Cast to int32 for HPU compatibility
         limits = (accepted == 0).to(torch.int32).max(1).indices
         limits[~(accepted == 0).any(1)] = k
 
