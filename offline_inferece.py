@@ -6,6 +6,7 @@ import time
 import cv2
 import random
 import argparse
+import sys
 
 MODALITY_VIDEO = "video"
 MODALITY_IMAGE = "image"
@@ -150,7 +151,20 @@ def prepare_input_data(args):
     return input_data
 
 
+def validate_args(args):
+    print(f"args: {args}")
+    invalid_args = False
+    if args.mix_prompt_lenght and args.multiple_prompts:
+        invalid_args = True
+    if invalid_args:
+        print(
+            f"Validaiton error: both mix_prompt_lenght and multiple_prompts agrs are passed, which are incompatible. Only use one"
+        )
+        sys.exit()
+
+
 def main(args) -> int:
+    validate_args(args)
     sampling_params = SamplingParams(temperature=0.0, max_tokens=100)
     llm = get_llm(args)
     print(" ========= LLM started =========")
@@ -242,5 +256,4 @@ if __name__ == "__main__":
 
     # Parse the arguments
     args = parser.parse_args()
-    print(args)
     main(args)
