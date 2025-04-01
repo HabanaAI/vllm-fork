@@ -49,7 +49,8 @@ class RobertaEmbedding(CustomOp):
         # Replace position ids because in RoBERTa models
         # they have to start at padding_idx + 1 and ignore
         # existing padding tokens
-        # Modified replace position ids as HPU set position_ids and input_ids as [batch_size, bucket_size]
+        # Modified replace position ids
+        # for HPU set position_ids and input_ids as [batch_size, bucket_size]
         # References:
         # - https://github.com/huggingface/transformers/blob/a3d69a8994d673899608a7c17fbf4f953f50474e/src/transformers/models/roberta/modeling_roberta.py#L133
         # - https://github.com/huggingface/transformers/blob/a3d69a8994d673899608a7c17fbf4f953f50474e/src/transformers/models/roberta/modeling_roberta.py#L1669
