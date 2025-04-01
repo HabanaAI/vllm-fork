@@ -262,6 +262,9 @@ class HpuModelAdapter:
                                            fullgraph=fullgraph,
                                            dynamic=False)
 
+    def __getattr__(self, attr):
+        return getattr(self.model, attr)
+      
     def _regional_compilation(self,
                               module,
                               fullgraph,
@@ -446,6 +449,13 @@ class HpuModelAdapter:
             raise AttributeError(
                 "The module at the end of the path does not have \
                a 'prepare_cos_sin' method.")
+
+    #@property
+    #def lm_head(self):
+    #    return self.model.lm_head
+    #def __getattr__(self, name):
+    #    return object.__getattribute__(self.model, name)
+        #return getattr(self.model, name)
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -918,6 +928,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
+   # @property
+   # def model(self):
+   #     if isinstance(self._model, HpuModelAdapter):
+   #         return self._model.model
+   #     return self._model
+
+  #  @model.setter
+  #  def model(self, m):
+  #      self._model = m        
+    
     def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
             return self.model.model
