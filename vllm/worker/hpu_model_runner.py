@@ -263,7 +263,7 @@ class HpuModelAdapter:
                                            dynamic=False)
 
     def __getattr__(self, attr):
-        return getattr(self.model_runner, attr)
+        return getattr(self.model, attr)
       
     def _regional_compilation(self,
                               module,
