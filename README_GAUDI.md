@@ -151,7 +151,7 @@ The following configurations have been validated to be function with Gaudi2 devi
 
 ## Execution Modes
 
-Currently in vLLM for HPU we support four execution modes, depending on selected HPU PyTorch Bridge backend (via `PT_HPU_LAZY_MODE` environment variable), and `--enforce-eager` flag.
+Currently, vLLM for HPU supports four execution modes, determined by the selected HPU PyTorch Bridge backend (via the PT_HPU_LAZY_MODE environment variable) and the --enforce-eager flag.
 
 | `PT_HPU_LAZY_MODE` | `enforce_eager` | Execution Mode     |
 | ------------------ | --------------- | ------------------ |
@@ -160,10 +160,16 @@ Currently in vLLM for HPU we support four execution modes, depending on selected
 | 1                  | 0               | HPU Graphs         |
 | 1                  | 1               | PyTorch lazy mode  |
 
-> [!WARNING]
-> All modes using PT_HPU_LAZY_MODE=0 are experimental and should only be used for validating functional correctness. To achieve the best performance, use HPU Graphs or PyTorch Lazy Mode. Performance improvements are planned for future releases.
+> [!NOTE]
+> Starting with the 1.21.0 release, the torch.compile execution mode became the default for vLLM. HPU Graphs mode remains supported to ensure backward compatibility.
+
+> [!TIP]
+> We recommend experimenting with the PT_HPU_LAZY_MODE environment variable to determine whether HPU Graphs or torch.compile mode performs better for your specific use case. While both modes generally deliver comparable performance, certain edge cases may favor one over the other.
 
 ## Bucketing Mechanism
+
+> [!NOTE]
+> The following paragraph uses HPU Graphs as an example to explain the described mechanism. All information is equally valid for torch.compile graphs.
 
 Intel Gaudi accelerators perform best when operating on models with fixed tensor shapes. [Intel Gaudi Graph Compiler](https://docs.habana.ai/en/latest/Gaudi_Overview/Intel_Gaudi_Software_Suite.html#graph-compiler-and-runtime)
 generates optimized binary code that implements the given model topology on Gaudi. In its default configuration, the produced binary code may be highly dependent on input and output tensor shapes, requiring graph recompilation
