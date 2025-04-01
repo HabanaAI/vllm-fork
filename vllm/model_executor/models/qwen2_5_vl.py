@@ -61,6 +61,8 @@ from vllm.platforms import _Backend, current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 
+import habana_frameworks.torch.core as htcore
+
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
 from .qwen2_vl import Qwen2VLDummyInputsBuilder as Qwen2_5_VLDummyInputsBuilder
 from .qwen2_vl import (Qwen2VLMultiModalProcessor, Qwen2VLProcessingInfo,
@@ -1064,9 +1066,11 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 pixel_values, grid_thw)
             assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
             #print('.......', cu_seqlens, expand_to_max(cu_seqlens, 10))
+            expanded_cu_seqlens = expand_to_max(cu_seqlens, 10)
+            htcore.mark_step() # padding in expand_to_max is dynamic
             hidden_states = self.visual(pixel_values,
                                         rotary_pos_emb=rot_pos_emb,
-                                        cu_seqlens=expand_to_max(cu_seqlens, 10),)
+                                        cu_seqlens=expanded_cu_seqlens,)
                                         #cu_window_seqlens=cu_window_seqlens)
             image_embeds = self.visual.post_attn(hidden_states, window_index)
             #image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
@@ -1093,9 +1097,11 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             #Moved dynamic calculation to pre_attn, and post_attn and keep the visual() block to be static to include only VisionTransformer and VisionMerger.
             pixel_values_videos, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
                 pixel_values_videos, grid_thw)
+            expanded_cu_seqlens = expand_to_max(cu_seqlens, 10)
+            htcore.mark_step() # padding in expand_to_max is dynamic
             hidden_states = self.visual(pixel_values_videos,
                                         rotary_pos_emb=rot_pos_emb,
-                                        cu_seqlens=expand_to_max(cu_seqlens, 10),)
+                                        cu_seqlens=expanded_cu_seqlens,)
                                         #cu_window_seqlens=cu_window_seqlens)
             video_embeds = self.visual.post_attn(hidden_states, window_index)
             #video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
