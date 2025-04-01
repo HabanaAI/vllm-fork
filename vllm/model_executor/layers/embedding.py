@@ -1,12 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+from typing import Optional
+
 import torch
 from torch import nn
 from transformers import RobertaConfig
-from typing import Optional
-
-from vllm.model_executor.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding)
 
 from vllm.model_executor.custom_op import CustomOp
+from vllm.model_executor.layers.vocab_parallel_embedding import (
+    VocabParallelEmbedding)
 
 
 @CustomOp.register("roberta_embedding")
