@@ -4,13 +4,13 @@
 model="/data/Llama-3.1-70B-Instruct"
 model_name="Llama-3.1-70B-Instruct"
 qps="inf"
-gpu_utils=0.9
+gpu_utils=0.99
 
 #tp_parrallel_list=(2 4 8)
 #req_in_out_list=(128_2048 128_4096 500_2000 2048_2048)
 max_num_batched_tokens=8192
-tp_parrallel_list=(2)
-req_in_out_list=(1024_1024 1024_4096 4096_1024 8192_1024)
+tp_parrallel_list=(8 4 2 1)
+req_in_out_list=(1024_1024 8192_1024)
 cons=(1 2 4 8 16 32 64 128 256 512 1024)
 for req_in_out in "${req_in_out_list[@]}"; do
     for tp_parrallel in "${tp_parrallel_list[@]}"; do
@@ -23,14 +23,17 @@ for req_in_out in "${req_in_out_list[@]}"; do
 
             log_name="gaudi3-fp8-${model_name}-${gpu_utils}util-TPparallel${tp_parrallel}-isl${isl}-osl${osl}-con${con}"
 
-            total_len=$((isl + osl))
             block_size=256
+            total_len=$((isl + osl + block_size))
             bs_step=128
             block_step=256
 
             # if total_len is not multiple of block_size, round up to the next multiple of block_size
             total_len=$(((total_len + block_size - 1) / block_size * block_size))
             decode_bs=${cons_max}
+            if [[ $max_num_batched_tokens -lt $total_len ]]; then
+                max_num_batched_tokens=$(( max_num_batched_tokens * 2 ))
+            fi
 
             isl_aligned=$(((isl + block_size - 1) / block_size * block_size))
             VLLM_DECODE_BLOCK_BUCKET_MIN=$((isl_aligned * decode_bs / block_size))
@@ -39,18 +42,26 @@ for req_in_out in "${req_in_out_list[@]}"; do
             prefill_bs=$((max_num_batched_tokens / isl_aligned))
 
             total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
-            max_decode_bs=$(((115 * tp_parrallel - 70) * 1024 / 20 * block_size / total_len_aligned))
+            max_decode_bs=$(((124 * tp_parrallel - 67) * 1024 / (20 * block_size / 128) * block_size / total_len_aligned))
             echo "max_decode_bs: $max_decode_bs"
-            if [[ $max_decode_bs -gt 128 ]]; then
-                max_decode_bs=$(((max_decode_bs - 128 + 1) / 128 * 128))
+            if [[ $max_decode_bs -gt 512 ]]; then
+                max_decode_bs=$((max_decode_bs / 512 * 512))
+            elif [[ $max_decode_bs -gt 256 ]]; then
+                max_decode_bs=$((max_decode_bs / 256 * 256))
+            elif [[ $max_decode_bs -gt 128 ]]; then
+                max_decode_bs=$((max_decode_bs / 128 * 128))
             elif [[ $max_decode_bs -gt 64 ]]; then
-                max_decode_bs=$(((max_decode_bs - 64 + 1) / 64 * 64))
+                max_decode_bs=$((max_decode_bs / 64 * 64))
             elif [[ $max_decode_bs -gt 32 ]]; then
-                max_decode_bs=$(((max_decode_bs - 32 + 1) / 32 * 32))
+                max_decode_bs=$((max_decode_bs / 32 * 32))
             fi
             # get max batch_size, if decode_bs is exceeding max_batch_size, set decode_bs to max_batch_size
             if [[ $decode_bs -gt ${max_decode_bs} ]]; then
                 decode_bs=${max_decode_bs}
+            fi
+
+            if [[ $cons_min -gt $decode_bs ]]; then
+                cons_min=$decode_bs
             fi
             
             echo "isl: $isl, osl: $osl, prefill_seqlen: $isl_aligned, prefill_bs: $prefill_bs, decode_bs: $cons_min : $decode_bs, VLLM_DECODE_BLOCK_BUCKET_MIN: $VLLM_DECODE_BLOCK_BUCKET_MIN, VLLM_DECODE_BLOCK_BUCKET_MAX: $VLLM_DECODE_BLOCK_BUCKET_MAX"
@@ -72,7 +83,8 @@ for req_in_out in "${req_in_out_list[@]}"; do
             QUANT_CONFIG=quant_files/inc_main/meta-llama-3.1-70b-instruct-2/maxabs_quant_g3.json \
             VLLM_DELAYED_SAMPLING=true \
             VLLM_SOFTMAX_CONST_NORM=true \
-            VLLM_GRAPH_PROMPT_RATIO=0.1 \
+            VLLM_GRAPH_RESERVED_MEM=0.01 \
+            VLLM_GRAPH_PROMPT_RATIO=0.05 \
             HABANA_VISIBLE_DEVICES="ALL" \
             PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
             PT_HPU_WEIGHT_SHARING=0 \
@@ -104,7 +116,14 @@ for req_in_out in "${req_in_out_list[@]}"; do
             sleep 10s
             echo ${pid}
 
-            n_prompts=$((con * 10))
+            if [[ $con == 512 ]]; then
+                n_prompts=$((con * 4))
+            elif [[ $con == 1024 ]]; then
+                n_prompts=$((con * 2))
+            else
+                n_prompts=$((con * 10))
+            fi
+
             log_name_run="${log_name}_con${con}_nprompts${n_prompts}"
             start_time=$(date +%s)
             echo "Start to warmup" >> benchmark_results/${log_name}_serving.log
