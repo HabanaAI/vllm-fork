@@ -153,7 +153,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
-        if attn_type != AttentionType.DECODER:
+        if attn_type != AttentionType.DECODER and self.attn_type != AttentionType.ENCODER_ONLY:
             raise NotImplementedError("Encoder self-attention and "
                                       "encoder/decoder cross-attention "
                                       "are not implemented for "
@@ -184,6 +184,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         Returns:
             shape = [num_tokens, num_heads * head_size]
         """
+
         batch_size, seq_len, hidden_size = query.shape
         _, seq_len_kv, _ = key.shape
 
@@ -192,10 +193,11 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         value = value.view(-1, self.num_kv_heads, self.head_size)
         block_indices = attn_metadata.block_indices
         block_offsets = attn_metadata.block_offsets
-        if attn_metadata.is_prompt:
+        if attn_metadata.is_prompt \
+            is not AttentionType.ENCODER_ONLY:
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
-        if kv_cache is not None:
+        if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
 
@@ -222,7 +224,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     attn_bias = attn_bias.tile((1, self.num_kv_heads, 1, 1))
                     attn_bias.add_(position_bias)
             else:
-                attn_bias = None
+                attn_bias = attn_metadata.attn_bias
 
             query_shape = (batch_size, seq_len, self.num_heads, self.head_size)
             kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
@@ -237,7 +239,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 matmul_qk_op=self.matmul_qk,
                 softmax_op=self.softmax,
                 matmul_av_op=self.matmul_av,
-                fsdpa_op=self.fused_scaled_dot_product_attention,
+                fsdpa_op=self.fused_scaled_dot_product_attention if self.prefill_usefusedsdpa else None,
             )
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:

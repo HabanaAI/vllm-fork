@@ -31,6 +31,8 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
 
 import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
+from vllm.attention.backends.abstract import AttentionType
+from vllm.attention.backends.hpu_attn import HPUAttentionImpl
 from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed.parallel_state import get_world_group
 from vllm.forward_context import set_forward_context
@@ -314,6 +316,10 @@ class HpuModelAdapter:
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
         enforce_eager = vllm_config.model_config.enforce_eager
+        self.is_pooler = hasattr(self.model, "_pooler")
+        self.is_causal = True
+        if self.is_pooler:
+            self.set_causal_option(self.model)
 
         if not htorch.utils.internal.is_lazy() and not enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -350,7 +356,8 @@ class HpuModelAdapter:
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         prefill_metadata = attn_metadata
-        if prefill_metadata is None or self.prefill_use_fusedsdpa:
+        if (attn_metadata is None
+                or (self.prefill_use_fusedsdpa and self.is_causal)):
             return attn_metadata
 
         seq_lens_t = prefill_metadata.seq_lens_tensor
@@ -358,13 +365,27 @@ class HpuModelAdapter:
                                  dtype=torch.int32).view(1, seq_len).ge(
                                      seq_lens_t.unsqueeze(-1)).view(
                                          batch_size, 1, 1, seq_len))
-        causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),
-                                            device=device,
-                                            dtype=torch.bool),
-                                 diagonal=1)
-        mask = causal_mask.logical_or(len_mask)
+        if self.is_causal:
+            attn_mask = torch.triu(torch.ones(
+                (batch_size, 1, seq_len, seq_len),
+                device=device,
+                dtype=torch.bool),
+                                   diagonal=1)
+        else:
+            attn_mask = torch.zeros((batch_size, 1, seq_len, seq_len),
+                                    device=device,
+                                    dtype=torch.bool)
+        if self.is_pooler:
+            len_mask_v = len_mask.view(batch_size, 1, seq_len, 1)
+            mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
+            off_value = -3E38  #small number, avoid nan and overflow
+        else:
+            mask = attn_mask.logical_or(
+                len_mask)  #no need for len_mask_v as decode overwrites it
+            off_value = -math.inf
+
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -math.inf))
+            mask, off_value))
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
         return attn_metadata
 
@@ -419,13 +440,15 @@ class HpuModelAdapter:
                                               input_ids.size(0),
                                               input_ids.size(1),
                                               input_ids.device, self.dtype)
-        LoraMask.setLoraMask(kwargs.pop('lora_mask'))
+        if 'lora_mask' in kwargs:
+            LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         with set_forward_context(attn_metadata, self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-            hidden_states = hidden_states.index_select(0,
-                                                       selected_token_indices)
+            if selected_token_indices is not None:
+                hidden_states = hidden_states.index_select(0,
+                                                        selected_token_indices)
         return hidden_states
 
     def compute_logits(self, *args, **kwargs):
@@ -434,6 +457,17 @@ class HpuModelAdapter:
     def sample(self, *args, **kwargs):
         return self.model.sample(*args, **kwargs)
 
+    def set_causal_option(self, module):
+        if isinstance(module, HPUAttentionImpl) and hasattr(
+                module, 'attn_type'):
+            self.is_causal = not (
+                module.attn_type == AttentionType.ENCODER
+                or module.attn_type == AttentionType.ENCODER_ONLY
+                or module.attn_type == AttentionType.ENCODER_DECODER)
+            return
+        else:
+            for child_name, child_module in module.named_children():
+                self.set_causal_option(child_module)
 
 class PreparePromptMetadata(NamedTuple):
     input_tokens: torch.Tensor
@@ -641,6 +675,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._setup_buckets()
         self._set_gc_threshold()
         self.use_contiguous_pa = envs.VLLM_USE_HPU_CONTIGUOUS_CACHE_FETCH
+        self.is_pooler = False
 
     def _set_gc_threshold(self) -> None:
         # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -680,6 +715,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"{next(self.model.parameters()).device} "
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
+            self.is_pooler = hasattr(self.model, "_pooler")
 
             if self.lora_config:
                 assert hasattr(self.model, "embedding_modules"
@@ -797,6 +833,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f"block:{self.bucketing_global_state.decode_block_bucket_cfg}")
         logger.info(msg)
 
+    def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
+        cfg = (batch_size, seq_len, is_prompt)
+        seen = cfg in self.seen_configs
+        self.seen_configs.add(cfg)
+        if not seen and not warmup_mode:
+            phase = 'prompt' if is_prompt else 'decode'
+            logger.warning("Configuration: (%s, %s, %s) was not warmed-up!",
+                           phase, batch_size, seq_len)
+
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -883,6 +928,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             # Compute the slot mapping.
             slot_mapping.append([])
+
             block_table = seq_group_metadata.block_tables[seq_id]
 
             # Mask the [0, start_idx) tokens of the prompt with _PAD_SLOT_ID,
@@ -900,11 +946,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if i < start_idx:
                     slot_mapping[-1].append(_PAD_SLOT_ID)
                     continue
-
-                block_number = block_table[i // self.block_size]
-                block_offset = i % self.block_size
-                slot = block_number * self.block_size + block_offset
-                slot_mapping[-1].append(slot)
+                if block_table is not None:
+                    block_number = block_table[i // self.block_size]
+                    block_offset = i % self.block_size
+                    slot = block_number * self.block_size + block_offset
+                    slot_mapping[-1].append(slot)
 
         max_query_len = max(query_lens)
         sum_query_len = sum(query_lens)
@@ -929,7 +975,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             lora_prompt_mapping.extend(
                 [lora_id] *
                 (max_prompt_len - context_len
-                 if seq_group_metadata.sampling_params.prompt_logprobs else 1))
+                 if seq_group_metadata.sampling_params and seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         input_tokens = make_tensor_with_pad(input_tokens,
                                             max_len=max_prompt_len,
@@ -1209,10 +1255,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs)
-        sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
-                                                     seq_lens, query_lens,
-                                                     self.device,
-                                                     self.pin_memory)
+        if not self.is_pooler:
+            sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
+                                                        seq_lens, query_lens,
+                                                        self.device,
+                                                        self.pin_memory)
 
         if not self.scheduler_config.chunked_prefill_enabled:
             assert (len(prefill_reqs) and len(decode_reqs)) == 0
@@ -1243,15 +1290,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         paddings = [0] + paddings[:-1]
         paddings = list(itertools.accumulate(paddings))
         paddings_prompt_logprobs = []
-        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-            if seq_group_metadata.sampling_params.prompt_logprobs is not None \
-                              and seq_group_metadata.is_prompt:
-                paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
-        paddings = torch.tensor(
-            paddings_prompt_logprobs if paddings_prompt_logprobs else paddings,
-            dtype=sampling_metadata.selected_token_indices.dtype,
-            device=sampling_metadata.selected_token_indices.device)
-        sampling_metadata.selected_token_indices.add_(paddings)
+        if not self.is_pooler:
+            for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                if seq_group_metadata.sampling_params.prompt_logprobs is not None \
+                                and seq_group_metadata.is_prompt:
+                    paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
+            paddings = torch.tensor(
+                paddings_prompt_logprobs if paddings_prompt_logprobs else paddings,
+                dtype=sampling_metadata.selected_token_indices.dtype,
+                device=sampling_metadata.selected_token_indices.device)
+            sampling_metadata.selected_token_indices.add_(paddings)
+        else:
+            sampling_metadata = None
 
         if self.lora_config:
             lora_mapping = LoRAMapping(
@@ -1273,7 +1323,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         metadata_dict = {
             "input_tokens": input_tokens,
             "input_positions": input_positions,
-            "selected_token_indices": sampling_metadata.selected_token_indices,
+            "selected_token_indices": sampling_metadata.selected_token_indices if sampling_metadata is not None else None,
             "lora_requests": lora_requests,
             "lora_mapping": lora_mapping,
             "multi_modal_kwargs": multi_modal_kwargs,
@@ -1306,6 +1356,75 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      batch_size_padded=batch_size_padded,
                                      lora_ids=lora_ids), \
                                         sampling_metadata
+    def create_lora_mask(self, input_tokens: torch.Tensor, lora_ids: List[int],
+                         is_prompt: bool):
+        '''
+        This is a helper function to create the mask for lora computations.
+        Lora Mask is needed to ensure we match the correct lora weights for the
+        for the request.
+        For Prompt phase we have
+        lora_mask with shape (batch_size * seq_len, max_loras * max_rank)
+        lora_logits_mask with shape (batch_size, max_loras * max_rank)
+        For Decode phase we have both
+        lora_mask and lora_logits_mask with shape
+        (batch_size, max_loras * max_rank)
+        '''
+        lora_mask: torch.Tensor = None
+        lora_logits_mask: torch.Tensor = None
+        lora_index = 0
+
+        if self.lora_config:
+            if is_prompt:
+                lora_mask = torch.zeros(
+                    input_tokens.shape[0] * input_tokens.shape[1],
+                    (self.lora_config.max_loras) *\
+                        self.lora_config.max_lora_rank,
+                    dtype=self.lora_config.lora_dtype)
+                lora_logits_mask = torch.zeros(
+                    input_tokens.shape[0], (self.lora_config.max_loras) *
+                    self.lora_config.max_lora_rank,
+                    dtype=self.lora_config.lora_dtype)
+
+                ones = torch.ones(input_tokens.shape[1],
+                                  self.lora_config.max_lora_rank,
+                                  dtype=self.lora_config.lora_dtype)
+                logit_ones = torch.ones(1,
+                                        self.lora_config.max_lora_rank,
+                                        dtype=self.lora_config.lora_dtype)
+
+                for i in range(len(lora_ids)):
+                    if lora_ids[i] == 0:
+                        continue
+                    lora_index = self.lora_manager._adapter_manager.\
+                        lora_index_to_id.index(lora_ids[i])
+                    start_row = i * input_tokens.shape[1]
+                    end_row = start_row + input_tokens.shape[1]
+                    start_col = lora_index * self.lora_config.max_lora_rank
+                    end_col = start_col + self.lora_config.max_lora_rank
+                    lora_mask[start_row:end_row, start_col:end_col] = ones
+                    lora_logits_mask[i, start_col:end_col] = logit_ones
+                lora_mask = lora_mask.to('hpu')
+                lora_logits_mask = lora_logits_mask.to('hpu')
+            else:
+                lora_mask = torch.zeros(input_tokens.shape[0],
+                                        (self.lora_config.max_loras) *
+                                        self.lora_config.max_lora_rank,
+                                        dtype=self.lora_config.lora_dtype)
+                ones = torch.ones(1,
+                                  self.lora_config.max_lora_rank,
+                                  dtype=self.lora_config.lora_dtype)
+                for i in range(len(lora_ids)):
+                    if lora_ids[i] == 0:
+                        continue
+                    lora_index = self.lora_manager._adapter_manager.\
+                        lora_index_to_id.index(lora_ids[i])
+                    start_pos = lora_index * self.lora_config.max_lora_rank
+                    end_pos = start_pos + self.lora_config.max_lora_rank
+                    lora_mask[i, start_pos:end_pos] = ones
+                lora_mask = lora_mask.to('hpu')
+                lora_logits_mask = lora_mask
+
+        return lora_mask, lora_logits_mask
 
     def _seq_len(self, attn_metadata):
         if attn_metadata.num_prefills != 0:
@@ -1346,7 +1465,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         seq_len,
                                         is_prompt,
                                         lora_request=None):
-        sampling_params = SamplingParams(temperature=0)
+        if self.is_pooler:
+            sampling_params = None
+        else:
+            sampling_params = SamplingParams(temperature=0)
         num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
         if is_prompt:
@@ -1577,7 +1699,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger.info("Skipping warmup...")
             return
         self.profiler.start('internal', 'warmup')
-        max_blocks = kv_caches[0][0].size(0)
+        if not self.is_pooler:
+            max_blocks = kv_caches[0][0].size(0)
 
         self.bucketing_global_state.prompt_buckets, prompt_omitted_buckets = \
             generate_prompt_buckets(
@@ -1597,14 +1720,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         msg = f"Omitted prompt buckets: {list(sorted(prompt_omitted_buckets))}"
         logger.debug(msg)
-
-        self.bucketing_global_state.decode_buckets = generate_decode_buckets(
-            self.bucketing_global_state.decode_bs_bucket_cfg,
-            self.bucketing_global_state.decode_block_bucket_cfg, max_blocks)
-        logger.info("Generated %d decode buckets [bs, total_blocks]: %s",
-                    len(self.bucketing_global_state.decode_buckets),
-                    list(sorted(self.bucketing_global_state.decode_buckets)))
-
+        if not self.is_pooler:
+            self.bucketing_global_state.decode_buckets = generate_decode_buckets(
+                self.bucketing_global_state.decode_bs_bucket_cfg,
+                self.bucketing_global_state.decode_block_bucket_cfg, max_blocks)
+            logger.info("Generated %d decode buckets [bs, total_blocks]: %s",
+                        len(self.bucketing_global_state.decode_buckets),
+                        list(sorted(self.bucketing_global_state.decode_buckets)))
+        else:
+            self.bucketing_global_state.decode_buckets = []
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             cache_size_limit = 1 + 3 * (
                 len(self.bucketing_global_state.prompt_buckets) +
@@ -1648,57 +1772,80 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 graph_free_mem = free_mem - self.mem_margin
                 graph_free_mem = align_workers(graph_free_mem,
                                                torch.distributed.ReduceOp.MIN)
-                prompt_graph_mem_ratio = float(
-                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
-                prompt_available_memory = (prompt_graph_mem_ratio *
-                                           graph_free_mem)
-                decode_available_memory = (graph_free_mem -
-                                           prompt_available_memory)
-                msg = (
-                    f"Using {format_bytes(graph_free_mem)}"
-                    f"/{format_bytes(free_mem)} "
-                    "of free device memory for HPUGraphs, "
-                    f"{format_bytes(prompt_available_memory)} for prompt and "
-                    f"{format_bytes(decode_available_memory)} for decode "
-                    f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
-                logger.info(msg)
-                prompt_strategy = os.environ.get('VLLM_GRAPH_PROMPT_STRATEGY',
-                                                 'min_tokens')
-                decode_strategy = os.environ.get('VLLM_GRAPH_DECODE_STRATEGY',
-                                                 'max_bs')
-                mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
-                    self.warmup_graphs(
-                    prompt_strategy, self.bucketing_global_state.prompt_buckets,
-                    True, prompt_available_memory)
-                mem_post_decode, decode_batch_seq, decode_captured_all = \
-                    self.warmup_graphs(
-                    decode_strategy, self.bucketing_global_state.decode_buckets,
-                    False, decode_available_memory)
-
-                # Not all prompt buckets were captured, but all decode buckets
-                # were captured and we have some free graph-allocated space
-                # left. Let's try to use it for capturing more prompt buckets.
-                if (mem_post_decode + mem_post_prompt < graph_free_mem
-                        and not prompt_captured_all and decode_captured_all):
-                    mem_post_prompt, _, prompt_captured_all = (
+                if not self.is_pooler:
+                    prompt_graph_mem_ratio = float(
+                        os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
+                    prompt_available_memory = (prompt_graph_mem_ratio *
+                                            graph_free_mem)
+                    decode_available_memory = (graph_free_mem -
+                                            prompt_available_memory)
+                    msg = (
+                        f"Using {format_bytes(graph_free_mem)}"
+                        f"/{format_bytes(free_mem)} "
+                        "of free device memory for HPUGraphs, "
+                        f"{format_bytes(prompt_available_memory)} for prompt and "
+                        f"{format_bytes(decode_available_memory)} for decode "
+                        f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
+                    logger.info(msg)
+                    prompt_strategy = os.environ.get('VLLM_GRAPH_PROMPT_STRATEGY',
+                                                    'min_tokens')
+                    decode_strategy = os.environ.get('VLLM_GRAPH_DECODE_STRATEGY',
+                                                    'max_bs')
+                    mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
-                            prompt_strategy,
-                            self.bucketing_global_state.prompt_buckets, True,
+                        prompt_strategy, self.bucketing_global_state.prompt_buckets,
+                        True, prompt_available_memory)
+                    mem_post_decode, decode_batch_seq, decode_captured_all = \
+                        self.warmup_graphs(
+                        decode_strategy, self.bucketing_global_state.decode_buckets,
+                        False, decode_available_memory)
+
+                    # Not all prompt buckets were captured, but all decode buckets
+                    # were captured and we have some free graph-allocated space
+                    # left. Let's try to use it for capturing more prompt buckets.
+                    if (mem_post_decode + mem_post_prompt < graph_free_mem
+                            and not prompt_captured_all and decode_captured_all):
+                        mem_post_prompt, _, prompt_captured_all = (
+                            self.warmup_graphs(
+                                prompt_strategy,
+                                self.bucketing_global_state.prompt_buckets, True,
+                                graph_free_mem - mem_post_prompt - mem_post_decode,
+                                mem_post_prompt, prompt_batch_seq))
+
+                    # Not all decode buckets were captured, but all prompt buckets
+                    # were captured and we have some free graph-allocated space
+                    # left. Let's try to use it for capturing more decode buckets.
+                    if mem_post_decode + mem_post_prompt < graph_free_mem \
+                        and not decode_captured_all \
+                            and prompt_captured_all:
+                        mem_post_decode, _, _ = self.warmup_graphs(
+                            decode_strategy,
+                            self.bucketing_global_state.decode_buckets, False,
                             graph_free_mem - mem_post_prompt - mem_post_decode,
-                            mem_post_prompt, prompt_batch_seq))
+                            mem_post_decode, decode_batch_seq)
+                else:
+                    prompt_available_memory = graph_free_mem
+                    msg = (
+                        f"Using {format_bytes(graph_free_mem)}"
+                        f"/{format_bytes(free_mem)} "
+                        "of free device memory for HPUGraphs, "
+                        f"{format_bytes(prompt_available_memory)} for prompt")
+                    logger.info(msg)
+                    prompt_strategy = os.environ.get(
+                        'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
 
-                # Not all decode buckets were captured, but all prompt buckets
-                # were captured and we have some free graph-allocated space
-                # left. Let's try to use it for capturing more decode buckets.
-                if mem_post_decode + mem_post_prompt < graph_free_mem \
-                    and not decode_captured_all \
-                        and prompt_captured_all:
-                    mem_post_decode, _, _ = self.warmup_graphs(
-                        decode_strategy,
-                        self.bucketing_global_state.decode_buckets, False,
-                        graph_free_mem - mem_post_prompt - mem_post_decode,
-                        mem_post_decode, decode_batch_seq)
-
+                    mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
+                        self.warmup_graphs(
+                        prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                        True, kv_caches, prompt_available_memory)
+                    if mem_post_prompt < graph_free_mem \
+                        and not prompt_captured_all:
+                        mem_post_prompt, _, prompt_captured_all = (
+                            self.warmup_graphs(
+                                prompt_strategy,
+                                self.bucketing_ctx.prompt_buckets, True,
+                                kv_caches, graph_free_mem - mem_post_prompt,
+                                mem_post_prompt, prompt_batch_seq))
                 self.log_graph_warmup_summary(
                     self.bucketing_global_state.prompt_buckets, True,
                     mem_post_prompt)
@@ -1883,85 +2030,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def finish_measurements(self):
         from neural_compressor.torch.quantization import finalize_calibration
         finalize_calibration(self.model.model)
-
-    def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
-        cfg = (batch_size, seq_len, is_prompt)
-        seen = cfg in self.seen_configs
-        self.seen_configs.add(cfg)
-        if not seen and not warmup_mode:
-            phase = 'prompt' if is_prompt else 'decode'
-            logger.warning("Configuration: (%s, %s, %s) was not warmed-up!",
-                           phase, batch_size, seq_len)
-
-    def create_lora_mask(self, input_tokens: torch.Tensor, lora_ids: List[int],
-                         is_prompt: bool):
-        '''
-        This is a helper function to create the mask for lora computations.
-        Lora Mask is needed to ensure we match the correct lora weights for the
-        for the request.
-        For Prompt phase we have 
-        lora_mask with shape (batch_size * seq_len, max_loras * max_rank)
-        lora_logits_mask with shape (batch_size, max_loras * max_rank)
-        For Decode phase we have both
-        lora_mask and lora_logits_mask with shape
-        (batch_size, max_loras * max_rank)
-        '''
-        lora_mask: torch.Tensor = None
-        lora_logits_mask: torch.Tensor = None
-        lora_index = 0
-
-        if self.lora_config:
-            if is_prompt:
-                lora_mask = torch.zeros(
-                    input_tokens.shape[0] * input_tokens.shape[1],
-                    (self.lora_config.max_loras) *\
-                        self.lora_config.max_lora_rank,
-                    dtype=self.lora_config.lora_dtype)
-                lora_logits_mask = torch.zeros(
-                    input_tokens.shape[0], (self.lora_config.max_loras) *
-                    self.lora_config.max_lora_rank,
-                    dtype=self.lora_config.lora_dtype)
-
-                ones = torch.ones(input_tokens.shape[1],
-                                  self.lora_config.max_lora_rank,
-                                  dtype=self.lora_config.lora_dtype)
-                logit_ones = torch.ones(1,
-                                        self.lora_config.max_lora_rank,
-                                        dtype=self.lora_config.lora_dtype)
-
-                for i in range(len(lora_ids)):
-                    if lora_ids[i] == 0:
-                        continue
-                    lora_index = self.lora_manager._adapter_manager.\
-                        lora_index_to_id.index(lora_ids[i])
-                    start_row = i * input_tokens.shape[1]
-                    end_row = start_row + input_tokens.shape[1]
-                    start_col = lora_index * self.lora_config.max_lora_rank
-                    end_col = start_col + self.lora_config.max_lora_rank
-                    lora_mask[start_row:end_row, start_col:end_col] = ones
-                    lora_logits_mask[i, start_col:end_col] = logit_ones
-                lora_mask = lora_mask.to('hpu')
-                lora_logits_mask = lora_logits_mask.to('hpu')
-            else:
-                lora_mask = torch.zeros(input_tokens.shape[0],
-                                        (self.lora_config.max_loras) *
-                                        self.lora_config.max_lora_rank,
-                                        dtype=self.lora_config.lora_dtype)
-                ones = torch.ones(1,
-                                  self.lora_config.max_lora_rank,
-                                  dtype=self.lora_config.lora_dtype)
-                for i in range(len(lora_ids)):
-                    if lora_ids[i] == 0:
-                        continue
-                    lora_index = self.lora_manager._adapter_manager.\
-                        lora_index_to_id.index(lora_ids[i])
-                    start_pos = lora_index * self.lora_config.max_lora_rank
-                    end_pos = start_pos + self.lora_config.max_lora_rank
-                    lora_mask[i, start_pos:end_pos] = ones
-                lora_mask = lora_mask.to('hpu')
-                lora_logits_mask = lora_mask
-
-        return lora_mask, lora_logits_mask
 
     @torch.inference_mode()
     def execute_model(
