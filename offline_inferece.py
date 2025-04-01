@@ -153,6 +153,7 @@ def prepare_input_data(args):
 
 def validate_args(args):
     print(f"args: {args}")
+    invalid_args = False
     if args.mix_prompt_lenght and args.multiple_prompts:
         invalid_args = True
     if invalid_args:
