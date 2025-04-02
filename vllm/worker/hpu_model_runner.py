@@ -421,9 +421,10 @@ class HpuModelAdapter(torch.nn.Module):
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
-            if get_pp_group().is_last_rank:
-                hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-                hidden_states = hidden_states.index_select(0, selected_token_indices)
+            if not get_pp_group().is_last_rank:
+                return hidden_states
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+            hidden_states = hidden_states.index_select(0, selected_token_indices)
         return hidden_states
 
     def compute_logits(self, *args, **kwargs):
