@@ -247,6 +247,13 @@ class HpuModelAdapter(torch.nn.Module):
             self.set_causal_option(self.model)
 
 
+    
+    def __getattr__(self, attr):
+        if name == "model":
+            raise AttributeError("model")
+        return getattr(self.model, attr)
+
+
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
