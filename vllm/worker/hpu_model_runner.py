@@ -256,6 +256,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.is_causal = True
         if self.is_pooler:
             self.set_causal_option(self.model)
+        self.use_merged_prefill = VLLM_MERGED_PREFILL
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -347,7 +348,7 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
         slot_mapping = metadata.slot_mapping.flatten()
         indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt and not VLLM_MERGED_PREFILL:
+        if is_prompt and not self.use_merged_prefill:
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
             offsets = None
         else:
@@ -646,8 +647,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.max_num_batched_tokens = \
             self.scheduler_config.max_num_batched_tokens
         self.block_size = self.cache_config.block_size
+        self.use_merged_prefill = VLLM_MERGED_PREFILL
         assert not (self.scheduler_config.use_padding_aware_scheduling
-                    and VLLM_MERGED_PREFILL), \
+                    and self.use_merged_prefill), \
             'Merged prefill is not compatible with padding aware scheduling!'
 
         self.pin_memory = is_pin_memory_available()
@@ -687,7 +689,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                  self.max_num_prefill_seqs,
                                                  self.block_size,
                                                  self.max_num_batched_tokens,
-                                                 VLLM_MERGED_PREFILL)
+                                                 self.use_merged_prefill)
         self.graphed_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -1019,12 +1021,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     max_len=max_prompt_len,
                                     pad=-1,
                                     dtype=torch.long,
-                                    flat=VLLM_MERGED_PREFILL)
+                                    flat=self.use_merged_prefill)
         seq_idx_t = make_cpu_tensor(seq_idx,
                                     max_len=max_prompt_len,
                                     pad=-1,
                                     dtype=torch.long,
-                                    flat=VLLM_MERGED_PREFILL)
+                                    flat=self.use_merged_prefill)
         q_seq_idx_t = seq_idx_t.unsqueeze(-1)
         kv_seq_idx_t = seq_idx_t.unsqueeze(-2)
         q_seq_pos_t = seq_pos_t.unsqueeze(-1)
@@ -1192,7 +1194,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     slot = block_number * self.block_size + block_offset
                     slot_mapping[-1].append(slot)
 
-        if VLLM_MERGED_PREFILL:
+        if self.use_merged_prefill:
             target_query_len = sum(query_lens)
         else:
             target_query_len = max(query_lens)
@@ -1243,7 +1245,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               max_len=max_prompt_len,
                                               pad=0,
                                               dtype=torch.long,
-                                              flat=VLLM_MERGED_PREFILL)
+                                              flat=self.use_merged_prefill)
         if self.model_is_mrope:
             input_positions = \
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
@@ -1255,28 +1257,27 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               max_len=max_prompt_len,
                                               pad=0,
                                               dtype=torch.long,
-                                              flat=VLLM_MERGED_PREFILL)
+                                              flat=self.use_merged_prefill)
 
         slot_mapping = make_cpu_tensor(slot_mapping,
                                        max_len=max_prompt_len,
                                        pad=_PAD_SLOT_ID,
                                        dtype=torch.long,
-                                       flat=VLLM_MERGED_PREFILL)
+                                       flat=self.use_merged_prefill)
 
         attn_bias = None
         seq_lens_tensor = None
         context_lens_tensor = None
 
-        if VLLM_MERGED_PREFILL:
+        if self.use_merged_prefill:
             attn_bias = self.make_attn_bias(seq_lens, max_prompt_len,
                                             self.model_config.dtype)
-        else:
-            seq_lens_tensor = torch.tensor(seq_lens,
+        seq_lens_tensor = torch.tensor(seq_lens,
+                                       dtype=torch.long,
+                                       device='cpu')
+        context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.long,
                                            device='cpu')
-            context_lens_tensor = torch.tensor(context_lens,
-                                               dtype=torch.long,
-                                               device='cpu')
 
         placeholder_index_maps = {
             modality: placeholder_map.index_map()
@@ -1706,7 +1707,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if self.is_pooler:
             sampling_metadata = None
-        elif not VLLM_MERGED_PREFILL:
+        elif not self.use_merged_prefill:
             # FIXME: We need to adjust selected_token_indices to accommodate
             # for padding
             max_len = input_tokens.size(1)
