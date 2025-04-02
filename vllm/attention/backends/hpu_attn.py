@@ -335,8 +335,6 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         else:
             self.latent_cache_k = VLLMKVCache()
             self.latent_cache_v = VLLMKVCache()
-            self.matmul_qk_decode = self.matmul_qk
-            self.matmul_av_decode = self.matmul_av
 
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         HPUFusedSDPA = kernels.fsdpa()
@@ -490,8 +488,10 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             block_scales=attn_metadata.block_scales,
             block_groups=attn_metadata.block_groups,
             scale=self.scale,
-            matmul_qk_op=self.matmul_qk_decode,
-            matmul_av_op=self.matmul_av_decode,
+            matmul_qk_op=self.matmul_qk
+            if not self.VLLM_USE_FP8_MATMUL else self.matmul_qk_decode,
+            matmul_av_op=self.matmul_av
+            if not self.VLLM_USE_FP8_MATMUL else self.matmul_av_decode,
             batch2block_matmul_op=self.batch2block_matmul,
             block2batch_matmul_op=self.block2batch_matmul,
             keys_fetch_func=self.latent_cache_k.fetch_from_cache
