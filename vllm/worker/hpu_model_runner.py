@@ -231,6 +231,7 @@ def get_path_to_rope(model: torch.nn.Module):
 
 class HpuModelAdapter(torch.nn.Module):
 
+    __initialized = False
     def __init__(self, model, vllm_config, layer_names):
         super().__init__()
         self.model = model
@@ -246,13 +247,17 @@ class HpuModelAdapter(torch.nn.Module):
         if self.is_pooler:
             self.set_causal_option(self.model)
 
+        self.__initialized = True
+
 
     
     def __getattr__(self, attr):
-        return self.model.__dict__[attr]
-        if attr == "model":
-            return object.__getattribute__(self, "model")
-        return getattr(self.model, attr)
+        if self.__initialized:
+            return getattr(self.model, attr)
+        try:
+            return self.__dict__[attr]
+        except KeyError:
+            raise AttributeError(attr)
 
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
