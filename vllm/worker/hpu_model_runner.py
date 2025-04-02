@@ -248,9 +248,7 @@ class HpuModelAdapter(torch.nn.Module):
 
 
     
-    def __getattr__(self, attr):
-        if attr.startswith("__"):
-            raise AttributeError(attr)
+    def __getattribute__(self, attr):
         return getattr(self.model, attr)
 
 
