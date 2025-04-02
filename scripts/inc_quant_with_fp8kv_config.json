@@ -16,7 +16,6 @@
             "latent_cache_v_nodeq",
             "matmul_qk",
             "matmul_av",
-            "batch2block_matmul",
             "block2batch_matmul"
         ]
     },
