@@ -252,7 +252,7 @@ class Proxy:
             try:
                 async for _ in self.forward_request(
                         f"http://{prefill_instance}/v1/completions",
-                        kv_prepare_request):
+                        kv_prepare_request, use_chunked=False):
                     continue
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("prefill", prefill_instance)
@@ -263,11 +263,13 @@ class Proxy:
 
             try:
                 generator = self.forward_request(
-                    f"http://{decode_instance}/v1/completions", request)
+                    f"http://{decode_instance}/v1/completions", request, use_chunked=False)  # noqa: E501
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            response = StreamingResponse(generator)
+            # response = StreamingResponse(generator)
+            async for data in generator:
+                response = JSONResponse(content=json.loads(data.decode('utf-8')))
             return response
         except Exception:
             import sys
@@ -289,7 +291,7 @@ class Proxy:
             try:
                 async for _ in self.forward_request(
                         f"http://{prefill_instance}/v1/chat/completions",
-                        kv_prepare_request):
+                        kv_prepare_request, use_chunked=False):
                     continue
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("prefill", prefill_instance)
@@ -300,11 +302,13 @@ class Proxy:
             try:
                 generator = self.forward_request(
                     "http://" + decode_instance + "/v1/chat/completions",
-                    request)
+                    request, use_chunked=False)
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            response = StreamingResponse(content=generator)
+            # response = StreamingResponse(generator)
+            async for data in generator:
+                response = JSONResponse(content=json.loads(data.decode('utf-8')))
             return response
         except Exception:
             exc_info = sys.exc_info()
