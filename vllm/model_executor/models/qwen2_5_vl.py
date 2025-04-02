@@ -107,10 +107,7 @@ class AttentionLongSequence:
         return attn_output
 
 def create_block_diagonal_attention_mask_outerprod(indices):
-    maxsize = indices[9] # TODO using -1 here causes crashes.. using hardcoded 9, since for now I assume max num images = 10 ... maybe not revert to -1 when fusedsdpa with attn is resolved
-    #print(indices.shape)
-    #print(indices)
-    #print(maxsize)
+    maxsize = indices[-1]
     
     range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
     yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
@@ -118,7 +115,6 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     xx = torch.logical_and(yy, zz)
     # can reduce sum externally or as batchmatmul
     res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
-    #breakpoint()
     #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
     return res.bool()
 
