@@ -5,10 +5,7 @@ on:
   # but only for the habana_main branch
   push:
     branches:
-      - habana_main
-  pull_request:
-    branches:
-      - habana_main
+      - michalkuligowski-patch-test_lora_rebase
 
 
 jobs:
