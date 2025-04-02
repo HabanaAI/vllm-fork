@@ -421,10 +421,10 @@ class DefaultModelLoader(BaseModelLoader):
             vllm_config.quant_config is not None
             and "inc" in vllm_config.quant_config.get_name().lower())
         force_use_inc = os.environ.get("VLLM_REQUANT_FP8_INC", "0") == "1"
-        use_fp8_matmul = os.environ.get("USE_FP8_MATMUL",
-                                        "false").lower() in ["1", "true"]
+        VLLM_USE_FP8_MATMUL = os.environ.get("VLLM_USE_FP8_MATMUL",
+                                             "false").lower() in ["1", "true"]
         user_pass_inc_as_quantization = user_pass_inc_as_quantization \
-            or force_use_inc or use_fp8_matmul
+            or force_use_inc or VLLM_USE_FP8_MATMUL
         return (vllm_config.cache_config.cache_dtype == "fp8_inc"
                 and not user_pass_inc_as_quantization)
 

@@ -319,18 +319,22 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         self.matmul_av = Matmul()
         self.batch2block_matmul = Matmul()
         self.block2batch_matmul = Matmul()
-        self.latent_cache_k = VLLMKVCache()
-        self.latent_cache_v = VLLMKVCache()
 
-        self.use_fp8_matmul = os.environ.get("USE_FP8_MATMUL",
-                                             "false").lower() in ["true", "1"]
+        self.VLLM_USE_FP8_MATMUL = os.environ.get(
+            "VLLM_USE_FP8_MATMUL", "false").lower() in ["true", "1"]
 
-        if self.use_fp8_matmul:
-            self.latent_cache_k = initialize_fp8_kv_cache(self.latent_cache_k)
-            self.latent_cache_v = initialize_fp8_kv_cache(self.latent_cache_v)
+        if self.VLLM_USE_FP8_MATMUL:
+            self.latent_cache_k_nodeq = VLLMKVCache()
+            self.latent_cache_v_nodeq = VLLMKVCache()
+            self.latent_cache_k_nodeq = initialize_fp8_kv_cache(
+                self.latent_cache_k_nodeq)
+            self.latent_cache_v_nodeq = initialize_fp8_kv_cache(
+                self.latent_cache_v_nodeq)
             self.matmul_qk_decode = initialize_fp8_matmul(self.matmul_qk)
             self.matmul_av_decode = initialize_fp8_matmul(self.matmul_av)
         else:
+            self.latent_cache_k = VLLMKVCache()
+            self.latent_cache_v = VLLMKVCache()
             self.matmul_qk_decode = self.matmul_qk
             self.matmul_av_decode = self.matmul_av
 
@@ -414,8 +418,13 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
 
         # write the latent and rope to kv cache
         if kv_cache is not None and len(kv_cache) == 2:
-            k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
-                                          block_indices, block_offsets)
+            if not self.VLLM_USE_FP8_MATMUL:
+                k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
+                                              block_indices, block_offsets)
+            else:
+                k_cache = self.latent_cache_k_nodeq(latent_vec_k, kv_cache[0],
+                                                    block_indices,
+                                                    block_offsets)
             v_cache = None
             kv_cache = (k_cache, v_cache)
 
@@ -485,8 +494,12 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             matmul_av_op=self.matmul_av_decode,
             batch2block_matmul_op=self.batch2block_matmul,
             block2batch_matmul_op=self.block2batch_matmul,
-            keys_fetch_func=self.latent_cache_k.fetch_from_cache,
-            values_fetch_func=self.latent_cache_v.fetch_from_cache,
+            keys_fetch_func=self.latent_cache_k.fetch_from_cache
+            if not self.VLLM_USE_FP8_MATMUL else
+            self.latent_cache_k_nodeq.fetch_from_cache,
+            values_fetch_func=self.latent_cache_v.fetch_from_cache
+            if not self.VLLM_USE_FP8_MATMUL else
+            self.latent_cache_v_nodeq.fetch_from_cache,
             kv_lora_rank=self.kv_lora_rank,
         )
         output = output.view(batch_size, 1, -1)

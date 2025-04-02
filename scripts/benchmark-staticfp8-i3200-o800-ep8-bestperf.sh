@@ -15,7 +15,7 @@ gpu_utils=0.95
 bs=224
 num_prompts=224
 request_rate=128
-log_name="online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
+log_name="[staticquant]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
 in_len_aligned=$((in_len + 127 / 128 * 128))
 total_len_aligend=$((total_len + 127 / 128 * 128))
@@ -30,6 +30,7 @@ tokenizer="/data/models/DeepSeek-R1-static/"
 # tokenizer="/data/models/DeepSeek-R1/"
 model_name="DeepSeek-R1"
 
+VLLM_USE_FP8_MATMUL=true \
 VLLM_DELAYED_SAMPLING=true \
 HABANA_VISIBLE_DEVICES="ALL" \
 VLLM_MOE_N_SLICE=${moe_n_slice} \

@@ -1,7 +1,7 @@
 VLLM_SKIP_WARMUP=true \
 QUANT_CONFIG=scripts/inc_quant_with_fp8kv_config.json \
 VLLM_REQUANT_FP8_INC=1 \
-USE_FP8_MATMUL=true \
+VLLM_USE_FP8_MATMUL=true \
 VLLM_EP_SIZE=8 \
 VLLM_MOE_N_SLICE=1 \
 VLLM_DELAYED_SAMPLING=true \

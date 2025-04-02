@@ -12,8 +12,8 @@
         "names": [
             "lm_head",
             "mlp\\.gate\\b",
-            "latent_cache_k",
-            "latent_cache_v",
+            "latent_cache_k_nodeq",
+            "latent_cache_v_nodeq",
             "matmul_qk",
             "matmul_av",
             "batch2block_matmul",
