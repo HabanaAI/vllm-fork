@@ -11,9 +11,9 @@ if [ $((total_len % 128)) -ne 0 ]; then
 fi
 ep_size=8
 moe_n_slice=1
-gpu_utils=0.92
-bs=448
-num_prompts=448
+gpu_utils=0.98
+bs=512
+num_prompts=512
 request_rate=16
 log_name="[staticfp8]static-online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
@@ -23,6 +23,7 @@ model="/data/models/DeepSeek-R1-static/"
 tokenizer="/data/models/DeepSeek-R1-static/"
 model_name="DeepSeek-R1"
 
+VLLM_GRAPH_RESERVED_MEM=0.05 \
 VLLM_USE_FP8_MATMUL=true \
 VLLM_DELAYED_SAMPLING=true \
 HABANA_VISIBLE_DEVICES="ALL" \

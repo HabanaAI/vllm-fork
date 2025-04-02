@@ -11,9 +11,9 @@ if [ $((total_len % 128)) -ne 0 ]; then
 fi
 ep_size=8
 moe_n_slice=1
-gpu_utils=0.95
-bs=224
-num_prompts=224
+gpu_utils=0.98
+bs=256
+num_prompts=256
 request_rate=128
 log_name="[staticquant]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
@@ -30,6 +30,7 @@ tokenizer="/data/models/DeepSeek-R1-static/"
 # tokenizer="/data/models/DeepSeek-R1/"
 model_name="DeepSeek-R1"
 
+VLLM_GRAPH_RESERVED_MEM=0.05 \
 VLLM_USE_FP8_MATMUL=true \
 VLLM_DELAYED_SAMPLING=true \
 HABANA_VISIBLE_DEVICES="ALL" \
@@ -55,8 +56,8 @@ python -m vllm.entrypoints.openai.api_server \
     --dtype bfloat16 \
     --use-v2-block-manager \
     --num_scheduler_steps ${multi_step}\
-    --max-model-len 8192 \
-    --max-num-batched-tokens 8192\
+    --max-model-len 12800 \
+    --max-num-batched-tokens 12800\
     --distributed_executor_backend mp \
     --gpu_memory_utilization ${gpu_utils} \
     --kv_cache_dtype "fp8_inc" \
