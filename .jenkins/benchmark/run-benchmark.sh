@@ -24,7 +24,6 @@ fi
 
 # Get the directory of the current script
 script_dir=$(dirname "$(readlink -f "$0")")
-echo "script_dir: $script_dir"
 
 start=`date +%s`
 python  $script_dir/../../benchmarks/benchmark_throughput.py \
