@@ -221,7 +221,7 @@ def _pipelined_pa(attn, value, block_groups, block_mapping, block_scales,
 def flat_pa_mla(query, key_cache, value_cache, block_list, block_mapping,
                 block_bias, block_scales, block_groups, scale, matmul_qk_op,
                 matmul_av_op, batch2block_matmul_op, block2batch_matmul_op,
-                keys_fetch_func, values_fetch_func, kv_lora_rank):
+                keys_fetch_func, values_fetch_func, kv_lora_rank, kv_in_fp8):
     key_cache = key_cache.unsqueeze(2)
 
     batch_size = query.size(0)
@@ -252,15 +252,28 @@ def flat_pa_mla(query, key_cache, value_cache, block_list, block_mapping,
 
     attn = matmul_qk_op(query, key)
     attn = attn + block_bias
-    attn = _pipelined_pa(attn,
-                         value,
-                         block_groups,
-                         block_mapping,
-                         block_scales=block_scales,
-                         batch_size=batch_size,
-                         matmul_av_op=matmul_av_op,
-                         batch2block_matmul_op=batch2block_matmul_op,
-                         block2batch_matmul_op=block2batch_matmul_op)
+    if kv_in_fp8:
+        # Chendi: This is a workaround for manually
+        # remove dequant/quant for performance
+        attn = _pipelined_pa(attn,
+                             value,
+                             block_groups,
+                             block_mapping,
+                             block_scales=block_scales,
+                             batch_size=batch_size,
+                             matmul_av_op=matmul_av_op,
+                             batch2block_matmul_op=batch2block_matmul_op,
+                             block2batch_matmul_op=block2batch_matmul_op)
+    else:
+        attn = ops.pipelined_pa(attn,
+                                value,
+                                block_groups,
+                                block_mapping,
+                                block_scales=block_scales,
+                                batch_size=batch_size,
+                                matmul_av_op=matmul_av_op,
+                                batch2block_matmul_op=batch2block_matmul_op,
+                                block2batch_matmul_op=block2batch_matmul_op)
     attn = ops.block2batch(attn, block_mapping, block2batch_matmul_op)
     attn = attn.squeeze(-2)
     if kv_heads != q_heads:
@@ -501,6 +514,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             if not self.VLLM_USE_FP8_MATMUL else
             self.latent_cache_v_nodeq.fetch_from_cache,
             kv_lora_rank=self.kv_lora_rank,
+            kv_in_fp8=self.VLLM_USE_FP8_MATMUL,
         )
         output = output.view(batch_size, 1, -1)
         result = self._v_up_proj_and_o_proj(output)
