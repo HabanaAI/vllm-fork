@@ -237,7 +237,7 @@ class MooncakeStoreConnector(KVConnectorBase):
     ) -> None:
         input_tokens_tensor = model_input.input_tokens # shape: [batch_size, seq_len_padding_to_128]
         seq_lens = model_input.attn_metadata.seq_lens # 2D list
-        slot_mapping_flat = model_input.attn_metadata.slot_mapping.flatten()
+
         start_layer = model_executable.model.model.start_layer
         end_layer = model_executable.model.model.end_layer
         num_kv_heads = 1
@@ -254,7 +254,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         # For each sequence in the batch, we will pack kv together, so we send
         # 0. current_tokens [seq_len]
         # 1. bool mask [seq_len]
-        # 2. key [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size) // tp_size ], [61, seq_len, 1, 72]
+        # 2. key [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size)], [61, seq_len, 1, 576]
         # 3. empty tensor
         # 4. hidden_or_intermediate_states [1, hidden_size]
         for idx, slen in enumerate(seq_lens):
@@ -266,14 +266,15 @@ class MooncakeStoreConnector(KVConnectorBase):
             store_key_prefix = self.tensor_hash(current_tokens)
             logger.debug(f"send token len: {slen}, token: {current_tokens}")
             keys, values = [], []
+            start = 0
+            end = slen
+            current_slot_mapping = model_input.attn_metadata.slot_mapping[idx][start:end]
 
             for layer_id in range(start_layer, end_layer):
                 kv_cache = kv_caches[layer_id - start_layer]
-                # only get current rank shard 
                 key_cache = kv_cache[0].reshape(-1, num_kv_heads, k_head_size)
                 value_cache = kv_cache[1].reshape(-1, num_kv_heads, v_head_size)
 
-                current_slot_mapping = slot_mapping_flat[start_pos:end_pos]
                 htorch.core.mark_step()
                 keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                 values.append(value_cache[current_slot_mapping].unsqueeze(0))
@@ -322,7 +323,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         # For each sequence in the batch, we patch kv tensor together, so we recv
         # 0. current_tokens [seq_len]
         # 1. bool mask [seq_len]
-        # 2. key_values [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size) // 8], [61, seq_len, 1, 72]
+        # 2. key_values [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size)], [61, seq_len, 1, 576]
         # 3. empty tensor
         # 4. hidden_or_intermediate_states [1, hidden_size]
         for idx, slen in enumerate(seq_lens):
