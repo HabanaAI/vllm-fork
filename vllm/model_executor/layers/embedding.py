@@ -70,7 +70,7 @@ class RobertaEmbedding(CustomOp):
             valid_input_mask = expected_pos < seq_len
             expected_pos = expected_pos * valid_input_mask
             assert torch.equal(positions, expected_pos)
-            position_ids[index] = create_position_ids_from_input_ids(
+            position_ids[index] = create_position_ids_from_input_ids_hpu(
                 tokens, self.padding_idx, seq_len)
 
         # Position embeddings.
@@ -85,7 +85,7 @@ class RobertaEmbedding(CustomOp):
         embeddings = self.LayerNorm(embeddings)
         return embeddings
 
-    def forward_cuda(
+    def forward_native(
         self,
         input_ids: torch.Tensor,
         seq_lens: torch.Tensor,
@@ -135,9 +135,38 @@ class RobertaEmbedding(CustomOp):
 
 
 # Adapted from transformers
+def create_position_ids_from_input_ids_hpu(input_ids,
+                                           padding_idx,
+                                           seq_len,
+                                           past_key_values_length=0):
+    """
+    Replace non-padding symbols with their position numbers.
+    Position numbers begin at padding_idx+1. Padding symbols
+    are ignored. This is modified from fairseq's `utils.make_positions`.
+
+    Args:
+        x: torch.Tensor x:
+
+    Returns: torch.Tensor
+    """
+    # The series of casts and type-conversions here are carefully
+    # balanced to both work with ONNX export and XLA.
+    valid_input_mask = torch.arange(input_ids.size()[0],
+                                    dtype=torch.int,
+                                    device=input_ids.device)
+    valid_input_mask = valid_input_mask < seq_len
+
+    mask = input_ids.ne(padding_idx).int()
+
+    incremental_indices = (torch.cumsum(mask, dim=0).type_as(mask) +
+                           past_key_values_length) * mask
+
+    return (incremental_indices.long() + padding_idx) * valid_input_mask
+
+
+# Adapted from transformers
 def create_position_ids_from_input_ids(input_ids,
                                        padding_idx,
-                                       seq_len=None,
                                        past_key_values_length=0):
     """
     Replace non-padding symbols with their position numbers.
@@ -151,18 +180,9 @@ def create_position_ids_from_input_ids(input_ids,
     """
     # The series of casts and type-conversions here are carefully
     # balanced to both work with ONNX export and XLA.
-    if seq_len is not None:
-        valid_input_mask = torch.arange(input_ids.size()[0],
-                                        dtype=torch.int,
-                                        device=input_ids.device)
-        valid_input_mask = valid_input_mask < seq_len
-
     mask = input_ids.ne(padding_idx).int()
 
     incremental_indices = (torch.cumsum(mask, dim=0).type_as(mask) +
                            past_key_values_length) * mask
 
-    if seq_len is not None:
-        return (incremental_indices.long() + padding_idx) * valid_input_mask
-    else:
-        return incremental_indices.long() + padding_idx
+    return incremental_indices.long() + padding_idx
