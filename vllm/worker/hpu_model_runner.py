@@ -255,8 +255,10 @@ class HpuModelAdapter(torch.nn.Module):
         if self.__initialized:
             return getattr(self.model, attr)
         try:
+            print(self)
             return self.__dict__[attr]
         except KeyError:
+            print(self)
             raise AttributeError(attr)
 
 
