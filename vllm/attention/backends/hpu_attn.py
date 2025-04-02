@@ -96,7 +96,6 @@ def initialize_fp8_matmul(mod, load_device="hpu"):
         def forward(self, input, other):
             qinput = self.quant_input(input)
             qother = other
-            #qother = self.quant_input_1(other)
             output = self.matmul_fp8(qinput,
                                      qother,
                                      out_dtype=torch.bfloat16,
@@ -238,11 +237,6 @@ def flat_pa_mla(query, key_cache, value_cache, block_list, block_mapping,
         key = torch.concat((value, key), dim=-1)
     else:
         value = key[..., :kv_lora_rank]
-    # get concat key ##
-    #key 64, value 512 => after concat key 576
-    # 1. save KV-cache transposed into kv: [block_size, 576, num_blocks]
-    # 2. slice key from key tensor
-    # #################
 
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
@@ -329,13 +323,16 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         self.latent_cache_v = VLLMKVCache()
 
         self.use_fp8_matmul = os.environ.get("USE_FP8_MATMUL",
-                                             "true").lower() in ["true", "1"]
+                                             "false").lower() in ["true", "1"]
 
         if self.use_fp8_matmul:
             self.latent_cache_k = initialize_fp8_kv_cache(self.latent_cache_k)
             self.latent_cache_v = initialize_fp8_kv_cache(self.latent_cache_v)
-            self.matmul_qk = initialize_fp8_matmul(self.matmul_qk)
-            self.matmul_av = initialize_fp8_matmul(self.matmul_av)
+            self.matmul_qk_decode = initialize_fp8_matmul(self.matmul_qk)
+            self.matmul_av_decode = initialize_fp8_matmul(self.matmul_av)
+        else:
+            self.matmul_qk_decode = self.matmul_qk
+            self.matmul_av_decode = self.matmul_av
 
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         HPUFusedSDPA = kernels.fsdpa()
@@ -409,27 +406,17 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         latent_vec_k = torch.concat(
             (k_c_normed, k_pe.view(batch_size, -1, self.qk_rope_head_dim)),
             dim=-1)
-        # assert layer._k_scale == 0, f"got _k_scale={layer._k_scale}"
         latent_vec_k = latent_vec_k.view(
             -1, self.qk_rope_head_dim + self.kv_lora_rank)
-        #latent_vec_v = k_c_normed.view(-1, self.kv_lora_rank)
         if is_prefill:
             latent_vec_k = latent_vec_k.unflatten(0,
                                                   (block_indices.size(0), -1))
 
         # write the latent and rope to kv cache
         if kv_cache is not None and len(kv_cache) == 2:
-            if kv_cache[1] is not None:
-                latent_vec_v = latent_vec_k[..., :self.kv_lora_rank]
-                latent_vec_k = latent_vec_k[..., self.kv_lora_rank:]
-                k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
-                                              block_indices, block_offsets)
-                v_cache = self.latent_cache_v(latent_vec_v, kv_cache[1],
-                                              block_indices, block_offsets)
-            else:
-                k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
-                                              block_indices, block_offsets)
-                v_cache = None
+            k_cache = self.latent_cache_k(latent_vec_k, kv_cache[0],
+                                          block_indices, block_offsets)
+            v_cache = None
             kv_cache = (k_cache, v_cache)
 
         if is_prefill:
@@ -494,8 +481,8 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             block_scales=attn_metadata.block_scales,
             block_groups=attn_metadata.block_groups,
             scale=self.scale,
-            matmul_qk_op=self.matmul_qk,
-            matmul_av_op=self.matmul_av,
+            matmul_qk_op=self.matmul_qk_decode,
+            matmul_av_op=self.matmul_av_decode,
             batch2block_matmul_op=self.batch2block_matmul,
             block2batch_matmul_op=self.block2batch_matmul,
             keys_fetch_func=self.latent_cache_k.fetch_from_cache,
