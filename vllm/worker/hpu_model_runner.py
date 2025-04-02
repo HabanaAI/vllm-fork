@@ -242,10 +242,10 @@ class HpuModelAdapter(torch.nn.Module):
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
         self.layer_names = layer_names
-        self.is_pooler = hasattr(self.model, "_pooler")
+        self.is_pooler = hasattr(model, "_pooler")
         self.is_causal = True
         if self.is_pooler:
-            self.set_causal_option(self.model)
+            self.set_causal_option(model)
 
         self.__initialized = True
 
