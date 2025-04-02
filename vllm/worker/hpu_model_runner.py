@@ -231,6 +231,7 @@ def get_path_to_rope(model: torch.nn.Module):
 
 class HpuModelAdapter(torch.nn.Module):
 
+    __initialized = False
     def __init__(self, model, vllm_config, layer_names):
         super().__init__()
         self.model = model
@@ -241,10 +242,26 @@ class HpuModelAdapter(torch.nn.Module):
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
         self.layer_names = layer_names
-        self.is_pooler = hasattr(self.model, "_pooler")
+        self.is_pooler = hasattr(model, "_pooler")
         self.is_causal = True
         if self.is_pooler:
-            self.set_causal_option(self.model)
+            self.set_causal_option(model)
+
+        self.__initialized = True
+
+
+    
+    def __getattr__(self, attr):
+        if self.__initialized:
+            print(self)
+            return getattr(self.model, attr)
+        try:
+            print(self)
+            return self.__dict__[attr]
+        except KeyError:
+            print(self)
+            raise AttributeError(attr)
+
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -383,6 +400,13 @@ class HpuModelAdapter(torch.nn.Module):
             raise AttributeError(
                 "The module at the end of the path does not have \
                a 'prepare_cos_sin' method.")
+
+    #@property
+    #def lm_head(self):
+    #    return self.model.lm_head
+    #def __getattr__(self, name):
+    #    return object.__getattribute__(self.model, name)
+        #return getattr(self.model, name)
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -860,6 +884,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             disable_tensor_cache=True,
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
+
+   # @property
+   # def model(self):
+   #     if isinstance(self._model, HpuModelAdapter):
+   #         return self._model.model
+   #     return self._model
+
+  #  @model.setter
+  #  def model(self, m):
+  #      self._model = m        
+    
 
     def _maybe_compile(self, *args, **kwargs):
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
