@@ -2038,7 +2038,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             inputs = self.prepare_model_input(seqs)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
-            if is_single_step:
+            if is_prompt or is_single_step:
                 intermediate_tensors = None
                 if not get_pp_group().is_first_rank:
                     intermediate_tensors = \
