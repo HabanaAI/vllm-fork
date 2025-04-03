@@ -1293,5 +1293,61 @@ def test_fsdpa_long_chunked():
     print('test done')
 
 
+def test_fsdpa_long_chunked1():
+    set_random_seed(0)
+    dim = 25600
+    device = 'cpu'
+    x = torch.randn([dim, 1, 1280], device=device).bfloat16()
+    cu_seqlens = expand_to_max(torch.tensor([0, dim//2, dim//2 + dim//4, dim], device=device), 8)
+    assert cu_seqlens[-1].item() == dim
+    model = FSDPAAttnMaskOneshot(False, True).to(torch.bfloat16).to(device)
+    weights = model.state_dict()
+    y_unfused_oneshot = model(x, cu_seqlens)
+    
+    device = 'hpu'
+    model = FSDPAAttnMaskChunked(1024)
+    model.load_state_dict(weights)
+    model = model.to(torch.bfloat16).to(device)
+    y_chunked = model(x.to(device), cu_seqlens.to(device))
+    
+    assert torch.allclose(y_chunked.to('cpu'), y_unfused_oneshot.to('cpu'), atol = 0.01)
+    # test failed: Synapse detected a device critical error that requires a restart.
+
+
+class Slicer(nn.Module):
+    def __init__(self):
+        super(Slicer, self).__init__()
+    def forward(self, x, slices):
+        res = 1
+        for i in range(1, len(slices)):
+            start_idx = slices[i - 1]
+            end_idx = slices[i]
+            x_i = x[start_idx:end_idx]
+            res *= x_i.sum()
+        return res
+            
+
+def test_sliceinhpugraph():
+    model = Slicer().to('hpu')
+    x = torch.arange(1, 11, device='hpu') * 10 # tensor([ 10,  20,  30,  40,  50,  60,  70,  80,  90, 100], device='hpu:0')
+    slices1 = torch.tensor([0, 5, 10], device='hpu')
+    slices2 = torch.tensor([0, 2, 10], device='hpu')
+    
+    y1 = model(x, slices1)
+    y2 = model(x, slices2)
+    print(y1)
+    print(y2)
+    
+    model = htorch.hpu.wrap_in_hpu_graph(model)
+    
+    y1 = model(x, slices1)
+    y2 = model(x, slices2)
+    print(y1)
+    print(y2)
+    
+    
+    
+
+
 #if __name__ == "__main__":
 #    main()
