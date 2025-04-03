@@ -120,6 +120,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         blocksparse_params: Optional[Dict[str, Any]] = None,
         max_seq_len: int = 4096,
         attn_type: str = AttentionType.DECODER,
+        **kwargs,
     ) -> None:
         super(AttentionImpl, self).__init__()
         self.kv_cache_dtype = kv_cache_dtype

@@ -99,11 +99,13 @@ class Llama4MoE(nn.Module):
             hidden_states=hidden_states,
             router_logits=router_logits,
         )
-        experts_out = routed_out + shared_out
+        out_shape = shared_out.shape
+        experts_out = routed_out + shared_out.view(*routed_out.shape)
 
         if self.tp_size > 1:
             experts_out = tensor_model_parallel_all_reduce(experts_out)
 
+        experts_out = experts_out.view(*out_shape)
         return experts_out
 
 

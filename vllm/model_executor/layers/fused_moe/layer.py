@@ -34,6 +34,8 @@ if current_platform.is_tpu():
     from .moe_torch_iterative import fused_moe as fused_moe_pallas
 else:
     fused_moe_pallas = None  # type: ignore
+if current_platform.is_hpu():
+     import habana_frameworks.torch as htorch
 logger = init_logger(__name__)
 
 
@@ -232,15 +234,60 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         renormalize: bool,
         topk_group: Optional[int] = None,
         num_expert_group: Optional[int] = None,
+        global_num_experts: int = -1,
+        expert_map: Optional[torch.Tensor] = None,
         custom_routing_function: Optional[Callable] = None,
-        **kwargs,
-    ):
-        assert not use_grouped_topk, 'use_grouped_topk must be False on HPU'
-        assert num_expert_group is None, ('num_expert_group is '
-                                          'not supported on HPU')
-        assert topk_group is None, 'topk_group is not supported on HPU'
-        if layer is not None:
-            return layer.hpu_fused_moe(x, router_logits, top_k)
+        scoring_func: str = "softmax",
+        e_score_correction_bias: Optional[torch.Tensor] = None,
+        apply_router_weight_on_input: bool = False,
+        activation: str = "silu",
+    ) -> torch.Tensor:
+        hidden_dim = x.shape[-1]
+        num_experts = layer.w13_weight.shape[0]
+        moe_n_slice = 8 if num_experts > 32 else 1
+        n_expert_slice = num_experts // moe_n_slice
+        assert n_expert_slice * moe_n_slice == num_experts
+        x = x.view(-1, hidden_dim)
+        topk_weights, topk_ids = FusedMoE.select_experts(
+            hidden_states=x,
+            router_logits=router_logits,
+            use_grouped_topk=use_grouped_topk,
+            top_k=top_k,
+            renormalize=renormalize,
+            topk_group=topk_group,
+            num_expert_group=num_expert_group,
+            custom_routing_function=custom_routing_function,
+            scoring_func=scoring_func,
+            e_score_correction_bias=e_score_correction_bias)
+        topk_weights = topk_weights.view(-1, top_k)
+        topk_ids = topk_ids.view(-1, top_k)
+        for i in range(moe_n_slice):
+            min_expert = i * n_expert_slice
+            max_expert = (i + 1) * n_expert_slice
+            w13_list_slice = [
+                layer.w13_weight[j].data.squeeze()
+                for j in range(min_expert, max_expert)
+            ]
+            w2_list_slice = [
+                layer.w2_weight[j].data.squeeze()
+                for j in range(min_expert, max_expert)
+            ]
+            current_hidden_states = torch.ops.hpu.mixture_of_experts(
+                hidden_states=x,
+                expert_routing_table=topk_ids.to(torch.int64),
+                router_weights=topk_weights.to(x.dtype),
+                w12=w13_list_slice,
+                w3=w2_list_slice,
+                permuted_weights=True,
+                activation=activation,
+                experts_min=min_expert,
+                experts_max=max_expert - 1,)
+            htorch.core.mark_step()
+            if i == 0:
+                final_hidden_states = current_hidden_states
+            else:
+                final_hidden_states.add_(current_hidden_states)
+        return final_hidden_states.view(-1, hidden_dim)
 
     def forward_cpu(
         self,
@@ -276,38 +323,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             e_score_correction_bias,
         )
 
-    def forward_hpu(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        use_grouped_topk: bool,
-        top_k: int,
-        router_logits: torch.Tensor,
-        renormalize: bool,
-        topk_group: Optional[int] = None,
-        num_expert_group: Optional[int] = None,
-        global_num_experts: int = -1,
-        expert_map: Optional[torch.Tensor] = None,
-        custom_routing_function: Optional[Callable] = None,
-        scoring_func: str = "softmax",
-        e_score_correction_bias: Optional[torch.Tensor] = None,
-        apply_router_weight_on_input: bool = False,
-        activation: str = "silu",
-    ) -> torch.Tensor:
-        assert not use_grouped_topk
-        assert num_expert_group is None
-        assert topk_group is None
-        assert custom_routing_function is None
-        assert layer is not None
-        assert apply_router_weight_on_input is False
-        if scoring_func != "softmax":
-            raise NotImplementedError(
-                "Only softmax scoring function is supported for HPU.")
-        if e_score_correction_bias is not None:
-            raise NotImplementedError(
-                "Expert score correction bias is not supported for HPU.")
-        return layer.hpu_fused_moe(x, layer.w13_weight, layer.w2_weight,
-                                   router_logits, top_k)
 
     def forward_tpu(
         self,
@@ -503,9 +518,9 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
-        if is_hpu:
-            from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.num_experts)
+        # if is_hpu:
+        #     from vllm_hpu_extension.ops import DynamicFusedMOE
+        #     self.hpu_fused_moe = DynamicFusedMOE(self.num_experts)
 
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
@@ -630,9 +645,9 @@ class FusedMoE(torch.nn.Module):
             expert_data = expert_data.narrow(shard_dim, shard_size, shard_size)
         expert_data.copy_(loaded_weight)
 
-        if is_hpu:
-            self.hpu_fused_moe.MoeOp.w13_list[expert_id].set_weight(
-                orig_exp_data)
+        # if is_hpu:
+        #     self.hpu_fused_moe.MoeOp.w13_list[expert_id].set_weight(
+        #         orig_exp_data)
 
     def _load_w2(self,
                  expert_data: torch.Tensor,
@@ -652,8 +667,8 @@ class FusedMoE(torch.nn.Module):
                                                  shard_size)
         # w2, down_proj: Load into only logical weight of w2.
         expert_data.copy_(loaded_weight)
-        if is_hpu:
-            self.hpu_fused_moe.MoeOp.w2_list[expert_id].set_weight(expert_data)
+        # if is_hpu:
+        #     self.hpu_fused_moe.MoeOp.w2_list[expert_id].set_weight(expert_data)
 
     def _load_single_value(self, param: torch.nn.Parameter,
                            loaded_weight: torch.Tensor, expert_id: int):
