@@ -121,7 +121,7 @@ class EngineArgs:
     use_v2_block_manager: bool = True
     use_padding_aware_scheduling: bool = (
         current_platform.is_hpu() and not bool(envs.VLLM_USE_V1)
-        and (os.environ.get('VLLM_MERGED_PREFILL', 'false') != 'true'))
+        and (os.environ.get('VLLM_MERGED_PREFILL', 'false').lower() != 'true'))
     swap_space: float = 4  # GiB
     cpu_offload_gb: float = 0  # GiB
     gpu_memory_utilization: float = 0.90
