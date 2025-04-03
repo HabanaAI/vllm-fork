@@ -2706,7 +2706,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             0, sampling_metadata.selected_token_indices))
                 if not get_pp_group().is_last_rank:
                     return hidden_states
-                
+
                 # Compute the logits.
                 with self.profiler.record_event(
                         'internal',

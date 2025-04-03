@@ -526,7 +526,7 @@ def init_worker_distributed_environment(
 
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
-    
+
     if parallel_config.pipeline_parallel_size > 1:
         # torch-ccl xpu need a collective API warm up
         # before calling send/recv API

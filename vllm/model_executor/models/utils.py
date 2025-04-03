@@ -612,7 +612,9 @@ def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
     ) -> IntermediateTensors:
         return IntermediateTensors({
             key:
-            torch.zeros((batch_size, context_size, hidden_size), dtype=dtype, device=device)
+            torch.zeros((batch_size, context_size, hidden_size),
+                        dtype=dtype,
+                        device=device)
             for key in keys
         })
 
