@@ -13,7 +13,7 @@ To achieve the best performance, please follow the methods outlined in the
 - Ubuntu 22.04 LTS OS
 - Python 3.10
 - Intel Gaudi 2 and 3 AI accelerators
-- Intel Gaudi software version 1.20.0 and above
+- Intel Gaudi software version 1.21.0 and above
 
 ## Quick Start Using Dockerfile
 Set up the container with latest release of Gaudi Software Suite using the Dockerfile:
@@ -122,30 +122,43 @@ $ python setup.py develop
 - Beam search
 - Prefill chunking (mixed-batch inferencing)
 
-# Supported Configurations
+# Validated models and configurations
 
-The following configurations have been validated to be function with Gaudi2 devices with random or greedy sampling. Configurations that are not listed may or may not work.
+The following configurations have been validated to be function with Gaudi2 or Gaudi 3 devices with random or greedy sampling. Configurations that are not listed may or may not work.
 
-- [meta-llama/Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b) on single HPU, or with tensor parallelism on 2x and 8x HPU, BF16 datatype
-- [meta-llama/Llama-2-7b-chat-hf](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf) on single HPU, or with tensor parallelism on 2x and 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B) on single HPU, or with tensor parallelism on 2x and 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) on single HPU, or with tensor parallelism on 2x and 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3.1-8B](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B) on single HPU, or with tensor parallelism on 2x and 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct) on single HPU, or with tensor parallelism on 2x and 8x HPU, BF16 datatype
-- [meta-llama/Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b) with tensor parallelism on 8x HPU, BF16 datatype
-- [meta-llama/Llama-2-70b-chat-hf](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf) with tensor parallelism on 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3-70B](https://huggingface.co/meta-llama/Meta-Llama-3-70B) with tensor parallelism on 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3-70B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-70B-Instruct) with tensor parallelism on 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3.1-70B](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B) with tensor parallelism on 8x HPU, BF16 datatype
-- [meta-llama/Meta-Llama-3.1-70B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B-Instruct) with tensor parallelism on 8x HPU, BF16 datatype
-- [mistralai/Mistral-7B-Instruct-v0.3](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3) on single HPU or with tensor parallelism on 2x HPU, BF16 datatype
-- [mistralai/Mixtral-8x7B-Instruct-v0.1](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1) with tensor parallelism on 2x HPU, BF16 datatype
-- [llava-hf/llava-1.5-7b-hf](https://huggingface.co/llava-hf/llava-1.5-7b-hf) on single HPU or with tensor parallelism on 8x HPU, BF16 datatype
-- [Qwen/Qwen2-72B-Instruct](https://huggingface.co/Qwen/Qwen2-72B-Instruct) with tensor parallelism on 8x HPU, BF16 datatype
-- [Qwen/Qwen2.5-72B-Instruct](https://huggingface.co/Qwen/Qwen2.5-72B-Instruct) with tensor parallelism on 8x HPU, BF16 datatype
-- [mistralai/Mistral-Large-Instruct-2407](https://huggingface.co/mistralai/Mistral-Large-Instruct-2407) with tensor parallelism on 8x HPU, BF16 datatype
-- [princeton-nlp/gemma-2-9b-it-SimPO](https://huggingface.co/princeton-nlp/gemma-2-9b-it-SimPO) on single HPU, BF16 datatype
-- [meta-llama/Llama-3.2-90B-Vision-Instruct](https://huggingface.co/meta-llama/Llama-3.2-90B-Vision-Instruct) with tensor parallelism on 4x and 8x HPU, BF16 datatype
+| **Model**   | **Tensor Parallelism [x HPU]**   | **Datatype**    | **Validated on**    |
+|:---    |:---:    |:---:    |:---:  |
+| [meta-llama/Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b)     | 1, 2, 8    | BF16   | Gaudi2, Gaudi3|
+| [meta-llama/Llama-2-7b-chat-hf](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)     | 1, 2, 8    | BF16    | Gaudi2, Gaudi3|
+| [meta-llama/Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b)     | 8    | BF16    | Gaudi2, Gaudi3|
+| [meta-llama/Llama-2-70b-chat-hf](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf)    | 8    | BF16    | Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B)     | 1, 2, 8    | BF16    | Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)     | 1, 2, 8    | BF16    | Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3-70B](https://huggingface.co/meta-llama/Meta-Llama-3-70B)     | 8    | BF16    |Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3-70B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-70B-Instruct)     | 8    | BF16    |Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3.1-8B](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B)     | 1    | BF16, FP8    | Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct)     | 1    | BF16, FP8    | Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3.1-70B](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B)    | 2, 4, 8    | BF16, FP8    |Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3.1-70B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B-Instruct)     | 2, 4, 8    | BF16, FP8    |Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3.1-405B](https://huggingface.co/meta-llama/Meta-Llama-3.1-405B)     | 8    | BF16, FP8    |Gaudi3|
+| [meta-llama/Meta-Llama-3.1-405B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-405B-Instruct)     | 8    | BF16, FP8    |Gaudi3|
+| [meta-llama/Llama-3.2-11B-Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision)     | 1    | BF16    | Gaudi2, Gaudi3|
+| [meta-llama/Llama-3.2-90B-Vision](https://huggingface.co/meta-llama/Llama-3.2-90B-Vision)     | 4, 8 (min. for Gaudi 2)    | BF16    | Gaudi2, Gaudi3|
+| [meta-llama/Llama-3.2-90B-Vision-Instruct](https://huggingface.co/meta-llama/Llama-3.2-90B-Vision-Instruct)     | 4, 8 (min. for Gaudi 2)    | BF16    | Gaudi2, Gaudi3 |
+| [meta-llama/Meta-Llama-3.2-405B](https://huggingface.co/meta-llama/Llama-3.2-405B)     | 8  | BF16    | Gaudi3|
+| [meta-llama/Meta-Llama-3.3-70B](https://huggingface.co/meta-llama/Llama-3.3-70B)     | 4  | BF16, FP8    | Gaudi3|
+| [meta-llama/Granite-3B-code-instruct-128k](https://huggingface.co/ibm-granite/granite-3b-code-instruct-128k)     | 1  | BF16    | Gaudi3|
+| [meta-llama/Granite-3.0-8B-instruct](https://huggingface.co/ibm-granite/granite-3.0-8b-instruct)     | 1  | BF16, FP8    | Gaudi2, Gaudi3|
+| [meta-llama/Granite-20B-code-instruct-8k](https://huggingface.co/ibm-granite/granite-20b-code-instruct-8k)     | 1  | BF16, FP8    | Gaudi2, Gaudi3|
+| [meta-llama/Granite-34B-code-instruc-8k](https://huggingface.co/ibm-granite/granite-34b-code-instruct-8k)     | 1  | BF16    | Gaudi3|
+| [mistralai/Mistral-Large-Instruct-2407](https://huggingface.co/mistralai/Mistral-Large-Instruct-2407)     | 1, 4    | BF16    | Gaudi3|
+| [mistralai/Mistral-7B-Instruct-v0.3](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)     | 1, 2    | BF16    | Gaudi2|
+| [mistralai/Mixtral-8x7B-Instruct-v0.1](https://huggingface.co/mistralai/Mixtral-8x7B-v0.1)     | 2    | FP8    |Gaudi2, Gaudi3|
+| [llava-hf/llava-1.5-7b-hf](https://huggingface.co/llava-hf/llava-1.5-7b-hf)     | 1, 8    | BF16    | Gaudi2, Gaudi3 |
+| [princeton-nlp/gemma-2-9b-it-SimPO](https://huggingface.co/princeton-nlp/gemma-2-9b-it-SimPO)     | 1    | BF16    |Gaudi2, Gaudi3|
+| [Qwen/Qwen2-72B-Instruct](https://huggingface.co/Qwen/Qwen2-72B-Instruct)     | 8    | BF16    |Gaudi2|
+| [Qwen/Qwen2.5-72B-Instruct](https://huggingface.co/Qwen/Qwen2.5-72B-Instruct)     | 8    | BF16    |Gaudi2|
+
 
 # Performance Tuning
 
@@ -185,7 +198,7 @@ INFO 08-01 21:37:59 hpu_model_runner.py:509] Generated 48 decode buckets: [(1, 1
 ```
 
 `min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, interval between `min` and `step`
-has special handling - `min` gets multiplied by consecutive powers of two, until `step` gets reached. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage,
+has special handling - `min` gets multiplied by consecutive powers of two, until the multiplier is less than or equal to `step`. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage,
 while allowing larger padding on larger batch sizes.
 
 **Example with ramp-up**
