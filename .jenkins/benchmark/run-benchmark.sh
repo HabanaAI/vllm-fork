@@ -40,7 +40,7 @@ python  $script_dir/../../benchmarks/benchmark_throughput.py \
     --use-padding-aware-scheduling |& tee $log_file
 end=`date +%s`
 runtime=$((end-start))
-printf " -------------- \nBenchmark takes: %2d:%02d\n\n" $((runtime/60)) $((runtime%60)) 
+printf " -------------- \nBenchmark took: %2d:%02d\n\n" $((runtime/60)) $((runtime%60)) 
 
 throughput=$(grep -oP 'Throughput: [0-9.]+ requests/s, \K[0-9]+' $log_file)
 warmup=$(grep -oP 'Warmup finished in +\K[0-9:]+' $log_file)
@@ -73,7 +73,7 @@ if [[ -n "$TEST_RESULTS_DIR" ]]; then
     cat <<EOF > ${LOG_PATH}
 <?xml version="1.0" encoding="utf-8"?>
 <testsuites><testsuite name="benchmark" errors="0" failures="$((throughput_fail + warmup_fail))" skipped="0" tests="2" time="$runtime">
-<testcase classname=".jenkins.benchmark.${model_short}" name="${model_short}-throughput" time="$runtime">
+<testcase classname=".jenkins.benchmark.${model_short}-bf16" name="${model_short}-bf16-throughput" time="$runtime">
 <properties>
 <property name="throughput" value="$throughput"/>
 <property name="throughput threshold" value="$throughput_threshold"/>
@@ -86,7 +86,7 @@ EOF
     fi
  cat <<EOF >> ${LOG_PATH}
 </testcase>
-<testcase classname=".jenkins.benchmark.${model_short}" name="${model_short}-warmup" time="$warmup">
+<testcase classname=".jenkins.benchmark.${model_short}-bf16" name="${model_short}-bf16-warmup" time="$warmup">
 <properties>
 <property name="warmup time" value="$warmup"/>
 <property name="warmup threshold" value="$warmup_threshold"/>
