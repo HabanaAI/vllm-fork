@@ -1280,8 +1280,17 @@ def test_fsdpa_chunked():
     
     assert torch.allclose(y_chunked.to('cpu'), y_unfused_oneshot.to('cpu'), atol = 0.01)
 
-    
-
+def test_fsdpa_long_chunked():
+    dim = 25600
+    device='hpu'
+    q1 = torch.randn([1, 16, dim, 80], device=device).bfloat16()
+    k1 = torch.randn([1, 16, dim, 80], device=device).bfloat16()
+    v1 = torch.randn([1, 16, dim, 80], device=device).bfloat16()
+    attn_mask = torch.randn([1,1,dim,dim]) > 0.5
+    fused_out = AttentionLongSequence.forward(q1, k1, v1, attn_mask, 64)
+    print('fwd recorded')
+    print(fused_out.sum())
+    print('test done')
 
 
 #if __name__ == "__main__":
