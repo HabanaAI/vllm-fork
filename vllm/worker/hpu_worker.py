@@ -135,7 +135,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         affinity.sort()
         affinity = affinity[::2]  # no threads => skip every 2
         l = len(affinity) // 8
-        new_affinity = affinity[rank * l:(rank + 1) * l][1:]  # skip one core to leave room for the OS
+        new_affinity = affinity[1:][rank * l:(rank + 1) * l]  # skip one core to leave room for the OS
         os.sched_setaffinity(pid, set(new_affinity))
         logger.info("[%d] Setting custom affinity", rank)
 
