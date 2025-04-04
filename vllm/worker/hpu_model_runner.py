@@ -261,8 +261,8 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
-                or (self.prefill_use_fusedsdpa and self.is_causal and not self.is_alibi
-                    and attn_metadata.block_list is None)
+                or (self.prefill_use_fusedsdpa and self.is_causal
+                    and not self.is_alibi and attn_metadata.block_list is None)
                 or not attn_metadata.is_prompt):
             return attn_metadata
 
