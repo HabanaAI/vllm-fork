@@ -254,14 +254,14 @@ class HpuModelAdapter(torch.nn.Module):
         self.layer_names = layer_names
         self.is_pooler = hasattr(self.model, "_pooler")
         self.is_causal = True
-        if self.is_pooler:
-            self.set_causal_option(self.model)
+
+        self.set_attnimpl_config(self.model)
         self.use_merged_prefill = VLLM_MERGED_PREFILL
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
-                or (self.prefill_use_fusedsdpa and self.is_causal
+                or (self.prefill_use_fusedsdpa and self.is_causal and not self.is_alibi
                     and attn_metadata.block_list is None)
                 or not attn_metadata.is_prompt):
             return attn_metadata
@@ -436,17 +436,18 @@ class HpuModelAdapter(torch.nn.Module):
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
 
-    def set_causal_option(self, module):
+    def set_attnimpl_config(self, module):
         if isinstance(module, HPUAttentionImpl) and hasattr(
                 module, 'attn_type'):
             self.is_causal = not (
                 module.attn_type == AttentionType.ENCODER
                 or module.attn_type == AttentionType.ENCODER_ONLY
                 or module.attn_type == AttentionType.ENCODER_DECODER)
+            self.is_alibi = (module.alibi_slopes is not None)
             return
         else:
             for child_name, child_module in module.named_children():
-                self.set_causal_option(child_module)
+                self.set_attnimpl_config(child_module)
 
     # sampler property will be used by spec_decode_worker
     # don't rename
