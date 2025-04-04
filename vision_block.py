@@ -1518,7 +1518,8 @@ class SimulateBatchedFullAttn2(nn.Module):
             we might get assignment = [([2], (1, 16)), ([0, 1], (2, 4))]
             ... img 2 (of size 8) go to (1,16), images 0 and 1 goes to bucket (2,4)
             '''
-            list_to_be_concat = [None] * num_images
+            #list_to_be_concat = [None] * num_images
+            ret_tensor = torch.zeros(x.shape, device=x.device, dtype=x.dtype)
             for img_indices, (bs, max_len) in assignment:
                 #if len(img_indices) != bs:
                 #    breakpoint()
@@ -1531,15 +1532,22 @@ class SimulateBatchedFullAttn2(nn.Module):
                     gathered_batch = torch.concat([gathered_batch, pad_empty_slots_in_batch])
                 htcore.mark_step()
                 norm_out = self.norm(gathered_batch)
+                #breakpoint()
                 htcore.mark_step()
                 # split the batch, and put back the outputs in the original location where it was taken from
+                #for b_idx, orig_location in zip(range(norm_out.shape[0]), img_indices):
+                #    list_to_be_concat[orig_location] = norm_out[b_idx][:img_sizes_cpu[orig_location]]
                 for b_idx, orig_location in zip(range(norm_out.shape[0]), img_indices):
-                    list_to_be_concat[orig_location] = norm_out[b_idx][:img_sizes_cpu[orig_location]]
-            lst2 = list_to_be_concat
+                    ret_tensor[slices[orig_location] : slices[orig_location+1]] = norm_out[b_idx][:img_sizes_cpu[orig_location]]
+                #breakpoint()
+                #print()
+            #lst2 = list_to_be_concat
+            htcore.mark_step()
+            return ret_tensor
         else:
             lst2 = [self.norm(slc) for slc in lst1]
-        htcore.mark_step()
-        return torch.concat(lst2)
+            htcore.mark_step()
+            return torch.concat(lst2)
             
 def test_simulate_window_and_full():
     model = SimulateBatchedFullAttn().bfloat16()
@@ -1581,19 +1589,24 @@ def test_simulate_window_and_full():
 
     model = SimulateBatchedFullAttn2(True, [(1, 16), (2, 4)]).bfloat16()
     cpu_res_3 = [model(x, expand_to_max(slc, 5)) for slc in slices]
-
     for idx, (i, j) in enumerate(zip(cpu_res, cpu_res_3)):
         assert torch.allclose(i, j, atol=0.00001)
-    # This proves that the SimulateBatchedFullAttn and SimulateBatchedFullAttn2(True) (batched) are the same
-    
-    # TODO: now make sure SimulateBatchedFullAttn2(True) works ok on hpu with hpugraphs
+    # This proves that the SimulateBatchedFullAttn and SimulateBatchedFullAttn2(True) (batched) are the same on CPU
+
+    model = model.to('hpu')
+    hpu_res = [model(x_h, expand_to_max(slc.to('hpu'), 5)) for slc in slices]
+    for idx, (i, j) in enumerate(zip(cpu_res, hpu_res)):
+        assert torch.allclose(i, j.to('cpu'), atol=0.005) # needs a bit loose tolerance for cpu vs hpu comparision
+    # This proves that the SimulateBatchedFullAttn on CPU and SimulateBatchedFullAttn2(True) (batched) on HPU are the same
 
 
-        
-    
-    
+    model.lin = htorch.hpu.wrap_in_hpu_graph(model.lin)
+    model.norm = htorch.hpu.wrap_in_hpu_graph(model.norm)
 
-
+    hpu_graphs_res = [model(x_h, expand_to_max(slc.to('hpu'), 5)) for slc in slices]
+    for idx, (i, j) in enumerate(zip(cpu_res, hpu_graphs_res)):
+        assert torch.allclose(i, j.to('cpu'), atol=0.005) # needs a bit loose tolerance for cpu vs hpu comparision
+    # This makes sure SimulateBatchedFullAttn2(True) works ok on hpu with hpugraphs
 
 
 
