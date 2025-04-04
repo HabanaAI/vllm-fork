@@ -20,6 +20,7 @@ from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.platforms import _Backend
 import pytest
+import habana_frameworks.torch.core as htcore
 
 logger = logging.getLogger("vllm")
 logger.setLevel(logging.ERROR)
@@ -1291,6 +1292,323 @@ def test_fsdpa_long_chunked():
     print('fwd recorded')
     print(fused_out.sum())
     print('test done')
+
+
+def test_fsdpa_long_chunked1():
+    set_random_seed(0)
+    dim = 25600
+    device = 'cpu'
+    x = torch.randn([dim, 1, 1280], device=device).bfloat16()
+    cu_seqlens = expand_to_max(torch.tensor([0, dim//2, dim//2 + dim//4, dim], device=device), 8)
+    assert cu_seqlens[-1].item() == dim
+    model = FSDPAAttnMaskOneshot(False, True).to(torch.bfloat16).to(device)
+    weights = model.state_dict()
+    y_unfused_oneshot = model(x, cu_seqlens)
+    
+    device = 'hpu'
+    model = FSDPAAttnMaskChunked(1024)
+    model.load_state_dict(weights)
+    model = model.to(torch.bfloat16).to(device)
+    y_chunked = model(x.to(device), cu_seqlens.to(device))
+    
+    assert torch.allclose(y_chunked.to('cpu'), y_unfused_oneshot.to('cpu'), atol = 0.01)
+    # test failed: Synapse detected a device critical error that requires a restart.
+
+
+class Slicer(nn.Module):
+    def __init__(self):
+        super(Slicer, self).__init__()
+    def forward(self, x, slices):
+        res = 1
+        for i in range(1, len(slices)):
+            start_idx = slices[i - 1]
+            end_idx = slices[i]
+            x_i = x[start_idx:end_idx]
+            res *= x_i.sum()
+        return res
+            
+# this test shows slice doesnt work with hpu graph as expected.
+def test_sliceinhpugraph():
+    model = Slicer().to('hpu')
+    # tensor([ 10,  20,  30,  40,  50,  60,  70,  80,  90, 100], device='hpu:0')
+    x = torch.arange(1, 11, device='hpu') * 10
+    slices1 = torch.tensor([0, 5, 10], device='hpu')
+    slices2 = torch.tensor([0, 2, 10], device='hpu')
+
+    y1 = model(x, slices1) # 60000
+    y2 = model(x, slices2) # 15600
+    print(y1)
+    print(y2)
+
+    model = htorch.hpu.wrap_in_hpu_graph(model)
+
+    y1 = model(x, slices1) # 60000
+    y2 = model(x, slices2) # 60000 # incorrect
+    print(y1)
+    print(y2)
+
+
+'''
+input x will; always be aligned to 4
+first we will chunk x in pieces of 4, run each piece thru self.lin and concat them back
+Then depending on slices, we will slice out output of linear and normalize it
+Finally we will concat it back again and return
+'''
+class SimulateBatchedFullAttn(nn.Module):
+    def __init__(self):
+        super(SimulateBatchedFullAttn, self).__init__()
+        self.lin = torch.nn.Linear(4, 4, bias=False)
+        with torch.no_grad():
+            self.lin.weight.copy_(torch.arange(16).float().reshape([4, 4]))
+        
+    def forward(self, x, slices):
+        x = torch.concat([self.lin(x[i*4:(i+1)*4]) for i in range(x.shape[0]//4)])
+        lst = []
+        for i in range(1, len(slices)):
+            start_idx = slices[i - 1]
+            end_idx = slices[i]
+            x_i = x[start_idx:end_idx]
+            lst.append(x_i/x_i.abs().sum())
+        return torch.concat(lst)
+
+
+class Norm(nn.Module):
+    def __init__(self):
+        super(Norm, self).__init__()
+    def forward(self, x):
+        return x/x.abs().sum(dim=-1, keepdim=True)
+
+
+import copy
+
+class AssignmentPerBucket:
+    def __init__(self, key):
+        self.max_bs = key[0]
+        self.max_seq_len = key[1]
+        self.assignment = [[]]
+    def curr_slot_occupancy(self):
+        return len(self.assignment[-1])
+    def add(self, seq):
+        if self.curr_slot_occupancy() == self.max_bs:
+            self.assignment.append([])
+        self.assignment[-1].append(seq)
+    def __repr__(self):
+        return str(self._canonical())
+    def _canonical(self):
+        return [i for i in self.assignment if len(i) > 0]
+    def num_batches(self):
+        return len(self._canonical())
+    def __eq__(self, other):
+        self._canonical() == other._canonical()
+        
+
+def get_timed_cost_fn(buckets):
+  def compute_time(assignment):
+      return sum(assignment[k].num_batches()*buckets[k] for k in assignment)
+  return compute_time
+
+
+def padding_cost(assignment):
+    cost = 0
+    for k in assignment:
+        bs, max_len = k
+        batches = assignment[k]._canonical()
+        
+        for b_idx, batch in enumerate(batches):
+            cost += sum([max_len - i for i in batch])
+            if b_idx == len(batches) - 1:
+                cost += max_len * (bs - len(batch))
+
+    return cost
+
+
+def assign_images_to_batches(buckets, image_sizes, cost_fn):
+    '''
+    image_sizes_yet_to_be_assigned: a list of remaining images to assign to batches
+    curr_batches: dict
+      Key: tuple of len 2, first is bs, second is seq len
+      Value: List of assignments
+      For a key (2, 500) assignment could be something like: [[300, 200], [500, 400], [200]]. This means, first batch (bs=2) processes image of shape (300, 200), second one (500, 400) and the last one is still incomplete but it has 1 entry with image of size 200
+      Clearly all numbers in the assignments must be <= the key[1]
+    '''
+    def helper(image_sizes_yet_to_be_assigned, curr_batches):
+        if len(image_sizes_yet_to_be_assigned) == 0:
+            return curr_batches
+
+        min_time = 10000000000000
+        best_assignment = None
+        # Write it better by incorporating pruning. if ur current assignment is gonna be over best time till now, dont explore that branch
+        for i_idx, img_size in enumerate(image_sizes_yet_to_be_assigned):
+            for bkt in curr_batches:
+                if img_size <= bkt[1]:
+                    new_curr_batches = copy.deepcopy(curr_batches)
+                    new_curr_batches[bkt].add(img_size)
+                    new_image_sizes_yet_to_be_assigned = image_sizes_yet_to_be_assigned[:i_idx] + image_sizes_yet_to_be_assigned[i_idx+1:] # leave out i_idx
+                    assignment_for_this_branch = helper(new_image_sizes_yet_to_be_assigned, new_curr_batches)
+                    time_for_this_branch = cost_fn(assignment_for_this_branch) # do i need to compute time? doesnt the fn already return it?
+                    if (time_for_this_branch <= min_time):
+                        min_time = time_for_this_branch
+                        best_assignment = assignment_for_this_branch
+        return best_assignment
+    x = helper(image_sizes, {k: AssignmentPerBucket(k) for k in buckets})
+    return (x, cost_fn(x))
+
+
+def test_assign_imgs_to_batches():
+    buckets = {(1, 1000): 2, (4, 500): 2, (2,600): 1.2, (2, 500): 1}
+    image_sizes = [320, 640, 400, 600, 800]
+    x = assign_images_to_batches(buckets, image_sizes, get_timed_cost_fn(buckets))
+    
+    golden = ({(1, 1000): [[800], [640]], (4, 500): [], (2, 600): [[600]], (2, 500): [[400, 320]]}, 6.2)
+    x_vals = {k:x[0][k]._canonical() for k in x[0]}
+    assert golden == (x_vals, x[1]) 
+    
+    x1 = assign_images_to_batches(buckets, image_sizes, padding_cost)
+    golden1 = 1240
+    assert golden1 == x1[1] 
+
+
+
+class SimulateBatchedFullAttn2(nn.Module):
+    def __init__(self, batched, buckets):
+        super(SimulateBatchedFullAttn2, self).__init__()
+        self.lin = torch.nn.Linear(4, 4, bias=False)
+        with torch.no_grad():
+            self.lin.weight.copy_(torch.arange(16).float().reshape([4, 4]))
+        self.norm = Norm()
+        self.buckets = buckets  # this cannot be in the ctor in real case
+        self.batched = batched
+        
+    def forward(self, x, slices):
+        lst0 = [self.lin(x[i*4:(i+1)*4]) for i in range(x.shape[0]//4)]
+        htcore.mark_step()
+        x = torch.concat(lst0)
+        lst1 = [x[slices[i - 1]:slices[i]] for i in range(1, len(slices))]
+        htcore.mark_step()
+        if self.batched:
+            # slices always starts from 0, and assign_images_to_batches accepts inputs without the initial 0, hence the [1:] slicing
+            img_sizes_cpu = list(torch.diff(slices.to('cpu').unique()).numpy())
+            assignment_batches, _ = assign_images_to_batches(self.buckets, img_sizes_cpu, padding_cost) # how to keep track of a growing number of buckets, maybe we see a large image and we recompile during runtime?
+            # lst1 has an ordering of images, say [320, 640, 400, 600, 800, 800]
+            # assignment_batches is something like: {(1, 1000): [[800], [640], [800]], (4, 500): [], (2, 600): [[600]], (2, 500): [[400, 320]]}
+            # we need a way to pull together images from lst1 into batches and them place them back into an output list again
+            num_images = len(img_sizes_cpu)
+            processed_already = [False] * num_images
+            assignment = []
+            for bkt in assignment_batches:
+                for batch in assignment_batches[bkt]._canonical():
+                    prep_batch = []
+                    for seq_len in batch:
+                        add_this_image = None
+                        for image_idx, img_size in enumerate(img_sizes_cpu): # must be a better way to do this, gonna brute force it for now
+                            if img_size == seq_len and not processed_already[image_idx]:
+                                #print(f'setting {image_idx} to true')
+                                processed_already[image_idx] = True
+                                add_this_image = image_idx
+                                break
+                        prep_batch += [add_this_image]
+                    assignment += [(prep_batch, bkt)]
+            #assert sum(processed_already) == num_images
+            #breakpoint()
+            '''
+            For example, for slices = tensor([ 0,  4,  8, 16, 16]), buckets = [(1, 16), (2, 4)]
+            img_sizes_cpu = [4, 4, 8] (first 2 images of size 4, last one of size 8)
+            assignment_batches = {(1, 16): [[8]], (2, 4): [[4, 4]]}
+            ... the img of size 8 gets processed in bucket with bs=1, max len = 16, while the 2 images with sizes 4 fit in bs=2, maxsize=4 bucket
+            we might get assignment = [([2], (1, 16)), ([0, 1], (2, 4))]
+            ... img 2 (of size 8) go to (1,16), images 0 and 1 goes to bucket (2,4)
+            '''
+            #list_to_be_concat = [None] * num_images
+            ret_tensor = torch.zeros(x.shape, device=x.device, dtype=x.dtype)
+            for img_indices, (bs, max_len) in assignment:
+                #if len(img_indices) != bs:
+                #    breakpoint()
+                #    print()
+                pad_for_incomplete_batch = [] if len(img_indices) == bs else torch.zeros([bs-len(img_indices), max_len])
+                gathered_batch = [torch.nn.functional.pad(lst1[i], (0, max_len-img_sizes_cpu[i])) for i in img_indices]
+                gathered_batch = torch.concat([i.unsqueeze(0) for i in gathered_batch])
+                if len(img_indices) != bs:
+                    pad_empty_slots_in_batch = torch.zeros([bs-len(img_indices), max_len], device=gathered_batch.device, dtype=x.dtype)
+                    gathered_batch = torch.concat([gathered_batch, pad_empty_slots_in_batch])
+                htcore.mark_step()
+                norm_out = self.norm(gathered_batch)
+                #breakpoint()
+                htcore.mark_step()
+                # split the batch, and put back the outputs in the original location where it was taken from
+                #for b_idx, orig_location in zip(range(norm_out.shape[0]), img_indices):
+                #    list_to_be_concat[orig_location] = norm_out[b_idx][:img_sizes_cpu[orig_location]]
+                for b_idx, orig_location in zip(range(norm_out.shape[0]), img_indices):
+                    ret_tensor[slices[orig_location] : slices[orig_location+1]] = norm_out[b_idx][:img_sizes_cpu[orig_location]]
+                #breakpoint()
+                #print()
+            #lst2 = list_to_be_concat
+            htcore.mark_step()
+            return ret_tensor
+        else:
+            lst2 = [self.norm(slc) for slc in lst1]
+            htcore.mark_step()
+            return torch.concat(lst2)
+            
+def test_simulate_window_and_full():
+    model = SimulateBatchedFullAttn().bfloat16()
+    x = torch.arange(16).bfloat16()
+    slices = [torch.tensor([0, 16]), # 1 img
+              torch.tensor([0, 4, 16]), torch.tensor([0, 8, 16]), torch.tensor([0, 12, 16]), # 2 images
+              torch.tensor([0, 4, 8, 16]), torch.tensor([0, 8, 12, 16]), torch.tensor([0, 4, 12, 16]), # 3 images
+              torch.tensor([0, 4, 8, 12, 16])] # 4 images
+    cpu_res = [model(x, slc) for slc in slices]
+    print(cpu_res)
+
+    from habana_frameworks.torch.hpu.metrics import metric_global
+    model = htorch.hpu.wrap_in_hpu_graph(model.to('hpu'))
+    x_h = x.to('hpu')
+    slices_h = [i.to('hpu') for i in slices]
+    for slc in slices_h:
+        htcore.mark_step(sync=True)
+        gc_metric = metric_global("graph_compilation")
+        print(gc_metric.stats())
+        y = model(x_h, slc)
+        print(y)
+        htcore.mark_step(sync=True)
+        gc_metric = metric_global("graph_compilation")
+        print(gc_metric.stats())
+        print('------------')
+    '''
+    1 img: recompiles. correct. expected
+    2 imgs: recompiles for 1st 2 (why the second?). correct only for the first one
+    3 imgs: recompiles for 1st 2 (why the second?). correct only for the first one
+    4 imgs: recompiles. correct. expected
+    '''
+    
+    
+    model = SimulateBatchedFullAttn2(False, None).bfloat16()
+    cpu_res_2 = [model(x, slc) for slc in slices]
+    for i, j in zip(cpu_res, cpu_res_2):
+        assert torch.allclose(i, j, atol=0.00001)
+    # this proves SimulateBatchedFullAttn and SimulateBatchedFullAttn2(False) (unbatched) are the same
+
+    model = SimulateBatchedFullAttn2(True, [(1, 16), (2, 4)]).bfloat16()
+    cpu_res_3 = [model(x, expand_to_max(slc, 5)) for slc in slices]
+    for idx, (i, j) in enumerate(zip(cpu_res, cpu_res_3)):
+        assert torch.allclose(i, j, atol=0.00001)
+    # This proves that the SimulateBatchedFullAttn and SimulateBatchedFullAttn2(True) (batched) are the same on CPU
+
+    model = model.to('hpu')
+    hpu_res = [model(x_h, expand_to_max(slc.to('hpu'), 5)) for slc in slices]
+    for idx, (i, j) in enumerate(zip(cpu_res, hpu_res)):
+        assert torch.allclose(i, j.to('cpu'), atol=0.005) # needs a bit loose tolerance for cpu vs hpu comparision
+    # This proves that the SimulateBatchedFullAttn on CPU and SimulateBatchedFullAttn2(True) (batched) on HPU are the same
+
+
+    model.lin = htorch.hpu.wrap_in_hpu_graph(model.lin)
+    model.norm = htorch.hpu.wrap_in_hpu_graph(model.norm)
+
+    hpu_graphs_res = [model(x_h, expand_to_max(slc.to('hpu'), 5)) for slc in slices]
+    for idx, (i, j) in enumerate(zip(cpu_res, hpu_graphs_res)):
+        assert torch.allclose(i, j.to('cpu'), atol=0.005) # needs a bit loose tolerance for cpu vs hpu comparision
+    # This makes sure SimulateBatchedFullAttn2(True) works ok on hpu with hpugraphs
+
+
 
 
 #if __name__ == "__main__":
