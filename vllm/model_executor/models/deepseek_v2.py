@@ -117,30 +117,6 @@ class DeepseekV2MoE(nn.Module):
         if config.hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {config.hidden_act}. "
                              "Only silu is supported for now.")
-        if is_hpu:
-            self.experts = FusedMoE(
-                num_experts=config.n_routed_experts,
-                top_k=config.num_experts_per_tok,
-                hidden_size=config.hidden_size,
-                intermediate_size=config.moe_intermediate_size,
-                reduce_results=False,
-                renormalize=config.norm_topk_prob,
-                quant_config=quant_config,
-                use_grouped_topk=False,
-                prefix=f"{prefix}.experts")
-        else:
-            self.experts = FusedMoE(
-                num_experts=config.n_routed_experts,
-                top_k=config.num_experts_per_tok,
-                hidden_size=config.hidden_size,
-                intermediate_size=config.moe_intermediate_size,
-                reduce_results=False,
-                renormalize=config.norm_topk_prob,
-                quant_config=quant_config,
-                use_grouped_topk=True,
-                num_expert_group=config.n_group,
-                topk_group=config.topk_group,
-                prefix=f"{prefix}.experts")
 
         self.gate = ReplicatedLinear(config.hidden_size,
                                      config.n_routed_experts,
@@ -165,6 +141,7 @@ class DeepseekV2MoE(nn.Module):
             num_expert_group=config.n_group,
             topk_group=config.topk_group,
             prefix=f"{prefix}.experts",
+            tp_size=self.tp_size,
             scoring_func=config.scoring_func,
             e_score_correction_bias=self.gate.e_score_correction_bias)
 
@@ -180,12 +157,19 @@ class DeepseekV2MoE(nn.Module):
             )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        num_tokens, hidden_dim = hidden_states.shape
+        if hidden_states.dim() == 3:
+            batch_size, seq_len, hidden_dim = hidden_states.shape
+            num_tokens = batch_size * seq_len
+        else:
+            batch_size, seq_len = None, None
+            num_tokens, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         if self.n_shared_experts is not None:
             shared_output = self.shared_experts(hidden_states)
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
+        if batch_size is not None and seq_len is not None:
+            hidden_states = hidden_states.view(batch_size, seq_len, hidden_dim)
         final_hidden_states = self.experts(
             hidden_states=hidden_states,
             router_logits=router_logits) * self.routed_scaling_factor
@@ -195,6 +179,8 @@ class DeepseekV2MoE(nn.Module):
             final_hidden_states = tensor_model_parallel_all_reduce(
                 final_hidden_states)
 
+        if batch_size is not None:
+            return final_hidden_states.view(batch_size, seq_len, hidden_dim)
         return final_hidden_states.view(num_tokens, hidden_dim)
 
 
