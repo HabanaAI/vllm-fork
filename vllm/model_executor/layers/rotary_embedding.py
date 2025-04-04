@@ -112,6 +112,8 @@ class RotaryEmbedding(CustomOp):
             cache = cache.to(dtype)
         self.cos_sin_cache: torch.Tensor
         self.register_buffer("cos_sin_cache", cache, persistent=False)
+        self.cos: Optional[torch.Tensor] = None
+        self.sin: Optional[torch.Tensor] = None
 
     def prepare_cos_sin(self,
                         positions: torch.Tensor,
@@ -138,8 +140,11 @@ class RotaryEmbedding(CustomOp):
                                           2,
                                           dim=-1,
                                           output_size=cos_sin.shape[-1])
-        self.register_buffer("cos", cos, persistent=False)
-        self.register_buffer("sin", sin, persistent=False)
+        if not torch._dynamo.is_compiling():
+            torch._dynamo.mark_dynamic(cos, 0)
+            torch._dynamo.mark_dynamic(sin, 0)
+        self.cos = cos
+        self.sin = sin
 
     def _compute_inv_freq(self, base: Union[int, float]) -> torch.Tensor:
         """Compute the inverse frequency."""
@@ -257,7 +262,7 @@ class RotaryEmbedding(CustomOp):
 
         # Prepare cos-sin caches for long-context + LoRA with offsets for every
         # forward, since the offset information wasn't available previously
-        if not hasattr(self, "sin") or self.recompute_cos_sin:
+        if (self.sin is None) or self.recompute_cos_sin:
             self.prepare_cos_sin(positions, offsets, recompute_cos_sin=True)
         if hasattr(self, "scaling_factors") or hasattr(
                 self, "scaling_factor") or self.sin is None:
