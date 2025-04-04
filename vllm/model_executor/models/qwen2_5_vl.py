@@ -64,7 +64,6 @@ from vllm.transformers_utils.config import uses_mrope
 from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 import habana_frameworks.torch.core as htcore
-
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
 from .qwen2_vl import Qwen2VLDummyInputsBuilder as Qwen2_5_VLDummyInputsBuilder
 from .qwen2_vl import (Qwen2VLMultiModalProcessor, Qwen2VLProcessingInfo,
@@ -79,8 +78,6 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
 # === Vision Inputs === #
-
-
 class AttentionLongSequence:
     @staticmethod
     def forward(q, k, v, mask, q_block_size):
@@ -97,14 +94,64 @@ class AttentionLongSequence:
         attn_output = torch.zeros_like(q)
 
         for i in range(q_tiles):
+            #print(f"LongSequence [{i}/{q_tiles}]")
             s, e = i * q_block_size, (i + 1) * q_block_size
             row_q = q[:, :, s:e, :]
             row_mask = mask[:, :, s:e, :]
             attn_output[:, :, s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0, False, None)
 
+            #TODO: markstep every 10th layer, didn't experiment which one is optimal number.
+            #10,50,100 shows simliar result, without this, we see the program hangs for multiple prompts(with larger images)
+            if i % 50 == 0:
+                htcore.mark_step()
+
         #if q_padding != 0:
         #    attn_output = attn_output[:, :, :-q_padding, :]
 
+        return attn_output
+
+class AttentionLongSequence2:
+    @staticmethod
+    def forward(q, k, v, mask, q_block_size, scale=None):
+        """
+        Support long sequence by split q and v
+        """
+        q_len = q.size(-2)
+        q_tiles = (q_len // q_block_size) if (q_len % q_block_size == 0) else math.ceil(q_len / q_block_size)
+        q_padding = q_tiles * q_block_size - q_len
+        q = F.pad(q, (0, 0, 0, q_padding), "constant", 0)
+        if mask is not None:
+            mask = F.pad(mask, (0, 0, 0, q_padding), "constant", -10000.0)
+        attn_output = torch.zeros_like(q)
+        attn_outputs=[]
+        import math
+        for i in range(q_tiles):
+            s, e = i * q_block_size, (i + 1) * q_block_size
+            row_q = q[:, :, s:e, :]
+            row_mask = mask[:, :, s:e, :]
+            print(f"[{i}/{q_tiles}] - q:{row_q.shape}, k:{k.transpose(-1,-2).shape}")
+            scale_factor = 1 / math.sqrt(row_q.size(-1)) if scale is None else scale
+            output = torch.matmul(row_q * scale_factor, k.transpose(-1,-2))
+            if row_mask is not None:
+                output = output.add(row_mask)
+            output = torch.softmax(output, dim=-1)
+            output = output.to(q.dtype)
+            qkv_output=[]
+            for j in range(q_tiles):
+                sj, ej = j * q_block_size, (j + 1) * q_block_size
+                row_qk= output[:,:,:,sj:ej]
+                row_v = v[:,:,sj:ej,:]
+                output2 = torch.matmul(row_qk, row_v)
+                qkv_output.append(output2)
+            attn_output[:, :, s:e,:]=sum(qkv_output)
+
+            #TODO: Same as mark_step in AttentionLongSequence()
+            if i % 50 == 0:
+                htcore.mark_step()
+
+
+        if q_padding != 0:
+            attn_output = attn_output[:, :, :-q_padding, :]
         return attn_output
 
 def create_block_diagonal_attention_mask_outerprod(indices):
@@ -357,6 +404,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                 outputs = []
                 cu_seqlens = list(range(0, x.shape[0]+1, 64)) # assuming x%64=0 (image is 112 aligned in both h/w dims)
                 #print(cu_seqlens)
+                #print("Window Attention:", len(cu_seqlens))
                 for i in range(1, len(cu_seqlens)):
                     start_idx = cu_seqlens[i - 1]
                     end_idx = cu_seqlens[i]
@@ -376,6 +424,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                     outputs.append(output_i)
                 context_layer = torch.cat(outputs, dim=1)
             else:
+                #print(f"Full Attention: {q.shape}, {k.shape}, {v.shape}")
                 # TODO. we only need to create this mask once. all 4 full-attn layers could share it
                 #print(cu_seqlens)
                 fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
@@ -788,12 +837,20 @@ class Qwen2_5_VisionTransformer(nn.Module):
         hidden_states = x.unsqueeze(1)
 
         if self.batched:
-            for windowed, full in zip(self.windowed_blocks_consecutive, self.full_attn_layer):
+            for index, (windowed, full) in enumerate(zip(self.windowed_blocks_consecutive, self.full_attn_layer)):
+                #TODO: markstep every 1 or 2 layer, didn't experiment which one is optimal number
+                #When I remove this, 1st compile time for longer sequence is much bigger.
+                htcore.mark_step()
+
                 #breakpoint()
                 hidden_states, _, _ = windowed((hidden_states, None, rotary_pos_emb))
                 hidden_states, _, _ = full((hidden_states, cu_seqlens, rotary_pos_emb))
         else:
             for layer_num, blk in enumerate(self.blocks):
+                #TODO: markstep every 1 or 2 layer, didn't experiment which one is optimal number
+                #When I remove this, 1st compile time for longer sequence is much bigger.
+                htcore.mark_step()
+
                 if layer_num in self.fullatt_block_indexes:
                     cu_seqlens_now = cu_seqlens
                     #fullatt_block_attn_mask = None
@@ -804,8 +861,8 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 #print(type(cu_seqlens_now))
                 #print(type(cu_seqlens))
                 #print(cu_seqlens_now)
-                #print((cu_seqlens))
-
+                #print((cu_seqlens)
+                #print(f"==[{layer_num}/{len(self.blocks)}] VisionBlock")
                 hidden_states, _, _ = blk((hidden_states, cu_seqlens_now, rotary_pos_emb))
                 #print(hidden_states.sum(), '....')
 
