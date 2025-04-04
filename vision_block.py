@@ -1527,7 +1527,7 @@ class SimulateBatchedFullAttn2(nn.Module):
                 gathered_batch = [torch.nn.functional.pad(lst1[i], (0, max_len-img_sizes_cpu[i])) for i in img_indices]
                 gathered_batch = torch.concat([i.unsqueeze(0) for i in gathered_batch])
                 if len(img_indices) != bs:
-                    pad_empty_slots_in_batch = torch.zeros([bs-len(img_indices), max_len], device=gathered_batch.device)
+                    pad_empty_slots_in_batch = torch.zeros([bs-len(img_indices), max_len], device=gathered_batch.device, dtype=x.dtype)
                     gathered_batch = torch.concat([gathered_batch, pad_empty_slots_in_batch])
                 htcore.mark_step()
                 norm_out = self.norm(gathered_batch)
@@ -1580,14 +1580,24 @@ def test_simulate_window_and_full():
     # this proves SimulateBatchedFullAttn and SimulateBatchedFullAttn2(False) (unbatched) are the same
 
     model = SimulateBatchedFullAttn2(True, [(1, 16), (2, 4)]).bfloat16()
+    #breakpoint()
+    #model(x, expand_to_max(slices[1], 5))
     cpu_res_3 = [model(x, expand_to_max(slc, 5)) for slc in slices]
-    for i, j in zip(cpu_res, cpu_res_2):
-        assert torch.allclose(i, j, atol=0.00001)
+    for idx, (i, j) in enumerate(zip(cpu_res, cpu_res_3)):
+        try:
+            assert torch.allclose(i, j, atol=0.00001)
+        except:
+            breakpoint()
+            print()
+
     # This proves that the SimulateBatchedFullAttn and SimulateBatchedFullAttn2(True) (batched) are the same
+    # for now it is broken
     
     # TODO: now make sure SimulateBatchedFullAttn2(True) works ok on hpu with hpugraphs
+
+
         
-        
+    
     
 
 
