@@ -1376,7 +1376,7 @@ class Norm(nn.Module):
     def __init__(self):
         super(Norm, self).__init__()
     def forward(self, x):
-        return x/x.abs().sum()
+        return x/x.abs().sum(dim=-1, keepdim=True)
 
 
 import copy
@@ -1580,18 +1580,11 @@ def test_simulate_window_and_full():
     # this proves SimulateBatchedFullAttn and SimulateBatchedFullAttn2(False) (unbatched) are the same
 
     model = SimulateBatchedFullAttn2(True, [(1, 16), (2, 4)]).bfloat16()
-    #breakpoint()
-    #model(x, expand_to_max(slices[1], 5))
     cpu_res_3 = [model(x, expand_to_max(slc, 5)) for slc in slices]
-    for idx, (i, j) in enumerate(zip(cpu_res, cpu_res_3)):
-        try:
-            assert torch.allclose(i, j, atol=0.00001)
-        except:
-            breakpoint()
-            print()
 
+    for idx, (i, j) in enumerate(zip(cpu_res, cpu_res_3)):
+        assert torch.allclose(i, j, atol=0.00001)
     # This proves that the SimulateBatchedFullAttn and SimulateBatchedFullAttn2(True) (batched) are the same
-    # for now it is broken
     
     # TODO: now make sure SimulateBatchedFullAttn2(True) works ok on hpu with hpugraphs
 
