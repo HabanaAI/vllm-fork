@@ -149,7 +149,7 @@ def pad_list(input, k, v):
 
 
 def _get_multimodal_bucket(curr_num_image_patches):
-    FIXED_MULTIMODAL_BUCKETS = [16, 1600, 3200, 4800, 6400, 9600]
+    FIXED_MULTIMODAL_BUCKETS = [64, 1600, 3200, 4800, 6400, 9600]
     for mm_bucket in FIXED_MULTIMODAL_BUCKETS:
         if curr_num_image_patches <= mm_bucket:
             return mm_bucket
@@ -535,10 +535,40 @@ class HpuModelAdapter:
                 if image_input is None and video_input is None:
                     inputs_embeds = None
                 else:
-                    inputs_embeds = self.model.get_input_embeddings_v0(
-                        input_ids,
-                        image_input=image_input,
-                        video_input=video_input)
+
+                    def _get_single_image_prompt(i, input_dict):
+                        if input_dict is None:
+                            return None
+                        pixel_values = input_dict["pixel_values"]
+                        indices = input_dict["image_grid_thw"].prod(dim=1).cumsum(0)
+                        start = indices[i-1] if i > 0 else 0
+                        end = indices[i]
+                        return {
+                            "type": input_dict["type"],
+                            "pixel_values": pixel_values[start:end, :],
+                            "image_grid_thw": input_dict["image_grid_thw"][i, None],
+                        }
+
+                    num_images = len(image_input["image_grid_thw"]) if image_input is not None else 0
+                    batch_size, _ = input_ids.shape
+                    # TODO: Dealing with the simpler case where there is one image per prompt
+                    # If we have multiple images per prompt, we need to keep track of 
+                    # where the padding on the prompt are and replace the image_embed correctly 
+                    assert batch_size == num_images, "TODO, we need to have one image per prompt"
+                    inputs_embeds = None
+                    for i in range(num_images):
+                        single_image_input = _get_single_image_prompt(i, image_input)
+                        # TODO work on the videoinput 
+                        single_inputs_embeds = self.model.get_input_embeddings_v0(
+                            input_ids[i, None, :], 
+                            image_input=single_image_input, 
+                            video_input=video_input,
+                        )
+                        if inputs_embeds is None:
+                            inputs_embeds = single_inputs_embeds
+                        else:
+                            inputs_embeds = torch.cat([inputs_embeds, single_inputs_embeds], dim=0)
+
                     input_ids = None
 
             kwargs.update({
@@ -1174,9 +1204,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         mm_data,
                         seq_group_metadata.mm_processor_kwargs,
                     )
-
-                # padding image patches (pixel_values, image_grid_thw)
-                mm_kwargs = pad_multimodal_data(mm_kwargs)
 
                 # special processing for mrope position deltas.
                 if self.model_is_mrope:
