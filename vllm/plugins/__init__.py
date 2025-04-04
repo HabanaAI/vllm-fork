@@ -64,30 +64,10 @@ def load_general_plugins():
         # see https://github.com/pytorch/pytorch/blob/43c5f59/torch/_dynamo/config.py#L158
         torch._dynamo.config.disable = True
     elif current_platform.is_hpu():
-        # NOTE(kzawora): PT HPU lazy backend (PT_HPU_LAZY_MODE = 1)
-        # does not support torch.compile
-        # Eager backend (PT_HPU_LAZY_MODE = 0) must be selected for
-        # torch.compile support
-        _environ = dict(os.environ)
-        env_update_dict = {}
-        try:
-            # NOTE(kzawora) multi-HPU inference with HPUGraphs (lazy-only)
-            # requires enabling lazy collectives
-            # see https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html # noqa: E501
-            # this does nothing for eager/t.compile
-            os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = 'true'
-            lazy_mode_env_var = os.environ.get('PT_HPU_LAZY_MODE', None)
-            is_lazy = lazy_mode_env_var == '1'
-            if lazy_mode_env_var is None:
-                import habana_frameworks.torch as htorch
-                is_lazy = htorch.utils.internal.is_lazy()
-            if is_lazy:
-                torch._dynamo.config.disable = True
-                env_update_dict['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = 'true'
-        finally:
-            os.environ.clear()
-            os.environ.update(_environ)
-            os.environ.update(env_update_dict)
+        os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = 'true' 
+        import habana_frameworks.torch as htorch 
+        if htorch.utils.internal.is_lazy(): 
+            torch._dynamo.config.disable = True
     plugins = load_plugins_by_group(group='vllm.general_plugins')
     # general plugins, we only need to execute the loaded functions
     for func in plugins.values():
