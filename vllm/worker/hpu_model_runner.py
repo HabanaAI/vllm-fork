@@ -896,19 +896,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                          'true').strip().lower() in ("1", "true"):
                 compiled_methods = [self.model._set_block_mapping]
                 for method in compiled_methods:
-                    method = torch.compile(method,
-                                           backend='hpu_backend',
-                                           fullgraph=fullgraph,
-                                           dynamic=False)
+                    method = torch.compile(
+                        method,
+                        backend='hpu_backend',
+                        dynamic=None,
+                        options={"force_static_compile": True})
+
                 self.regional_compilation_layers_list = [
                     RMSNorm, VocabParallelEmbedding
                 ]
                 self._regional_compilation(self.model, fullgraph)
             else:
-                self.model = torch.compile(self.model,
-                                           backend='hpu_backend',
-                                           fullgraph=fullgraph,
-                                           dynamic=False)
+                self.model = torch.compile(
+                    self.model,
+                    backend='hpu_backend',
+                    dynamic=None,
+                    options={"force_static_compile": True})
 
     def _regional_compilation(self,
                               module,
@@ -942,8 +945,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     ):
         module = torch.compile(module,
                                backend='hpu_backend',
-                               fullgraph=fullgraph,
-                               dynamic=False)
+                               dynamic=None,
+                               options={"force_static_compile": True})
+
         setattr(model, name, module)
 
     def get_model(self) -> torch.nn.Module:
