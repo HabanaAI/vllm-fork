@@ -73,6 +73,7 @@ from .utils import (AutoWeightsLoader, WeightsMapper,
                     init_vllm_registered_model, maybe_prefix,
                     merge_multimodal_embeddings)
 from .vision import get_vit_attn_backend
+import os
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
@@ -359,11 +360,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                 for i in range(1, len(cu_seqlens)):
                     start_idx = cu_seqlens[i - 1]
                     end_idx = cu_seqlens[i]
-                    try:
-                        q_i = q[:, start_idx:end_idx]
-                    except:
-                        breakpoint()
-                        print()
+                    q_i = q[:, start_idx:end_idx]
                     k_i = k[:, start_idx:end_idx]
                     v_i = v[:, start_idx:end_idx]
                     q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
@@ -443,16 +440,25 @@ class Qwen2_5_VisionBlock(nn.Module):
                                      bias=True,
                                      quant_config=quant_config,
                                      prefix=f"{prefix}.mlp")
+        self.prefix = prefix
 
-    def forward(self, x: torch.Tensor, #cu_seqlens: torch.Tensor,
-                cu_seqlens: Optional[torch.Tensor],
-                rotary_pos_emb: torch.Tensor) -> torch.Tensor:
+    #def forward(self, x: torch.Tensor, #cu_seqlens: torch.Tensor,
+    #            cu_seqlens: Optional[torch.Tensor],
+    #            rotary_pos_emb: torch.Tensor) -> torch.Tensor:
+    # TODO sasarkar: right now changing inp/out signature, because I am stashing them into a nn.sequential, which needs single input and output to feed into next
+    # ideally i'd want to create a separate nn.module instead of highjacking nn.sequential
+    def forward(self, inputs):
+        try:
+            x, cu_seqlens, rotary_pos_emb = inputs
+        except:
+            breakpoint()
+            print()
         #print(f"VisionBlock : x[{x.shape}], cu_seqlens[{cu_seqlens.shape}, rotary_pos_emb{[rotary_pos_emb.shape]}]")
         x = x + self.attn(self.norm1(x),
                           cu_seqlens=cu_seqlens,
                           rotary_pos_emb=rotary_pos_emb)
         x = x + self.mlp(self.norm2(x))
-        return x
+        return x, cu_seqlens, rotary_pos_emb
 
 
 class Qwen2_5_VisionPatchEmbed(nn.Module):
@@ -591,17 +597,45 @@ class Qwen2_5_VisionTransformer(nn.Module):
         head_dim = self.hidden_size // self.num_heads
         self.rotary_pos_emb = Qwen2_5_VisionRotaryEmbedding(head_dim // 2)
 
-        self.blocks = nn.ModuleList([
-            Qwen2_5_VisionBlock(
-                dim=self.hidden_size,
-                num_heads=self.num_heads,
-                mlp_hidden_dim=vision_config.intermediate_size,
-                act_fn=_ACTIVATION_REGISTRY[vision_config.hidden_act],
-                norm_layer=norm_layer,
-                quant_config=quant_config,
-                prefix=f"{prefix}.blocks.{layer_idx}")
-            for layer_idx in range(depth)
-        ])
+        self.batched = os.environ.get("QWEN_VISUAL_BATCHED", "0") == "1"
+        if self.batched:
+            self.windowed_blocks_consecutive = []
+            self.full_attn_layer = []
+            windowed_blocks = []
+            self.layer_idx_to_windowed_layer_map = {} ####
+            self.layer_idx_to_full_layer_map = {} ####
+            for layer_idx in range(depth):
+                layer = Qwen2_5_VisionBlock(
+                                        dim=self.hidden_size,
+                                        num_heads=self.num_heads,
+                                        mlp_hidden_dim=vision_config.intermediate_size,
+                                        act_fn=_ACTIVATION_REGISTRY[vision_config.hidden_act],
+                                        norm_layer=norm_layer,
+                                        quant_config=quant_config,
+                                        prefix=f"{prefix}.blocks.{layer_idx}")
+                if layer_idx not in self.fullatt_block_indexes:
+                    self.layer_idx_to_windowed_layer_map[layer_idx] = (len(self.windowed_blocks_consecutive), len(windowed_blocks))
+                    windowed_blocks += [layer]
+                else:
+                    windowed_blocks =  nn.Sequential(*windowed_blocks)
+                    self.windowed_blocks_consecutive += [windowed_blocks]
+                    windowed_blocks = []
+                    self.layer_idx_to_full_layer_map[layer_idx] = len(self.full_attn_layer)
+                    self.full_attn_layer += [layer]
+            self.full_attn_layer = nn.ModuleList(self.full_attn_layer)
+            self.windowed_blocks_consecutive = nn.ModuleList(self.windowed_blocks_consecutive)
+        else:
+            self.blocks = nn.ModuleList([
+                Qwen2_5_VisionBlock(
+                    dim=self.hidden_size,
+                    num_heads=self.num_heads,
+                    mlp_hidden_dim=vision_config.intermediate_size,
+                    act_fn=_ACTIVATION_REGISTRY[vision_config.hidden_act],
+                    norm_layer=norm_layer,
+                    quant_config=quant_config,
+                    prefix=f"{prefix}.blocks.{layer_idx}")
+                for layer_idx in range(depth)
+            ])
         self.merger = Qwen2_5_VisionPatchMerger(
             d_model=vision_config.out_hidden_size,
             context_dim=self.hidden_size,
@@ -610,6 +644,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.merger",
         )
+
 
     @property
     def dtype(self) -> torch.dtype:
@@ -751,23 +786,28 @@ class Qwen2_5_VisionTransformer(nn.Module):
 
         # transformers
         hidden_states = x.unsqueeze(1)
-        for layer_num, blk in enumerate(self.blocks):
-            if layer_num in self.fullatt_block_indexes:
-                cu_seqlens_now = cu_seqlens
-                #fullatt_block_attn_mask = None
-            else:
-                cu_seqlens_now = None
-            #    fullatt_block_attn_mask = None
-            #print('xxx', layer_num, self.fullatt_block_indexes)
-            #print(type(cu_seqlens_now))
-            #print(type(cu_seqlens))
-            #print(cu_seqlens_now)
-            #print((cu_seqlens))
-            
-            hidden_states = blk(hidden_states,
-                                cu_seqlens=cu_seqlens_now,
-                                rotary_pos_emb=rotary_pos_emb)
-            #print(hidden_states.sum(), '....')
+
+        if self.batched:
+            for windowed, full in zip(self.windowed_blocks_consecutive, self.full_attn_layer):
+                #breakpoint()
+                hidden_states, _, _ = windowed((hidden_states, None, rotary_pos_emb))
+                hidden_states, _, _ = full((hidden_states, cu_seqlens, rotary_pos_emb))
+        else:
+            for layer_num, blk in enumerate(self.blocks):
+                if layer_num in self.fullatt_block_indexes:
+                    cu_seqlens_now = cu_seqlens
+                    #fullatt_block_attn_mask = None
+                else:
+                    cu_seqlens_now = None
+                #    fullatt_block_attn_mask = None
+                #print('xxx', layer_num, self.fullatt_block_indexes)
+                #print(type(cu_seqlens_now))
+                #print(type(cu_seqlens))
+                #print(cu_seqlens_now)
+                #print((cu_seqlens))
+
+                hidden_states, _, _ = blk((hidden_states, cu_seqlens_now, rotary_pos_emb))
+                #print(hidden_states.sum(), '....')
 
         # adapter
         hidden_states = self.merger(hidden_states)
@@ -790,9 +830,25 @@ class Qwen2_5_VisionTransformer(nn.Module):
             ("qkv_proj", "v_proj", "v"),
         ]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
+
         loaded_params: Set[str] = set()
 
         for name, loaded_weight in weights:
+            if self.batched:
+                '''
+                blocks.0.* must be converted to windowed_blocks_consecutive.0.0.* etc
+                '''
+                if name.startswith('blocks'):
+                    #print('......', name)
+                    layer_idx = int(name.split('.')[1])
+                    if layer_idx in self.fullatt_block_indexes:
+                        full_layer_idx = self.layer_idx_to_full_layer_map[layer_idx]
+                        prefix = f'full_attn_layer.{full_layer_idx}.'
+                    else:
+                        group, layer_in_group = self.layer_idx_to_windowed_layer_map[layer_idx]
+                        prefix = f'windowed_blocks_consecutive.{group}.{layer_in_group}.'
+                    name = prefix + '.'.join(name.split('.')[2:])
+                    #print('modified name', name)
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
