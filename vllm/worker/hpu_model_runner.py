@@ -147,15 +147,15 @@ def pad_list(input, k, v):
     padding = target_len - input_len
     return input + [v] * padding
 
-
+# remove?
 def _get_multimodal_bucket(curr_num_image_patches):
-    FIXED_MULTIMODAL_BUCKETS = [16, 1600, 3200, 4800, 6400, 9600]
+    FIXED_MULTIMODAL_BUCKETS = [64, 1600, 3200, 4800, 6400, 9600]
     for mm_bucket in FIXED_MULTIMODAL_BUCKETS:
         if curr_num_image_patches <= mm_bucket:
             return mm_bucket
     return curr_num_image_patches
 
-
+# remove?
 def pad_multimodal_data(mm_data):
     pixel_values = mm_data["pixel_values"]
     image_grid_thw = mm_data["image_grid_thw"]
@@ -527,6 +527,7 @@ class HpuModelAdapter:
 
             with compile_only_mode_context():
                 #calculate embedding for multimodal
+                #breakpoint()
                 image_input = self.model._parse_and_validate_image_input(
                     **kwargs)
                 video_input = self.model._parse_and_validate_video_input(
@@ -548,6 +549,7 @@ class HpuModelAdapter:
 
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
                                  virtual_engine):
+            #breakpoint()
             hidden_states = self.model(*args, **kwargs)
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
             if selected_token_indices is not None:
@@ -1176,7 +1178,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     )
 
                 # padding image patches (pixel_values, image_grid_thw)
-                mm_kwargs = pad_multimodal_data(mm_kwargs)
+                #mm_kwargs = pad_multimodal_data(mm_kwargs)
 
                 # special processing for mrope position deltas.
                 if self.model_is_mrope:
@@ -2302,17 +2304,26 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_ctx.generate_prompt_buckets()
 
         if supports_multimodal(self.model.model):
-            #TODO:
-            # Multimodal buckets are based on H,W , it should be changed to be aligned with multimodal paddings.
-            # Also need to move to HPUBucketingContext.
-            #Multimodal bucket : [[560, 560], [560, 1120], [560, 1680], [1120, 560], [1120, 1120], [1120, 1680], [1680, 560], [1680, 1120], [1680, 1680]]
-            VLLM_MULTIMODAL_BUCKET = 560  #Pick number divisible by 28(patchsize*mergesize), this can be env.
-            max_seq_len = 1120  #2048  #self.max_num_batched_tokens
-            bucket = VLLM_MULTIMODAL_BUCKET
-            self.multimodal_buckets = [
-                [h, w] for h in range(bucket, max_seq_len + 1, bucket)
-                for w in range(bucket, max_seq_len + 1, bucket)
-            ]
+            if True:
+                FIXED_MULTIMODAL_BUCKETS = self.model.model.FIXED_MULTIMODAL_BUCKETS
+                # [1600, 3200, 4800, 6400, 9600]
+                # 1600 means an image with 1600*14*14 ppixels, ie 560x560
+                self.multimodal_buckets = [[112, total_size * 14 * 14 / 112] for total_size in FIXED_MULTIMODAL_BUCKETS]
+                # TODO This is qwen2.5vl/model specific code here. This should come from model file?
+            else:
+                #TODO:
+                # Multimodal buckets are based on H,W , it should be changed to be aligned with multimodal paddings.
+                # Also need to move to HPUBucketingContext.
+                #Multimodal bucket : [[560, 560], [560, 1120], [560, 1680], [1120, 560], [1120, 1120], [1120, 1680], [1680, 560], [1680, 1120], [1680, 1680]]
+                VLLM_MULTIMODAL_BUCKET = 560  #Pick number divisible by 28(patchsize*mergesize), this can be env.
+                max_seq_len = 1120  #2048  #self.max_num_batched_tokens
+                bucket = VLLM_MULTIMODAL_BUCKET
+                # TODO this number and self.FIXED_MULTIMODAL_BUCKETS should be in sync
+                self.multimodal_buckets = [
+                    [h, w] for h in range(bucket, max_seq_len + 1, bucket)
+                    for w in range(bucket, max_seq_len + 1, bucket)
+                ]
+                breakpoint()
             print("Multimodal bucket :", self.multimodal_buckets)
 
         if not self.is_pooler:

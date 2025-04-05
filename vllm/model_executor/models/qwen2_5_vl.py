@@ -62,7 +62,7 @@ from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 
 from habana_frameworks.torch.hpex.kernels import FusedSDPA
-
+import os
 import habana_frameworks.torch.core as htcore
 
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
@@ -79,7 +79,7 @@ is_hpu = current_platform.is_hpu()
 
 # === Vision Inputs === #
 
-
+# Jimin to add marksteps in case the inp is very big
 class AttentionLongSequence:
     @staticmethod
     def forward(q, k, v, mask, q_block_size):
@@ -359,11 +359,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                 for i in range(1, len(cu_seqlens)):
                     start_idx = cu_seqlens[i - 1]
                     end_idx = cu_seqlens[i]
-                    try:
-                        q_i = q[:, start_idx:end_idx]
-                    except:
-                        breakpoint()
-                        print()
+                    q_i = q[:, start_idx:end_idx]
                     k_i = k[:, start_idx:end_idx]
                     v_i = v[:, start_idx:end_idx]
                     q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
@@ -620,6 +616,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         return self.patch_embed.proj.weight.device
 
     def rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
+        #breakpoint()
         pos_ids = []
         #TODO:  h//2 w//2 -> DOESN"T WORK in PT_COMPILE_ONLY_MODE(warmup)
         #Shape or reshape() need to be predetermined, not depends on the tensor value itself.
@@ -719,7 +716,6 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 dtype=grid_thw.dtype
                 if torch.jit.is_tracing() else torch.int32)
             cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
-
         seq_len, _ = hidden_states.size()
         hidden_states = hidden_states.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
@@ -733,7 +729,6 @@ class Qwen2_5_VisionTransformer(nn.Module):
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
-
         return hidden_states, rotary_pos_emb, cu_seqlens, cu_window_seqlens, window_index
 
     def forward(
@@ -936,6 +931,12 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
+        envvar = os.environ.get('FIXED_MULTIMODAL_BUCKETS', "")
+        if envvar == "":
+            self.FIXED_MULTIMODAL_BUCKETS = [1600, 3200, 4800, 6400] # add 768 a small bucket maybe?
+        else:
+            self.FIXED_MULTIMODAL_BUCKETS = [int(i) for i in envvar.split(',')]
+        assert all([k%64 == 0 for k in self.FIXED_MULTIMODAL_BUCKETS]), f"FIXED_MULTIMODAL_BUCKETS should all be multiples of 64, but was {self.FIXED_MULTIMODAL_BUCKETS}"
 
     @cached_property
     def sampler(self):
@@ -1066,6 +1067,56 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 video_embeds=video_embeds,
                 video_grid_thw=video_grid_thw)
 
+    def _get_multimodal_bucket(self, curr_num_image_patches):
+        for mm_bucket in self.FIXED_MULTIMODAL_BUCKETS:
+            if curr_num_image_patches <= mm_bucket:
+                return mm_bucket
+        self.FIXED_MULTIMODAL_BUCKETS += [curr_num_image_patches] # a shape larger than any that was compiled before. its gonna be compiled now, so save it for the future
+        # TODO test this with some appropriate test
+        return curr_num_image_patches
+
+    def pad_multimodal_data(self, pixel_values, image_grid_thw):
+        
+        #pixel_values = mm_data["pixel_values"]
+        #image_grid_thw = mm_data["image_grid_thw"]
+        assert pixel_values.shape[
+            0] % 64 == 0, '[testing version] needs 64 aligned resolution'
+        #print('.........', pixel_values.shape, image_grid_thw)
+
+        desired_number_of_pixels = self._get_multimodal_bucket(pixel_values.shape[0])
+        padding_len = desired_number_of_pixels - pixel_values.shape[0]
+        if padding_len <= 0:
+            #breakpoint()
+            return pixel_values, image_grid_thw
+
+        logger.info(
+            f"[MM_BUCKETING] Padding current number pixel {pixel_values.shape[0]} to {desired_number_of_pixels}"
+        )
+        # needs to make sure padding_len is even
+        assert padding_len % 64 == 0, '[testing version] padding needs to be multiple of 64'
+
+        constant_value = -100
+        pixel_values = torch.cat([
+            pixel_values,
+            torch.ones((padding_len, pixel_values.shape[1]), device=pixel_values.device) * constant_value
+        ])
+
+        image_grid_thw = torch.cat(
+            [image_grid_thw,
+             torch.tensor([[1, 8, padding_len // 8]], device=image_grid_thw.device)])
+        # images are always multiple of 64 (from being 112x112 aligned
+        # So "pixel_values" is 64x, desired_number_of_pixels = 64y (all our buckets will be 64 aligned)
+        # so padding_len = 64(y-x)
+        #try:
+        assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
+        #except:
+        #    breakpoint()
+        #    print()
+
+        #mm_data["pixel_values"] = pixel_values
+        #mm_data["image_grid_thw"] = image_grid_thw
+        return pixel_values, image_grid_thw
+
     def _process_image_input(
             self,
             image_input: Qwen2_5_VLImageInputs) -> tuple[torch.Tensor, ...]:
@@ -1078,18 +1129,81 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         else:
             pixel_values = image_input["pixel_values"].type(self.visual.dtype)
             #Moved dynamic calculation to pre_attn, and post_attn and keep the visual() block to be static to include only VisionTransformer and VisionMerger.
-            pixel_values, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
-                pixel_values, grid_thw)
-            assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
-            #print('.......', cu_seqlens, expand_to_max(cu_seqlens, 10))
-            expanded_cu_seqlens = expand_to_max(cu_seqlens, 10)
-            htcore.mark_step() # padding in expand_to_max is dynamic
-            hidden_states = self.visual(pixel_values,
-                                        rotary_pos_emb=rot_pos_emb,
-                                        cu_seqlens=expanded_cu_seqlens,)
-                                        #cu_window_seqlens=cu_window_seqlens)
-            image_embeds = self.visual.post_attn(hidden_states, window_index)
-            #image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
+
+            if True:
+                '''
+                go thru grid_thw
+                say grid_thw is 1,16,16 and 1,128,128
+                say u have 2 buckets: 512 and 16384
+
+                slice pixel_values at 16*16 = 256 (1st img) and attach a new "image" to it, to pad it up to 512
+                attach a new
+                '''
+
+                offset = 0
+                # right now we do 1 img at a time, but if we have multiple small images we could pack them in together
+                # Like say if I have image = 224, 224, 6400, and my buckets are: 1024, 6400
+                # instead of padding 224->1024 and 224->1024, we can pack both 224 into 1 and send it to 1024
+                results = []
+                for img_idx in range(grid_thw.shape[0]):
+                    img_shape = grid_thw[img_idx, :].unsqueeze(0)
+                    curr_img_size = img_shape.prod()
+
+                    pixel_values_curr_img = pixel_values[offset : offset + curr_img_size, :]
+                    #breakpoint()
+                    offset += curr_img_size
+                    pixel_values_curr_img_padded, img_shape_padded = self.pad_multimodal_data(pixel_values_curr_img, img_shape)
+
+                    pixel_values_curr_img_padded, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
+                    pixel_values_curr_img_padded, img_shape_padded)
+
+                    assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
+
+                    expanded_cu_seqlens = expand_to_max(cu_seqlens, 3) # either a single image, or a single image and its accompanying pad image, so only max expansion to 3
+                    htcore.mark_step()
+                    #breakpoint()
+                    hidden_states = self.visual(pixel_values_curr_img_padded,
+                                            rotary_pos_emb=rot_pos_emb,
+                                            cu_seqlens=expanded_cu_seqlens,)
+                    htcore.mark_step()
+                    image_embeds = self.visual.post_attn(hidden_states, window_index)
+                    results += [image_embeds[:img_shape_padded[0].prod()//4, :]] # slice image_embeds to remove the padded parts. instead of hardcoding 4, maybe use config spatial merge etc
+                results_cat = torch.concat(results)
+                image_embeds = results_cat
+            else:
+                pixel_values, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
+                    pixel_values, grid_thw)
+                assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
+                #print('.......', cu_seqlens, expand_to_max(cu_seqlens, 10))
+                expanded_cu_seqlens = expand_to_max(cu_seqlens, 10)
+                htcore.mark_step() # padding in expand_to_max is dynamic
+                #breakpoint()
+                hidden_states = self.visual(pixel_values,
+                                            rotary_pos_emb=rot_pos_emb,
+                                            cu_seqlens=expanded_cu_seqlens,)
+                                            #cu_window_seqlens=cu_window_seqlens)
+                htcore.mark_step()
+                image_embeds = self.visual.post_attn(hidden_states, window_index)
+                #breakpoint()
+                #print()
+                #image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
+            '''
+            TODO for grid_thw 16x16, 72x72, the first (16x16/4)=64 values kind of match but not fully. the last (72x72/4) fully match
+            why doesnt it  match for the first image?
+            which one is "correct"?
+            (Pdb) results_cat[64]
+            tensor([-3.4375, -1.3359,  0.5156,  ..., -2.7969,  0.8867,  0.0801],
+                   device='hpu:0', dtype=torch.bfloat16)
+            (Pdb) image_embeds[64]
+            tensor([-3.4375, -1.3359,  0.5156,  ..., -2.7969,  0.8867,  0.0801],
+                   device='hpu:0', dtype=torch.bfloat16)
+            (Pdb) results_cat[63]
+            tensor([-0.5469, -1.4219,  0.2236,  ..., -0.5547, -0.4199, -0.2969],
+                   device='hpu:0', dtype=torch.bfloat16)
+            (Pdb) image_embeds[63]
+            tensor([-0.5156, -1.3594,  0.1758,  ..., -0.5234, -0.4180, -0.3105],
+                   device='hpu:0', dtype=torch.bfloat16)
+            '''
 
         # Split concatenated embeddings for each image item.
         merge_size = self.visual.spatial_merge_size
@@ -1189,6 +1303,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         inputs_embeds = self.get_input_embeddings(input_ids)
         if image_input is not None:
+            #breakpoint()
             image_embeds = self._process_image_input(image_input)
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids,
