@@ -1360,9 +1360,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         dummy_slots = itertools.cycle(
             range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
 
+        is_apc = self.vllm_config.cache_config.enable_prefix_caching
+
         for seq_group_metadata in seq_group_metadata_list:
-            assert not seq_group_metadata.is_prompt
-            assert seq_group_metadata.token_chunk_size == 1
+            print(seq_group_metadata.token_chunk_size)
+            if seq_group_metadata.is_prompt and is_apc:
+                print("APC + fully cached")
+                seq_group_metadata.token_chunk_size = 1
+                seq_group_metadata.is_prompt = False
+                #seq_group_meta.computed_block_nums 
+            else:
+                assert not seq_group_metadata.is_prompt
+                assert seq_group_metadata.token_chunk_size == 1
 
             seq_ids = list(seq_group_metadata.seq_data.keys())
             lora_id = seq_group_metadata.lora_int_id
@@ -1385,10 +1394,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if output is None:
                     generation_token = seq_data.get_last_token_id()
                     input_tokens.append([generation_token])
+                    print(input_tokens)
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
                 input_positions.append([position])
+                print(input_positions)
 
                 if self.model_is_mrope:
                     if seq_data.mrope_position_delta is not None:
@@ -1604,6 +1615,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_placeholder_index_maps=None,
             enable_kv_scales_calculation=False,
         )
+
+        print("toks", input_tokens, "posits", input_positions, "cached shit", attn_metadata.block_list)
+
+        print(PrepareDecodeMetadata(input_tokens=input_tokens,
+                                     input_positions=input_positions,
+                                     attn_metadata=attn_metadata,
+                                     lora_index_mapping=lora_index_mapping,
+                                     lora_prompt_mapping=lora_prompt_mapping,
+                                     lora_requests=lora_requests,
+                                     slot_mapping=slot_mapping,
+                                     lora_ids=lora_ids))
+
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -1643,10 +1666,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prefill_reqs = []
         decode_reqs = []
         for seq_group_meta in seq_group_metadata_list:
-            if seq_group_meta.is_prompt:
+            if seq_group_meta.computed_block_nums is not None and len(
+                    seq_group_meta.computed_block_nums
+            ) > 0 and self.vllm_config.cache_config.enable_prefix_caching:
+                prefix_cached_len = len(
+                    seq_group_meta.computed_block_nums) * self.block_size
+                seq_len = seq_group_meta.seq_data[list(
+                    seq_group_meta.seq_data.keys())[0]].get_len()
+                is_seq_prompt = prefix_cached_len > seq_len
+            else:
+                is_seq_prompt = seq_group_meta.is_prompt
+            if is_seq_prompt:
                 prefill_reqs.append(seq_group_meta)
             else:
+                #seq_group_meta.is_prompt = False
                 decode_reqs.append(seq_group_meta)
+
+        #import pdb; pdb.set_trace()
+        print("@@@@@@@@@@", len(prefill_reqs), len(decode_reqs))
 
         # Prepare input tensors.
         (
