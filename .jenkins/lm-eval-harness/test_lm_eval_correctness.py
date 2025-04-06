@@ -4,7 +4,7 @@ LM eval harness on model to compare vs HF baseline computed offline.
 Configs are found in configs/$MODEL.yaml
 
 * export LM_EVAL_TEST_DATA_FILE=configs/Meta-Llama-3-70B-Instruct.yaml
-* export LM_EVAL_TP_SIZE=4 
+* export LM_EVAL_TP_SIZE=4
 * pytest -s test_lm_eval_correctness.py
 """
 import atexit
@@ -12,6 +12,7 @@ import itertools
 import os
 import statistics
 import time
+import logging
 from pathlib import Path
 
 import lm_eval
@@ -19,6 +20,19 @@ import numpy
 import yaml
 
 import vllm
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configure lm_eval logging
+lm_eval_logger = logging.getLogger('lm-eval')
+lm_eval_logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(name)s - %(levelname)s - %(asctime)s - %(message)s')
+handler.setFormatter(formatter)
+lm_eval_logger.addHandler(handler)
 
 RTOL = 0.06
 TEST_DATA_FILE = os.environ.get(
@@ -30,6 +44,11 @@ REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
 
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
+LORA_ADAPTER_PATH = os.environ.get("LORA_ADAPTER_PATH", None)
+
+INFERENCE_SERVING = os.environ.get("INFERENCE_SERVING", "false") in ['1', 'true']
+
+NUM_CONCURRENT = os.environ.get("NUM_CONCURRENT", 128)
 
 def setup_fp8():
     os.environ[
@@ -53,26 +72,51 @@ def launch_lm_eval(eval_config):
                  f"max_num_seqs={max_num_seqs}," \
                  f"enable_prefix_caching=False," \
                  f"trust_remote_code={trust_remote_code}"
+
     if eval_config.get("fp8"):
         model_args += ",quantization=inc," \
             "kv_cache_dtype=fp8_inc," \
             "weights_load_device=cpu"
+
     if eval_config.get("num_scheduler_steps"):
         model_args += \
-            f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
+            f"num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
+
+    # if LORA_ADAPTER_PATH:
+    #     model_args += f",peft={LORA_ADAPTER_PATH}"
+    if LORA_ADAPTER_PATH:
+        model_args += f",enable_lora=True,lora_local_path={LORA_ADAPTER_PATH}"
+
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
         kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']
     if 'apply_chat_template' in eval_config:
         kwargs['apply_chat_template'] = eval_config['apply_chat_template']
-    results = lm_eval.simple_evaluate(
-        model="vllm",
-        model_args=model_args,
-        tasks=[task["name"] for task in eval_config["tasks"]],
-        num_fewshot=eval_config["num_fewshot"],
-        limit=eval_config["limit"],
-        batch_size="auto",
-        **kwargs)
+    
+    if INFERENCE_SERVING:
+        model_args = \
+            f"model={eval_config['model_name']}," \
+            "base_url=http://0.0.0.0:8080/v1/completions," \
+            f"num_concurrent={NUM_CONCURRENT}," \
+            "max_retries=3"
+
+        if LORA_ADAPTER_PATH:
+            model_args += f",enable_lora=True,lora_local_path={LORA_ADAPTER_PATH}"
+
+        results = lm_eval.simple_evaluate(
+            model="local-completions",
+            model_args=model_args,
+            tasks=[task["name"] for task in eval_config["tasks"]]
+        )
+    else:
+        results = lm_eval.simple_evaluate(
+            model="vllm",
+            model_args=model_args,
+            tasks=[task["name"] for task in eval_config["tasks"]],
+            num_fewshot=eval_config["num_fewshot"],
+            limit=eval_config["limit"],
+            batch_size="auto",
+            **kwargs)
 
     return results
 
