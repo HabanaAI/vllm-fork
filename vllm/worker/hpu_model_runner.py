@@ -685,6 +685,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.cached_step_inputs: List[
             ModelInputForHPUWithSamplingMetadata] = []
 
+        # PP intermediate tensors
+        self.intermediate_tensors: IntermediateTensors = None
+
+    def get_intermediate_tensors(self) -> IntermediateTensors:
+        return self.intermediate_tensors
+
+    def set_intermediate_tensors(self, intermediate_tensors: IntermediateTensors) -> None:
+        self.intermediate_tensors = intermediate_tensors
+
     def _set_gc_threshold(self) -> None:
         # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
         # for comprehensive description of gc generations.
@@ -1703,7 +1712,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_single_step:
                 intermediate_tensors = None
-                if not get_pp_group().is_first_rank:
+                if self.parallel_config.pipeline_parallel_size > 1:
                     intermediate_tensors = \
                         self.model.make_empty_intermediate_tensors(
                             batch_size=batch_size,
@@ -2140,6 +2149,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 seq_group_metadata_list, finished_requests_ids)
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
+
+            # Init PP Intermediate Tensors
+            if self.parallel_config.pipeline_parallel_size > 1:
+                self.intermediate_tensors = self.model.make_empty_intermediate_tensors(
+                    batch_size=model_input.batch_size_padded,
+                    context_size=model_input.input_tokens.size(1) if is_prompt else 1,
+                    dtype=self.model_config.dtype,
+                    device=self.device)
 
         return dataclasses.replace(model_input,
                                    sampling_metadata=sampling_metadata,
