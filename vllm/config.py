@@ -2627,7 +2627,7 @@ class KVTransferConfig(BaseModel):
 
     # The device used by kv connector to buffer the KV cache.
     # Currently only support 'cuda'.
-    kv_buffer_device: Optional[str] = "cuda"
+    kv_buffer_device: Optional[str] = "cpu"
 
     # The buffer size for TorchDistributedConnector. Measured in number of
     # bytes. Recommended value: 1e9 (about 1GB).

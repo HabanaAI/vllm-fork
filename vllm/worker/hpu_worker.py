@@ -510,13 +510,14 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
 
 def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
+    vllm_config: VllmConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
     backend = hpu_backend_string()
+    parallel_config = vllm_config.parallel_config
     init_distributed_environment(parallel_config.world_size,
                                  rank,
                                  distributed_init_method,
@@ -553,7 +554,7 @@ def init_worker_distributed_environment(
     assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
-
+    ensure_kv_transfer_initialized(vllm_config)
 
 def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
                                 max_model_len) -> None:

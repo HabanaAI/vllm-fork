@@ -17,7 +17,7 @@ from vllm.sequence import IntermediateTensors
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
-
+    from vllm.worker.hpu_model_runner import ModelInputForHPUWithSamplingMetadata
 
 class KVConnectorBase(ABC):
     """
@@ -120,4 +120,25 @@ class KVConnectorBase(ABC):
 
         """
 
+        raise NotImplementedError
+
+    @abstractmethod
+    def send_kv_caches_and_hidden_states_hpu(
+        self,
+        model_executable: torch.nn.Module,
+        model_input: "ModelInputForHPUWithSamplingMetadata",
+        kv_caches: List[torch.Tensor],
+        hidden_or_intermediate_states: Union[torch.Tensor,
+                                             IntermediateTensors],
+    ) -> None:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def recv_kv_caches_and_hidden_states_hpu(
+        self, model_executable: torch.nn.Module,
+        model_input: "ModelInputForHPUWithSamplingMetadata",
+        attn_metadata: object,
+        kv_caches: List[torch.Tensor]
+    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+               "ModelInputForHPUWithSamplingMetadata"]:
         raise NotImplementedError
