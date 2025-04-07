@@ -252,14 +252,15 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     valid_seq_lengths=attn_metadata.seq_lens_tensor,
                     **self.common_attention_args())
             else:
-                # TODO: enable FusedSDPA
-                out = HPUPagedAttention.forward_prefix(
+                out = ops.prompt_attention(
+                    impl=self.prefill_impl,
                     query=query.view(query_shape),
                     key=key.view(kv_shape),
                     value=value.view(kv_shape),
                     key_cache=key_cache,
                     value_cache=value_cache,
                     block_list=attn_metadata.block_list,
+                    is_causal=True,
                     attn_bias=attn_metadata.attn_bias,
                     **self.common_attention_args())
             output = out.reshape(batch_size, seq_len, hidden_size)
