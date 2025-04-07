@@ -26,7 +26,7 @@ jobs:
           token: ${{ secrets.GH_PAT }}
       - name: Parse Comment
         run: |
-          MAINTAINERS=$(grep -E '^[^#]' .github/CODEOWNERS | tr -d '@*')
+          MAINTAINERS=$(grep -Eh '^[^#]' .github/CODEOWNERS .github/TESTOWNERS | tr -d '@*' | tr '\n' ' ')
           COMMENTER=${{ github.event.comment.user.login }}
           echo "Maintainers are: ${MAINTAINERS}"
           echo "Commenter Is: ${COMMENTER}"
@@ -297,9 +297,9 @@ jobs:
           with:
             fetch-depth: 0
             token: ${{ secrets.GH_PAT }}
-        - name: Delete Temp Branch
-          run: |
-              git push origin --delete ${{ needs.read_codeowners.outputs.pr_branch }}
+        # - name: Delete Temp Branch
+        #   run: |
+        #       git push origin --delete ${{ needs.read_codeowners.outputs.pr_branch }}
         - name: Check Test Results
           run: |
             test_result="${{ needs.TestRun.result }}"
