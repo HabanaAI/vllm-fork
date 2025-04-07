@@ -63,7 +63,6 @@ class HPUPagedAttention:
     def forward_decode(**kwargs) -> torch.Tensor:
         return ops.flat_pa(**kwargs)
 
-
     @staticmethod
     def swap_blocks(
         src_kv_cache: Tuple[torch.Tensor, torch.Tensor],
