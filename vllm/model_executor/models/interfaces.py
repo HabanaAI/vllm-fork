@@ -4,6 +4,7 @@ from typing import (TYPE_CHECKING, ClassVar, Dict, List, Literal, Optional,
                     Protocol, Type, Union, overload, runtime_checkable)
 
 import torch
+from torch import Tensor
 from typing_extensions import TypeIs, TypeVar
 
 from vllm.logger import init_logger
@@ -20,6 +21,7 @@ logger = init_logger(__name__)
 
 T = TypeVar("T", default="NestedTensors")
 
+MultiModalEmbeddings = Union[list[Tensor], Tensor, tuple[Tensor, ...]]
 
 @runtime_checkable
 class SupportsMultiModal(Protocol):

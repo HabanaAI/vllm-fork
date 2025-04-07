@@ -888,10 +888,17 @@ class Qwen2VLProcessingInfo(BaseProcessingInfo):
 
         return num_frames
 
-    def get_num_frames_with_most_features(self, seq_len: int) -> int:
-        mm_config = self.ctx.get_mm_config()
-        max_images = mm_config.limit_per_prompt.get("image", 1)
-        max_videos = mm_config.limit_per_prompt.get("video", 1)
+    def get_num_frames_with_most_features(
+          self,
+          seq_len: int,
+          mm_counts: Mapping[str, int]=None) -> int:
+        if mm_counts is None:
+            mm_config = self.ctx.get_mm_config()
+            max_images = mm_config.limit_per_prompt.get("image", 1)
+            max_videos = mm_config.limit_per_prompt.get("video", 1)
+        else:
+            max_images = mm_counts.get("image", 0)
+            max_videos = mm_counts.get("video", 0)
 
         max_image_tokens = self.get_max_image_tokens() * max_images
         max_total_frames = self._get_max_video_frames(seq_len -
@@ -901,13 +908,16 @@ class Qwen2VLProcessingInfo(BaseProcessingInfo):
 
         return max(max_frames_per_video, 1)
 
-    def get_max_video_tokens(self, seq_len: int) -> int:
+    def get_max_video_tokens(
+            self,
+            seq_len: int,
+            mm_counts: Mapping[str, int] = None) -> int:
         target_width, target_height = self.get_image_size_with_most_features()
 
         return self.get_num_video_tokens(
             image_width=target_width,
             image_height=target_height,
-            num_frames=self.get_num_frames_with_most_features(seq_len),
+            num_frames=self.get_num_frames_with_most_features(seq_len, mm_counts),
             image_processor=None,
         )
 

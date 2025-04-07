@@ -565,6 +565,39 @@ def run_qwen2_5_vl(question: str, modality: str):
     stop_token_ids = None
     return llm, prompt, stop_token_ids
 
+# Qwen2.5-Omni
+def run_qwen2_5_omni(question: str, modality: str):
+    model_name = "Qwen/Qwen2.5-Omni-7B"
+
+    llm = LLM(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        mm_processor_kwargs={
+            "min_pixels": 28 * 28,
+            "max_pixels": 1280 * 28 * 28,
+        },
+        disable_mm_preprocessor_cache=args.disable_mm_preprocessor_cache,
+        dtype="bfloat16",
+    )
+
+    if modality == "image":
+        placeholder = "<|IMAGE|>"
+    elif modality == "video":
+        placeholder = "<|VIDEO|>"
+
+    default_system = (
+        "You are Qwen, a virtual human developed by the Qwen Team, Alibaba "
+        "Group, capable of perceiving auditory and visual inputs, as well as "
+        "generating text and speech.")
+
+    prompt = (f"<|im_start|>system\n{default_system}<|im_end|>\n"
+              f"<|im_start|>user\n<|vision_bos|>{placeholder}<|vision_eos|>"
+              f"{question}<|im_end|>\n"
+              "<|im_start|>assistant\n")
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
 
 model_example_map = {
     "aria": run_aria,
@@ -593,6 +626,7 @@ model_example_map = {
     "qwen_vl": run_qwen_vl,
     "qwen2_vl": run_qwen2_vl,
     "qwen2_5_vl": run_qwen2_5_vl,
+    "qwen2_5_omni": run_qwen2_5_omni,
 }
 
 

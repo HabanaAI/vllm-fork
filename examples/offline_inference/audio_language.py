@@ -67,6 +67,34 @@ def run_qwen2_audio(question: str, audio_count: int):
     stop_token_ids = None
     return llm, prompt, stop_token_ids
 
+# Qwen2.5-Omni
+def run_qwen2_5_omni(question: str, audio_count: int):
+    model_name = "Qwen/Qwen2.5-Omni-7B"
+
+    llm = LLM(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=5,
+        limit_mm_per_prompt={"audio": audio_count},
+        dtype="bfloat16",
+    )
+
+    audio_in_prompt = "".join([
+        "<|audio_bos|><|AUDIO|><|audio_eos|>\n" for idx in range(audio_count)
+    ])
+
+    default_system = (
+        "You are Qwen, a virtual human developed by the Qwen Team, Alibaba "
+        "Group, capable of perceiving auditory and visual inputs, as well as "
+        "generating text and speech.")
+
+    prompt = (f"<|im_start|>system\n{default_system}<|im_end|>\n"
+              "<|im_start|>user\n"
+              f"{audio_in_prompt}{question}<|im_end|>\n"
+              "<|im_start|>assistant\n")
+    stop_token_ids = None
+    return llm, prompt, stop_token_ids
+
 
 def run_minicpmo(question: str, audio_count: int):
     model_name = "openbmb/MiniCPM-o-2_6"
@@ -97,6 +125,7 @@ def run_minicpmo(question: str, audio_count: int):
 model_example_map = {
     "ultravox": run_ultravox,
     "qwen2_audio": run_qwen2_audio,
+    "qwen2_5_omni": run_qwen2_5_omni,
     "minicpmo": run_minicpmo
 }
 

@@ -30,6 +30,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
 from vllm.sampling_params import SamplingType
+from vllm.transformers_utils.config import uses_mrope
 from vllm.transformers_utils.tokenizer_group import init_tokenizer_from_configs
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LayerBlockType, cdiv,
                         is_fake_hpu, is_pin_memory_available)
@@ -516,7 +517,9 @@ class HpuModelAdapter:
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
-        if self.layer_names is not None:
+        model_config = getattr(self.model, "config", None)
+        model_is_mrope = uses_mrope(model_config)
+        if self.layer_names is not None and not model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config):
             hidden_states = self.model(*args, **kwargs)

@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import (Callable, Generator, ItemsView, Iterable, Mapping,
                              Sequence)
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import lru_cache
 from typing import (TYPE_CHECKING, Generic, NamedTuple, Optional, Protocol,
                     TypeVar, Union)
@@ -34,6 +35,141 @@ _S = TypeVar("_S", str, list[int])
 
 PromptSeq = Union[str, list[int]]
 """A token sequence (list of token IDs) or text."""
+
+
+@dataclass
+class PromptIndex:
+    """Resolves to an index in the prompt."""
+    get_match_index: Callable[[AnyTokenizer, PromptSeq], Optional[int]]
+
+
+class PromptIndexTargets:
+
+    @staticmethod
+    def start() -> PromptIndex:
+        """
+        Resolves to the start of the prompt (before the first token).
+
+        This results in a match even if the prompt is empty.
+        """
+        return PromptIndex(lambda tok, prompt: 0)
+
+    @staticmethod
+    def prefix(seq: PromptSeq) -> PromptIndex:
+        """
+        Resolves to a location in the prompt after the given prefix.
+        """
+
+        def get_match_index(
+            tokenizer: AnyTokenizer,
+            prompt: PromptSeq,
+        ) -> Optional[int]:
+            prefix = seq
+
+            if isinstance(prompt, str):
+                if not isinstance(prefix, str):
+                    # Make both `str`
+                    prefix = decode_tokens(tokenizer, prefix)
+            else:
+                if isinstance(prefix, str):
+                    # Make both `list[int]`
+                    prefix = encode_tokens(tokenizer,
+                                           prefix,
+                                           add_special_tokens=False)
+
+            match_idx = len(prefix)
+            return match_idx if prompt[:match_idx] == prefix else None
+
+        return PromptIndex(get_match_index)
+
+    @staticmethod
+    def end() -> PromptIndex:
+        """
+        Resolves to the end of the prompt (after the last token).
+
+        This results in a match even if the prompt is empty.
+        """
+        return PromptIndex(lambda tok, prompt: len(prompt))
+
+
+PromptTarget = Union[PromptSeq, PromptIndex]
+"""
+The token sequence or text to update.
+"""
+
+
+@dataclass
+class PromptUpdateDetails(Generic[_S]):
+    """Details about the token sequence or text that are part of the update."""
+
+    full: _S
+    """The full content."""
+
+    features: _S
+    """
+    The part of the content that corresponds to feature placeholders;
+    this will be replaced by the output of the vision encoder during model
+    inference.
+    """
+
+    @staticmethod
+    def from_seq(seq: _S) -> "PromptUpdateDetails[_S]":
+        return PromptUpdateDetails(full=seq, features=seq)
+
+
+PromptUpdateInfo = Union[PromptSeq, PromptUpdateDetails]
+"""
+The token sequence or text that are part of the update.
+
+If only part of the content corresponds to feature placeholders, you can
+use :class:`PromptUpdateDetails` to specify which part.
+"""
+
+PromptUpdateContent = Union[Callable[[int], PromptUpdateInfo],
+                            PromptUpdateInfo]
+"""
+Given the index of the processed item within :attr:`modality`,
+output the corresponding token sequence (or text).
+
+For convenience, you can directly pass in the token sequence (or text)
+instead of a function if it does not depend on the input.
+"""
+
+
+class UpdateMode(str, Enum):
+    INSERT = "insert"
+    REPLACE = "replace"
+
+
+@dataclass
+class PromptUpdate(ABC):
+    """
+    Defines how to update a prompt with placeholder tokens.
+    """
+
+    modality: str
+    """The modality for which the update is made."""
+
+    target: PromptTarget
+    """The token sequence (or text) to update."""
+
+    @property
+    @abstractmethod
+    def content(self) -> PromptUpdateContent:
+        """The placeholder tokens that are part of the update."""
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def mode(self) -> UpdateMode:
+        """Defines how to update the prompt."""
+        raise NotImplementedError
+
+    def bind(self, tokenizer: AnyTokenizer) -> "BoundPromptUpdate":
+        return BoundPromptUpdate(
+            _origin=self,
+            tokenizer=tokenizer,
+        )
 
 
 @dataclass
@@ -235,6 +371,77 @@ class _BoundPromptReplacementGroup:
     full: _BoundPromptSequence
     features: _BoundPromptSequence
 
+@dataclass
+class _BoundPromptContent:
+    full: _BoundPromptSequence
+    features: _BoundPromptSequence
+
+@dataclass
+class BoundPromptUpdate:
+    """
+    A :class:`PromptUpdate` bound to a tokenizer to automatically convert
+    :attr:`target` and the result of :meth:`get_content` between
+    token sequence and text representations.
+    """
+    _origin: PromptUpdate
+    tokenizer: AnyTokenizer = field(repr=False)
+
+    def __post_init__(self) -> None:
+        self._content_cache = dict[int, _BoundPromptContent]()
+
+    @property
+    def modality(self) -> str:
+        return self._origin.modality
+
+    @property
+    def target(self) -> Union[_BoundPromptSequence, PromptIndex]:
+        """The token sequence (or text) to update."""
+        target = self._origin.target
+
+        if isinstance(target, PromptIndex):
+            return target
+
+        return _BoundPromptSequence.from_seq(self.tokenizer, target)
+
+    @property
+    def content(self) -> PromptUpdateContent:
+        """The placeholder tokens that are part of the update."""
+        return self._origin.content
+
+    @property
+    def mode(self) -> UpdateMode:
+        """Defines how to update the prompt."""
+        return self._origin.mode
+
+    def get_content(self, item_idx: int) -> _BoundPromptContent:
+        """
+        Given the index of the processed item within :attr:`modality`,
+        output the token sequence (or text) to update.
+        """
+        content = self.content
+        if callable(content):
+            cache_key = item_idx
+            if cache_key in self._content_cache:
+                return self._content_cache[cache_key]
+
+            content = content(item_idx)
+        else:
+            cache_key = None
+
+        if not isinstance(content, PromptUpdateDetails):
+            content = PromptUpdateDetails.from_seq(content)
+
+        bound_full = _BoundPromptSequence.from_seq(self.tokenizer,
+                                                   content.full)
+        bound_features = _BoundPromptSequence.from_seq(self.tokenizer,
+                                                       content.features)
+        bound_content = _BoundPromptContent(full=bound_full,
+                                            features=bound_features)
+
+        if cache_key is not None:
+            self._content_cache[cache_key] = bound_content
+
+        return bound_content
 
 @dataclass
 class BoundPromptReplacement:
