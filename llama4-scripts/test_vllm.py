@@ -6,6 +6,7 @@ import os
 # os.environ['HABANA_LOGS']='llama4_habana_logs'
 # os.environ['LOG_LEVEL_ALL']='3'
 os.environ['PT_HPU_LAZY_MODE']='1'
+# os.environ['PT_HPUGRAPH_DISABLE_TENSOR_CACHE']='1'
 os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES']='true'
 os.environ['PT_HPU_WEIGHT_SHARING']='0'
 os.environ['VLLM_SKIP_WARMUP']='true'
@@ -33,7 +34,7 @@ def test_text(llm):
     ]
 
     # Create a sampling params object.
-    sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=16)
+    sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=1024)
 
     # Generate texts from the prompts. The output is a list of RequestOutput
     # objects that contain the prompt, generated text, and other information.
@@ -46,36 +47,26 @@ def test_text(llm):
         print("-----------------------------------")
         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
 
-
+        # "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/datasets/cat_style_layout.png",
 def test_images(llm):
-    image_urls = [
-        "https://huggingface.co/datasets/huggingface/documentation-images/resolve/0052a70beed5bf71b92610a43a52df6d286cd5f3/diffusers/rabbit.jpg",
-        #"https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/datasets/cat_style_layout.png",
-    ]
+    # image_url = "https://d2opxh93rbxzdn.cloudfront.net/original/2X/4/40cfa8ca1f24ac29cfebcb1460b5cafb213b6105.png"
+    image_url = "https://huggingface.co/datasets/patrickvonplaten/random_img/resolve/main/europe.png"
     # Create a sampling params object.
     sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=128)
     # Perform multi-image inference using llm.chat()
-    outputs = llm.chat(
-        [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "What is inside the image?",
-                    },
-                    *(
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": image_url},
-                        }
-                        for image_url in image_urls
-                    ),
-                ],
-            }
-        ],
-        sampling_params=sampling_params,
-    )
+    messages = [
+         {
+             "role": "user",
+             "content": [
+                 {
+                     "type": "text",
+                     "text": "what countries are on the map, specify only those that are with a text",
+                 },
+                 {"type": "image_url", "image_url": {"url": image_url}},
+             ],
+         },
+     ]
+    outputs = llm.chat(messages, sampling_params=sampling_params)
 
     # Print the outputs.
     for output in outputs:
@@ -83,6 +74,41 @@ def test_images(llm):
         generated_text = output.outputs[0].text
         print("-----------------------------------")
         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
+# def test_images(llm):
+#     image_urls = [
+#         "https://huggingface.co/datasets/huggingface/documentation-images/resolve/0052a70beed5bf71b92610a43a52df6d286cd5f3/diffusers/rabbit.jpg",
+#     ]
+#     # Create a sampling params object.
+#     sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=128)
+#     # Perform multi-image inference using llm.chat()
+#     outputs = llm.chat(
+#         [
+#             {
+#                 "role": "user",
+#                 "content": [
+#                     {
+#                         "type": "text",
+#                         "text": "Can you describe how these two images are similar, and how they differ?",
+#                     },
+#                     *(
+#                         {
+#                             "type": "image_url",
+#                             "image_url": {"url": image_url},
+#                         }
+#                         for image_url in image_urls
+#                     ),
+#                 ],
+#             }
+#         ],
+#         sampling_params=sampling_params,
+#     )
+
+#     # Print the outputs.
+#     for output in outputs:
+#         prompt = output.prompt
+#         generated_text = output.outputs[0].text
+#         print("-----------------------------------")
+#         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
 
 
 def test_completion(llm):
@@ -94,7 +120,7 @@ def test_completion(llm):
         "The future of AI is",
     ]
     # Create a sampling parameters object
-    sampling_params = SamplingParams(temperature=0, max_tokens=16)
+    sampling_params = SamplingParams(temperature=0, max_tokens=128)
     # Generate texts from the prompts
     outputs = llm.generate(prompts, sampling_params)
     # Print the outputs
@@ -116,7 +142,7 @@ def main():
         type=str,
         help="The Hugging Face model ID to use (e.g., 'll-re/Llama-4-Scout-17B-16E-Instruct').",
         #default="/software/stanley/models/llama4-final-v2/Llama-4-Scout-17B-16E-Instruct/",
-        default="/data/models/Llama-4-Scout-17B-16E-Instruct/",
+        default="/root/data/Llama-4-Scout-17B-16E-Instruct/",
     )
 
     # Parse the arguments
@@ -130,11 +156,14 @@ def main():
     llm = LLM(
         model=model_id,
         dtype='bfloat16',
-        enforce_eager=True,
-        tensor_parallel_size=8,
+        #enforce_eager=True,
+        max_model_len=16384,
+        tensor_parallel_size=4,
         limit_mm_per_prompt={"image": 5},
     )
-    print("---------Now start Completion test-----------")
+    # print("---------Now start Completion test-----------")
+    # test_text(llm)
+    print("---------Now start Image test-----------")
     test_images(llm)
     # if "instruct" in model_id.lower():
     #     print("---------Now start Instruct test-----------")
