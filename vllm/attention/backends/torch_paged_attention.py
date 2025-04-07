@@ -672,7 +672,8 @@ def paged_attention_var_len(
     sm_m = torch.full((n_q_tokens, n_heads, 1), float('-inf'), dtype=q.dtype, device=q.device)
 
     # Online softmax Outer loop over KV blocks
-    for j in range(0, m_padded, chunk_size_k):
+    # looping only over the right part of the matrix (skipping left fully-padded chunks)
+    for j in range(((m_padded - m) // chunk_size_k) * chunk_size_k, m_padded, chunk_size_k):
         k_j_full, v_j_full, kv_j_pad_mask = gather_kv_tokens(
             k, v, block_id_for_token_idx, offset_in_block_for_token_idx, chunk_start=j, chunk_size=chunk_size_k)
         k_j_full = k_j_full.transpose(1, 2)  # (b, nh, chunk_m, d)
@@ -680,7 +681,9 @@ def paged_attention_var_len(
 
         j_end = j + chunk_size_k
         k_j_scaled_full = k_j_full * softmax_scale
-        for i in range(0, n_padded, chunk_size_q):  # Inner loop over Q blocks
+        # looping only over the bottom causal part of the matrix (skipping the top masked chunks)
+        q_start_idx = (max(n_padded - n, n_padded - m_padded + j) // chunk_size_q) * chunk_size_q if causal else 0
+        for i in range(q_start_idx, n_padded, chunk_size_q):  # Inner loop over Q blocks
             # calculate indices and mask for current chunk for q-shaped tensors
             chunk_i_idx, chunk_i_pad_mask = calculate_q_chunk_indices(
                 cu_seqlens_q, max_seqlen=n_padded, chunk_start=i, chunk_size=chunk_size_q)
@@ -689,11 +692,12 @@ def paged_attention_var_len(
             normalized_i = i + m_padded - n_padded
             normalized_i_end = normalized_i + chunk_size_q
 
-            if causal and normalized_i_end <= j:
-                # i <= j for the lower left element in the current block
-                # therefore we can mask out (ignore) the whole block
-                # normalized_i_end "transforms" the scenario into regular n x n causal attention
-                continue
+            # # commented out when modified loop boundries (keeping the code for now for validation)
+            # if causal and normalized_i_end <= j:
+            #     # i <= j for the lower left element in the current block
+            #     # therefore we can mask out (ignore) the whole block
+            #     # normalized_i_end "transforms" the scenario into regular n x n causal attention
+            #     continue
 
             # calculate mask per sample
             # for non-causal: mask out q and k pad tokens in the current chunk
@@ -718,9 +722,10 @@ def paged_attention_var_len(
                 n_non_masked = non_masked.sum().item()
                 mark_step()
 
-                # nothing samples to process. skip entirely this chunk.
-                if n_non_masked == 0:
-                    continue
+                # # commented out when modified loop boundries (keeping the code for now for validation)
+                # # nothing samples to process. skip entirely this chunk.
+                # if n_non_masked == 0:
+                #     continue
 
                 # get the bucketed number of the non-masked samples
                 # then, bucketize non_masked accordingly
