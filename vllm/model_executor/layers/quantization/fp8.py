@@ -715,8 +715,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
         if current_platform.is_hpu():
             return layer.moe_op(x,
-                                topk_weights=topk_weights,
-                                topk_ids=topk_ids)
+                                topk_weights=topk_weights.to(torch.int64),
+                                topk_ids=topk_ids.to(x.dtype))
 
         return fused_experts(
             x,
