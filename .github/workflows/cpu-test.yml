@@ -9,7 +9,7 @@ on:
   pull_request:
     branches:
       - habana_main
-      - v1*
+      - v1.*
 
 jobs:
   cputest:
