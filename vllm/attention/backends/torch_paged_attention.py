@@ -21,7 +21,7 @@ DO_AVOID_FULLY_PADDED_CHUNKS = True
 BATCH_BINS = [1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256]
 MAX_SEQLEN_K_BINS = [128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 4096]
 MAX_SEQLEN_Q_BINS = [1, 2, 3, 4, 6, 8, 16, 32, 64, 128, 256, 384, 512, 768, 1024, 1280, 1536, 1792, 2048, 2560, 3072, 4096]
-NON_MASKED_BATCH_BINS = sorted(list(set([0, 1, 2, 3, 4, 5, 6, 7, 8] + BATCH_BINS)))
+NON_MASKED_BATCH_BINS = sorted(list(set([0, 1, 2, 3, 4, 5, 6, 7, 8])))
 
 
 def mark_step():
@@ -98,7 +98,7 @@ def get_bucketed_n_non_masked(n_non_masked):
         if n_non_masked > NON_MASKED_BATCH_BINS[-1]:
             return nearset_multiple(n_non_masked, 256)
         i = bisect_left(NON_MASKED_BATCH_BINS, n_non_masked)
-        n_padded_non_masked = NON_MASKED_BATCH_BINS[i]
+        n_padded_non_masked = min(n_non_masked, NON_MASKED_BATCH_BINS[i])
     return n_padded_non_masked
 
 
