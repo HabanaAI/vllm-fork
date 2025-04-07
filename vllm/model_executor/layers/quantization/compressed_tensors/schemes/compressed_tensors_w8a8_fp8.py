@@ -5,8 +5,7 @@ from typing import Callable, List, Optional
 import torch
 from compressed_tensors.quantization import QuantizationStrategy
 from torch.nn import Parameter
-from vllm_hpu_extension.ops import (
-    get_hpu_gaudi2_scale_factor, is_hpu_gaudi2, is_hpu_gaudi3, ScaleToHwAligned)
+from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
@@ -87,11 +86,7 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
         # INPUT SCALE
         if self.is_static_input_scheme and hasattr(layer, 'input_scale'):
             input_scale = layer.input_scale.max()
-            if is_hpu_gaudi2():
-                input_scale = input_scale * get_hpu_gaudi2_scale_factor()
-                input_scale = ScaleToHwAligned("GAUDI2").calc(input_scale)
-            if is_hpu_gaudi3():
-                input_scale = ScaleToHwAligned("GAUDI3").calc(input_scale)
+            input_scale = ConvertScaleToHwAligned().calc(input_scale)
             layer.input_scale = Parameter(input_scale, requires_grad=False)
         else:
             layer.input_scale = None
