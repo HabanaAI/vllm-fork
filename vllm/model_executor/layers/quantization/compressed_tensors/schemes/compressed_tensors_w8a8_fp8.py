@@ -86,7 +86,8 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
         # INPUT SCALE
         if self.is_static_input_scheme and hasattr(layer, 'input_scale'):
             input_scale = layer.input_scale.max()
-            input_scale = ConvertScaleToHwAligned().calc(input_scale)
+            if current_platform.is_hpu():
+                input_scale = ConvertScaleToHwAligned().calc(input_scale)
             layer.input_scale = Parameter(input_scale, requires_grad=False)
         else:
             layer.input_scale = None
