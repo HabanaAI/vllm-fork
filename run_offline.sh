@@ -3,10 +3,17 @@
 usage() {
     echo "Usage: $0"
     echo "Options:"
-    echo "  --model|-m                    Model path lub model stub"
-    echo "  --image_type|-i               Type model: snowscat synthetic"
-    echo "  --video                       URL of the video file"
-    echo "  --iter                        number of iterations(Default:1)"
+    echo " --model|-m                       Model path lub model stub"
+    echo " --image|-i                       run with image-embed prompts"
+    echo " --video                          URL of the video file"
+    echo " --iter                           number of iterations(Default:1)"
+    echo " --multiple_prompts               run 4x image in a single prompt (bs=4)"
+    echo " --image_width/--image_height     width/height of image"
+    echo " --video                          run with inputs"
+    echo " --text-only                      run with only text inputs"
+    echo " --mix_prompt_lenght              run with randomized prompt lenght in each iter (--iter)"
+    echo " --shuffle_images                 randomly shuffle the source images"
+    echo " --mix_prompts                    run both image and text modality together"
     exit 1
 }
 
@@ -28,9 +35,9 @@ while [[ $# -gt 0 ]]; do
         MultiPrompt="On"
         shift 1
         ;;
-    --image_type | -i)
-        ImageType=$2
-        shift 2
+    --image | -i)
+        ImageInput="On"
+        shift 1
         ;;
     --gpu_mem_usage | -gmu)
         GMU=$2
@@ -62,7 +69,11 @@ while [[ $# -gt 0 ]]; do
         shift 1
         ;;
     --mix_prompt_lenght)
-        MixPromptLenght="One"
+        MixPromptLenght="On"
+        shift 1
+        ;;
+    --shuffle_images)
+        ShuffleImages="On"
         shift 1
         ;;
     --iter)
@@ -81,20 +92,13 @@ done
 
 #Set Default values
 iter=${iter:-1}
-ImageType=${ImageType:-"snowscat"}
+ImageInput=${ImageInput:-"on"}
+ImageWidth=${ImageWidth:-"1200"}
+ImageHeight=${ImageHeight:-"600"}
 video=${video}
 
 if [[ -n $HELP ]]; then
     usage
-fi
-
-if [[ $ImageType == "snowscat" ]] && [[ ! $(md5sum /tmp/snowscat-H3oXiq7_bII-unsplash.jpg | cut -d" " -f1) == "3ad5657658d1a7684e35541778d30204" ]]; then
-    python3 -c "import requests; from PIL import Image; url = 'https://huggingface.co/alkzar90/ppaine-landscape/resolve/main/assets/snowscat-H3oXiq7_bII-unsplash.jpg'; filename = f'"'/tmp/{url.split("'"/"'")[-1]}'"'; r = requests.get(url, allow_redirects=True); open(filename,'wb').write(r.content);"
-    ImageWidth=${ImageWidth:-"1200"}
-    ImageHeight=${ImageHeight:-"600"}
-elif [[ $ImageType == "synthetic" ]]; then
-    ImageWidth=${ImageWidth:-"250"}
-    ImageHeight=${ImageHeight:-"250"}
 fi
 
 if [[ -n "$video" ]]; then
@@ -153,6 +157,10 @@ if [[ -n "$MixPromptLenght" ]]; then
     EXTRAARGS="$EXTRAARGS --mix_prompt_lenght"
 fi
 
+if [[ -n "$ShuffleImages" ]]; then
+    EXTRAARGS="$EXTRAARGS --shuffle_images"
+fi
+
 if [[ "$model" == *"Qwen2"* ]]; then
     #export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false; unset VLLM_QWEN_SPLIT_GRAPHS
     export VLLM_QWEN_SPLIT_GRAPHS=true
@@ -164,7 +172,7 @@ if [[ -n "$video" ]]; then
 elif [[ -n "$TextOnly" ]]; then
     ARGS="-m $model -t --iter $iter $EXTRAARGS"
 else
-    ARGS="-m $model -i $ImageType --iter $iter $EXTRAARGS"
+    ARGS="-m $model -i --iter $iter $EXTRAARGS"
     if [ -n "$ImageWidth" ] && [ -n "$ImageHeight" ]; then
         ARGS="$ARGS --image_width $ImageWidth --image_height $ImageHeight"
     fi
