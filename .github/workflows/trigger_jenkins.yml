@@ -248,6 +248,7 @@ jobs:
           run: |
             random_string=$(tr -dc 'a-z0-9' </dev/urandom | head -c 10)
             pod_name="vllm-fork-${{github.event.issue.number}}-${random_string}"
+            set +e
             hlctl create containers \
                 --file=pod.yml \
                 --flavor=${{ matrix.tests.flavor}} \
@@ -255,7 +256,10 @@ jobs:
                 --namespace="framework" \
                 --retry \
                 --shm=10240
+            test_status=$?
+            set -e
             echo "Logs are available at https://logs-browser.k8s-infra.habana-labs.com/files/${pod_name}-tfjob"
+            exit $test_status
         - name: Create Commit Status(Failure)
           uses: actions/github-script@v7
           if: failure()
