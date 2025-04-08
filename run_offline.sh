@@ -7,6 +7,7 @@ usage() {
     echo " --image|-i                       run with image-embed prompts"
     echo " --video                          URL of the video file"
     echo " --iter                           number of iterations(Default:1)"
+    echo " --num_prompts                    number of batches of prompt"
     echo " --multiple_prompts               run 4x image in a single prompt (bs=4)"
     echo " --image_width/--image_height     width/height of image"
     echo " --video                          run with inputs"
@@ -34,6 +35,10 @@ while [[ $# -gt 0 ]]; do
     --multiple_prompts)
         MultiPrompt="On"
         shift 1
+        ;;
+    --num_prompts)
+        NumPrompts=$2
+        shift 2
         ;;
     --image | -i)
         ImageInput="On"
@@ -147,6 +152,10 @@ fi
 EXTRAARGS=" "
 if [[ -n "$MultiPrompt" ]]; then
     EXTRAARGS="$EXTRAARGS --multiple_prompts"
+fi
+
+if [[ -n "$NumPrompts" ]]; then
+    EXTRAARGS="$EXTRAARGS --prompts $NumPrompts"
 fi
 
 if [[ -n "$TwoImagesPrompt" ]]; then

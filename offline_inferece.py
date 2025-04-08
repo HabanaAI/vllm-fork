@@ -47,7 +47,8 @@ def get_images(index, random_shuffle=False):
     ]
     if random_shuffle:
         random.shuffle(image_path)
-    return image_path[index]
+    image_idx = index % len(image_path)
+    return image_path[image_idx]
 
 
 def get_multi_modal_prompt(args, modality, index=0):
@@ -214,9 +215,9 @@ def main(args) -> int:
         throughput = num_tokens / elapsed_time
         print(f"-- generate time = {elapsed_time:0.2f}, throughput = {throughput:0.2f}")
 
-        for o in outputs:
+        for i, o in enumerate(outputs):
             generated_text = o.outputs[0].text
-            print(generated_text)
+            print(f"[{i}/{len(outputs)}]: {generated_text}")
 
 
 if __name__ == "__main__":
