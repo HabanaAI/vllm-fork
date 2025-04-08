@@ -100,6 +100,10 @@ class AttentionLongSequence:
             row_q = q[:, :, s:e, :]
             row_mask = mask[:, :, s:e, :]
             attn_output[:, :, s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0, False, None)
+            #TODO: markstep every 10th layer, didn't experiment which one is optimal number.
+            #10,50,100 shows simliar result, without this, we see the program hangs for multiple prompts(with larger images)
+            if i % 75 == 0:
+                htcore.mark_step()
 
         #if q_padding != 0:
         #    attn_output = attn_output[:, :, :-q_padding, :]
