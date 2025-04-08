@@ -24,7 +24,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Qwen2.5-VL model compatible with HuggingFace weights."""
-from functools import cached_property, partial
+from functools import cached_property, partial, wraps
 from typing import (Callable, Iterable, List, Literal, Mapping, Optional, Set,
                     Tuple, TypedDict, Union)
 
@@ -37,6 +37,8 @@ from transformers.models.qwen2_5_vl import (Qwen2_5_VLImageProcessor,
                                             Qwen2_5_VLProcessor)
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import (
     Qwen2_5_VLConfig, Qwen2_5_VLVisionConfig)
+from transformers.image_transforms import resize
+from transformers.image_utils import get_image_size, infer_channel_dimension_format, make_list_of_images, to_numpy_array
 
 from vllm.attention import AttentionMetadata
 from vllm.config import VllmConfig
@@ -74,6 +76,30 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
 # === Vision Inputs === #
+
+def preprocess_images_to_force_aligment(processor_function):
+    @wraps(processor_function)
+    def force_alignment_decorator(images, **kwargs):
+        FACTOR = 112
+        images = make_list_of_images(images)
+        images = [to_numpy_array(image) for image in images]
+        if kwargs["input_data_format"] is None:
+            # We assume that all images have the same channel dimension format.
+            input_data_format = infer_channel_dimension_format(images[0])
+        processed_images = []
+        for image in images:
+            height, width = get_image_size(image, channel_dim=input_data_format)
+            height = max(height, FACTOR)
+            width  = max(width, FACTOR)
+            resized_height = round(height / FACTOR) * FACTOR
+            resized_width = round(width / FACTOR) * FACTOR
+            image = resize(
+                        image, size=(resized_height, resized_width), input_data_format=input_data_format
+                    )
+            # logger.info(f"[ForceAligment_Q2.5vl] Resized from {(height, width)} to {(resized_height, resized_width)}")
+            processed_images.append(image)
+        return processor_function(processed_images, **kwargs)
+    return force_alignment_decorator
 
 
 class Qwen2_5_VLImagePixelInputs(TypedDict):
@@ -736,9 +762,13 @@ class Qwen2_5_VLProcessingInfo(Qwen2VLProcessingInfo):
         min_pixels: Optional[int] = None,
         max_pixels: Optional[int] = None,
         fps: Optional[float] = 2.0,
+        force_alignment: Optional[int] = None
     ) -> Qwen2_5_VLProcessor:
         hf_processor = self.ctx.get_hf_processor(Qwen2_5_VLProcessor)
         image_processor = hf_processor.image_processor  # type: ignore
+        if force_alignment or is_hpu:
+            image_processor._preprocess = \
+                preprocess_images_to_force_aligment(image_processor._preprocess)
         assert isinstance(image_processor, Qwen2_5_VLImageProcessor)
 
         if min_pixels:
@@ -759,6 +789,7 @@ class Qwen2_5_VLProcessingInfo(Qwen2VLProcessingInfo):
         min_pixels: Optional[int] = None,
         max_pixels: Optional[int] = None,
         fps: Optional[float] = 2.0,
+        force_alignment: Optional[int] = None
     ) -> Qwen2_5_VLImageProcessor:
         hf_processor = self.get_hf_processor(
             min_pixels=min_pixels,
@@ -766,6 +797,9 @@ class Qwen2_5_VLProcessingInfo(Qwen2VLProcessingInfo):
             fps=fps,
         )
         image_processor = hf_processor.image_processor  # type: ignore
+        if force_alignment or is_hpu:
+            image_processor._preprocess = \
+                preprocess_images_to_force_aligment(image_processor._preprocess)
         assert isinstance(image_processor, Qwen2_5_VLImageProcessor)
         return image_processor
 

@@ -7,6 +7,7 @@ RunOnlineTests=true
 RunMemBenchAnalysis=false
 RandomizedImage=true
 RandomShuffle=true
+RunProcessorUT=true
 
 #Basic tests
 if $RunBasic; then
@@ -30,6 +31,11 @@ fi
 if $RandomShuffle; then
 	VLLM_GRAPH_RESERVED_MEM=0.4 bash run_offline.sh -m $ModelName -i --random_image_size --iter 5 --image_width 1120 --image_height 1120 --mix_prompt_lenght
 	VLLM_GRAPH_RESERVED_MEM=0.4 bash run_offline.sh -m $ModelName -i --random_image_size --iter 5 --image_width 1120 --image_height 1120 --multiple_prompts
+fi
+
+#Unit Test for Processor
+if $RunProcessorUT; then
+  pytest /workspace/vllm/tests/models/multimodal/processing/test_qwen2_5_vl.py -s -v;
 fi
 
 #pytests
