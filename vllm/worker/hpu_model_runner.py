@@ -2733,6 +2733,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
+                torch.hpu.synchronize()
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
