@@ -1,0 +1,1 @@
+python benchmarks/benchmark_serving.py --backend vllm --model /software/data/models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/ --dataset-name sonnet --dataset-path benchmarks/sonnet.txt --num-prompts 16 --port 8123 --sonnet-input-len 128 --sonnet-output-len 1024 --sonnet-prefix-len 100
