@@ -274,8 +274,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         if e_score_correction_bias is not None:
             raise NotImplementedError(
                 "Expert score correction bias is not supported for HPU.")
-        return layer.hpu_fused_moe(x, layer.w13_weight, layer.w2_weight,
-                                   router_logits, top_k)
+        return layer.hpu_fused_moe(x, router_logits, top_k)
 
     def forward_tpu(
         self,
@@ -470,7 +469,7 @@ class FusedMoE(torch.nn.Module):
         self.custom_routing_function = custom_routing_function
         if is_hpu:
             from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.num_experts)
+            self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
 
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
@@ -481,7 +480,7 @@ class FusedMoE(torch.nn.Module):
                              "non-grouped topk.")
         if current_platform.is_hpu():
             from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.global_num_experts)
+            self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
 
         # Note: get_quant_method will look at the layer's local_num_experts
         # for heuristic purposes, so it must be initialized first.
