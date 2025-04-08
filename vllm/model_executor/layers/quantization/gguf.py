@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional
 
 import gguf
+import time
 import torch
 from gguf import GGMLQuantizationType as WeightType
 from torch.nn.parameter import Parameter, UninitializedParameter
@@ -116,10 +117,44 @@ def _fuse_mul_mat(x: torch.Tensor, qweight: torch.Tensor,
 
 class Dequantizer:
 
+    def custom_view(self, x):
+        low = x[:,0].to(torch.int32).unsqueeze(1)
+        high = x[:,1].to(torch.int32).unsqueeze(1)
+
+        bits = (high << 8) | low
+
+        sign = (bits >> 15) & 0x1
+        exponent = (bits >> 10) & 0x1F
+        fraction = bits & 0x3FF
+
+        result = torch.zeros_like(bits, dtype=torch.float32, device=torch.device('hpu'))
+
+        #Normal numbers
+        normals = (exponent > 0) & (exponent < 0x1F)
+        n_values = (1 + fraction / 1024) * torch.pow(2.0,exponent - 15)
+        result = torch.where(normals, n_values, result)
+        
+        #subnormal
+        subnormals = (exponent == 0) & (fraction != 0)
+        s_values = (fraction / 1024) * (2.0**(-14))
+        result = torch.where(subnormals, s_values, result)
+
+        # inf and NaN
+        inf_mask = (exponent == 0x1F) & (fraction == 0)
+        result = torch.where(inf_mask, torch.tensor(float('inf'),device=torch.device('hpu')), result)
+        nan_mask = (exponent == 0x1F) & (fraction != 0)
+        result = torch.where(nan_mask, torch.tensor(float('nan'),device=torch.device('hpu')), result)
+
+        # Apply sign
+        result = torch.where(sign==1, result * -1, result)
+        # print("HPU result ==> ",result, result.device)
+        return result
+
+
     def get_scale_min(self, scales):
 
         n_blocks = scales.shape[0]
-        scales = scales.to(torch.uint8).reshape(n_blocks, 3, 4)
+        scales = scales.to(torch.uint8).view(n_blocks, 3, 4)
 
         d, m, m_d = torch.tensor_split(scales, 3, dim=-2)
 
@@ -129,42 +164,46 @@ class Dequantizer:
 
         return sc.reshape(n_blocks, 8), min_vals.reshape(n_blocks, 8)
 
+    
     def dequantize_blocks_q4_k(self, blocks):
-
+    
         n_blocks = blocks.shape[0]
-
-        d, dmin, scales, qs = torch.tensor_split(blocks, [2, 4, 4+12], dim=1)
-
-        d, dmin = d.view(torch.float16).float(), dmin.view(torch.float16).float()
+        d, dmin, scales, qs = torch.split(blocks, [2, 2, 12, 128], dim=1)
 
         sc, m = self.get_scale_min(scales)
+        # d, dmin = d.clone().view(torch.float16).float(), dmin.clone().view(torch.float16).float()
+        d = self.custom_view(d.clone())
+        dmin = self.custom_view(dmin.clone())
 
         #compute dequantized values
         d = (d * sc.float()).reshape(n_blocks, -1, 1)
         dm = (dmin * m.float()).reshape(n_blocks, -1, 1)
 
         #Bitwise operations for quantized values
-        # breakpoint()
         qs = qs.reshape(n_blocks, -1, 1, 32)
-        qs = qs >> torch.tensor([0, 4], dtype=torch.uint8).reshape(1,1,2,1)
+        qs = qs >> torch.tensor([0, 4], dtype=torch.uint8, device=torch.device('hpu')).reshape(1,1,2,1)
         qs = (qs & 0x0F).reshape(n_blocks, -1, 32).float()
 
         return (d * qs - dm).reshape(n_blocks, 256)
 
+    
     def dequantize_blocks_q6_k(self, blocks):
 
         n_blocks = blocks.shape[0]
-
-        ql, qh, scales, d = torch.tensor_split(blocks, [128, 128+64, 128+64+16], dim=1)
-
-        scales, d = scales.view(torch.int8).float(), d.view(torch.float16).float()
-
+        ql, qh, scales, d = torch.split(blocks, [128, 64, 16, 2], dim=1)
+    
+        # scales, d = scales.clone().view(torch.int8).float(), d.clone().view(torch.float16).float()
+        scales = scales.clone().view(torch.int8).float()
+        d = self.custom_view(d.clone())
         d = (d * scales).reshape(n_blocks, 16, 1)
 
         #compute dequantized values
-        ql = ql.reshape(n_blocks, -1, 1, 64) >> torch.tensor([0, 4], dtype=torch.uint8).reshape(1, 1, 2, 1)
+        ql = ql.reshape(n_blocks, -1, 1, 64)
+        ql = ql >> torch.tensor([0, 4], dtype=torch.uint8, device=torch.device('hpu')).reshape(1, 1, 2, 1)
         ql = (ql & 0x0F).reshape(n_blocks, -1, 32)
-        qh = qh.reshape(n_blocks, -1, 1, 32) >> torch.tensor([0, 2, 4, 6], dtype=torch.uint8).reshape(1, 1, 4, 1)
+
+        qh = qh.reshape(n_blocks, -1, 1, 32)
+        qh = qh >> torch.tensor([0, 2, 4, 6], dtype=torch.uint8, device=torch.device('hpu')).reshape(1, 1, 4, 1)
         qh = (qh & 0x03).reshape(n_blocks, -1, 32)
 
         q = (ql | (qh << 4)).to(torch.int8) - 32
@@ -270,11 +309,7 @@ class GGUFLinearMethod(LinearMethodBase):
                 qweight_type = layer.qweight_type.shard_weight_type[idx]
 
                 if qweight_type in KQUANT_TYPES:
-                    if(idx != 'v'):
-                        qw = qweight[q_idx][:,:1152].cpu()          # Hardcoded - will be resolved with nested tensor
-                    else:
-                        qw = qweight[q_idx].cpu()
-                    dequant_weight = self.dequantizer.dequantize_grouped_rows(qw, qweight_type, otype=torch.float32).to(device="hpu")
+                    dequant_weight = self.dequantizer.dequantize_grouped_rows(qweight[q_idx], qweight_type, otype=torch.float32)
                     res = x @ dequant_weight.T
                     result.append(res)
                 else:
@@ -283,10 +318,10 @@ class GGUFLinearMethod(LinearMethodBase):
         else:
             qweight = layer.qweight
             qweight_type = layer.qweight_type.weight_type
-            print("333333  ", layer, qweight.shape, qweight_type)
+            # print("333333  ", layer, qweight.shape, qweight_type)
 
             if qweight_type in KQUANT_TYPES:
-                dequant_weight = self.dequantizer.dequantize_grouped_rows(qweight.data.cpu(), qweight_type, otype=torch.float32).to(device="hpu")  # Doubt 
+                dequant_weight = self.dequantizer.dequantize_grouped_rows(qweight.data, qweight_type, otype=torch.float32)  # Doubt 
                 out = x @ dequant_weight.T
             else:
                 out = _fuse_mul_mat(x, qweight, qweight_type)
@@ -316,9 +351,7 @@ class GGUFEmbeddingMethod(GGUFLinearMethod):
 
         if qweight_type < 2:
             return torch.embedding(qweight, x)
-
-        dequant_qweight = self.dequantizer.dequantize_grouped_rows(qweight.data.cpu() , qweight_type, otype=torch.float32).to(device="hpu")
-
+        dequant_qweight = self.dequantizer.dequantize_grouped_rows(qweight.data, qweight_type, otype=torch.float32)
         res = torch.embedding(dequant_qweight, x)
         return res
         # x_flat = x.flatten()
@@ -337,21 +370,21 @@ class GGUFUninitializedParameter(UninitializedParameter):
         assert len(dtype) == 1, ValueError(
             f"Data container has mixed dtypes: {dtype}")
         dtype = next(iter(dtype))
-        # nested_data = torch.nested.nested_tensor(self.data_container,
-        #                                          device=self.device,
-        #                                          dtype=dtype)
+        nested_data = torch.nested.nested_tensor(self.data_container,
+                                                 device=self.device,
+                                                 dtype=dtype)
         
         # for i in range(len(self.data_container)):
         #     print(self.data_container[i].shape)
 
-        max_rows = max(tensor.size(0) for tensor in self.data_container)
-        max_cols = max(tensor.size(1) for tensor in self.data_container)
+        # max_rows = max(tensor.size(0) for tensor in self.data_container)
+        # max_cols = max(tensor.size(1) for tensor in self.data_container)
 
-        padded_data = [torch.cat([tensor.to(device=self.device),torch.zeros(max_rows-tensor.size(0), tensor.size(1), device=self.device, dtype=dtype)],dim=0) for tensor in self.data_container]
+        # padded_data = [torch.cat([tensor.to(device=self.device),torch.zeros(max_rows-tensor.size(0), tensor.size(1), device=self.device, dtype=dtype)],dim=0) for tensor in self.data_container]
 
-        padded_data = [torch.cat([tensor.to(device=self.device), torch.zeros(tensor.size(0), max_cols-tensor.size(1), device=self.device, dtype=dtype)],dim=1) for tensor in padded_data]
+        # padded_data = [torch.cat([tensor.to(device=self.device), torch.zeros(tensor.size(0), max_cols-tensor.size(1), device=self.device, dtype=dtype)],dim=1) for tensor in padded_data]
 
-        nested_data = torch.stack(padded_data)
+        # nested_data = torch.stack(padded_data)
         # print("Nested_data shape  = ", nested_data.shape)
         # print("--------------------------------------------")
 
