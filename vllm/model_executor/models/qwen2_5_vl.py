@@ -1149,6 +1149,13 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 # Like say if I have image = 224, 224, 6400, and my buckets are: 1024, 6400
                 # instead of padding 224->1024 and 224->1024, we can pack both 224 into 1 and send it to 1024
                 results = []
+                # During warmup: self.model.visual_warmup_times isnt set, so we can do it 1-by-1
+                # after warmup we need to check "visual_warmup_times" and we can batch based on that
+                # Note that sometimes we may recompile, in which case "_get_multimodal_bucket" will return a larger number
+                # however we will not have time for that larger size in "visual_warmup_times"
+                # so after that our policy will be:
+                # if size within original buckets attempt coalescing within original buckets
+                # if size is larger, only then use a already precompiled non-original bucket
                 for img_idx in range(grid_thw.shape[0]):
                     img_shape = grid_thw[img_idx, :].unsqueeze(0)
                     curr_img_size = img_shape.prod()

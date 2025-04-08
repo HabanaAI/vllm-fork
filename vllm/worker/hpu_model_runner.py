@@ -1992,7 +1992,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         multimodal_seqs_group_metada=False,
                         temperature=0,
                         height=None,
-                        width=None) -> None:
+                        width=None,
+                        return_time=False) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt,
                                       multimodal_seqs_group_metada)
         scenario_name = ("warmup_"
@@ -2026,6 +2027,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
+        if return_time:
+            times += 1
 
         if multimodal_seqs_group_metada:
             seqs = [
@@ -2068,6 +2071,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
+            if return_time:
+                tstart = time.time()
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
@@ -2084,18 +2089,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=False,
                                              is_last_step=True)
+                # TODO: why 2 execute_model?
                 self.execute_model(inputs,
                                    kv_caches,
                                    warmup_mode=True,
                                    num_steps=2,
                                    seqs=seqs)
             torch.hpu.synchronize()
+            if return_time:
+                t_total = time.time() - tstart
             if profiler:
                 profiler.step()
         if profiler:
             profiler.stop()
         self.profiler.end()
         gc.collect()
+        return t_total if return_time else None
 
     def remove_all_loras(self):
         if not self.lora_manager:
@@ -2161,12 +2170,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # HPU graph for video and language model
 
         # Warmup Multimodal with fixed seq_len
+        if not hasattr(self, 'visual_warmup_times'):
+            self.visual_warmup_times = {}
         for i, (h, w) in enumerate(self.multimodal_buckets):
             max_batch_size = 1  #TODO: For now we hardcoded batch 1.
             max_seq_len = 2048  #TODO: set with VLLM_PROMPT_SEQ_BUCKET_MAX
             self.log_warmup_multimodal('Image', i, max_seq_len, max_batch_size,
                                        max_seq_len, h, w)
-            self.warmup_scenario(batch_size=max_batch_size,
+            assert h%112 == 0 and w % 112 == 0, "Expected to be 112 aligned for now"
+            t = self.warmup_scenario(batch_size=max_batch_size,
                                  seq_len=max_seq_len,
                                  is_prompt=True,
                                  kv_caches=kv_caches,
@@ -2174,7 +2186,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  is_lora_profile_run=True,
                                  multimodal_seqs_group_metada=True,
                                  height=h,
-                                 width=w)
+                                 width=w,
+                                 return_time=True)
+            #if ((h*w) / (14*14)) in self.visual_warmup_times:
+            #breakpoint()
+            #print()
+            self.visual_warmup_times[((h*w) / (14*14))] = self.visual_warmup_times.get(((h*w) / (14*14)), []) + [('nograph', t)] # TODO hardcoded "14" remove. "14" is a model specific number, maybe (h,w) or h*w is a better key?
 
         #Warmup without multimodal for text-prompt only
         #TODO: We might need to warmup with smaller multimodal to generate
@@ -2262,7 +2279,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_seq_len = 2048  #TODO: set with VLLM_PROMPT_SEQ_BUCKET_MAX (1680x1680 error on HPU GRAPH)
             self.log_warmup_multimodal('Graph/Image', i, max_seq_len,
                                        max_batch_size, max_seq_len, h, w)
-            self.warmup_scenario(
+            t = self.warmup_scenario(
                 batch_size=max_batch_size,
                 seq_len=max_seq_len,
                 is_prompt=True,
@@ -2271,7 +2288,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 #is_lora_profile_run=True,
                 multimodal_seqs_group_metada=True,
                 height=h,
-                width=w)
+                width=w,
+                return_time=True)
+            self.visual_warmup_times[((h*w) / (14*14))] = self.visual_warmup_times.get(((h*w) / (14*14)), []) + [('graph', t)]
+
 
         return total_mem, total_batch_seq, captured_all
 
@@ -2369,7 +2389,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if not self.is_pooler:
                 self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,
                                         False, kv_caches)
-
+            #breakpoint() # self.visual_warmup_times is populated at this point (but without hpu graphs)
             if not self.enforce_eager and htorch.utils.internal.is_lazy():
                 if not self.is_pooler:
                     assert self.mem_margin is not None, \
@@ -2475,6 +2495,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
+        #breakpoint() # self.visual_warmup_times is populated at this point (with and without hpu graphs)
+        # Another way to do this is for qwen2.5vl model (or any multimodal model) to track if a new shape is incoming, and then enable a timer.
+        # then this "time collection" logic is hidden in model file itself, and model_runner isnt tainted with it
+        # Also inside the model file, we may get a better estimate of the time. right now the time is a proxy as it also contains "text time" (though all text inp is of same len (2048)?)
+        # bt we'd need to markstep/sync=True if we are collecting times inside
+        if hasattr(self, 'visual_warmup_times'):
+            summary = {k: min([t for _, t in self.visual_warmup_times[k]]) for k in self.visual_warmup_times}
+            self.visual_warmup_times = summary
+            self.model.visual_warmup_times = self.visual_warmup_times # a strange way to pass this in, but gonna charge ahead for now with this
         self.profiler.end()
 
     def finish_measurements(self):
