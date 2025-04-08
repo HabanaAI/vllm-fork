@@ -542,8 +542,6 @@ def write_back_q_slice_to_tensor(
     n_q_tokens = t.shape[0]
     last_index = n_q_tokens - 1
     t_at_last_index = t[last_index]
-    if t.device == torch.device('hpu:0'):
-        t_slice, q_indices = index_put_pre_process(t, q_indices, t_slice)
     idx, vls = q_indices.flatten().sort()
     t[idx[:n_q_tokens]] = t_slice.flatten(0, 1)[vls[:n_q_tokens]]
     t[last_index] = torch.where(is_last_index_in_slice, t_slice[-1, -1], t_at_last_index)
