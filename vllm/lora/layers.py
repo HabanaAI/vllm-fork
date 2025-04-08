@@ -271,8 +271,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA, CustomOp):
         
         print(f"{full_output_org.shape}")
         print(f"{full_output.shape}")
-        return full_output_org
-      # .view_as(full_output_org)
+        return full_output.view_as(full_output_org)
 
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
         added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1,
