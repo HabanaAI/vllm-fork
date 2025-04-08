@@ -1145,7 +1145,7 @@ class IntermediateTensors:
 
     def __repr__(self) -> str:
         return f"IntermediateTensors(tensors={self.tensors})"
-    
+
     def __iter__(self):
         return iter(self.tensors)
 
