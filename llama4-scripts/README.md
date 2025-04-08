@@ -15,13 +15,9 @@ pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --
 # install dependencies for llama4
 pip install pydantic msgspec cachetools cloudpickle psutil zmq blake3 py-cpuinfo aiohttp openai uvloop fastapi uvicorn watchfiles partial_json_parser python-multipart gguf llguidance prometheus_client numba compressed_tensors
 
-# install transformers to recognize the model
-cd /software/users/${YOUR NAME}/;
-git clone https://github.com/huggingface/transformers.git; cd transformers
-pip install -e .
 ```
 
 ## run example
 ```
-PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /software/stanley/models/llama4-final-v2/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
+PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
 ```
