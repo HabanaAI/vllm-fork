@@ -159,7 +159,6 @@ The following configurations have been validated to be function with Gaudi2 or G
 | [Qwen/Qwen2-72B-Instruct](https://huggingface.co/Qwen/Qwen2-72B-Instruct)     | 8    | BF16    |Gaudi2|
 | [Qwen/Qwen2.5-72B-Instruct](https://huggingface.co/Qwen/Qwen2.5-72B-Instruct)     | 8    | BF16    |Gaudi2|
 
-
 # Performance Tuning
 
 ## Execution Modes
