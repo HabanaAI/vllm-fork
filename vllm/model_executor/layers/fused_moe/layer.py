@@ -838,7 +838,9 @@ class FusedMoE(torch.nn.Module):
 
     def naive_multicast(self, x: torch.Tensor,
                         cu_tokens_across_dp_cpu: torch.Tensor):
-        assert (len(x.shape) == 2)
+        assert (len(x.shape) in [2, 3])
+        if len(x.shape) == 3:
+            x = x.view(-1, x.size(2))
         buffer = torch.empty((cu_tokens_across_dp_cpu[-1], x.size(1)),
                              device=x.device,
                              dtype=x.dtype)
