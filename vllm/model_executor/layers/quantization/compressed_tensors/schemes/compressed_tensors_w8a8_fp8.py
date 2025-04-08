@@ -5,7 +5,7 @@ from typing import Callable, List, Optional
 import torch
 from compressed_tensors.quantization import QuantizationStrategy
 from torch.nn import Parameter
-from vllm_hpu_extension.ops import get_hpu_gaudi2_scale_factor, is_hpu_gaudi2
+from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
@@ -24,6 +24,7 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
 
     def __init__(self, strategy: str, is_static_input_scheme: bool):
         self.strategy = strategy
+        self.out_dtype = torch.get_default_dtype()
         self.is_static_input_scheme = is_static_input_scheme
         self.fp8_linear = Fp8LinearOp(use_per_token_if_dynamic=True)
 
@@ -85,8 +86,8 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
         # INPUT SCALE
         if self.is_static_input_scheme and hasattr(layer, 'input_scale'):
             input_scale = layer.input_scale.max()
-            if is_hpu_gaudi2():
-                input_scale = input_scale * get_hpu_gaudi2_scale_factor()
+            if current_platform.is_hpu():
+                input_scale = ConvertScaleToHwAligned().calc(input_scale)
             layer.input_scale = Parameter(input_scale, requires_grad=False)
         else:
             layer.input_scale = None
@@ -146,5 +147,6 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
         return self.fp8_linear.apply(input=x,
                                      weight=layer.weight,
                                      weight_scale=layer.weight_scale,
+                                     out_dtype=self.out_dtype,
                                      input_scale=layer.input_scale,
                                      bias=bias)
