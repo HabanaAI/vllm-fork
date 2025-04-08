@@ -247,7 +247,7 @@ jobs:
         - name: Run Test
           run: |
             random_string=$(tr -dc 'a-z0-9' </dev/urandom | head -c 10)
-            vllm-fork-${{github.event.issue.number}}-${random_string}
+            pod_name="vllm-fork-${{github.event.issue.number}}-${random_string}"
             hlctl create containers \
                 --file=pod.yml \
                 --flavor=${{ matrix.tests.flavor}} \
