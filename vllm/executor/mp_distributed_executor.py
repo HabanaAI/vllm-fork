@@ -129,7 +129,16 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
         self.pp_locks: Optional[List[asyncio.Lock]] = None
         self.shutdown_workers = True
 
+    def preprocess_calibration(self):
+        print('=========multiprocess_executor preprocess_calibration=========')
+        self._run_workers("preprocess_calibration")
+
+    def postprocess_calibration(self):
+        print('=========multiprocess_executor postprocess_calibration=========')
+        self._run_workers("postprocess_calibration")
+
     def shutdown(self):
+        print('=========multiprocess_executor shutdown=========')
         if getattr(self, 'shutdown_workers', False):
             self._run_workers("shutdown")
             self.shutdown_workers = False

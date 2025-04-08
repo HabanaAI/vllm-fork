@@ -230,6 +230,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             self.model_runner.mem_margin = hpu_memory_margin
             self._warm_up_model()
 
+    def preprocess_calibration(self):
+        self.model_runner.model.replace_model_forward()
+
+    def postprocess_calibration(self):
+        self.model_runner.model.calibrate_blocks()
+
     def execute_model(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None,

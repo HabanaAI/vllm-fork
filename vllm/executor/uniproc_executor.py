@@ -63,6 +63,14 @@ class UniProcExecutor(ExecutorBase):
         # it's running.
         return
 
+    def preprocess_calibration(self):
+        print('=========single process_executor preprocess_calibration=========')
+        getattr(self.driver_worker, 'preprocess_calibration', lambda: None)()
+
+    def postprocess_calibration(self):
+        print('=========single process_executor postprocess_calibration=========')
+        getattr(self.driver_worker, 'postprocess_calibration', lambda: None)()
+
     def shutdown(self):
         if getattr(self, 'shutdown_worker', False):
             self.shutdown_worker = False

@@ -1,0 +1,11 @@
+{
+    "mode": "MEASURE",
+    "measure_on_hpu": "false",
+    "observer": "maxabs",
+    "blocklist": {
+        "names": [
+            "lm_head"
+        ]
+    },
+    "dump_stats_path": "./inc_output/measure"
+}

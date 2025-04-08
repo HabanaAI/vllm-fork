@@ -24,7 +24,9 @@ from vllm.model_executor.parameter import (BasevLLMParameter,
                                            PerTensorScaleParameter,
                                            RowvLLMParameter)
 # yapf: enable
-from vllm.model_executor.utils import set_weight_attrs
+from vllm.model_executor.utils import set_weight_attrs, use_mmap, set_param_data
+
+
 
 logger = init_logger(__name__)
 
@@ -372,7 +374,10 @@ class ColumnParallelLinear(LinearBase):
             loaded_weight = loaded_weight.reshape(1)
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        if not use_mmap:
+            param_data.copy_(loaded_weight)
+        else:
+            param.data = loaded_weight
 
     def weight_loader_v2(self, param: Parameter, loaded_weight: torch.Tensor):
         # Special case for loading scales off disk, which often do not
@@ -595,7 +600,13 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                     "the same for all partitions.")
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        if not use_mmap:
+            param_data.copy_(loaded_weight)
+        else:
+            idx = shard_offset // shard_size
+            param_data = loaded_weight
+            set_param_data(param, idx, param_data, cat_dim=output_dim)
+
 
     def _load_fused_module_from_checkpoint(self, param: BasevLLMParameter,
                                            loaded_weight: torch.Tensor):
@@ -1008,7 +1019,12 @@ class QKVParallelLinear(ColumnParallelLinear):
                     "for all partitions.")
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        if not use_mmap:
+            param_data.copy_(loaded_weight)
+        else:
+            idx = shard_offset // shard_size
+            param_data = loaded_weight
+            set_param_data(param, idx, param_data, cat_dim=output_dim)
 
 
 class SplitQKVParallelLinear(torch.nn.Module):
@@ -1189,7 +1205,10 @@ class RowParallelLinear(LinearBase):
             loaded_weight = loaded_weight.reshape(1)
 
         assert param_data.shape == loaded_weight.shape
-        param_data.copy_(loaded_weight)
+        if not use_mmap:
+            param_data.copy_(loaded_weight)
+        else:
+            param.data = loaded_weight
 
     def weight_loader_v2(self, param: BasevLLMParameter,
                          loaded_weight: torch.Tensor):

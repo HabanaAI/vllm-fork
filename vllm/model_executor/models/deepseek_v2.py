@@ -637,6 +637,7 @@ class DeepseekV2Model(nn.Module):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
+        breakpoint()
 
         config = vllm_config.model_config.hf_config
         model_config = vllm_config.model_config

@@ -376,12 +376,70 @@ class HpuModelAdapter(torch.nn.Module):
 
         # At the end, we should be at the RotaryEmbedding layer.
         if hasattr(current_module, 'prepare_cos_sin'):
+            current_module = current_module.to('hpu').to(torch.bfloat16)
             current_module.prepare_cos_sin(
                 positions, recompute_cos_sin=self.recompute_cos_sin)
         else:
             raise AttributeError(
                 "The module at the end of the path does not have \
                a 'prepare_cos_sin' method.")
+
+    @torch.inference_mode()
+    def replace_model_forward(self) -> None:
+        """Replace forward to get the input args and kwargs of the first block."""
+        from neural_compressor.torch.utils.block_wise import replace_forward, set_module
+
+        for n, m in self.model.named_modules():
+            if m.__class__.__name__.endswith("Embedding"):
+                m = m.to("hpu").to(torch.bfloat16)
+                print(n, m)
+                set_module(self.model, n, m)
+        self.model = replace_forward(self.model)
+
+    @torch.inference_mode()
+    def calibrate_blocks(self):
+        """run calibration on each block to get the input args and kwargs of each block."""
+        from neural_compressor.torch.utils.block_wise import (
+            recover_forward,
+            fetch_module,
+            get_block_prefix,
+            get_non_persistent_buffers,
+            load_non_persistent_buffers,
+        )
+        from neural_compressor.torch.utils import get_used_hpu_mem_MB, get_used_cpu_mem_MB, logger
+
+        self.model = recover_forward(self.model)
+        logger.info(f"'===========1    Used HPU memory: {round((get_used_hpu_mem_MB())/1024, 3)} GiB")
+        logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB())/1024, 3)} GiB")
+        self.model.lm_head = self.model.lm_head.to("meta")
+        logger.info(f"===========2    Used HPU memory: {round((get_used_hpu_mem_MB())/1024, 3)} GiB")
+        logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB())/1024, 3)} GiB")
+        total_block_args = getattr(self.model, "total_block_args", [])
+        total_block_kwargs = getattr(self.model, "total_block_kwargs", [])
+        block_prefix, block_num = get_block_prefix(self.model)
+        block_list = fetch_module(self.model, block_prefix)
+        for i, block in enumerate(block_list):
+            logger.info("Calibrating block: {}".format(i))
+            non_persistent_buffers = get_non_persistent_buffers(block)
+            block = block.to("hpu").to(torch.bfloat16)
+            # get block outputs
+            for block_id, (args, kwargs) in enumerate(zip(total_block_args, total_block_kwargs)):
+                with set_forward_context(self.attn_metadata, self.vllm_config,
+                                        self.virtual_engine):
+                    out = block(*args, **kwargs)
+                if self.model.config.model_type == "opt":
+                    total_block_args[block_id][0].copy_(out[0])
+                if self.model.config.model_type in ["llama", "deepseek"]:
+                    total_block_args[block_id][1].copy_(out[0])
+                    total_block_args[block_id][4] = out[1]
+                torch.hpu.synchronize()
+            block = block.to("meta")  # clean device memory
+            gc.collect()
+            torch.hpu.synchronize()
+            logger.info(f"Used HPU memory: {round((get_used_hpu_mem_MB())/1024, 3)} GiB")
+            logger.info(f"Used CPU memory: {round((get_used_cpu_mem_MB())/1024, 3)} GiB")
+            # some parameter is shared between blocks, so we need to reset it
+            load_non_persistent_buffers(block, non_persistent_buffers)
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -395,6 +453,10 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
+        if not hasattr(self, "attn_metadata"):
+            self.attn_metadata = kwargs['attn_metadata']
+        if not hasattr(self, "virtual_engine"):
+            self.virtual_engine = virtual_engine
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         model_config = getattr(self.model, "config", None)
@@ -404,7 +466,14 @@ class HpuModelAdapter(torch.nn.Module):
 
         with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
                                  virtual_engine):
-            hidden_states = self.model(*args, **kwargs)
+            if kwargs['attn_metadata'].is_prompt:
+                hidden_states = self.model(*args, **kwargs)
+                if hidden_states is None:
+                    return torch.randn([1, self.model.config.hidden_size], dtype=torch.bfloat16, device="hpu")
+            else:
+                return torch.randn([1, self.model.config.hidden_size], dtype=torch.bfloat16, device="hpu")
+            if hidden_states is None:
+                return torch.randn([1, self.model.config.hidden_size], dtype=torch.bfloat16, device="hpu")
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
             if selected_token_indices is not None:
                 hidden_states = hidden_states.index_select(
@@ -412,6 +481,7 @@ class HpuModelAdapter(torch.nn.Module):
         return hidden_states
 
     def compute_logits(self, *args, **kwargs):
+        self.model.lm_head = self.model.lm_head.to("hpu").to(torch.bfloat16)
         return self.model.compute_logits(*args, **kwargs)
 
     def sample(self, *args, **kwargs):
@@ -853,11 +923,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        return htorch.hpu.wrap_in_hpu_graph(
-            HpuModelAdapter(*args, **kwargs),
-            disable_tensor_cache=True,
-        ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-            *args, **kwargs)
+        return HpuModelAdapter(*args, **kwargs)
 
     def _maybe_compile(self, *args, **kwargs):
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
@@ -1910,6 +1976,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
                         temperature=0) -> None:
+        return
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -2283,6 +2350,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         finalize_calibration(self.model.model)
 
     def shutdown_inc(self):
+        print('=========shutdown_inc=========')
         can_finalize_inc = (self.model_config.quantization == 'inc') and \
             (self.model.model is not None) and \
             self.inc_initialized_successfully and \
@@ -2565,9 +2633,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if previous_hidden_states is not None:
                 execute_model_kwargs.update(
                     {"previous_hidden_states": previous_hidden_states})
-            if htorch.utils.internal.is_lazy():
-                execute_model_kwargs.update(
-                    {"bypass_hpu_graphs": not use_graphs})
 
             htorch.core.mark_step()
             if self.is_driver_worker:
