@@ -21,6 +21,7 @@ def sample_frames(path, num_frames):
     frames = []
     for i in range(total_frames):
         ret, frame = video.read()
+
         pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if not ret:
             continue
@@ -31,6 +32,24 @@ def sample_frames(path, num_frames):
     return frames[:num_frames]
 
 
+def get_images(index, random_shuffle=False):
+    image_path = [
+        "images/snowscat-H3oXiq7_bII-unsplash.jpg",
+        "images/1920x1080.jpg",
+        "images/200x200.jpg",
+        "images/32x32.jpg",
+        "images/800x600.jpg",
+        "images/snowscat-H3oXiq7_bII-unsplash.jpg",
+        "images/1920x1080.jpg",
+        "images/200x200.jpg",
+        "images/32x32.jpg",
+        "images/800x600.jpg",
+    ]
+    if random_shuffle:
+        random.shuffle(image_path)
+    return image_path[index]
+
+
 def get_multi_modal_prompt(args, modality, index=0):
     if modality == MODALITY_IMAGE:
         image_prompt = (
@@ -39,13 +58,10 @@ def get_multi_modal_prompt(args, modality, index=0):
             f"Describe this image"
             f"<|im_end|>\n<|im_start|>assistant\n"
         )
-        if args.image == "synthetic":
-            image = ImageAsset("stop_sign").pil_image
-        elif args.image == "snowscat":
-            filename = "/tmp/snowscat-H3oXiq7_bII-unsplash.jpg"
-            image = Image.open(filename)
-        elif args.image:
-            image = Image.open(args.image)
+        filename = get_images(index, args.shuffle_images)
+        filename2 = get_images(index + 1, args.shuffle_images)
+        image = Image.open(filename)
+        image2 = Image.open(filename2)
         if args.image_width and args.image_height:
             image = image.resize((args.image_width, args.image_height))
         prompts = [
@@ -62,7 +78,7 @@ def get_multi_modal_prompt(args, modality, index=0):
             # rand_height = 112*int(rand_height/112)
             rand_width = 1008
             rand_height = 1008
-            image2 = image.resize((rand_width, rand_height))
+            image2 = image2.resize((rand_width, rand_height))
             prompts = [
                 {"prompt": image_prompt, "multi_modal_data": {"image": image}},
                 {"prompt": image_prompt, "multi_modal_data": {"image": image}},
@@ -77,7 +93,6 @@ def get_multi_modal_prompt(args, modality, index=0):
                 f"Identify the similarities between these images."
                 f"<|im_end|>\n<|im_start|>assistant\n"
             )
-            image2 = ImageAsset("stop_sign").pil_image
             image2 = image2.resize((140, 140))
             prompts = [
                 {
@@ -102,7 +117,7 @@ def get_multi_modal_prompt(args, modality, index=0):
             "How does deepspeed work?",
         ]
         return {"prompt": question_list[index % len(question_list)]}
-    print(f"Unknow image/Video Input {args.image} {args.video}")
+    print(f"Unknow image/Video Input {args}")
     exit
 
 
@@ -181,6 +196,7 @@ def main(args) -> int:
         elif args.mix_prompt_lenght:
             iter_lenght = 2 if i != 2 else 1
             rand_idx = random.randint(0, int(len(input_data) / 2))
+            # rand_idx = 0
             # : iter_lenght = 2 else: iter_lenght =1
             iter_input_data = input_data[rand_idx : iter_lenght + rand_idx]
             print(
@@ -212,7 +228,7 @@ if __name__ == "__main__":
         default="Qwen/Qwen2.5-VL-3B-Instruct",
         help="model name or path",
     )
-    parser.add_argument("-i", "--image", help="type of image")
+    parser.add_argument("-i", "--image", action="store_true", help="Image input")
     parser.add_argument("-v", "--video", help="Video Input")
     parser.add_argument(
         "-t", "--text_only", action="store_true", help="Text only pormpts"
@@ -221,6 +237,9 @@ if __name__ == "__main__":
     parser.add_argument("--image_height", type=int, help="Image width size")
     parser.add_argument(
         "--two_images_prompt", action="store_true", help="Prompt with two images"
+    )
+    parser.add_argument(
+        "--shuffle_images", action="store_true", help="shuffle the image list"
     )
     parser.add_argument(
         "--mix_prompts",
