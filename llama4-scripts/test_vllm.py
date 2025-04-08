@@ -158,7 +158,7 @@ def main():
         dtype='bfloat16',
         #enforce_eager=True,
         max_model_len=16384,
-        tensor_parallel_size=4,
+        tensor_parallel_size=8,
         limit_mm_per_prompt={"image": 5},
     )
     # print("---------Now start Completion test-----------")

@@ -23,5 +23,5 @@ pip install -e .
 
 ## run example
 ```
-PT_HPU_LAZY_MODE python llama4-scripts/test_vllm.py --model_id /software/stanley/models/llama4-final-v2/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
+PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /software/stanley/models/llama4-final-v2/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
 ```

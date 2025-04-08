@@ -1132,6 +1132,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             seq_data_mrope_positions: Optional[List[List[int]]] = None
             if seq_group_metadata.multi_modal_data:
+                print(f"[DEBUG] seq_group_metadata.multi_modal_data is {seq_group_metadata.multi_modal_data}")
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
                     .from_seq_group(seq_group_metadata,
