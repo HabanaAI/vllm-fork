@@ -7,6 +7,7 @@ RunOnlineTests=true
 RunMemBenchAnalysis=false
 RandomizedImage=true
 RandomShuffle=true
+RunOnlineDatasets=false
 RunProcessorUT=true
 
 #Basic tests
