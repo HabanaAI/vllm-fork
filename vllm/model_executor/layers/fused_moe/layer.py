@@ -164,6 +164,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        ep_rank: Optional[int] = None,
     ) -> torch.Tensor:
         return self.forward(
             x=x,
@@ -180,7 +181,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias,
             activation=activation,
-            apply_router_weight_on_input=apply_router_weight_on_input)
+            apply_router_weight_on_input=apply_router_weight_on_input,
+            ep_rank=ep_rank)
 
     def forward_cuda(
         self,
@@ -199,6 +201,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        ep_rank: Optional[int] = None,
     ) -> torch.Tensor:
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
@@ -241,12 +244,18 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        ep_rank: Optional[int] = None,
     ) -> torch.Tensor:
         hidden_dim = x.shape[-1]
         num_experts = layer.w13_weight.shape[0]
         moe_n_slice = 8 if num_experts > 32 else 1
         n_expert_slice = num_experts // moe_n_slice
         assert n_expert_slice * moe_n_slice == num_experts
+        if ep_rank is not None:
+            ep_shift = ep_rank * num_experts
+        else:
+            ep_shift = 0
+        #print(f"expert_map is {expert_map}, ep_shift is {ep_shift}")
         x = x.view(-1, hidden_dim)
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
@@ -280,8 +289,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 w3=w2_list_slice,
                 permuted_weights=True,
                 activation=activation,
-                experts_min=min_expert,
-                experts_max=max_expert - 1,)
+                experts_min=min_expert + ep_shift,
+                experts_max=max_expert - 1 + ep_shift,)
             htorch.core.mark_step()
             if i == 0:
                 final_hidden_states = current_hidden_states
@@ -341,6 +350,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
+        ep_rank: Optional[int] = None,
     ) -> torch.Tensor:
         assert not use_grouped_topk
         assert num_expert_group is None
@@ -928,6 +938,7 @@ class FusedMoE(torch.nn.Module):
             e_score_correction_bias=self.e_score_correction_bias,
             activation=self.activation,
             apply_router_weight_on_input=self.apply_router_weight_on_input,
+            ep_rank=self.ep_rank,
         )
 
         if self.dp_size > 1:
