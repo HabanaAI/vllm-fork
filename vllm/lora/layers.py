@@ -136,7 +136,7 @@ class BaseLayerWithLoRA(nn.Module):
         raise NotImplementedError
 
 
-@CustomOp.register("vocab_parallel_embedding_with_lora")
+# @CustomOp.register("vocab_parallel_embedding_with_lora")
 class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA, CustomOp):
 
     def __init__(self, base_layer: VocabParallelEmbedding) -> None:
