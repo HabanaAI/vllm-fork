@@ -160,6 +160,7 @@ def main():
         max_model_len=16384,
         tensor_parallel_size=8,
         limit_mm_per_prompt={"image": 5},
+        enable_expert_parallel=True,
     )
     print("---------Now start Completion test-----------")
     test_text(llm)
