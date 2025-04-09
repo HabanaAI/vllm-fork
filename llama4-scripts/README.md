@@ -10,6 +10,7 @@ docker exec -it llama4-vllm-1.21 /bin/bash
 cd /data/models; huggingface-cli download --local-dir Llama-4-Scout-17B-16E-Instruct meta-llama/Llama-4-Scout-17B-16E-Instruct --token ${YOUR_TOKEN}
 
 cd /software/users/${YOUR NAME}/;
+git clone https://github.com/HabanaAI/vllm-fork -b llama4
 pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation;
 
 # install dependencies for llama4
