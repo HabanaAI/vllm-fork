@@ -675,8 +675,9 @@ class DeepseekV2Model(nn.Module):
 
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
+            kvcaches = None if kv_caches is None else kv_caches[i - self.start_layer]
             hidden_states, residual = layer(positions, hidden_states,
-                                            kv_caches[i - self.start_layer],
+                                            kvcaches,
                                             attn_metadata, residual)
 
         if not get_pp_group().is_last_rank:
