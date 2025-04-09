@@ -29,11 +29,16 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
     scaled_quantize)
 from vllm.model_executor.layers.rotary_embedding import (
     DeepseekScalingRotaryEmbedding, RotaryEmbedding)
+from vllm.platforms import current_platform
 
-try:
-    from vllm.vllm_flash_attn import flash_attn_varlen_func
-except ImportError:
-    from flash_attn import flash_attn_varlen_func
+if current_platform.is_hpu():
+    from vllm_hpu_extension.ops import is_hpu_gaudi2
+
+if current_platform.is_cuda_alike():
+    try:
+        from vllm.vllm_flash_attn import flash_attn_varlen_func
+    except ImportError:
+        from flash_attn import flash_attn_varlen_func
 
 
 @dataclass
@@ -199,9 +204,14 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                 output = output_parallel
             return output
         else:
-            x = torch.einsum("bnl,lnv->bnv", x, self.W_UV)
-            return self.o_proj(x.reshape(-1,
-                                         self.num_heads * self.v_head_dim))[0]
+            # chendi: this is a cherry-pick of missing commit from upstream
+            # Convert from (B, N, L) to (N, B, L)
+            x = x.view(-1, self.num_heads, self.kv_lora_rank).transpose(0, 1)
+            # Multiply (N, B, L) x (N, L, V) -> (N, B, V)
+            x = torch.bmm(x, self.W_UV)
+            # Convert from (N, B, V) to (B, N * V)
+            x = x.transpose(0, 1).reshape(-1, self.num_heads * self.v_head_dim)
+            return self.o_proj(x)[0]
 
     def _q_proj_and_k_up_proj(self, x):
         if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
@@ -214,10 +224,17 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
             return torch.matmul(x, self.W_Q_UK)\
                 .view(-1, self.num_heads, self.kv_lora_rank)
         else:
-            x = torch.matmul(x, self.W_Q)\
-                .view(-1, self.num_heads, self.qk_nope_head_dim)
-            return torch.einsum("bnp,lnp->bnl", x, self.W_UK)\
-                .view(-1, self.num_heads, self.kv_lora_rank)
+            # chendi: this is a cherry-pick of missing commit from upstream
+            q_nope, q_pe = self.q_proj(x)[0]\
+                .view(-1, self.num_heads, self.qk_head_dim)\
+                .split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+
+            # Convert from (B, N, P) to (N, B, P)
+            q_nope = q_nope.transpose(0, 1)
+            # Multiply (N, B, P) x (N, P, L) -> (N, B, L)
+            ql_nope = torch.bmm(q_nope, self.W_UK_T)
+            # Convert from (N, B, L) to (B, N, L)
+            return ql_nope.transpose(0, 1), q_pe
 
     def process_weights_after_loading(self, act_dtype: torch.dtype):
         # TODO(lucas) This is very gross, we need a more wide scale refactor of
@@ -302,19 +319,21 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
         W_UK, W_UV = kv_b_proj_weight.split(
             [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
 
-        q_proj_weight = get_and_maybe_dequant_weights(self.q_proj).T\
-                .view(-1, self.num_heads, self.qk_head_dim)
+        if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
+            # Chendi: This is a cherry-pick of  missing commit from upstream
+            q_proj_weight = get_and_maybe_dequant_weights(self.q_proj).T\
+                    .view(-1, self.num_heads, self.qk_head_dim)
 
-        # can be W_Q or W_UQ depending q_lora_rank, the former if
-        # q_lora_rank is None, the latter otherwise. From the Attention backend
-        # perspective though we call these both W_Q and rely on the layer
-        # to pass in the correct matrix
-        W_Q = q_proj_weight[..., :self.qk_nope_head_dim]
-        self.W_QR = q_proj_weight[..., self.qk_nope_head_dim:]\
-            .flatten(start_dim=1).contiguous()
+            # can be W_Q or W_UQ depending q_lora_rank, the former if
+            # q_lora_rank is None, the latter otherwise. From the Attention
+            # backend perspective though we call these both W_Q and rely on
+            # the layer to pass in the correct matrix
+            W_Q = q_proj_weight[..., :self.qk_nope_head_dim]
+            self.W_QR = q_proj_weight[..., self.qk_nope_head_dim:]\
+                .flatten(start_dim=1).contiguous()
 
-        # W_QR is small so for simplicity we dont bother requantizing it
-        self.W_QR = self.W_QR.to(act_dtype)
+            # W_QR is small so for simplicity we dont bother requantizing it
+            self.W_QR = self.W_QR.to(act_dtype)
 
         if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
             requantization_enabled = not envs.VLLM_MLA_DISABLE_REQUANTIZATION
@@ -337,15 +356,20 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
             # for decode, as a result we end up with absorbed weights for decode
             # and another copy of raw weights for prefill.
             #
-            self.W_UK, self.W_UV = kv_b_proj_weight.split(
-                [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
             # We absorb `W_UK` into `W_Q` resulting in either W_Q_UK or W_UQ_UK
             # depending q_lora_rank, the former if q_lora_rank is None, the
             # latter otherwise
             # basically if q_lora_rank is none we are absorbing into q_proj
             # instead of UQ
-            W_Q_UK = torch.einsum("qnd,lnd -> qnl", W_Q, W_UK)\
-                .flatten(start_dim=1).contiguous()
+
+            # chendi: Important fix for Gaudi2
+            if current_platform.is_hpu() and is_hpu_gaudi2():
+                W_Q_UK = torch.einsum(
+                    "qnd,lnd -> qnl", W_Q.bfloat16(),
+                    W_UK.bfloat16()).flatten(start_dim=1).contiguous().float()
+            else:
+                W_Q_UK = torch.einsum("qnd,lnd -> qnl", W_Q,
+                                      W_UK).flatten(start_dim=1).contiguous()
 
             if is_fp8(weight_dtype) and requantization_enabled:
                 W_Q_UK, W_Q_UK_scales = scaled_quantize(
@@ -361,8 +385,17 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
 
             W_O = get_and_maybe_dequant_weights(self.o_proj)\
                 .view(-1, self.num_heads, self.v_head_dim)
-            W_UV_O = torch.einsum("lnd,hnd -> nlh", W_UV, W_O)\
-                .flatten(start_dim=0, end_dim=1).contiguous()
+
+            # chendi: Important fix for Gaudi2
+            if current_platform.is_hpu() and is_hpu_gaudi2():
+                W_UV_O = torch.einsum("lnd,hnd -> nlh", W_UV.bfloat16(),
+                                      W_O.bfloat16()).flatten(
+                                          start_dim=0,
+                                          end_dim=1).contiguous().float()
+            else:
+                W_UV_O = torch.einsum("lnd,hnd -> nlh", W_UV,
+                                      W_O).flatten(start_dim=0,
+                                                   end_dim=1).contiguous()
 
             if is_fp8(weight_dtype) and requantization_enabled:
                 W_UV_O, W_UV_O_scales = scaled_quantize(
@@ -378,13 +411,11 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
 
             self.tp_size = get_tensor_model_parallel_world_size()
         else:
-            if is_fp8(weight_dtype):
-                raise NotImplementedError(
-                    "Currently fp8 requires matrix absorption")
-
-            self.W_UV = W_UV
-            self.W_UK = W_UK
-            self.W_Q = W_Q.flatten(start_dim=1)
+            # chendi: this is a cherry-pick of missing commit from upstream
+            # Convert from (L, N, V) to (N, L, V)
+            self.W_UV = W_UV.transpose(0, 1)
+            # Convert from (L, N, P) to (N, P, L)
+            self.W_UK_T = W_UK.permute(1, 2, 0)
 
     @abstractmethod
     def _forward_prefill(
