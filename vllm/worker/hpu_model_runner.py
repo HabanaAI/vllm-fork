@@ -2551,7 +2551,20 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
             num_cached = len(self.cached_step_outputs)
-            assert num_cached > 0
+            #assert num_cached > 0
+            if num_cached == 0:
+                # Initialize cached step outputs with dummy values for pipeline parallelism
+                self.cached_step_outputs.append(
+                    torch.full((model_input.input_tokens.size(0), 1),
+                                DUMMY_TOKEN_ID,
+                                device=model_input.input_tokens.device,
+                                dtype=model_input.input_tokens.dtype)
+                )
+                num_cached = 1
+                if len(self.cached_step_inputs) < num_cached:
+                    # Initialize cached_step_inputs with enough elements
+                    while len(self.cached_step_inputs) < num_cached:
+                        self.cached_step_inputs.append(model_input)
             cur_seq_ids = self._get_seq_ids(model_input)
             cur_seq_id_pos = {
                 sid: idx
@@ -2712,8 +2725,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             self.cached_step_inputs = []
                         
                         received_data = broadcast_tensor_dict(src=get_pp_group().last_rank)
-                        
-                        if "token_ids" in received_data:
+                        print(f'worker: {get_pp_group().rank} my received data = {received_data}')
+
+                        if received_data is not None and "token_ids" in received_data:
                             real_token_ids = received_data["token_ids"]
                             received_seq_ids = received_data["seq_ids"]
 
@@ -2779,6 +2793,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     "token_ids": real_token_ids,
                                     "seq_ids": seq_ids
                             }
+                            print(f'worker: {get_pp_group().rank} sending = {data_to_broadcast}')
                             broadcast_tensor_dict(data_to_broadcast, src=get_pp_group().rank)
                         else:
                             self._patch_prev_output()
