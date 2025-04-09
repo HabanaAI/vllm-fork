@@ -4,7 +4,7 @@ LM eval harness on model to compare vs HF baseline computed offline.
 Configs are found in configs/$MODEL.yaml
 
 * export LM_EVAL_TEST_DATA_FILE=configs/Meta-Llama-3-70B-Instruct.yaml
-* export LM_EVAL_TP_SIZE=4 
+* export LM_EVAL_TP_SIZE=4
 * pytest -s test_lm_eval_correctness.py
 """
 import atexit
@@ -12,6 +12,7 @@ import itertools
 import os
 import statistics
 import time
+import logging
 from pathlib import Path
 
 import lm_eval
@@ -19,6 +20,16 @@ import numpy
 import yaml
 
 import vllm
+
+
+# Configure lm_eval logging
+lm_eval_logger = logging.getLogger('lm_eval')
+lm_eval_logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(name)s - %(levelname)s - %(asctime)s - %(message)s')
+handler.setFormatter(formatter)
+lm_eval_logger.addHandler(handler)
 
 RTOL = 0.06
 TEST_DATA_FILE = os.environ.get(
@@ -29,6 +40,8 @@ REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
                                     "false") in ['1', 'true']
 
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
+
+LORA_ADAPTER_PATH = os.environ.get("LORA_ADAPTER_PATH", None)
 
 
 def setup_fp8():
@@ -60,6 +73,8 @@ def launch_lm_eval(eval_config):
     if eval_config.get("num_scheduler_steps"):
         model_args += \
             f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
+    if LORA_ADAPTER_PATH:
+        model_args += f",enable_lora=True,lora_local_path={LORA_ADAPTER_PATH}"
     kwargs = {}
     if 'fewshot_as_multiturn' in eval_config:
         kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']
