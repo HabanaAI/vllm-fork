@@ -39,6 +39,10 @@ while [[ $# -gt 0 ]]; do
         ImageInput="On"
         shift 1
         ;;
+    --num_prompts)
+        NumPrompts=$2
+        shift 2
+        ;;
     --gpu_mem_usage | -gmu)
         GMU=$2
         shift 2
@@ -93,8 +97,8 @@ done
 #Set Default values
 iter=${iter:-1}
 ImageInput=${ImageInput:-"on"}
-ImageWidth=${ImageWidth:-"1200"}
-ImageHeight=${ImageHeight:-"600"}
+#ImageWidth=${ImageWidth:-"1200"}
+#ImageHeight=${ImageHeight:-"600"}
 video=${video}
 
 if [[ -n $HELP ]]; then
@@ -136,10 +140,12 @@ else
     export VLLM_SKIP_WARMUP=false
     export VLLM_PROMPT_SEQ_BUCKET_MIN=256
     export VLLM_PROMPT_SEQ_BUCKET_MAX=2048
-    export VLLM_PROMPT_BS_BUCKET_MAX=1
-    export VLLM_DECODE_BS_BUCKET_MIN=32
-    export VLLM_DECODE_BS_BUCKET_STEP=32
-    export VLLM_DECODE_BS_BUCKET_MAX=32
+    export VLLM_PROMPT_BS_BUCKET_MAX=4
+    export VLLM_PROMPT_BS_BUCKET_MIN=1
+    export VLLM_PROMPT_BS_BUCKET_STEP=2
+    export VLLM_DECODE_BS_BUCKET_MIN=1
+    export VLLM_DECODE_BS_BUCKET_STEP=2
+    export VLLM_DECODE_BS_BUCKET_MAX=4
     export VLLM_DECODE_BLOCK_BUCKET_MAX=2048
     export VLLM_DECODE_BLOCK_BUCKET_STEP=2048
 fi
@@ -147,6 +153,10 @@ fi
 EXTRAARGS=" "
 if [[ -n "$MultiPrompt" ]]; then
     EXTRAARGS="$EXTRAARGS --multiple_prompts"
+fi
+
+if [[ -n "$NumPrompts" ]]; then
+    EXTRAARGS="$EXTRAARGS --prompts $NumPrompts"
 fi
 
 if [[ -n "$TwoImagesPrompt" ]]; then
