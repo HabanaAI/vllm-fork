@@ -351,8 +351,19 @@ def main(args: argparse.Namespace):
     random.seed(args.seed)
 
     # Sample the requests.
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer, trust_remote_code=args.trust_remote_code)
+    if args.tokenizer_mode == "mistral":
+        try:
+            from vllm.transformers_utils.tokenizer import MistralTokenizer
+        except ImportError as e:
+            raise ImportError("MistralTokenizer requires vllm package.\n"
+                              "Please install it with `pip install vllm` "
+                              "to use mistral tokenizer mode.") from e
+        tokenizer = MistralTokenizer.from_pretrained(
+            str(args.tokenizer))
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.tokenizer, trust_remote_code=args.trust_remote_code)
+
     if args.dataset is None:
         vocab_size = tokenizer.vocab_size
         requests = []
