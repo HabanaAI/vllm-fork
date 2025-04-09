@@ -3,7 +3,9 @@
 import itertools
 from typing import Iterable, List, Optional, Tuple
 
+import os
 import torch
+import torch.nn.functional as F
 from torch import nn
 from transformers import RobertaConfig
 
@@ -73,6 +75,9 @@ class RobertaEmbedding(CustomOp):
             raise ValueError("Only 'absolute' position_embedding_type" +
                              " is supported")
 
+        self.use_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
+                                     'false').lower() == 'true'
+
     def forward_hpu(
         self,
         input_ids: torch.Tensor,
@@ -93,22 +98,43 @@ class RobertaEmbedding(CustomOp):
         # - https://github.com/huggingface/transformers/blob/a3d69a8994d673899608a7c17fbf4f953f50474e/src/transformers/models/roberta/modeling_roberta.py#L1669
         pos_list = []
         token_list = []
-        for offset in range(position_ids.size()[0]):
-            pos_list.append(position_ids[offset])
-            token_list.append(input_ids[offset])
+        if self.use_merged_prefill:
+            offset = 0
+            for seq_len in seq_lens:
+                pos_list.append(position_ids[0][offset:offset + seq_len])
+                token_list.append(input_ids[0][offset:offset + seq_len])
+                offset += seq_len
 
-        for index, (positions, tokens,
-                    seq_len) in enumerate(zip(pos_list, token_list, seq_lens)):
-            # Verify assumption that incoming position are
-            # always a sequence from 0 to N.
-            expected_pos = torch.arange(positions.size()[0],
-                                        dtype=torch.long,
-                                        device=inputs_embeds.device)
-            valid_input_mask = expected_pos < seq_len
-            expected_pos = expected_pos * valid_input_mask
-            assert torch.equal(positions, expected_pos)
-            position_ids[index] = create_position_ids_from_input_ids_hpu(
-                tokens, self.padding_idx, seq_len)
+            new_pos_list = []
+            for positions, tokens in zip(pos_list, token_list):
+                # Verify assumption that incoming position are
+                # always a sequence from 0 to N.
+                expected_pos = torch.arange(positions.size()[0],
+                                            dtype=torch.long,
+                                            device=inputs_embeds.device)
+                assert torch.equal(positions, expected_pos)
+                new_pos_list.append(
+                    create_position_ids_from_input_ids(tokens, self.padding_idx))
+            position_ids = torch.cat(new_pos_list)
+            padding = input_ids.size()[1] - position_ids.size()[0]
+            position_ids = F.pad(position_ids, (0, padding), "constant", 0)
+        else:
+            for offset in range(position_ids.size()[0]):
+                pos_list.append(position_ids[offset])
+                token_list.append(input_ids[offset])
+
+            for index, (positions, tokens,
+                        seq_len) in enumerate(zip(pos_list, token_list, seq_lens)):
+                # Verify assumption that incoming position are
+                # always a sequence from 0 to N.
+                expected_pos = torch.arange(positions.size()[0],
+                                            dtype=torch.long,
+                                            device=inputs_embeds.device)
+                valid_input_mask = expected_pos < seq_len
+                expected_pos = expected_pos * valid_input_mask
+                assert torch.equal(positions, expected_pos)
+                position_ids[index] = create_position_ids_from_input_ids_hpu(
+                    tokens, self.padding_idx, seq_len)
 
         # Position embeddings.
         position_embeddings = self.position_embeddings(position_ids)
