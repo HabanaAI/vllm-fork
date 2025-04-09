@@ -95,6 +95,8 @@ elif ! $HPU && ! $GPU; then
 fi
 
 if $GPU; then
+    # using vllm v0 till further notice
+    export VLLM_USE_V1=0
     uv pip install datasets pandas -q
 fi
 
