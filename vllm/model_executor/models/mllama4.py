@@ -812,12 +812,14 @@ class Llama4ForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         # NOTE: In v1, inputs_embeds is always generated at model runner,
         # this condition is for v0 compatibility.
-        elif inputs_embeds is None:
+        elif inputs_embeds is None and "pixel_values" in kwargs:
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
             inputs_embeds = self.get_input_embeddings(input_ids,
                                                       vision_embeddings)
             input_ids = None
 
+        # if self.rank == 0 and inputs_embeds is not None:
+        #     print(f"[DEBUG] kwargs is {kwargs}, inputs_embeds: {inputs_embeds}")
         return self.language_model(input_ids, positions, intermediate_tensors,
                                    inputs_embeds)
 

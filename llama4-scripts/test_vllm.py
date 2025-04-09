@@ -142,7 +142,7 @@ def main():
         type=str,
         help="The Hugging Face model ID to use (e.g., 'll-re/Llama-4-Scout-17B-16E-Instruct').",
         #default="/software/stanley/models/llama4-final-v2/Llama-4-Scout-17B-16E-Instruct/",
-        default="/root/data/Llama-4-Scout-17B-16E-Instruct/",
+        default="/data/models/Llama-4-Scout-17B-16E-Instruct/",
     )
 
     # Parse the arguments
@@ -156,13 +156,13 @@ def main():
     llm = LLM(
         model=model_id,
         dtype='bfloat16',
-        #enforce_eager=True,
+        enforce_eager=True,
         max_model_len=16384,
         tensor_parallel_size=8,
         limit_mm_per_prompt={"image": 5},
     )
-    # print("---------Now start Completion test-----------")
-    # test_text(llm)
+    print("---------Now start Completion test-----------")
+    test_text(llm)
     print("---------Now start Image test-----------")
     test_images(llm)
     # if "instruct" in model_id.lower():

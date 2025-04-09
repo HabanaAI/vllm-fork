@@ -1132,7 +1132,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             seq_data_mrope_positions: Optional[List[List[int]]] = None
             if seq_group_metadata.multi_modal_data:
-                print(f"[DEBUG] seq_group_metadata.multi_modal_data is {seq_group_metadata.multi_modal_data}")
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
                     .from_seq_group(seq_group_metadata,
@@ -2701,6 +2700,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         selected_token_indices=sampling_metadata.
                         selected_token_indices)
 
+                torch.hpu.synchronize()
                 if self.lora_config:
                     LoraMask.setLoraMask(
                         lora_logits_mask.index_select(
@@ -2720,6 +2720,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
+                torch.hpu.synchronize()
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
