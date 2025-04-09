@@ -54,6 +54,17 @@ model_path=/data/hf_models/DeepSeek-R1-G2-static
 bash single_16k_len.sh
 ```
 
+vLLM server is ready to serve when the log below appears.
+```bash
+INFO 04-09 00:49:01 llm_engine.py:431] init engine (profile, create kv cache, warmup model) took 32.75 seconds
+INFO 04-09 00:49:01 api_server.py:800] Using supplied chat template:
+INFO 04-09 00:49:01 api_server.py:800] None
+INFO 04-09 00:49:01 api_server.py:937] Starting vLLM API server on http://0.0.0.0:8688
+INFO 04-09 00:49:01 launcher.py:23] Available routes are:
+INFO 04-09 00:49:01 launcher.py:31] Route: /openapi.json, Methods: HEAD, GET
+
+```
+
 ### g. Check the vLLM performance quickly
 You may check the vLLM performance with benchmark_vllm_client.sh. 
 - Login the same container with the command like "docker exec -it deepseek_server /bin/bash"
@@ -115,7 +126,7 @@ Assume that the converted model weight files are in the folder /mnt/disk4
 docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all --device=/dev:/dev -v /dev:/dev -v /mnt/disk4:/data -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --cap-add SYS_PTRACE --cap-add=CAP_IPC_LOCK --ulimit memlock=-1:-1 --net=host --ipc=host vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
 ```
 
-#### e. HCCL demo test
+#### d. HCCL demo test
 Make sure the HCCL demo test passes using the assigned IPs on the two nodes (16 HPU) and get the expected all-reduce throughput. 
 HCCL demo guide document: https://github.com/HabanaAI/hccl_demo?tab=readme-ov-file#running-hccl-demo-on-2-servers-16-gaudi-devices
 ##### Example Commands:
@@ -138,7 +149,6 @@ The expected throughput is like below.
 #########################################################################################
 ```
 
----
 
 ### 2. Install VLLM
 ```bash
@@ -157,7 +167,7 @@ export VLLM_HOST_IP=192.168.1.101
 export GLOO_SOCKET_IFNAME=enx6c1ff7012f87
 ```
 
-### b. Adjust Environment Variables if required. Make sure the head node and worker node to have the same configuration except for VLLM_HOST_IP AND GLOO_SOCKER_IFNAME. 
+### b. Adjust Environment Variables if required. Make sure the head node and worker node to have the same configuration except for VLLM_HOST_IP, GLOO_SOCKER_IFNAME and HCCL_SOCKET_IFNAME. 
 ```bash
 max_num_batched_tokens=32768
 max_num_seqs=512
