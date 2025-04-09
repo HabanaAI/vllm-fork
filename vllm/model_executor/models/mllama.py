@@ -1060,12 +1060,6 @@ class MllamaTextCrossAttention(CustomOp):
                                                      block_indices,
                                                      block_offsets)
 
-        # We have to call torch.sdpa for prefill when using a
-        # custom cross-attention mask. Because the mask is not a
-        # standard causal mask, neither a block diagonal mask which
-        # can be optimized by xformers.BlockDiagonalMask.
-        # The mask is specially calculated for supporting multi
-        # images and interleaved images.
         q_len = q.shape[0]
         kv_len = k.shape[0]
         q = q.transpose(0, 1).view(self.num_local_key_value_heads,
