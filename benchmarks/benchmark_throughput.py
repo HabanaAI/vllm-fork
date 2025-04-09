@@ -475,9 +475,62 @@ def main(args: argparse.Namespace):
     print(args)
     random.seed(args.seed)
     # Sample the requests.
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer, trust_remote_code=args.trust_remote_code)
-    requests = get_requests(args, tokenizer)
+    if args.tokenizer_mode == "mistral":
+        try:
+            from vllm.transformers_utils.tokenizer import MistralTokenizer
+        except ImportError as e:
+            raise ImportError("MistralTokenizer requires vllm package.\n"
+                              "Please install it with `pip install vllm` "
+                              "to use mistral tokenizer mode.") from e
+        tokenizer = MistralTokenizer.from_pretrained(
+            str(args.tokenizer))
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.tokenizer, trust_remote_code=args.trust_remote_code)
+
+    if args.dataset is None:
+        vocab_size = tokenizer.vocab_size
+        requests = []
+        for _ in range(args.num_prompts):
+
+            request_tokenizer = tokenizer
+            lora_request: Optional[LoRARequest] = None
+            if args.enable_lora:
+                lora_request, lora_tokenizer = get_random_lora_request(args)
+                if lora_tokenizer:
+                    request_tokenizer = lora_tokenizer
+
+            # Synthesize a prompt with the given input length.
+            candidate_ids = [
+                random.randint(0, vocab_size - 1)
+                for _ in range(args.input_len)
+            ]
+            # As tokenizer may add additional tokens like BOS, we need to try
+            # different lengths to get the desired input length.
+            for _ in range(5):  # Max attempts to correct
+                candidate_prompt = request_tokenizer.decode(candidate_ids)
+                tokenized_len = len(request_tokenizer.encode(candidate_prompt))
+
+                if tokenized_len == args.input_len:
+                    break
+
+                # Adjust length based on difference
+                diff = args.input_len - tokenized_len
+                if diff > 0:
+                    candidate_ids.extend([
+                        random.randint(100, vocab_size - 100)
+                        for _ in range(diff)
+                    ])
+                else:
+                    candidate_ids = candidate_ids[:diff]
+            requests.append(
+                SampleRequest(prompt=candidate_prompt,
+                              prompt_len=args.input_len,
+                              expected_output_len=args.output_len,
+                              lora_request=lora_request))
+    else:
+        requests = sample_requests(tokenizer, args)
+
     is_multi_modal = any(request.multi_modal_data is not None
                          for request in requests)
     request_outputs: Optional[list[RequestOutput]] = None
