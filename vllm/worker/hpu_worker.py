@@ -126,17 +126,44 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             self.profiler = None
 
     def affine_cpu(self):
+        def get_cores_cpu_mapping() -> dict:
+            """
+            Runs 'lscpu -e' in a subprocess and returns results as a dict {core: [cpu, cpu, ...]}. 
+            If the cores have hyperthreading enabled, one worker should have CPU affinity based on actual CPU cores. 
+            """
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["lscpu", "-e=CPU,CORE"],
+                    text=True,
+                    capture_output=True,
+                    check=True
+                )
+                lines = result.stdout.strip().split("\n")[1:]  # Skip the header
+                core_to_cpus = {}
+                for line in lines:
+                    cpu, core = map(int, line.split())
+                    if core not in core_to_cpus:
+                        core_to_cpus[core] = set()
+                    core_to_cpus[core].add(cpu)
+                return core_to_cpus
+            except subprocess.CalledProcessError as e:
+                logger.info("Error running lscpu: %s", e)
+                return {}
         # CPU affinity
         rank = self.rank
         pid = os.getpid()
         logger.info("Starting rank %d - PID %d", rank, pid)
-        affinity = list(os.sched_getaffinity(pid))
-
+        affinity = os.sched_getaffinity(pid)
+        if not (cores_affinity := get_cores_cpu_mapping()):
+            logger.warning("[%d] Unable to set custom affinity", rank)
+            return
+        affinity = [core for core, cpus in cores_affinity.items() if cpus.intersection(affinity)]
         affinity.sort()
-        affinity = affinity[::2]  # no threads => skip every 2
         l = len(affinity) // self.parallel_config.world_size
-        new_affinity = affinity[1:][rank * l:(rank + 1) * l]  # skip one core to leave room for the OS
-        os.sched_setaffinity(pid, set(new_affinity))
+        affinity = affinity[rank * l:(rank + 1) * l]
+        new_affinity = set().union(*(cpus for core, cpus in cores_affinity.items() if core in affinity))
+        os.sched_setaffinity(pid, new_affinity)
         logger.info("[%d] Setting custom affinity", rank)
 
         logger.info("[%d] Affinity: %s", rank, str(os.sched_getaffinity(pid)))
