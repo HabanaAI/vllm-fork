@@ -784,6 +784,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return self.model
 
     def _use_graphs(self, batch_size, seq_len, is_prompt):
+        if is_prompt:
+            return False
         if self.enforce_eager:
             return False
         if self.skip_warmup:
@@ -1415,6 +1417,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_seq_len = self.bucketing_global_state.prompt_seq_bucket_cfg[-1]
         max_batch_size = min(self.max_num_batched_tokens // max_seq_len,
                              self.scheduler_config.max_num_seqs)
+        print(f'BOB: profile_run:: {self.max_num_seqs=}, {self.max_num_batched_tokens=}, {max_batch_size=}, {max_seq_len=} =========================== ')
         self.warmup_scenario(max_batch_size, max_seq_len, True, False, True)
         return
 
@@ -2166,6 +2169,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 **execute_model_kwargs,
                 selected_token_indices=sampling_metadata.selected_token_indices
             )
+            if warmup_mode == True:
+                 torch.hpu.synchronize()
+                 import torch.distributed as dist
+                 if dist.is_initialized():
+                     dist.barrier()
 
         if self.lora_config:
             LoraMask.setLoraMask(
@@ -2201,6 +2209,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 logits=logits,
                 sampling_metadata=sampling_metadata,
             )
+            print(f'BOB: 0 {output=} ********************')
+
         if use_delayed_sampling and self.is_driver_worker:
             self._patch_prev_output()
             output = self._pad_to_max_num_seqs(output.sampled_token_ids,
@@ -2210,6 +2220,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         else:
             output.outputs = output.outputs[:real_batch_size]
         htorch.core.mark_step()
+        print(f'BOB: 1 {output=} ********************')
+
         if model_input.async_callback is not None:
             model_input.async_callback()
         if self.is_driver_worker and self.profiler.enabled:
@@ -2224,11 +2236,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 real_batch_size=real_batch_size,
                 is_prompt=is_prompt)
             self.profiler.record_counter(self.event_start, counters)
+            print(f'BOB: 2 {output=} ********************')
 
         if self.return_hidden_states:
             # we only need to pass hidden states of most recent token
             assert model_input.sampling_metadata is not None
             hidden_states = hidden_states[:real_batch_size]
+            print(f'BOB: 3 {output=} ********************')
             output.sampled_token_ids = output.sampled_token_ids[:
                                                                 real_batch_size]
             output.sampled_token_probs = output.sampled_token_probs[:
