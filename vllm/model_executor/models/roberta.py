@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import itertools
+import os
 from typing import Iterable, List, Optional, Tuple
 
-import os
 import torch
-import torch.nn.functional as F
 from torch import nn
 from transformers import RobertaConfig
 
@@ -76,7 +75,7 @@ class RobertaEmbedding(CustomOp):
                              " is supported")
 
         self.use_merged_prefill = os.environ.get('VLLM_MERGED_PREFILL',
-                                     'false').lower() == 'true'
+                                                 'false').lower() == 'true'
 
     def forward_hpu(
         self,
@@ -105,26 +104,26 @@ class RobertaEmbedding(CustomOp):
                 token_list.append(input_ids[0][offset:offset + seq_len])
                 offset += seq_len
 
-            new_pos_list = []
-            for positions, tokens in zip(pos_list, token_list):
+            offset = 0
+            for positions, tokens, seq_len in zip(pos_list, token_list,
+                                                  seq_lens):
                 # Verify assumption that incoming position are
                 # always a sequence from 0 to N.
                 expected_pos = torch.arange(positions.size()[0],
                                             dtype=torch.long,
                                             device=inputs_embeds.device)
                 assert torch.equal(positions, expected_pos)
-                new_pos_list.append(
-                    create_position_ids_from_input_ids(tokens, self.padding_idx))
-            position_ids = torch.cat(new_pos_list)
-            padding = input_ids.size()[1] - position_ids.size()[0]
-            position_ids = F.pad(position_ids, (0, padding), "constant", 0)
+                position_ids[0][offset:offset +
+                                seq_len] = create_position_ids_from_input_ids(
+                                    tokens, self.padding_idx)
+                offset += seq_len
         else:
             for offset in range(position_ids.size()[0]):
                 pos_list.append(position_ids[offset])
                 token_list.append(input_ids[offset])
 
-            for index, (positions, tokens,
-                        seq_len) in enumerate(zip(pos_list, token_list, seq_lens)):
+            for index, (positions, tokens, seq_len) in enumerate(
+                    zip(pos_list, token_list, seq_lens)):
                 # Verify assumption that incoming position are
                 # always a sequence from 0 to N.
                 expected_pos = torch.arange(positions.size()[0],
