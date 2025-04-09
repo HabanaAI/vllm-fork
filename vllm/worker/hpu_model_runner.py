@@ -2711,9 +2711,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         if not hasattr(self, "cached_step_inputs") or len(self.cached_step_inputs) == 0:
                             self.cached_step_inputs = []
                         
-                        received_data = broadcast_tensor_dict(src=pp_group.last_rank)
+                        received_data = broadcast_tensor_dict(src=get_pp_group().last_rank)
                         
-                        if "token_ids" in received_tokens:
+                        if "token_ids" in received_data:
                             real_token_ids = received_data["token_ids"]
                             received_seq_ids = received_data["seq_ids"]
 
@@ -2779,7 +2779,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     "token_ids": real_token_ids,
                                     "seq_ids": seq_ids
                             }
-                            broadcast_tensor_dict(data_to_broadcast, src=pp_group.rank)
+                            broadcast_tensor_dict(data_to_broadcast, src=get_pp_group().rank)
                         else:
                             self._patch_prev_output()
                             output = self._pad_to_max_num_seqs(
