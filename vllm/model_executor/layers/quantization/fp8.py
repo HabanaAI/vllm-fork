@@ -607,7 +607,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             
             if current_platform.is_hpu() and VLLM_REQUANT_FP8_INC:
                 moe_op = layer.moe_op
-                os.environ["INC_DYNAMIC_MOE_EXPERTS"] = str(moe_op.num_experts)
                 for index in range(moe_op.num_experts):
                     moe_op.w13_list[index].set_weight(layer.w13_weight[index])
                     moe_op.w13_list[index].set_scale_inv_fp8(
