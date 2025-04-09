@@ -2705,14 +2705,27 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             0, sampling_metadata.selected_token_indices))
                 if not get_pp_group().is_last_rank:
                     if use_delayed_sampling and get_pp_group().is_first_rank:
-                        received_tokens = broadcast_tensor_dict(src=pp_group.last_rank)
+                        received_data = broadcast_tensor_dict(src=pp_group.last_rank)
                         if "token_ids" in received_tokens:
-                            real_token_ids = received_tokens["token_ids"]
+                            real_token_ids = received_data["token_ids"]
+                            received_seq_ids = received_data["seq_ids"]
+
+                            cur_seq_ids = self._get_seq_ids(model_input)
+                            seq_id_mapping = {}
+
+                            for i, sid in enumerate(received_seq_ids):
+                                if sid in cur_seq_ids:
+                                    seq_id_mapping[sid] = cur_seq_ids.index(sid)
+                            mapped_tokens = torch.zeros_like(real_token_ids)
+                            
+                            for old_idx, new_idx in seq_id_mapping.items():
+                                mapped_tokens[new_idx] = real_token_ids[old_idx]
+                            
                             padded_output = self._pad_to_max_num_seqs(
                                 output.sampled_token_ids, DUMMY_TOKEN_ID)
                             self.cached_step_outputs.append(padded_output)
                             self.cached_step_inputs.append(model_input)
-                        fake_output = self._delayed_sampler_outputs(model_input)
+                    
                     return hidden_states
 
                 # Compute the logits.
@@ -2753,8 +2766,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if use_delayed_sampling and self.is_driver_worker:
                         if get_pp_group().is_last_rank:
                             real_token_ids = output.sampled_token_ids
-                            tokens_to_broadcast = {"token_ids": real_token_ids}
-                            broadcast_tensor_dict(tokens_to_broadcast, src=pp_group.rank)
+                            seq_ids = self._get_seq_ids(model_input)
+
+                            data_to_broadcast = {
+                                    "token_ids": real_token_ids,
+                                    "seq_ids": seq_ids
+                            }
+                            broadcast_tensor_dict(data_to_broadcast, src=pp_group.rank)
                         else:
                             self._patch_prev_output()
                             output = self._pad_to_max_num_seqs(
