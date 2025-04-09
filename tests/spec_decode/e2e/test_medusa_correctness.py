@@ -396,6 +396,53 @@ def test_mqa_scorer(vllm_runner, common_llm_kwargs, per_test_common_llm_kwargs,
                                   temperature=0.0)
 
 
+@pytest.mark.parametrize(
+    "common_llm_kwargs",
+    [{
+        # Disable eager to run test in graph mode, e.g. hpu graph, torch compile graph, cuda graph, etc.
+        "enforce_eager": False,
+
+        # Print spec metrics.
+        "disable_log_stats": False,
+
+        # Precision
+        "dtype": PRECISION,
+
+        # Main model
+        "model_name": MAIN_MODEL,
+    }])
+@pytest.mark.parametrize("per_test_common_llm_kwargs", [{}])
+@pytest.mark.parametrize("baseline_llm_kwargs", [{}])
+@pytest.mark.parametrize("test_llm_kwargs", [
+    {
+        "speculative_model": SPEC_MODEL,
+        "num_speculative_tokens": MAX_SPEC_TOKENS,
+    },
+])
+@pytest.mark.parametrize("output_len", [
+    128,
+])
+@pytest.mark.parametrize("batch_size", [1, 32])
+@pytest.mark.parametrize("seed", [1])
+@pytest.mark.parametrize("prefill_chunk_size", [-1, 32])
+def test_medusa_e2e_greedy_correctness_with_graphs(vllm_runner, common_llm_kwargs,
+                                       per_test_common_llm_kwargs,
+                                       baseline_llm_kwargs, test_llm_kwargs,
+                                       batch_size: int, output_len: int,
+                                       seed: int, prefill_chunk_size: int):
+    """Verify greedy equality with different batch size."""
+    maybe_enable_chunked_prefill(prefill_chunk_size, test_llm_kwargs)
+    run_equality_correctness_test(vllm_runner,
+                                  common_llm_kwargs,
+                                  per_test_common_llm_kwargs,
+                                  baseline_llm_kwargs,
+                                  test_llm_kwargs,
+                                  batch_size,
+                                  max_output_len=output_len,
+                                  seed=seed,
+                                  temperature=0.0)
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__])
