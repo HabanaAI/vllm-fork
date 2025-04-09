@@ -13,6 +13,11 @@ cd /software/users/${YOUR NAME}/;
 git clone https://github.com/HabanaAI/vllm-fork -b llama4
 pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation;
 
+> Note: if you're using 1.20.0, you might need to `pip install numpy==1.26.4" if it's not this version yet
+
+> Note: this is from requirements-hpu.txt, for some reason something is uninstalling our version
+pip install git+https://github.com/HabanaAI/vllm-hpu-extension.git@145c63d
+
 # install dependencies for llama4
 pip install pydantic msgspec cachetools cloudpickle psutil zmq blake3 py-cpuinfo aiohttp openai uvloop fastapi uvicorn watchfiles partial_json_parser python-multipart gguf llguidance prometheus_client numba compressed_tensors
 
