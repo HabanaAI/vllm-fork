@@ -1489,7 +1489,7 @@ class QKVCrossParallelLinear(LinearBase):
         """Check if two parameters are exactly pointing to same things."""
         # ignore weight_loader because it's always different
         key_to_ignore = ["weight_loader", "_weight_loader"]
-        if is_hpu and type(map_param) == habana_frameworks.torch.core.HabanaParameterWrapper and type(src_param) == torch.nn.parameter.Parameter:
+        if is_hpu and type(map_param) == habana_frameworks.torch.core.weight_sharing.HabanaParameterWrapper and type(src_param) == torch.nn.parameter.Parameter:
             has_same_type_name = True
         else:
             has_same_type_name = type(src_param) is type(map_param)
