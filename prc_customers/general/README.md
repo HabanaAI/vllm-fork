@@ -5,15 +5,15 @@ docker run -it --runtime=habana \
     -e HABANA_VISIBLE_DEVICES=all \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --net=host --ipc=host \
-    artifactory-kfs.habana-labs.com/docker-local/1.20.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.0:1.20.0-543
+    vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:1.20.1-97
  ```
 2. Install vLLM：
 ``` bash
-git clone -b prc_main_1.20 https://github.com/intel-sandbox/aicse.vllm-habana
-git clone -b prc_main_1.20 https://github.com/intel-sandbox/vllm-hpu-extension
+git clone -b aice/v1.20.1 https://github.com/HabanaAI/vllm-fork
+git clone -b aice/v1.20.1 https://github.com/HabanaAI/vllm-hpu-extension
 
-python3 -m pip install -e ./vllm-hpu-extension
-python3 -m pip install -e ./aicse.vllm-habana  # This may take 5-10 minutes.
+VLLM_TARGET_DEVICE=hpu pip install -e /workspace/vllm-fork --no-build-isolation
+pip install -e /workspace/vllm-hpu-extension --no-build-isolation
 ```
 3. We recommend using Pillow-SIMD instead of Pillow to improve the image processing performance in Multimodal models like Qwen-VL, GLM-4V.
 To install Pillow-SIMD, run the following:
@@ -131,11 +131,8 @@ We can cache the recipe to disk and skip warm-up during the benchmark to save wa
 > We can also skip warm-up at the 1st step and run the benchmark twice, one for warm-up and the other one for collecting of the performance data. This approach has the risk of some missing warm-up bucketing as the scheduling of the two rounds of benchmark may not be exactly the same.
 
 ## FAQs
-### Handling of the accuracy issue for some PRC models
-Currently the `block_softmax` using global max cause accuracy issue for some PRC models. Habana RnD team provided a temp fix to this with about 30% perf drop.  Please set `export VLLM_PA_SOFTMAX_IMPL=scatter_reduce` before calling of `start_gaudi_vllm_server.sh` and `benchmark_throughput.sh` to apply this fix.
-Please refer to [issue-275](https://github.com/HabanaAI/vllm-fork/issues/275) for more details.
-
-We found some models may have low lm_eval score when running with bf16 format. Please try to set `VLLM_PRESERVE_QK_FP32_ACCUM_RES=true`, `VLLM_USE_FP32_SOFTMAX=true` and `VLLM_PROMPT_USE_FUSEDSDPA=false` to improve the accuracy.
+### Handling of the accuracy issue
+We found some models may have low lm_eval score when running with bf16 format. Please try to set `VLLM_FP32_SOFTMAX=true` and `VLLM_PROMPT_USE_FUSEDSDPA=false` to improve the accuracy.
 
 > The models listed in the [Supported Configurations](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#supported-configurations) don't have this accuracy issue.
 
@@ -175,10 +172,10 @@ modID   CPU Affinity    NUMA Affinity
 
 ### Profile the LLM engine
 The following 4 ENVs are used to control the device profiling:
-- `VLLM_DEVICE_PROFILER_ENABLED`, set to `true` to enable device profiler.
-- `VLLM_DEVICE_PROFILER_WARMUP_STEPS`, number of steps to ignore for profiling.
-- `VLLM_DEVICE_PROFILER_STEPS`, number of steps to capture for profiling.
-- `VLLM_DEVICE_PROFILER_REPEAT`, number of cycles for (warmup + profile).
+- `VLLM_ENGINE_PROFILER_ENABLED`, set to `true` to enable device profiler.
+- `VLLM_ENGINE_PROFILER_WARMUP_STEPS`, number of steps to ignore for profiling.
+- `VLLM_ENGINE_PROFILER_STEPS`, number of steps to capture for profiling.
+- `VLLM_ENGINE_PROFILER_REPEAT`, number of cycles for (warmup + profile).
 
 > Please refer to [torch.profiler.schedule](https://pytorch.org/docs/stable/profiler.html#torch.profiler.schedule) for more deatils about the profiler schedule arguments.
 

@@ -626,7 +626,8 @@ class QWenModel(nn.Module):
             if pixel_values is not None and self.visual is not None:
                 hidden_states = hidden_states.reshape(-1, hidden_size)
                 image_embeds = image_embeds.reshape(-1, hidden_size)
-                hidden_states[input_ids.reshape(-1) == self.visual.image_pad_id] = image_embeds
+                hidden_states[input_ids.reshape(-1) ==
+                              self.visual.image_pad_id] = image_embeds
                 hidden_states = hidden_states.reshape(batch_size, seq_length,
                                                       hidden_size)
             residual = None

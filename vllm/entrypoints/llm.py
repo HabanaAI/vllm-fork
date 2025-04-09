@@ -243,13 +243,13 @@ class LLM:
         self.profiler = self._setup_profiler()
 
     def _setup_profiler(self):
-        enable_profile = os.getenv("VLLM_DEVICE_PROFILER_ENABLED",
+        enable_profile = os.getenv("VLLM_ENGINE_PROFILER_ENABLED",
                                    "false").lower() in ["true", "1"]
         if not enable_profile:
             return None
-        warmup = int(os.getenv("VLLM_DEVICE_PROFILER_WARMUP_STEPS", "0"))
-        steps = int(os.getenv("VLLM_DEVICE_PROFILER_STEPS", "1"))
-        repeat = int(os.getenv("VLLM_DEVICE_PROFILER_REPEAT", "1"))
+        warmup = int(os.getenv("VLLM_ENGINE_PROFILER_WARMUP_STEPS", "0"))
+        steps = int(os.getenv("VLLM_ENGINE_PROFILER_STEPS", "1"))
+        repeat = int(os.getenv("VLLM_ENGINE_PROFILER_REPEAT", "1"))
         schedule = torch.profiler.schedule(wait=0,
                                            warmup=warmup,
                                            active=steps,

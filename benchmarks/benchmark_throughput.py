@@ -240,7 +240,9 @@ def run_vllm(
                        multi_modal_data=request.multi_modal_data))
         sampling_params.append(
             SamplingParams(
-                temperature=0.0,
+                n=n,
+                temperature=1.0,
+                top_p=1.0,
                 ignore_eos=True,
                 max_tokens=request.expected_output_len,
             ))
@@ -303,7 +305,9 @@ async def run_vllm_async(
                            multi_modal_data=request.multi_modal_data))
             sampling_params.append(
                 SamplingParams(
-                    temperature=0.0,
+                    n=n,
+                    temperature=1.0,
+                    top_p=1.0,
                     ignore_eos=True,
                     max_tokens=request.expected_output_len,
                 ))
