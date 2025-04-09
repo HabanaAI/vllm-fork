@@ -1280,11 +1280,6 @@ class MllamaTextModel(nn.Module):
         inputs_embeds = self.embed_tokens(input_ids)
         hidden_states = inputs_embeds
 
-        if is_hpu:
-            for idx, decoder_layer in enumerate(self.layers):
-                if idx not in self.cross_attention_layers:
-                    self.layers[idx].self_attn.rotary_emb.prepare_cos_sin(
-                        positions)
         for idx, decoder_layer in enumerate(self.layers):
             if idx in self.cross_attention_layers:
                 if not skip_cross_attention:
