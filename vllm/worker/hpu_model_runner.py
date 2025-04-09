@@ -2704,6 +2704,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         lora_logits_mask.index_select(
                             0, sampling_metadata.selected_token_indices))
                 if not get_pp_group().is_last_rank:
+                    if use_delayed_sampling and get_pp_group().is_first_rank:
+                        received_tokens = broadcast_tensor_dict(src=pp_group.last_rank)
+                        if "token_ids" in received_tokens:
+                            real_token_ids = received_tokens["token_ids"]
+                            padded_output = self._pad_to_max_num_seqs(
+                                output.sampled_token_ids, DUMMY_TOKEN_ID)
+                            self.cached_step_outputs.append(padded_output)
+                            self.cached_step_inputs.append(model_input)
+                        fake_output = self._delayed_sampler_outputs(model_input)
                     return hidden_states
 
                 # Compute the logits.
@@ -2742,11 +2751,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
-                        self._patch_prev_output()
-                        output = self._pad_to_max_num_seqs(
-                            output.sampled_token_ids, DUMMY_TOKEN_ID)
-                        self.cached_step_outputs.append(output)
-                        self.cached_step_inputs.append(model_input)
+                        if get_pp_group().is_last_rank:
+                            real_token_ids = output.sampled_token_ids
+                            tokens_to_broadcast = {"token_ids": real_token_ids}
+                            broadcast_tensor_dict(tokens_to_broadcast, src=pp_group.rank)
+                        else:
+                            self._patch_prev_output()
+                            output = self._pad_to_max_num_seqs(
+                                output.sampled_token_ids, DUMMY_TOKEN_ID)
+                            self.cached_step_outputs.append(output)
+                            self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
