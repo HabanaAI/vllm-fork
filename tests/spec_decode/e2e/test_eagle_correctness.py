@@ -308,7 +308,8 @@ def test_eagle_disable_queue(vllm_runner, common_llm_kwargs,
 @pytest.mark.parametrize(
     "common_llm_kwargs",
     [{
-        # Disable eager to run test in graph mode, e.g. hpu graph, torch compile graph, cuda graph, etc.
+        # Disable eager to run test in graph mode, 
+        # e.g. hpu graph, torch compile graph, cuda graph, etc.
         "enforce_eager": False,
 
         # Print spec metrics.
