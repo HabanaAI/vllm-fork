@@ -202,8 +202,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         ep_rank = None,
     ):
-        bs, seq_len, hidden_size = x.shape
-        x = x.reshape(bs * seq_len, hidden_size)
+        if len(x.shape) == 3:
+            bs, seq_len, hidden_size = x.shape
+            x = x.reshape(bs * seq_len, hidden_size)
         assert len(x.shape) == 2
         import habana_frameworks.torch as htorch
         htorch.core.mark_step()
