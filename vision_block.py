@@ -1195,7 +1195,7 @@ def test_fsdpa_compare_fused_unfused():
 
 class AttentionLongSequence:
     @staticmethod
-    def forward(q, k, v, mask, q_block_size):
+    def forward(q, k, v, mask, q_block_size, step_after=None):
         """
         Support long sequence at prompt phase
         """
@@ -1212,6 +1212,9 @@ class AttentionLongSequence:
             row_q = q[:, :, s:e, :]
             row_mask = mask[:, :, s:e, :]
             attn_output[:, :, s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0, False, None)
+            if not None:
+                if i % step_after == 0:
+                    htcore.mark_step()
 
         if q_padding != 0:
             attn_output = attn_output[:, :, :-q_padding, :]
@@ -1609,6 +1612,84 @@ def test_simulate_window_and_full():
     # This makes sure SimulateBatchedFullAttn2(True) works ok on hpu with hpugraphs
 
 
+def test_crossoverpoint():
+    def foo():
+        from habana_frameworks.torch.hpex.kernels import FusedSDPA
+        import time
+        dims = [1600, 3200, 4800, 6400]
+        fused_sdpa_times = {}
+        for dim in dims:
+            q1 = torch.rand([1, 16, dim, 80], device='hpu').bfloat16()
+            k1 = torch.rand([1, 16, dim, 80], device='hpu').bfloat16()
+            v1 = torch.rand([1, 16, dim, 80], device='hpu').bfloat16()
+            fullatt_block_attn_mask = torch.ones([1, 1, dim, dim], device='hpu').bool()
+            htcore.mark_step(sync=True)
+            t0 = time.time()
+            fused_out = FusedSDPA.apply(q1, k1, v1, fullatt_block_attn_mask, 0.0)
+            print(fused_out.sum())
+            t1 = time.time() - t0
+            fused_sdpa_times[dim] = t1
+            print(f'Done fused {dim}')
+        htcore.mark_step(sync=True)
+
+        # could have done in the last loop, but just to be safe doing it separately
+        longprompt_mixtralstyle = {}
+        for step in [25, 50, 75]:
+            for block in [64, 128, 256]:
+                for dim in dims:
+                    if dim%block != 0:
+                        continue
+                    q1 = torch.rand([1, 16, dim, 80], device='hpu').bfloat16()
+                    k1 = torch.rand([1, 16, dim, 80], device='hpu').bfloat16()
+                    v1 = torch.rand([1, 16, dim, 80], device='hpu').bfloat16()
+                    fullatt_block_attn_mask = torch.ones([1, 1, dim, dim], device='hpu').bool()
+                    htcore.mark_step(sync=True)
+                    t0 = time.time()
+                    fused_out = AttentionLongSequence.forward(q1, k1, v1, fullatt_block_attn_mask, block, step)
+                    print(fused_out.sum())
+                    t1 = time.time() - t0
+                    longprompt_mixtralstyle[(dim, step, block)] = t1
+                    print(f'Done AttentionLongSequence {dim} step {step} block {block}')
+        return fused_sdpa_times, longprompt_mixtralstyle
+    foo() # warming up
+    foo() # warming up
+    fused_sdpa_times, longprompt_mixtralstyle = foo()
+    print(fused_sdpa_times)
+    print(longprompt_mixtralstyle)
+    '''
+    {1600: 0.0016040802001953125,
+    3200: 0.0029897689819335938,
+    4800: 0.005352973937988281,
+    6400: 0.0066585540771484375}
+
+
+    {(1600, 25, 64): 0.00471806526184082, <<<
+    (1600, 50, 64): 0.004710674285888672 <<<
+    (1600, 75, 64): 0.004685878753662109 <<<
+
+    (3200, 25, 128): 0.005719423294067383 <<<
+    (3200, 50, 64): 0.009069204330444336
+    (3200, 50, 128): 0.005730867385864258 <<<
+    (3200, 75, 64): 0.009095430374145508
+    (3200, 25, 64): 0.008173942565917969,
+    (3200, 75, 128): 0.005720376968383789 <<<
+
+    (4800, 25, 64): 0.011794090270996094,  <<<
+    (4800, 50, 64): 0.011925697326660156
+    (4800, 75, 64): 0.014850854873657227
+
+    (6400, 25, 64): 0.014657258987426758,
+    (6400, 25, 128): 0.009445905685424805,
+    (6400, 25, 256): 0.00830841064453125,   <<<
+    (6400, 50, 64): 0.015633106231689453
+    (6400, 50, 128): 0.011644601821899414
+    (6400, 50, 256): 0.008297920227050781  <<<
+    (6400, 75, 64): 0.015521526336669922
+    (6400, 75, 128): 0.011669635772705078
+    (6400, 75, 256): 0.008321523666381836}  <<<
+
+
+    '''
 
 
 #if __name__ == "__main__":

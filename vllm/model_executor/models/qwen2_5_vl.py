@@ -418,9 +418,12 @@ class Qwen2_5_VisionAttention(nn.Module):
                 attn_mask = fullatt_block_attn_mask.reshape(batch_size, 1, seq_len_N_t, seq_len_N_s, -1)[:, :, :, :, 0]
                 assert attn_mask.shape == mask_shape
 
-                #fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
-                #fused_out = torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, fullatt_block_attn_mask, 0.0)  ######## this works if used instead of fsdpa
-                fused_out = AttentionLongSequence.forward(q1, k1, v1, attn_mask, 64)  ## TODO change this 64 to something bigger. Need to think carefully about the buckets to use
+                if q1.shape[2] <= 6400: # this crossover point should be measured
+                    fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
+                    #fused_out = torch.nn.functional.scaled_dot_product_attention(q1, k1, v1, fullatt_block_attn_mask, 0.0)  ######## this works if used instead of fsdpa
+                else:
+                    fused_out = AttentionLongSequence.forward(q1, k1, v1, attn_mask, 64)
+                    ## TODO change this 64 to something bigger.
                 context_layer = rearrange(fused_out, "b h s d -> b s h d ")
                 
             
@@ -1206,7 +1209,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
                     expanded_cu_seqlens = expand_to_max(cu_seqlens, 3) # either a single image, or a single image and its accompanying pad image, so only max expansion to 3
                     htcore.mark_step()
-                    #breakpoint()
                     hidden_states = self.visual(pixel_values_curr_img_padded,
                                             rotary_pos_emb=rot_pos_emb,
                                             cu_seqlens=expanded_cu_seqlens,)
