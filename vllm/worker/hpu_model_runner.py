@@ -2544,9 +2544,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
-        assert not (use_delayed_sampling and
-            self.parallel_config.pipeline_parallel_size != 1), \
-            'Delayed sampling is not compatible with Pipeline Parallelism!'
+        #assert not (use_delayed_sampling and
+            #self.parallel_config.pipeline_parallel_size != 1), \
+            #'Delayed sampling is not compatible with Pipeline Parallelism!'
         assert model_input.input_tokens is not None
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
@@ -2705,7 +2705,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             0, sampling_metadata.selected_token_indices))
                 if not get_pp_group().is_last_rank:
                     if use_delayed_sampling and get_pp_group().is_first_rank:
+                        if not hasattr(self, "cached_step_outputs") or len(self.cached_step_outputs) == 0:
+                            self.cached_step_outputs = []
+            
+                        if not hasattr(self, "cached_step_inputs") or len(self.cached_step_inputs) == 0:
+                            self.cached_step_inputs = []
+                        
                         received_data = broadcast_tensor_dict(src=pp_group.last_rank)
+                        
                         if "token_ids" in received_tokens:
                             real_token_ids = received_data["token_ids"]
                             received_seq_ids = received_data["seq_ids"]
@@ -2946,6 +2953,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return SamplerOutput(sampler_outputs)
 
     def _patch_prev_output(self):
+        # Add check to ensure caches aren't empty before proceeding
+        if not hasattr(self, "cached_step_inputs") or not hasattr(self, "cached_step_outputs"):
+            return
+        
+        if len(self.cached_step_inputs) == 0 or len(self.cached_step_outputs) == 0:
+            return
+    
+        assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
+            f'''Inputs and outputs are out of sync!
+            {len(self.cached_step_inputs)} vs {len(self.cached_step_outputs)}'''
         assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
             f'''Inputs and outputs are out of sync!
             {len(self.cached_step_inputs)} vs {len(self.cached_step_outputs)}'''
