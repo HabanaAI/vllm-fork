@@ -8,6 +8,7 @@ import time
 from functools import cache
 from typing import Dict, List, Optional, Tuple
 
+import requests as reqs
 import torch
 import uvloop
 from PIL import Image
@@ -356,6 +357,16 @@ def main(args: argparse.Namespace):
     if args.dataset is None:
         vocab_size = tokenizer.vocab_size
         requests = []
+        mm_data = None
+        if args.mm_data:
+            mm_data_url = "https://llava-vl.github.io/static/images/view.jpg"
+            try:
+                raw_image = Image.open(reqs.get(
+                    mm_data_url, stream=True).raw).convert("RGB")
+            except Exception as e:
+                print(f"Failed to download image from {mm_data_url}: {e}")
+                raw_image = None
+            mm_data = {"image": raw_image}
         for _ in range(args.num_prompts):
 
             request_tokenizer = tokenizer
@@ -364,11 +375,10 @@ def main(args: argparse.Namespace):
                 lora_request, lora_tokenizer = get_random_lora_request(args)
                 if lora_tokenizer:
                     request_tokenizer = lora_tokenizer
-
+            input_len = args.input_len - 2 if args.mm_data else args.input_len
             # Synthesize a prompt with the given input length.
             candidate_ids = [
-                random.randint(0, vocab_size - 1)
-                for _ in range(args.input_len)
+                random.randint(0, vocab_size - 1) for _ in range(input_len)
             ]
             # As tokenizer may add additional tokens like BOS, we need to try
             # different lengths to get the desired input length.
@@ -376,11 +386,11 @@ def main(args: argparse.Namespace):
                 candidate_prompt = request_tokenizer.decode(candidate_ids)
                 tokenized_len = len(request_tokenizer.encode(candidate_prompt))
 
-                if tokenized_len == args.input_len:
+                if tokenized_len == input_len:
                     break
 
                 # Adjust length based on difference
-                diff = args.input_len - tokenized_len
+                diff = input_len - tokenized_len
                 if diff > 0:
                     candidate_ids.extend([
                         random.randint(100, vocab_size - 100)
@@ -388,11 +398,20 @@ def main(args: argparse.Namespace):
                     ])
                 else:
                     candidate_ids = candidate_ids[:diff]
-            requests.append(
-                SampleRequest(prompt=candidate_prompt,
-                              prompt_len=args.input_len,
-                              expected_output_len=args.output_len,
-                              lora_request=lora_request))
+            if mm_data is not None:
+                requests.append(
+                    SampleRequest(prompt="<|image|><|begin_of_text|>" +
+                                  candidate_prompt,
+                                  prompt_len=args.input_len,
+                                  expected_output_len=args.output_len,
+                                  lora_request=lora_request,
+                                  multi_modal_data=mm_data))
+            else:
+                requests.append(
+                    SampleRequest(prompt=candidate_prompt,
+                                  prompt_len=args.input_len,
+                                  expected_output_len=args.output_len,
+                                  lora_request=lora_request))
     else:
         requests = sample_requests(tokenizer, args)
 
@@ -498,6 +517,10 @@ if __name__ == "__main__":
         default=None,
         help="Path to the lora adapters to use. This can be an absolute path, "
         "a relative path, or a Hugging Face model identifier.")
+    parser.add_argument("--mm-data",
+                        action='store_true',
+                        default=False,
+                        help="Add multi-modal data to the requests.")
 
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
