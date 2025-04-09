@@ -64,6 +64,10 @@ while [[ $# -gt 0 ]]; do
         NumPrompt=$2
         shift 2
         ;;
+    --use_vllm_v1)
+        VLLMV1="On"
+        shift 1
+        ;;
     --run_sonet)
         RunSonet=true
         shift 1
@@ -95,13 +99,19 @@ elif ! $HPU && ! $GPU; then
 fi
 
 if $GPU; then
-    # using vllm v0 till further notice
-    export VLLM_USE_V1=0
     uv pip install datasets pandas -q
 fi
 
 if $HPU; then
     pip install datasets pandas -q
+fi
+
+if [[ -n "$VLLMV1" ]]; then
+    echo "INFO: vllm V1 is enabled"
+    export VLLM_USE_V1=1
+else
+    echo "INFO: vllm V1 is disabled"
+    export VLLM_USE_V1=0
 fi
 
 if [[ -n "$SkipWarmup" ]]; then

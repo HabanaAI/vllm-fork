@@ -88,6 +88,10 @@ while [[ $# -gt 0 ]]; do
         TwoImagesPrompt="on"
         shift 1
         ;;
+    --use_vllm_v1)
+        VLLMV1="On"
+        shift 1
+        ;;
     --help)
         usage
         ;;
@@ -113,6 +117,14 @@ if [[ -n "$video" ]]; then
     GMU=${GMU:-"0.6"}
 else
     GMU=${GMU:-"0.9"}
+fi
+
+if [[ -n "$VLLMV1" ]]; then
+    echo "INFO: vllm V1 is enabled"
+    export VLLM_USE_V1=1
+else
+    echo "INFO: vllm V1 is disabled"
+    export VLLM_USE_V1=0
 fi
 
 if [[ -n $InstallVLLM ]]; then
