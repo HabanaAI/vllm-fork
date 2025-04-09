@@ -26,7 +26,9 @@ from vllm.model_executor.parameter import (BasevLLMParameter,
                                            RowvLLMParameter)
 # yapf: enable
 from vllm.model_executor.utils import set_weight_attrs
+from vllm.platforms import current_platform
 
+is_hpu = current_platform.is_hpu()
 logger = init_logger(__name__)
 
 WEIGHT_LOADER_V2_SUPPORTED = [
@@ -1487,7 +1489,10 @@ class QKVCrossParallelLinear(LinearBase):
         """Check if two parameters are exactly pointing to same things."""
         # ignore weight_loader because it's always different
         key_to_ignore = ["weight_loader", "_weight_loader"]
-        has_same_type_name = type(src_param) is type(map_param)
+        if is_hpu and type(map_param) == habana_frameworks.torch.core.HabanaParameterWrapper and type(src_param) == torch.nn.parameter.Parameter:
+            has_same_type_name = True
+        else:
+            has_same_type_name = type(src_param) is type(map_param)
         src_param_attrs = {
             k: v
             for k, v in src_param.__dict__.items() if k not in key_to_ignore
