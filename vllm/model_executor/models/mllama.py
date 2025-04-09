@@ -472,7 +472,7 @@ class MllamaVisionSdpaAttention(CustomOp):
                                           attn_output.shape[1], -1)
         output, _ = self.o_proj(attn_output)
         return output
-    
+
     def forward_cuda(
         self,
         hidden_state: torch.Tensor,
@@ -495,9 +495,10 @@ class MllamaVisionSdpaAttention(CustomOp):
                    self.head_dim).transpose(1, 2)
 
         from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
         # TODO: remove padding in image encoder
         attn_output = FusedSDPA.apply(q, k, v, attention_mask, 0.0)
-        
+
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(attn_output.shape[0],
                                           attn_output.shape[1], -1)
@@ -893,7 +894,7 @@ class MllamaTextCrossAttention(CustomOp):
                 kv_cache, attn_metadata)
         out, _ = self.o_proj(output)
         return out
-    
+
     def forward_cuda(
         self,
         hidden_states: torch.Tensor,
@@ -904,10 +905,9 @@ class MllamaTextCrossAttention(CustomOp):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         return self.forward_native(hidden_states, attention_mask,
-                                   kv_range_for_decode,
-                                   cross_attention_states, kv_cache,
-                                   attn_metadata)
-    
+                                   kv_range_for_decode, cross_attention_states,
+                                   kv_cache, attn_metadata)
+
     def forward_hpu(
         self,
         hidden_states: torch.Tensor,
@@ -937,9 +937,9 @@ class MllamaTextCrossAttention(CustomOp):
 
         if attention_mask is not None:
             output = self._attention_with_mask_hpu(q, k, v, kv_cache,
-                                               attention_mask,
-                                               kv_range_for_decode,
-                                               attn_metadata)
+                                                   attention_mask,
+                                                   kv_range_for_decode,
+                                                   attn_metadata)
         else:
             output = self.attn(
                 q.view(-1, self.num_local_heads * self.head_dim), k, v,
@@ -1090,15 +1090,15 @@ class MllamaTextCrossAttention(CustomOp):
         fsdpa_op = ModuleFusedSDPA(FusedSDPA)
         # use fast as softmax_mode for better accuracy
         output = fsdpa_op(q,
-                            k,
-                            v,
-                            attention_mask,
-                            dropout_p=0.0,
-                            is_causal=False,
-                            scale=None,
-                            softmax_mode="fast",
-                            recompute_mode=None,
-                            valid_sequence_lengths=None)
+                          k,
+                          v,
+                          attention_mask,
+                          dropout_p=0.0,
+                          is_causal=False,
+                          scale=None,
+                          softmax_mode="fast",
+                          recompute_mode=None,
+                          valid_sequence_lengths=None)
         output = output.permute(2, 0, 1, 3).reshape(
             q_len, self.num_local_heads * self.head_dim)
         return output
@@ -1169,7 +1169,7 @@ class MllamaCrossAttentionDecoderLayer(CustomOp):
         hidden_states = residual + self.cross_attn_mlp_gate.tanh(
         ) * hidden_states
         return hidden_states
-    
+
     def forward_cuda(
         self,
         hidden_states: torch.Tensor,
@@ -1181,7 +1181,7 @@ class MllamaCrossAttentionDecoderLayer(CustomOp):
         return self.forward_native(hidden_states, cross_attention_states,
                                    cross_attention_mask, kv_range_for_decode,
                                    full_text_row_masked_out_mask)
-    
+
     def forward_hpu(
         self,
         hidden_states: torch.Tensor,
@@ -1212,11 +1212,11 @@ class MllamaCrossAttentionDecoderLayer(CustomOp):
         assert len(residual.shape) == 3
         if len(hidden_states.shape) == 2:
             hidden_states = hidden_states.view(residual.size(0),
-                                                residual.size(1),
-                                                residual.size(2))
+                                               residual.size(1),
+                                               residual.size(2))
         full_text_row_masked_out_mask = full_text_row_masked_out_mask.view(
             hidden_states.size(0), -1, 1)
-        
+
         hidden_states = full_text_row_masked_out_mask * hidden_states
         hidden_states = residual + self.cross_attn_attn_gate.tanh(
         ) * hidden_states
