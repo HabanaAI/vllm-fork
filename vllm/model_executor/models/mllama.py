@@ -1196,8 +1196,7 @@ class MllamaForCausalLM(nn.Module):
                                         info=MllamaProcessingInfo,
                                         dummy_inputs=MllamaDummyInputsBuilder)
 @CustomOp.register("mllama_for_conditional_generation")
-class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal,
-                                     SupportsV0Only, CustomOp):
+class MllamaForConditionalGeneration(SupportsMultiModal, SupportsV0Only, CustomOp):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
         "gate_up_proj": ["gate_proj", "up_proj"]
