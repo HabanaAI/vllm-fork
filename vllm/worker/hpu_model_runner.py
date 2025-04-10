@@ -2209,7 +2209,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 logits=logits,
                 sampling_metadata=sampling_metadata,
             )
-            print(f'BOB: 0 {output=} ********************')
+            # print(f'BOB: 0 {output=} ********************')
 
         if use_delayed_sampling and self.is_driver_worker:
             self._patch_prev_output()
@@ -2220,7 +2220,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         else:
             output.outputs = output.outputs[:real_batch_size]
         htorch.core.mark_step()
-        print(f'BOB: 1 {output=} ********************')
+        # print(f'BOB: 1 {output=} ********************')
 
         if model_input.async_callback is not None:
             model_input.async_callback()
@@ -2236,13 +2236,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 real_batch_size=real_batch_size,
                 is_prompt=is_prompt)
             self.profiler.record_counter(self.event_start, counters)
-            print(f'BOB: 2 {output=} ********************')
+            # print(f'BOB: 2 {output=} ********************')
 
         if self.return_hidden_states:
             # we only need to pass hidden states of most recent token
             assert model_input.sampling_metadata is not None
             hidden_states = hidden_states[:real_batch_size]
-            print(f'BOB: 3 {output=} ********************')
+            # print(f'BOB: 3 {output=} ********************')
             output.sampled_token_ids = output.sampled_token_ids[:
                                                                 real_batch_size]
             output.sampled_token_probs = output.sampled_token_probs[:
@@ -2256,6 +2256,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 return [fake_output]
             else:
                 return []
+
+        print(f'BOB: execute_model:: {output=} ======= ')
+
         return [output]
 
     def _delayed_sampler_outputs(self, model_input):
