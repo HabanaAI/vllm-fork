@@ -422,10 +422,9 @@ class BaseLinearLayerWithLoRA(BaseLayerWithLoRA):
         # therefore we need to flatten the batch dimensions.
 
         #TODO(hlahkar): remove the check once hpu handles flat tensors
-        if not current_platform.is_hpu():
-            if x.ndim == 3 and output.ndim == 3:
-                output = output.flatten(0, 1)
-                x = x.flatten(0, 1)
+        if not current_platform.is_hpu() and x.ndim == 3 and output.ndim == 3:
+            output = output.flatten(0, 1)
+            x = x.flatten(0, 1)
 
         self.punica_wrapper.add_lora_linear(output, x, self.lora_a_stacked,
                                             self.lora_b_stacked,
