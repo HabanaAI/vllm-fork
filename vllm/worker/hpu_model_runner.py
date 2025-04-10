@@ -434,7 +434,6 @@ class HpuModelAdapter(torch.nn.Module):
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
 
-
     # sampler property will be used by spec_decode_worker
     # don't rename
     @property
@@ -1049,6 +1048,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             for child_name, child_module in module.named_children():
                 self.set_causal_option(child_module)
+
     def move_to_device(self, tensor):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
