@@ -47,7 +47,6 @@ def test_text(llm):
         print("-----------------------------------")
         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
 
-        # "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/datasets/cat_style_layout.png",
 def test_images(llm):
     # image_url = "https://d2opxh93rbxzdn.cloudfront.net/original/2X/4/40cfa8ca1f24ac29cfebcb1460b5cafb213b6105.png"
     image_url = "https://huggingface.co/datasets/patrickvonplaten/random_img/resolve/main/europe.png"
@@ -74,41 +73,44 @@ def test_images(llm):
         generated_text = output.outputs[0].text
         print("-----------------------------------")
         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
-# def test_images(llm):
-#     image_urls = [
-#         "https://huggingface.co/datasets/huggingface/documentation-images/resolve/0052a70beed5bf71b92610a43a52df6d286cd5f3/diffusers/rabbit.jpg",
-#     ]
-#     # Create a sampling params object.
-#     sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=128)
-#     # Perform multi-image inference using llm.chat()
-#     outputs = llm.chat(
-#         [
-#             {
-#                 "role": "user",
-#                 "content": [
-#                     {
-#                         "type": "text",
-#                         "text": "Can you describe how these two images are similar, and how they differ?",
-#                     },
-#                     *(
-#                         {
-#                             "type": "image_url",
-#                             "image_url": {"url": image_url},
-#                         }
-#                         for image_url in image_urls
-#                     ),
-#                 ],
-#             }
-#         ],
-#         sampling_params=sampling_params,
-#     )
 
-#     # Print the outputs.
-#     for output in outputs:
-#         prompt = output.prompt
-#         generated_text = output.outputs[0].text
-#         print("-----------------------------------")
-#         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
+
+def test_images_2(llm):
+    image_urls = [
+        "https://huggingface.co/datasets/huggingface/documentation-images/resolve/0052a70beed5bf71b92610a43a52df6d286cd5f3/diffusers/rabbit.jpg",
+        "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/datasets/cat_style_layout.png",
+    ]
+    # Create a sampling params object.
+    sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=128)
+    # Perform multi-image inference using llm.chat()
+    outputs = llm.chat(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Can you describe how these two images are similar, and how they differ?",
+                    },
+                    *(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_url},
+                        }
+                        for image_url in image_urls
+                    ),
+                ],
+            }
+        ],
+        sampling_params=sampling_params,
+    )
+
+    # Print the outputs.
+    for output in outputs:
+        prompt = output.prompt
+        generated_text = output.outputs[0].text
+        print("-----------------------------------")
+        print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
 
 
 def test_completion(llm):
@@ -156,7 +158,7 @@ def main():
     llm = LLM(
         model=model_id,
         dtype='bfloat16',
-        enforce_eager=True,
+        #enforce_eager=True,
         max_model_len=16384,
         tensor_parallel_size=8,
         limit_mm_per_prompt={"image": 5},
@@ -166,6 +168,8 @@ def main():
     test_text(llm)
     print("---------Now start Image test-----------")
     test_images(llm)
+    print("---------Now start multi Image test-----------")
+    test_images_2(llm)
     # if "instruct" in model_id.lower():
     #     print("---------Now start Instruct test-----------")
     #     test_text(llm)

@@ -818,8 +818,6 @@ class Llama4ForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                       vision_embeddings)
             input_ids = None
 
-        # if self.rank == 0 and inputs_embeds is not None:
-        #     print(f"[DEBUG] kwargs is {kwargs}, inputs_embeds: {inputs_embeds}")
         return self.language_model(input_ids, positions, intermediate_tensors,
                                    inputs_embeds)
 

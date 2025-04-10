@@ -2628,6 +2628,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
+            if model_input.multi_modal_kwargs is not None and 'embed_is_patch' in model_input.multi_modal_kwargs:
+                if model_input.multi_modal_kwargs['embed_is_patch'].dim() == 3:
+                    num_images = model_input.multi_modal_kwargs['embed_is_patch'].size(0)
+                    model_input.multi_modal_kwargs['embed_is_patch'] = list(torch.split(model_input.multi_modal_kwargs['embed_is_patch'].squeeze(0), num_images, dim=0))
+
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -2691,7 +2696,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
-
                 with self.profiler.record_event('internal',
                                                 model_event_name,
                                                 args=profiler_args):
