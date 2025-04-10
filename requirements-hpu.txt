@@ -9,3 +9,6 @@ tabulate
 setuptools>=61
 setuptools-scm>=8
 vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@145c63d
+
+#inc temp fix
+/software/users/dsemiat/dynamic_quant/vllm/neural_compressor_pt-3.3.1.dev1+g62bb6913f-py3-none-any.whl
