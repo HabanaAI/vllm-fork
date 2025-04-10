@@ -39,6 +39,7 @@ cd vllm-fork
 pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation;
 
 # install specific INC
+pip uninstall -y neural-compressor neural-compressor-pt
 git clone -b dev/llama4_launch https://github.com/intel/neural-compressor.git
 cd neural-compressor
 pip install -e .
