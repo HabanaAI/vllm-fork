@@ -87,13 +87,18 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         ModelRunnerClass: Type[HPUModelRunnerBase] = HPUModelRunner
         if self.model_config.runner_type == "pooling":
             ModelRunnerClass = HPUPoolingModelRunner
+            is_causal = None
         elif is_encoder_decoder_model:
             ModelRunnerClass = HPUEncoderDecoderModelRunner
+            is_causal = False
+        else:
+            is_causal = True
         self.model_runner: HPUModelRunnerBase = ModelRunnerClass(
             vllm_config=vllm_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
             **speculative_args,
+            is_causal=is_causal,
         )
         if model_runner_cls is not None:
             self.model_runner = model_runner_cls(self.model_runner)
