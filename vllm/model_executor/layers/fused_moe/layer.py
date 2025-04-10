@@ -478,6 +478,7 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
+        self.multicast_fn = self.hpu_multicast if is_hpu else self.naive_multicast
         if is_hpu:
             if VLLM_REQUANT_FP8_INC:
                 ep_shift = self.ep_rank * self.local_num_experts
@@ -844,6 +845,12 @@ class FusedMoE(torch.nn.Module):
 
         return topk_weights, topk_ids
 
+    def hpu_multicast(self, x: torch.Tensor,
+                      cu_tokens_across_dp_cpu: torch.Tensor):
+        buffer = get_dp_group().all_gather(x, 0)
+
+        return buffer
+
     def naive_multicast(self, x: torch.Tensor,
                         cu_tokens_across_dp_cpu: torch.Tensor):
         assert (len(x.shape) in [2, 3])
@@ -883,10 +890,10 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
-            hidden_states = self.naive_multicast(hidden_states,
-                                                 cu_tokens_across_dp_cpu)
-            router_logits = self.naive_multicast(router_logits,
-                                                 cu_tokens_across_dp_cpu)
+            hidden_states = self.multicast_fn(hidden_states,
+                                              cu_tokens_across_dp_cpu)
+            router_logits = self.multicast_fn(router_logits,
+                                              cu_tokens_across_dp_cpu)
 
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
