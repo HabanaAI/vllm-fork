@@ -28,6 +28,25 @@ pip install pydantic msgspec cachetools cloudpickle psutil zmq blake3 py-cpuinfo
 PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
 ```
 
+## FP8 quantization
+
+We take unit_scale (means scale is 1 for all modules) as the first step and meaningless output is expected. To get a FP8 Scout/Maverick llama4 model, please follow below steps:
+
+```bash
+# install specific vllm which supports FP8 quantization with neural-compressor for llama4
+git clone -b llama4 https://github.com/mengniwang95/vllm-fork.git
+cd vllm-fork
+pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation;
+
+# install specific INC
+git clone -b dev/llama4_launch https://github.com/intel/neural-compressor.git
+cd neural-compressor
+pip install -e .
+
+# run cmd
+PT_HPU_LAZY_MODE=1 QUANT_CONFIG=llama4-scripts/inc_unit_scale_quant.json python llama4-scripts/test_vllm_quant.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct
+```
+
 
 # Enable Vision Accuracy test using ChartQA Dataset
 
