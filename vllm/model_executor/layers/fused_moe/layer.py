@@ -2,6 +2,7 @@
 
 from abc import abstractmethod
 from enum import Enum
+import os
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -24,7 +25,7 @@ from vllm.platforms.interface import CpuArchEnum
 from vllm.utils import direct_register_custom_op
 
 is_hpu = current_platform.is_hpu()
-
+use_fp8 = "QUANT_CONFIG" in os.environ
 if current_platform.is_cuda_alike():
     from .fused_moe import fused_experts
 else:
@@ -247,7 +248,11 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         ep_rank: Optional[int] = None,
     ) -> torch.Tensor:
         hidden_dim = x.shape[-1]
-        num_experts = layer.local_num_experts
+        # FP8 change
+        if use_fp8:
+            num_experts = layer.local_num_experts
+        else: # BF16
+            num_experts = layer.w13_weight.shape[0]
         moe_n_slice = 8 if num_experts > 32 else 1
         n_expert_slice = num_experts // moe_n_slice
         assert n_expert_slice * moe_n_slice == num_experts
@@ -273,22 +278,43 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         for i in range(moe_n_slice):
             min_expert = i * n_expert_slice
             max_expert = (i + 1) * n_expert_slice
-            w13_list_slice = [
-                layer.hpu_fused_moe.MoeOp.w13_list[j].weight
-                for j in range(min_expert, max_expert)
-            ]
-            w2_list_slice = [
-                layer.hpu_fused_moe.MoeOp.w2_list[j].weight
-                for j in range(min_expert, max_expert)
-            ]
-            current_hidden_states = layer.hpu_fused_moe.MoeOp(
-                hidden_states=x,
-                expert_routing_table=topk_ids.to(torch.int64),
-                router_weights=topk_weights.to(x.dtype),
-                activation=activation,
-                experts_min=min_expert + ep_shift,
-                experts_max=max_expert - 1 + ep_shift
-            )
+            if use_fp8:
+                w13_list_slice = [
+                    layer.hpu_fused_moe.MoeOp.w13_list[j].weight
+                    for j in range(min_expert, max_expert)
+                ]
+                w2_list_slice = [
+                    layer.hpu_fused_moe.MoeOp.w2_list[j].weight
+                    for j in range(min_expert, max_expert)
+                ]
+                current_hidden_states = layer.hpu_fused_moe.MoeOp(
+                    hidden_states=x,
+                    expert_routing_table=topk_ids.to(torch.int64),
+                    router_weights=topk_weights.to(x.dtype),
+                    activation=activation,
+                    experts_min=min_expert + ep_shift,
+                    experts_max=max_expert - 1 + ep_shift
+                )
+            else: # BF16
+                w13_list_slice = [
+                    layer.w13_weight[j].data.squeeze()
+                    for j in range(min_expert, max_expert)
+                ]
+                w2_list_slice = [
+                    layer.w2_weight[j].data.squeeze()
+                    for j in range(min_expert, max_expert)
+                ]
+                current_hidden_states = torch.ops.hpu.mixture_of_experts(
+                    hidden_states=x,
+                    expert_routing_table=topk_ids.to(torch.int64),
+                    router_weights=topk_weights.to(x.dtype),
+                    w12=w13_list_slice,
+                    w3=w2_list_slice,
+                    permuted_weights=True,
+                    activation=activation,
+                    experts_min=min_expert + ep_shift,
+                    experts_max=max_expert - 1 + ep_shift,
+                )
             htorch.core.mark_step()
             if i == 0:
                 final_hidden_states = current_hidden_states
@@ -539,7 +565,11 @@ class FusedMoE(torch.nn.Module):
                              "non-grouped topk.")
         if current_platform.is_hpu():
             from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
+            # Use local_num_experts for FP8, global_num_experts for BF16
+            if use_fp8:
+                self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
+            else:
+                self.hpu_fused_moe = DynamicFusedMOE(self.global_num_experts)
 
         # Note: get_quant_method will look at the layer's local_num_experts
         # for heuristic purposes, so it must be initialized first.
@@ -652,7 +682,8 @@ class FusedMoE(torch.nn.Module):
             expert_data = expert_data.narrow(shard_dim, shard_size, shard_size)
         expert_data.copy_(loaded_weight)
 
-        if is_hpu:
+        # Apply FP8 logic if QUANT_CONFIG exists
+        if is_hpu and use_fp8:
             for expert_id in range(expert_data.shape[0]):
                 self.hpu_fused_moe.MoeOp.w13_list[expert_id].set_weight(
                         expert_data[expert_id]
@@ -677,12 +708,13 @@ class FusedMoE(torch.nn.Module):
                                                  shard_size)
         # w2, down_proj: Load into only logical weight of w2.
         expert_data.copy_(loaded_weight)
-        if is_hpu:
+        if is_hpu and use_fp8:
             for expert_id in range(expert_data.shape[0]):
                 self.hpu_fused_moe.MoeOp.w2_list[expert_id].set_weight(
                         expert_data[expert_id]
                         )
-            torch.hpu.synchronize()
+        # Sync regardless of BF16 or FP8
+        torch.hpu.synchronize()
 
     def _load_single_value(self, param: torch.nn.Parameter,
                            loaded_weight: torch.Tensor, expert_id: int):
