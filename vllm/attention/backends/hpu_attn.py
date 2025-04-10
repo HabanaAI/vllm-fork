@@ -369,8 +369,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Decoding run.
             output = HPUPagedAttention.forward_decode(
                 query=query,
-                key_cache=key_cache,
-                value_cache=value_cache,
                 block_mapping=block_mapping,
                 block_bias=attn_bias,
                 block_groups=block_groups,
