@@ -1029,14 +1029,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             attn_mask = seq_idx_t
         if self.is_pooler:
-            mask_v = torch.where(q_seq_pos_t < 0 , True, False)
+            mask_v = torch.where(q_seq_pos_t < 0, True, False)
             attn_mask = attn_mask | mask_v
-            off_value = -3E38 #small number, avoid nan and overflow
+            off_value = -3E38  #small number, avoid nan and overflow
         else:
             off_value = -math.inf
         attn_bias = torch.zeros_like(attn_mask, dtype=dtype)
         attn_bias.masked_fill_(attn_mask, off_value)
-        import pdb;pdb.set_trace()
         return attn_bias.unsqueeze(1)
 
     def set_causal_option(self, module):
