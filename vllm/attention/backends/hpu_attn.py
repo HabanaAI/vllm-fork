@@ -374,7 +374,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_mapping=block_mapping,
                 block_bias=attn_bias,
                 block_groups=block_groups,
-                **self.common_attention_args(block_list))
+                **self.common_attention_args(block_list, key_cache,
+                                             value_cache))
         # Reshape the output tensor.
         return output.view(batch_size, -1, hidden_size)
 
