@@ -6,7 +6,9 @@ import json
 import os
 import random
 import time
-import warnings
+import os
+import io
+import base64
 from functools import cache
 from typing import Any, Optional, Union
 
@@ -25,7 +27,8 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.entrypoints.openai.api_server import (
     build_async_engine_client_from_engine_args)
-from vllm.inputs import TextPrompt, TokensPrompt
+from vllm.inputs import TextPrompt
+from vllm.outputs import RequestOutput
 from vllm.lora.request import LoRARequest
 from vllm.lora.utils import get_adapter_absolute_path
 from vllm.multimodal.inputs import MultiModalDataDict
@@ -80,7 +83,6 @@ def get_random_lora_request(
         lora_tokenizer_cache[lora_id] = get_lora_tokenizer(lora_request)
     return lora_request, lora_tokenizer_cache[lora_id]
 
-
 def sample_requests(tokenizer: PreTrainedTokenizerBase,
                     args: argparse.Namespace) -> list[SampleRequest]:
 
@@ -111,21 +113,6 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         prompt = data["conversations"][0]["value"]
         completion = data["conversations"][1]["value"]
 
-        multi_modal_data: Optional[MultiModalDataDict] = None
-        if "image" in data:
-            multi_modal_data = multi_modal_data or {}
-            image_path = data["image"]
-            # TODO(vllm-project/vllm/issues/9778): Support multiple images.
-            assert isinstance(image_path,
-                              str), "Only support single image input"
-            try:
-                multi_modal_data["image"] = Image.open(image_path).convert(
-                    "RGB")
-            except FileNotFoundError:
-                # Ignore datapoint where asset is missing
-                continue
-            prompt = _get_prompt_for_image_model(question=prompt, model=model)
-
         request_tokenizer = tokenizer
         lora_request: Optional[LoRARequest] = None
         if args.enable_lora:
@@ -145,6 +132,38 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
+
+        multi_modal_data: Optional[MultiModalDataDict] = None
+        if "image" in data:
+            multi_modal_data = multi_modal_data or {}
+            image_path = os.path.join(os.path.dirname(dataset_path), data["image"])
+            # TODO(vllm-project/vllm/issues/9778): Support multiple images.
+            assert isinstance(image_path,
+                              str), "Only support single image input"
+            # if os.path.isfile(image_path):
+            #     multi_modal_data = {"type": "image_url", "image_url": {"url": f"file://{image_path}"}}
+            # else:
+            #     # Ignore datapoint where asset is missing
+            #     continue
+            try:
+                image = Image.open(image_path).convert("RGB")
+                with io.BytesIO() as image_data:
+                    image.save(image_data, format="JPEG")
+                    image_base64 = base64.b64encode(image_data.getvalue()).decode("utf-8")
+                multi_modal_data = {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_base64}"
+                    }
+                }
+            except FileNotFoundError:
+                # Ignore datapoint where asset is missing
+                continue
+            # prompt = _get_prompt_for_image_model(question=prompt, model=model)
+            content = [{"text": prompt, "type": "text"}, multi_modal_data]
+            prompt = [{"role": "user", "content": content}]
+
+
         filtered_dataset.append(
             SampleRequest(prompt=prompt,
                           prompt_len=prompt_len,
@@ -218,8 +237,7 @@ def run_vllm(
                 ignore_eos=True,
             ))
         end = time.perf_counter()
-    return end - start, outputs
-
+    return end - start
 
 def run_vllm_chat(
         requests: list[SampleRequest],
@@ -259,12 +277,16 @@ def run_vllm_chat(
     end = time.perf_counter()
     return end - start, outputs
 
-
-async def run_vllm_async(requests: list[SampleRequest],
-                         n: int,
-                         engine_args: AsyncEngineArgs,
-                         disable_frontend_multiprocessing: bool = False,
-                         disable_detokenize: bool = False) -> float:
+async def run_vllm_async(
+    requests: List[SampleRequest],
+    n: int,
+    engine_args: AsyncEngineArgs,
+    disable_frontend_multiprocessing: bool = False,
+    weights_load_device: str = None,
+    use_padding_aware_scheduling: bool = False,
+    max_num_seqs: int = 256,
+    max_num_prefill_seqs: int = None,
+) -> float:
     from vllm import SamplingParams
 
     async with build_async_engine_client_from_engine_args(
@@ -577,14 +599,13 @@ def main(args: argparse.Namespace):
                 len(o.token_ids) for o in ro.outputs if o)
         total_num_tokens = total_prompt_tokens + total_output_tokens
     else:
-        total_num_tokens = sum(r.prompt_len + r.expected_output_len
-                               for r in requests)
-        total_output_tokens = sum(r.expected_output_len for r in requests)
-        total_prompt_tokens = total_num_tokens - total_output_tokens
+        total_num_tokens = sum(request.prompt_len + request.expected_output_len
+                            for request in requests)
+        total_output_tokens = sum(request.expected_output_len
+                                for request in requests)
 
     if is_multi_modal and args.backend != "vllm-chat":
-        print("\033[91mWARNING\033[0m: Multi-modal request with "
-              f"{args.backend} backend detected. The "
+        print("\033[91mWARNING\033[0m: Multi-modal request detected. The "
               "following metrics are not accurate because image tokens are not"
               " counted. See vllm-project/vllm/issues/9778 for details.")
         # TODO(vllm-project/vllm/issues/9778): Count multi-modal token length.
