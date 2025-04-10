@@ -241,27 +241,20 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
                                         1, 0)
         #TODO(hlahkar): remove the check once hpu handles flat tensors
 
-        if not current_platform.is_hpu():
-            embeddings_indices = torch.narrow(
-                self.punica_wrapper._embeddings_indices, 1, 0, x.size(0))
+        if current_platform.is_hpu():
+            shape = x.shape
+            x = x.view(shape[0] * shape[1])
+        added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1,
+                                        1, 0)
+        embeddings_indices = torch.narrow(
+            self.punica_wrapper._embeddings_indices, 1, 0, x.size(0))
 
-            indices = embeddings_indices[1]
-        else:
-            shape = x.size(0) * x.size(1)
-            embeddings_indices = torch.narrow(
-                self.punica_wrapper._embeddings_indices, 1, 0, shape)
-
-            indices = embeddings_indices[1].view_as(x)
+        indices = embeddings_indices[1]
         full_lora_a_embeddings = F.embedding(
             x + indices,
             self.lora_a_stacked_2d,
         )
-
-        #TODO(hlahkar): remove the check once hpu handles flat tensors
-        if not current_platform.is_hpu():
-            indices = embeddings_indices[0]
-        else:
-            indices = embeddings_indices[0].view_as(x)
+        indices = embeddings_indices[0]
         full_output = self.base_layer.forward(x +
                                               (indices * added_tokens_mask))
 
@@ -279,6 +272,10 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
                                                full_lora_a_embeddings,
                                                self.lora_b_stacked,
                                                add_input=True)
+
+        if current_platform.is_hpu():
+            full_output_org = full_output_org.view(shape[0], shape[1],
+                                                   full_output_org.shape[1])
         return full_output.view_as(full_output_org)
 
     @classmethod
