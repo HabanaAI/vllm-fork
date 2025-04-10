@@ -5,6 +5,9 @@ import dataclasses
 import json
 import random
 import time
+import os
+import io
+import base64
 from functools import cache
 from typing import Dict, List, Optional, Tuple
 
@@ -19,6 +22,7 @@ from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.entrypoints.openai.api_server import (
     build_async_engine_client_from_engine_args)
 from vllm.inputs import TextPrompt
+from vllm.outputs import RequestOutput
 from vllm.lora.request import LoRARequest
 from vllm.lora.utils import get_adapter_absolute_path
 from vllm.multimodal import MultiModalDataDict
@@ -91,7 +95,6 @@ def get_random_lora_request(
         lora_tokenizer_cache[lora_id] = get_lora_tokenizer(lora_request)
     return lora_request, lora_tokenizer_cache[lora_id]
 
-
 def sample_requests(tokenizer: PreTrainedTokenizerBase,
                     args: argparse.Namespace) -> List[SampleRequest]:
 
@@ -122,21 +125,6 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         prompt = data["conversations"][0]["value"]
         completion = data["conversations"][1]["value"]
 
-        multi_modal_data: Optional[MultiModalDataDict] = None
-        if "image" in data:
-            multi_modal_data = multi_modal_data or {}
-            image_path = data["image"]
-            # TODO(vllm-project/vllm/issues/9778): Support multiple images.
-            assert isinstance(image_path,
-                              str), "Only support single image input"
-            try:
-                multi_modal_data["image"] = Image.open(image_path).convert(
-                    "RGB")
-            except FileNotFoundError:
-                # Ignore datapoint where asset is missing
-                continue
-            prompt = _get_prompt_for_image_model(question=prompt, model=model)
-
         request_tokenizer = tokenizer
         lora_request: Optional[LoRARequest] = None
         if args.enable_lora:
@@ -156,6 +144,38 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
         if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
+
+        multi_modal_data: Optional[MultiModalDataDict] = None
+        if "image" in data:
+            multi_modal_data = multi_modal_data or {}
+            image_path = os.path.join(os.path.dirname(dataset_path), data["image"])
+            # TODO(vllm-project/vllm/issues/9778): Support multiple images.
+            assert isinstance(image_path,
+                              str), "Only support single image input"
+            # if os.path.isfile(image_path):
+            #     multi_modal_data = {"type": "image_url", "image_url": {"url": f"file://{image_path}"}}
+            # else:
+            #     # Ignore datapoint where asset is missing
+            #     continue
+            try:
+                image = Image.open(image_path).convert("RGB")
+                with io.BytesIO() as image_data:
+                    image.save(image_data, format="JPEG")
+                    image_base64 = base64.b64encode(image_data.getvalue()).decode("utf-8")
+                multi_modal_data = {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_base64}"
+                    }
+                }
+            except FileNotFoundError:
+                # Ignore datapoint where asset is missing
+                continue
+            # prompt = _get_prompt_for_image_model(question=prompt, model=model)
+            content = [{"text": prompt, "type": "text"}, multi_modal_data]
+            prompt = [{"role": "user", "content": content}]
+
+
         filtered_dataset.append(
             SampleRequest(prompt=prompt,
                           prompt_len=prompt_len,
@@ -220,6 +240,43 @@ def run_vllm(
         end = time.perf_counter()
     return end - start
 
+def run_vllm_chat(
+        requests: list[SampleRequest],
+        n: int,
+        engine_args: EngineArgs,
+        disable_detokenize: bool = False) -> tuple[float, list[RequestOutput]]:
+    """
+    Run vLLM chat benchmark. This function is recommended ONLY for benchmarking
+    multimodal models as it properly handles multimodal inputs and chat
+    formatting. For non-multimodal models, use run_vllm() instead.
+    """
+    from vllm import LLM, SamplingParams
+    llm = LLM(**dataclasses.asdict(engine_args))
+
+    assert all(
+        llm.llm_engine.model_config.max_model_len >= (
+            request.prompt_len + request.expected_output_len)
+        for request in requests), (
+            "Please ensure that max_model_len is greater than the sum of "
+            "prompt_len and expected_output_len for all requests.")
+
+    prompts = []
+    sampling_params: list[SamplingParams] = []
+    for request in requests:
+        prompts.append(request.prompt)
+        sampling_params.append(
+            SamplingParams(
+                n=n,
+                temperature=1.0,
+                top_p=1.0,
+                ignore_eos=True,
+                max_tokens=request.expected_output_len,
+                detokenize=not disable_detokenize,
+            ))
+    start = time.perf_counter()
+    outputs = llm.chat(prompts, sampling_params, use_tqdm=True)
+    end = time.perf_counter()
+    return end - start, outputs
 
 async def run_vllm_async(
     requests: List[SampleRequest],
@@ -428,13 +485,33 @@ def main(args: argparse.Namespace):
     elif args.backend == "mii":
         elapsed_time = run_mii(requests, args.model, args.tensor_parallel_size,
                                args.output_len)
+    elif args.backend == "vllm-chat":
+        elapsed_time, request_outputs = run_vllm_chat(
+            requests, args.n, EngineArgs.from_cli_args(args),
+            args.disable_detokenize)
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
-    total_num_tokens = sum(request.prompt_len + request.expected_output_len
-                           for request in requests)
-    total_output_tokens = sum(request.expected_output_len
-                              for request in requests)
-    if is_multi_modal:
+
+    if request_outputs:
+        # Note: with the vllm and vllm-chat backends,
+        # we have request_outputs, which we use to count tokens.
+        total_prompt_tokens = 0
+        total_output_tokens = 0
+        for ro in request_outputs:
+            if not isinstance(ro, RequestOutput):
+                continue
+            total_prompt_tokens += len(
+                ro.prompt_token_ids) if ro.prompt_token_ids else 0
+            total_output_tokens += sum(
+                len(o.token_ids) for o in ro.outputs if o)
+        total_num_tokens = total_prompt_tokens + total_output_tokens
+    else:
+        total_num_tokens = sum(request.prompt_len + request.expected_output_len
+                            for request in requests)
+        total_output_tokens = sum(request.expected_output_len
+                                for request in requests)
+
+    if is_multi_modal and args.backend != "vllm-chat":
         print("\033[91mWARNING\033[0m: Multi-modal request detected. The "
               "following metrics are not accurate because image tokens are not"
               " counted. See vllm-project/vllm/issues/9778 for details.")
@@ -460,7 +537,7 @@ if __name__ == "__main__":
     parser = FlexibleArgumentParser(description="Benchmark the throughput.")
     parser.add_argument("--backend",
                         type=str,
-                        choices=["vllm", "hf", "mii"],
+                        choices=["vllm", "hf", "mii", "vllm-chat"],
                         default="vllm")
     parser.add_argument("--dataset",
                         type=str,
@@ -502,6 +579,11 @@ if __name__ == "__main__":
                         action='store_true',
                         default=False,
                         help="Disable decoupled async engine frontend.")
+    parser.add_argument(
+        "--disable-detokenize",
+        action="store_true",
+        help=("Do not detokenize the response (i.e. do not include "
+              "detokenization time in the measurement)"))
     # LoRA
     parser.add_argument(
         "--lora-path",
