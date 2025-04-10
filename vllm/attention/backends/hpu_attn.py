@@ -269,7 +269,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         return output.view(batch_size, seq_len, hidden_size)
 
     def common_attention_args(self,
-                              attn_metadata=None,
+                              block_list=None,
                               key_cache=None,
                               value_cache=None):
         fsdpa_op = self.fused_scaled_dot_product_attention.apply \
