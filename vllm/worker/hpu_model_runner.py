@@ -439,7 +439,6 @@ class HpuModelAdapter(torch.nn.Module):
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
 
-
     # sampler property will be used by spec_decode_worker
     # don't rename
     @property
@@ -1032,7 +1031,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_mask = (seq_idx_t | seq_pos_t) if self.is_causal else seq_idx_t
         if self.is_pooler:
             mask_v = torch.where(q_seq_pos_t < 0, True, False)
-            attn_mask = attn_mask | mask_v 
+            attn_mask = attn_mask | mask_v
             off_value = -3E38  #small number, avoid nan and overflow
         else:
             off_value = -math.inf
@@ -1051,7 +1050,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             for child_name, child_module in module.named_children():
                 self.set_causal_option(child_module)
-    
+
     def move_to_device(self, tensor):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
