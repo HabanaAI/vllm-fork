@@ -139,8 +139,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         if "flex_attention" in enabled_flags():
             self.prefill_impl = 'flex'
         if "fsdpa" in enabled_flags():
-            assert alibi_slopes is None, \
-                'Prefill with FusedSDPA not supported with alibi slopes!'
             self.prefill_impl = 'fsdpa'
 
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
