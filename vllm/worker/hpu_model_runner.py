@@ -242,7 +242,7 @@ def get_path_to_rope(model: torch.nn.Module):
 
 class HpuModelAdapter(torch.nn.Module):
 
-    def __init__(self, model, vllm_config, layer_names, is_causal):
+    def __init__(self, model, vllm_config, layer_names, =True):
         super().__init__()
         self.model = model
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
@@ -1029,20 +1029,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         kv_seq_pos_t = seq_pos_t.unsqueeze(-2)
         seq_idx_t = q_seq_idx_t != kv_seq_idx_t
         seq_pos_t = kv_seq_pos_t > q_seq_pos_t
-        import pdb;pdb.set_trace()
-        if self.is_causal:
-            attn_mask = (seq_idx_t | seq_pos_t)
-        else:
-            attn_mask = seq_idx_t
+        attn_mask = (seq_idx_t | seq_pos_t) if self.is_causal else seq_idx_t
         if self.is_pooler:
-            mask_v = torch.where(q_seq_pos_t < 0 , True, False)
+            mask_v = torch.where(q_seq_pos_t < 0, True, False)
             attn_mask = attn_mask | mask_v 
-            off_value = -3E38 #small number, avoid nan and overflow
+            off_value = -3E38  #small number, avoid nan and overflow
         else:
             off_value = -math.inf
         attn_bias = torch.zeros_like(attn_mask, dtype=dtype)
         attn_bias.masked_fill_(attn_mask, off_value)
-        import pdb;pdb.set_trace()
         return attn_bias.unsqueeze(1)
 
     def set_causal_option(self, module):
@@ -1056,6 +1051,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             for child_name, child_module in module.named_children():
                 self.set_causal_option(child_module)
+    
     def move_to_device(self, tensor):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
