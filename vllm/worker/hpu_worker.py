@@ -85,14 +85,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         is_encoder_decoder_model = self._is_encoder_decoder_model()
         ModelRunnerClass: Type[HPUModelRunnerBase] = HPUModelRunner
+        is_causal = True
         if self.model_config.runner_type == "pooling":
             ModelRunnerClass = HPUPoolingModelRunner
-            is_causal = None
         elif is_encoder_decoder_model:
             ModelRunnerClass = HPUEncoderDecoderModelRunner
             is_causal = False
-        else:
-            is_causal = True
         self.model_runner: HPUModelRunnerBase = ModelRunnerClass(
             vllm_config=vllm_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
