@@ -1023,10 +1023,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         kv_seq_pos_t = seq_pos_t.unsqueeze(-2)
         seq_idx_t = q_seq_idx_t != kv_seq_idx_t
         seq_pos_t = kv_seq_pos_t > q_seq_pos_t
-        if self.is_causal:
-            attn_mask = (seq_idx_t | seq_pos_t)
-        else:
-            attn_mask = seq_idx_t
+        attn_mask = (seq_idx_t | seq_pos_t) if self.is_causal else seq_idx_t
         if self.is_pooler:
             mask_v = torch.where(q_seq_pos_t < 0, True, False)
             attn_mask = attn_mask | mask_v
