@@ -239,15 +239,29 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1,
                                         1, 0)
-        embeddings_indices = torch.narrow(
-            self.punica_wrapper._embeddings_indices, 1, 0, x.size(0))
+        #TODO(hlahkar): remove the check once hpu handles flat tensors
 
-        indices = embeddings_indices[1]
+        if not current_platform.is_hpu():
+            embeddings_indices = torch.narrow(
+                self.punica_wrapper._embeddings_indices, 1, 0, x.size(0))
+
+            indices = embeddings_indices[1]
+        else:
+            shape = x.size(0) * x.size(1)
+            embeddings_indices = torch.narrow(
+                self.punica_wrapper._embeddings_indices, 1, 0, shape)
+
+            indices = embeddings_indices[1].view_as(x)
         full_lora_a_embeddings = F.embedding(
             x + indices,
             self.lora_a_stacked_2d,
         )
-        indices = embeddings_indices[0]
+
+        #TODO(hlahkar): remove the check once hpu handles flat tensors
+        if not current_platform.is_hpu():
+            indices = embeddings_indices[0]
+        else:
+            indices = embeddings_indices[0].view_as(x)
         full_output = self.base_layer.forward(x +
                                               (indices * added_tokens_mask))
 
@@ -406,9 +420,12 @@ class BaseLinearLayerWithLoRA(BaseLayerWithLoRA):
         # In transformers backend, x and output have extra batch dimension like
         # (1, seq_len, hidden_dim), while punica expects (seq_len, hidden_dim),
         # therefore we need to flatten the batch dimensions.
-        if x.ndim == 3 and output.ndim == 3:
-            output = output.flatten(0, 1)
-            x = x.flatten(0, 1)
+
+        #TODO(hlahkar): remove the check once hpu handles flat tensors
+        if not current_platform.is_hpu():
+            if x.ndim == 3 and output.ndim == 3:
+                output = output.flatten(0, 1)
+                x = x.flatten(0, 1)
 
         self.punica_wrapper.add_lora_linear(output, x, self.lora_a_stacked,
                                             self.lora_b_stacked,
