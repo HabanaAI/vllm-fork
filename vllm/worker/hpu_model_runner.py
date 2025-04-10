@@ -1325,10 +1325,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             enable_kv_scales_calculation=False,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
-        for t in multi_modal_kwargs:
-            if torch.is_tensor(multi_modal_kwargs[t]):
-                multi_modal_kwargs[t] = multi_modal_kwargs[t].to(
-                    self.device, non_blocking=True)
+        multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs, device=self.device)
 
         return PreparePromptMetadata(input_tokens=input_tokens_tensor,
                                      input_positions=input_positions,
