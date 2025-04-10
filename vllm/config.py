@@ -1686,13 +1686,16 @@ class SchedulerConfig:
     def _verify_args(self) -> None:
         if (self.max_num_batched_tokens < self.max_model_len
                 and not self.chunked_prefill_enabled):
-            raise ValueError(
-                f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
-                f"smaller than max_model_len ({self.max_model_len}). "
-                "This effectively limits the maximum sequence length to "
-                "max_num_batched_tokens and makes vLLM reject longer "
-                "sequences. Please increase max_num_batched_tokens or "
-                "decrease max_model_len.")
+            if self.max_model_len == 81920 and self.max_num_batched_tokens < 65536:
+                logger.warning(" --------- trigger a temp w/a of 80k model len, with up to 64k input ---------")
+            else:
+                raise ValueError(
+                     f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
+                     f"smaller than max_model_len ({self.max_model_len}). "
+                     "This effectively limits the maximum sequence length to "
+                     "max_num_batched_tokens and makes vLLM reject longer "
+                     "sequences. Please increase max_num_batched_tokens or "
+                     "decrease max_model_len.")
 
         if self.max_num_batched_tokens < self.max_num_seqs:
             raise ValueError(

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 import habana_frameworks.torch as htorch  # noqa: F401
 import torch
+from vllm import envs
 import vllm_hpu_extension.ops as ops
 from neural_compressor.torch.algorithms.fp8_quant._core.quant_dequant import (
     DequantOutput, QuantInput)
@@ -343,9 +344,12 @@ class HPUMLAImpl(
                        "input_positions"), f"attn meta: {attn_metadata}"
 
         if not is_prefill:
-            q_nope = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
-            q_pe = torch.matmul(hidden_states_or_q_c, self.W_QR)\
-                .view(-1, self.num_heads, self.qk_rope_head_dim)
+            if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
+                q_nope = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
+                q_pe = torch.matmul(hidden_states_or_q_c, self.W_QR)\
+                    .view(-1, self.num_heads, self.qk_rope_head_dim)
+            else:
+                q_nope, q_pe = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
             input_positions = attn_metadata.input_positions.view(-1)
             q_pe, k_pe = \
                 self.rotary_emb(input_positions, q_pe, k_pe)

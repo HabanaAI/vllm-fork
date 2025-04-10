@@ -296,7 +296,10 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         capped_ratio = torch.minimum(
             selected_target_probs / selected_draft_probs,
             torch.full((1, ), 1, device=target_probs.device))
+        print(f'BOB: {selected_target_probs=}, {selected_draft_probs=}')
+        print(f'BOB: {uniform_rand=}, {capped_ratio=}')
         accepted = uniform_rand < capped_ratio
+        print(f'BOB: {accepted=}')
 
         return accepted
 

@@ -203,7 +203,11 @@ def pad_block_fp8_weight_naive(weight, weight_scale, block_size):
 
 
 def dynamic_quant(data, single_scale=False):
-    FULL_RANGE = 448.0
+    FULL_RANGE = torch.finfo(torch.float8_e4m3fn).max
+    if current_platform.is_hpu():
+        import habana_frameworks.torch.utils.experimental as htexp
+        if htexp._get_device_type() == htexp.synDeviceType.synDeviceGaudi2:
+            FULL_RANGE = torch.finfo(torch.float8_e4m3fnuz).max
     if single_scale:
         scale = ((torch.abs(data)).max() + 1e-8) / FULL_RANGE
     else:
