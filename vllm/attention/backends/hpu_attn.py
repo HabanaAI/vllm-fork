@@ -242,6 +242,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 attn_bias = attn_bias.tile((1, self.num_kv_heads, 1, 1))
                 attn_bias.add_(position_bias)
 
+            block_list = attn_metadata.block_list if attn_metadata \
+                and attn_metadata.block_list is not None else None
+
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
@@ -250,7 +253,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 is_causal=True,
                 attn_bias=attn_bias,
                 valid_seq_lengths=attn_metadata.seq_lens_tensor,
-                **self.common_attention_args(attn_metadata, key_cache,
+                **self.common_attention_args(block_list, key_cache,
                                              value_cache))
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
@@ -260,7 +263,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_mapping=attn_metadata.block_mapping,
                 block_bias=attn_metadata.attn_bias,
                 block_groups=attn_metadata.block_groups,
-                **self.common_attention_args(attn_metadata, key_cache,
+                **self.common_attention_args(attn_metadata.block_list, key_cache,
                                              value_cache))
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
@@ -271,9 +274,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                               value_cache=None):
         fsdpa_op = self.fused_scaled_dot_product_attention.apply \
             if self.fused_scaled_dot_product_attention is not None else None
-
-        block_list = attn_metadata.block_list if attn_metadata \
-                and attn_metadata.block_list is not None else None
 
         return {
             'scale': self.scale,
@@ -371,11 +371,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 query=query,
                 key_cache=key_cache,
                 value_cache=value_cache,
-                block_list=block_list,
                 block_mapping=block_mapping,
                 block_bias=attn_bias,
                 block_groups=block_groups,
-                **self.common_attention_args())
+                **self.common_attention_args(block_list))
         # Reshape the output tensor.
         return output.view(batch_size, -1, hidden_size)
 
