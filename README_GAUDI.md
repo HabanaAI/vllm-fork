@@ -403,8 +403,8 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 # Quantization, FP8 Inference and Model Calibration Process
 
 > [!NOTE]
-> Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described
-in the [vllm-hpu-extention](https://github.com/HabanaAI/vllm-hpu-extension/tree/main/calibration/README.md) package.
+> Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described in detail in [docs.habana.ai vLLM Inference Section](https://docs.habana.ai/en/v1.20.1/PyTorch/Inference_on_PyTorch/vLLM_Inference/vLLM_FP8_Inference.html).
+An end-to-end example tutorial for quantizing a BF16 Llama 3.1 model to FP8 and then inferencing is provided in this [Gaudi-tutorials repository](https://github.com/HabanaAI/Gaudi-tutorials/blob/main/PyTorch/vLLM_Tutorials/FP8_Quantization_using_INC/FP8_Quantization_using_INC.ipynb).
 
 Once you have completed the model calibration process and collected the measurements, you can run FP8 inference with vLLM using the following command:
 
@@ -481,6 +481,17 @@ Sequence group cmpl-3cbf19b0c6d74b3f90b5d5db2ed2385e-0 is preempted by Preemptio
 
 **Usage of Multi-Step Scheduling feature**
 Enabling of Multi-Step Scheduling is recommended for better decode performance. Refer to vllm-project#6854 for more details.
+
+# Other Online Serving Examples
+Please refer to this [collection](https://github.com/HabanaAI/Gaudi-tutorials/tree/main/PyTorch/vLLM_Tutorials/Benchmarking_on_vLLM/Online_Static#quick-start) of static-batched online serving example scripts designed to help the user reproduce performance numbers with vLLM on Gaudi for various types of models and varying context lengths. This a list of the models and examples scripts provided for 2K and 4K context length scenarios:
+- deepseek-r1-distill-llama-70b_gaudi3_1.20_contextlen-2k
+- deepseek-r1-distill-llama-70b_gaudi3_1.20_contextlen-4k
+- llama-3.1-70b-instruct_gaudi3_1.20_contextlen-2k
+- llama-3.1-70b-instruct_gaudi3_1.20_contextlen-4k
+- llama-3.1-8b-instruct_gaudi3_1.20_contextlen-2k
+- llama-3.1-8b-instruct_gaudi3_1.20_contextlen-4k
+- llama-3.3-70b-instruct_gaudi3_1.20_contextlen-2k
+- llama-3.3-70b-instruct_gaudi3_1.20_contextlen-4k
 
 # Troubleshooting
 
