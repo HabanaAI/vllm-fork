@@ -2626,9 +2626,35 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
             if model_input.multi_modal_kwargs is not None and 'embed_is_patch' in model_input.multi_modal_kwargs:
-                if model_input.multi_modal_kwargs['embed_is_patch'].dim() == 3:
-                    num_images = model_input.multi_modal_kwargs['embed_is_patch'].size(0)
-                    model_input.multi_modal_kwargs['embed_is_patch'] = list(torch.split(model_input.multi_modal_kwargs['embed_is_patch'].squeeze(0), num_images, dim=0))
+                def fix_embed_is_patch(embed_is_patch):
+                    if isinstance(embed_is_patch, torch.Tensor):
+                        print(f"{embed_is_patch.shape=}")
+                        if embed_is_patch.dim() == 3:
+                            result = []
+                            for i in range(embed_is_patch.size(0)):
+                                result.append(embed_is_patch[i])
+                            return result
+                        elif embed_is_patch.dim() == 2:
+                            result = []
+                            result.append(embed_is_patch)
+                            return result
+                    elif isinstance(embed_is_patch, (list, tuple)):
+                        # Apply only once per item, avoid repeated recursion
+                        result = []
+                        for item in embed_is_patch:
+                            fixed = fix_embed_is_patch(item)
+                            if isinstance(fixed, list):
+                                result.extend(fixed)
+                            else:
+                                result.append(fixed)
+                        return result
+                    else:
+                        print(f"embed_is_patch is {embed_is_patch.type()} and shape is {embed_is_patch.shape if isinstance(embed_is_patch, torch.Tensor) else embed_is_patch}")
+                        return None
+
+                model_input.multi_modal_kwargs['embed_is_patch'] = fix_embed_is_patch(model_input.multi_modal_kwargs['embed_is_patch'])
+                print(f"model_input.multi_modal_kwargs['embed_is_patch'] shape is {[t.shape for t in model_input.multi_modal_kwargs['embed_is_patch']]}")
+
 
             execute_model_kwargs = {
                 "input_ids": input_tokens,
