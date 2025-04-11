@@ -686,7 +686,7 @@ class FusedMoE(torch.nn.Module):
         if is_hpu and use_fp8:
             for expert_id in range(expert_data.shape[0]):
                 self.hpu_fused_moe.MoeOp.w13_list[expert_id].set_weight(
-                        expert_data[expert_id]
+                        orig_exp_data[expert_id]
                         )
             torch.hpu.synchronize()
 
