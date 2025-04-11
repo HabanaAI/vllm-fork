@@ -16,6 +16,9 @@ from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
 
 is_hpu = current_platform.is_hpu()
+if is_hpu:
+    import habana_frameworks.torch as htorch
+    import torch.nn.functional as F
 
 if current_platform.is_cuda_alike():
     from .fused_moe import fused_experts
@@ -177,8 +180,27 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         assert num_expert_group is None, ('num_expert_group is '
                                           'not supported on HPU')
         assert topk_group is None, 'topk_group is not supported on HPU'
-        if layer is not None:
-            return layer.hpu_fused_moe(x, router_logits, top_k)
+        if hasattr(layer.hpu_fused_moe, 'renormalize'):
+            if layer is not None:
+                return layer.hpu_fused_moe(x, router_logits, top_k, renormalize=renormalize)
+        else :
+            htorch.core.mark_step()
+            routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float32)
+            routing_weights, selected_experts = torch.topk(routing_weights,
+                                                            top_k,
+                                                            dim=-1)
+            if renormalize:
+                routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+            routing_weights = routing_weights.to(x.dtype)
+
+            final_hidden_states = layer.hpu_fused_moe.MoeOp(
+                hidden_states=x,
+                expert_routing_table=selected_experts,
+                router_weights=routing_weights,
+                permuted_weights=True,
+                activation="silu",
+            )
+            return final_hidden_states.view(-1, x.shape[1])
 
     def forward_cpu(
         self,
