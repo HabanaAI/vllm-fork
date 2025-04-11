@@ -654,6 +654,15 @@ class Phi3LongRoPEScaledRotaryEmbedding(CustomOp):
 
         return query.flatten(-2), key.flatten(-2)
 
+    def forward_cuda(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        offsets: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.forward_native(positions, query, key, offsets)
+
     def forward_hpu(
         self,
         positions: torch.Tensor,
