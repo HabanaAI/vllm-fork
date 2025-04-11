@@ -912,6 +912,11 @@ class LLMEngine:
     def has_unfinished_requests(self,
                                 virtual_engine: Optional[int] = None) -> bool:
         """Returns True if there are unfinished requests."""
+        # Skip DP sync if PD disaggregation is enabled
+        if self.vllm_config.kv_transfer_config is not None:
+            return any(scheduler.has_unfinished_seqs()
+                       for scheduler in self.scheduler)
+
         if virtual_engine is not None:
             schedulers = [self.scheduler[virtual_engine]]
         else:
@@ -1329,7 +1334,7 @@ class LLMEngine:
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
 
-        if self.should_execute_dummy_batch:
+        if self.vllm_config.kv_transfer_config is None and self.should_execute_dummy_batch:
             self.should_execute_dummy_batch = False
             outputs = self.model_executor.execute_model(
                 execute_model_req=ExecuteModelRequest(
@@ -1428,6 +1433,10 @@ class LLMEngine:
         else:
             # Nothing scheduled => If there is pending async postprocessor,
             # then finish it here.
+            if self.vllm_config.kv_transfer_config is not None and self.need_to_sync_across_dp:
+                self.model_executor.execute_model(
+                    execute_model_req=ExecuteModelRequest(
+                    seq_group_metadata_list=[], is_dummy_batch=True))
             if len(ctx.output_queue) > 0:
                 self._process_model_outputs(ctx=ctx)
             # No outputs in this case
