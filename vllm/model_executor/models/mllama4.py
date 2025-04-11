@@ -252,7 +252,7 @@ class Llama4VisionAttention(nn.Module):
             base=config.rope_theta,
             rope_scaling={"rope_type": "mllama4"},
             is_neox_style=False,
-            dtype='auto',  # important
+            #dtype=torch.complex64,  # important
         )
 
     def forward(
