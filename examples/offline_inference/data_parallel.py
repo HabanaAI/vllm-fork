@@ -34,8 +34,15 @@ from vllm import LLM, SamplingParams
 from vllm.utils import get_open_port
 
 
-def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
-         dp_master_port, GPUs_per_dp_rank):
+def main(model,
+         dp_size,
+         local_dp_rank,
+         global_dp_rank,
+         dp_master_ip,
+         dp_master_port,
+         GPUs_per_dp_rank,
+         enforce_eager=False,
+         enable_expert_parallel=False):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     os.environ["VLLM_DP_SIZE"] = str(dp_size)
@@ -77,8 +84,8 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     # Create an LLM.
     llm = LLM(model=model,
               tensor_parallel_size=GPUs_per_dp_rank,
-              enforce_eager=True,
-              enable_expert_parallel=True)
+              enforce_eager=enforce_eager,
+              enable_expert_parallel=enable_expert_parallel)
     outputs = llm.generate(prompts, sampling_params)
     # Print the outputs.
     for i, output in enumerate(outputs):
@@ -125,6 +132,12 @@ if __name__ == "__main__":
                         type=int,
                         default=0,
                         help="Master node port")
+    parser.add_argument("--ep",
+                        action='store_true',
+                        help="Enable expert parallel mode")
+    parser.add_argument("--enforce-eager",
+                        action='store_true',
+                        help="Enable enforce_eager mode")
     args = parser.parse_args()
 
     dp_size = args.dp_size
@@ -150,7 +163,7 @@ if __name__ == "__main__":
         proc = Process(target=main,
                        args=(args.model, dp_size, local_dp_rank,
                              global_dp_rank, dp_master_ip, dp_master_port,
-                             tp_size))
+                             tp_size, args.enforce_eager, args.ep))
         proc.start()
         procs.append(proc)
     exit_code = 0
