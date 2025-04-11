@@ -158,7 +158,7 @@ def main():
     llm = LLM(
         model=model_id,
         dtype='bfloat16',
-        #enforce_eager=True,
+        enforce_eager=True,
         max_model_len=16384,
         tensor_parallel_size=8,
         limit_mm_per_prompt={"image": 5},
