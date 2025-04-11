@@ -160,7 +160,6 @@ def main():
         #max_model_len=16384,
         max_model_len=1024,
         quantization="inc",
-        kv_cache_dtype="fp8_inc",
         tensor_parallel_size=8,
         limit_mm_per_prompt={"image": 5},
         enable_expert_parallel=True,
