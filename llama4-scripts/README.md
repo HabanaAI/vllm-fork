@@ -55,7 +55,13 @@ PT_HPU_LAZY_MODE=1 QUANT_CONFIG=llama4-scripts/inc_unit_scale_quant.json python 
 pip uninstall pandas
 pip install pandas fire datasets
 cd vllm-fork/llama4-scripts/accuracy
-# Run the server first
+# update model_path inside run_acc.sh
+bash run_acc.sh
+```
+
+or
+```bash
+# Run the server first and benchmark in two steps
 ./01-gaudi-vllm-serve.sh
 ```
 

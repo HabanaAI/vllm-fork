@@ -2631,6 +2631,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         print(f"{embed_is_patch.shape=}")
                         if embed_is_patch.dim() == 3:
                             result = []
+                            if embed_is_patch.size(1) > 1:
+                                embed_is_patch = embed_is_patch.transpose(0, 1)
                             for i in range(embed_is_patch.size(0)):
                                 result.append(embed_is_patch[i])
                             return result
