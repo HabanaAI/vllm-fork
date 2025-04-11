@@ -1767,7 +1767,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              self.max_num_batched_tokens // max_seq_len)
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
-                             False, True)
+                             False, True, is_profile_run=True)
         return
 
     def warmup_scenario(self,
@@ -1777,11 +1777,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         kv_caches,
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
+                        is_profile_run=False,
                         temperature=0) -> None:
         use_graphs = self._use_graphs(batch_size,
                                       seq_len,
                                       is_prompt,
-                                      is_profile_run=is_lora_profile_run)
+                                      is_profile_run=is_profile_run)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
                          f"bs{batch_size}_"
