@@ -500,6 +500,9 @@ class LlamaDecoderLayer(nn.Module):
         # only split for prefill
         do_split = self.do_split and attn_metadata.is_prompt
 
+        # GC issue
+        htorch.core.mark_step()
+
         # self_attn output a list of tensors to be processed sequential at layernorm and mlp
         if do_split and (seq_len*batch_size)//split_size>=2 and self.output_slice:
             # Slice residual
