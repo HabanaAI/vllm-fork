@@ -527,6 +527,9 @@ class LlamaDecoderLayer(nn.Module):
                 hidden_states, residual)
             hidden_states = self.mlp(hidden_states)
 
+        # GC issue
+        htorch.core.mark_step()
+        
         return hidden_states, residual
 
 @support_torch_compile
