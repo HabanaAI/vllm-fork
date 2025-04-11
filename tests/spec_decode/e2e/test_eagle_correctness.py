@@ -308,7 +308,7 @@ def test_eagle_disable_queue(vllm_runner, common_llm_kwargs,
 @pytest.mark.parametrize(
     "common_llm_kwargs",
     [{
-        # Disable eager to run test in graph mode, 
+        # Disable eager to run test in graph mode,
         # e.g. hpu graph, torch compile graph, cuda graph, etc.
         "enforce_eager": False,
 
@@ -334,11 +334,10 @@ def test_eagle_disable_queue(vllm_runner, common_llm_kwargs,
 ])
 @pytest.mark.parametrize("batch_size", [1, 32])
 @pytest.mark.parametrize("seed", [1])
-def test_eagle_e2e_greedy_correctness_with_graphs(vllm_runner, common_llm_kwargs,
-                                      per_test_common_llm_kwargs,
-                                      baseline_llm_kwargs, test_llm_kwargs,
-                                      batch_size: int, output_len: int,
-                                      seed: int):
+def test_eagle_e2e_greedy_correctness_with_graphs(
+        vllm_runner, common_llm_kwargs, per_test_common_llm_kwargs,
+        baseline_llm_kwargs, test_llm_kwargs, batch_size: int, output_len: int,
+        seed: int):
 
     run_equality_correctness_test(vllm_runner, common_llm_kwargs,
                                   per_test_common_llm_kwargs,
