@@ -882,6 +882,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
             disable_tensor_cache=True,
+            asynchronous=True,
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
