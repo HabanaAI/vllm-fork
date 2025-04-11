@@ -1212,12 +1212,12 @@ class HPUModelRunner:
                 slot_mapping, self.device)
             logits_indices_device = _async_h2d_tensor_copy(
                 logits_indices, self.device)
-
             prefill_request_ids.append(batch_req_ids)
             prefill_prompt_lens.append(batch_num_scheduled_tokens)
             prefill_token_ids.append(token_ids_device)
             prefill_position_ids.append(positions_device)
             prefill_logits_indices.append(logits_indices_device)
+
             attn_metadata = None
             if use_prefix_prefill:
                 # Prefix caching
@@ -1247,6 +1247,7 @@ class HPUModelRunner:
                     context_lens_tensor=context_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                     block_list=block_list_device)
             else:
@@ -1254,6 +1255,7 @@ class HPUModelRunner:
                     seq_lens_tensor=seq_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                 )
             # ATTN_METADATA.
@@ -1379,6 +1381,7 @@ class HPUModelRunner:
                 block_list=block_list_device,
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
+                input_positions=None,
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
             ))
@@ -1747,6 +1750,7 @@ class HPUModelRunner:
                 seq_lens_tensor=seq_lens_device,
                 num_prefills=batch_size,
                 num_prefill_tokens=batch_size * seq_or_block,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
         else:
             block_tables = [
@@ -1768,6 +1772,7 @@ class HPUModelRunner:
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
                 num_decode_tokens=batch_size,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
