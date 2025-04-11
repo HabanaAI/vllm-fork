@@ -163,7 +163,7 @@ The following configurations have been validated to be function with Gaudi2 or G
 
 ## Execution Modes
 
-Currently in vLLM for HPU we support four execution modes, depending on selected HPU PyTorch Bridge backend (via `PT_HPU_LAZY_MODE` environment variable), and `--enforce-eager` flag.
+Currently, vLLM for HPU supports four execution modes, determined by the selected HPU PyTorch Bridge backend (via the PT_HPU_LAZY_MODE environment variable) and the --enforce-eager flag.
 
 | `PT_HPU_LAZY_MODE` | `enforce_eager` | Execution Mode     |
 | ------------------ | --------------- | ------------------ |
@@ -172,8 +172,11 @@ Currently in vLLM for HPU we support four execution modes, depending on selected
 | 1                  | 0               | HPU Graphs         |
 | 1                  | 1               | PyTorch lazy mode  |
 
-> [!WARNING]
-> All modes using PT_HPU_LAZY_MODE=0 are experimental and should only be used for validating functional correctness. To achieve the best performance, use HPU Graphs or PyTorch Lazy Mode. Performance improvements are planned for future releases.
+> [!NOTE]
+> Starting with the 1.21.0 Intel Gaudi software release, the torch.compile execution mode became the default for vLLM. HPU Graphs mode remains supported to ensure backward compatibility.
+
+> [!TIP]
+> We recommend experimenting with the PT_HPU_LAZY_MODE environment variable to determine whether HPU Graphs or torch.compile mode performs better for your specific use case. While both modes generally deliver comparable performance, certain edge cases may favor one over the other.
 
 ## Bucketing Mechanism
 
