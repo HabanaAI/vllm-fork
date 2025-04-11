@@ -241,7 +241,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                                  attn_bias.shape[-1])
                 attn_bias = attn_bias.tile((1, self.num_kv_heads, 1, 1))
                 attn_bias.add_(position_bias)
-            
+
             block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
