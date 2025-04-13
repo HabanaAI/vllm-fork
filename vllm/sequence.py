@@ -1140,6 +1140,9 @@ class IntermediateTensors:
     def __len__(self):
         return len(self.tensors)
 
+    def __iter__(self):
+        return iter(self.tensors)
+
     def __eq__(self, other: object):
         return isinstance(other, self.__class__) and self
 

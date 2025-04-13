@@ -91,13 +91,13 @@ class GraniteMoeMoE(nn.Module):
                                 tp_size=tp_size,
                                 prefix=f"{prefix}.experts")
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, intermediate_tensors: Optional[IntermediateTensors] = None) -> torch.Tensor:
         # NOTE: hidden_states can have either 1D or 2D shape.
         orig_shape = hidden_states.shape
         hidden_states = hidden_states.view(-1, self.hidden_size)
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
-        final_hidden_states = self.experts(hidden_states, router_logits)
+        final_hidden_states = self.experts(hidden_states, router_logits, intermediate_tensors)
         return final_hidden_states.view(orig_shape)
 
 
@@ -228,6 +228,7 @@ class GraniteMoeDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> torch.Tensor:
         # Self Attention
         residual = hidden_states
@@ -241,7 +242,7 @@ class GraniteMoeDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states * self.residual_multiplier
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.block_sparse_moe(hidden_states)
+        hidden_states = self.block_sparse_moe(hidden_states, intermediate_tensors)
         hidden_states = residual + hidden_states * self.residual_multiplier
 
         return hidden_states
@@ -308,7 +309,8 @@ class GraniteMoeModel(nn.Module):
             kvcaches = None if kv_caches is None else kv_caches[i - self.start_layer]
             hidden_states = layer(positions, hidden_states,
                                   kvcaches,
-                                  attn_metadata)
+                                  attn_metadata,
+                                  intermediate_tensors)
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,

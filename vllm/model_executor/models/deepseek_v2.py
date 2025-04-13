@@ -89,7 +89,7 @@ class DeepseekV2MLP(nn.Module):
                              "Only silu is supported for now.")
         self.act_fn = SiluAndMul()
 
-    def forward(self, x):
+    def forward(self, x, intermediate_tensors: Optional[IntermediateTensors] = None):
         gate_up, _ = self.gate_up_proj(x)
         x = self.act_fn(gate_up)
         x, _ = self.down_proj(x)
@@ -155,7 +155,7 @@ class DeepseekV2MoE(nn.Module):
                 reduce_results=False,
             )
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, intermediate_tensors: Optional[IntermediateTensors] = None) -> torch.Tensor:
         batch_size, seq_len, hidden_dim = hidden_states.shape
         num_tokens = batch_size * seq_len
         hidden_states = hidden_states.view(-1, hidden_dim)
@@ -167,11 +167,13 @@ class DeepseekV2MoE(nn.Module):
         if is_hpu:
             final_hidden_states = self.experts(
                 hidden_states=hidden_states.view(batch_size, seq_len, hidden_dim),
-                router_logits=router_logits) * self.routed_scaling_factor
+                router_logits=router_logits,
+                intermediate_tensors = intermediate_tensors) * self.routed_scaling_factor
         else:
             final_hidden_states = self.experts(
                 hidden_states=hidden_states,
-                router_logits=router_logits) * self.routed_scaling_factor
+                router_logits=router_logits,
+                intermediate_tensors = intermediate_tensors) * self.routed_scaling_factor
         if shared_output is not None:
             final_hidden_states = final_hidden_states + shared_output
         if self.tp_size > 1:
@@ -584,6 +586,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
+        intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> torch.Tensor:
         # Self Attention
         if residual is None:
@@ -602,7 +605,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
-        hidden_states = self.mlp(hidden_states)
+        hidden_states = self.mlp(hidden_states, intermediate_tensors)
         return hidden_states, residual
 
 
@@ -678,7 +681,8 @@ class DeepseekV2Model(nn.Module):
             kvcaches = None if kv_caches is None else kv_caches[i - self.start_layer]
             hidden_states, residual = layer(positions, hidden_states,
                                             kvcaches,
-                                            attn_metadata, residual)
+                                            attn_metadata, residual,
+                                            intermediate_tensors)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({

@@ -2661,6 +2661,30 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
 
+            if self.dp_size > 1:
+                num_expert_names = [
+                    "moe_num_experts",  # Dbrx
+                    "num_experts",  # Jamba
+                    "n_routed_experts",  # DeepSeek
+                    "num_local_experts",  # Mixtral
+                ]
+                num_experts = 0
+                for name in num_expert_names:
+                    num_experts = getattr(self.model_config.hf_text_config, name, 0)
+                    if num_experts > 0:
+                        break
+                assert num_experts > 0, \
+                    "No expert found in the model config. Please check the model config."
+                num_tokens = attn_metadata.slot_mapping.numel()
+                hidden_states_across_dp = torch.empty((batch_size * self.dp_size, num_tokens // batch_size, self.model_config.get_hidden_size()),\
+                    device=input_tokens.device, dtype=self.model_config.dtype)
+                router_logits_across_dp = torch.empty((num_tokens * self.dp_size, num_experts),\
+                    device=input_tokens.device, dtype=self.model_config.dtype)
+                intermediate_tensors = IntermediateTensors({
+                    "hidden_states_across_dp": hidden_states_across_dp,
+                    "router_logits_across_dp": router_logits_across_dp
+                    })
+
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,

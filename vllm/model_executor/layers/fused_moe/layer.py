@@ -20,6 +20,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
+from vllm.sequence import IntermediateTensors
 from vllm.utils import direct_register_custom_op
 
 is_hpu = current_platform.is_hpu()
@@ -846,10 +847,24 @@ class FusedMoE(torch.nn.Module):
         return topk_weights, topk_ids
 
     def hpu_multicast(self, x: torch.Tensor,
-                      cu_tokens_across_dp_cpu: torch.Tensor):
-        buffer = get_dp_group().all_gather(x, 0)
-
-        return buffer
+                      cu_tokens_across_dp_cpu: torch.Tensor,
+                      output_tensor: Optional[torch.Tensor]):
+        if output_tensor is None:
+            world_size = get_dp_group().world_size
+            input_size = x.size()
+            # Allocate output tensor.
+            output_size = list(input_size)
+            output_size[0] *= world_size
+            output_tensor = torch.empty(output_size,
+                                        dtype=x.dtype,
+                                        device=x.device)
+        else:
+            if output_tensor.ndim == 3 and x.ndim == 2:
+                output_tensor.view(-1, x.size(1))
+        # All-gather.
+        torch.distributed.all_gather_into_tensor(output_tensor, x,
+                                                 group=get_dp_group().device_group)
+        return output_tensor
 
     def naive_multicast(self, x: torch.Tensor,
                         cu_tokens_across_dp_cpu: torch.Tensor):
@@ -875,25 +890,35 @@ class FusedMoE(torch.nn.Module):
         return buffer
 
     def forward(self, hidden_states: torch.Tensor,
-                router_logits: torch.Tensor):
-        if not self.use_direct_call:
-            return self.forward_impl(hidden_states, router_logits)
-        else:
-            return torch.ops.vllm.moe_forward(hidden_states, router_logits,
-                                              self.layer_name)
+                router_logits: torch.Tensor,
+                intermediate_tensors: Optional[IntermediateTensors]):
+        # TODO: Fix custom op for torch compile
+        return self.forward_impl(hidden_states, router_logits,
+                                 intermediate_tensors)
+
 
     def forward_impl(self, hidden_states: torch.Tensor,
-                     router_logits: torch.Tensor):
+                     router_logits: torch.Tensor,
+                     intermediate_tensors: Optional[IntermediateTensors]):
         assert self.quant_method is not None
-
         if self.dp_size > 1:
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
+            
+            if intermediate_tensors is not None\
+                and "hidden_states_across_dp" in intermediate_tensors:
+                hidden_states_across_dp = intermediate_tensors["hidden_states_across_dp"]
+                router_logits_across_dp = intermediate_tensors["router_logits_across_dp"]
+            else:
+                hidden_states_across_dp = None
+                router_logits_across_dp = None
 
             hidden_states = self.multicast_fn(hidden_states,
-                                              cu_tokens_across_dp_cpu)
+                                              cu_tokens_across_dp_cpu,
+                                              hidden_states_across_dp)
             router_logits = self.multicast_fn(router_logits,
-                                              cu_tokens_across_dp_cpu)
+                                              cu_tokens_across_dp_cpu,
+                                              router_logits_across_dp)
 
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
