@@ -92,7 +92,7 @@ python  $script_dir/../../benchmarks/benchmark_throughput.py \
     --max-num-batched-tokens 8192 \
     --max-num-seqs 128 \
     --use-padding-aware-scheduling \
-    $extra_args 2> >(tee -a $error_log_file) | tee -a $log_file
+    $fp8_args 2> >(tee -a $error_log_file) | tee -a $log_file
 
 # store exit status of the first command in the pipe (python script) only
 runtime_error=${PIPESTATUS[0]}
