@@ -72,7 +72,7 @@ start=`date +%s`
 
 export TQDM_DISABLE=True
 
-extra_args=""
+fp8_args=""
 if [[ $__fp8 == "yes" ]]; then
     export QUANT_CONFIG=/software/users/kpietkun/configs/llama3.1_quant_cofnig.json
     extra_args="--quantization=inc \
