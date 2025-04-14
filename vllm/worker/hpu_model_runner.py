@@ -341,8 +341,19 @@ class HpuModelAdapter(torch.nn.Module):
             block_groups.masked_fill_(oob_values, batch_size)
             metadata = metadata._replace(block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
-        metadata = metadata._replace(block_mapping=block_mapping,
-                                     attn_bias=attn_bias)
+        TrimmedAttentionMetadata = _TYPE_CACHE['TrimmedAttentionMetadata']
+        metadata = TrimmedAttentionMetadata(
+            attn_bias=attn_bias,  # type: ignore
+            seq_lens_tensor=metadata.seq_lens_tensor,  # type: ignore
+            context_lens_tensor=metadata.context_lens_tensor,  # type: ignore
+            block_list=metadata.block_list,  # type: ignore
+            block_mapping=block_mapping,  # type: ignore
+            block_usage=metadata.block_usage,  # type: ignore
+            slot_mapping=metadata.slot_mapping,  # type: ignore
+            is_prompt=metadata.is_prompt,  # type: ignore
+            block_indices=metadata.block_indices,  # type: ignore
+            block_offsets=metadata.block_offsets,  # type: ignore
+            block_groups=metadata.block_groups)  # type: ignore
         return metadata
 
     def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
