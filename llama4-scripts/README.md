@@ -48,21 +48,21 @@ QUANT_CONFIG=quant.json PT_HPU_LAZY_MODE=1 python test_vllm_quant.py --model_id 
 # MMLU Pro test
 
 ``` bash
-cd llama4-scripts/accuracy; git clone https://github.com/TIGER-AI-Lab/MMLU-Pro.git;
-cp evaluate_from_local.py MMLU-Pro/evaluate_from_local.py;
-pip uninstall pandas
-pip install pandas fire datasets
+cd llama4-scripts/accuracy;
+pip install numpy==1.26.4
+pip install lm_eval
 sh run_mmlupro_acc.sh
-
 ```
 
 # Enable Vision Accuracy test using ChartQA Dataset
 
 ```bash
-pip uninstall pandas
-pip install pandas fire datasets
+pip uninstall lm_eval
+git clone --depth 1 https://github.com/EleutherAI/lm-evaluation-harness
+cd lm-evaluation-harness
+pip install -e .
+pip install numpy==1.26.4
 cd vllm-fork/llama4-scripts/accuracy
-# update model_path inside run_acc.sh
 bash run_chartqa_acc.sh
 ```
 

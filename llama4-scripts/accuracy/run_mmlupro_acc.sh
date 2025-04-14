@@ -1,21 +1,12 @@
-#!/bin/bash
-
-save_dir="Llama-4-Scout-mmlupro_acc_output"
-model="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
-selected_subjects="all"
-gpu_util=0.8
-
-cd MMLU-Pro/
+model_path="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
+output_dir="Llama-4-Scout-17B-16E-Instruct-mmlu-pro-acc"
+#model_path="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct/"
+#output_dir="Llama-4-Maverick-17B-128E-Instruct-mmlu-pro-acc"
+mkdir -p ${output_dir}
 PT_HPU_LAZY_MODE=1 \
 VLLM_SKIP_WARMUP=true \
-HABANA_VISIBLE_DEVICES="ALL" \
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
 PT_HPU_WEIGHT_SHARING=0 \
-python evaluate_from_local.py \
-    --selected_subjects $selected_subjects \
-    --save_dir $save_dir \
-    --model $model \
-    --global_record_file ${save_dir}/eval_record_collection.csv \
-    --gpu_util $gpu_util
-
-cd ..
+lm_eval --model vllm \
+  --model_args "pretrained=${model_path},tensor_parallel_size=8,max_model_len=4096,max_num_seqs=1024,gpu_memory_utilization=0.8,use_v2_block_manager=True,dtype=bfloat16,max_gen_toks=2048,disable_log_stats=False,enable_expert_parallel=True" \
+  --tasks mmlu_pro --num_fewshot 0 --fewshot_as_multiturn --apply_chat_template --batch_size 'auto' --log_samples --output_path ${output_dir} --show_config 2>&1 | tee ${output_dir}/log.txt
