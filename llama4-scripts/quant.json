@@ -5,11 +5,11 @@
     "scale_method": "maxabs_hw",
     "whitelist": {
         "types": [],
-        "names": []
+        "names": ["experts"]
     },
     "blocklist": {
-        "types": ["VLLMKVCache"],
-        "names": ["^(?!.*language_model).*$"]
+        "types": [],
+        "names": []
     },
     "dump_stats_path": "./nc_workspace_measure/inc_measure_output"
 }
