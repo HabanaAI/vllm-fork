@@ -89,6 +89,7 @@ if TYPE_CHECKING:
     VLLM_RAY_PER_WORKER_GPUS: float = 1.0
     VLLM_RAY_BUNDLE_INDICES: str = ""
     VLLM_CUDART_SO_PATH: Optional[str] = None
+    VLLM_ENABLE_EXPERT_PARALLEL: bool = True
 
 
 def get_default_cache_root():
@@ -585,6 +586,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # specify the path through environment variable VLLM_CUDART_SO_PATH.
     "VLLM_CUDART_SO_PATH":
     lambda: os.getenv("VLLM_CUDART_SO_PATH", None),
+
+    # Temporary add for enable expert parallel, should remove after rebase
+    "VLLM_ENABLE_EXPERT_PARALLEL":
+    lambda: bool(int(os.getenv("VLLM_ENABLE_EXPERT_PARALLEL", "1"))),
 }
 
 # end-env-vars-definition
