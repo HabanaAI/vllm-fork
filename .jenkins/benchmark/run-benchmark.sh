@@ -32,11 +32,14 @@ if [[ -n "$TEST_RESULTS_DIR" ]]; then
     LOG_PATH=$(mktemp ${TEST_RESULTS_DIR}/benchmark_${model_short}_${scenario}_XXXXXX.xml)
 fi
 
-
 # Get threshold values according to the scenario and env variables
+# These env vars are in the following format: <scenario>=<threshold_value> separated by a ";" symbol, for example: PERF_THRESHOLD=fp8=999999;bf16=999999
 throughput_threshold=999999
 
-IFS=',' read -ra pairs <<< "$PERF_THRESHOLD"
+original_ifs=$IFS 
+IFS=';' 
+
+read -ra pairs <<< "$PERF_THRESHOLD"
 for pair in "${pairs[@]}"; do
     IFS='=' read -ra kv <<< "$pair"
     key="${kv[0]}"
@@ -49,7 +52,7 @@ done
 
 warmup_threshold=1
 
-IFS=',' read -ra pairs <<< "$WARMUP_THRESHOLD"
+read -ra pairs <<< "$WARMUP_THRESHOLD"
 for pair in "${pairs[@]}"; do
     IFS='=' read -ra kv <<< "$pair"
     key="${kv[0]}"
@@ -60,6 +63,8 @@ for pair in "${pairs[@]}"; do
     fi
 done
 
+IFS=$original_ifs
+
 # Get the directory of the current script
 script_dir=$(dirname "$(readlink -f "$0")")
 
@@ -67,40 +72,27 @@ start=`date +%s`
 
 export TQDM_DISABLE=True
 
+extra_args=""
 if [[ $__fp8 == "yes" ]]; then
     export QUANT_CONFIG=/software/users/kpietkun/configs/llama3.1_quant_cofnig.json
-    python  $script_dir/../../benchmarks/benchmark_throughput.py \
-        --model $model \
-        --device hpu \
-        --seed 2024 \
-        --backend vllm \
-        --dataset /mnt/weka/data/pytorch/llama2/ShareGPT_V3_unfiltered_cleaned_split.json \
-        --num-prompts 1000 \
-        --dtype bfloat16 \
-        --max-model-len 4096 \
-        --max-num-batched-tokens 8192 \
-        --max-num-seqs 128 \
-        --quantization=inc \
+    extra_args="--quantization=inc \
         --kv-cache-dtype=fp8_inc \
-        --weights-load_device=cpu \
-        --use-padding-aware-scheduling 2> >(tee -a $error_log_file) | tee -a $log_file
-
-else
-
-    python  $script_dir/../../benchmarks/benchmark_throughput.py \
-        --model $model \
-        --device hpu \
-        --seed 2024 \
-        --backend vllm \
-        --dataset /mnt/weka/data/pytorch/llama2/ShareGPT_V3_unfiltered_cleaned_split.json \
-        --num-prompts 1000 \
-        --dtype bfloat16 \
-        --max-model-len 4096 \
-        --max-num-batched-tokens 8192 \
-        --max-num-seqs 128 \
-        --use-padding-aware-scheduling 2> >(tee -a $error_log_file) | tee -a $log_file
-
+        --weights-load_device=cpu "
 fi
+
+python  $script_dir/../../benchmarks/benchmark_throughput.py \
+    --model $model \
+    --device hpu \
+    --seed 2024 \
+    --backend vllm \
+    --dataset /mnt/weka/data/pytorch/llama2/ShareGPT_V3_unfiltered_cleaned_split.json \
+    --num-prompts 1000 \
+    --dtype bfloat16 \
+    --max-model-len 4096 \
+    --max-num-batched-tokens 8192 \
+    --max-num-seqs 128 \
+    --use-padding-aware-scheduling \
+    $extra_args 2> >(tee -a $error_log_file) | tee -a $log_file
 
 # store exit status of the first command in the pipe (python script) only
 runtime_error=${PIPESTATUS[0]}
