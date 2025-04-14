@@ -97,7 +97,7 @@ $ python setup.py develop
 ```
 
 # Supported Features
-| **Feature**   | **Description**   | **References** 
+| **Feature**   | **Description**   | **References**  |
 |---    |---    |---    |
 | Offline batched inference     | Offline inference using LLM class from vLLM Python API    | [Quickstart](https://docs.vllm.ai/en/stable/getting_started/quickstart.html#offline-batched-inference)<br>[Example](https://docs.vllm.ai/en/stable/getting_started/examples/offline_inference.html)   |
 | Online inference via OpenAI-Compatible Server     | Online inference using HTTP server that implements OpenAI Chat and Completions API    | [Documentation](https://docs.vllm.ai/en/stable/serving/openai_compatible_server.html)<br>[Example](https://docs.vllm.ai/en/stable/getting_started/examples/openai_chat_completion_client.html)    |
@@ -180,7 +180,7 @@ Currently, vLLM for HPU supports four execution modes, determined by the selecte
 | 1                  | 1               | PyTorch lazy mode  |
 
 > [!NOTE]
-> Starting with the 1.21.0 Intel Gaudi software release, the torch.compile execution mode became the default for vLLM. HPU Graphs mode remains supported to ensure backward compatibility. Please verify the compatibility of the torch.compile mode with the information in the 'Supported Features' table.
+> Starting with the 1.21.0 Intel Gaudi software release, the torch.compile execution mode became the default for vLLM. HPU Graphs mode remains supported to ensure backward compatibility. Please verify the compatibility of the torch.compile mode with the information in the [Supported Features](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#supported-features) table.
 
 > [!TIP]
 > We recommend experimenting with the PT_HPU_LAZY_MODE environment variable to determine whether HPU Graphs or torch.compile mode performs better for your specific use case. While both modes generally deliver comparable performance, certain edge cases may favor one over the other.
@@ -206,8 +206,7 @@ INFO 08-01 21:37:59 hpu_model_runner.py:504] Decode bucket config (min, step, ma
 INFO 08-01 21:37:59 hpu_model_runner.py:509] Generated 48 decode buckets: [(1, 128), (1, 256), (1, 384), (1, 512), (1, 640), (1, 768), (1, 896), (1, 1024), (1, 1152), (1, 1280), (1, 1408), (1, 1536), (1, 1664), (1, 1792), (1, 1920), (1, 2048), (2, 128), (2, 256), (2, 384), (2, 512), (2, 640), (2, 768), (2, 896), (2, 1024), (2, 1152), (2, 1280), (2, 1408), (2, 1536), (2, 1664), (2, 1792), (2, 1920), (2, 2048), (4, 128), (4, 256), (4, 384), (4, 512), (4, 640), (4, 768), (4, 896), (4, 1024), (4, 1152), (4, 1280), (4, 1408), (4, 1536), (4, 1664), (4, 1792), (4, 1920), (4, 2048)]
 ```
 
-`min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, interval between `min` and `step`
-has special handling - `min` gets multiplied by consecutive powers of two, until the multiplier is less than or equal to `step`. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage,
+`min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, interval between `min` and `step` has special handling - `min` gets multiplied by consecutive powers of two, until the multiplier is less than or equal to `step`. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage,
 while allowing larger padding on larger batch sizes.
 
 **Example with ramp-up**
@@ -407,8 +406,8 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 
 - `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used, if `1` PyTorch Lazy backend for Gaudi will be used. `1` is the default.
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES` must be set to `true` for tensor parallel inference with HPU Graphs. `true` is the default.
-- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava and qwen models.
-- `VLLM_PROMPT_USE_FLEX_ATTENTION` is enabled only for llama model, and allows to use torch.nn.attention.flex_attention instead of FusedSDPA. Note, this requires `VLLM_PROMPT_USE_FUSEDSDPA=0`
+- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava and qwen models. `false` is the default.
+- `VLLM_PROMPT_USE_FLEX_ATTENTION` is enabled only for llama model, and allows to use torch.nn.attention.flex_attention instead of FusedSDPA. Note, this requires `VLLM_PROMPT_USE_FUSEDSDPA=0`. `false` is the default.
 
 # Quantization, FP8 Inference and Model Calibration Process
 
