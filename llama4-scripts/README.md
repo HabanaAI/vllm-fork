@@ -42,7 +42,16 @@ pip install -e .
 # run cmd
 PT_HPU_LAZY_MODE=1 QUANT_CONFIG=llama4-scripts/inc_unit_scale_quant.json python llama4-scripts/test_vllm_quant.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct
 ```
+# MMLU Pro test
 
+``` bash
+cd llama4-scripts/accuracy; git clone https://github.com/TIGER-AI-Lab/MMLU-Pro.git;
+cp evaluate_from_local.py MMLU-Pro/evaluate_from_local.py;
+pip uninstall pandas
+pip install pandas fire datasets
+sh run_mmlupro_acc.sh
+
+```
 
 # Enable Vision Accuracy test using ChartQA Dataset
 
@@ -51,7 +60,7 @@ pip uninstall pandas
 pip install pandas fire datasets
 cd vllm-fork/llama4-scripts/accuracy
 # update model_path inside run_acc.sh
-bash run_acc.sh
+bash run_chartqa_acc.sh
 ```
 
 or

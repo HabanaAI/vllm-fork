@@ -10,6 +10,8 @@ from tqdm import tqdm
 
 from eval.metrics import Metric
 from eval.models import Model
+import uuid
+myuuid = uuid.uuid4()
 
 
 @dataclasses.dataclass
@@ -71,6 +73,9 @@ class Eval(ABC):
                 interaction = futures[future]
                 interaction.model_answer = future.result()
                 interactions_w_model_ans.append(interaction)
+            with open(f"chartqa_output_{myuuid}.json", "a") as f:
+                for interaction in interactions_w_model_ans:
+                    f.write(f"{interaction}\n\n")
             self.interactions = interactions_w_model_ans
 
     def compute_metrics(self):
@@ -98,6 +103,7 @@ class HuggingFaceEval(Eval):
     dataset_split: str
 
     def get_dataset(self):
+        #return load_dataset(self.dataset_name)[self.dataset_split].select(range(10))
         return load_dataset(self.dataset_name)[self.dataset_split]
 
     def load_eval(self):
