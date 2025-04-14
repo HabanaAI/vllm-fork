@@ -61,6 +61,10 @@ from vllm.platforms import _Backend, current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 
+from habana_frameworks.torch.hpex.kernels import FusedSDPA
+import os
+import habana_frameworks.torch.core as htcore
+
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
 from .qwen2_vl import Qwen2VLDummyInputsBuilder as Qwen2_5_VLDummyInputsBuilder
 from .qwen2_vl import (Qwen2VLMultiModalProcessor, Qwen2VLProcessingInfo,
@@ -75,6 +79,45 @@ is_hpu = current_platform.is_hpu()
 
 # === Vision Inputs === #
 
+class AttentionLongSequence:
+    @staticmethod
+    def forward(q, k, v, mask, q_block_size):
+        """
+        Support long sequence at prompt phase
+        """
+        q_len = q.size(-2)
+        assert q_len % q_block_size == 0
+        q_tiles = (q_len // q_block_size) if (q_len % q_block_size == 0) else math.ceil(q_len / q_block_size)
+        #q_padding = q_tiles * q_block_size - q_len
+        #q = F.pad(q, (0, 0, 0, q_padding), "constant", 0)
+        #if mask is not None:
+        #    mask = F.pad(mask, (0, 0, 0, q_padding), "constant", -10000.0)
+        attn_output = torch.zeros_like(q)
+
+        for i in range(q_tiles):
+            s, e = i * q_block_size, (i + 1) * q_block_size
+            row_q = q[:, :, s:e, :]
+            row_mask = mask[:, :, s:e, :]
+            attn_output[:, :, s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0, False, None)
+            #TODO: markstep every 10th layer, didn't experiment which one is optimal number.
+            #10,50,100 shows simliar result, without this, we see the program hangs for multiple prompts(with larger images)
+            if i % 75 == 0:
+                htcore.mark_step()
+        return attn_output
+
+def create_block_diagonal_attention_mask_outerprod(indices):
+    maxsize = indices[-1]
+    range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
+    yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+    zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+    xx = torch.logical_and(yy, zz)
+    # can reduce sum externally or as batchmatmul
+    res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+    #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+    return res.bool()
+
+def expand_to_max(indices, max_num_images):
+    return torch.nn.functional.pad(indices, (0, max_num_images-indices.shape[0]), value=indices[-1])
 
 class Qwen2_5_VLImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
@@ -216,6 +259,7 @@ class Qwen2_5_VisionAttention(nn.Module):
         self.num_attention_heads_per_partition = dist_utils.divide(
             num_heads, self.tp_size)
 
+
         self.qkv = ColumnParallelLinear(input_size=embed_dim,
                                         output_size=3 * projection_size,
                                         quant_config=quant_config,
@@ -260,7 +304,7 @@ class Qwen2_5_VisionAttention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        cu_seqlens: torch.Tensor,
+        cu_seqlens: Optional[torch.Tensor],
         rotary_pos_emb: torch.Tensor,
     ) -> torch.Tensor:
         # [s, b, c] --> [s, b, head * 3 * head_dim]
@@ -304,26 +348,43 @@ class Qwen2_5_VisionAttention(nn.Module):
                                       b=batch_size)
         elif self.attn_backend == _Backend.TORCH_SDPA:
             # Execute attention entry by entry for speed & less VRAM.
-            outputs = []
-            for i in range(1, len(cu_seqlens)):
-                start_idx = cu_seqlens[i - 1]
-                end_idx = cu_seqlens[i]
-                q_i = q[:, start_idx:end_idx]
-                k_i = k[:, start_idx:end_idx]
-                v_i = v[:, start_idx:end_idx]
-                q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
-                                 for x in [q_i, k_i, v_i])
-                if is_hpu:
-                    from habana_frameworks.torch.hpex.kernels import FusedSDPA
-                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
+            if cu_seqlens is None:
+                outputs = []
+                cu_seqlens = list(range(0, x.shape[0]+1, 64)) # assuming x%64=0 (image is 112 aligned in both h/w dims)
+                for i in range(1, len(cu_seqlens)):
+                    start_idx = cu_seqlens[i - 1]
+                    end_idx = cu_seqlens[i]
+                    q_i = q[:, start_idx:end_idx]
+                    k_i = k[:, start_idx:end_idx]
+                    v_i = v[:, start_idx:end_idx]
+                    q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
+                                    for x in [q_i, k_i, v_i])
+                    if is_hpu:
+                        output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
+                    else:
+                        output_i = F.scaled_dot_product_attention(q_i,
+                                                                k_i,
+                                                                v_i,
+                                                                dropout_p=0.0)
+                    output_i = rearrange(output_i, "b h s d -> b s h d ")
+                    outputs.append(output_i)
+                context_layer = torch.cat(outputs, dim=1)
+            else:
+                fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+                q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")for x in [q, k, v])
+
+
+                (batch_size, n_heads, seq_len_N_t, head_dim_qk) = q1.shape
+                (batch_size, n_heads, seq_len_N_s, head_dim_qk) = k1.shape
+                mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
+                attn_mask = fullatt_block_attn_mask.reshape(batch_size, 1, seq_len_N_t, seq_len_N_s, -1)[:, :, :, :, 0]
+                assert attn_mask.shape == mask_shape
+
+                if q1.shape[2] <= 6400: # this crossover point should be measured
+                    fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
                 else:
-                    output_i = F.scaled_dot_product_attention(q_i,
-                                                              k_i,
-                                                              v_i,
-                                                              dropout_p=0.0)
-                output_i = rearrange(output_i, "b h s d -> b s h d ")
-                outputs.append(output_i)
-            context_layer = torch.cat(outputs, dim=1)
+                    fused_out = AttentionLongSequence.forward(q1, k1, v1, attn_mask, 64)
+                context_layer = rearrange(fused_out, "b h s d -> b s h d ")
         elif self.attn_backend == _Backend.XFORMERS:
             from xformers import ops as xops
             from xformers.ops.fmha.attn_bias import BlockDiagonalMask
@@ -370,7 +431,8 @@ class Qwen2_5_VisionBlock(nn.Module):
                                      quant_config=quant_config,
                                      prefix=f"{prefix}.mlp")
 
-    def forward(self, x: torch.Tensor, cu_seqlens: torch.Tensor,
+    def forward(self, x: torch.Tensor, #cu_seqlens: torch.Tensor,
+                cu_seqlens: Optional[torch.Tensor],
                 rotary_pos_emb: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.norm1(x),
                           cu_seqlens=cu_seqlens,
@@ -553,7 +615,9 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 self.spatial_merge_size,
                 w // self.spatial_merge_size,
                 self.spatial_merge_size,
-            ).permute(0, 2, 1, 3).flatten()
+            ).permute(
+                0, 2, 1,
+                3).flatten()
             wpos_ids = wpos_ids.reshape(
                 h // self.spatial_merge_size,
                 self.spatial_merge_size,
@@ -603,11 +667,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         window_index = torch.cat(window_index, dim=0)
         return window_index, cu_window_seqlens
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        grid_thw: torch.Tensor,
-    ) -> torch.Tensor:
+    def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor):
         # patchify
         hidden_states = x.to(device=self.device, dtype=self.dtype)
         hidden_states = self.patch_embed(hidden_states)
@@ -650,26 +710,40 @@ class Qwen2_5_VisionTransformer(nn.Module):
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         rotary_pos_emb = rotary_pos_emb[window_index, :, :]
         rotary_pos_emb = rotary_pos_emb.reshape(seq_len, -1)
-        # compute cu_seqlens
         cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2],
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
+        return hidden_states, rotary_pos_emb, cu_seqlens, cu_window_seqlens, window_index
+
+    def forward(
+            self,
+            x: torch.Tensor,
+            cu_seqlens: torch.Tensor,
+            rotary_pos_emb: torch.Tensor) -> torch.Tensor:
+        assert x.shape[0] == cu_seqlens[-1] == rotary_pos_emb.shape[0]
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
-        # transformers
+        hidden_states = x.unsqueeze(1)
         hidden_states = hidden_states.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
+                #fullatt_block_attn_mask = None
                 cu_seqlens_now = cu_seqlens
-            else:
+                cu_seqlens_now = None
                 cu_seqlens_now = cu_window_seqlens
             hidden_states = blk(hidden_states,
                                 cu_seqlens=cu_seqlens_now,
                                 rotary_pos_emb=rotary_pos_emb)
 
         # adapter
+
+        return hidden_states
+
+    def post_attn(self, hidden_states: torch.Tensor,
+                  window_index: torch.Tensor):
         hidden_states = self.merger(hidden_states)
         reverse_indices = torch.argsort(window_index)
+
         hidden_states = hidden_states[reverse_indices, :]
         return hidden_states
 
@@ -828,6 +902,12 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
+        envvar = os.environ.get('FIXED_MULTIMODAL_BUCKETS', "")
+        if envvar == "":
+            self.FIXED_MULTIMODAL_BUCKETS = [1600, 3200, 4800, 6400] # add 768 a small bucket maybe?
+        else:
+            self.FIXED_MULTIMODAL_BUCKETS = [int(i) for i in envvar.split(',')]
+        assert all([k%64 == 0 for k in self.FIXED_MULTIMODAL_BUCKETS]), f"FIXED_MULTIMODAL_BUCKETS should all be multiples of 64, but was {self.FIXED_MULTIMODAL_BUCKETS}"
 
     @cached_property
     def sampler(self):
@@ -903,6 +983,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         video_grid_thw = kwargs.pop("video_grid_thw", None)
         second_per_grid_ts = kwargs.pop("second_per_grid_ts", None)
 
+
         if pixel_values_videos is None and video_embeds is None:
             return None
 
@@ -932,6 +1013,42 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 type="video_embeds",
                 video_embeds=video_embeds,
                 video_grid_thw=video_grid_thw)
+    def _get_multimodal_bucket(self, curr_num_image_patches):
+        for mm_bucket in self.FIXED_MULTIMODAL_BUCKETS:
+            if curr_num_image_patches <= mm_bucket:
+                return mm_bucket
+        self.FIXED_MULTIMODAL_BUCKETS += [curr_num_image_patches] # a shape larger than any that was compiled before. its gonna be compiled now, so save it for the future
+        return curr_num_image_patches
+
+    def pad_multimodal_data(self, pixel_values, image_grid_thw):
+        assert pixel_values.shape[
+            0] % 64 == 0, '[testing version] needs 64 aligned resolution'
+
+        desired_number_of_pixels = self._get_multimodal_bucket(pixel_values.shape[0])
+        padding_len = desired_number_of_pixels - pixel_values.shape[0]
+        if padding_len <= 0:
+            #breakpoint()
+            return pixel_values, image_grid_thw
+
+        logger.info(
+            f"[MM_BUCKETING] Padding current number pixel {pixel_values.shape[0]} to {desired_number_of_pixels}"
+        )
+        # needs to make sure padding_len is even
+        assert padding_len % 64 == 0, '[testing version] padding needs to be multiple of 64'
+
+        constant_value = -100
+        pixel_values = torch.cat([
+            pixel_values,
+            torch.ones((padding_len, pixel_values.shape[1]), device=pixel_values.device) * constant_value
+        ])
+
+        image_grid_thw = torch.cat(
+            [image_grid_thw,
+             torch.tensor([[1, 8, padding_len // 8]], device=image_grid_thw.device)])
+
+        assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
+        return pixel_values, image_grid_thw
+
 
     def _process_image_input(
             self,
@@ -943,7 +1060,67 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if image_input["type"] == "image_embeds":
             image_embeds = image_input["image_embeds"].type(self.visual.dtype)
         else:
-            pixel_values = image_input["pixel_values"].type(self.visual.dtype)
+
+            if True:
+                '''
+                go thru grid_thw
+                say grid_thw is 1,16,16 and 1,128,128
+                say u have 2 buckets: 512 and 16384
+
+                slice pixel_values at 16*16 = 256 (1st img) and attach a new "image" to it, to pad it up to 512
+                attach a new
+                '''
+
+                offset = 0
+                # right now we do 1 img at a time, but if we have multiple small images we could pack them in together
+                # Like say if I have image = 224, 224, 6400, and my buckets are: 1024, 6400
+                # instead of padding 224->1024 and 224->1024, we can pack both 224 into 1 and send it to 1024
+                results = []
+                # During warmup: self.model.visual_warmup_times isnt set, so we can do it 1-by-1
+                # after warmup we need to check "visual_warmup_times" and we can batch based on that
+                # Note that sometimes we may recompile, in which case "_get_multimodal_bucket" will return a larger number
+                # however we will not have time for that larger size in "visual_warmup_times"
+                # so after that our policy will be:
+                # if size within original buckets attempt coalescing within original buckets
+                # if size is larger, only then use a already precompiled non-original bucket
+                for img_idx in range(grid_thw.shape[0]):
+                    img_shape = grid_thw[img_idx, :].unsqueeze(0)
+                    curr_img_size = img_shape.prod()
+
+                    pixel_values_curr_img = pixel_values[offset : offset + curr_img_size, :]
+                    #breakpoint()
+                    offset += curr_img_size
+                    pixel_values_curr_img_padded, img_shape_padded = self.pad_multimodal_data(pixel_values_curr_img, img_shape)
+
+                    pixel_values_curr_img_padded, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
+                    pixel_values_curr_img_padded, img_shape_padded)
+
+                    assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
+
+                    expanded_cu_seqlens = expand_to_max(cu_seqlens, 3) # either a single image, or a single image and its accompanying pad image, so only max expansion to 3
+                    htcore.mark_step()
+                    hidden_states = self.visual(pixel_values_curr_img_padded,
+                                            rotary_pos_emb=rot_pos_emb,
+                                            cu_seqlens=expanded_cu_seqlens,)
+                    htcore.mark_step()
+                    image_embeds = self.visual.post_attn(hidden_states, window_index)
+                    results += [image_embeds[:img_shape_padded[0].prod()//4, :]] # slice image_embeds to remove the padded parts. instead of hardcoding 4, maybe use config spatial merge etc
+                results_cat = torch.concat(results)
+                image_embeds = results_cat
+            else:
+                pixel_values, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
+                    pixel_values, grid_thw)
+                assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
+                #print('.......', cu_seqlens, expand_to_max(cu_seqlens, 10))
+                expanded_cu_seqlens = expand_to_max(cu_seqlens, 10)
+                htcore.mark_step() # padding in expand_to_max is dynamic
+                #breakpoint()
+                hidden_states = self.visual(pixel_values,
+                                            rotary_pos_emb=rot_pos_emb,
+                                            cu_seqlens=expanded_cu_seqlens,)
+                                            #cu_window_seqlens=cu_window_seqlens)
+                htcore.mark_step()
+                image_embeds = self.visual.post_attn(hidden_states, window_index)
             image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
 
         # Split concatenated embeddings for each image item.
@@ -964,6 +1141,18 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         else:
             pixel_values_videos = video_input["pixel_values_videos"].type(
                 self.visual.dtype)
+
+            #Moved dynamic calculation to pre_attn, and post_attn and keep the visual() block to be static to include only VisionTransformer and VisionMerger.
+            pixel_values_videos, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
+                pixel_values_videos, grid_thw)
+            expanded_cu_seqlens = expand_to_max(cu_seqlens, 10)
+            htcore.mark_step() # padding in expand_to_max is dynamic
+            hidden_states = self.visual(pixel_values_videos,
+                                        rotary_pos_emb=rot_pos_emb,
+                                        cu_seqlens=expanded_cu_seqlens,)
+                                        #cu_window_seqlens=cu_window_seqlens)
+            video_embeds = self.visual.post_attn(hidden_states, window_index)
+            #video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
             video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
 
         # Split concatenated embeddings for each video item.

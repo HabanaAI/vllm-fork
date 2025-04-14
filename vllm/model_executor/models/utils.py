@@ -366,13 +366,15 @@ def _merge_multimodal_embeddings(
     assert isinstance(num_expected_tokens, int)
 
     flattened = _flatten_embeddings(multimodal_embeddings)
-    if flattened.shape[0] != num_expected_tokens:
-        expr = _embedding_count_expression(multimodal_embeddings)
-        raise ValueError(
-            f"Attempted to assign {expr} = {flattened.shape[0]} "
-            f"multimodal tokens to {num_expected_tokens} placeholders")
+    # if flattened.shape[0] != num_expected_tokens:
+    #     expr = _embedding_count_expression(multimodal_embeddings)
+    #     raise ValueError(
+    #         f"Attempted to assign {expr} = {flattened.shape[0]} "
+    #         f"multimodal tokens to {num_expected_tokens} placeholders")
 
-    inputs_embeds[is_multimodal] = flattened
+    # flattened could have dummy data from the padding after num_expected_tokens
+    inputs_embeds[is_multimodal] = flattened[:num_expected_tokens, :]
+
     return inputs_embeds
 
 
@@ -597,15 +599,12 @@ def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
 
     def make_empty_intermediate_tensors(
         batch_size: int,
-        context_size: int,
         dtype: torch.dtype,
         device: torch.device,
     ) -> IntermediateTensors:
         return IntermediateTensors({
             key:
-            torch.zeros((batch_size, context_size, hidden_size),
-                        dtype=dtype,
-                        device=device)
+            torch.zeros((batch_size, hidden_size), dtype=dtype, device=device)
             for key in keys
         })
 
