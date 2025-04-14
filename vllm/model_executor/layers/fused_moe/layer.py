@@ -279,14 +279,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             min_expert = i * n_expert_slice
             max_expert = (i + 1) * n_expert_slice
             if use_fp8:
-                w13_list_slice = [
-                    layer.hpu_fused_moe.MoeOp.w13_list[j].weight
-                    for j in range(min_expert, max_expert)
-                ]
-                w2_list_slice = [
-                    layer.hpu_fused_moe.MoeOp.w2_list[j].weight
-                    for j in range(min_expert, max_expert)
-                ]
                 current_hidden_states = layer.hpu_fused_moe.MoeOp(
                     hidden_states=x,
                     expert_routing_table=topk_ids.to(torch.int64),
@@ -686,7 +678,7 @@ class FusedMoE(torch.nn.Module):
         if is_hpu and use_fp8:
             for expert_id in range(expert_data.shape[0]):
                 self.hpu_fused_moe.MoeOp.w13_list[expert_id].set_weight(
-                        expert_data[expert_id]
+                        orig_exp_data[expert_id]
                         )
             torch.hpu.synchronize()
 
