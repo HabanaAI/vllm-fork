@@ -1048,7 +1048,7 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
             indices_list = [
                 id_to_index.index(value) for value in index_mapping
             ]
-            indices = torch.tensor(indices_list, device=device)
+            indices = torch.tensor(indices_list)
             mask = createLoraMask(indices, len(inputs), 1, max_loras, 8,
                                   torch.bfloat16)
             LoraMask.setLoraMask(mask)
