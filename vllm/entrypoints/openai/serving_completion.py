@@ -299,7 +299,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         has_echoed[i] = True
                     else:
                         # return just the delta
-                        delta_text = output.text
+                        delta_text = tokenizer.convert_ids_to_tokens(output.token_ids[-1])
                         delta_token_ids = output.token_ids
                         out_logprobs = output.logprobs
 
