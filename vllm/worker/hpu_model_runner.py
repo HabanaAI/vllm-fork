@@ -1025,7 +1025,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             #TODO:For now return TRUE for development
             #This needs to be updated later with proper bucket detections.
-            #return (batch_size, height, weight) in self.graphed_multimodal_buckets
             return True
 
     def _is_valid_bucket(self, bucket):
@@ -1991,7 +1990,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, seq_len,
                                                     lora_request, temperature,
-                                                    height, width):
+                                                    max_pixels):
 
         from vllm.multimodal.utils import cached_get_tokenizer
 
@@ -2009,15 +2008,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                       tokenizer)
         mm_counts = self.mm_registry.get_mm_limits_per_prompt(
             self.model_config)
-        #mm_counts = {"image":1}
-        print("mm_counts:", mm_counts)
         factory = processor.dummy_inputs
         processor_inputs = factory.get_dummy_processor_inputs(
             seq_len=seq_len,
             mm_counts=mm_counts,
-            image_width=width,
-            image_height=height)
-
+        )
+        if max_pixels is not None:
+            # Note: We will overwrite this value if any exits
+            processor_inputs.hf_processor_mm_kwargs["max_pixels"] = max_pixels
+        print(" ============ ", processor_inputs.hf_processor_mm_kwargs)
         mm_inputs = processor.apply(
             prompt=processor_inputs.prompt_text,
             mm_data=processor_inputs.mm_data,
@@ -2030,6 +2029,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids.extend([0] * (seq_len - len(prompt_token_ids)))
         seq_data = SequenceData.from_seqs(prompt_token_ids)
 
+        import pdb; pdb.set_trace()
         return SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=True,
@@ -2105,8 +2105,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_lora_profile_run=False,
                         multimodal_seqs_group_metada=False,
                         temperature=0,
-                        height=None,
-                        width=None,
+                        max_pixels=None,
                         return_time=False) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt,
                                       multimodal_seqs_group_metada)
@@ -2151,8 +2150,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature,
-                    height=height,
-                    width=width) for i in range(batch_size)
+                    max_pixels=max_pixels,
+                ) for i in range(batch_size)
             ]
         elif is_prompt:
             seqs = [
@@ -2273,7 +2272,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def log_warmup_multimodal(self, phase, i, max_i, batch_size, seq_len,
-                              height, width):
+                              max_pixels):
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
         dim = "num_blocks"
@@ -2281,7 +2280,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             dim = "seq_len"
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
-               f"{dim}:{seq_len}", f"hw:({height},{width})",
+               f"{dim}:{seq_len}", f"max_pixels:{max_pixels}",
                f"free_mem:{free_mem}")
         logger.info(msg)
 
@@ -2295,12 +2294,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Warmup Multimodal with fixed seq_len
         if not hasattr(self, 'visual_warmup_times'):
             self.visual_warmup_times = {}
-        for i, (h, w) in enumerate(self.multimodal_buckets):
+        for i, max_pixels in enumerate(self.multimodal_buckets):
             max_batch_size = 1  #TODO: For now we hardcoded batch 1.
             max_seq_len = 2048  #TODO: set with VLLM_PROMPT_SEQ_BUCKET_MAX
             self.log_warmup_multimodal('Image', i, max_seq_len, max_batch_size,
-                                       max_seq_len, h, w)
-            assert h%112 == 0 and w % 112 == 0, "Expected to be 112 aligned for now"
+                                       max_seq_len, max_pixels)
             t = self.warmup_scenario(batch_size=max_batch_size,
                                  seq_len=max_seq_len,
                                  is_prompt=True,
@@ -2308,8 +2306,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  is_pt_profiler_run=False,
                                  is_lora_profile_run=True,
                                  multimodal_seqs_group_metada=True,
-                                 height=h,
-                                 width=w,
+                                 max_pixels=max_pixels,
                                  return_time=True)
             #if ((h*w) / (14*14)) in self.visual_warmup_times:
             #breakpoint()
@@ -2329,8 +2326,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      is_prompt,
                                      kv_caches,
                                      multimodal_seqs_group_metada=True,
-                                     height=112,
-                                     width=112) # everythign must be 112 aligned (for now)
+                                     max_pixels=max_pixels) # everythign must be 112 aligned (for now)
             else:
                 self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
 
@@ -2379,8 +2375,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     temperature=1.0
                     if batch_size not in warmed_random_sampler_bs else 0,
                     multimodal_seqs_group_metada=True if is_prompt else False,
-                    height=112,
-                    width=112)
+                    max_pixels=14*14*112)
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
@@ -2410,8 +2405,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 #is_pt_profiler_run=False,
                 #is_lora_profile_run=True,
                 multimodal_seqs_group_metada=True,
-                height=h,
-                width=w,
+                max_pixels=max_pixels,
                 return_time=True)
             self.visual_warmup_times[((h*w) / (14*14))] = self.visual_warmup_times.get(((h*w) / (14*14)), []) + [('graph', t)]
 
@@ -2435,10 +2429,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not self.is_pooler:
             max_blocks = kv_caches[0][0].size(0)
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
-            
+
         if supports_multimodal(self.model.model):
-            FIXED_MULTIMODAL_BUCKETS = self.model.model.FIXED_MULTIMODAL_BUCKETS
-            self.multimodal_buckets = [[112, total_size * 14 * 14 / 112] for total_size in FIXED_MULTIMODAL_BUCKETS]
+            self.multimodal_buckets = self.model.model.FIXED_MULTIMODAL_BUCKETS
             print("Multimodal bucket :", self.multimodal_buckets)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
@@ -2596,10 +2589,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
-        if hasattr(self, 'visual_warmup_times'):
-            summary = {k: min([t for _, t in self.visual_warmup_times[k]]) for k in self.visual_warmup_times}
-            self.visual_warmup_times = summary
-            self.model.visual_warmup_times = self.visual_warmup_times
+        # if hasattr(self, 'visual_warmup_times'):
+        #     summary = {k: min([t for _, t in self.visual_warmup_times[k]]) for k in self.visual_warmup_times}
+        #     self.visual_warmup_times = summary
+        #     self.model.visual_warmup_times = self.visual_warmup_times
         self.profiler.end()
 
     def finish_measurements(self):
