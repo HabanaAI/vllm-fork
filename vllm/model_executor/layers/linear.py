@@ -182,7 +182,8 @@ class UnquantizedLinearMethod(LinearMethodBase):
                        **extra_weight_attrs):
         weight = Parameter(torch.empty(sum(output_partition_sizes),
                                        input_size_per_partition,
-                                       dtype=params_dtype),
+                                       dtype=params_dtype,
+                                       device=torch.device('hpu')),
                            requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
