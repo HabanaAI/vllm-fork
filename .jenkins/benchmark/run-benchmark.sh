@@ -34,7 +34,7 @@ python  $script_dir/../../benchmarks/benchmark_throughput.py \
     --dataset /mnt/weka/data/pytorch/llama2/ShareGPT_V3_unfiltered_cleaned_split.json \
     --num-prompts 1000 \
     --dtype bfloat16 \
-    --max-model-len 4096 \
+    --max-model-len 2048 \
     --max-num-batched-tokens 8192 \
     --max-num-seqs 128 \
     --use-padding-aware-scheduling |& tee $log_file
