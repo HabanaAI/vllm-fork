@@ -142,7 +142,11 @@ class RayDistributedExecutor(DistributedExecutorBase):
         num_gpus = envs.VLLM_RAY_PER_WORKER_GPUS
 
         def retain_envs(var_name):
-            retain_var_list = ['GLOO_SOCKET_IFNAME']
+            retain_var_list = [
+                'GLOO_SOCKET_IFNAME',
+                'HCCL_SOCKET_IFNAME',
+                'NCCL_SOCKET_IFNAME'
+            ]
             return ('HPU' in var_name or 'RAY' in var_name
                     or 'VLLM' in var_name or var_name in retain_var_list)
 
