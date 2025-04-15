@@ -280,7 +280,6 @@ class Qwen2_5_VisionAttention(nn.Module):
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
-        breakpoint()
         seq_len, bs, _ = qkv.shape
         if self.tp_size > 1:
             qkv = tensor_model_parallel_all_gather(qkv)
@@ -730,7 +729,6 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 cu_seqlens_now = cu_seqlens
             else:
                 cu_seqlens_now = None
-            breakpoint()
             hidden_states = blk(hidden_states,
                                 cu_seqlens=cu_seqlens_now,
                                 rotary_pos_emb=rotary_pos_emb)
