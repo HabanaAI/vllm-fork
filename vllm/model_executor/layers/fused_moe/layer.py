@@ -274,8 +274,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         if e_score_correction_bias is not None:
             raise NotImplementedError(
                 "Expert score correction bias is not supported for HPU.")
-        return layer.hpu_fused_moe(x, layer.w13_weight, layer.w2_weight,
-                                   router_logits, top_k)
+        return layer.hpu_fused_moe(x, router_logits, top_k)
 
     def forward_tpu(
         self,
@@ -424,7 +423,7 @@ class FusedMoE(torch.nn.Module):
         # Use expert parallelism instead of tensor parallelism?
         vllm_config = get_current_vllm_config()
         use_ep = (vllm_config.parallel_config.enable_expert_parallel
-                  and self.tp_size > 1)
+                  and self.tp_size * self.dp_size > 1)
 
         # For smuggling this layer into the fused moe custom op
         self.use_direct_call = self.dp_size == 1
@@ -470,7 +469,7 @@ class FusedMoE(torch.nn.Module):
         self.custom_routing_function = custom_routing_function
         if is_hpu:
             from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.num_experts)
+            self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
 
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
@@ -481,7 +480,7 @@ class FusedMoE(torch.nn.Module):
                              "non-grouped topk.")
         if current_platform.is_hpu():
             from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.global_num_experts)
+            self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
 
         # Note: get_quant_method will look at the layer's local_num_experts
         # for heuristic purposes, so it must be initialized first.
@@ -824,7 +823,9 @@ class FusedMoE(torch.nn.Module):
 
     def naive_multicast(self, x: torch.Tensor,
                         cu_tokens_across_dp_cpu: torch.Tensor):
-        assert (len(x.shape) == 2)
+        assert (len(x.shape) in [2, 3])
+        if len(x.shape) == 3:
+            x = x.view(-1, x.size(2))
         buffer = torch.empty((cu_tokens_across_dp_cpu[-1], x.size(1)),
                              device=x.device,
                              dtype=x.dtype)
