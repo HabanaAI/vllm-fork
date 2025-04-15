@@ -118,7 +118,7 @@ $ python setup.py develop
 | Multiprocessing backend   | Multiprocessing is the default distributed runtime in vLLM. The vLLM HPU backend supports it alongside Ray.   | [Documentation](https://docs.vllm.ai/en/latest/serving/distributed_serving.html)  |
 | Multimodal   | vLLM HPU backend supports the inference for multi-modal models. (Not fully supported with t.compile execution mode) |  [Documentation](https://docs.vllm.ai/en/latest/serving/multimodal_inputs.html) |
 | Multinode support   | vLLM HPU backend supports distributed, multiple nodes inferencing with Ray.    | <REF>  |
-| vLLM v1 architecture (early release)   | V1 architecure is now available for HPU backend, and will gradually enable it for every use case we plan to support.   | [Documentation](https://docs.vllm.ai/en/latest/serving/distributed_serving.html) |
+| vLLM v1 architecture (early release)   | V1 architecture is now available for HPU backend, and will gradually enable it for every use case we plan to support.   | [Documentation](https://docs.vllm.ai/en/latest/serving/distributed_serving.html) |
 | Guided decode   | vLLM HPU supports guided decoding backend for the generation of structured outputs.   | [Documentation](https://docs.vllm.ai/en/latest/features/structured_outputs.html)  |
 
 > [!NOTE]
