@@ -47,7 +47,6 @@ def test_text(llm):
         print("-----------------------------------")
         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
 
-        # "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/datasets/cat_style_layout.png",
 def test_images(llm):
     # image_url = "https://d2opxh93rbxzdn.cloudfront.net/original/2X/4/40cfa8ca1f24ac29cfebcb1460b5cafb213b6105.png"
     image_url = "https://huggingface.co/datasets/patrickvonplaten/random_img/resolve/main/europe.png"
@@ -74,41 +73,44 @@ def test_images(llm):
         generated_text = output.outputs[0].text
         print("-----------------------------------")
         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
-# def test_images(llm):
-#     image_urls = [
-#         "https://huggingface.co/datasets/huggingface/documentation-images/resolve/0052a70beed5bf71b92610a43a52df6d286cd5f3/diffusers/rabbit.jpg",
-#     ]
-#     # Create a sampling params object.
-#     sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=128)
-#     # Perform multi-image inference using llm.chat()
-#     outputs = llm.chat(
-#         [
-#             {
-#                 "role": "user",
-#                 "content": [
-#                     {
-#                         "type": "text",
-#                         "text": "Can you describe how these two images are similar, and how they differ?",
-#                     },
-#                     *(
-#                         {
-#                             "type": "image_url",
-#                             "image_url": {"url": image_url},
-#                         }
-#                         for image_url in image_urls
-#                     ),
-#                 ],
-#             }
-#         ],
-#         sampling_params=sampling_params,
-#     )
 
-#     # Print the outputs.
-#     for output in outputs:
-#         prompt = output.prompt
-#         generated_text = output.outputs[0].text
-#         print("-----------------------------------")
-#         print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
+
+def test_images_2(llm):
+    image_urls = [
+        "https://huggingface.co/datasets/huggingface/documentation-images/resolve/0052a70beed5bf71b92610a43a52df6d286cd5f3/diffusers/rabbit.jpg",
+        "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/datasets/cat_style_layout.png",
+    ]
+    # Create a sampling params object.
+    sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=128)
+    # Perform multi-image inference using llm.chat()
+    outputs = llm.chat(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Can you describe how these two images are similar, and how they differ?",
+                    },
+                    *(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_url},
+                        }
+                        for image_url in image_urls
+                    ),
+                ],
+            }
+        ],
+        sampling_params=sampling_params,
+    )
+
+    # Print the outputs.
+    for output in outputs:
+        prompt = output.prompt
+        generated_text = output.outputs[0].text
+        print("-----------------------------------")
+        print(f"Prompt: {prompt!r}\nGenerated text:\n {generated_text}\n")
 
 
 def test_completion(llm):
@@ -129,6 +131,53 @@ def test_completion(llm):
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
+def reset_seed(seed=42):
+    import torch
+    import random
+    import numpy as np
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+def get_prompt_token_ids(model_path, prompts, max_length=1024):
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    prompt_token_ids = []
+    for prompt in prompts:
+        tokens = tokenizer(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_length,
+                )
+        if len(tokens.input_ids[0]) < max_length:
+            continue
+        prompt_token_ids.append([x.item() for x in tokens.input_ids[0]])
+    return prompt_token_ids
+
+def get_pile_prompts(model_name, num_samples=512):
+    from datasets import load_dataset
+    from tqdm import tqdm
+    import transformers
+    least_tokens = 1024
+    seed = 42
+    reset_seed(seed)
+    dataset = load_dataset("NeelNanda/pile-10k", split="train")
+    dataset = dataset.shuffle(seed=seed)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=True)
+    num_sample = 0
+    samples_lst = []
+    for data in tqdm(dataset):
+        prompt = data["text"]
+        tokens = tokenizer(prompt, return_tensors="pt")
+        if len(tokens.input_ids[0]) < least_tokens:
+            continue
+        num_sample += 1
+        samples_lst.append(prompt)
+        if num_sample >= num_samples:
+            break
+    return samples_lst
 
 def main():
     # Create an argument parser
@@ -150,7 +199,12 @@ def main():
 
     # Access the model_id argument
     model_id = args.model_id
-
+    num_samples = 512
+    prompts = get_pile_prompts(model_id, num_samples)
+    sampling_params = SamplingParams(temperature=0.6, top_p=0.9, max_tokens=128)
+    prompt_token_ids = get_prompt_token_ids(
+            model_id, prompts, 1024)
+ 
     # Print or use the model_id as needed
     print(f"Using model: {model_id}")
     llm = LLM(
@@ -158,15 +212,19 @@ def main():
         dtype='bfloat16',
         enforce_eager=True,
         max_model_len=16384,
-        quantization="inc",
         tensor_parallel_size=8,
         limit_mm_per_prompt={"image": 5},
         enable_expert_parallel=True,
+        quantization="inc",
     )
-    print("---------Now start Completion test-----------")
-    test_text(llm)
+    outputs = llm.generate(prompts=None, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
+    #print("---------Now start Completion test-----------")
+    #test_completion(llm)
+    #test_text(llm)
     #print("---------Now start Image test-----------")
     #test_images(llm)
+    #print("---------Now start multi Image test-----------")
+    #test_images_2(llm)
     # if "instruct" in model_id.lower():
     #     print("---------Now start Instruct test-----------")
     #     test_text(llm)

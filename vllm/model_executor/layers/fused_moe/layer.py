@@ -23,6 +23,7 @@ from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
 from vllm.utils import direct_register_custom_op
+from vllm_hpu_extension.ops import MoeMatmul
 
 is_hpu = current_platform.is_hpu()
 use_fp8 = "QUANT_CONFIG" in os.environ
@@ -38,6 +39,39 @@ else:
 if current_platform.is_hpu():
      import habana_frameworks.torch as htorch
 logger = init_logger(__name__)
+
+
+class VllmMixtureOfExpertsOp(torch.nn.Module):
+
+    def __init__(self, num_total_experts):
+        super().__init__()
+        self.w13_list = torch.nn.ModuleList(
+            [MoeMatmul() for _ in range(num_total_experts)])
+        self.w2_list = torch.nn.ModuleList(
+            [MoeMatmul() for _ in range(num_total_experts)])
+        self.num_experts = num_total_experts
+
+    def forward(self,
+                hidden_states,
+                expert_routing_table,
+                router_weights,
+                permuted_weights=True,
+                activation="silu",
+                experts_min=0,
+                experts_max=7):
+        # pre-processing for custom op inputs
+        experts_range = range(self.num_experts)
+        w1_list = [self.w13_list[i].weight.squeeze() for i in experts_range]
+        w2_list = [self.w2_list[i].weight.squeeze() for i in experts_range]
+        return torch.ops.hpu.mixture_of_experts(hidden_states=hidden_states,
+                                                expert_routing_table=expert_routing_table,
+                                                router_weights=router_weights,
+                                                w12=w1_list,
+                                                w3=w2_list,
+                                                permuted_weights=permuted_weights,
+                                                activation=activation,
+                                                experts_min=experts_min,
+                                                experts_max=experts_max)
 
 
 class FusedMoeWeightScaleSupported(Enum):
@@ -279,10 +313,11 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             min_expert = i * n_expert_slice
             max_expert = (i + 1) * n_expert_slice
             if use_fp8:
-                current_hidden_states = layer.hpu_fused_moe.MoeOp(
+                current_hidden_states = layer.hpu_fused_moe(
                     hidden_states=x,
                     expert_routing_table=topk_ids.to(torch.int64),
                     router_weights=topk_weights.to(x.dtype),
+                    permuted_weights=True,
                     activation=activation,
                     experts_min=min_expert + ep_shift,
                     experts_max=max_expert - 1 + ep_shift
@@ -559,7 +594,7 @@ class FusedMoE(torch.nn.Module):
             from vllm_hpu_extension.ops import DynamicFusedMOE
             # Use local_num_experts for FP8, global_num_experts for BF16
             if use_fp8:
-                self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
+                self.hpu_fused_moe = VllmMixtureOfExpertsOp(self.local_num_experts)
             else:
                 self.hpu_fused_moe = DynamicFusedMOE(self.global_num_experts)
 
@@ -677,7 +712,7 @@ class FusedMoE(torch.nn.Module):
         # Apply FP8 logic if QUANT_CONFIG exists
         if is_hpu and use_fp8:
             for expert_id in range(expert_data.shape[0]):
-                self.hpu_fused_moe.MoeOp.w13_list[expert_id].set_weight(
+                self.hpu_fused_moe.w13_list[expert_id].set_weight(
                         orig_exp_data[expert_id]
                         )
             torch.hpu.synchronize()
@@ -702,7 +737,7 @@ class FusedMoE(torch.nn.Module):
         expert_data.copy_(loaded_weight)
         if is_hpu and use_fp8:
             for expert_id in range(expert_data.shape[0]):
-                self.hpu_fused_moe.MoeOp.w2_list[expert_id].set_weight(
+                self.hpu_fused_moe.w2_list[expert_id].set_weight(
                         expert_data[expert_id]
                         )
         # Sync regardless of BF16 or FP8
