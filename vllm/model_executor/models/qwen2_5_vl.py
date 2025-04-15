@@ -1060,6 +1060,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if image_input["type"] == "image_embeds":
             image_embeds = image_input["image_embeds"].type(self.visual.dtype)
         else:
+            pixel_values = image_input["pixel_values"].type(self.visual.dtype)
 
             if is_hpu:
                 '''
@@ -1108,7 +1109,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 results_cat = torch.concat(results)
                 image_embeds = results_cat
             else:
-                pixel_values = image_input["pixel_values"].type(self.visual.dtype)
                 image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
 
         # Split concatenated embeddings for each image item.
