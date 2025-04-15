@@ -2029,7 +2029,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids.extend([0] * (seq_len - len(prompt_token_ids)))
         seq_data = SequenceData.from_seqs(prompt_token_ids)
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         return SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=True,

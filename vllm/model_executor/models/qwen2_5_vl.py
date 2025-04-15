@@ -725,12 +725,12 @@ class Qwen2_5_VisionTransformer(nn.Module):
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
         hidden_states = x.unsqueeze(1)
-        hidden_states = hidden_states.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
             else:
                 cu_seqlens_now = None
+            breakpoint()
             hidden_states = blk(hidden_states,
                                 cu_seqlens=cu_seqlens_now,
                                 rotary_pos_emb=rotary_pos_emb)
