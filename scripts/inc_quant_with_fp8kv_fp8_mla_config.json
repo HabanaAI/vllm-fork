@@ -12,12 +12,8 @@
         "names": [
             "lm_head",
             "mlp\\.gate\\b",
-            "latent_cache_k_nodeq",
-            "latent_cache_v_nodeq",
-            "matmul_qk",
-            "matmul_av",
             "block2batch_matmul"
         ]
     },
-    "dump_stats_path": "./scripts/nc_workspace_measure_kvache/inc_measure_output"
+    "dump_stats_path": "./scripts/nc_workspace_measure_kvache_fp8_mla/inc_measure_output"
 }
