@@ -1,6 +1,6 @@
 #!/bin/bash
 tp_parrallel=8
-in_len=1024
+in_len=10240
 out_len=1024
 multi_step=1
 total_len=$((in_len + out_len))
@@ -56,8 +56,8 @@ python3 -m vllm.entrypoints.openai.api_server \
     --dtype bfloat16 \
     --use-v2-block-manager \
     --num_scheduler_steps ${multi_step} \
-    --max-model-len 9216 \
-    --max-num-batched-tokens 9216 \
+    --max-model-len 147456 \
+    --max-num-batched-tokens 147456 \
     --use-padding-aware-scheduling \
     --block-size ${block_size} \
     --distributed_executor_backend ray \
@@ -79,7 +79,7 @@ echo ${pid}
 
 ########################################################## Concurrency 64 Sonnet #################################################################
 max_concurrency_client=64
-in_len=1024
+in_len=10240
 out_len=1024
 start_time=$(date +%s)
 echo "Start to benchmark"

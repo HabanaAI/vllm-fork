@@ -1,6 +1,6 @@
 #!/bin/bash
 tp_parrallel=8
-in_len=1024
+in_len=5120
 out_len=1024
 multi_step=1
 total_len=$((in_len + out_len))
@@ -79,7 +79,7 @@ echo ${pid}
 
 ########################################################## Concurrency 64 Sonnet #################################################################
 max_concurrency_client=64
-in_len=1024
+in_len=5120
 out_len=1024
 start_time=$(date +%s)
 echo "Start to benchmark"

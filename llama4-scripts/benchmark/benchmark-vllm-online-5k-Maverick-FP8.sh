@@ -1,6 +1,6 @@
 #!/bin/bash
 tp_parrallel=8
-in_len=1024
+in_len=5120
 out_len=1024
 multi_step=1
 total_len=$((in_len + out_len))
@@ -15,7 +15,7 @@ gpu_utils=0.95
 bs=64
 num_prompts=640
 request_rate=inf
-block_size=128
+block_size=256
 block_step=256
 
 log_name="[inc-staticquant-scalar-fp8matmul-split]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
@@ -27,12 +27,13 @@ total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
 VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len_aligned * bs / block_size + block_step))
 
-model="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
-tokenizer="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
-model_name="Scout"
+model="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct/"
+tokenizer="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct/"
+model_name="Maverick"
 
 mkdir -p benchmark_logs
 
+QUANT_CONFIG="quant.json" \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
@@ -63,6 +64,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --distributed_executor_backend ray \
     --gpu_memory_utilization ${gpu_utils} \
     --enable-expert-parallel \
+    --quantization="inc" \
     --override-generation-config='{"attn_temperature_tuning": true}' \
     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
 pid=$(($!-1))
@@ -79,7 +81,7 @@ echo ${pid}
 
 ########################################################## Concurrency 64 Sonnet #################################################################
 max_concurrency_client=64
-in_len=1024
+in_len=5120
 out_len=1024
 start_time=$(date +%s)
 echo "Start to benchmark"
