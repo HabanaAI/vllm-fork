@@ -74,7 +74,7 @@ export TQDM_DISABLE=True
 
 fp8_args=""
 if [[ $__fp8 == "yes" ]]; then
-    export QUANT_CONFIG=/software/users/kpietkun/configs/llama3.1_quant_cofnig.json
+    export QUANT_CONFIG=/software/data/vllm-benchmarks/inc/maxabs_quant_unit.json
     fp8_args="--quantization=inc \
         --kv-cache-dtype=fp8_inc \
         --weights-load_device=cpu "
