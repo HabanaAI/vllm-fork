@@ -15,21 +15,17 @@ gpu_utils=0.95
 bs=64
 num_prompts=640
 request_rate=inf
+block_size=256
+block_step=256
 
 log_name="[inc-staticquant-scalar-fp8matmul-split]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
-in_len_aligned=$(((in_len + 127) / 128 * 128))
-prompt_seq_max=$(((in_len + 128 + 127) / 128 * 128))
-echo "====================================================== in_len_aligned = ${in_len_aligned}"
-total_len_aligned=$(((total_len + 127) / 128 * 128))
-
-decode_total_len=$((total_len + 128))
-decode_total_len_aligned=$(((decode_total_len + 127) / 128 * 128))
-
-VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len_aligned * bs / 128))
-VLLM_DECODE_BLOCK_BUCKET_MIN=$(((VLLM_DECODE_BLOCK_BUCKET_MIN + 127) / 128 * 128))
-VLLM_DECODE_BLOCK_BUCKET_MAX=$((decode_total_len_aligned * bs / 128))
-VLLM_DECODE_BLOCK_BUCKET_MAX=$(((VLLM_DECODE_BLOCK_BUCKET_MAX + 127) / 128 * 128))
+prompt_bs_max=8
+# Increase prompt max seq len bucket just in case there are more tokens than provided due to tokenizer
+prompt_seq_max=$((in_len + $block_size))
+total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
+VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size))
+VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len_aligned * bs / block_size + block_step))
 
 model="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct/"
 tokenizer="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct/"
@@ -42,16 +38,16 @@ mkdir -p benchmark_logs
 # VLLM_USE_FP8_MATMUL=true \
 # VLLM_MOE_N_SLICE=${moe_n_slice} \
 # VLLM_MLA_DISABLE_REQUANTIZATION=1 \
-QUANT_CONFIG="../inc_unit_scale_quant.json" \
+QUANT_CONFIG="../quant.json" \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
-VLLM_PROMPT_BS_BUCKET_MAX=8 \
-VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len_aligned} \
+VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
+VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
 VLLM_PROMPT_SEQ_BUCKET_MAX=${prompt_seq_max} \
 VLLM_DECODE_BS_BUCKET_MIN=${bs} \
 VLLM_DECODE_BS_BUCKET_MAX=${bs} \
 VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN} \
 VLLM_DECODE_BLOCK_BUCKET_MAX=${VLLM_DECODE_BLOCK_BUCKET_MAX} \
-VLLM_DECODE_BLOCK_BUCKET_STEP=256 \
+VLLM_DECODE_BLOCK_BUCKET_STEP=$block_step \
 VLLM_DELAYED_SAMPLING=true \
 HABANA_VISIBLE_DEVICES="ALL" \
 VLLM_EP_SIZE=${ep_size} \
@@ -68,11 +64,12 @@ python3 -m vllm.entrypoints.openai.api_server \
     --num_scheduler_steps ${multi_step} \
     --max-model-len 9216 \
     --max-num-batched-tokens 9216 \
+    --use-padding-aware-scheduling \
+    --block-size ${block_size} \
     --distributed_executor_backend ray \
     --gpu_memory_utilization ${gpu_utils} \
-    --quantization="inc" \
-    --kv_cache_dtype "fp8_inc" \
     --enable-expert-parallel \
+    --quantization="inc" \
     --override-generation-config='{"attn_temperature_tuning": true}' \
     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
 pid=$(($!-1))
