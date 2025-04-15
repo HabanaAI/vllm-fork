@@ -30,7 +30,7 @@ PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Ll
 
 ## FP8 quantization
 
-We take unit_scale (means scale is 1 for all modules) as the first step and meaningless output is expected. To get a FP8 Scout/Maverick llama4 model, please follow below steps:
+To get a FP8 Scout/Maverick llama4 model, please follow below steps:
 
 ```bash
 # install specific INC
@@ -39,8 +39,11 @@ git clone -b dev/llama4_launch https://github.com/intel/neural-compressor.git
 cd neural-compressor
 pip install -e .
 
-# run cmd
-PT_HPU_LAZY_MODE=1 QUANT_CONFIG=llama4-scripts/inc_unit_scale_quant.json python llama4-scripts/test_vllm_quant.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct
+# calibration
+QUANT_CONFIG=measure.json PT_HPU_LAZY_MODE=1 python test_measure.py --model_id meta-llama/Llama-4-Maverick-17B-128E-Instruct
+
+# quantization
+QUANT_CONFIG=quant.json PT_HPU_LAZY_MODE=1 python test_vllm_quant.py --model_id meta-llama/Llama-4-Maverick-17B-128E-Instruct
 ```
 # MMLU Pro test
 
