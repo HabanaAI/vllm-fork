@@ -122,11 +122,8 @@ def set_forward_context(attn_metadata: Any,
             dtype = vllm_config.model_config.dtype
             hidden_states_across_dp = torch.empty((request_batch_size * dp_size, padded_seq_length, hidden_size),\
                 device=device, dtype=dtype)
-            router_logits_across_dp = torch.empty((batchsize * dp_size, num_experts),\
-                device=device, dtype=dtype)
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu,
-                                     hidden_states_across_dp,
-                                     router_logits_across_dp)
+                                     hidden_states_across_dp)
         else:
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu)
 

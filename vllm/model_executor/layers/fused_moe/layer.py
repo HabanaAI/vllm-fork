@@ -890,15 +890,13 @@ class FusedMoE(torch.nn.Module):
         return buffer
 
     def forward(self, hidden_states: torch.Tensor,
-                router_logits: torch.Tensor):
-        if not self.use_direct_call:
-            return self.forward_impl(hidden_states, router_logits)
-        else:
-            return torch.ops.vllm.moe_forward(hidden_states, router_logits,
-                                              self.layer_name)
+                router_logits: Optional[torch.Tensor] = None,
+                gate: Optional[torch.nn.Module] = None):
+        return self.forward_impl(hidden_states, router_logits, gate)
 
     def forward_impl(self, hidden_states: torch.Tensor,
-                     router_logits: torch.Tensor):
+                     router_logits: Optional[torch.Tensor] = None,
+                     gate: Optional[torch.nn.Module] = None):
         assert self.quant_method is not None
 
         if self.dp_size > 1:
@@ -906,15 +904,11 @@ class FusedMoE(torch.nn.Module):
             ).dp_metadata.cu_tokens_across_dp_cpu
             hidden_states_across_dp = get_forward_context(
             ).dp_metadata.hidden_states_across_dp
-            router_logits_across_dp = get_forward_context(
-            ).dp_metadata.router_logits_across_dp
 
             hidden_states = self.multicast_fn(hidden_states,
                                               cu_tokens_across_dp_cpu,
                                               hidden_states_across_dp)
-            router_logits = self.multicast_fn(router_logits,
-                                              cu_tokens_across_dp_cpu,
-                                              router_logits_across_dp)
+            router_logits, _ = gate(hidden_states.view(-1, hidden_states.shape[-1]))
 
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
