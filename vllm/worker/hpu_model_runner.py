@@ -107,9 +107,11 @@ def subtuple(obj: object,
     else:
         values = {f: to_override.get(f, getattr(obj, f)) for f in fields}
     if typename not in _TYPE_CACHE:
-        _TYPE_CACHE[typename] = collections.namedtuple(typename,
-                                                       ' '.join(fields))
-    return _TYPE_CACHE[typename](**values)
+        _TYPE_CACHE[typename] = {
+            'object': collections.namedtuple(typename, ' '.join(fields)),
+            'fields': fields
+        }
+    return _TYPE_CACHE[typename]['object'](**values)  # type: ignore
 
 
 def align_workers(value, op):
@@ -341,19 +343,20 @@ class HpuModelAdapter(torch.nn.Module):
             block_groups.masked_fill_(oob_values, batch_size)
             metadata = metadata._replace(block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
-        TrimmedAttentionMetadata = _TYPE_CACHE['TrimmedAttentionMetadata']
-        metadata = TrimmedAttentionMetadata(
-            attn_bias=attn_bias,  # type: ignore
-            seq_lens_tensor=metadata.seq_lens_tensor,  # type: ignore
-            context_lens_tensor=metadata.context_lens_tensor,  # type: ignore
-            block_list=metadata.block_list,  # type: ignore
-            block_mapping=block_mapping,  # type: ignore
-            block_usage=metadata.block_usage,  # type: ignore
-            slot_mapping=metadata.slot_mapping,  # type: ignore
-            is_prompt=metadata.is_prompt,  # type: ignore
-            block_indices=metadata.block_indices,  # type: ignore
-            block_offsets=metadata.block_offsets,  # type: ignore
-            block_groups=metadata.block_groups)  # type: ignore
+
+        # Torch compile dynamo doesn't support calling any named tuple
+        # dynamic methods other than len and get_attr so we need to
+        # mimic behaviour of tuple._replace manually
+        TrimmedAttentionMetadata = _TYPE_CACHE['TrimmedAttentionMetadata'][
+            'object']
+        fields = _TYPE_CACHE['TrimmedAttentionMetadata']['fields']
+        metadata_dict = {
+            field: getattr(metadata, field)
+            for field in fields  # type: ignore
+        }  # type: ignore
+        metadata_dict['attn_bias'] = attn_bias
+        metadata_dict['block_mapping'] = block_mapping
+        metadata = TrimmedAttentionMetadata(**metadata_dict)  # type: ignore
         return metadata
 
     def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
