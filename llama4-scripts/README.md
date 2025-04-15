@@ -66,24 +66,6 @@ cd vllm-fork/llama4-scripts/accuracy
 bash run_chartqa_acc.sh
 ```
 
-or
-```bash
-# Run the server first and benchmark in two steps
-./01-gaudi-vllm-serve.sh
-```
-
-Wait until the log message says this, which means the server is up and ready:
-```bash
-INFO:     Started server process [69796]                                                                                                       
-INFO:     Waiting for application startup.                                                                                                     
-INFO:     Application startup complete. 
-```
-
-Then run the client:
-```bash
-./02-gaudi-vllm-eval.sh
-```
-
 ---
 
 ## Test vLLM on GPU (used as reference output)
