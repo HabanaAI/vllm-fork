@@ -21,6 +21,7 @@ from vllm.platforms import current_platform
 from vllm.utils import direct_register_custom_op
 
 if current_platform.is_hpu():
+    import habana_frameworks.torch as htorch
     from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
 
@@ -896,6 +897,10 @@ def grouped_topk(
         scores = gating_output.sigmoid()
     else:
         raise ValueError(f"Unsupported scoring function: {scoring_func}")
+
+    # Chendi: Important fix, avoid fusedKernel due to acc issue
+    if current_platform.is_hpu():
+        htorch.core.mark_step()
 
     num_token = scores.shape[0]
     if e_score_correction_bias is not None:
