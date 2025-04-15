@@ -206,7 +206,7 @@ def test_pa_gather_kv_tokens():
     offset_in_block_for_token_idx = compute_per_token_offset_in_block(block_id_for_token_idx)
 
     # activate
-    k_chunk, v_chunk, pad_mask = gather_kv_tokens(
+    kv_token_outputs = gather_kv_tokens(
         k_cache.to(DEVICE),
         v_cache.to(DEVICE),
         block_id_for_token_idx.to(DEVICE),
@@ -223,7 +223,19 @@ def test_pa_gather_kv_tokens():
         [0, 0, 0, 0, 1, 2, 3],
         [2, 3, 4, 5, 6, 7, 8],
     ]
-    expected = torch.tensor(expected_vals, dtype=torch.float).view(batch, chunk_size, nh, d)
+    expected_vals = torch.tensor(expected_vals, dtype=torch.float)
+
+    if len(kv_token_outputs) == 3:
+        k_chunk, v_chunk, pad_mask = kv_token_outputs
+    elif len(kv_token_outputs) == 5:
+        k_chunk, v_chunk, pad_mask, batch, keep_batch_bucketed = kv_token_outputs
+        expected_vals = expected_vals[keep_batch_bucketed.cpu()]
+    else:
+        print("WARNING: mismatch in number of returned values from function gather_kv_tokens")
+    # if using DO_REDUCE_KV_GATHER_BATCH, the function gather_kv_tokens will reduce batch size and return effective_batch and keep_batch_bucketed (indices to get effective batch)
+    assert k_chunk.shape == (batch, chunk_size, nh, d)
+    assert v_chunk.shape == (batch, chunk_size, nh, d)
+    expected = expected_vals.view(batch, chunk_size, nh, d)
     assert expected.eq(k_chunk.to('cpu')).all().item()
 
 

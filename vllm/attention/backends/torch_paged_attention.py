@@ -16,6 +16,7 @@ DO_PAD_BATCH = True
 DO_PAD_MAX_SEQLEN_K = True
 DO_PAD_MAX_SEQLEN_Q = True
 DO_AVOID_FULLY_PADDED_CHUNKS = True
+DO_REDUCE_KV_GATHER_BATCH = True
 
 # Default bins configuration
 BATCH_BINS = [1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256]
@@ -387,6 +388,23 @@ def gather_kv_tokens(k, v, block_id_for_token_idx, offset_in_block_for_token_idx
     # however, this can be handy for debug
     blocks_to_gather = torch.where(blocks_to_gather == PAD_BLOCK_ID, 0, blocks_to_gather)
 
+    # if we wish to reduce redundant gather of KV tokens, we check for which batchse we need the current KV chunk
+    # to avoid dynamic shape, we bucketize the effective batch and use bucketed batch indices to drop the padded batch 
+    # and return it to drop this batch with q as well
+    if DO_REDUCE_KV_GATHER_BATCH:
+        keep_batch = blocks_to_gather.any(dim=1)
+
+        n_non_masked = keep_batch.sum().item()
+        # --------------------------------------------------------------------------------
+        # the number of non-masked samples is dynamic, therefore force a graph break here!
+        # --------------------------------------------------------------------------------
+        mark_step()
+        keep_batch_bucketed = bucketize_non_masked_tensor(n_non_masked, keep_batch)
+        batch = keep_batch_bucketed.shape[0]
+        sliced_block_ids = sliced_block_ids[keep_batch_bucketed]
+        sliced_offset_in_block = sliced_offset_in_block[keep_batch_bucketed]
+        blocks_to_gather = blocks_to_gather[keep_batch_bucketed]
+
     # since we gather *full* blocks, we might gather extra elements from most left and right blocks.
     # therefore, we need to discard those elements. for that, we calculate the number of extra left and right
     # elements that were gathered. this is done per row.
@@ -414,6 +432,8 @@ def gather_kv_tokens(k, v, block_id_for_token_idx, offset_in_block_for_token_idx
     # extract k and v tokens from required gathered blocks
     k_tokens = extract_tokens_from_gathered_blocks(k)
     v_tokens = extract_tokens_from_gathered_blocks(v)
+    if DO_REDUCE_KV_GATHER_BATCH:
+        return k_tokens, v_tokens, pad_mask, batch, keep_batch_bucketed
     return k_tokens, v_tokens, pad_mask
 
 
@@ -542,6 +562,8 @@ def write_back_q_slice_to_tensor(
     n_q_tokens = t.shape[0]
     last_index = n_q_tokens - 1
     t_at_last_index = t[last_index]
+    if t.device == torch.device('hpu:0'):
+        t_slice, q_indices = index_put_pre_process(t, q_indices, t_slice)
     idx, vls = q_indices.flatten().sort()
     t[idx[:n_q_tokens]] = t_slice.flatten(0, 1)[vls[:n_q_tokens]]
     t[last_index] = torch.where(is_last_index_in_slice, t_slice[-1, -1], t_at_last_index)
@@ -672,8 +694,12 @@ def paged_attention_var_len(
     # Online softmax Outer loop over KV blocks
     # looping only over the right part of the matrix (skipping left fully-padded chunks)
     for j in range(((m_padded - m) // chunk_size_k) * chunk_size_k, m_padded, chunk_size_k):
-        k_j_full, v_j_full, kv_j_pad_mask = gather_kv_tokens(
-            k, v, block_id_for_token_idx, offset_in_block_for_token_idx, chunk_start=j, chunk_size=chunk_size_k)
+        if DO_REDUCE_KV_GATHER_BATCH:
+            k_j_full, v_j_full, kv_j_pad_mask, b_padded, keep_batch_padded = gather_kv_tokens(
+                k, v, block_id_for_token_idx, offset_in_block_for_token_idx, chunk_start=j, chunk_size=chunk_size_k)
+        else:
+            k_j_full, v_j_full, kv_j_pad_mask = gather_kv_tokens(
+                k, v, block_id_for_token_idx, offset_in_block_for_token_idx, chunk_start=j, chunk_size=chunk_size_k)
         k_j_full = k_j_full.transpose(1, 2)  # (b, nh, chunk_m, d)
         v_j_full = v_j_full.transpose(1, 2)  # (b, nh, chunk_m, d)
 
@@ -685,6 +711,9 @@ def paged_attention_var_len(
             # calculate indices and mask for current chunk for q-shaped tensors
             chunk_i_idx, chunk_i_pad_mask = calculate_q_chunk_indices(
                 cu_seqlens_q, max_seqlen=n_padded, chunk_start=i, chunk_size=chunk_size_q)
+            if DO_REDUCE_KV_GATHER_BATCH:
+                chunk_i_idx = chunk_i_idx[keep_batch_padded]
+                chunk_i_pad_mask = chunk_i_pad_mask[keep_batch_padded]
 
             # for causality, we normalize i to j to simulate an m x m matrix
             normalized_i = i + m_padded - n_padded
@@ -782,6 +811,6 @@ def paged_attention_var_len(
             # --------------------------------------------------------------------------------
             # end of dynamic graph
             # --------------------------------------------------------------------------------
-            mark_step() if DO_AVOID_FULLY_PADDED_CHUNKS else None
+            mark_step() if DO_AVOID_FULLY_PADDED_CHUNKS or DO_REDUCE_KV_GATHER_BATCH else None
 
     return out
