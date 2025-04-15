@@ -143,8 +143,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
 
         def retain_envs(var_name):
             retain_var_list = [
-                'GLOO_SOCKET_IFNAME',
-                'HCCL_SOCKET_IFNAME',
+                'GLOO_SOCKET_IFNAME', 'HCCL_SOCKET_IFNAME',
                 'NCCL_SOCKET_IFNAME'
             ]
             return ('HPU' in var_name or 'RAY' in var_name
