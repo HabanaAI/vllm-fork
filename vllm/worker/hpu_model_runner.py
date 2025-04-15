@@ -2190,7 +2190,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
         if not self.is_pooler:
-            max_blocks = kv_caches[0][0].size(0)
+            max_blocks = kv_caches[0][0].size(0) - 1
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
