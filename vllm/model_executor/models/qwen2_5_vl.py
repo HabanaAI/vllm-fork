@@ -1061,7 +1061,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             image_embeds = image_input["image_embeds"].type(self.visual.dtype)
         else:
 
-            if True:
+            if is_hpu:
                 '''
                 go thru grid_thw
                 say grid_thw is 1,16,16 and 1,128,128
@@ -1108,20 +1108,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 results_cat = torch.concat(results)
                 image_embeds = results_cat
             else:
-                pixel_values, rot_pos_emb, cu_seqlens, cu_window_seqlens, window_index = self.visual.pre_attn(
-                    pixel_values, grid_thw)
-                assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
-                #print('.......', cu_seqlens, expand_to_max(cu_seqlens, 10))
-                expanded_cu_seqlens = expand_to_max(cu_seqlens, 10)
-                htcore.mark_step() # padding in expand_to_max is dynamic
-                #breakpoint()
-                hidden_states = self.visual(pixel_values,
-                                            rotary_pos_emb=rot_pos_emb,
-                                            cu_seqlens=expanded_cu_seqlens,)
-                                            #cu_window_seqlens=cu_window_seqlens)
-                htcore.mark_step()
-                image_embeds = self.visual.post_attn(hidden_states, window_index)
-            image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
+                pixel_values = image_input["pixel_values"].type(self.visual.dtype)
+                image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
 
         # Split concatenated embeddings for each image item.
         merge_size = self.visual.spatial_merge_size
