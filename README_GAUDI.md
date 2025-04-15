@@ -438,7 +438,7 @@ However, disabling this feature in production environments is not recommended, a
 
 # Long Context Support
 
-Long context feature enables support for a token context window exceeding 32K tokens. It is supported by the following models:
+Long context feature enables support for a token context window exceeding 128K tokens. It is supported by the following models:
 - [meta-llama/Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b)
 - [meta-llama/Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b)
 - [meta-llama/Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)
