@@ -31,9 +31,9 @@ VLLM_DECODE_BLOCK_BUCKET_MIN=$(((VLLM_DECODE_BLOCK_BUCKET_MIN + 127) / 128 * 128
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((decode_total_len_aligned * bs / 128))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$(((VLLM_DECODE_BLOCK_BUCKET_MAX + 127) / 128 * 128))
 
-model="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
-tokenizer="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
-model_name="Scout"
+model="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct/"
+tokenizer="/mnt/weka/llm/Llama-4-Maverick-17B-128E-Instruct/"
+model_name="Maverick"
 
 mkdir -p benchmark_logs
 # QUANT_CONFIG="scripts/inc_quant_with_fp8kv_config.json" \
@@ -42,7 +42,7 @@ mkdir -p benchmark_logs
 # VLLM_USE_FP8_MATMUL=true \
 # VLLM_MOE_N_SLICE=${moe_n_slice} \
 # VLLM_MLA_DISABLE_REQUANTIZATION=1 \
-
+QUANT_CONFIG="../inc_unit_scale_quant.json" \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=8 \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len_aligned} \
@@ -70,6 +70,8 @@ python3 -m vllm.entrypoints.openai.api_server \
     --max-num-batched-tokens 9216 \
     --distributed_executor_backend ray \
     --gpu_memory_utilization ${gpu_utils} \
+    --quantization="inc" \
+    --kv_cache_dtype "fp8_inc" \
     --enable-expert-parallel \
     --override-generation-config='{"attn_temperature_tuning": true}' \
     --trust_remote_code 2>&1 | tee benchmark_logs/${log_name}_serving.log &
