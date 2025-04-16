@@ -463,7 +463,6 @@ class HpuModelAdapter(torch.nn.Module):
 
             with compile_only_mode_context():
                 #calculate embedding for multimodal
-                #breakpoint()
                 image_input = self.model._parse_and_validate_image_input(
                     **kwargs)
                 video_input = self.model._parse_and_validate_video_input(
@@ -2106,8 +2105,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
                         temperature=0,
-                        max_pixels=None,
-                        return_time=False) -> None:
+                        max_pixels=None) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt, max_pixels)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -2141,8 +2139,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
-        if return_time:
-            times += 1
 
         if is_prompt:
             seqs = [
@@ -2176,8 +2172,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            if return_time:
-                tstart = time.time()
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
@@ -2211,15 +2205,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    num_steps=2,
                                    seqs=seqs)
             torch.hpu.synchronize()
-            if return_time:
-                t_total = time.time() - tstart
+
             if profiler:
                 profiler.step()
         if profiler:
             profiler.stop()
         self.profiler.end()
         gc.collect()
-        return t_total if return_time else None
 
     def remove_all_loras(self):
         if not self.lora_manager:
@@ -2292,14 +2284,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         for i, max_pixels in enumerate(self.multimodal_buckets):
             self.log_warmup_multimodal('Image', i, max_seq_len, max_batch_size,
                                        max_seq_len, max_pixels)
-            t = self.warmup_scenario(batch_size=max_batch_size,
+            self.warmup_scenario(batch_size=max_batch_size,
                                  seq_len=max_seq_len,
                                  is_prompt=True,
                                  kv_caches=kv_caches,
                                  is_pt_profiler_run=False,
                                  is_lora_profile_run=True,
-                                 max_pixels=max_pixels * 14 * 14,
-                                 return_time=True)
+                                 max_pixels=max_pixels * 14 * 14)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
@@ -2376,13 +2367,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
             self.log_warmup_multimodal('Graph/Image', i, max_seq_len,
                                        max_batch_size, max_seq_len, max_pixels)
-            t = self.warmup_scenario(
+            self.warmup_scenario(
                 batch_size=max_batch_size,
                 seq_len=max_seq_len,
                 is_prompt=True,
                 kv_caches=kv_caches,
-                max_pixels=max_pixels * 14 * 14,
-                return_time=True)
+                max_pixels=max_pixels * 14 * 14)
 
         return total_mem, total_batch_seq, captured_all
 
