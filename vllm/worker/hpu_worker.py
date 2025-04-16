@@ -359,6 +359,9 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
+        
+        self.model_runner._PAD_BLOCK_ID = num_hpu_blocks
+        self.model_runner._PAD_SLOT_ID = num_hpu_blocks * self.cache_config.block_size
 
         gc.collect()
         return num_hpu_blocks, num_cpu_blocks

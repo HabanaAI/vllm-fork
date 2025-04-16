@@ -73,10 +73,6 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 _TYPE_CACHE = {}
-# These values are assumed to be zero in several places.
-# Use caution when updating them!
-_PAD_SLOT_ID = 0
-_PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
@@ -718,6 +714,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # For delayed sampling
         self.cached_step_inputs: List[
             ModelInputForHPUWithSamplingMetadata] = []
+        
+        self._PAD_SLOT_ID = -1
+        self._PAD_BLOCK_ID = -1
 
     def _set_gc_threshold(self) -> None:
         """
@@ -1171,7 +1170,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
                 # yet. In this case, we just use a dummy slot mapping.
-                slot_mapping.append([_PAD_SLOT_ID] * seq_len)
+                slot_mapping.append([self._PAD_SLOT_ID] * seq_len)
                 continue
 
             # Compute the slot mapping.
@@ -1191,7 +1190,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 start_idx = max(0, seq_len - self.sliding_window)
             for i in range(context_len, seq_len):
                 if i < start_idx:
-                    slot_mapping[-1].append(_PAD_SLOT_ID)
+                    slot_mapping[-1].append(self._PAD_SLOT_ID)
                     continue
                 # For encoder-only models, the block_table is None,
                 # and there is no need to initialize the slot_mapping.
@@ -1234,13 +1233,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             prefix_block_list = list(
                 itertools.chain.from_iterable(
                     bt if len(bt) == max_num_block else bt +
-                    ([_PAD_BLOCK_ID] * (max_num_block - len(bt)))
+                    ([self._PAD_BLOCK_ID] * (max_num_block - len(bt)))
                     for bt in prefix_block_tables))
 
             # TODO: pad to proper len
             pad_len = len(prefix_block_list)
             prefix_block_list = pad_list(prefix_block_list, pad_len,
-                                         _PAD_BLOCK_ID)
+                                         self._PAD_BLOCK_ID)
 
             prefix_block_list_tensor = torch.tensor(prefix_block_list,
                                                     dtype=torch.long,
@@ -1268,7 +1267,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         slot_mapping = make_cpu_tensor(slot_mapping,
                                        max_len=max_prompt_len,
-                                       pad=_PAD_SLOT_ID,
+                                       pad=self._PAD_SLOT_ID,
                                        dtype=torch.long,
                                        flat=self.use_merged_prefill)
 
@@ -1365,7 +1364,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         lora_ids: List[int] = []
 
         dummy_slots = itertools.cycle(
-            range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
+            range(self._PAD_SLOT_ID, self._PAD_SLOT_ID + self.block_size))
 
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
@@ -1418,10 +1417,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_table = block_table[:num_fully_occupied_blocks + 1]
 
                 if len(block_table) == 0:
-                    block_number = _PAD_BLOCK_ID
+                    block_number = self._PAD_BLOCK_ID
                 else:
                     block_number = block_table[position // self.block_size]
-                if block_number == _PAD_BLOCK_ID:
+                if block_number == self._PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:
                     block_offset = position % self.block_size
@@ -1507,7 +1506,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
-        block_list = padding_fn(block_list, _PAD_BLOCK_ID)
+        block_list = padding_fn(block_list, self._PAD_BLOCK_ID)
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
 
@@ -1538,7 +1537,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if batch_size_padding > 0:
                 encoder_seq_lens.extend(encoder_seq_lens[0]
                                         for _ in range(batch_size_padding))
-            cross_block_list = padding_fn(cross_block_list, _PAD_BLOCK_ID)
+            cross_block_list = padding_fn(cross_block_list, self._PAD_BLOCK_ID)
             cross_block_groups = padding_fn(cross_block_groups, -1)
             cross_block_usage = padding_fn(cross_block_usage, 1)
 
@@ -1938,7 +1937,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             input_len = seq_len - 1
             output_len = 1
-            block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
+            block_tables = {group_id: [self._PAD_BLOCK_ID] * num_blocks}
         prompt_token_ids = [0] * input_len
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
@@ -1952,6 +1951,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_request=lora_request)
 
     def profile_run(self) -> None:
+
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
