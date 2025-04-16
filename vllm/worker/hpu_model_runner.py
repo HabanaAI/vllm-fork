@@ -1497,7 +1497,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
-                indices[bid] = i
+                if bid == self._PAD_BLOCK_ID:
+                    indices[bid-1] = i
+                else:
+                    indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
         else:
