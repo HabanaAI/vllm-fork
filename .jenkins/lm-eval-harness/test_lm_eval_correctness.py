@@ -128,9 +128,7 @@ def get_current_gaudi_platform():
 
     device_type = htexp._get_device_type()
 
-    if device_type == htexp.synDeviceType.synDeviceGaudi:
-        return "Gaudi1"
-    elif device_type == htexp.synDeviceType.synDeviceGaudi2:
+    if device_type == htexp.synDeviceType.synDeviceGaudi2:
         return "Gaudi2"
     elif device_type == htexp.synDeviceType.synDeviceGaudi3:
         return "Gaudi3"
@@ -140,68 +138,63 @@ def get_current_gaudi_platform():
 
 
 def test_lm_eval_correctness(record_xml_attribute, record_property):
-    try:
-        eval_config = yaml.safe_load(
-            Path(TEST_DATA_FILE).read_text(encoding="utf-8"))
+    eval_config = yaml.safe_load(
+        Path(TEST_DATA_FILE).read_text(encoding="utf-8"))
 
-        # Record JUnitXML test name
-        tasks_str = '_'.join([t['name'] for t in eval_config["tasks"]])
-        platform = get_current_gaudi_platform()
-        testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
-                    f'tp{TP_SIZE}')
-        record_xml_attribute("name", testname)
+    # Record JUnitXML test name
+    tasks_str = '_'.join([t['name'] for t in eval_config["tasks"]])
+    platform = get_current_gaudi_platform()
+    testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
+                f'tp{TP_SIZE}')
+    record_xml_attribute("name", testname)
 
-        # Set up environment for FP8 inference
-        if eval_config.get("fp8"):
-            setup_fp8()
-        # Launch eval requests.
-        start_time = time.perf_counter()
-        results = launch_lm_eval(eval_config)
-        total_time = time.perf_counter() - start_time
+    # Set up environment for FP8 inference
+    if eval_config.get("fp8"):
+        setup_fp8()
+    # Launch eval requests.
+    start_time = time.perf_counter()
+    results = launch_lm_eval(eval_config)
+    total_time = time.perf_counter() - start_time
 
-        tokenizer = vllm.transformers_utils.tokenizer.get_tokenizer(
-            eval_config['model_name'])
+    tokenizer = vllm.transformers_utils.tokenizer.get_tokenizer(
+        eval_config['model_name'])
 
-        # Confirm scores match ground truth.
-        for task in eval_config["tasks"]:
+    # Confirm scores match ground truth.
+    for task in eval_config["tasks"]:
 
-            samples = results['samples'][task["name"]]
-            tokenized_inputs = [
-                tokenizer(x['arguments'][0][0])['input_ids'] for x in samples
-            ]
-            tokenized_inputs_lens = [len(x) for x in tokenized_inputs]
-            tokenized_outputs = [
-                list(
-                    itertools.chain.from_iterable(
-                        tokenizer(
-                            list(itertools.chain.from_iterable(
-                                x['resps'])))['input_ids'])) for x in samples
-            ]
-            tokenized_outputs_lens = [len(x) for x in tokenized_outputs]
-            if REPORT_PERFORMANCE:
-                report_performance(task['name'], tokenized_inputs_lens,
-                                   tokenized_outputs_lens, total_time,
-                                   record_property)
+        samples = results['samples'][task["name"]]
+        tokenized_inputs = [
+            tokenizer(x['arguments'][0][0])['input_ids'] for x in samples
+        ]
+        tokenized_inputs_lens = [len(x) for x in tokenized_inputs]
+        tokenized_outputs = [
+            list(
+                itertools.chain.from_iterable(
+                    tokenizer(
+                        list(itertools.chain.from_iterable(
+                            x['resps'])))['input_ids'])) for x in samples
+        ]
+        tokenized_outputs_lens = [len(x) for x in tokenized_outputs]
+        if REPORT_PERFORMANCE:
+            report_performance(task['name'], tokenized_inputs_lens,
+                               tokenized_outputs_lens, total_time,
+                               record_property)
 
-            for metric in task["metrics"]:
-                ground_truth = metric["value"]
-                measured_value = results["results"][task["name"]][
-                    metric["name"]]
-                print(
-                    f'{task["name"]} | {metric["name"]}: '
-                    f'ground_truth={ground_truth} | measured={measured_value}')
+        for metric in task["metrics"]:
+            ground_truth = metric["value"]
+            measured_value = results["results"][task["name"]][
+                metric["name"]]
+            print(
+                f'{task["name"]} | {metric["name"]}: '
+                f'ground_truth={ground_truth} | measured={measured_value}')
 
-                # Record ground truth and measured value to JUnitXML
-                record_property(
-                    f"{task['name']}_{metric['name']}_ground_truth",
-                    ground_truth)
-                record_property(f"{task['name']}_{metric['name']}_measured",
-                                measured_value)
-                if measured_value < ground_truth:
-                    assert numpy.isclose(ground_truth,
-                                         measured_value,
-                                         rtol=RTOL)
-    except Exception as exc:
-        # nasty workaround for a nasty HPU PT bridge bug (SW-204785)
-        atexit.register(fail_on_exit)
-        raise exc
+            # Record ground truth and measured value to JUnitXML
+            record_property(
+                f"{task['name']}_{metric['name']}_ground_truth",
+                ground_truth)
+            record_property(f"{task['name']}_{metric['name']}_measured",
+                            measured_value)
+            if measured_value < ground_truth:
+                assert numpy.isclose(ground_truth,
+                                     measured_value,
+                                     rtol=RTOL)
