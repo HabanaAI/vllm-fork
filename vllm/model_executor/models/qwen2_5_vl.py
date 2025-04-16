@@ -722,7 +722,8 @@ class Qwen2_5_VisionTransformer(nn.Module):
             rotary_pos_emb: torch.Tensor) -> torch.Tensor:
         assert x.shape[0] == cu_seqlens[-1] == rotary_pos_emb.shape[0]
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
-
+        if is_hpu:
+            assert x.shape[0]%64 == 0, "Expect inputs to be 112x112 aligned. Please align before sending image or use this version of transformer that does the resizing/alignment automatically: pip install git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf"
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
