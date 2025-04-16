@@ -267,7 +267,10 @@ INFO 08-01 22:27:16 hpu_model_runner.py:1066] [Warmup][Decode][48/48] batch_size
 
 > [!TIP]
 > Compiling all the buckets may take some time and can be disabled by setting the VLLM_SKIP_WARMUP=true environment variable. Keep in mind that if you do this, you may encounter graph compilations
-when executing a given bucket for the first time. Disabling warmup is fine for development, but it is highly recommended to enable it in deployment.
+when executing a given bucket for the first time.
+
+> [!WARNING]
+> Disabling warmup is fine for development, but it is highly recommended to enable it in deployment.
 
 ## HPU Graph Capture
 
