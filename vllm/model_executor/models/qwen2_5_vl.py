@@ -305,6 +305,7 @@ class Qwen2_5_VisionAttention(nn.Module):
         self,
         x: torch.Tensor,
         cu_seqlens: Optional[torch.Tensor],
+        fullattn_mask: Optional[torch.Tensor],
         rotary_pos_emb: torch.Tensor,
     ) -> torch.Tensor:
         # [s, b, c] --> [s, b, head * 3 * head_dim]
@@ -370,7 +371,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                     outputs.append(output_i)
                 context_layer = torch.cat(outputs, dim=1)
             else:
-                fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+                fullatt_block_attn_mask = fullattn_mask
                 q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")for x in [q, k, v])
 
 
@@ -431,11 +432,13 @@ class Qwen2_5_VisionBlock(nn.Module):
                                      quant_config=quant_config,
                                      prefix=f"{prefix}.mlp")
 
-    def forward(self, x: torch.Tensor, #cu_seqlens: torch.Tensor,
-                cu_seqlens: Optional[torch.Tensor],
+    def forward(self, x: torch.Tensor,
+                cu_seqlens: torch.Tensor,
+                fullattn_mask: Optional[torch.Tensor],
                 rotary_pos_emb: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.norm1(x),
                           cu_seqlens=cu_seqlens,
+                          fullattn_mask=fullattn_mask,
                           rotary_pos_emb=rotary_pos_emb)
         x = x + self.mlp(self.norm2(x))
         return x
@@ -713,25 +716,28 @@ class Qwen2_5_VisionTransformer(nn.Module):
         cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2],
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
+        cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
         return hidden_states, rotary_pos_emb, cu_seqlens, cu_window_seqlens, window_index
 
     def forward(
             self,
             x: torch.Tensor,
             cu_seqlens: torch.Tensor,
+            fullattn_mask: Optional[torch.Tensor],
             rotary_pos_emb: torch.Tensor) -> torch.Tensor:
-        assert x.shape[0] == cu_seqlens[-1] == rotary_pos_emb.shape[0]
-        cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
         if is_hpu:
             assert x.shape[0]%64 == 0, "Expect inputs to be 112x112 aligned. Please align before sending image or use this version of transformer that does the resizing/alignment automatically: pip install git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf"
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
+            #TODO: now we premake fullattn_mask, we don't need to pass cu_seqlens
+            #but keep it here for now since other ATTN is using this argument. Need to clean code.
             if layer_num in self.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
             else:
                 cu_seqlens_now = None
             hidden_states = blk(hidden_states,
                                 cu_seqlens=cu_seqlens_now,
+                                fullattn_mask=fullattn_mask,
                                 rotary_pos_emb=rotary_pos_emb)
 
         # adapter
@@ -1086,10 +1092,15 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     assert pixel_values.shape[0] % 64 == 0, f"We need image h/w to be aligned to 112 for now. Which will make pixel_values be a multiple of (112/14)*(112/14)=64 (14 is patch size for ViT). Got pixel_values shape {pixel_values.shape[0]}"
 
                     expanded_cu_seqlens = expand_to_max(cu_seqlens, 3) # either a single image, or a single image and its accompanying pad image, so only max expansion to 3
+                    #Create full attention block mast before VisionTransformer to save memory/time
+                    #TODO cu_seqlens can be removed but keep it here for now
+                    fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+                    assert pixel_values_curr_img_padded.shape[0] == expanded_cu_seqlens[-1] == rot_pos_emb.shape[0]
                     htcore.mark_step()
                     hidden_states = self.visual(pixel_values_curr_img_padded,
                                             rotary_pos_emb=rot_pos_emb,
-                                            cu_seqlens=expanded_cu_seqlens,)
+                                            cu_seqlens=expanded_cu_seqlens,
+                                            fullattn_mask=fullatt_block_attn_mask,)
                     htcore.mark_step()
                     image_embeds = self.visual.post_attn(hidden_states, window_index)
                     results += [image_embeds[:img_shape_padded[0].prod()//4, :]] # slice image_embeds to remove the padded parts. instead of hardcoding 4, maybe use config spatial merge etc
