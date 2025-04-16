@@ -908,11 +908,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                   'false').strip().lower() in ("1", "true")
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
-                self.model._set_block_mapping = torch.compile(
-                    self.model._set_block_mapping,
-                    backend='hpu_backend',
-                    fullgraph=fullgraph,
-                    dynamic=False)
+                compiled_methods = ['_set_block_mapping']
+                for method_name in compiled_methods:
+                    method = getattr(self.model, method_name)
+                    compiled_method = torch.compile(method,
+                                                    backend='hpu_backend',
+                                                    fullgraph=fullgraph,
+                                                    dynamic=False)
+                    setattr(self.model, method_name, compiled_method)
                 self.regional_compilation_layers_list = [
                     RMSNorm, VocabParallelEmbedding
                 ]
