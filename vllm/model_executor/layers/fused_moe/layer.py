@@ -197,6 +197,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 hidden_states=x,
                 expert_routing_table=selected_experts,
                 router_weights=routing_weights,
+                layer=layer,
                 permuted_weights=True,
                 activation="silu",
             )
