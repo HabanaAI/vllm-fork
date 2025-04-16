@@ -88,6 +88,28 @@ VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
 DUMMY_TOKEN_ID = -1
 
 
+'''
+This class is used to bucket image tokens
+'''
+class VisionBuckets():
+    def __init__(self):
+        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
+        if envvar == "":
+            self.multimodal_buckets = [1600, 3200, 4800, 6400]
+        else:
+            self.multimodal_buckets = [int(i) for i in envvar.split(',')]
+
+    def get_multimodal_bucket(self, curr_num_image_patches):
+        for mm_bucket in self.multimodal_buckets:
+            if curr_num_image_patches <= mm_bucket:
+                return mm_bucket
+        self.multimodal_buckets += [curr_num_image_patches] # a shape larger than any that was compiled before. its gonna be compiled now, so save it for the future
+        return curr_num_image_patches
+
+    def __repr__(self):
+        return str(self.multimodal_buckets)
+
+
 class PhaseType(Enum):
     PREFILL = 'prefill'
     PREFIX_PREFILL = 'prefix_prefill'
@@ -762,7 +784,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                  self.use_merged_prefill,
                                                  self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
-        self.multimodal_buckets = [] #This should be use HPUBucketingContext
+        self.multimodal_buckets = [] #This should be use HPUBucketingContext <<
         self.graphed_multimodal_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -923,6 +945,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.model_memory_usage = m.consumed_device_memory
         msg = f"Loading model weights took in total {m.get_summary_string()}"
         logger.info(msg)
+        self.add_vision_buckets_to_model()
+
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -1120,6 +1144,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def move_to_device(self, tensor):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
+    '''
+    Right now Qwen2.5VL needs to know these buckets so it can do some things internally
+    '''
+    def add_vision_buckets_to_model(self):
+        if supports_multimodal(self.get_model()):
+            vb = VisionBuckets()
+            if isinstance(self.model, HpuModelAdapter):
+                self.model.model.vision_buckets = vb
+            else:
+                self.model.vision_buckets = vb
 
     def _prepare_prompt(
         self,
@@ -2011,7 +2045,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if max_pixels and max_pixels != _UNSET_MAX_PIXELS:
             hf_processor_mm_kwargs = dict(processor_inputs.hf_processor_mm_kwargs)
             hf_processor_mm_kwargs["max_pixels"] = max_pixels
-        print(f" ===== {max_pixels} ====== : ", hf_processor_mm_kwargs)
+        print(f" ===== {max_pixels} ====== : ", hf_processor_mm_kwargs) # logger.info
         mm_inputs = processor.apply(
             prompt=processor_inputs.prompt_text,
             mm_data=processor_inputs.mm_data,
@@ -2396,8 +2430,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if supports_multimodal(self.model.model):
-            self.multimodal_buckets = self.model.model.FIXED_MULTIMODAL_BUCKETS
-            print("Multimodal bucket :", self.multimodal_buckets)
+            self.multimodal_buckets = self.get_model().vision_buckets.multimodal_buckets
+            logger.info(f"Multimodal bucket : {self.multimodal_buckets}")
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')

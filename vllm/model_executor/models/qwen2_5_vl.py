@@ -901,12 +901,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
-        envvar = os.environ.get('FIXED_MULTIMODAL_BUCKETS', "")
-        if envvar == "":
-            self.FIXED_MULTIMODAL_BUCKETS = [1600, 3200, 4800, 6400] # add 768 a small bucket maybe?
-        else:
-            self.FIXED_MULTIMODAL_BUCKETS = [int(i) for i in envvar.split(',')]
-        assert all([k%64 == 0 for k in self.FIXED_MULTIMODAL_BUCKETS]), f"FIXED_MULTIMODAL_BUCKETS should all be multiples of 64, but was {self.FIXED_MULTIMODAL_BUCKETS}"
 
     @cached_property
     def sampler(self):
@@ -1012,18 +1006,12 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 type="video_embeds",
                 video_embeds=video_embeds,
                 video_grid_thw=video_grid_thw)
-    def _get_multimodal_bucket(self, curr_num_image_patches):
-        for mm_bucket in self.FIXED_MULTIMODAL_BUCKETS:
-            if curr_num_image_patches <= mm_bucket:
-                return mm_bucket
-        self.FIXED_MULTIMODAL_BUCKETS += [curr_num_image_patches] # a shape larger than any that was compiled before. its gonna be compiled now, so save it for the future
-        return curr_num_image_patches
 
     def pad_multimodal_data(self, pixel_values, image_grid_thw):
         assert pixel_values.shape[
             0] % 64 == 0, '[testing version] needs 64 aligned resolution'
 
-        desired_number_of_pixels = self._get_multimodal_bucket(pixel_values.shape[0])
+        desired_number_of_pixels = self.vision_buckets.get_multimodal_bucket(pixel_values.shape[0])
         padding_len = desired_number_of_pixels - pixel_values.shape[0]
         if padding_len <= 0:
             #breakpoint()
