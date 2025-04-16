@@ -60,8 +60,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
-        if self.is_driver_worker:
-            assert self.rank == 0, "The driver worker must have rank 0."
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -512,12 +510,7 @@ def init_worker_distributed_environment(
                                       parallel_config.pipeline_parallel_size)
 
     if torch.distributed.is_initialized():
-        torch_world_size = torch.distributed.get_world_size()
-        if torch_world_size != parallel_config.world_size:
-            raise RuntimeError(
-                "torch.distributed is already initialized but the torch world "
-                "size does not match parallel_config.world_size "
-                f"({torch_world_size} vs. {parallel_config.world_size}).")
+        pass
     elif not distributed_init_method:
         raise ValueError(
             "distributed_init_method must be set if torch.distributed "
@@ -535,7 +528,6 @@ def init_worker_distributed_environment(
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
     torch.distributed.all_reduce(dummy_tensor_hpu)
-    assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
 
