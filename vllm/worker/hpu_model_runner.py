@@ -1148,12 +1148,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     Right now Qwen2.5VL needs to know these buckets so it can do some things internally
     '''
     def add_vision_buckets_to_model(self):
-        if supports_multimodal(self.get_model()):
-            vb = VisionBuckets()
-            if isinstance(self.model, HpuModelAdapter):
-                self.model.model.vision_buckets = vb
-            else:
-                self.model.vision_buckets = vb
+        model = self.get_model()
+        if supports_multimodal(model):
+            model.vision_buckets = VisionBuckets()
 
     def _prepare_prompt(
         self,
@@ -2028,7 +2025,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, seq_len,
                                                     max_pixels, sampling_params,
                                                     lora_request):
-        assert self.mm_registry.has_processor(self.model_config)
+        assert self.mm_registry.has_processor(self.model_config), 'Multimodal Warmup needs a processor'
         tokenizer = cached_get_tokenizer(
             self.model_config.tokenizer,
             trust_remote_code=self.model_config.trust_remote_code,
@@ -2042,10 +2039,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_len=seq_len,
             mm_counts=mm_counts,
         )
+
+        hf_processor_mm_kwargs = dict(processor_inputs.hf_processor_mm_kwargs)
         if max_pixels and max_pixels != _UNSET_MAX_PIXELS:
-            hf_processor_mm_kwargs = dict(processor_inputs.hf_processor_mm_kwargs)
             hf_processor_mm_kwargs["max_pixels"] = max_pixels
-        print(f" ===== {max_pixels} ====== : ", hf_processor_mm_kwargs) # logger.info
+
         mm_inputs = processor.apply(
             prompt=processor_inputs.prompt_text,
             mm_data=processor_inputs.mm_data,
@@ -2054,7 +2052,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         prompt_token_ids = mm_inputs["prompt_token_ids"]
         placeholders_by_modality = mm_inputs["mm_placeholders"]
-        prompt_token_ids.extend([0] * (seq_len - len(prompt_token_ids)))
+        num_tokens_to_extend = seq_len - len(prompt_token_ids)
+        assert num_tokens_to_extend > 0, "seq_len is smaller than multimodal tokens"
+        prompt_token_ids.extend([0] * (num_tokens_to_extend))
         seq_data = SequenceData.from_seqs(prompt_token_ids)
 
         return SequenceGroupMetadata(
@@ -2294,32 +2294,28 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                               max_pixels):
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
-        dim = "num_blocks"
-        if "Prompt" in phase:
-            dim = "seq_len"
+        dim = "seq_len"
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
-               f"{dim}:{seq_len}", f"max_pixels:{max_pixels}",
+               f"{dim}:{seq_len} "
+               f"max_pixels:{max_pixels} "
                f"free_mem:{free_mem}")
         logger.info(msg)
 
-    def _warmup_multimodal(self, buckets, is_prompt, kv_caches):
-        # TODO: The plan here is loop over a couple of image
-        # resolutions and see if that helps during the warmup
-        # somehow indepedent of the batch_size, seq_len
-        # might need to mark.step() somewhere to split the
-        # HPU graph for video and language model
-
-        # Warmup Multimodal with fixed seq_len
-        if not hasattr(self, 'visual_warmup_times'):
-            self.visual_warmup_times = {}
+    def _warmup_multimodal(self, kv_caches):
+        if not supports_multimodal(self.get_model()):
+            return
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
-        max_batch_size = 1  # NOTE: Fix batch size to 1 for multimodal
+        seq_len = max_seq_len
+        batch_size = 1
+        phase = 'Multimodal'
+        num_candidates = len(self.multimodal_buckets)
         for i, max_pixels in enumerate(self.multimodal_buckets):
-            self.log_warmup_multimodal('Image', i, max_seq_len, max_batch_size,
-                                       max_seq_len, max_pixels)
-            self.warmup_scenario(batch_size=max_batch_size,
-                                 seq_len=max_seq_len,
+            self.log_warmup_multimodal(phase, i, num_candidates,
+                                       batch_size, seq_len,
+                                       max_pixels)
+            self.warmup_scenario(batch_size=batch_size,
+                                 seq_len=seq_len,
                                  is_prompt=True,
                                  kv_caches=kv_caches,
                                  is_pt_profiler_run=False,
@@ -2331,7 +2327,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
-        self._warmup_multimodal(buckets, is_prompt, kv_caches)
+        self._warmup_multimodal(kv_caches)
 
     def warmup_graphs(self,
                       strategy,
@@ -2385,28 +2381,60 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             total_mem += used_mem
             total_batch_seq += batch_seq
 
-        # TODO: Multimodal HPU graph warmup need to be also check Memory,
-        # and drop some buckets if memory is not sufficient.
-        logger.info("[Multimodal] WARMUP IMAGE GRAPH")
+        mm_outputs = \
+        self._warmup_multimodal_graph(
+            kv_caches=kv_caches,
+            available_mem=available_mem,
+            starting_mem=total_mem,
+            total_batch_seq=total_batch_seq,
+        )
+        if mm_outputs is not None:
+            total_mem, total_batch_seq, mm_captured_all = mm_outputs
+            captured_all = captured_all and mm_captured_all
+        return total_mem, total_batch_seq, captured_all
+
+    def _warmup_multimodal_graph(self,
+                      kv_caches,
+                      available_mem,
+                      starting_mem=0,
+                      total_batch_seq=0.001):
+        if not supports_multimodal(self.get_model()):
+            return None
+        total_mem = starting_mem
+        idx = 0
+        phase = f'Graph/Multimodal'
+        num_candidates = len(self.multimodal_buckets)
+        captured_all = True
         for idx, max_pixels in enumerate(self.multimodal_buckets):
-            graphed_multimodal_buckets = (1, max_pixels)
-            if not graphed_multimodal_buckets in self.graphed_multimodal_buckets:
-                self.graphed_multimodal_buckets.add(graphed_multimodal_buckets)
-
-
-        for i, (b, max_pixels) in enumerate(self.graphed_multimodal_buckets):
-            max_batch_size = b  #TODO: For now we hardcoded batch 1.
-            assert max_batch_size == 1  # The visual warmup does not need to run in batches
-            #max_seq_len = 2048  #TODO: set with VLLM_PROMPT_SEQ_BUCKET_MAX (1680x1680 error on HPU GRAPH)
+            batch_size = 1  # Note: Multimodal buckets are indepedent of batch_size
             _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
-            self.log_warmup_multimodal('Graph/Image', i, max_seq_len,
-                                       max_batch_size, max_seq_len, max_pixels)
-            self.warmup_scenario(
-                batch_size=max_batch_size,
-                seq_len=max_seq_len,
-                is_prompt=True,
-                kv_caches=kv_caches,
-                max_pixels=max_pixels * 14 * 14)
+            seq_len = max_seq_len
+            batch_seq = 1 * max_pixels
+            # Graph memory usage is proportional to seq dimension in a batch
+            mem_estimate = batch_seq / total_batch_seq * total_mem
+            if mem_estimate >= available_mem:
+                captured_all = False
+                continue
+            graphed_multimodal_bucket = max_pixels
+            if graphed_multimodal_bucket in self.graphed_multimodal_buckets:
+                continue
+            self.graphed_multimodal_buckets.add(graphed_multimodal_bucket)
+            self.log_warmup_multimodal(phase, idx, num_candidates,
+                                       batch_size, seq_len, max_pixels)
+
+            with HabanaMemoryProfiler() as mem_prof:
+                self.warmup_scenario(
+                    batch_size=batch_size,
+                    seq_len=seq_len,
+                    is_prompt=True,
+                    kv_caches=kv_caches,
+                    max_pixels=max_pixels * 14 * 14)
+
+            used_mem = align_workers(mem_prof.consumed_device_memory,
+                                     torch.distributed.ReduceOp.MAX)
+            available_mem -= used_mem
+            total_mem += used_mem
+            total_batch_seq += batch_seq
 
         return total_mem, total_batch_seq, captured_all
 
@@ -2421,7 +2449,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f'({100 * len(graphed) / num_candidates:.1f}%) '
                f'used_mem:{format_bytes(total_mem)} '
                f'buckets:{sorted(list(graphed))}')
-        logger.info(msg)
+        logger.info(msg)        
+        if "Prompt" in phase and len(self.multimodal_buckets) > 0:
+            phase = "Graph/Multimodal"
+            num_candidates = len(self.multimodal_buckets)
+            mm_graphed = self.graphed_multimodal_buckets
+            msg = (f'{phase} captured:{len(mm_graphed)} '
+                f'({100 * len(mm_graphed) / num_candidates:.1f}%) '
+                f'buckets:{sorted(list(mm_graphed))}')
+            logger.info(msg)
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
@@ -2429,8 +2465,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_blocks = kv_caches[0][0].size(0)
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
-        if supports_multimodal(self.model.model):
-            self.multimodal_buckets = self.get_model().vision_buckets.multimodal_buckets
+        model = self.get_model()
+        if supports_multimodal(model):
+            self.multimodal_buckets = model.vision_buckets.multimodal_buckets
             logger.info(f"Multimodal bucket : {self.multimodal_buckets}")
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
@@ -2588,10 +2625,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
-        # if hasattr(self, 'visual_warmup_times'):
-        #     summary = {k: min([t for _, t in self.visual_warmup_times[k]]) for k in self.visual_warmup_times}
-        #     self.visual_warmup_times = summary
-        #     self.model.visual_warmup_times = self.visual_warmup_times
         self.profiler.end()
 
     def finish_measurements(self):
