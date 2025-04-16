@@ -11,7 +11,7 @@ model_name=$( echo $model_path | awk -F/ '{print $NF}' )
 echo "Benchmarking ${model_path} for vllm server '${host}:${port}' with ${num_prompts} prompts from ${data_path} and request_rate=${request_rate}"
 log_name=benchmark_serving_${model_name}_sharegpt_rate-${request_rate}_prompts-${num_prompts}_$(date +%F-%H-%M-%S)
 
-python ../../benchmarks/benchmark_serving.py \
+python ../benchmarks/benchmark_serving.py \
     --backend vllm \
     --model $model_path \
     --trust-remote-code \

@@ -224,7 +224,7 @@ set_numactl
 set_bucketing
 
 ${NUMA_CTL} \
-python "$BASH_DIR/../../benchmarks/benchmark_throughput.py" \
+python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --backend vllm \
     --model "${model_path}" \
     --trust-remote-code \
