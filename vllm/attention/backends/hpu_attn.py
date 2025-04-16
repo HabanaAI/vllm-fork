@@ -6,12 +6,14 @@
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
+import os
 
 import torch
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.flags import enabled_flags
-from vllm_hpu_extension.utils import Matmul, Softmax, VLLMKVCache
+from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
+                                      VLLMKVCache)
 
 import vllm.envs as envs
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
@@ -21,8 +23,89 @@ from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
 from vllm.logger import init_logger
+import habana_frameworks.torch.core as htcore
+import math
 
 logger = init_logger(__name__)
+
+const_norm = os.environ.get('VLLM_SOFTMAX_CONST_NORM', 'false').lower() == 'true'
+const_pa = os.environ.get('VLLM_SOFTMAX_CONST_PA', 'false').lower() == 'true'
+const_val = float(os.environ.get('VLLM_SOFTMAX_CONST_VAL', '10.0'))
+eps_value = float(os.environ.get('VLLM_SOFTMAX_EPS_VALUE', str(torch.finfo(torch.bfloat16).tiny)))
+
+def pa(attn, value, batch_size, block_groups, block_mapping, matmul_av_op, batch2block_matmul_op, block2batch_matmul_op):
+    #normalization
+    attn.sub_(const_val)
+    # end of norm
+    attn = attn.exp()
+    sums = attn.sum(dim=-1).unsqueeze(-1)
+    block_sum = sums
+    # Sum block's sums that belongs to the same sequeneces
+    group_sums = ops.block2batch(sums, block_mapping)
+    group_sums = ops.batch2block(group_sums, block_mapping)
+    group_sums.add_(eps_value)
+    group_sums = torch.maximum(block_sum, group_sums)
+    attn.div_(group_sums)
+    attn = matmul_av_op(attn, value)
+    return attn
+
+def pipelined_const_pa(attn, value, block_groups, block_mapping,
+                 matmul_av_op, batch2block_matmul_op, block2batch_matmul_op):
+    # Normalize the attention scores
+    attn.sub_(const_val)
+    attn = attn.exp()
+    # Sum block's sums that belongs to the same sequeneces
+    sums = attn.sum(dim=-1).unsqueeze(-1)
+    block_sums = sums
+    group_sums = ops.block2batch(sums, block_mapping)
+    group_sums = ops.batch2block(group_sums, block_mapping)
+    # For stability in case some of the sums have been zeroed out during block aggretation
+    group_sums.add_(eps_value)
+    group_sums = torch.maximum(block_sums, group_sums)
+    attn = matmul_av_op(attn, value)
+    attn.div_(group_sums)
+    return attn
+
+def flat_pa(query, key_cache, value_cache, block_list, block_mapping,
+            block_bias, block_groups, scale, matmul_qk_op,
+            matmul_av_op, batch2block_matmul_op, block2batch_matmul_op,
+            keys_fetch_func, values_fetch_func):
+    batch_size, _, hidden_size = query.shape
+    _, _, kv_heads, head_size = key_cache.shape
+    q_heads = hidden_size // head_size
+
+    query_shape = (-1, q_heads, 1, head_size)
+    query = ops.batch2block(scale * query, block_mapping, batch2block_matmul_op).view(query_shape)
+    key = keys_fetch_func(key_cache, block_list).transpose(1, 2)
+    value = values_fetch_func(value_cache, block_list).transpose(1, 2)
+    block_bias = block_bias.view(key.size(0), 1, 1, -1)
+    if kv_heads != q_heads:
+        block_bias = block_bias.unsqueeze(1)
+        query = query.unflatten(1, (kv_heads, -1))
+        key = key.unflatten(1, (kv_heads, 1))
+        value = value.unflatten(1, (kv_heads, 1))
+        key = key.transpose(3, 4)
+    else:
+        key = key.transpose(2, 3)
+
+    attn = matmul_qk_op(query, key)
+    if 'fp32_softmax' in enabled_flags():
+        attn = attn.float()
+        htcore.mark_step()
+    attn = attn + block_bias
+    if const_pa:
+        attn = pipelined_const_pa(attn, value, block_groups, block_mapping, matmul_av_op, batch2block_matmul_op, block2batch_matmul_op)
+    elif const_norm:
+        attn = pa(attn, value, batch_size, block_groups, block_mapping, matmul_av_op, batch2block_matmul_op, block2batch_matmul_op,)
+    else:
+        attn = ops.pipelined_pa(attn, value, block_groups, block_mapping,
+                            batch_size=batch_size, matmul_av_op=matmul_av_op,
+                            batch2block_matmul_op=batch2block_matmul_op, block2batch_matmul_op=block2batch_matmul_op)
+    attn = ops.block2batch(attn, block_mapping, block2batch_matmul_op)
+    attn = attn.squeeze(-2)
+    if kv_heads != q_heads:
+        attn = attn.flatten(1, 2)
+    return attn
 
 
 class HPUAttentionBackend(AttentionBackend):
@@ -142,7 +225,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             assert alibi_slopes is None, \
                 'Prefill with FusedSDPA not supported with alibi slopes!'
             self.prefill_impl = 'fsdpa'
-
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
         self.alibi_slopes = alibi_slopes
@@ -258,16 +340,24 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
-            output = HPUPagedAttention.forward_decode(
+            output = flat_pa(
                 query=query,
+                key_cache=key_cache,
+                value_cache=value_cache,
+                block_list=attn_metadata.block_list,
                 block_mapping=attn_metadata.block_mapping,
                 block_bias=attn_metadata.attn_bias,
                 block_groups=attn_metadata.block_groups,
-                **self.common_attention_args(attn_metadata.block_list,
-                                             key_cache, value_cache))
+                scale=self.scale,
+                matmul_qk_op=self.matmul_qk,
+                matmul_av_op=self.matmul_av,
+                batch2block_matmul_op=self.batch2block_matmul,
+                block2batch_matmul_op=self.block2batch_matmul,
+                keys_fetch_func=self.k_cache.fetch_from_cache,
+                values_fetch_func=self.v_cache.fetch_from_cache)
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
-
+    
     def common_attention_args(self,
                               block_list=None,
                               key_cache=None,
