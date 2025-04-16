@@ -511,7 +511,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 attn_bias=attn_bias,
                 valid_seq_lengths=attn_metadata.seq_lens_tensor,
                 **self.common_attention_args(block_list, key_cache,
-                                             value_cache))
+                                             value_cache,
+                                             attn_metadata.block_size))
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
@@ -520,16 +521,17 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_mapping=attn_metadata.block_mapping,
                 block_bias=attn_metadata.attn_bias,
                 block_groups=attn_metadata.block_groups,
-                block_size=attn_metadata.block_size,
                 **self.common_attention_args(attn_metadata.block_list,
-                                             key_cache, value_cache))
+                                             key_cache, value_cache,
+                                             attn_metadata.block_size))
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
     def common_attention_args(self,
                               block_list=None,
                               key_cache=None,
-                              value_cache=None):
+                              value_cache=None,
+                              block_size=None):
         return {
             'scale': self.scale,
             'matmul_qk_op': self.matmul_qk,
@@ -543,6 +545,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             'block_list': block_list,
             'key_cache': key_cache,
             'value_cache': value_cache,
+            'block_size': block_size,
         }
 
     def forward_encoder_decoder(
