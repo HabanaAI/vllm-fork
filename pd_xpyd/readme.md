@@ -1,28 +1,13 @@
-Note: this doc didn't cover mla data parallel!!!
+# Mooncake Installation and Usage Guide
+> Note: This document does not cover MLA data parallel setup.
 
-# setup docker and install mooncake
+## Installation
 
-Please refer Chaojun's https://github.com/chaojun-zhang/vllm/blob/c9154592820bf1375a030e46e0334b83ac36287b/pd_distributed/setup.md 
-
-0. make sure proxy works in intel env!
-1. install mooncake [link](#https://github.com/kvcache-ai/Mooncake/?tab=readme-ov-file#-quick-start)
-
-```
-apt install git wget curl net-tools sudo iputils-ping etcd  -y
-
-git clone https://github.com/kvcache-ai/Mooncake.git
-cd Mooncake
-
-bash dependencies.sh
-
-mkdir build
-cd build
-cmake ..
-make -j
-make install
+```bash
+pip3 install mooncake-transfer-engine
 ```
 
-# How to Run
+## How to Run
 
 0. prepare and modify mooncake.json
 
