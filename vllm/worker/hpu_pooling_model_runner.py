@@ -43,6 +43,12 @@ class HPUPoolingModelRunner(
         if num_steps > 1:
             raise ValueError(
                 "HPUPoolingModelRunner does not support multi-step execution.")
+        if self.lora_config:
+            assert model_input.lora_requests is not None
+            assert model_input.lora_mapping is not None
+            self.set_active_loras(model_input.lora_requests,
+                                  model_input.lora_mapping)
+
         input_tokens = model_input.input_tokens
         input_positions = model_input.input_positions
         attn_metadata = model_input.attn_metadata
@@ -59,6 +65,13 @@ class HPUPoolingModelRunner(
         seq_len = self._seq_len(attn_metadata)
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         super()._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
+
+        lora_mask: torch.Tensor = None
+        lora_logits_mask: torch.Tensor = None
+        if self.lora_config:
+            assert model_input.lora_ids is not None
+            lora_mask, lora_logits_mask = self.create_lora_mask(
+                input_tokens, model_input.lora_ids, attn_metadata.is_prompt)
 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         # use an empty tensor instead of `None`` to force Dynamo to pass
@@ -77,6 +90,7 @@ class HPUPoolingModelRunner(
             "attn_metadata":
             super().trim_attn_metadata(model_input.attn_metadata),
             "intermediate_tensors": intermediate_tensors,
+            "lora_mask": lora_mask,
         }
 
         if htorch.utils.internal.is_lazy():
@@ -150,12 +164,20 @@ class HPUPoolingModelRunner(
                 model_input.batch_size_padded is not None and \
                 model_input.attn_metadata.seq_lens_tensor is not None
 
-            prompt_offsets = [
-                i * model_input.input_tokens.shape[1]
-                for i in range(model_input.batch_size_padded)
-            ]
-            prompt_offsets_tensor = torch.tensor(prompt_offsets).to(
-                model_input.input_tokens.device)
+            if self.use_merged_prefill:
+                prompt_offsets_tensor = \
+                    model_input.attn_metadata.seq_lens_tensor
+                prompt_offsets_tensor = prompt_offsets_tensor.roll(shifts=1)
+                prompt_offsets_tensor[0] = 0
+                prompt_offsets_tensor = torch.cumsum(prompt_offsets_tensor,
+                                                     dim=0)
+            else:
+                prompt_offsets = [
+                    i * model_input.input_tokens.shape[1]
+                    for i in range(model_input.batch_size_padded)
+                ]
+                prompt_offsets_tensor = torch.tensor(prompt_offsets).to(
+                    model_input.input_tokens.device)
 
             pooling_metadata = self._prepare_pooling(
                 seq_group_metadata_list,
