@@ -104,10 +104,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.hpu_cache: Optional[List[List[torch.Tensor]]] = None
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
-        if envs.VLLM_TORCH_PROFILER_DIR:
+        if envs.VLLM_TORCH_PROFILER_DIR and is_driver_worker:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
             logger.info("Profiling enabled. Traces will be saved to: %s",
                         torch_profiler_trace_dir)
+            self.torch_profiler_trace_dir = torch_profiler_trace_dir
 
             if os.getenv('VLLM_PROFILER_ENABLED') == 'full':
                 fn = self.full_trace_handler
@@ -122,6 +123,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 ],
                 with_stack=with_stack,
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
+            logger.info(f"Profiling enabled, fn is {fn}")
         else:
             self.profiler = None
 
@@ -177,7 +179,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
     def start_profile(self):
         if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
+            return
         high_level_profiler = self.model_runner.profiler
         with high_level_profiler.record_event('internal', 'start_profiler'):
             # Clean up the queue
@@ -190,8 +192,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
     def stop_profile(self):
         if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
+            return
+            #raise RuntimeError("Profiler is not enabled.")
         self.profiler.stop()
+        logger.info(f"Saved full profiling to {self.torch_profiler_trace_dir}")
 
     def _set_env_vars(self):
         local_rank = self.local_rank

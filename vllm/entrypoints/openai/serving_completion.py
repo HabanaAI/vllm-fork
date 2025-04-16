@@ -312,6 +312,8 @@ class OpenAIServingCompletion(OpenAIServing):
                         delta_text = output.text
                         delta_token_ids = output.token_ids
                         out_logprobs = output.logprobs
+                        if len(output.token_ids)>0:
+                             delta_text = tokenizer.decode([output.token_ids[-1]])
 
                         if not delta_text and not delta_token_ids \
                             and not previous_num_tokens[i]:
