@@ -30,7 +30,7 @@ PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Ll
 
 ## FP8 quantization
 
-To get a FP8 Scout/Maverick llama4 model, please follow below steps:
+To get a FP8 Maverick llama4 model, please follow below steps:
 
 ```bash
 # install specific INC
