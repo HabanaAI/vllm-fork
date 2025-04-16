@@ -65,7 +65,6 @@ class FusedMoEMethodBase(QuantizeMethodBase):
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
-        ep_rank: Optional[int] = 0,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -99,7 +98,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
-
         if current_platform.is_cpu():
             if current_platform.get_cpu_architecture() == CpuArchEnum.X86:
                 import intel_extension_for_pytorch as ipex
@@ -124,20 +122,20 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
-        ep_rank: Optional[int] = 0,
     ) -> torch.Tensor:
-        return self.forward(x=x,
-                            layer=layer,
-                            router_logits=router_logits,
-                            top_k=top_k,
-                            renormalize=renormalize,
-                            use_grouped_topk=use_grouped_topk,
-                            topk_group=topk_group,
-                            num_expert_group=num_expert_group,
-                            custom_routing_function=custom_routing_function,
-                            scoring_func=scoring_func,
-                            e_score_correction_bias=e_score_correction_bias,
-                            ep_rank=ep_rank)
+        return self.forward(
+            x=x,
+            layer=layer,
+            router_logits=router_logits,
+            top_k=top_k,
+            renormalize=renormalize,
+            use_grouped_topk=use_grouped_topk,
+            topk_group=topk_group,
+            num_expert_group=num_expert_group,
+            custom_routing_function=custom_routing_function,
+            scoring_func=scoring_func,
+            e_score_correction_bias=e_score_correction_bias,
+        )
 
     def forward_cuda(
         self,
@@ -185,8 +183,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
-        ep_rank: Optional[int] = 0,
-        **kwargs,
     ):
         bs, seq, hidden_dim = x.shape
         bt = bs * seq
@@ -213,7 +209,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 
         num_experts = layer.w13_weight.shape[0]
         moe_intermediate = layer.w2_weight.shape[2]
-        ep_shift = ep_rank * num_experts
+        ep_shift = layer.ep_rank * num_experts
         selected_experts = (topk_ids - ep_shift).to(torch.int64)
 
         if bt > dynamic_moe_min_size:
@@ -723,7 +719,7 @@ class FusedMoE(torch.nn.Module):
             custom_routing_function=self.custom_routing_function,
             scoring_func=self.scoring_func,
             e_score_correction_bias=self.e_score_correction_bias,
-            ep_rank=self.ep_rank)
+        )
 
         if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1):
             final_hidden_states = tensor_model_parallel_all_reduce(
