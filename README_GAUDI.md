@@ -185,8 +185,7 @@ INFO 08-01 21:37:59 hpu_model_runner.py:509] Generated 48 decode buckets: [(1, 1
 ```
 
 `min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, interval between `min` and `step`
-has special handling - `min` gets multiplied by consecutive powers of two, until `step` gets reached. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage,
-while allowing larger padding on larger batch sizes.
+has special handling - `min` gets multiplied by consecutive powers of two (i.e., min × 2, min × 4, min × 8, ...) until the multiplication reaches `step` value. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage, while allowing larger padding on larger batch sizes.
 
 **Example with ramp-up**
 
@@ -343,7 +342,8 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
 - `VLLM_GRAPH_PROMPT_RATIO`: percentage of reserved graph memory dedicated for prompt graphs, `0.3` by default.
 - `VLLM_GRAPH_PROMPT_STRATEGY`: strategy determining order of prompt graph capture, `min_tokens` or `max_bs`, `min_tokens` by default.
 - `VLLM_GRAPH_DECODE_STRATEGY`: strategy determining order of decode graph capture, `min_tokens` or `max_bs`, `max_bs` by default.
-- `VLLM_{phase}_{dim}_BUCKET_{param}` - collection of 12 environment variables configuring ranges of bucketing mechanism.
+- `VLLM_EXPONENTIAL_BUCKETING`, if `true`, enables exponential bucket spacing instead of linear (experimental).
+- `VLLM_{phase}_{dim}_BUCKET_{param}` - collection of 12 environment variables configuring ranges of bucketing mechanism (linear bucketing only).
   - `{phase}` is either `PROMPT` or `DECODE`
   - `{dim}` is either `BS`, `SEQ` or `BLOCK`
   - `{param}` is either `MIN`, `STEP` or `MAX`
