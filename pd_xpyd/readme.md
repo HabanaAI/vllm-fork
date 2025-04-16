@@ -51,9 +51,6 @@ mooncake_master -enable_gc true -port 50001
 refer `start_prefill.sh`, `start_decode.sh`
 nencessary env/paras are:
 ```
-# some mooncake components will install to here
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
-
 MOONCAKE_CONFIG_PATH=./pd_xpyd/mooncake.json
 
 # for prefill
