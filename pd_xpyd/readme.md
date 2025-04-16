@@ -1,13 +1,34 @@
-# Mooncake Installation and Usage Guide
-> Note: This document does not cover MLA data parallel setup.
+# Mooncake Installation and Prefill/Decode Disaggregation Usage Guide
+> **Note**: This document does not cover MLA data parallel setup.
 
-## Installation
+## Mooncake Installation
 
+### Install via pip
 ```bash
-pip3 install mooncake-transfer-engine
+pip3 install mooncake-transfer-engine==0.3.0b3
 ```
 
-## How to Run
+### Install from Source
+```bash
+# Install required packages
+apt install git wget curl net-tools sudo iputils-ping etcd -y
+
+# Clone the Mooncake repository
+git clone https://github.com/kvcache-ai/Mooncake.git -b v0.3.0-beta
+cd Mooncake
+
+# Install dependencies
+bash dependencies.sh
+
+# Build and install Mooncake
+mkdir build
+cd build
+cmake ..
+make -j
+make install
+```
+
+## Prefill/Decode Disaggregation Usage
 
 0. prepare and modify mooncake.json
 
