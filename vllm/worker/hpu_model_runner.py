@@ -892,7 +892,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) and not self.vllm_config.model_config.enforce_eager:
             fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
                                   'false').strip().lower() in ("1", "true")
-            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPAES',
+            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
                                 'false').strip().lower() in ("1", "true")
 
             if os.getenv('VLLM_REGIONAL_COMPILATION',
