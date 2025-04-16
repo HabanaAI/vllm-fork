@@ -70,8 +70,6 @@ script_dir=$(dirname "$(readlink -f "$0")")
 
 start=`date +%s`
 
-export TQDM_DISABLE=True
-
 fp8_args=""
 if [[ $__fp8 == "yes" ]]; then
     export QUANT_CONFIG=/software/data/vllm-benchmarks/inc/maxabs_quant_unit.json
