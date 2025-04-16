@@ -82,8 +82,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     seq_lens: Optional[List[int]] = None
     encoder_seq_lens: Optional[List[int]] = None
     encoder_seq_lens_tensor: Optional[torch.Tensor] = None
-    cross_block_indices: Optional[torch.Tensor] = None
-    cross_block_offsets: Optional[torch.Tensor] = None
+    cross_block_indices_and_offsets: Optional[torch.Tensor] = None
     cross_block_list: Optional[torch.Tensor] = None
     cross_slot_mapping: Optional[torch.Tensor] = None
     cross_block_mapping: Optional[torch.Tensor] = None
@@ -334,8 +333,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         else:
             assert value is None
 
-        block_indices = attn_metadata.cross_block_indices
-        block_offsets = attn_metadata.cross_block_offsets
+        block_indices_and_offsets = \
+            attn_metadata.cross_block_indices_and_offsets
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -343,10 +342,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices,
-                                     block_offsets)
-            value_cache = self.v_cache(value, value_cache, block_indices,
-                                       block_offsets)
+            key_cache = self.k_cache(key, key_cache, block_indices_and_offsets)
+            value_cache = self.v_cache(value, value_cache,
+                                       block_indices_and_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -376,7 +374,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_bias=attn_bias,
                 block_groups=block_groups,
                 **self.common_attention_args(block_list, key_cache,
-                                             value_cache))
+                                             value_cache,
+                                             attn_metadata.block_size))
         # Reshape the output tensor.
         return output.view(batch_size, -1, hidden_size)
 
