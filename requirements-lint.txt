@@ -12,4 +12,4 @@ pymarkdownlnt==0.9.26
 mypy==1.11.1
 types-PyYAML
 types-requests
-types-setuptools
+types-setuptools==75.6.0.20241223
