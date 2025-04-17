@@ -14,7 +14,6 @@ from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
                                       VLLMKVCache)
 
-# import vllm.envs as envs
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
                                               AttentionMetadata, AttentionType)
@@ -128,7 +127,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     seq_lens: Optional[List[int]] = None
     encoder_seq_lens: Optional[List[int]] = None
     encoder_seq_lens_tensor: Optional[torch.Tensor] = None
-    cross_block_indices_and_offsets: Optional[torch.Tensor] = None
+    cross_block_indices_with_offsets: Optional[torch.Tensor] = None
     cross_block_list: Optional[torch.Tensor] = None
     cross_slot_mapping: Optional[torch.Tensor] = None
     cross_block_mapping: Optional[torch.Tensor] = None
@@ -463,15 +462,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
-        block_indices_and_offsets = attn_metadata.block_indices_and_offsets
+        block_indices_with_offsets = attn_metadata.block_indices_with_offsets
         key_cache = None
         value_cache = None
-        # if attn_metadata.is_prompt and self.attn_type \
-        #         is not AttentionType.ENCODER_ONLY \
-        #     and (attn_metadata.block_list is None if envs.VLLM_USE_V1
-        #          else True):
-        #     key = key.unflatten(0, (block_indices.size(0), -1))
-        #     value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -479,9 +472,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices_and_offsets)
+            key_cache = self.k_cache(key, key_cache,
+                                     block_indices_with_offsets)
             value_cache = self.v_cache(value, value_cache,
-                                       block_indices_and_offsets)
+                                       block_indices_with_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -588,8 +582,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         else:
             assert value is None
 
-        block_indices_and_offsets = \
-            attn_metadata.cross_block_indices_and_offsets
+        block_indices_with_offsets = \
+            attn_metadata.cross_block_indices_with_offsets
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -597,9 +591,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices_and_offsets)
+            key_cache = self.k_cache(key, key_cache,
+                                     block_indices_with_offsets)
             value_cache = self.v_cache(value, value_cache,
-                                       block_indices_and_offsets)
+                                       block_indices_with_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.

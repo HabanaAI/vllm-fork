@@ -20,7 +20,7 @@ class HPUPagedAttentionMetadata:
     block_list: Optional[torch.Tensor]
     block_mapping: Optional[torch.Tensor]
     block_usage: Optional[torch.Tensor]
-    block_indices_and_offsets: Optional[torch.Tensor]
+    block_indices_with_offsets: Optional[torch.Tensor]
     block_groups: Optional[torch.Tensor]
 
 
