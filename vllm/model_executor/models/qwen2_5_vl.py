@@ -112,7 +112,16 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
     xx = torch.logical_and(yy, zz)
     # can reduce sum externally or as batchmatmul
-    res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+    #TODO: einsum with tensor dimension too big doesn't work. Register max size error.
+    #We can always move to CPU for all einsum without shape checking if perf impact is minimal.
+    if xx.shape[-1] > 40000:
+        print("einsum running on CPU : ", xx.shape)
+        xx = xx.to("cpu")
+        res = torch.einsum('bi,bj->bij', xx, xx)
+        res = res.to("hpu")
+        res = torch.sum(res, dim=0)
+    else:
+        res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
     #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
     return res.bool()
 
@@ -353,6 +362,10 @@ class Qwen2_5_VisionAttention(nn.Module):
                 outputs = []
                 cu_seqlens = list(range(0, x.shape[0]+1, 64)) # assuming x%64=0 (image is 112 aligned in both h/w dims)
                 for i in range(1, len(cu_seqlens)):
+                    #TODO: Check if number 100 is good
+                    #For large image, we add mark step here for every 100th step to make compile time shorter
+                    if i % 100 == 0:
+                        htcore.mark_step()
                     start_idx = cu_seqlens[i - 1]
                     end_idx = cu_seqlens[i]
                     q_i = q[:, start_idx:end_idx]
@@ -381,7 +394,9 @@ class Qwen2_5_VisionAttention(nn.Module):
                 attn_mask = fullatt_block_attn_mask.reshape(batch_size, 1, seq_len_N_t, seq_len_N_s, -1)[:, :, :, :, 0]
                 assert attn_mask.shape == mask_shape
 
-                if q1.shape[2] <= 6400: # this crossover point should be measured
+                #TODO:after 1by1 branch, even with long sequence, FusedSDPA is much faster
+                # Setting the number here to the max number we get in profile_run.
+                if q1.shape[2] <= 65536: # this crossover point should be measured
                     fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
                 else:
                     fused_out = AttentionLongSequence.forward(q1, k1, v1, attn_mask, 64)
@@ -729,6 +744,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
             assert x.shape[0]%64 == 0, "Expect inputs to be 112x112 aligned. Please align before sending image or use this version of transformer that does the resizing/alignment automatically: pip install git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf"
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
+            htcore.mark_step()
             #TODO: now we premake fullattn_mask, we don't need to pass cu_seqlens
             #but keep it here for now since other ATTN is using this argument. Need to clean code.
             if layer_num in self.fullatt_block_indexes:

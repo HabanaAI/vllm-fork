@@ -95,7 +95,9 @@ class VisionBuckets():
     def __init__(self):
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
-            self.multimodal_buckets = [1600, 3200, 4800, 6400]
+            #TODO:with profile_run, the bucket of 65536 is added, so the pixel values
+            #bigger than 12800 below always padded to 65536 which is too big.
+            self.multimodal_buckets = [1600, 3200, 4800, 6400, 9600, 12800]
         else:
             self.multimodal_buckets = [int(i) for i in envvar.split(',')]
 
@@ -299,7 +301,7 @@ class HpuModelAdapter(torch.nn.Module):
         if htorch.utils.internal.is_lazy() and self.split_graph:
             logger.info("[Multimodal] Split Graph to Visual and Language")
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
-                self.model.visual, disable_tensor_cache=False)
+                self.model.visual, disable_tensor_cache=True)
             self.model.language_model.model = htorch.hpu.wrap_in_hpu_graph(
                 self.model.language_model.model, disable_tensor_cache=True)
 
@@ -2053,7 +2055,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids = mm_inputs["prompt_token_ids"]
         placeholders_by_modality = mm_inputs["mm_placeholders"]
         num_tokens_to_extend = seq_len - len(prompt_token_ids)
-        assert num_tokens_to_extend > 0, "seq_len is smaller than multimodal tokens"
         prompt_token_ids.extend([0] * (num_tokens_to_extend))
         seq_data = SequenceData.from_seqs(prompt_token_ids)
 
@@ -2110,8 +2111,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_request=lora_request)
 
     def profile_run(self) -> None:
-        # TODO FIX PROFILE
-        return 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
