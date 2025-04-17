@@ -242,7 +242,7 @@ def get_path_to_rope(model: torch.nn.Module):
 
 class HpuModelAdapter(torch.nn.Module):
 
-    def __init__(self, model, vllm_config, layer_names):
+    def __init__(self, model, vllm_config, layer_names, is_causal):
         super().__init__()
         self.model = model
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
@@ -253,9 +253,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.dtype = vllm_config.model_config.dtype
         self.layer_names = layer_names
         self.is_pooler = hasattr(self.model, "_pooler")
-        self.is_causal = True
-        if self.is_pooler:
-            self.set_causal_option(self.model)
+        self.is_causal = is_causal
         self.use_merged_prefill = VLLM_MERGED_PREFILL
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
@@ -441,18 +439,6 @@ class HpuModelAdapter(torch.nn.Module):
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
 
-    def set_causal_option(self, module):
-        if isinstance(module, HPUAttentionImpl) and hasattr(
-                module, 'attn_type'):
-            self.is_causal = not (
-                module.attn_type == AttentionType.ENCODER
-                or module.attn_type == AttentionType.ENCODER_ONLY
-                or module.attn_type == AttentionType.ENCODER_DECODER)
-            return
-        else:
-            for child_name, child_module in module.named_children():
-                self.set_causal_option(child_module)
-
     # sampler property will be used by spec_decode_worker
     # don't rename
     @property
@@ -628,6 +614,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return_hidden_states: bool = False,
         input_registry: InputRegistry = INPUT_REGISTRY,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
+        is_causal: bool = True,
     ):
         ModelRunnerBase.__init__(self, vllm_config=vllm_config)
         environment.set_model_config(self.model_config)
@@ -715,6 +702,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # For both multi-step scheduling and delayed sampling
         self.cached_step_outputs: List[torch.Tensor] = []
         self.is_pooler = False
+        self.is_causal = is_causal
         # For delayed sampling
         self.cached_step_inputs: List[
             ModelInputForHPUWithSamplingMetadata] = []
@@ -840,11 +828,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             path_to_rope = get_path_to_rope(self.model)
             torch.hpu.synchronize()
 
+            if self.is_pooler:
+                self.set_causal_option(self.model)
             with HabanaMemoryProfiler() as m_wrap:
                 self.model = self._maybe_wrap_in_hpu_graph(
                     self.model,
                     vllm_config=self.vllm_config,
-                    layer_names=path_to_rope)
+                    layer_names=path_to_rope,
+                    is_causal=self.is_causal)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
             with HabanaMemoryProfiler() as m_wrap:
@@ -892,32 +883,51 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) and not self.vllm_config.model_config.enforce_eager:
             fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
                                   'false').strip().lower() in ("1", "true")
+            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
+                                'false').strip().lower() in ("1", "true")
+
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
                 compiled_methods = [self.model._set_block_mapping]
                 for method in compiled_methods:
-                    method = torch.compile(method,
-                                           backend='hpu_backend',
-                                           fullgraph=fullgraph,
-                                           dynamic=False)
+                    if dynamic:
+                        method = torch.compile(
+                            method,
+                            backend='hpu_backend',
+                            fullgraph=fullgraph,
+                            options={"force_static_compile": True})
+                    else:
+                        method = torch.compile(method,
+                                               backend='hpu_backend',
+                                               fullgraph=fullgraph,
+                                               dynamic=False)
+
                 self.regional_compilation_layers_list = [
                     RMSNorm, VocabParallelEmbedding
                 ]
-                self._regional_compilation(self.model, fullgraph)
+                self._regional_compilation(self.model, fullgraph, dynamic)
             else:
-                self.model = torch.compile(self.model,
-                                           backend='hpu_backend',
-                                           fullgraph=fullgraph,
-                                           dynamic=False)
+                if dynamic:
+                    self.model = torch.compile(
+                        self.model,
+                        backend='hpu_backend',
+                        fullgraph=fullgraph,
+                        options={"force_static_compile": True})
+                else:
+                    self.model = torch.compile(self.model,
+                                               backend='hpu_backend',
+                                               fullgraph=fullgraph,
+                                               dynamic=False)
 
     def _regional_compilation(self,
                               module,
                               fullgraph,
+                              dynamic,
                               parent_module=None,
                               module_name=None):
         if isinstance(module, torch.nn.ModuleList):
             for children_name, children_module in module.named_children():
-                self._compile_region(module, fullgraph, children_name,
+                self._compile_region(module, fullgraph, dynamic, children_name,
                                      children_module)
         elif any(
                 isinstance(module, layer)
@@ -925,25 +935,33 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self._compile_region(
                 parent_module,
                 fullgraph,
+                dynamic,
                 module_name,
                 module,
             )
         else:
             for children_name, children_module in module.named_children():
-                self._regional_compilation(children_module, fullgraph, module,
-                                           children_name)
+                self._regional_compilation(children_module, fullgraph, dynamic,
+                                           module, children_name)
 
     def _compile_region(
         self,
         model,
         fullgraph,
+        dynamic,
         name,
         module,
     ):
-        module = torch.compile(module,
-                               backend='hpu_backend',
-                               fullgraph=fullgraph,
-                               dynamic=False)
+        if dynamic:
+            module = torch.compile(module,
+                                   backend='hpu_backend',
+                                   fullgraph=fullgraph,
+                                   options={"force_static_compile": True})
+        else:
+            module = torch.compile(module,
+                                   backend='hpu_backend',
+                                   fullgraph=fullgraph,
+                                   dynamic=False)
         setattr(model, name, module)
 
     def get_model(self) -> torch.nn.Module:
@@ -1024,6 +1042,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def make_attn_bias(self, seq_lens, max_prompt_len, dtype):
         seq_pos = [list(range(sl)) for sl in seq_lens]
         seq_idx = [[i] * sl for i, sl in enumerate(seq_lens)]
+
         seq_pos_t = make_cpu_tensor(seq_pos,
                                     max_len=max_prompt_len,
                                     pad=-1,
@@ -1034,16 +1053,35 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     pad=-1,
                                     dtype=torch.long,
                                     flat=self.use_merged_prefill)
+
         q_seq_idx_t = seq_idx_t.unsqueeze(-1)
         kv_seq_idx_t = seq_idx_t.unsqueeze(-2)
         q_seq_pos_t = seq_pos_t.unsqueeze(-1)
         kv_seq_pos_t = seq_pos_t.unsqueeze(-2)
         seq_idx_t = q_seq_idx_t != kv_seq_idx_t
         seq_pos_t = kv_seq_pos_t > q_seq_pos_t
-        attn_mask = seq_idx_t | seq_pos_t
+        attn_mask = (seq_idx_t | seq_pos_t) if self.is_causal else seq_idx_t
+        if self.is_pooler:
+            mask_v = torch.where(q_seq_pos_t < 0, True, False)
+            attn_mask = attn_mask | mask_v
+            off_value = -3E38  #small number, avoid nan and overflow
+        else:
+            off_value = -math.inf
         attn_bias = torch.zeros_like(attn_mask, dtype=dtype)
-        attn_bias.masked_fill_(attn_mask, -math.inf)
+        attn_bias.masked_fill_(attn_mask, off_value)
         return attn_bias.unsqueeze(1)
+
+    def set_causal_option(self, module):
+        if isinstance(module, HPUAttentionImpl) and hasattr(
+                module, 'attn_type'):
+            self.is_causal = not (
+                module.attn_type == AttentionType.ENCODER
+                or module.attn_type == AttentionType.ENCODER_ONLY
+                or module.attn_type == AttentionType.ENCODER_DECODER)
+            return
+        else:
+            for child_name, child_module in module.named_children():
+                self.set_causal_option(child_module)
 
     def move_to_device(self, tensor):
         return tensor if tensor is None else tensor.to(self.device,
