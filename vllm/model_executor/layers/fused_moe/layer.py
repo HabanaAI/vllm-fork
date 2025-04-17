@@ -32,8 +32,8 @@ else:
 logger = init_logger(__name__)
 if is_hpu:
     import os
-    dynamic_moe_min_size = int(os.environ.get("VLLM_DYNAMIC_MOE_MIN_SIZE",
-                                              256))
+    dynamic_moe_min_tokens = int(
+        os.environ.get("VLLM_DYNAMIC_MOE_MIN_TOKENS", 256))
 
 
 class FusedMoeWeightScaleSupported(Enum):
@@ -64,7 +64,7 @@ class FusedMoEMethodBase(QuantizeMethodBase):
         num_expert_group: Optional[int] = None,
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
-        e_score_correction_bias: Optional[torch.Tensor] = None,
+        e_score_correction_bias: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -121,7 +121,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         num_expert_group: Optional[int] = None,
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
-        e_score_correction_bias: Optional[torch.Tensor] = None,
+        e_score_correction_bias: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         return self.forward(
             x=x,
@@ -212,7 +212,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         ep_shift = layer.ep_rank * num_experts
         selected_experts = (topk_ids - ep_shift).to(torch.int64)
 
-        if bt > dynamic_moe_min_size:
+        if bt > dynamic_moe_min_tokens:
             experts_range = range(num_experts)
             w1_list = [layer.w13_weight[i].squeeze() for i in experts_range]
             w2_list = [layer.w2_weight[i].squeeze() for i in experts_range]
