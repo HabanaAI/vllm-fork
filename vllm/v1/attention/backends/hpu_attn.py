@@ -39,13 +39,12 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
 
     @classmethod
     def make_prefill_metadata(cls, seq_lens_tensor, num_prefills,
-                              num_prefill_tokens, slot_mapping):
+                              num_prefill_tokens, slot_mapping, block_size):
         return cls(is_prompt=True,
                    block_list=None,
                    block_mapping=None,
                    block_usage=None,
-                   block_indices=None,
-                   block_offsets=None,
+                   block_indices_with_offsets=None,
                    block_groups=None,
                    attn_bias=None,
                    num_decode_tokens=0,
@@ -55,18 +54,18 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
                    num_prefills=num_prefills,
                    num_prefill_tokens=num_prefill_tokens,
                    slot_mapping=slot_mapping,
-                   enable_kv_scales_calculation=False)
+                   enable_kv_scales_calculation=False,
+                   block_size=block_size)
 
     @classmethod
     def make_cached_prefill_metadata(cls, seq_lens_tensor, context_lens_tensor,
                                      num_prefills, num_prefill_tokens,
-                                     slot_mapping, block_list):
+                                     slot_mapping, block_list, block_size):
         return cls(is_prompt=True,
                    block_list=block_list,
                    block_mapping=None,
                    block_usage=None,
-                   block_indices=None,
-                   block_offsets=None,
+                   block_indices_with_offsets=None,
                    block_groups=None,
                    attn_bias=None,
                    num_decode_tokens=0,
@@ -76,15 +75,15 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
                    num_prefills=num_prefills,
                    num_prefill_tokens=num_prefill_tokens,
                    slot_mapping=slot_mapping,
-                   enable_kv_scales_calculation=False)
+                   enable_kv_scales_calculation=False,
+                   block_size=block_size)
 
     @classmethod
     def make_decode_metadata(cls, block_list, block_usage, block_groups,
-                             num_decode_tokens, slot_mapping):
+                             num_decode_tokens, slot_mapping, block_size):
         return cls(is_prompt=False,
                    block_mapping=None,
-                   block_indices=None,
-                   block_offsets=None,
+                   block_indices_with_offsets=None,
                    attn_bias=None,
                    seq_lens_tensor=None,
                    context_lens_tensor=None,
@@ -96,4 +95,5 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
                    block_groups=block_groups,
                    num_decode_tokens=num_decode_tokens,
                    slot_mapping=slot_mapping,
-                   enable_kv_scales_calculation=False)
+                   enable_kv_scales_calculation=False,
+                   block_size=block_size)
