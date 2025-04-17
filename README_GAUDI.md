@@ -343,7 +343,8 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
 - `VLLM_GRAPH_PROMPT_RATIO`: percentage of reserved graph memory dedicated for prompt graphs, `0.3` by default.
 - `VLLM_GRAPH_PROMPT_STRATEGY`: strategy determining order of prompt graph capture, `min_tokens` or `max_bs`, `min_tokens` by default.
 - `VLLM_GRAPH_DECODE_STRATEGY`: strategy determining order of decode graph capture, `min_tokens` or `max_bs`, `max_bs` by default.
-- `VLLM_{phase}_{dim}_BUCKET_{param}` - collection of 12 environment variables configuring ranges of bucketing mechanism.
+- `VLLM_EXPONENTIAL_BUCKETING`, if `true`, enables exponential bucket spacing instead of linear (experimental).
+- `VLLM_{phase}_{dim}_BUCKET_{param}` - collection of 12 environment variables configuring ranges of bucketing mechanism (linear bucketing only).
   - `{phase}` is either `PROMPT` or `DECODE`
   - `{dim}` is either `BS`, `SEQ` or `BLOCK`
   - `{param}` is either `MIN`, `STEP` or `MAX`
@@ -355,7 +356,7 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
       - batch size max (`VLLM_PROMPT_BS_BUCKET_MAX`): `min(max_num_seqs, 64)`
       - sequence length min (`VLLM_PROMPT_SEQ_BUCKET_MIN`): `block_size`
       - sequence length step (`VLLM_PROMPT_SEQ_BUCKET_STEP`): `block_size`
-      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `max_model_len`
+      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `1024`
 
     - Decode:
 
@@ -364,16 +365,28 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
       - batch size max (`VLLM_DECODE_BS_BUCKET_MAX`): `max_num_seqs`
       - block size min (`VLLM_DECODE_BLOCK_BUCKET_MIN`): `block_size`
       - block size step (`VLLM_DECODE_BLOCK_BUCKET_STEP`): `block_size`
-      - block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`): `max(128, (max_num_seqs*max_model_len)/block_size)`
+      - block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`): `max(128, (max_num_seqs*2048)/block_size)`
+  - Recommended Values:
+    - Prompt:
+
+      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `max_model_len`
+    - Decode:
+
+      - block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`): `max(128, (max_num_seqs*max_model_len/block_size)`
+
+> [!NOTE]
+> Model config may report very high max_model_len,
+> please set it to max input_tokens+output_tokens rounded up to multiple of block_size as per actual requirements.
+
 - `VLLM_HANDLE_TOPK_DUPLICATES`, if ``true`` - handles duplicates that are outside of top-k. `false` by default.
 - `VLLM_CONFIG_HIDDEN_LAYERS` - configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. The default is 1.
-   It helps improve throughput by reducing inter-token latency limitations in some models.
+    It helps improve throughput by reducing inter-token latency limitations in some models.
 
 Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM execution:
 
 - `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used, if `1` PyTorch Lazy backend for Gaudi will be used. `1` is the default.
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES` must be set to `true` for tensor parallel inference with HPU Graphs.
-- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava and qwen models.
+- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava, qwen and roberta models.
 - `VLLM_PROMPT_USE_FLEX_ATTENTION` is enabled only for llama model, and allows to use torch.nn.attention.flex_attention instead of FusedSDPA. Note, this requires `VLLM_PROMPT_USE_FUSEDSDPA=0`
 
 # Quantization, FP8 Inference and Model Calibration Process
@@ -395,6 +408,9 @@ measurements for a given model. The quantization configuration is used during in
 > [!TIP]
 > If you are prototyping or testing your model with FP8, you can use the `VLLM_SKIP_WARMUP=true` environment variable to disable the warmup stage, which is time-consuming.
 However, disabling this feature in production environments is not recommended, as it can lead to a significant performance decrease.
+
+> [!TIP]
+> If you are benchmarking an FP8 model with `scale_format=const`, setting `VLLM_DISABLE_MARK_SCALES_AS_CONST=true` can help speed up the warmup stage.
 
 > [!TIP]
 > When using FP8 models, you may experience timeouts caused by the long compilation time of FP8 operations. To mitigate this, set the following environment variables:

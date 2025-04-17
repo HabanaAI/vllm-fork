@@ -26,7 +26,7 @@ jobs:
           token: ${{ secrets.GH_PAT }}
       - name: Parse Comment
         run: |
-          MAINTAINERS=$(grep -E '^[^#]' .github/CODEOWNERS | tr -d '@*')
+          MAINTAINERS=$(grep -Eh '^[^#]' .github/CODEOWNERS .github/TESTOWNERS | tr -d '@*' | tr '\n' ' ')
           COMMENTER=${{ github.event.comment.user.login }}
           echo "Maintainers are: ${MAINTAINERS}"
           echo "Commenter Is: ${COMMENTER}"
@@ -220,14 +220,19 @@ jobs:
             RELEASED_SYNAPSE_VERSION: ${{ vars.RELEASED_SYNAPSE_VERSION }}
             BASE_BRANCH: ${{ needs.read_codeowners.outputs.pr_branch }}      
           run: |
-            version_regex='^v([0-9]+)\.([0-9]+)\.([0-9]+)$'
+            LOG_REDIRECTION="\&>"
+            version_regex='^v([0-9]+)\.([0-9]+)\.([0-9]+)_next$'
             if [[ $TARGET_BRANCH =~ $version_regex ]]; then
               synapse_version=${TARGET_BRANCH#v}
+              synapse_version=${synapse_version%_*}
+              synapse_build_endpoint="https://dms.habana-labs.com/api/v1.1/guide/info/${synapse_version}/latest?type=docker-pt"
             else
               synapse_version=${RELEASED_SYNAPSE_VERSION#v}
+              LOG_REDIRECTION="2>\&1 \| tee"
+              synapse_build_endpoint="https://dms.habana-labs.com/api/v1.1/branch/info/v${synapse_version}"
             fi
-            echo "Using SynapseAI version ${synapse_version}"            
-            synapse_build=$(curl "https://dms.habana-labs.com/api/v1.1/branch/info/v$synapse_version" | jq -r ".release_id")
+            echo "Using SynapseAI version ${synapse_version}"
+            synapse_build=$(curl "${synapse_build_endpoint}" | jq -r ".release_id")
             pt_version=${{ vars.PT_VERSION }}
             BUILD_TAG="Github-vLLM-Fork-${{ github.event.number }}-${{github.run_number}}"
             safe_cmd=${TEST_COMMAND//&/\\&}
@@ -239,17 +244,24 @@ jobs:
             sed -i "s/##PYTORCH_VERSION##/${pt_version}/g" pod.yml
             sed -i "s|##GIT_BRANCH##|$BASE_BRANCH|g" pod.yml
             sed -i "s|##CMD##|$safe_cmd|g" pod.yml
+            sed -i "s|##LOG_REDIRECTION##|$LOG_REDIRECTION|g" pod.yml
             echo "Pod Template Created"
         - name: Run Test
           run: |
             random_string=$(tr -dc 'a-z0-9' </dev/urandom | head -c 10)
+            pod_name="vllm-fork-${{github.event.issue.number}}-${random_string}"
+            set +e
             hlctl create containers \
                 --file=pod.yml \
                 --flavor=${{ matrix.tests.flavor}} \
-                --name="vllm-fork-${{github.event.issue.number}}-${random_string}" \
+                --name="${pod_name}" \
                 --namespace="framework" \
                 --retry \
                 --shm=10240
+            test_status=$?
+            set -e
+            echo "Logs are available at https://logs-browser.k8s-infra.habana-labs.com/files/${pod_name}-tfjob"
+            exit $test_status
         - name: Create Commit Status(Failure)
           uses: actions/github-script@v7
           if: failure()

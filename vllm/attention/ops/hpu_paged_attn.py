@@ -61,11 +61,9 @@ class HPUPagedAttention:
 
     @staticmethod
     def forward_decode(**kwargs) -> torch.Tensor:
+        if kwargs.get("kv_lora_rank"):
+            return ops.flat_pa_mla(**kwargs)
         return ops.flat_pa(**kwargs)
-
-    @staticmethod
-    def forward_prefix(**kwargs) -> torch.Tensor:
-        return ops.prompt_attention_with_context(**kwargs)
 
     @staticmethod
     def swap_blocks(
