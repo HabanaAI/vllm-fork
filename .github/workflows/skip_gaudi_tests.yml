@@ -23,7 +23,7 @@ jobs:
           token: ${{ secrets.GH_PAT }}
       - name: Parse Comment
         run: |
-          MAINTAINERS=$(grep -Eh '^[^#]' .github/CODEOWNERS .github/TESTOWNERS | tr -d '@*' | tr '\n' ' ')
+          MAINTAINERS=$(grep -Eh '^[^#]' .github/CODEOWNERS | tr -d '@*' | tr '\n' ' ')
           COMMENTER=${{ github.event.comment.user.login }}
           echo "Maintainers are: ${MAINTAINERS}"
           echo "Commenter Is: ${COMMENTER}"
