@@ -543,7 +543,7 @@ class FusedMoE(torch.nn.Module):
                       shard_id: str, expert_id: int) -> None:
         tp_rank = get_tensor_model_parallel_rank()
         if self.ep_size > 1:
-            tp_rank = tp_rank // self.ep_size
+            tp_rank = tp_rank % self.tp_size
             # now we want to only load weights for current expert group
             expert_id = expert_id - self.ep_rank * self.num_experts
             if expert_id < 0 or expert_id >= self.num_experts:
