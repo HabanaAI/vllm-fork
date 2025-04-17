@@ -239,6 +239,13 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1,
                                         1, 0)
+        #TODO(hlahkar): remove the check once hpu handles flat tensors
+
+        if current_platform.is_hpu():
+            shape = x.shape
+            x = x.view(shape[0] * shape[1])
+        added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1,
+                                        1, 0)
         embeddings_indices = torch.narrow(
             self.punica_wrapper._embeddings_indices, 1, 0, x.size(0))
 
@@ -265,6 +272,10 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA):
                                                full_lora_a_embeddings,
                                                self.lora_b_stacked,
                                                add_input=True)
+
+        if current_platform.is_hpu():
+            full_output_org = full_output_org.view(shape[0], shape[1],
+                                                   full_output_org.shape[1])
         return full_output.view_as(full_output_org)
 
     @classmethod
@@ -406,7 +417,9 @@ class BaseLinearLayerWithLoRA(BaseLayerWithLoRA):
         # In transformers backend, x and output have extra batch dimension like
         # (1, seq_len, hidden_dim), while punica expects (seq_len, hidden_dim),
         # therefore we need to flatten the batch dimensions.
-        if x.ndim == 3 and output.ndim == 3:
+
+        #TODO(hlahkar): remove the check once hpu handles flat tensors
+        if not current_platform.is_hpu() and x.ndim == 3 and output.ndim == 3:
             output = output.flatten(0, 1)
             x = x.flatten(0, 1)
 
