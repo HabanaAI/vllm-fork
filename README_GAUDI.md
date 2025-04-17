@@ -18,6 +18,7 @@ To achieve the best performance, please follow the methods outlined in the
 ## Quick Start Using Dockerfile
 Set up the container with latest release of Gaudi Software Suite using the Dockerfile:
 
+### Ubuntu
 ```
 $ docker build -f Dockerfile.hpu -t vllm-hpu-env  .
 $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --rm vllm-hpu-env
@@ -28,6 +29,12 @@ $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_
 of [Install Driver and Software](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html#install-driver-and-software) and "Configure Container
 Runtime" section of [Docker Installation](https://docs.habana.ai/en/latest/Installation_Guide/Installation_Methods/Docker_Installation.html#configure-container-runtime).
 Make sure you have ``habanalabs-container-runtime`` package installed and that ``habana`` container runtime is registered.
+
+### Red Hat Enterprise Linux
+```
+$ docker build -f Dockerfile.hpu.ubi -t vllm-hpu-env  .
+$ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --rm vllm-hpu-env
+```
 
 ## Build from Source
 
