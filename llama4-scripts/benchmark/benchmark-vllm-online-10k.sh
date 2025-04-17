@@ -15,16 +15,18 @@ gpu_utils=0.95
 bs=64
 num_prompts=640
 request_rate=inf
-block_size=128
-block_step=256
+block_size=256
+block_step=128
 
 log_name="[inc-staticquant-scalar-fp8matmul-split]online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
 prompt_bs_max=8
 # Increase prompt max seq len bucket just in case there are more tokens than provided due to tokenizer
-prompt_seq_max=$((in_len + $block_size))
-total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size))
-VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size))
+possible_extra_tokens=256
+prompt_seq_min=$((in_len - possible_extra_tokens))
+prompt_seq_max=$((in_len + possible_extra_tokens))
+total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size + possible_extra_tokens))
+VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size - block_step))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len_aligned * bs / block_size + block_step))
 
 model="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct/"
@@ -35,7 +37,7 @@ mkdir -p benchmark_logs
 
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
-VLLM_PROMPT_SEQ_BUCKET_MIN=${in_len} \
+VLLM_PROMPT_SEQ_BUCKET_MIN=${prompt_seq_min} \
 VLLM_PROMPT_SEQ_BUCKET_MAX=${prompt_seq_max} \
 VLLM_DECODE_BS_BUCKET_MIN=${bs} \
 VLLM_DECODE_BS_BUCKET_MAX=${bs} \
@@ -56,8 +58,8 @@ python3 -m vllm.entrypoints.openai.api_server \
     --dtype bfloat16 \
     --use-v2-block-manager \
     --num_scheduler_steps ${multi_step} \
-    --max-model-len 147456 \
-    --max-num-batched-tokens 147456 \
+    --max-model-len ${total_len_aligned} \
+    --max-num-batched-tokens ${total_len_aligned} \
     --use-padding-aware-scheduling \
     --block-size ${block_size} \
     --distributed_executor_backend ray \
@@ -79,8 +81,6 @@ echo ${pid}
 
 ########################################################## Concurrency 64 Sonnet #################################################################
 max_concurrency_client=64
-in_len=10240
-out_len=1024
 start_time=$(date +%s)
 echo "Start to benchmark"
 python3 ../benchmarks/benchmark_serving.py \
