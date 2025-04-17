@@ -105,7 +105,7 @@ $ python setup.py develop
 | Paged KV cache with algorithms enabled for Intel Gaudi accelerators   | vLLM HPU backend contains a custom Paged Attention and cache operators implementations optimized for Gaudi devices.   | N/A   |
 | Custom Intel Gaudi operator implementations   | vLLM HPU backend provides optimized implementations of operators such as prefill attention, Root Mean Square Layer Normalization, Rotary Positional Encoding.     | N/A   |
 | Tensor parallel inference (single-node multi-HPU)     | vLLM HPU backend support multi-HPU inference across a single node with tensor parallelism with Ray and HCCL.  | [Documentation](https://docs.vllm.ai/en/stable/serving/distributed_serving.html)<br>[Example](https://docs.ray.io/en/latest/serve/tutorials/vllm-example.html)<br>[HCCL reference](https://docs.habana.ai/en/latest/API_Reference_Guides/HCCL_APIs/index.html)    |
-| Pipeline parallel inference (single-node multi-HPU)   | vLLM HPU backend support multi-HPU inference across single node with pipeline parallelism.   | [Documentation](https://docs.vllm.ai/en/stable/serving/distributed_serving.html)    |
+| Pipeline parallel inference (single or multi-node multi-HPU)   | vLLM HPU backend support multi-HPU inference across single or multi node with pipeline parallelism.   | [Documentation](https://docs.vllm.ai/en/stable/serving/distributed_serving.html)<br> [How to run](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#pipeline-parallelism)   |
 | Inference with HPU Graphs     | vLLM HPU backend uses HPU Graphs by default for optimal performance. When HPU Graphs are enabled, execution graphs will be recorded ahead of time, to be later replayed during inference, significantly reducing host overheads.  | [Documentation](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html)<br>[vLLM HPU backend execution modes](https://docs.vllm.ai/en/stable/getting_started/gaudi-installation.html#execution-modes)<br>[Optimization guide](https://docs.vllm.ai/en/latest/getting_started/gaudi-installation.html#hpu-graph-capture)    |
 | Inference with torch.compile   | vLLM HPU backend supports inference with torch.compile.    | [vLLM HPU backend execution modes](https://docs.vllm.ai/en/stable/getting_started/gaudi-installation.html#execution-modes)    |
 | Attention with Linear Biases (ALiBi)  | vLLM HPU backend supports models utilizing Attention with Linear Biases (ALiBi) such as mpt-7b.   | [vLLM supported models](https://docs.vllm.ai/en/latest/models/supported_models.html)  |
@@ -500,6 +500,22 @@ Sequence group cmpl-3cbf19b0c6d74b3f90b5d5db2ed2385e-0 is preempted by Preemptio
 
 **Usage of Multi-Step Scheduling feature**
 Enabling of Multi-Step Scheduling is recommended for better decode performance. Refer to vllm-project#6854 for more details.
+
+# Pipeline Parallelism
+
+Pipeline parallelism is a distributed model parallelization technique that splits the model vertically across its layers, distributing different parts of the model across multiple devices.
+With this feature when running a model that does not fit on a single node with tensor parallelism and requires multi-node solution we can split the model vertically accross its layers and distribute the slices accross available nodes.
+For example if we have two nodes - 8 HPUs each, we no longer have to use tensor_parallel_size=16 but instead we can set tensor_parallel_size-8 with pipeline_parallel_size=2.
+Because pipeline parallelism runs pp_size amount of virtual engines on each device we have to accordingly lower max_num_seqs since it acts as a micro batch for each virtual engine.
+
+## How to run
+
+```bash
+vllm serve <model_path> --device hpu --tensor-parallel-size 8 --pipeline_parallel_size 2 --distributed-executor-backend ray
+```
+
+> [!NOTE]
+> Currently pipeline parallelism on lazy mode requires: PT_HPUGRAPH_DISABLE_TENSOR_CACHE=0.
 
 # Other Online Serving Examples
 Please refer to this [collection](https://github.com/HabanaAI/Gaudi-tutorials/tree/main/PyTorch/vLLM_Tutorials/Benchmarking_on_vLLM/Online_Static#quick-start) of static-batched online serving example scripts designed to help the user reproduce performance numbers with vLLM on Gaudi for various types of models and varying context lengths. This a list of the models and examples scripts provided for 2K and 4K context length scenarios:
