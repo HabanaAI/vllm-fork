@@ -366,14 +366,13 @@ def _merge_multimodal_embeddings(
     assert isinstance(num_expected_tokens, int)
 
     flattened = _flatten_embeddings(multimodal_embeddings)
-    # if flattened.shape[0] != num_expected_tokens:
-    #     expr = _embedding_count_expression(multimodal_embeddings)
-    #     raise ValueError(
-    #         f"Attempted to assign {expr} = {flattened.shape[0]} "
-    #         f"multimodal tokens to {num_expected_tokens} placeholders")
+    if flattened.shape[0] != num_expected_tokens:
+        expr = _embedding_count_expression(multimodal_embeddings)
+        raise ValueError(
+            f"Attempted to assign {expr} = {flattened.shape[0]} "
+            f"multimodal tokens to {num_expected_tokens} placeholders")
 
-    # flattened could have dummy data from the padding after num_expected_tokens
-    inputs_embeds[is_multimodal] = flattened[:num_expected_tokens, :]
+    inputs_embeds[is_multimodal] = flattened
 
     return inputs_embeds
 
