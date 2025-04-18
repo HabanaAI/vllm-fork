@@ -1861,8 +1861,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _dummy_run(self, max_num_batched_tokens: int) -> None:
         assert max_num_batched_tokens == 1
-        self.warmup_scenario(max_num_batched_tokens, 1, False, None, False,
-                             True, 0, 1, True)
+        self.warmup_scenario(max_num_batched_tokens, 128, False, None, False,
+                             True, False, 0, 1, True)
         return
 
     def warmup_scenario(self,
@@ -1978,7 +1978,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if profiler:
             profiler.stop()
         self.profiler.end()
-        gc.collect()
+        # don't do gc for dummy run
+        if not (batch_size == 1 and seq_len == 128):
+            gc.collect()
 
     def remove_all_loras(self):
         if not self.lora_manager:
