@@ -110,18 +110,21 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
     yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
     zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
-    xx = torch.logical_and(yy, zz)
+    xx = torch.logical_and(yy, zz).float()
     # can reduce sum externally or as batchmatmul
     #TODO: einsum with tensor dimension too big doesn't work. Register max size error.
     #We can always move to CPU for all einsum without shape checking if perf impact is minimal.
     if xx.shape[-1] > 40000:
         print("einsum running on CPU : ", xx.shape)
         xx = xx.to("cpu")
-        res = torch.einsum('bi,bj->bij', xx, xx)
+        res = torch.einsum('bi,bj->ij', xx, xx)
+        #breakpoint()
         res = res.to("hpu")
-        res = torch.sum(res, dim=0)
+        #res = torch.sum(res, dim=0)
     else:
-        res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        #res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
+        res = torch.einsum('bi,bj->ij', xx, xx)
+    #print('.....MASK SHAPE', res.shape, indices)
     #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
     return res.bool()
 
@@ -396,6 +399,7 @@ class Qwen2_5_VisionAttention(nn.Module):
 
                 #TODO:after 1by1 branch, even with long sequence, FusedSDPA is much faster
                 # Setting the number here to the max number we get in profile_run.
+                #print('BATCHSIZE:: ', batch_size, '.........................................')
                 if q1.shape[2] <= 65536: # this crossover point should be measured
                     fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)  # Bx1xNxN
                 else:
