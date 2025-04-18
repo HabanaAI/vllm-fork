@@ -13,7 +13,6 @@ import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.utils import Matmul, Softmax, VLLMKVCache
 
-import vllm.envs as envs
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
                                               AttentionMetadata, AttentionType)
@@ -75,14 +74,14 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     # Currently, input sequences can only contain all prompts
     # or all decoding. True if all sequences are prompts.
     is_prompt: bool
+    block_size: int
     attn_bias: Optional[torch.Tensor]
     seq_lens_tensor: Optional[torch.Tensor]
     context_lens_tensor: Optional[torch.Tensor]
     seq_lens: Optional[List[int]] = None
     encoder_seq_lens: Optional[List[int]] = None
     encoder_seq_lens_tensor: Optional[torch.Tensor] = None
-    cross_block_indices: Optional[torch.Tensor] = None
-    cross_block_offsets: Optional[torch.Tensor] = None
+    cross_block_indices_with_offsets: Optional[torch.Tensor] = None
     cross_block_list: Optional[torch.Tensor] = None
     cross_slot_mapping: Optional[torch.Tensor] = None
     cross_block_mapping: Optional[torch.Tensor] = None
@@ -205,16 +204,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
-        block_indices = attn_metadata.block_indices
-        block_offsets = attn_metadata.block_offsets
+        block_indices_with_offsets = attn_metadata.block_indices_with_offsets
         key_cache = None
         value_cache = None
-        if attn_metadata.is_prompt and self.attn_type \
-                is not AttentionType.ENCODER_ONLY \
-            and (attn_metadata.block_list is None if envs.VLLM_USE_V1
-                 else True):
-            key = key.unflatten(0, (block_indices.size(0), -1))
-            value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -222,10 +214,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices,
-                                     block_offsets)
-            value_cache = self.v_cache(value, value_cache, block_indices,
-                                       block_offsets)
+            key_cache = self.k_cache(key, key_cache,
+                                     block_indices_with_offsets)
+            value_cache = self.v_cache(value, value_cache,
+                                       block_indices_with_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -254,7 +246,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 attn_bias=attn_bias,
                 valid_seq_lengths=attn_metadata.seq_lens_tensor,
                 **self.common_attention_args(block_list, key_cache,
-                                             value_cache))
+                                             value_cache,
+                                             attn_metadata.block_size))
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
@@ -264,14 +257,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_bias=attn_metadata.attn_bias,
                 block_groups=attn_metadata.block_groups,
                 **self.common_attention_args(attn_metadata.block_list,
-                                             key_cache, value_cache))
+                                             key_cache, value_cache,
+                                             attn_metadata.block_size))
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
     def common_attention_args(self,
                               block_list=None,
                               key_cache=None,
-                              value_cache=None):
+                              value_cache=None,
+                              block_size=None):
         fsdpa_op = self.fused_scaled_dot_product_attention.apply \
             if self.fused_scaled_dot_product_attention is not None else None
 
@@ -288,6 +283,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             'block_list': block_list,
             'key_cache': key_cache,
             'value_cache': value_cache,
+            'block_size': block_size,
         }
 
     def forward_encoder_decoder(
@@ -331,8 +327,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         else:
             assert value is None
 
-        block_indices = attn_metadata.cross_block_indices
-        block_offsets = attn_metadata.cross_block_offsets
+        block_indices_with_offsets = \
+            attn_metadata.cross_block_indices_with_offsets
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -340,10 +336,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices,
-                                     block_offsets)
-            value_cache = self.v_cache(value, value_cache, block_indices,
-                                       block_offsets)
+            key_cache = self.k_cache(key, key_cache,
+                                     block_indices_with_offsets)
+            value_cache = self.v_cache(value, value_cache,
+                                       block_indices_with_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -373,7 +369,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_bias=attn_bias,
                 block_groups=block_groups,
                 **self.common_attention_args(block_list, key_cache,
-                                             value_cache))
+                                             value_cache,
+                                             attn_metadata.block_size))
         # Reshape the output tensor.
         return output.view(batch_size, -1, hidden_size)
 
