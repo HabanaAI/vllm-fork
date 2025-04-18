@@ -297,8 +297,6 @@ class DeepseekV2Attention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         if is_hpu:
             # need reshape from tensor(x0, y0) to tensor(x1) for hpu
@@ -353,7 +351,7 @@ class DeepseekV2Attention(nn.Module):
             q = q.reshape(_batch_size, q.shape[0] // _batch_size, q.shape[1])
             k = k.reshape(_batch_size, k.shape[0] // _batch_size, k.shape[1])
             v = v.reshape(_batch_size, v.shape[0] // _batch_size, v.shape[1])
-        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+        attn_output = self.attn(q, k, v)
         if is_hpu:
             # need restore from tensor(x0, y0, z0) to tensor(x1, y1) for hpu
             attn_output = attn_output.reshape(
@@ -500,8 +498,6 @@ class DeepseekV2MLAAttention(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         if self.q_lora_rank is not None:
             ckq = self.q_a_proj(hidden_states)[0]
@@ -511,8 +507,7 @@ class DeepseekV2MLAAttention(nn.Module):
         kv_c, k_pe = self.kv_a_proj_with_mqa(hidden_states)[0].split(
             [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
-        return self.mla_attn(hidden_states_or_q_c, kv_c_normed, k_pe, kv_cache,
-                             attn_metadata)
+        return self.mla_attn(hidden_states_or_q_c, kv_c_normed, k_pe, output_shape=hidden_states.shape)
 
 
 class DeepseekV2DecoderLayer(nn.Module):
@@ -581,8 +576,6 @@ class DeepseekV2DecoderLayer(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
     ) -> torch.Tensor:
         # Self Attention
@@ -595,8 +588,6 @@ class DeepseekV2DecoderLayer(nn.Module):
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
-            kv_cache=kv_cache,
-            attn_metadata=attn_metadata,
         )
 
         # Fully Connected
@@ -657,8 +648,6 @@ class DeepseekV2Model(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
@@ -673,12 +662,8 @@ class DeepseekV2Model(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
-        for i in range(self.start_layer, self.end_layer):
-            layer = self.layers[i]
-            kvcaches = None if kv_caches is None else kv_caches[i - self.start_layer]
-            hidden_states, residual = layer(positions, hidden_states,
-                                            kvcaches,
-                                            attn_metadata, residual)
+        for layer in self.layers[self.start_layer:self.end_layer]:
+            hidden_states, residual = layer(positions, hidden_states, residual)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
@@ -715,13 +700,10 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        kv_caches: List[torch.Tensor],
-        attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        hidden_states = self.model(input_ids, positions, kv_caches,
-                                   attn_metadata, intermediate_tensors,
+        hidden_states = self.model(input_ids, positions, intermediate_tensors,
                                    inputs_embeds)
         return hidden_states
 
@@ -778,13 +760,9 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             if "rotary_emb.inv_freq" in name:
                 continue
 
-            # TODO(simon): support nextn predict layers
-            if hasattr(self.config, "num_nextn_predict_layers"
-                       ) and self.config.num_nextn_predict_layers > 0:
-                assert self.config.num_nextn_predict_layers == 1
-                layer_idx = self.config.num_hidden_layers
-                if name.startswith(f"model.layers.{layer_idx}"):
-                    continue
+            spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
+            if spec_layer is not None:
+                continue  # skip spec decode layers for main model
 
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 # Skip non-stacked layers and experts (experts handled below).
@@ -860,3 +838,15 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
 class DeepseekV3ForCausalLM(DeepseekV2ForCausalLM):
     pass
+
+
+def get_spec_layer_idx_from_weight_name(config: PretrainedConfig,
+                                         weight_name: str) -> Optional[int]:
+     if hasattr(config,
+                "num_nextn_predict_layers") and (config.num_nextn_predict_layers
+                                                 > 0):
+         layer_idx = config.num_hidden_layers
+         for i in range(config.num_nextn_predict_layers):
+             if weight_name.startswith(f"model.layers.{layer_idx+i}."):
+                 return layer_idx + i
+     return None

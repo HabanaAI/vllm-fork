@@ -153,8 +153,10 @@ class Attention(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
+        # For some alternate attention backends like MLA the attention output
+        # shape does not match the query shape, so we optionally let the model
+        # definition specify the output tensor shape.
+        output_shape: Optional[torch.Size] = None,
     ) -> torch.Tensor:
         # NOTE: please avoid accessing `kv_cache` and `attn_metadata` arguments
         # directly, use `self.kv_cache` and
@@ -164,17 +166,25 @@ class Attention(nn.Module):
             if ctx_attn_metadata.enable_kv_scales_calculation:
                 self.calc_kv_scales(key, value)
         if self.use_output:
-            output = torch.empty_like(query)
-            hidden_size = query.size(-1)
-            # Reshape the query, key, and value tensors.
-            # NOTE(woosuk): We do this outside the custom op to minimize the
-            # CPU overheads from the non-CUDA-graph regions.
-            query = query.view(-1, self.num_heads, self.head_size)
-            output = output.view(-1, self.num_heads, self.head_size)
-            if key is not None:
-                key = key.view(-1, self.num_kv_heads, self.head_size)
-            if value is not None:
-                value = value.view(-1, self.num_kv_heads, self.head_size)
+            output_shape = (output_shape
+                            if output_shape is not None else query.shape)
+            output = torch.empty(output_shape,
+                                 dtype=query.dtype,
+                                 device=query.device)
+            hidden_size = output_shape[-1]
+            # We skip reshaping query, key and value tensors for the MLA
+            # backend since these tensors have different semantics and are
+            # processed differently.
+            if not self.use_mla:
+                # Reshape the query, key, and value tensors.
+                # NOTE(woosuk): We do this outside the custom op to minimize the
+                # CPU overheads from the non-CUDA-graph regions.
+                query = query.view(-1, self.num_heads, self.head_size)
+                output = output.view(-1, self.num_heads, self.head_size)
+                if key is not None:
+                    key = key.view(-1, self.num_kv_heads, self.head_size)
+                if value is not None:
+                    value = value.view(-1, self.num_kv_heads, self.head_size)
             if self.use_direct_call:
                 forward_context: ForwardContext = get_forward_context()
                 ctx_attn_metadata = forward_context.attn_metadata
