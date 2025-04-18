@@ -495,25 +495,6 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
-        if is_hpu:
-            num_experts = self.local_num_experts
-            ep_shift = self.ep_rank * num_experts
-            from vllm_hpu_extension.ops import (VllmMixtureOfExpertsOp,
-                                                VllmMixtureOfExpertsOpFP8)
-            experts_min, experts_max = ep_shift, num_experts + ep_shift - 1
-            if quant_config is not None:
-                moe_op = VllmMixtureOfExpertsOpFP8(
-                    num_experts,
-                    experts_min,
-                    experts_max,
-                )
-            else:
-                moe_op = VllmMixtureOfExpertsOp(
-                    num_experts,
-                    experts_min,
-                    experts_max,
-                )
-            self.moe_op = moe_op
 
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
@@ -547,7 +528,30 @@ class FusedMoE(torch.nn.Module):
                     "CompressedTensorsWNA16MarlinMoEMethod",
                     "CompressedTensorsWNA16MoEMethod")):
             moe_quant_params["intermediate_size_full"] = intermediate_size
+        if is_hpu:
+            num_experts = self.local_num_experts
+            ep_shift = self.ep_rank * num_experts
+            from vllm_hpu_extension.ops import (VllmMixtureOfExpertsOp,
+                                                VllmMixtureOfExpertsOpFP8)
 
+            from vllm.model_executor.layers.quantization.fp8 import (
+                Fp8MoEMethod)
+
+            experts_min, experts_max = ep_shift, num_experts + ep_shift - 1
+            if quant_config is not None and isinstance(self.quant_method,
+                                                       Fp8MoEMethod):
+                moe_op = VllmMixtureOfExpertsOpFP8(
+                    num_experts,
+                    experts_min,
+                    experts_max,
+                )
+            else:
+                moe_op = VllmMixtureOfExpertsOp(
+                    num_experts,
+                    experts_min,
+                    experts_max,
+                )
+            self.moe_op = moe_op
         self.quant_method.create_weights(layer=self, **moe_quant_params)
 
     def _load_per_tensor_weight_scale(self, shard_id: str,
