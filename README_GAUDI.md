@@ -117,7 +117,6 @@ $ python setup.py develop
 | Pipeline parallel inference (single or multi-node multi-HPU)   | vLLM HPU backend supports multi-HPU inference across single or multi-node with pipeline parallelism.   | [Documentation](https://docs.vllm.ai/en/stable/serving/distributed_serving.html)<br> [How to run](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#pipeline-parallelism)   |
 | Inference with HPU Graphs     | vLLM HPU backend uses HPU Graphs by default for optimal performance. When HPU Graphs are enabled, execution graphs will be recorded ahead of time, to be later replayed during inference, significantly reducing host overheads.  | [Documentation](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html)<br>[vLLM HPU backend execution modes](https://docs.vllm.ai/en/stable/getting_started/gaudi-installation.html#execution-modes)<br>[Optimization guide](https://docs.vllm.ai/en/latest/getting_started/gaudi-installation.html#hpu-graph-capture)    |
 | Inference with torch.compile   | vLLM HPU backend supports inference with torch.compile.    | [vLLM HPU backend execution modes](https://docs.vllm.ai/en/stable/getting_started/gaudi-installation.html#execution-modes)    |
-| Attention with Linear Biases (ALiBi)  | vLLM HPU backend supports models utilizing Attention with Linear Biases (ALiBi) such as mpt-7b.   | [vLLM supported models](https://docs.vllm.ai/en/latest/models/supported_models.html)  |
 | INC quantization  | vLLM HPU backend supports FP8 model and KV cache quantization and calibration with Intel Neural Compressor (INC).     | [Documentation](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_FP8.html)   |
 | AutoAWQ quantization | vLLM HPU backend supports the inference with models quantized using AutoAWQ library. | [Library](https://github.com/casper-hansen/AutoAWQ) |
 | AutoGPTQ quantization | vLLM HPU backend supports the inference with models quantized using AutoGPTQ library. | [Library](https://github.com/AutoGPTQ/AutoGPTQ) |
@@ -130,6 +129,8 @@ $ python setup.py develop
 | Multinode support   | vLLM HPU backend supports distributed, multiple nodes inferencing with Ray.    | <REF>  |
 | vLLM v1 architecture (early release)   | V1 architecture is now available for HPU backend, and will gradually enable it for every use case we plan to support.   | [Documentation](https://docs.vllm.ai/en/latest/serving/distributed_serving.html) |
 | Guided decode   | vLLM HPU supports guided decoding backend for the generation of structured outputs.   | [Documentation](https://docs.vllm.ai/en/latest/features/structured_outputs.html)  |
+| Delayed Sampling  (experimental) | vLLM HPU supports delayed sampling scheduling for asynchronous execution, enabled by `VLLM_DELAYED_SAMPLING=true` environment variable.   | N/A |
+| Exponential bucketing (experimental) | vLLM HPU supports exponential bucketing spacing instead of linear to automate configuration of bucketing mechanism, enabled by `VLLM_EXPONENTIAL_BUCKETING=true` environment variable.   | N/A |
 
 > [!NOTE]
 > All specified features are supported with --enforce-eager flag as well.
@@ -153,9 +154,9 @@ The following configurations have been validated to be function with Gaudi2 or G
 | [meta-llama/Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)     | 1, 2, 8    | BF16    | Gaudi2, Gaudi3|
 | [meta-llama/Meta-Llama-3-70B](https://huggingface.co/meta-llama/Meta-Llama-3-70B)     | 8    | BF16    |Gaudi2, Gaudi3|
 | [meta-llama/Meta-Llama-3-70B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-70B-Instruct)     | 8    | BF16    |Gaudi2, Gaudi3|
-| [meta-llama/Meta-Llama-3.1-8B](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B)     | 1    | BF16, FP8, FP16 (Gaudi2)    | Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3.1-8B](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B)     | 1    | BF16, FP8, INT4, FP16 (Gaudi2)    | Gaudi2, Gaudi3|
 | [meta-llama/Meta-Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct)     | 1    | BF16, FP8    | Gaudi2, Gaudi3|
-| [meta-llama/Meta-Llama-3.1-70B](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B)    | 2, 4, 8    | BF16, FP8   |Gaudi2, Gaudi3|
+| [meta-llama/Meta-Llama-3.1-70B](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B)    | 2, 4, 8    | BF16, FP8, INT4   |Gaudi2, Gaudi3|
 | [meta-llama/Meta-Llama-3.1-70B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-70B-Instruct)     | 2, 4, 8    | BF16, FP8, FP16 (Gaudi2)    |Gaudi2, Gaudi3|
 | [meta-llama/Meta-Llama-3.1-405B](https://huggingface.co/meta-llama/Meta-Llama-3.1-405B)     | 8    | BF16, FP8    |Gaudi3|
 | [meta-llama/Meta-Llama-3.1-405B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-405B-Instruct)     | 8    | BF16, FP8    |Gaudi3|
@@ -413,6 +414,13 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
 > [!NOTE]
 > Model config may report very high max_model_len,
 > please set it to max input_tokens+output_tokens rounded up to multiple of block_size as per actual requirements.
+
+> [!TIP]
+> When a deployed workload does not utilize the full context that a model can handle, it is good practice to limit the maximum values upfront based on the input and output token lengths that will be generated after serving the vLLM server.
+> EXAMPLE:
+> Let's assume that we want to deploy text generation model Qwen2.5-1.5B, which has a defined "max_position_embeddings" of 131072 (our max_model_len). At the same time, we know that our workload pattern will not use the full context length because we expect a maximum input token size of 1K and predict generating a maximum of 2K tokens as output. In this case, it is not necessary to start the vLLM server to be ready for the full context length. Instead, we should limit it upfront to achieve faster service preparation and decrease warmup time. The recommended values in this example should be:
+> - `--max_model_len`: 3072 - the sum of input and output sequences (1+2)*1024  
+> - `VLLM_PROMPT_SEQ_BUCKET_MAX`: 1024 - the maximum input token size that we expect to handle
 
 - `VLLM_HANDLE_TOPK_DUPLICATES`, if ``true`` - handles duplicates that are outside of top-k. `false` by default.
 - `VLLM_CONFIG_HIDDEN_LAYERS` - configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. The default is 1.
