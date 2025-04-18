@@ -169,6 +169,14 @@ def make_cpu_tensor(data, max_len, pad, dtype, flat) -> torch.Tensor:
                                 dtype=dtype,
                                 device='cpu')
 
+def make_hpu_tensor(data, max_len, pad, dtype, flat, device) -> torch.Tensor:
+    if flat:
+        data = [flatten(data)]
+    return make_tensor_with_pad(data,
+                                max_len=max_len,
+                                pad=pad,
+                                dtype=dtype,
+                                device=device)
 
 def get_target_layer_suffix_list(model_type) -> list[str]:
     # This sets the suffix for the hidden layer name, which is controlled by
@@ -1039,16 +1047,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def make_attn_bias(self, seq_lens, max_prompt_len, dtype):
         seq_pos = [list(range(sl)) for sl in seq_lens]
         seq_idx = [[i] * sl for i, sl in enumerate(seq_lens)]
-        seq_pos_t = make_cpu_tensor(seq_pos,
+        seq_pos_t = make_hpu_tensor(seq_pos,
                                     max_len=max_prompt_len,
                                     pad=-1,
                                     dtype=torch.long,
-                                    flat=self.use_merged_prefill)
-        seq_idx_t = make_cpu_tensor(seq_idx,
+                                    flat=self.use_merged_prefill,
+                                    device=self.device)
+        seq_idx_t = make_hpu_tensor(seq_idx,
                                     max_len=max_prompt_len,
                                     pad=-1,
                                     dtype=torch.long,
-                                    flat=self.use_merged_prefill)
+                                    flat=self.use_merged_prefill,
+                                    device=self.device)
         q_seq_idx_t = seq_idx_t.unsqueeze(-1)
         kv_seq_idx_t = seq_idx_t.unsqueeze(-2)
         q_seq_pos_t = seq_pos_t.unsqueeze(-1)
@@ -1318,7 +1328,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = self.move_to_device(seq_lens_tensor)
         slot_mapping = self.move_to_device(slot_mapping)
         context_lens_tensor = self.move_to_device(context_lens_tensor)
-        attn_bias = self.move_to_device(attn_bias)
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
