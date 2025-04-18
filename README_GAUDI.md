@@ -530,10 +530,16 @@ vllm serve <model_path> --device hpu --tensor-parallel-size 8 --pipeline_paralle
 # Multi-node support
 
 vLLM works with multi-node environment setup via Ray. To run models on multiple nodes run following steps:
-1. Pre-requisites, follow the steps on all nodes:
+
+## 1. Pre-requisites, follow the steps on all nodes:
+
 - Install latest [vllm-fork](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#build-and-install-vllm)
-- Check if all Gaudi NIC ports are up <br>
-Note : Following commands should be run on the host and NOT inside the container. <br>
+
+- Check if all Gaudi NIC ports are up.
+
+> [!NOTE]
+> Following commands should be run on the host and NOT inside the container.
+
 ```bash
 cd /opt/habanalabs/qual/gaudi2/bin 
 ./manage_network_ifs.sh --status 
@@ -542,21 +548,29 @@ cd /opt/habanalabs/qual/gaudi2/bin
 ./manage_network_ifs.sh --up
 # Give it a minute for the NIC's to flip and check the status again
 ```
+
 - Set following envs:
+
 ```bash
 # Check the network interface for outbound/inbound comms. Command 'ip a' or 'ifconfig' should list all the interfaces
 export GLOO_SOCKET_IFNAME=eth0
 export HCCL_SOCKET_IFNAME=eth0
 ```
-2. Start Ray on head node:
+
+### 2. Start Ray on head node:
+
 ```bash
 ray start --head --port=6379
 ```
-3. Add workers to the Ray cluster:
+
+#### 3. Add workers to the Ray cluster:
+
 ```bash
 ray start --address='<ip-of-ray-head-node>:6379'
 ```
-4. Start vLLM server
+
+#### 4. Start vLLM server:
+
 ```bash
 vllm serve meta-llama/Llama-3.1-405B-Instruct --dtype bfloat16 --max-model-len  2048 --block-size 128 --max-num-seqs 32 --tensor-parallel-size 16 --distributed-executor-backend ray
 ```
