@@ -31,7 +31,7 @@ of [Install Driver and Software](https://docs.habana.ai/en/latest/Installation_G
 Runtime" section of [Docker Installation](https://docs.habana.ai/en/latest/Installation_Guide/Installation_Methods/Docker_Installation.html#configure-container-runtime).
 Make sure you have ``habanalabs-container-runtime`` package installed and that ``habana`` container runtime is registered.
 
-### Red Hat Enterprise Linux
+### Red Hat Enterprise Linux for use with Red Hat OpenShift AI.
 
 ```
 $ docker build -f Dockerfile.hpu.ubi -t vllm-hpu-env  .
