@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import argparse
+import asyncio
 import ipaddress
 import itertools
 import json
@@ -8,6 +9,8 @@ import os
 import sys
 import threading
 from abc import ABC, abstractmethod
+from collections import deque
+from contextlib import asynccontextmanager, suppress
 from typing import Callable, Optional
 
 import aiohttp
@@ -32,6 +35,38 @@ class SchedulingPolicy(ABC):
         raise NotImplementedError("Scheduling Proxy is not set.")
 
 
+def deep_hash_dict(d: dict) -> int:
+    """Hashes a dict deeply by serializing it to a stable JSON string."""
+    json_str = json.dumps(d, sort_keys=True)
+    return hash(json_str)
+
+
+class HashableQueue:
+
+    def __init__(self):
+        self.queue = deque()
+        self.items_set = set()
+
+    def put(self, item):
+        item_hash = deep_hash_dict(item)
+        if item_hash not in self.items_set:
+            self.queue.append(item)
+            self.items_set.add(item_hash)
+
+    def get(self):
+        item = self.queue.popleft()
+        item_hash = deep_hash_dict(item)
+        self.items_set.remove(item_hash)
+        return item
+
+    def contains(self, item):
+        item_hash = deep_hash_dict(item)
+        return item_hash in self.items_set
+
+    def qsize(self):
+        return len(self.items_set)
+
+
 class Proxy:
 
     def __init__(
@@ -53,7 +88,10 @@ class Proxy:
         self.scheduling_policy = scheduling_policy
         self.custom_create_completion = custom_create_completion
         self.custom_create_chat_completion = custom_create_chat_completion
+        self.send_requests_list = HashableQueue()
         self.router = APIRouter()
+        logger.info("proxy server is starting..., decode_instances: %s",
+                    decode_instances)
         self.setup_routes()
 
     def setup_routes(self):
@@ -229,6 +267,20 @@ class Proxy:
                 logger.error("Unexpected error: %s", str(e))
                 raise HTTPException(status_code=500, detail=str(e)) from e
 
+    async def fire_and_forget_post(self, url, payload):
+
+        async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
+            headers = {
+                "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
+            }
+            try:
+                async with session.post(url, headers=headers,
+                                        json=payload) as response:
+                    return await response.text()
+            except Exception as e:
+                logger.error("Unexpected error: %s", str(e))
+                raise HTTPException(status_code=500, detail=str(e)) from e
+
     def schedule(self, cycler: itertools.cycle) -> str:
         return self.scheduling_policy.schedule(cycler)
 
@@ -241,10 +293,77 @@ class Proxy:
         }
         return status
 
+    async def process_queued_requests(self):
+        n_workers = len(self.decode_instances)
+        waiting_time = 0
+        while True:
+            if self.send_requests_list.qsize() == 0:
+                await asyncio.sleep(0.1)
+                continue
+
+            if self.send_requests_list.qsize() < n_workers:
+                # If there are fewer than n_workers requests, wait for a bit
+                waiting_time += 0.1
+                if waiting_time < 5:
+                    logger.info("Waiting for more requests.")
+                    await asyncio.sleep(0.1)
+                    continue
+                else:
+                    logger.info(
+                        "Still can't collect %s requests, will try padding.",
+                        str(n_workers))
+
+            waiting_time = 0
+            # Pull up to n_workers requests
+
+            batch = []
+            fetch_num_requests = min(n_workers,
+                                     self.send_requests_list.qsize())
+            for _ in range(fetch_num_requests):
+                batch.append(self.send_requests_list.get())
+            logger.info("Getting %s requests from queue...", str(len(batch)))
+
+            # If fewer than n_workers, duplicate to reach n_workers
+            actual_len = len(batch)
+            padding_len = n_workers - actual_len
+            if padding_len == 0:
+                continue
+
+            request = batch[0]
+
+            logger.info("padding requests length is %s", str(len(batch)))
+            tasks = []
+            for _ in range(padding_len):
+                decode_instance = self.schedule(self.decode_cycler)
+                logger.info(
+                    "Forwarding padding request to decode instance: %s",
+                    str(decode_instance))
+                try:
+                    tasks.append(
+                        self.fire_and_forget_post(
+                            f"http://{decode_instance}/v1/completions",
+                            request))
+                except HTTPException as http_exc:
+                    self.remove_instance_endpoint("decode", decode_instance)
+                    logger.error("Decode instance error: {}", http_exc)
+            await asyncio.gather(*tasks)
+
+    async def get_pass_approval(self, request):
+        self.send_requests_list.put(request)
+        # wait until request is offlist
+        while True:
+            if self.send_requests_list.contains(request):
+                await asyncio.sleep(0.1)
+                continue
+            else:
+                break
+
     async def create_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
-            
+
+            await self.get_pass_approval(request)
+
             if len(self.prefill_instances) > 0:
                 kv_prepare_request = request.copy()
                 kv_prepare_request["max_tokens"] = 1
@@ -261,6 +380,8 @@ class Proxy:
 
             # Perform kv recv and decoding stage
             decode_instance = self.schedule(self.decode_cycler)
+            logger.info("Forwarding actual request to decode instance: %s",
+                        str(decode_instance))
 
             try:
                 generator = self.forward_request(
@@ -272,12 +393,12 @@ class Proxy:
             return response
         except Exception:
             import sys
-
-            exc_info = sys.exc_info()
-            print("Error occurred in disagg proxy server")
-            print(exc_info)
+            import traceback
+            logger.error("Error in create_completion: %s", str(sys.exc_info()))
+            traceback.print_exc()
 
     async def create_chat_completion(self, raw_request: Request):
+        logger.info("Received request for completion.")
         try:
             request = await raw_request.json()
 
@@ -310,8 +431,8 @@ class Proxy:
         except Exception:
             exc_info = sys.exc_info()
             error_messages = [str(e) for e in exc_info if e]
-            print("Error occurred in disagg proxy server")
-            print(error_messages)
+            logger.error("Error occurred in disagg proxy server, %s",
+                         str(exc_info))
             return StreamingResponse(content=iter(error_messages),
                                      media_type="text/event-stream")
 
@@ -408,8 +529,26 @@ class ProxyServer:
 
     def run_server(self):
         app = FastAPI()
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            # Start your background task
+            background_task = asyncio.create_task(
+                self.proxy_instance.process_queued_requests())
+
+            yield  # app runs during this
+
+            # On shutdown: clean up
+            background_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await background_task
+
         app.include_router(self.proxy_instance.router)
-        config = uvicorn.Config(app, host="0.0.0.0", port=self.port, loop="uvloop")
+        app.router.lifespan_context = lifespan
+        config = uvicorn.Config(app,
+                                host="0.0.0.0",
+                                port=self.port,
+                                loop="uvloop")
         server = uvicorn.Server(config)
         server.run()
 
