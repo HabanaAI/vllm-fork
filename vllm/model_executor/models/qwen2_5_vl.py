@@ -1225,7 +1225,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         image_input: Optional[tuple[torch.Tensor, ...]] = None,
         video_input: Optional[tuple[torch.Tensor, ...]] = None,
     ) -> torch.Tensor:
-
         inputs_embeds = self.get_input_embeddings(input_ids)
         if image_input is not None:
             image_embeds = self._process_image_input(image_input)

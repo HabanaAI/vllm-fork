@@ -97,7 +97,8 @@ class VisionBuckets():
         if envvar == "":
             #TODO:with profile_run, the bucket of 65536 is added, so the pixel values
             #bigger than 12800 below always padded to 65536 which is too big.
-            self.multimodal_buckets = [1600, 3200, 4800, 6400, 9600, 12800]
+            #self.multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544, 16384, 26500, 40000, 65536]
+            self.multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544]
         else:
             self.multimodal_buckets = [int(i) for i in envvar.split(',')]
 
@@ -105,7 +106,8 @@ class VisionBuckets():
         for mm_bucket in self.multimodal_buckets:
             if curr_num_image_patches <= mm_bucket:
                 return mm_bucket
-        self.multimodal_buckets += [curr_num_image_patches] # a shape larger than any that was compiled before. its gonna be compiled now, so save it for the future
+        #Remove dynamic bucket expands since this is not done for the language model.
+        #self.multimodal_buckets += [curr_num_image_patches] # a shape larger than any that was compiled before. its gonna be compiled now, so save it for the future
         return curr_num_image_patches
 
     def __repr__(self):
@@ -1051,10 +1053,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return False
         if self.skip_warmup:
             return True
-        if not max_pixels or not self.graphed_multimodal_buckets:
+        if not max_pixels:
             return (batch_size, seq_len, is_prompt) in self.graphed_buckets
         else:
-            return (batch_size, seq_len, is_prompt, max_pixels) in self.graphed_buckets
+            #TODO: We might need to check both language bucket and multimodal bucket
+            # and return True only it's avialble, or return seperately.
+            return (max_pixels) in self.graphed_multimodal_buckets
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -1430,6 +1434,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             enable_kv_scales_calculation=False,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
+
         for t in multi_modal_kwargs:
             if torch.is_tensor(multi_modal_kwargs[t]):
                 multi_modal_kwargs[t] = multi_modal_kwargs[t].to(
@@ -2119,8 +2124,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
+        max_batch_size = max_batch_size if not self.model_is_mrope else 1
         self.warmup_scenario(
-            batch_size=1,
+            batch_size=max_batch_size,
             seq_len=max_seq_len,
             is_prompt=True,
             kv_caches=kv_caches,
@@ -2309,6 +2315,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         batch_size = 1
         phase = 'Multimodal'
         num_candidates = len(self.multimodal_buckets)
+
         for i, max_pixels in enumerate(self.multimodal_buckets):
             self.log_warmup_multimodal(phase, i, num_candidates,
                                        batch_size, seq_len,
@@ -2326,7 +2333,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
-        self._warmup_multimodal(kv_caches)
+        if is_prompt:
+            self._warmup_multimodal(kv_caches)
 
     def warmup_graphs(self,
                       strategy,
@@ -2893,8 +2901,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt,
-                                          self.model_is_mrope)
+            if self.model_is_mrope and is_prompt and hasattr(model_input, 'multi_modal_kwargs') and \
+                model_input.multi_modal_kwargs is not None and 'pixel_values' in model_input.multi_modal_kwargs:
+                max_pixel = model_input.multi_modal_kwargs['pixel_values'].shape[-2]            
+                #print(f"max_pixel: {max_pixel}, count:{(model_input.input_tokens == 151655).sum().item()}, grid_thw: {model_input.multi_modal_kwargs['image_grid_thw']}")
+            else:
+                max_pixel = None
+
+            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt, max_pixels=max_pixel)
             self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None
