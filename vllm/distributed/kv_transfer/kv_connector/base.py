@@ -130,6 +130,7 @@ class KVConnectorBase(ABC):
         kv_caches: List[torch.Tensor],
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
+        input_tokens_tensor_cpu: torch.Tensor,
     ) -> None:
         raise NotImplementedError
 

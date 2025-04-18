@@ -82,10 +82,11 @@ class KVTransferAgent:
         kv_caches: List[torch.Tensor],
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
+        input_tokens_tensor_cpu: torch.Tensor,
     ) -> None:
         self.connector.send_kv_caches_and_hidden_states_hpu(
             model_executable, model_input, kv_caches,
-            hidden_or_intermediate_states)
+            hidden_or_intermediate_states, input_tokens_tensor_cpu)
 
     def recv_kv_caches_and_hidden_states_hpu(
         self, model_executable: torch.nn.Module,
