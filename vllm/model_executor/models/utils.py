@@ -373,6 +373,7 @@ def _merge_multimodal_embeddings(
             f"multimodal tokens to {num_expected_tokens} placeholders")
 
     inputs_embeds[is_multimodal] = flattened
+
     return inputs_embeds
 
 
@@ -597,15 +598,12 @@ def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
 
     def make_empty_intermediate_tensors(
         batch_size: int,
-        context_size: int,
         dtype: torch.dtype,
         device: torch.device,
     ) -> IntermediateTensors:
         return IntermediateTensors({
             key:
-            torch.zeros((batch_size, context_size, hidden_size),
-                        dtype=dtype,
-                        device=device)
+            torch.zeros((batch_size, hidden_size), dtype=dtype, device=device)
             for key in keys
         })
 
