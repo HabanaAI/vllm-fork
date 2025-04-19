@@ -343,16 +343,20 @@ class HpuModelAdapter(torch.nn.Module):
                                      attn_bias=attn_bias)
         return metadata
 
-    def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
-        slot_mapping = metadata.slot_mapping.flatten()
-        indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+    def _set_indices_with_offsets(self, metadata, block_size, is_prompt):
+        indices_with_offsets = metadata.slot_mapping.flatten()
         if is_prompt and not self.use_merged_prefill:
+            indices = torch.div(indices_with_offsets,
+                                block_size,
+                                rounding_mode="floor")
             indices = indices.unflatten(0, (-1, block_size))[:, 0]
-            offsets = None
-        else:
-            offsets = torch.fmod(slot_mapping, block_size)
-        metadata = metadata._replace(block_offsets=offsets,
-                                     block_indices=indices)
+            indices = indices.unsqueeze(1) * block_size
+            offsets = torch.arange(block_size,
+                                   device=indices.device).unsqueeze(0)
+            indices_with_offsets = (indices + offsets).flatten()
+
+        metadata = metadata._replace(
+            block_indices_with_offsets=indices_with_offsets)
         return metadata
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
@@ -364,9 +368,9 @@ class HpuModelAdapter(torch.nn.Module):
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-        attn_metadata = self._set_indices_and_offsets(attn_metadata,
-                                                      self.block_size,
-                                                      attn_metadata.is_prompt)
+        attn_metadata = self._set_indices_with_offsets(attn_metadata,
+                                                       self.block_size,
+                                                       attn_metadata.is_prompt)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -1345,11 +1349,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
+            block_size=self.block_size,
             block_list=prefix_block_list_tensor,
             block_mapping=None,
             block_usage=None,
-            block_indices=None,
-            block_offsets=None,
+            block_indices_with_offsets=None,
             block_groups=None,
             attn_bias=attn_bias,
             seq_lens=seq_lens,
@@ -1628,11 +1632,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
+            block_size=self.block_size,
             block_list=block_list,
             block_mapping=None,
             block_usage=block_usage,
-            block_indices=None,
-            block_offsets=None,
+            block_indices_with_offsets=None,
             block_groups=block_groups,
             attn_bias=None,
             seq_lens_tensor=None,
@@ -1951,8 +1955,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_usage',
             'slot_mapping',
             'is_prompt',
-            'block_indices',
-            'block_offsets',
+            'block_size',
+            'block_indices_with_offsets',
             'block_groups',
         ])
         return attention_metadata
