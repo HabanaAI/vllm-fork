@@ -2350,6 +2350,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                       available_mem,
                       starting_mem=0,
                       total_batch_seq=0.001):
+
+        if is_prompt and supports_multimodal(self.get_model()) and is_prompt:
+            multimodal_prompt_graph_mem_ratio = float(
+                os.environ.get('VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO', '0.3'))
+            multimodal_avail_mem = (multimodal_prompt_graph_mem_ratio *
+                                    available_mem)
+            available_mem = (available_mem - multimodal_avail_mem)
+            msg = (
+                f"Using {format_bytes(multimodal_avail_mem)} for multimodal prompt and "
+                f"{format_bytes(available_mem)} for text prompt "
+                f"(VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO={multimodal_prompt_graph_mem_ratio})")
+            logger.info(msg)
+        else:
+            multimodal_avail_mem = 0
+
         total_mem = starting_mem
         idx = 0
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
@@ -2397,10 +2412,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         mm_outputs = \
         self._warmup_multimodal_graph(
             kv_caches=kv_caches,
-            available_mem=available_mem,
-            starting_mem=total_mem,
+            available_mem=multimodal_avail_mem,
+            starting_mem=0,
             total_batch_seq=total_batch_seq,
         )
+
         if mm_outputs is not None:
             total_mem, total_batch_seq, mm_captured_all = mm_outputs
             captured_all = captured_all and mm_captured_all
