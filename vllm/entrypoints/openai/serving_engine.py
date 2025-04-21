@@ -112,11 +112,11 @@ class OpenAIServing:
 
             to_delete = []
             for model in closed_models:
-                for i, base_model in enumerate(self.base_model_paths):
+                for i, base_model in enumerate(self.models.base_model_paths):
                     if base_model.name == model:
                         to_delete.append(i)
             for i in to_delete:
-                del self.base_model_paths[i]
+                del self.models.base_model_paths[i]
             for model in new_models:
                 self.models.base_model_paths.append(
                     BaseModelPath(name=model, model_path=model))

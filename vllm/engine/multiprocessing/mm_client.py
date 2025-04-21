@@ -92,6 +92,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
             request_output = await queue.get()
         finally:
             self.output_queues.pop(request_id)
+        print("request_output", request_output)
         if isinstance(request_output, BaseException):
             return f"{request_output}"
         else:
@@ -118,7 +119,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
                     model_config=new_model_config,
                     scheduler_config=engine_config.scheduler_config,
                     parallel_config=engine_config.parallel_config,
-                    enable_lora=bool(engine_config.lora_config),
+                    lora_config=engine_config.lora_config,
                 ))
             self.input_preprocessors.append(
                 InputPreprocessor(new_model_config, self.tokenizers[-1]))

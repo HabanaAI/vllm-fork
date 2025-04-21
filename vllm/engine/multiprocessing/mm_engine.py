@@ -59,7 +59,6 @@ class MMLLMEngine(MQLLMEngine):
                          use_async_sockets,
                          *args,
                          log_requests=log_requests,
-                         engine_args=engine_args,
                          **kwargs)
         kwargs.pop('is_multi_models_engine', None)
 
@@ -101,13 +100,16 @@ class MMLLMEngine(MQLLMEngine):
 
         use_async_sockets = engine_config.model_config.use_async_output_proc
 
-        return cls(ipc_path=ipc_path,
-                   use_async_sockets=use_async_sockets,
-                   vllm_config=engine_configs,
-                   executor_class=executor_class,
-                   log_requests=not engine_args.disable_log_requests,
-                   log_stats=not engine_args.disable_log_stats,
-                   usage_context=usage_context)
+        return cls(
+            ipc_path=ipc_path,
+            use_async_sockets=use_async_sockets,
+            vllm_config=engine_configs,
+            executor_class=executor_class,
+            log_requests=not engine_args.disable_log_requests,
+            log_stats=not engine_args.disable_log_stats,
+            usage_context=usage_context,
+            # chendi: engine_args is used by mm_engine.py
+            engine_args=engine_args)
 
     def cleanup(self):
         """Cleanup zeromq state on shutdown."""
@@ -166,6 +168,7 @@ class MMLLMEngine(MQLLMEngine):
                 frames = self.input_socket.recv_multipart(copy=False)
                 request = pickle.loads(frames[0].buffer)
 
+                print("request type is ", type(request))
                 if isinstance(request, RPCProcessRequest):
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors
@@ -281,11 +284,12 @@ class MMLLMEngine(MQLLMEngine):
                                  closed_models=closed_models,
                                  new_models=[m[0] for m in new_models])
             ])
-        except Exception as e:
+        except Exception:
             print("error happens: ", traceback.format_exc())
-            rpc_err = RPCError(request_id=request.request_id,
-                               is_engine_errored=False,
-                               exception=e)
+            rpc_err = RPCError(
+                request_id=request.request_id,
+                is_engine_errored=False,
+                exception=Exception(f"{traceback.format_exc()}"))
             self._send_outputs(rpc_err)
 
     def _health_check(self):
