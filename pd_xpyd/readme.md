@@ -5,6 +5,7 @@
 
 ### Install via pip
 ```bash
+apt install etcd -y
 pip3 install mooncake-transfer-engine==0.3.0b3
 ```
 
