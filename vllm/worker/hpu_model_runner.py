@@ -86,12 +86,13 @@ VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
-
-
 '''
 This class is used to bucket image tokens
 '''
+
+
 class VisionBuckets():
+
     def __init__(self):
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
@@ -297,10 +298,8 @@ class HpuModelAdapter(torch.nn.Module):
             'VLLM_QWEN_SPLIT_GRAPHS', 'false').lower() in ['1', 'true']
 
         if not htorch.utils.internal.is_lazy() and self.split_graph:
-            logger.warning(
-                f"[Multimodal] HPU is not in Lazy Mode, "
-                f"split graph has not impact"
-            )
+            logger.warning(f"[Multimodal] HPU is not in Lazy Mode, "
+                           f"split graph has not impact")
         if htorch.utils.internal.is_lazy() and self.split_graph:
             logger.info("[Multimodal] Split Graph to Visual and Language")
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
@@ -489,7 +488,7 @@ class HpuModelAdapter(torch.nn.Module):
                 bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
 
             with compile_only_mode_context():
-                #calculate embedding for multimodal
+                # always calculate embeddings for multimodal
                 image_input = self.model._parse_and_validate_image_input(
                     **kwargs)
                 video_input = self.model._parse_and_validate_video_input(
@@ -789,7 +788,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                  self.use_merged_prefill,
                                                  self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
-        self.multimodal_buckets = [] #This should be use HPUBucketingContext <<
+        self.multimodal_buckets = [
+        ]  #This should be use HPUBucketingContext <<
         self.graphed_multimodal_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -951,7 +951,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         msg = f"Loading model weights took in total {m.get_summary_string()}"
         logger.info(msg)
         self.add_vision_buckets_to_model()
-
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -1150,9 +1149,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def move_to_device(self, tensor):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
+
     '''
     Right now Qwen2.5VL needs to know these buckets so it can do some things internally
     '''
+
     def add_vision_buckets_to_model(self):
         model = self.get_model()
         if supports_multimodal(model):
@@ -2030,9 +2031,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return attention_metadata
 
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, seq_len,
-                                                    max_pixels, sampling_params,
+                                                    max_pixels,
+                                                    sampling_params,
                                                     lora_request):
-        assert self.mm_registry.has_processor(self.model_config), 'Multimodal Warmup needs a processor'
+        assert self.mm_registry.has_processor(
+            self.model_config), 'Multimodal Warmup needs a processor'
         tokenizer = cached_get_tokenizer(
             self.model_config.tokenizer,
             trust_remote_code=self.model_config.trust_remote_code,
@@ -2161,8 +2164,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                          f"bs{batch_size}_"
                          f"seq{seq_len}_"
                          f"multimodal{max_pixels if max_pixels else 'F'}_"
-                         f"graphs{'T' if use_graphs else 'F'}"
-                        )
+                         f"graphs{'T' if use_graphs else 'F'}")
         # This represents the maximum number of different requests
         # that will have unique loras, an therefore the max amount of memory
         # consumption create dummy lora request copies from the lora request
@@ -2198,8 +2200,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
                     max_pixels=max_pixels,
-                    temperature=temperature
-                ) for i in range(batch_size)
+                    temperature=temperature) for i in range(batch_size)
             ]
         else:
             # FIXME: seq_len is actually number of blocks
@@ -2327,9 +2328,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_candidates = len(self.multimodal_buckets)
 
         for i, max_pixels in enumerate(self.multimodal_buckets):
-            self.log_warmup_multimodal(phase, i, num_candidates,
-                                       batch_size, seq_len,
-                                       max_pixels)
+            self.log_warmup_multimodal(phase, i, num_candidates, batch_size,
+                                       seq_len, max_pixels)
             self.warmup_scenario(batch_size=batch_size,
                                  seq_len=seq_len,
                                  is_prompt=True,
@@ -2411,10 +2411,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return total_mem, total_batch_seq, captured_all
 
     def _warmup_multimodal_graph(self,
-                      kv_caches,
-                      available_mem,
-                      starting_mem=0,
-                      total_batch_seq=0.001):
+                                 kv_caches,
+                                 available_mem,
+                                 starting_mem=0,
+                                 total_batch_seq=0.001):
         if not supports_multimodal(self.get_model()):
             return None
         total_mem = starting_mem
@@ -2436,16 +2436,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if graphed_multimodal_bucket in self.graphed_multimodal_buckets:
                 continue
             self.graphed_multimodal_buckets.add(graphed_multimodal_bucket)
-            self.log_warmup_multimodal(phase, idx, num_candidates,
-                                       batch_size, seq_len, max_pixels)
+            self.log_warmup_multimodal(phase, idx, num_candidates, batch_size,
+                                       seq_len, max_pixels)
 
             with HabanaMemoryProfiler() as mem_prof:
-                self.warmup_scenario(
-                    batch_size=batch_size,
-                    seq_len=seq_len,
-                    is_prompt=True,
-                    kv_caches=kv_caches,
-                    max_pixels=max_pixels)
+                self.warmup_scenario(batch_size=batch_size,
+                                     seq_len=seq_len,
+                                     is_prompt=True,
+                                     kv_caches=kv_caches,
+                                     max_pixels=max_pixels)
 
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
@@ -2466,14 +2465,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f'({100 * len(graphed) / num_candidates:.1f}%) '
                f'used_mem:{format_bytes(total_mem)} '
                f'buckets:{sorted(list(graphed))}')
-        logger.info(msg)        
+        logger.info(msg)
         if "Prompt" in phase and len(self.multimodal_buckets) > 0:
             phase = "Graph/Multimodal"
             num_candidates = len(self.multimodal_buckets)
             mm_graphed = self.graphed_multimodal_buckets
             msg = (f'{phase} captured:{len(mm_graphed)} '
-                f'({100 * len(mm_graphed) / num_candidates:.1f}%) '
-                f'buckets:{sorted(list(mm_graphed))}')
+                   f'({100 * len(mm_graphed) / num_candidates:.1f}%) '
+                   f'buckets:{sorted(list(mm_graphed))}')
             logger.info(msg)
 
     @torch.inference_mode()
@@ -2826,7 +2825,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         for pixel_values in pixel_values_list:
             assert isinstance(pixel_values, torch.Tensor)
             curr_num_pixels = pixel_values.shape[-2]
-            bucket_size = model.vision_buckets.get_multimodal_bucket(curr_num_pixels)
+            bucket_size = model.vision_buckets.get_multimodal_bucket(
+                curr_num_pixels)
             max_bucket_size = max(max_bucket_size, bucket_size)
         return max_bucket_size
 
