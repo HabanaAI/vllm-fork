@@ -494,14 +494,11 @@ class HpuModelAdapter(torch.nn.Module):
                 video_input = self.model._parse_and_validate_video_input(
                     **kwargs)
 
-                if image_input is None and video_input is None:
-                    inputs_embeds = None
-                else:
-                    inputs_embeds = self.model.get_input_embeddings_v0(
-                        input_ids,
-                        image_input=image_input,
-                        video_input=video_input)
-                    input_ids = None
+                inputs_embeds = self.model.get_input_embeddings_v0(
+                    input_ids,
+                    image_input=image_input,
+                    video_input=video_input)
+                input_ids = None
 
             kwargs.update({
                 "input_ids": input_ids,
