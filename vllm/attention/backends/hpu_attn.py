@@ -216,7 +216,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.block2batch_matmul = Matmul()
         self.k_cache = VLLMKVCache()
         self.v_cache = VLLMKVCache()
-        self.fused_scaled_dot_product_attention = kernels.fsdpa()
+        HPUFusedSDPA = kernels.fsdpa()
+        self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
+            else ModuleFusedSDPA(HPUFusedSDPA)
 
         self.prefill_impl = 'naive'
         if "flex_attention" in enabled_flags():
@@ -362,7 +364,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                               block_list=None,
                               key_cache=None,
                               value_cache=None):
-        fsdpa_op = self.fused_scaled_dot_product_attention.apply \
+        fsdpa_op = self.fused_scaled_dot_product_attention \
             if self.fused_scaled_dot_product_attention is not None else None
 
         return {
