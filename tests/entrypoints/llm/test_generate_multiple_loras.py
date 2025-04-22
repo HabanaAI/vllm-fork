@@ -33,10 +33,10 @@ def monkeypatch_module():
 @pytest.fixture(scope="module",
                 params=[{
                     "enforce_eager": False,
-                    "use_v1: False
+                    "use_v1": False
                 }, {
                     "enforce_eager": True,
-                    "use_v1: False
+                    "use_v1": False
                 }])
 def llm(request, monkeypatch_module):
 
