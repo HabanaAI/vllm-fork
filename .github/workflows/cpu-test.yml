@@ -5,12 +5,10 @@ on:
   # but only for the habana_main branch
   push:
     branches:
-      - habana_main
+      - [main]
   pull_request:
     branches:
-      - habana_main
-      - v1.*
-
+      - [main]
 jobs:
   cputest:
     runs-on: ubuntu-latest
