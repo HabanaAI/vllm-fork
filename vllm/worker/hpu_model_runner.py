@@ -883,9 +883,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) and not self.vllm_config.model_config.enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
-                compiled_methods = [self.model._set_block_mapping]
-                for method in compiled_methods:
-                    method = self._compile(method)
+                compiled_methods = ['_set_block_mapping']
+                for method_name in compiled_methods:
+                    method = getattr(self.model, method_name)
+                    self._compile_region(self.model, method_name, method)
 
                 self.regional_compilation_layers_list = [
                     RMSNorm, VocabParallelEmbedding
