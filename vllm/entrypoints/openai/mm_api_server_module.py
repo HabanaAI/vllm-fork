@@ -84,7 +84,7 @@ async def build_async_engine_client_from_engine_args(
     # Fall back
     # TODO: fill out feature matrix.
     logger.info("Building mm_api_server async engine client from engine args")
-    if (MMLLMEngineClient.is_unsupported_config(engine_args)
+    if (MMLLMEngineClient.is_unsupported_config(engine_args)  # type: ignore
             or envs.VLLM_USE_V1 or disable_frontend_multiprocessing):
 
         engine_configs = engine_args.create_engine_configs()
@@ -94,7 +94,7 @@ async def build_async_engine_client_from_engine_args(
                 engine_args=engine_args,
                 engine_config=engine_configs,
                 usage_context=UsageContext.OPENAI_API_SERVER)
-            yield engine_client
+            yield engine_client  # type: ignore[misc]
         finally:
             if engine_client and hasattr(engine_client, "shutdown"):
                 engine_client.shutdown()
@@ -106,9 +106,11 @@ async def build_async_engine_client_from_engine_args(
             # Note: global TemporaryDirectory will be automatically
             #   cleaned up upon exit.
             global prometheus_multiproc_dir
-            prometheus_multiproc_dir = tempfile.TemporaryDirectory()
+            tmp_dir = tempfile.TemporaryDirectory()
+            prometheus_multiproc_dir = tmp_dir  # type: ignore
             os.environ[
-                "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
+                "PROMETHEUS_MULTIPROC_DIR"] = \
+                    prometheus_multiproc_dir.name # type: ignore
         else:
             logger.warning(
                 "Found PROMETHEUS_MULTIPROC_DIR was set by user. "
@@ -305,8 +307,8 @@ async def init_app_state(
     state.task = model_config.task
 
 
-api_server.update_models = update_models
+api_server.update_models = update_models  # type: ignore
 api_server.init_app_state = init_app_state
 api_server.build_async_engine_client = build_async_engine_client
 api_server.build_async_engine_client_from_engine_args = (
-    build_async_engine_client_from_engine_args)
+    build_async_engine_client_from_engine_args)  # type: ignore

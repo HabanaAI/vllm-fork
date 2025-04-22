@@ -103,12 +103,19 @@ class OpenAIServing:
             executor=self._tokenizer_executor)
 
     async def update_model_config(self, request: ModelConfigRequest) -> str:
-        models = [model.id for model in request.models]
+        models = [model.id for model in request.models] \
+            if request.models else []
         request_id = f"mdlcfg-{random_uuid()}"
-        ret = await self.engine_client.update_model_config(request_id, models)
+        if hasattr(self.engine_client, "update_model_config"):
+            ret = await self.engine_client.update_model_config(
+                request_id, models)
+        else:
+            ret = None
         if isinstance(ret, RPCModelResponse):
             new_models = ret.new_models
             closed_models = ret.closed_models
+            new_models = new_models if new_models else []
+            closed_models = closed_models if closed_models else []
 
             to_delete = []
             for model in closed_models:
