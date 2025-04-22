@@ -17,7 +17,6 @@ import numpy as np
 import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
-from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
@@ -45,6 +44,7 @@ from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 
 if TYPE_CHECKING:
     from vllm.v1.core.scheduler import SchedulerOutput
+from vllm_hpu_extension.bucketing.common import get_bucketing_context
 
 logger = init_logger(__name__)
 
@@ -705,6 +705,7 @@ class HPUModelRunner:
         self.seen_configs: set = set()
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
+            HPUBucketingContext = get_bucketing_context()
             self.bucketing_ctx = HPUBucketingContext(
                 self.max_num_seqs, self.max_prefill_batch_size,
                 self.block_size, self.scheduler_config.max_num_batched_tokens,
@@ -1212,12 +1213,12 @@ class HPUModelRunner:
                 slot_mapping, self.device)
             logits_indices_device = _async_h2d_tensor_copy(
                 logits_indices, self.device)
-
             prefill_request_ids.append(batch_req_ids)
             prefill_prompt_lens.append(batch_num_scheduled_tokens)
             prefill_token_ids.append(token_ids_device)
             prefill_position_ids.append(positions_device)
             prefill_logits_indices.append(logits_indices_device)
+
             attn_metadata = None
             if use_prefix_prefill:
                 # Prefix caching
@@ -1247,6 +1248,7 @@ class HPUModelRunner:
                     context_lens_tensor=context_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                     block_list=block_list_device)
             else:
@@ -1254,6 +1256,7 @@ class HPUModelRunner:
                     seq_lens_tensor=seq_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                 )
             # ATTN_METADATA.
@@ -1379,6 +1382,7 @@ class HPUModelRunner:
                 block_list=block_list_device,
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
+                input_positions=None,
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
             ))
@@ -1747,6 +1751,7 @@ class HPUModelRunner:
                 seq_lens_tensor=seq_lens_device,
                 num_prefills=batch_size,
                 num_prefill_tokens=batch_size * seq_or_block,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
         else:
             block_tables = [
@@ -1768,6 +1773,7 @@ class HPUModelRunner:
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
                 num_decode_tokens=batch_size,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
@@ -1917,7 +1923,6 @@ class HPUModelRunner:
             logger.info("Skipping warmup...")
             return
         max_blocks = kv_caches[0][0].size(0)
-        self.bucketing_ctx.generate_prompt_buckets()
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
