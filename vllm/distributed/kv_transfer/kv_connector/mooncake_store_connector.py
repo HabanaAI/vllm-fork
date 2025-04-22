@@ -318,38 +318,24 @@ class MooncakeStoreConnector(KVConnectorBase):
                 layer = model_executable.model.layers[layer_id]
                 # get kvcache object
                 kv_cache = kv_caches[layer_id - start_layer]
-
-                # get remote kvcache
-                remote_k, remote_v = remote_kv[0][layer_id], remote_kv[1][
-                    layer_id]
-
-                # for hpu case
                 key_cache, value_cache = kv_cache[0], kv_cache[1]
 
-                key = remote_k.unsqueeze(0)
-                key = torch.nn.functional.pad(
-                    key,
-                    (0, 0, 0, 0, 0, 128 - key.size(1)),
-                    mode="constant",
-                    value=0
-                )
-                value = remote_v.unsqueeze(0)
-                value = torch.nn.functional.pad(
-                    value,
-                    (0, 0, 0, 0, 0, 128 - value.size(1)),
-                    mode="constant",
-                    value=0
-                )
-                self.cache_k(key,
-                        key_cache,
-                        block_indices_tensor,
-                        None,
-                        )
-                self.cache_v(value,
-                        value_cache,
-                        block_indices_tensor,
-                        None,
-                        )
+                if self.kv_helper.is_deepseek_mla and self.kv_helper.use_mla_opt:
+                    # deepseek path
+                    current_layer_idx = layer_id - start_layer
+                    key_values = remote_kv.to("hpu")
+                    keys = key_values
+                    key = keys[current_layer_idx].squeeze(-2).view(-1, self.block_size, self.k_v_head_size)
+                    self.cache_k(key, key_cache, block_indices_tensor, None)
+                else:
+                    # non-deepseek path
+                    remote_k, remote_v = remote_kv[0][layer_id], remote_kv[1][layer_id]
+                    key = remote_k.unsqueeze(0)
+                    value = remote_v.unsqueeze(0)
+                    key = torch.nn.functional.pad(key, (0, 0, 0, 0, 0, 128 - key.size(1)), mode="constant", value=0)
+                    value = torch.nn.functional.pad(value, (0, 0, 0, 0, 0, 128 - value.size(1)), mode="constant", value=0)
+                    self.cache_k(key, key_cache, block_indices_tensor, None)
+                    self.cache_v(value, value_cache, block_indices_tensor, None)
             start_block_idx = end_block_idx
             hidden_or_intermediate_states_for_one_req.append(hidden.to("hpu"))
 
