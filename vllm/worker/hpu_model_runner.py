@@ -474,7 +474,8 @@ class HpuModelAdapter:
             input_ids.device, self.dtype)
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
-        if self.layer_names is not None:
+        if self.layer_names is not None \
+            and self.vllm_config.model_config.hf_config.model_type not in ("deepseek_mtp"):
             self._prepare_cos_sin(kwargs['positions'])
 
         with set_forward_context(kwargs['attn_metadata'],
@@ -2619,7 +2620,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
         profile_run_mode=False,
-        previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
         **kwargs,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
@@ -2871,7 +2871,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
-                    continue
+                    return []
 
                 if use_delayed_sampling:
                     fake_output = self._delayed_sampler_outputs(model_input)
