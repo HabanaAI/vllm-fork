@@ -108,24 +108,19 @@ class AttentionLongSequence:
 def create_block_diagonal_attention_mask_outerprod(indices):
     maxsize = indices[-1]
     range_to_max_for_each_img = torch.arange(maxsize, device=indices.device).unsqueeze(0).repeat(indices.shape[0]-1,1)
-    yy = range_to_max_for_each_img < indices[1:].unsqueeze(1)
-    zz = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
-    xx = torch.logical_and(yy, zz).float()
+    lesser = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+    greater_eq = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+    range_indices = torch.logical_and(lesser, greater_eq).float()
     # can reduce sum externally or as batchmatmul
     #TODO: einsum with tensor dimension too big doesn't work. Register max size error.
     #We can always move to CPU for all einsum without shape checking if perf impact is minimal.
-    if xx.shape[-1] > 40000:
-        print("einsum running on CPU : ", xx.shape)
-        xx = xx.to("cpu")
-        res = torch.einsum('bi,bj->ij', xx, xx)
-        #breakpoint()
+    if range_indices.shape[-1] > 40000:
+        print("einsum running on CPU : ", range_indices.shape)
+        range_indices = range_indices.to("cpu")
+        res = torch.einsum('bi,bj->ij', range_indices, range_indices)
         res = res.to("hpu")
-        #res = torch.sum(res, dim=0)
     else:
-        #res = torch.sum(torch.einsum('bi,bj->bij', xx, xx), dim=0)
-        res = torch.einsum('bi,bj->ij', xx, xx)
-    #print('.....MASK SHAPE', res.shape, indices)
-    #res = torch.einsum('bi,bj->ij', xx.float(), xx.float())
+        res = torch.einsum('bi,bj->ij', range_indices, range_indices)
     return res.bool()
 
 def expand_to_max(indices, max_num_images):
