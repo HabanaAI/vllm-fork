@@ -121,13 +121,10 @@ def convert_mapping(
     prompt_mapping_tensor = torch.tensor(prompt_mapping,
                                          dtype=torch.long,
                                          device=device)
-    if(indices[2].numel() == 0):
-        embeddings_indices = torch.stack([torch.empty((0,)) for _ in range(2)])
-    else:
-        embeddings_indices = torch.stack([
-            indices[2] * extra_vocab_size,
-            indices[2] * (vocab_size + extra_vocab_size),
-        ])
+    embeddings_indices = torch.stack([
+        indices[2] * extra_vocab_size,
+        indices[2] * (vocab_size + extra_vocab_size),
+    ])
     embeddings_indices[embeddings_indices == -1] = max_loras - 1
     base_indices = indices[1]
     sampler_indices = prompt_mapping_tensor
