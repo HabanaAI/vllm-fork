@@ -920,10 +920,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         setattr(model, name, module)
 
     def _compile(self, module):
-        fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
-                              'false').strip().lower() in ("1", "true")
-        dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
-                            'false').strip().lower() in ("1", "true")
+        if not hasattr(self, '_compile_config'):
+            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
+                                  'false').strip().lower() in ("1", "true")
+            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
+                                'false').strip().lower() in ("1", "true")
+            self._compile_config = {'fullgraph': fullgraph, 'dynamic': dynamic}
+        fullgraph = self._compile_config['fullgraph']
+        dynamic = self._compile_config['dynamic']
         if dynamic:
             return torch.compile(module,
                                  backend='hpu_backend',
