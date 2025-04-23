@@ -164,25 +164,24 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                              topk_ids=topk_ids,
                              inplace=True)
 
-    def forward_hpu(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        use_grouped_topk: bool,
-        top_k: int,
-        router_logits: torch.Tensor,
-        renormalize: bool,
-        topk_group: Optional[int] = None,
-        num_expert_group: Optional[int] = None,
-        custom_routing_function: Optional[Callable] = None,
-        **kwargs,
-    ):
+    def forward_hpu(self,
+                    layer: torch.nn.Module,
+                    x: torch.Tensor,
+                    use_grouped_topk: bool,
+                    top_k: int,
+                    router_logits: torch.Tensor,
+                    renormalize: bool,
+                    topk_group: Optional[int] = None,
+                    num_expert_group: Optional[int] = None,
+                    custom_routing_function: Optional[Callable] = None,
+                    scoring_func: str = "softmax",
+                    e_score_correction_bias: Optional[torch.Tensor] = None):
         assert not use_grouped_topk, 'use_grouped_topk must be False on HPU'
         assert num_expert_group is None, ('num_expert_group is '
                                           'not supported on HPU')
         assert topk_group is None, 'topk_group is not supported on HPU'
         if layer is not None:
-            return layer.hpu_fused_moe(x, router_logits, top_k)
+            return layer.hpu_fused_moe(x, router_logits, top_k, layer)
 
     def forward_cpu(
         self,
@@ -263,25 +262,24 @@ class FusedMoE(torch.nn.Module):
         quant_config: Quantization configure.
     """
 
-    def __init__(
-        self,
-        num_experts: int,
-        top_k: int,
-        hidden_size: int,
-        intermediate_size: int,
-        params_dtype: Optional[torch.dtype] = None,
-        reduce_results: bool = False,
-        renormalize: bool = True,
-        use_grouped_topk: bool = False,
-        num_expert_group: Optional[int] = None,
-        topk_group: Optional[int] = None,
-        quant_config: Optional[QuantizationConfig] = None,
-        tp_size: Optional[int] = None,
-        prefix: str = "",
-        custom_routing_function: Optional[Callable] = None,
-        scoring_func: str = "softmax",
-        e_score_correction_bias: Optional[torch.Tensor] = None,
-    ):
+    def __init__(self,
+                 num_experts: int,
+                 top_k: int,
+                 hidden_size: int,
+                 intermediate_size: int,
+                 params_dtype: Optional[torch.dtype] = None,
+                 reduce_results: bool = False,
+                 renormalize: bool = True,
+                 use_grouped_topk: bool = False,
+                 num_expert_group: Optional[int] = None,
+                 topk_group: Optional[int] = None,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 tp_size: Optional[int] = None,
+                 ep_size: Optional[int] = None,
+                 prefix: str = "",
+                 custom_routing_function: Optional[Callable] = None,
+                 scoring_func: str = "softmax",
+                 e_score_correction_bias: Optional[torch.Tensor] = None):
         super().__init__()
 
         if params_dtype is None:
@@ -289,8 +287,12 @@ class FusedMoE(torch.nn.Module):
 
         self.tp_size = (tp_size if tp_size is not None else
                         get_tensor_model_parallel_world_size())
+        self.ep_size = ep_size if ep_size is not None else 1
+        assert num_experts % self.ep_size == 0
+
+        self.ep_rank = get_tensor_model_parallel_rank() // self.tp_size
         self.top_k = top_k
-        self.num_experts = num_experts
+        self.num_experts = num_experts // self.ep_size
         assert intermediate_size % self.tp_size == 0
         self.intermediate_size_per_partition = intermediate_size // self.tp_size
         self.reduce_results = reduce_results
@@ -319,7 +321,7 @@ class FusedMoE(torch.nn.Module):
         assert self.quant_method is not None
 
         moe_quant_params = {
-            "num_experts": num_experts,
+            "num_experts": self.num_experts,
             "hidden_size": hidden_size,
             "intermediate_size_per_partition":
             self.intermediate_size_per_partition,
@@ -385,7 +387,7 @@ class FusedMoE(torch.nn.Module):
     def _load_per_channel_weight_scale(self, expert_data: torch.Tensor,
                                        shard_dim: int, shard_id: str,
                                        loaded_weight: torch.Tensor,
-                                       tp_rank: int):
+                                       tp_rank: int, expert_id: int):
         # for per channel weight quantization
         if shard_id == "w2":
             expert_data.copy_(loaded_weight)
@@ -394,7 +396,8 @@ class FusedMoE(torch.nn.Module):
                            shard_dim=shard_dim,
                            loaded_weight=loaded_weight,
                            expert_data=expert_data,
-                           tp_rank=tp_rank)
+                           tp_rank=tp_rank,
+                           expert_id=expert_id)
 
     def _load_w13(self,
                   expert_data: torch.Tensor,
@@ -467,7 +470,13 @@ class FusedMoE(torch.nn.Module):
     def weight_loader(self, param: torch.nn.Parameter,
                       loaded_weight: torch.Tensor, weight_name: str,
                       shard_id: str, expert_id: int) -> None:
-
+        tp_rank = get_tensor_model_parallel_rank()
+        if self.ep_size > 1:
+            tp_rank = tp_rank % self.tp_size
+            # now we want to only load weights for current expert group
+            expert_id = expert_id - self.ep_rank * self.num_experts
+            if expert_id < 0 or expert_id >= self.num_experts:
+                return
         # compressed-tensors checkpoints with packed weights are stored flipped
         # TODO (mgoin): check self.quant_method.quant_config.quant_format
         # against known CompressionFormat enum values that have this quality
@@ -488,7 +497,6 @@ class FusedMoE(torch.nn.Module):
         SHARD_ID_TO_SHARDED_DIM = {"w1": 0, "w2": 1, "w3": 0}
 
         expert_data = param.data[expert_id]
-        tp_rank = get_tensor_model_parallel_rank()
 
         # is_transposed: if the dim to shard the weight
         # should be flipped. Required by GPTQ, compressed-tensors
@@ -532,13 +540,15 @@ class FusedMoE(torch.nn.Module):
             # TODO @dsikka: once hardened, refactor to use vLLM Parameters
             # specific to each case
             quant_method = getattr(param, "quant_method", None)
-            if quant_method == FusedMoeWeightScaleSupported.CHANNEL.value:
+            if (quant_method == FusedMoeWeightScaleSupported.CHANNEL.value
+                    or current_platform.is_hpu()):
                 self._load_per_channel_weight_scale(
                     shard_id=shard_id,
                     shard_dim=shard_dim,
                     loaded_weight=loaded_weight,
                     expert_data=expert_data,
-                    tp_rank=tp_rank)
+                    tp_rank=tp_rank,
+                    expert_id=expert_id)
             elif quant_method in [
                     FusedMoeWeightScaleSupported.GROUP.value,
                     FusedMoeWeightScaleSupported.BLOCK.value,
