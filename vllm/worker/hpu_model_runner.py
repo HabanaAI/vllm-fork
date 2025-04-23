@@ -28,6 +28,7 @@ from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 
+import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
@@ -447,6 +448,7 @@ class HpuModelAdapter(torch.nn.Module):
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
+
         virtual_engine = 0
         if 'virtual_engine' in kwargs:
             virtual_engine = kwargs.pop('virtual_engine')
@@ -495,8 +497,10 @@ class HpuModelAdapter(torch.nn.Module):
                 "inputs_embeds": inputs_embeds
             })
 
-        with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
-                                 virtual_engine):
+        attn_meta = kwargs.pop('attn_metadata')
+        if 'kv_caches' in kwargs:
+            kwargs.pop('kv_caches')
+        with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
             hidden_states = self.model(*args, **kwargs)
             if not get_pp_group().is_last_rank:
                 return hidden_states
@@ -523,6 +527,12 @@ class HpuModelAdapter(torch.nn.Module):
     @property
     def sampler(self):
         return self.model.sampler
+
+    # lm_head property will be used by spec_decode_worker
+    # don't rename
+    @property
+    def lm_head(self):
+        return self.model.lm_head
 
 
 class PreparePromptMetadata(NamedTuple):
@@ -776,6 +786,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "").lower() != "true", "Contiguous PA doesn't support APC"
         self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
                                                 'true').lower() == 'true'
+        if self.use_contiguous_pa != 'true':
+            self.use_contiguous_pa = envs.VLLM_USE_HPU_CONTIGUOUS_CACHE_FETCH
         if vllm_config.speculative_config is not None \
             and self.use_contiguous_pa:
             raise ValueError(
@@ -841,9 +853,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger.info(msg)
             self.is_pooler = hasattr(self.model, "_pooler")
             if self.lora_config:
-                assert hasattr(self.model, "supported_lora_modules"
-                               ) and self.model.supported_lora_modules, (
-                                   "Model does not support LoRA")
                 assert hasattr(self.model, "embedding_modules"
                                ), "Model does not have embedding_modules"
                 assert hasattr(
@@ -964,88 +973,63 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _maybe_compile(self, *args, **kwargs):
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not self.vllm_config.model_config.enforce_eager:
-            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
-                                  'false').strip().lower() in ("1", "true")
-            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
-                                'false').strip().lower() in ("1", "true")
-
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
-                compiled_methods = [self.model._set_block_mapping]
-                for method in compiled_methods:
-                    if dynamic:
-                        method = torch.compile(
-                            method,
-                            backend='hpu_backend',
-                            fullgraph=fullgraph,
-                            options={"force_static_compile": True})
-                    else:
-                        method = torch.compile(method,
-                                               backend='hpu_backend',
-                                               fullgraph=fullgraph,
-                                               dynamic=False)
+                compiled_methods = ['_set_block_mapping']
+                for method_name in compiled_methods:
+                    method = getattr(self.model, method_name)
+                    self._compile_region(self.model, method_name, method)
 
                 self.regional_compilation_layers_list = [
                     RMSNorm, VocabParallelEmbedding
                 ]
-                self._regional_compilation(self.model, fullgraph, dynamic)
+                self._regional_compilation(self.model)
             else:
-                if dynamic:
-                    self.model = torch.compile(
-                        self.model,
-                        backend='hpu_backend',
-                        fullgraph=fullgraph,
-                        options={"force_static_compile": True})
-                else:
-                    self.model = torch.compile(self.model,
-                                               backend='hpu_backend',
-                                               fullgraph=fullgraph,
-                                               dynamic=False)
+                self.model = self._compile(self.model)
 
     def _regional_compilation(self,
                               module,
-                              fullgraph,
-                              dynamic,
                               parent_module=None,
                               module_name=None):
         if isinstance(module, torch.nn.ModuleList):
             for children_name, children_module in module.named_children():
-                self._compile_region(module, fullgraph, dynamic, children_name,
-                                     children_module)
+                self._compile_region(module, children_name, children_module)
         elif any(
                 isinstance(module, layer)
                 for layer in self.regional_compilation_layers_list):
             self._compile_region(
                 parent_module,
-                fullgraph,
-                dynamic,
                 module_name,
                 module,
             )
         else:
             for children_name, children_module in module.named_children():
-                self._regional_compilation(children_module, fullgraph, dynamic,
-                                           module, children_name)
+                self._regional_compilation(children_module, module,
+                                           children_name)
 
-    def _compile_region(
-        self,
-        model,
-        fullgraph,
-        dynamic,
-        name,
-        module,
-    ):
-        if dynamic:
-            module = torch.compile(module,
-                                   backend='hpu_backend',
-                                   fullgraph=fullgraph,
-                                   options={"force_static_compile": True})
-        else:
-            module = torch.compile(module,
-                                   backend='hpu_backend',
-                                   fullgraph=fullgraph,
-                                   dynamic=False)
+    def _compile_region(self, model, name, module):
+        module = self._compile(module)
         setattr(model, name, module)
+
+    def _compile(self, module):
+        if not hasattr(self, '_compile_config'):
+            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
+                                  'false').strip().lower() in ("1", "true")
+            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
+                                'false').strip().lower() in ("1", "true")
+            self._compile_config = {'fullgraph': fullgraph, 'dynamic': dynamic}
+        fullgraph = self._compile_config['fullgraph']
+        dynamic = self._compile_config['dynamic']
+        if dynamic:
+            return torch.compile(module,
+                                 backend='hpu_backend',
+                                 fullgraph=fullgraph,
+                                 options={"force_static_compile": True})
+        else:
+            return torch.compile(module,
+                                 backend='hpu_backend',
+                                 fullgraph=fullgraph,
+                                 dynamic=False)
 
     def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
@@ -2531,8 +2515,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add((int(bs), int(seq_len), is_prompt))
-            self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
-                                 True)
+            self.warmup_scenario(int(bs), int(seq_len), is_prompt, True)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
