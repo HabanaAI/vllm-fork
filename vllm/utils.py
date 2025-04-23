@@ -923,15 +923,8 @@ def make_mrope_positions_tensor_with_pad( \
         input_positions: list[list[int]],
         input_mrope_positions: list[list[list[int]]],
         max_prompt_len: int,
-        pad: int) -> list[list[int]]:
-    # If no mrope positions, returns a flatten (seq_len,)
-    if all(mrope_position is None for mrope_position in input_mrope_positions):
-        return make_tensor_with_pad(input_positions,
-                                    max_len=max_prompt_len,
-                                    pad=0,
-                                    dtype=torch.long,
-                                    device='cpu').flatten()
-    # Otherwise, Qwen2.5-VL expects positions in a (3, seq_len)
+        pad: int) -> List[List[int]]:
+    # Qwen2.5-VL expects positions in a (3, seq_len)
     # we are going to pad each seq_data in the list
     # using either MRope values or regular position
     mrope_input_positions: list[list[int]] = [[] for _ in range(3)]
