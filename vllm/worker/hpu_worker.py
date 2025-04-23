@@ -16,6 +16,8 @@ from typing import List, Optional, Set, Tuple, Type
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
 import torch.distributed
+from habana_frameworks.torch.utils.debug.logger import (
+    refresh_logging_folder_path)
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
@@ -216,8 +218,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
-        if self.model_config.quantization == 'inc':
-            self._set_env_vars()
+        self._set_env_vars()
+        refresh_logging_folder_path()
         init_worker_distributed_environment(self.parallel_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
