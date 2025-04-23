@@ -52,7 +52,6 @@ from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
                              MultiModalRegistry)
-from vllm.multimodal.utils import cached_get_tokenizer
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceData, SequenceGroupMetadata,
@@ -96,11 +95,15 @@ class VisionBuckets():
     def __init__(self):
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
-            #self.multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544, 16384, 26500, 40000, 65536]
             multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544]
         else:
             multimodal_buckets = [int(i) for i in envvar.split(',')]
-        self.multimodal_buckets = sorted(multimodal_buckets)
+        self.multimodal_buckets = self._process_buckets(multimodal_buckets)
+
+    def _process_buckets(self, buckets):
+        for bucket in buckets:
+            assert bucket % 8 == 0, 'Buckets needs to be multiples 8 (slices of 64)'
+        return sorted(buckets)
 
     def get_multimodal_bucket(self, curr_num_image_patches):
         for mm_bucket in self.multimodal_buckets:
@@ -2075,9 +2078,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
 
-        image_h = int(math.sqrt(num_patches))
-        image_grid_thw = torch.tensor([1, image_h, image_h])
+        assert num_patches % 8, "Expect num_patches to be multiples of 8"
+        image_h = num_patches // 8
+        image_grid_thw = torch.tensor([1, image_h, 8])
+
+        image_grid_thw = torch.tensor([1, image_h, int(num_patches/image_h)])
         pixel_values = torch.randn(image_grid_thw.prod(), 1176)  # TODO: figure out the variable name
+
+        assert pixel_values.shape[0] % 64 == 0, (
+            f"pixel_values must be sliced in 64 chunks, got: {pixel_values.shape}"
+        )
+
         multi_modal_data = {
             "pixel_values": pixel_values,
             "image_grid_thw": image_grid_thw,
