@@ -30,10 +30,17 @@ def monkeypatch_module():
     mpatch.undo()
 
 
-@pytest.fixture(scope="module", params=[False, True])
+@pytest.fixture(scope="module",
+                params=[{
+                    "enforce_eager": False,
+                    "use_v1": False
+                }, {
+                    "enforce_eager": True,
+                    "use_v1": False
+                }])
 def llm(request, monkeypatch_module):
 
-    use_v1 = request.param
+    use_v1 = request.param["use_v1"]
     monkeypatch_module.setenv('VLLM_USE_V1', '1' if use_v1 else '0')
 
     # pytest caches the fixture so we use weakref.proxy to

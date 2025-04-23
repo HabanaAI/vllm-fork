@@ -40,6 +40,7 @@ from vllm.config import VllmConfig
 from vllm.distributed import get_pp_group, get_tp_group
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
+from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                QKVCrossParallelLinear,
@@ -471,7 +472,8 @@ class MllamaPrecomputedPositionEmbedding(nn.Module):
 
 
 # TODO: support other attention backends for attention in vision model
-class MllamaVisionSdpaAttention(nn.Module):
+@CustomOp.register("mllama_vision_sdpa_attention")
+class MllamaVisionSdpaAttention(CustomOp):
 
     def __init__(self,
                  config: config_mllama.MllamaVisionConfig,
@@ -504,7 +506,7 @@ class MllamaVisionSdpaAttention(nn.Module):
             prefix=f"{prefix}.o_proj",
         )
 
-    def forward(
+    def forward_native(
         self,
         hidden_state: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
@@ -519,12 +521,43 @@ class MllamaVisionSdpaAttention(nn.Module):
                    self.head_dim).transpose(1, 2)
 
         # TODO: remove padding in image encoder
-        if current_platform.is_hpu():
-            from habana_frameworks.torch.hpex.kernels import FusedSDPA
-            attn_output = FusedSDPA.apply(q, k, v, attention_mask, 0.0)
-        else:
-            attn_output = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=attention_mask, dropout_p=0.0)
+        attn_output = F.scaled_dot_product_attention(q,
+                                                     k,
+                                                     v,
+                                                     attn_mask=attention_mask,
+                                                     dropout_p=0.0)
+
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.reshape(attn_output.shape[0],
+                                          attn_output.shape[1], -1)
+        output, _ = self.o_proj(attn_output)
+        return output
+
+    def forward_cuda(
+        self,
+        hidden_state: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        return self.forward_native(hidden_state, attention_mask)
+
+    def forward_hpu(
+        self,
+        hidden_state: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        qkv, _ = self.qkv_proj(hidden_state)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        q = q.view(q.shape[0], q.shape[1], self.num_local_heads,
+                   self.head_dim).transpose(1, 2)
+        k = k.view(k.shape[0], k.shape[1], self.num_local_heads,
+                   self.head_dim).transpose(1, 2)
+        v = v.view(v.shape[0], v.shape[1], self.num_local_heads,
+                   self.head_dim).transpose(1, 2)
+
+        from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
+        # TODO: remove padding in image encoder
+        attn_output = FusedSDPA.apply(q, k, v, attention_mask, 0.0)
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(attn_output.shape[0],
@@ -823,7 +856,8 @@ class MllamaTextRMSNorm(nn.Module):
         return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
 
 
-class MllamaTextCrossAttention(nn.Module):
+@CustomOp.register("mllama_text_cross_attention")
+class MllamaTextCrossAttention(CustomOp):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(
@@ -885,7 +919,7 @@ class MllamaTextCrossAttention(nn.Module):
             attn_type=AttentionType.ENCODER_DECODER,
         )
 
-    def forward(
+    def forward_native(
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor],
@@ -904,6 +938,41 @@ class MllamaTextCrossAttention(nn.Module):
         if attention_mask is not None:
             output = self._attention_with_mask(q, k, v, attention_mask,
                                                kv_range_for_decode)
+        else:
+            output = self.attn(
+                q.view(-1, self.num_local_heads * self.head_dim), k, v)
+        out, _ = self.o_proj(output)
+        return out
+
+    def forward_cuda(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+        kv_range_for_decode: Optional[List[Tuple[int, int]]],
+        cross_attention_states: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        return self.forward_native(hidden_states, attention_mask,
+                                   kv_range_for_decode, cross_attention_states)
+
+    def forward_hpu(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+        kv_range_for_decode: Optional[List[Tuple[int, int]]],
+        cross_attention_states: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        q, k, v = self.qkv_proj(hidden_states, cross_attention_states)
+        if cross_attention_states is not None:
+            k = k.view(-1, self.num_local_key_value_heads, self.head_dim)
+            v = v.view(-1, self.num_local_key_value_heads, self.head_dim)
+            k = self.k_norm(k)
+
+        q = q.view(-1, self.num_local_heads, self.head_dim)
+        q = self.q_norm(q)
+
+        if attention_mask is not None:
+            output = self._attention_with_mask_hpu(q, k, v, attention_mask,
+                                                   kv_range_for_decode)
         else:
             output = self.attn(
                 q.view(-1, self.num_local_heads * self.head_dim), k, v)
@@ -988,8 +1057,82 @@ class MllamaTextCrossAttention(nn.Module):
             q_len, self.num_local_heads * self.head_dim)
         return output
 
+    def _attention_with_mask_hpu(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        attention_mask: torch.Tensor,
+        kv_range_for_decode: List[Tuple[int, int]],
+    ) -> torch.Tensor:
+        kv_cache = self.attn.kv_cache[self.pipeline_parallel_rank]
+        attn_metadata: AttentionMetadata = get_forward_context().attn_metadata
+        # Skip writing kv-cache for the initial profiling run.
+        if kv_cache is not None and isinstance(kv_cache, tuple):
+            assert self.attn.backend == _Backend.HPU_ATTN
+            # During cross-attention decode, key & value will be None,
+            # we don't need to cache them.
+            if (k is not None) and (v is not None):
+                from vllm.attention.ops.hpu_paged_attn import HPUPagedAttention
+                key_cache, value_cache = HPUPagedAttention.split_kv_cache(
+                    kv_cache, self.num_local_key_value_heads, self.head_dim)
+                cached_k = torch.cat([k[s:e] for s, e in kv_range_for_decode])
+                cached_v = torch.cat([v[s:e] for s, e in kv_range_for_decode])
+                block_indices = torch.cat([
+                    attn_metadata.cross_block_indices[s:e]
+                    for s, e in kv_range_for_decode
+                ])
+                block_offsets = torch.cat([
+                    attn_metadata.cross_block_offsets[s:e]
+                    for s, e in kv_range_for_decode
+                ])
+                key_cache = self.attn.impl.k_cache(cached_k, key_cache,
+                                                   block_indices,
+                                                   block_offsets)
+                value_cache = self.attn.impl.v_cache(cached_v, value_cache,
+                                                     block_indices,
+                                                     block_offsets)
 
-class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
+        q_len = q.shape[0]
+        kv_len = k.shape[0]
+        q = q.transpose(0, 1).view(self.num_local_key_value_heads,
+                                   self.num_key_value_groups, q_len,
+                                   self.head_dim).contiguous()
+        k = k.transpose(0,
+                        1)[:,
+                           None, :, :].expand(self.num_local_key_value_heads,
+                                              self.num_key_value_groups,
+                                              kv_len,
+                                              self.head_dim).contiguous()
+        v = v.transpose(0,
+                        1)[:,
+                           None, :, :].expand(self.num_local_key_value_heads,
+                                              self.num_key_value_groups,
+                                              kv_len,
+                                              self.head_dim).contiguous()
+        attention_mask = attention_mask.view(1, 1, q_len, kv_len)
+
+        from habana_frameworks.torch.hpex.kernels import FusedSDPA
+        from vllm_hpu_extension.utils import ModuleFusedSDPA
+        fsdpa_op = ModuleFusedSDPA(FusedSDPA)
+        # use fast as softmax_mode for better accuracy
+        output = fsdpa_op(q,
+                          k,
+                          v,
+                          attention_mask,
+                          dropout_p=0.0,
+                          is_causal=False,
+                          scale=None,
+                          softmax_mode="fast",
+                          recompute_mode=None,
+                          valid_sequence_lengths=None)
+        output = output.permute(2, 0, 1, 3).reshape(
+            q_len, self.num_local_heads * self.head_dim)
+        return output
+
+
+@CustomOp.register("mllama_cross_attention_decoder_layer")
+class MllamaCrossAttentionDecoderLayer(CustomOp):
     """Cross-attention transformer block with tanh-gated attention
     and feedforward."""
 
@@ -1025,7 +1168,7 @@ class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
                                                 eps=config.rms_norm_eps)
         self.cross_attn_mlp_gate = torch.nn.Parameter(torch.zeros(1))
 
-    def forward(
+    def forward_native(
         self,
         hidden_states: torch.Tensor,
         cross_attention_states: torch.Tensor,
@@ -1042,14 +1185,61 @@ class MllamaCrossAttentionDecoderLayer(torch.nn.Module):
             kv_range_for_decode=kv_range_for_decode,
             cross_attention_states=cross_attention_states,
         )
+        hidden_states = full_text_row_masked_out_mask * hidden_states
+        hidden_states = residual + self.cross_attn_attn_gate.tanh(
+        ) * hidden_states
+
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = full_text_row_masked_out_mask * hidden_states
+        hidden_states = residual + self.cross_attn_mlp_gate.tanh(
+        ) * hidden_states
+        return hidden_states
+
+    def forward_cuda(
+        self,
+        hidden_states: torch.Tensor,
+        cross_attention_states: torch.Tensor,
+        cross_attention_mask: torch.Tensor,
+        kv_range_for_decode: Optional[List[Tuple[int, int]]],
+        full_text_row_masked_out_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.forward_native(hidden_states, cross_attention_states,
+                                   cross_attention_mask, kv_range_for_decode,
+                                   full_text_row_masked_out_mask)
+
+    def forward_hpu(
+        self,
+        hidden_states: torch.Tensor,
+        cross_attention_states: torch.Tensor,
+        cross_attention_mask: torch.Tensor,
+        kv_range_for_decode: Optional[List[Tuple[int, int]]],
+        full_text_row_masked_out_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        residual = hidden_states
+        hidden_states = self.input_layernorm(hidden_states)
+
+        hidden_states = self.cross_attn(
+            hidden_states=hidden_states,
+            attention_mask=cross_attention_mask,
+            kv_range_for_decode=kv_range_for_decode,
+            cross_attention_states=cross_attention_states,
+        )
+
         # the rank of full_text_row_masked_out_mask is 2, not match with
         # the hidden_states, so expand its rank to 3.
         # TODO: Change input_tokens tensor at the beginning of model execution
         # to 2D tensor to align with public vllm input_tokens shape. But this
         # will face the graph building failure issue, still need to investigate.
-        if len(hidden_states.shape) == 3:
-            full_text_row_masked_out_mask = full_text_row_masked_out_mask.view(
-                hidden_states.size(0), -1, 1)
+        assert len(residual.shape) == 3
+        if len(hidden_states.shape) == 2:
+            hidden_states = hidden_states.view(residual.size(0),
+                                               residual.size(1),
+                                               residual.size(2))
+        full_text_row_masked_out_mask = full_text_row_masked_out_mask.view(
+            hidden_states.size(0), -1, 1)
+
         hidden_states = full_text_row_masked_out_mask * hidden_states
         hidden_states = residual + self.cross_attn_attn_gate.tanh(
         ) * hidden_states
@@ -1116,11 +1306,6 @@ class MllamaTextModel(nn.Module):
         inputs_embeds = self.embed_tokens(input_ids)
         hidden_states = inputs_embeds
 
-        if is_hpu:
-            for idx, decoder_layer in enumerate(self.layers):
-                if idx not in self.cross_attention_layers:
-                    self.layers[idx].self_attn.rotary_emb.prepare_cos_sin(
-                        positions)
         for idx, decoder_layer in enumerate(self.layers):
             if idx in self.cross_attention_layers:
                 if not skip_cross_attention:
@@ -1194,7 +1379,8 @@ class MllamaForCausalLM(nn.Module):
 @MULTIMODAL_REGISTRY.register_processor(MllamaMultiModalProcessor,
                                         info=MllamaProcessingInfo,
                                         dummy_inputs=MllamaDummyInputsBuilder)
-class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal,
+@CustomOp.register("mllama_for_conditional_generation")
+class MllamaForConditionalGeneration(CustomOp, SupportsMultiModal,
                                      SupportsV0Only):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
@@ -1375,7 +1561,11 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal,
         num_tokens_per_tile: int,
         dtype: torch.dtype,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        token_ids = input_ids.tolist()
+        if is_hpu:
+            # input_ids is not flatten yet for hpu
+            token_ids = input_ids.flatten().tolist()
+        else:
+            token_ids = input_ids.tolist()
         start = 0
         batch_token_ids = []
         for seq_len in attn_metadata.seq_lens:
@@ -1421,7 +1611,80 @@ class MllamaForConditionalGeneration(nn.Module, SupportsMultiModal,
             device)
         return full_text_row_masked_out_mask
 
-    def forward(
+    def forward_cuda(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        **kwargs: object,
+    ) -> Union[Tuple, CausalLMOutputWithPast]:
+        self.forward_native(input_ids, positions, **kwargs)
+
+    def forward_hpu(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        **kwargs: object,
+    ) -> Union[Tuple, CausalLMOutputWithPast]:
+        attn_metadata = get_forward_context().attn_metadata
+        if attn_metadata.num_prefill_tokens > 0 and \
+            attn_metadata.num_decode_tokens > 0:
+            raise ValueError("Chunk prefill not supported")
+        image_inputs = self._parse_and_validate_image_input(**kwargs)
+        cross_attention_states = None
+        cross_attention_mask = None
+        kv_range_for_decode = None
+
+        # For 1) text-only prefill and decode, 2) image-present decode.
+        if image_inputs is None:
+            full_text_row_masked_out_mask = (
+                attn_metadata.encoder_seq_lens_tensor
+                != 0).reshape(-1, 1).to(input_ids.device)
+            skip_cross_attention = max(attn_metadata.encoder_seq_lens) == 0
+
+        # For image-present prefill.
+        else:
+            skip_cross_attention = False
+
+            # Get the actual number of encoder tokens for each sample.
+            # Because attn_metadata.encoder_seq_lens only counts the last
+            # group of images for each sample, which is used to cheat the
+            # block manager to allocate blocks for those images only.
+            # See MllamaMultiModalProcessor for more details.
+            num_tiles_tensor = kwargs.pop("num_tiles")
+            num_tiles = [t.tolist() for t in num_tiles_tensor]
+            num_tokens_per_tile = calc_token_per_chunk(self.image_size)
+            actual_encoder_seq_lens = [
+                sum(num_tile) * num_tokens_per_tile for num_tile in num_tiles
+            ]
+            for actual_len, last_group_len in zip(
+                    actual_encoder_seq_lens, attn_metadata.encoder_seq_lens):
+                assert actual_len >= last_group_len
+
+            cross_attention_states = self.get_cross_attention_states(
+                image_inputs, attn_metadata, actual_encoder_seq_lens)
+
+            full_text_row_masked_out_mask = \
+                self.get_full_text_row_masked_out_mask(
+                    attn_metadata, input_ids.device)
+
+            cross_attention_mask, kv_range_for_decode = \
+                self.get_cross_attention_mask(
+                    input_ids, attn_metadata, num_tiles,
+                    num_tokens_per_tile, cross_attention_states.dtype)
+
+        outputs = self.language_model(
+            input_ids=input_ids,
+            positions=positions,
+            cross_attention_states=cross_attention_states,
+            cross_attention_mask=cross_attention_mask,
+            kv_range_for_decode=kv_range_for_decode,
+            full_text_row_masked_out_mask=full_text_row_masked_out_mask,
+            skip_cross_attention=skip_cross_attention,
+        )
+
+        return outputs
+
+    def forward_native(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
