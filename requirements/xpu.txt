@@ -10,7 +10,7 @@ wheel
 jinja2>=3.1.6
 datasets # for benchmark scripts
 
-torch==2.6.0+xpu
+torch==2.6.0+rocm6.2.4
 torchaudio
 torchvision
 pytorch-triton-xpu

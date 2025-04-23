@@ -21,7 +21,7 @@ sentence-transformers # required for embedding tests
 soundfile # required for audio tests
 jiwer # required for audio tests
 timm # required for internvl test
-torch==2.6.0
+torch==2.6.0+rocm6.2.4
 torchaudio==2.6.0
 torchvision==0.21.0
 transformers_stream_generator # required for qwen-vl test
