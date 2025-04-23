@@ -1175,7 +1175,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                        non_blocking=True)
 
     '''
-    Right now Qwen2.5VL needs to know these buckets so it can do some things internally
+    Qwen2.5VL requires the bucket's information
     '''
 
     def add_vision_buckets_to_model(self):
