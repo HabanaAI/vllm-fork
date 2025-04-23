@@ -36,7 +36,9 @@ fi
 
 #Unit Test for Processor
 if $RunProcessorUT; then
-  pytest /workspace/vllm/tests/models/multimodal/processing/test_qwen2_5_vl.py -s -v;
+  pip uninstall -y transformers
+  pip install git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf
+  pytest tests/models/multimodal/processing/test_qwen2_5_vl.py -s -v;
 fi
 
 #pytests
@@ -83,6 +85,6 @@ if $RandomizedImage; then
 fi
 
 if $RunOnlineDatasets; then
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench --num-prompts 500
-	bash run_online.sh -m $ModelName --skip_warmup --hpu --run_sonet --num-prompts 1000
+	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench --num-prompts 500 -sgt
+	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt
 fi

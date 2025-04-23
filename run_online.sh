@@ -26,6 +26,25 @@ wait_for_server() {
     done" && return 0 || return 1
 }
 
+check_device() {
+    device=$1
+    if [[ $device == "gpu" ]]; then
+        nvidia-smi >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "failed to executed nvidia-smi on this machine. exiting"
+            exit
+        fi
+    elif [[ $device == "hpu" ]]; then
+        hl-smi >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "failed to executed hl-smi on this machine. exiting"
+            exit
+        fi
+    else
+        echo "unknown device ${device}"
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
     --model | -m)
@@ -68,8 +87,8 @@ while [[ $# -gt 0 ]]; do
         VLLMV1="On"
         shift 1
         ;;
-    --run_sonet)
-        RunSonet=true
+    --save_generated-text | -sgt)
+        SaveGenratedText=true
         shift 1
         ;;
     --help)
@@ -89,6 +108,9 @@ NumPrompt=${NumPrompt:-"100"}
 # DataSet=${DataSet:-"lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench"}
 IFS=',' read -r -a DSArray <<<"$DataSet"
 VLLM_DIR=$(realpath .)
+OUTPUT_DIR=$VLLM_DIR/online.$(hostname).$(date -u +%Y%m%d%H%M)
+
+mkdir -p ${OUTPUT_DIR}
 
 if $HPU && $GPU; then
     echo "ERR: please specify --gpu or --hpu (not both)..exiting"
@@ -100,10 +122,12 @@ fi
 
 if $GPU; then
     uv pip install datasets pandas -q
+    check_device "gpu"
 fi
 
 if $HPU; then
     pip install datasets pandas -q
+    check_device "hpu"
 fi
 
 if [[ -n "$VLLMV1" ]]; then
@@ -134,13 +158,23 @@ if [[ "$model" == *"Qwen2"* ]]; then
     unset PT_HPUGRAPH_DISABLE_TENSOR_CACHE
 fi
 
-export HTTPS_PROXY=http://proxy-dmz.intel.com:912
-export HTTP_PROXY=http://proxy-dmz.intel.com:912
-export no_proxy=0.0.0.0,localhost,intel.com,.intel.com,10.0.0.0/8,192.168.0.0/16
+set_intel_proxy() {
+    echo "-------------------------------------"
+    echo "Warnning: Set Intel Proxies (if needed) before proceeding"
+    echo "-------------------------------------"
+    sleep 5
+}
+
+set_intel_proxy
+
+BenchSaveTextArg=" "
+if [[ -n "$SaveGenratedText" ]]; then
+    BenchSaveTextArg=" --save-result --result-dir ${OUTPUT_DIR}"
+fi
 
 if [[ ! -n "$SkipServer" ]]; then
     echo "INFO: Lunching the server"
-    logfile=online.$(hostname).$(date -u +%Y%m%d%H%M).server.log
+    logfile=${OUTPUT_DIR}/server.log
     cmd="python -m vllm.entrypoints.openai.api_server --port 8080 --model $model --tensor-parallel-size 1 --max-num-seqs 128 --dtype bfloat16 --gpu-memory-util $GMU --max-num-batched-tokens 32768 --max-model-len $MML --block-size 128 &"
     echo $cmd && echo $cmd >>$logfile
     eval $cmd 2>&1 | tee -a $logfile &
@@ -171,28 +205,27 @@ if [ ${#DSArray[@]} -gt 0 ]; then
         elif [[ $item == "LIME-DATA/infovqa" ]]; then
             Split=train
             Type=random
+        elif [[ $item == "sonnet" ]]; then
+            echo "INFO: $item dataset is text-only"
         else
             echo "ERR: unknown dataset: $item"
             continue
         fi
 
-        cmd="python benchmark_serving.py --backend openai-chat --model $model --trust-remote-code --port 8080 --endpoint /v1/chat/completions \
-        --dataset-path $item --dataset-name $Type --hf-split $Split --num-prompts $NumPrompt --request-rate inf --seed 0 --ignore_eos"
-        logfile=online.$(hostname).$(date -u +%Y%m%d%H%M).$(echo $item | cut -d"/" -f2).log
+        if [[ $item == "echo840/OCRBench" ]] || [[ $item == "lmarena-ai/vision-arena-bench-v0.1" ]] || [[ $item == "LIME-DATA/infovqa" ]]; then
+            cmd="python benchmark_serving.py --backend openai-chat --model $model --trust-remote-code --port 8080 --endpoint /v1/chat/completions \
+            --dataset-path $item --dataset-name $Type --hf-split $Split --num-prompts $NumPrompt --request-rate inf --seed 0 --ignore_eos ${BenchSaveTextArg}"
+        elif [[ $item == "sonnet" ]]; then
+            cmd="python benchmark_serving.py --backend openai-chat --model $model --trust-remote-code --port 8080 --endpoint /v1/chat/completions \
+            --dataset-name $item --dataset-path ./sonnet.txt  --sonnet-input-len 2048 --sonnet-output-len 128 --sonnet-prefix-len 100 \
+            --num-prompts $NumPrompt --request-rate inf --seed 0 --ignore_eos ${BenchSaveTextArg}"
+        fi
+        logfile=${OUTPUT_DIR}/$(echo $item | cut -d"/" -f2).log
         echo $cmd && echo $cmd >>$logfile
         eval $cmd 2>&1 | tee -a $logfile
     done
 else
-    echo "WARN: argument dataset is empty! no img-text dataset test is conducted"
-fi
-
-if [[ -n "$RunSonet" ]]; then
-    # test for the sonet
-    cmd="python benchmark_serving.py --backend openai-chat --model $model --trust-remote-code --port 8080 --endpoint /v1/chat/completions --dataset-name sonnet --dataset-path ./sonnet.txt \
-        --num-prompts 1000 --port 8080 --sonnet-input-len 2048 --sonnet-output-len 128 --sonnet-prefix-len 100 --num-prompts $NumPrompt --request-rate inf --seed 0 --ignore_eos"
-    logfile=online.$(hostname).$(date -u +%Y%m%d%H%M).sonet.log
-    echo $cmd && echo $cmd >>$logfile
-    eval $cmd 2>&1 | tee -a $logfile
+    echo "WARN: argument dataset is empty! no dataset test is conducted"
 fi
 
 # cleanup after done
