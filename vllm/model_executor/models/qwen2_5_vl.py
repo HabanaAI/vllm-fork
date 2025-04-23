@@ -88,10 +88,6 @@ class AttentionLongSequence:
         q_len = q.size(-2)
         assert q_len % q_block_size == 0
         q_tiles = (q_len // q_block_size) if (q_len % q_block_size == 0) else math.ceil(q_len / q_block_size)
-        #q_padding = q_tiles * q_block_size - q_len
-        #q = F.pad(q, (0, 0, 0, q_padding), "constant", 0)
-        #if mask is not None:
-        #    mask = F.pad(mask, (0, 0, 0, q_padding), "constant", -10000.0)
         attn_output = torch.zeros_like(q)
 
         for i in range(q_tiles):
@@ -99,8 +95,7 @@ class AttentionLongSequence:
             row_q = q[:, :, s:e, :]
             row_mask = mask[:, :, s:e, :]
             attn_output[:, :, s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0, False, None)
-            #TODO: markstep every 10th layer, didn't experiment which one is optimal number.
-            #10,50,100 shows simliar result, without this, we see the program hangs for multiple prompts(with larger images)
+            #TODO: markstep every so often, didn't experiment which one is optimal number.
             if i % 75 == 0:
                 htcore.mark_step()
         return attn_output
@@ -112,10 +107,8 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     greater_eq = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
     range_indices = torch.logical_and(lesser, greater_eq).float()
     # can reduce sum externally or as batchmatmul
-    #TODO: einsum with tensor dimension too big doesn't work. Register max size error.
-    #We can always move to CPU for all einsum without shape checking if perf impact is minimal.
     if range_indices.shape[-1] > 40000:
-        print("einsum running on CPU : ", range_indices.shape)
+        logger.info("einsum running on CPU : ", range_indices.shape)
         range_indices = range_indices.to("cpu")
         res = torch.einsum('bi,bj->ij', range_indices, range_indices)
         res = res.to("hpu")
@@ -798,7 +791,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
     def pad_multimodal_data(self, pixel_values, image_grid_thw, vision_buckets):
         assert pixel_values.shape[
-            0] % 64 == 0, '[testing version] needs 64 aligned resolution'
+            0] % 64 == 0, 'needs 64 aligned resolution'
 
         desired_number_of_pixels = vision_buckets.get_multimodal_bucket(pixel_values.shape[0])
         padding_len = desired_number_of_pixels - pixel_values.shape[0]
@@ -1309,7 +1302,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         if video_input is not None:
             if is_hpu:
-                print("Video inputs have not been enabled/verified yet, ignoring video inputs")
+                logger.warning("Video inputs have not been enabled/verified yet, ignoring video inputs")
                 return inputs_embeds
             video_embeds = self._process_video_input(video_input)
             inputs_embeds = merge_multimodal_embeddings(

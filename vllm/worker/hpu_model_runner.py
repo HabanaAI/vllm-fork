@@ -96,8 +96,6 @@ class VisionBuckets():
     def __init__(self):
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
-            #TODO:with profile_run, the bucket of 65536 is added, so the pixel values
-            #bigger than 12800 below always padded to 65536 which is too big.
             #self.multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544, 16384, 26500, 40000, 65536]
             multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544]
         else:
@@ -108,8 +106,6 @@ class VisionBuckets():
         for mm_bucket in self.multimodal_buckets:
             if curr_num_image_patches <= mm_bucket:
                 return mm_bucket
-        #Remove dynamic bucket expands since this is not done for the language model.
-        #self.multimodal_buckets += [curr_num_image_patches] # a shape larger than any that was compiled before. its gonna be compiled now, so save it for the future
         return curr_num_image_patches
 
     def __repr__(self):
@@ -2060,11 +2056,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     lora_request):
         assert self.model_is_mrope, "Warmup compatible with Qwen2vl models"
         if num_patches == _UNSET_NUM_PATCHES:
-            # # only half of the total number of tokens should be from image
-            # num_image_tokens = self.model_config.max_model_len // 2
-            # # get the number of patches from the num of image tokens
-            # num_patches = num_image_tokens * 4
-
             # Using the largest bucket
             num_patches = self.get_model().vision_buckets.multimodal_buckets[-1]
 
