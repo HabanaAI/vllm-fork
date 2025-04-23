@@ -355,7 +355,7 @@ class Qwen2_5_VisionAttention(nn.Module):
         elif self.attn_backend == _Backend.TORCH_SDPA and is_hpu:
             from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
-            # We are abusing the variable name cu_seqlens
+            # We are re-purposing the variable name cu_seqlens
             # to represent the mask for full attention,
             # if the mask if None we are doing window attention
             fullattn_mask = cu_seqlens
