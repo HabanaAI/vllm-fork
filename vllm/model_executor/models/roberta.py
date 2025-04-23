@@ -2,7 +2,7 @@
 
 import itertools
 import os
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 import torch
 from torch import nn
