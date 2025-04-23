@@ -2078,7 +2078,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
 
-        assert num_patches % 8, "Expect num_patches to be multiples of 8"
+        assert num_patches % 8 == 0, (
+            f"Expects num_patches to be multiples of 8, got: {num_patches}"
+        )
         image_h = num_patches // 8
         image_grid_thw = torch.tensor([1, image_h, 8])
 

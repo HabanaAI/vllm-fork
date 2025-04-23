@@ -870,7 +870,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             "pip install "
             "git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf"
         )
-        assert x.shape[0]%64 == 0, assert_msg
+        assert x.shape[0] % 64 == 0, assert_msg
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             htcore.mark_step()
