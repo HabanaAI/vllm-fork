@@ -2,7 +2,7 @@
 
 import itertools
 from abc import abstractmethod
-from typing import Any, Literal, Optional, Union, Callable
+from typing import Any, Callable, Literal, Optional, Union
 
 import torch
 import torch.nn as nn

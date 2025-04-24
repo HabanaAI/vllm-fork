@@ -23,7 +23,6 @@ from vllm.triton_utils import tl, triton
 from vllm.utils import direct_register_custom_op
 
 if current_platform.is_hpu():
-    import habana_frameworks.torch as htorch
     from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
 
