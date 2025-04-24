@@ -289,34 +289,43 @@ class MooncakeStoreConnector(KVConnectorBase):
                 htorch.core.mark_step()
             logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
         else:
-            input_tokens_tensor = model_input.input_tokens.to("cpu") # shape: [batch_size, seq_len_padding_to_128]
+            # from pudb.remote import set_trace
+            # set_trace()
+            # pudb.remote.set_trace()
+            input_tokens_tensor_cpu = model_input.input_tokens.to("cpu") # shape: [batch_size, seq_len_padding_to_128]
             torch.hpu.synchronize()
             seq_lens = model_input.attn_metadata.seq_lens # 2D list
-            slot_mapping_flat = model_input.attn_metadata.slot_mapping.flatten()
             start_layer = model_executable.model.start_layer
             end_layer = model_executable.model.end_layer
-
+            num_kv_heads = 1
             model_config = model_executable.model.config
             num_heads = int(model_config.num_key_value_heads / self.tp_size)
             hidden_size = model_config.hidden_size
             num_attention_heads = model_config.num_attention_heads
             head_size = int(hidden_size / num_attention_heads)
-
+            # For each sequence in the batch, we will pack kv together, so we send
+            # 0. current_tokens [seq_len]
+            # 1. bool mask [seq_len]
+            # 2. key [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size)], [61, seq_len, 1, 576]
+            # 3. empty tensor
+            # 4. hidden_or_intermediate_states [1, hidden_size]
             for idx, slen in enumerate(seq_lens):
-                start_pos = sum(seq_lens[:idx])
-                end_pos = start_pos + slen
-
-                current_tokens = input_tokens_tensor[start_pos:end_pos]
-                store_key_prefix = self.tensor_hash(current_tokens)
+                if slen == 1: # we think this is a padding sequence, so we skip it
+                    continue
+                current_tokens_cpu = input_tokens_tensor_cpu[idx][:slen]
+                store_key_prefix = self.tensor_hash(current_tokens_cpu)
+                logger.debug(f"send token len: {slen}, token: {current_tokens_cpu}")
                 keys, values = [], []
-
+                start = 0
+                padded_total_size = (slen + self.block_size - 1) // self.block_size * self.block_size
+                current_slot_mapping = model_input.attn_metadata.slot_mapping[idx][start:padded_total_size]
+                self.padded_length_tensor[0] = padded_total_size
+                htorch.core.mark_step()
+                # ==== graph should start here ======
                 for layer_id in range(start_layer, end_layer):
                     kv_cache = kv_caches[layer_id - start_layer]
-
                     key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
                     value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
-
-                    current_slot_mapping = slot_mapping_flat[start_pos:end_pos]
 
                     keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                     values.append(value_cache[current_slot_mapping].unsqueeze(0))
@@ -324,12 +333,17 @@ class MooncakeStoreConnector(KVConnectorBase):
                 keys = torch.cat(keys, dim=0)
                 values = torch.cat(values, dim=0)
                 kvcache_to_sent = torch.stack((keys, values), dim=0)
+                # we pack kv together, only need send one tensor
+                # kvcache_to_sent = keys
                 store_kvcache_key = f"{store_key_prefix}_{self.local_tp_rank}"
                 self.kv_store.put(store_kvcache_key, kvcache_to_sent)
-
+                
+                logger.debug(f"put kv cache key: {store_kvcache_key}")
+                
                 hidden_key = f"{store_key_prefix}_hidden_{self.local_tp_rank}"
                 self.kv_store.put(hidden_key,
-                                hidden_or_intermediate_states[start_pos:end_pos])
+                                hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
+                # ==== graph should end here ======
                 htorch.core.mark_step()
             logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
 
@@ -445,6 +459,8 @@ class MooncakeStoreConnector(KVConnectorBase):
                 htorch.core.mark_step()
         
         else:
+            # from pudb.remote import set_trace
+            # set_trace()
             bypass_model_exec = True
 
             input_tokens_tensor = model_input.input_tokens.to("cpu")
@@ -496,7 +512,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                     continue
 
                 # get roi for current seq
-                current_tokens = input_tokens_tensor[start_pos:end_pos]
+                current_tokens = input_tokens_tensor[:, start_pos:end_pos]
                 load_key_prefix = self.tensor_hash(current_tokens)
                 load_kvcache_key = f"{load_key_prefix}_{self.local_tp_rank}"
                 remote_kv = self.kv_store.get(load_kvcache_key)
@@ -527,12 +543,12 @@ class MooncakeStoreConnector(KVConnectorBase):
                     current_layer_idx = i - model_executable.model.start_layer
                     kv_cache = kv_caches[current_layer_idx]
                     key_cache, value_cache = kv_cache[0], kv_cache[1]
-                    key = remote_k.unsqueeze(0)
-                    value = remote_v.unsqueeze(0)
-                    key = torch.nn.functional.pad(key, (0, 0, 0, 0, 0, 128 - key.size(1)), mode="constant", value=0)
-                    value = torch.nn.functional.pad(value, (0, 0, 0, 0, 0, 128 - value.size(1)), mode="constant", value=0)
-                    # self.cache_k(key, key_cache, block_indices_tensor, None)
-                    # self.cache_v(value, value_cache, block_indices_tensor, None)
+                    key = remote_k.unsqueeze(0).view(-1, 128, 32, 128)
+                    value = remote_v.unsqueeze(0).view(-1, 128, 32, 128)
+                    # key = torch.nn.functional.pad(key, (0, 0, 0, 0, 0, 128 - key.size(1)), mode="constant", value=0)
+                    # value = torch.nn.functional.pad(value, (0, 0, 0, 0, 0, 128 - value.size(1)), mode="constant", value=0)
+                    self.cache_k(key, key_cache, block_indices_tensor, None)
+                    self.cache_v(value, value_cache, block_indices_tensor, None)
                 start_block_idx = end_block_idx
                 hidden_or_intermediate_states_for_one_req.append(hidden.to("hpu"))
                 htorch.core.mark_step()
