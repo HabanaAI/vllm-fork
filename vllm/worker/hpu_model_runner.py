@@ -44,7 +44,7 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
-from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
@@ -86,6 +86,15 @@ VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
+
+
+class Singleton(type):
+    _instances: Dict[type, object] = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super().__call__(*args, **kwargs)
+        return cls._instances[cls]
 
 
 class PhaseType(Enum):
@@ -251,6 +260,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
+        self.sampler = get_sampler()
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
@@ -448,7 +458,7 @@ class HpuModelAdapter(torch.nn.Module):
         return self.model.compute_logits(*args, **kwargs)
 
     def sample(self, *args, **kwargs):
-        return self.model.sample(*args, **kwargs)
+        return self.sampler(*args, **kwargs)
 
     def make_empty_intermediate_tensors(self, *args, **kwargs):
         return self.model.make_empty_intermediate_tensors(*args, **kwargs)
@@ -728,6 +738,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.cached_step_outputs: List[torch.Tensor] = []
         self.is_pooler = False
         self.is_causal = is_causal
+        # For delayed sampling
+        self.cached_step_inputs: List[
+            ModelInputForHPUWithSamplingMetadata] = []
+
+        # For multi-step scheduling
+        self.cached_step_outputs: List[torch.Tensor] = []
         # For delayed sampling
         self.cached_step_inputs: List[
             ModelInputForHPUWithSamplingMetadata] = []
@@ -1478,6 +1494,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             real_batch_size = len(seq_group_metadata_list)
             input_tokens = output[:real_batch_size].clone()
+                                        device=self.device)
+        else:
+            real_batch_size = len(seq_group_metadata_list)
+            input_tokens = output[:real_batch_size]
 
         input_positions = torch.tensor(
             input_mrope_positions if self.model_is_mrope else input_positions,
@@ -2564,6 +2584,21 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             tensor = torch.cat([tensor, padding])
         return tensor
 
+    def _get_seq_ids(self, model_input):
+        return ([
+            sg.seq_ids[0] for sg in model_input.sampling_metadata.seq_groups
+        ])
+
+    def _pad_to_max_num_seqs(self, tensor, value):
+        padding_needed = self.max_num_seqs - tensor.size(0)
+        if padding_needed:
+            padding = torch.full((padding_needed, *tensor.shape[1:]),
+                                 value,
+                                 device=tensor.device,
+                                 dtype=tensor.dtype)
+            tensor = torch.cat([tensor, padding])
+        return tensor
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -2854,6 +2889,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         "positions": result.input_positions,
                         "attn_metadata": vars(result.attn_metadata),
                         "lora_mask": lora_mask,
+                        "attn_metadata": vars(result.attn_metadata)
                     }
                     broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
                 else:
@@ -2887,7 +2923,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 return [output] if self.is_driver_worker else []
             else:
                 return []
-
         return output if type(output) is list else [output]
 
     def _delayed_sampler_outputs(self, model_input):

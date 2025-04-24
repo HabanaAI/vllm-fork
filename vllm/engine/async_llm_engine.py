@@ -526,8 +526,6 @@ class _AsyncLLMEngine(LLMEngine):
         )
 
     async def check_health_async(self) -> None:
-        if self.tokenizer:
-            self.tokenizer.check_health()
         self.model_executor.check_health()
 
 
@@ -1166,6 +1164,10 @@ class AsyncLLMEngine(EngineClient):
         self._request_tracker.abort_request(request_id,
                                             exception=asyncio.CancelledError,
                                             verbose=self.log_requests)
+
+    async def get_vllm_config(self) -> VllmConfig:
+        """Get the vllm configuration of the vLLM engine."""
+        return self.engine.get_vllm_config()
 
     async def get_model_config(self) -> ModelConfig:
         """Get the model configuration of the vLLM engine."""
