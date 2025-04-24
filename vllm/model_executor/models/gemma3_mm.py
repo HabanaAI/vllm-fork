@@ -31,6 +31,8 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
 from vllm.sequence import IntermediateTensors
 
+from vllm.platforms import current_platform
+
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
 from .siglip import SiglipVisionModel
@@ -639,6 +641,11 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         **kwargs,
     ):
         kwargs["has_images"] = True
+
+        if current_platform.is_hpu():
+            input_ids = input_ids.flatten()
+            positions = positions.flatten()
+
         # NOTE(woosuk): Here, we distinguish the sequences by the position id 0.
         # This is a HACK. Fix this.
         start_idices = (positions == 0).cpu().nonzero()
