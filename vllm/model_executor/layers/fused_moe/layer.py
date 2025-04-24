@@ -159,7 +159,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
         activation: str = "silu",
-        ep_rank: Optional[int] = None,
     ) -> torch.Tensor:
         return self.forward(x=x,
                             layer=layer,
@@ -174,8 +173,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                             custom_routing_function=custom_routing_function,
                             scoring_func=scoring_func,
                             e_score_correction_bias=e_score_correction_bias,
-                            activation=activation,
-                            ep_rank=ep_rank)
+                            activation=activation)
 
     def forward_cuda(
         self,
@@ -484,19 +482,20 @@ class FusedMoE(torch.nn.Module):
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
         if is_hpu:
-            ep_shift = self.ep_rank * self.num_experts
+            num_experts = self.local_num_experts
+            ep_shift = self.ep_rank * num_experts
             from vllm_hpu_extension.ops import (VllmMixtureOfExpertsOp,
                                                 VllmMixtureOfExpertsOpFP8)
-            experts_min, experts_max = ep_shift, self.num_experts + ep_shift - 1
+            experts_min, experts_max = ep_shift, num_experts + ep_shift - 1
             if quant_config is not None:
                 moe_op = VllmMixtureOfExpertsOpFP8(
-                    self.num_experts,
+                    num_experts,
                     experts_min,
                     experts_max,
                 )
             else:
                 moe_op = VllmMixtureOfExpertsOp(
-                    self.num_experts,
+                    num_experts,
                     experts_min,
                     experts_max,
                 )
@@ -509,9 +508,6 @@ class FusedMoE(torch.nn.Module):
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
             raise ValueError("Only softmax scoring function is supported for "
                              "non-grouped topk.")
-        if is_hpu:
-            from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.global_num_experts)
 
         # Note: get_quant_method will look at the layer's local_num_experts
         # for heuristic purposes, so it must be initialized first.
@@ -769,7 +765,8 @@ class FusedMoE(torch.nn.Module):
                     shard_dim=shard_dim,
                     loaded_weight=loaded_weight,
                     expert_data=expert_data,
-                    tp_rank=self.tp_rank)
+                    tp_rank=self.tp_rank,
+                    expert_id=expert_id)
             elif quant_method in [
                     FusedMoeWeightScaleSupported.GROUP.value,
                     FusedMoeWeightScaleSupported.BLOCK.value,

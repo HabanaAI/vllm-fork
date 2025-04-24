@@ -18,7 +18,7 @@ import vllm.envs as envs
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
                                               AttentionMetadata, AttentionType)
-from vllm.attention.backends.mla.utils import MLACommonImpl
+from vllm.attention.backends.mla.common import MLACommonImpl
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
@@ -218,12 +218,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
                        "input_positions"), f"attn meta: {attn_metadata}"
 
         if not is_prefill:
-            if envs.VLLM_MLA_PERFORM_MATRIX_ABSORPTION:
-                q_nope = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
-                q_pe = torch.matmul(hidden_states_or_q_c, self.W_QR)\
-                    .view(-1, self.num_heads, self.qk_rope_head_dim)
-            else:
-                q_nope, q_pe = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
+            q_nope, q_pe = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
             input_positions = attn_metadata.input_positions.view(-1)
             q_pe, k_pe = \
                 self.rotary_emb(input_positions, q_pe, k_pe)
