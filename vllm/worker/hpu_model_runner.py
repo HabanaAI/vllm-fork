@@ -78,7 +78,7 @@ _TYPE_CACHE = {}
 # Use caution when updating them!
 _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
-
+_UNSET_NUM_PATCHES = 9999999
 LORA_WARMUP_RANK = 8
 
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
@@ -86,6 +86,33 @@ VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
+
+
+class VisionBuckets():
+    '''
+    This class is used to bucket image tokens
+    '''
+    def __init__(self):
+        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
+        if envvar == "":
+            multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544]
+        else:
+            multimodal_buckets = [int(i) for i in envvar.split(',')]
+        self.multimodal_buckets = self._process_buckets(multimodal_buckets)
+
+    def _process_buckets(self, buckets):
+        for bucket in buckets:
+            assert bucket % 8 == 0, 'Buckets needs to be multiples 8 (slices of 64)'
+        return sorted(buckets)
+
+    def get_multimodal_bucket(self, curr_num_image_patches):
+        for mm_bucket in self.multimodal_buckets:
+            if curr_num_image_patches <= mm_bucket:
+                return mm_bucket
+        return curr_num_image_patches
+
+    def __repr__(self):
+        return str(self.multimodal_buckets)
 
 
 class PhaseType(Enum):
@@ -708,6 +735,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                  self.use_merged_prefill,
                                                  self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
+        self.multimodal_buckets = [
+        ]  #This should be use HPUBucketingContext <<
+        self.graphed_multimodal_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
         if self.vllm_config.cache_config.enable_prefix_caching:
@@ -870,6 +900,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.model_memory_usage = m.consumed_device_memory
         msg = f"Loading model weights took in total {m.get_summary_string()}"
         logger.info(msg)
+        self.add_vision_buckets_to_model()
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -966,12 +997,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, batch_size, seq_len, is_prompt):
+    def _use_graphs(self, batch_size, seq_len, is_prompt, num_patches=None):
         if self.enforce_eager:
             return False
         if self.skip_warmup:
             return True
-        return (batch_size, seq_len, is_prompt) in self.graphed_buckets
+        if not num_patches:
+            return (batch_size, seq_len, is_prompt) in self.graphed_buckets
+        #TODO: We might need to check both language bucket and multimodal bucket
+        # and return True only it's avialble, or return seperately.
+        return (num_patches) in self.graphed_multimodal_buckets
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -1083,6 +1118,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def move_to_device(self, tensor):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
+
+    '''
+    Qwen2.5VL requires the bucket's information
+    '''
+
+    def add_vision_buckets_to_model(self):
+        model = self.get_model()
+        if supports_multimodal(model):
+            model.vision_buckets = VisionBuckets()
 
     def _prepare_prompt(
         self,
@@ -1953,6 +1997,62 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_groups',
         ])
         return attention_metadata
+
+    def create_dummy_multi_modal_seq_group_metadata(self, group_id,
+                                                    num_patches,
+                                                    sampling_params,
+                                                    lora_request):
+        assert self.model_is_mrope, "Warmup compatible with Qwen2vl models"
+        if num_patches == _UNSET_NUM_PATCHES:
+            # Using the largest bucket
+            num_patches = self.get_model().vision_buckets.multimodal_buckets[-1]
+
+        # get number of tokens from num_patches using merger
+        # vision_config.spatial_merge_size
+        num_image_tokens = num_patches // 4  # TODO use the spatial_merge_size ** 2 insted of 4
+
+        image_token_id = self.get_model().config.image_token_id
+        prompt_token_ids = [image_token_id] * num_image_tokens
+        prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
+        placeholders_by_modality = {
+            'image': [{
+                'offset': 0,
+                'length': len(prompt_token_ids)
+            }]
+        }
+        seq_data = SequenceData.from_seqs(prompt_token_ids)
+        seq_data = SequenceData(prompt_token_ids_array)
+
+        assert num_patches % 8 == 0, (
+            f"Expects num_patches to be multiples of 8, got: {num_patches}"
+        )
+        image_h = num_patches // 8
+        image_grid_thw = torch.tensor([1, image_h, 8])
+
+        image_grid_thw = torch.tensor([1, image_h, int(num_patches/image_h)])
+        pixel_values = torch.randn(image_grid_thw.prod(), 1176)  # TODO: figure out the variable name
+
+        assert pixel_values.shape[0] % 64 == 0, (
+            f"pixel_values must be sliced in 64 chunks, got: {pixel_values.shape}"
+        )
+
+        multi_modal_data = {
+            "pixel_values": pixel_values,
+            "image_grid_thw": image_grid_thw,
+        }
+        multi_modal_data = MultiModalKwargs(multi_modal_data)
+
+        seq_group = SequenceGroupMetadata(
+            request_id=str(group_id),
+            is_prompt=True,
+            seq_data={group_id: seq_data},
+            sampling_params=sampling_params,
+            block_tables=None,
+            lora_request=lora_request[group_id] if lora_request else None,
+            multi_modal_data=multi_modal_data,
+            multi_modal_placeholders=placeholders_by_modality,
+        )
+        return seq_group
 
     def create_dummy_seq_group_metadata(self,
                                         group_id,
