@@ -2382,6 +2382,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                       starting_mem=0,
                       total_batch_seq=0.001):
 
+
         if is_prompt and supports_multimodal(self.get_model()) and is_prompt:
             multimodal_prompt_graph_mem_ratio = float(
                 os.environ.get('VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO', '0.3'))
@@ -2393,8 +2394,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 f"{format_bytes(available_mem)} for text prompt "
                 f"(VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO={multimodal_prompt_graph_mem_ratio})")
             logger.info(msg)
-        else:
-            multimodal_avail_mem = 0
 
         total_mem = starting_mem
         idx = 0
@@ -2440,17 +2439,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             total_mem += used_mem
             total_batch_seq += batch_seq
 
-        mm_outputs = \
-        self._warmup_multimodal_graph(
-            kv_caches=kv_caches,
-            available_mem=multimodal_avail_mem,
-            starting_mem=0,
-            total_batch_seq=total_batch_seq,
-        )
+        if is_prompt:
+            #For multimodal total_batch_seq and total_mem, we store it in the
+            #attribute for now.
+            mm_outputs = self._warmup_multimodal_graph(
+                kv_caches=kv_caches,
+                available_mem=multimodal_avail_mem,
+                starting_mem=0 if not hasattr(self, "mm_total_mem") else self.mm_total_mem,
+                total_batch_seq=0.001 if not hasattr(self, "mm_total_batch_seq")  else self.mm_total_batch_seq
+            )
 
-        if mm_outputs is not None:
-            total_mem, total_batch_seq, mm_captured_all = mm_outputs
-            captured_all = captured_all and mm_captured_all
+            if mm_outputs is not None:
+                mm_total_mem, total_mm_batch_seq, mm_captured_all = mm_outputs
+                total_mem = total_mem + mm_total_mem
+                captured_all = captured_all and mm_captured_all
+                self.mm_total_mem = mm_total_mem
+                self.mm_total_batch_seq= total_mm_batch_seq
+
         return total_mem, total_batch_seq, captured_all
 
     def _warmup_multimodal_graph(self,
