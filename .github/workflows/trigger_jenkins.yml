@@ -235,7 +235,7 @@ jobs:
             synapse_build=$(curl "${synapse_build_endpoint}" | jq -r ".release_id")
             pt_version=${{ vars.PT_VERSION }}
             BUILD_TAG="Github-vLLM-Fork-${{ github.event.number }}-${{github.run_number}}"
-            safe_cmd=${TEST_COMMAND//&/\\&}
+            safe_cmd=$(printf '%s\n' "${TEST_COMMAND}" | sed -e 's/[&/]/\\&/g')
             echo "Writing Pod Template To File"
             echo "${POD_TEMPLATE}" > pod.yml
             sed -i "s/##VERSION##/${synapse_version}/g" pod.yml
