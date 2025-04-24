@@ -639,6 +639,10 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         **kwargs,
     ):
         kwargs["has_images"] = True
+
+        input_ids = input_ids.flatten()
+        positions = positions.flatten()
+
         # NOTE(woosuk): Here, we distinguish the sequences by the position id 0.
         # This is a HACK. Fix this.
         start_idices = (positions == 0).cpu().nonzero()
