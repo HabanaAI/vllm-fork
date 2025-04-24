@@ -108,7 +108,7 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     range_indices = torch.logical_and(lesser, greater_eq).float()
     # can reduce sum externally or as batchmatmul
     if range_indices.shape[-1] > 40000:
-        logger.info("einsum running on CPU : ", range_indices.shape)
+        logger.info(f"einsum running on CPU : {range_indices.shape}")
         range_indices = range_indices.to("cpu")
         res = torch.einsum('bi,bj->ij', range_indices, range_indices)
         res = res.to("hpu")
