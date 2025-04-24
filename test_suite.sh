@@ -87,4 +87,7 @@ fi
 if $RunOnlineDatasets; then
 	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench --num-prompts 500 -sgt
 	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt
+	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 2
+	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 4
+	#bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 8
 fi

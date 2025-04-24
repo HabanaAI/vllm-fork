@@ -5,8 +5,9 @@ usage() {
     echo " --skip_warmup                    Skip VLLM warmups"
     echo " --gpu                            Run for nvidia GPU"
     echo " --hpu                            Run for Gaudi HPU"
-    echo " --dataset                        comma separate img-txt datasets, i.e. --dataset lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,"
-    echo " --run_textonly                   Run the sonet text-only case as well"
+    echo " --dataset                        comma separate img-txt datasets, i.e. --dataset lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,sonnet"
+    echo " --save_generated-text            save the generated text by vllm"
+    echo " --tp                             tensor-parallel size"
 }
 
 # Cleanup function
@@ -79,6 +80,10 @@ while [[ $# -gt 0 ]]; do
         MML=$2
         shift 2
         ;;
+    --tensor_parallel_size | -tp)
+        TP=$2
+        shift 2
+        ;;
     --num-prompts | -np)
         NumPrompt=$2
         shift 2
@@ -104,6 +109,7 @@ HPU=${HPU:-false}
 GMU=${GMU:-"0.9"}
 MML=${MML:-"32768"}
 NumPrompt=${NumPrompt:-"100"}
+TP=${TP:-"1"}
 
 # DataSet=${DataSet:-"lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench"}
 IFS=',' read -r -a DSArray <<<"$DataSet"
@@ -175,7 +181,7 @@ fi
 if [[ ! -n "$SkipServer" ]]; then
     echo "INFO: Lunching the server"
     logfile=${OUTPUT_DIR}/server.log
-    cmd="python -m vllm.entrypoints.openai.api_server --port 8080 --model $model --tensor-parallel-size 1 --max-num-seqs 128 --dtype bfloat16 --gpu-memory-util $GMU --max-num-batched-tokens 32768 --max-model-len $MML --block-size 128 &"
+    cmd="python -m vllm.entrypoints.openai.api_server --port 8080 --model $model --tensor-parallel-size $TP --max-num-seqs 128 --dtype bfloat16 --gpu-memory-util $GMU --max-num-batched-tokens 32768 --max-model-len $MML --block-size 128 &"
     echo $cmd && echo $cmd >>$logfile
     eval $cmd 2>&1 | tee -a $logfile &
 else
