@@ -25,8 +25,8 @@ docker run -it --runtime=habana \
 git clone -b aice/v1.20.1 https://github.com/HabanaAI/vllm-fork
 git clone -b aice/v1.20.1 https://github.com/HabanaAI/vllm-hpu-extension
 
-VLLM_TARGET_DEVICE=hpu pip install -e /workspace/vllm-fork --no-build-isolation
-pip install -e /workspace/vllm-hpu-extension --no-build-isolation
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
+pip install -e vllm-hpu-extension --no-build-isolation
 ```
 
 3. If you need use multimodal models like Qwen-VL, GLM-4V, we recommend using Pillow-SIMD instead of Pillow to improve the image processing performance.
@@ -114,6 +114,50 @@ bash benchmark_serving_sharegpt.sh # to benchmark with ShareGPT dataset
 > The input/output ranges passed to `start_gaudi_vllm_server.sh` should cover the following benchmark ranges to get expected performance.
 
 > The parameters in the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` must be modified to match the ones passed to `start_gaudi_vllm_server.sh`.
+
+### 3. Host vLLM service with FP8 precision
+Running vLLM service with FP8 precision is achieved by using [Intel(R) Neural Compressor (INC)](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#inference-using-fp8) package. For the detailed info, you may check [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.21.0/calibration/README.md).
+#### 1. Copy open_orca_gpt4_tokenized_llama.calibration_1000.pkl to vllm-hpu-extension/calibration folder
+```bash
+gzip -dk Gaudi-fp8-calibration/open_orca_gpt4_tokenized_llama.calibration_1000.pkl.gz
+cp Gaudi-fp8-calibration/open_orca_gpt4_tokenized_llama.calibration_1000.pkl vllm-hpu-extension/calibration
+```
+
+#### 2. Enter vllm-hpu-externsion/calibration folder and do calibration
+The example below is to calibrate Qwen2.5-72B-Instruct model for 2 Gaudi cards. The quantization files are copied into "quantization" folder.
+```bash
+cd vllm-hpu-extension/calibration
+MODEL=/models/Qwen2.5-72B-Instruct
+HPU_SIZE=2
+./calibrate_model.sh -m $MODEL -d open_orca_gpt4_tokenized_llama.calibration_1000.pkl  -o quantization -t $HPU_SIZE
+```
+
+#### 3. Make the Quantization folder
+Create a quantization folder at the same level as start_gaudi_vllm_server.sh.
+```bash
+mkdir quantization
+```
+Copy the converted quantization files into the quantization folder:
+```bash
+cp -r converted_quantization/* quantization/
+```
+Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf. 
+#### 4. Start vLLM service on Qwen2.5-72B-Instruct model with FP8 precision.
+It will take much more time to do warm-up with FP8 precision. Suggest creating the warm-up cache files to accelerate the warm-up for next time. 
+```bash
+bash start_gaudi_vllm_server.sh -w "/models/Qwen2.5-72B-Instruct" \
+    -n 2 \
+    -m 0,1 \ 
+    -b 128 \
+    -i 800,1024 \
+    -o 400,512 \
+    -l 4096 \
+    -t 8192 \
+    -d fp8 \
+    -p 30001 \
+    -c /vllm_cache/Qwen2.5-32B-Instruct/
+```
+
 
 ## Steps to run offline benchmark
  The script file "benchmark_throughput.sh" is used to run vLLM under offline mode. You may execute the command below to check its supported parameters.
