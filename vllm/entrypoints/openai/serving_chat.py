@@ -406,7 +406,6 @@ class OpenAIServingChat(OpenAIServing):
         tokenizer: AnyTokenizer,
         request_metadata: RequestResponseMetadata,
     ) -> AsyncGenerator[str, None]:
-        model_name = request.model
         created_time = int(time.time())
         chunk_object_type: Final = "chat.completion.chunk"
         first_iteration = True
@@ -904,7 +903,6 @@ class OpenAIServingChat(OpenAIServing):
         request_metadata: RequestResponseMetadata,
     ) -> Union[ErrorResponse, ChatCompletionResponse]:
 
-        model_name = request.model
         created_time = int(time.time())
         final_res: Optional[RequestOutput] = None
 

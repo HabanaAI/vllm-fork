@@ -239,7 +239,7 @@ async def build_async_engine_client_from_engine_args(
             target=run_mp_engine,
             args=(vllm_config, UsageContext.OPENAI_API_SERVER, ipc_path,
                   engine_args.disable_log_stats,
-                  engine_args.disable_log_requests, engine_alive))
+                  engine_args.disable_log_requests, engine_alive, engine_args))
         engine_process.start()
         engine_pid = engine_process.pid
         assert engine_pid is not None, "Engine process failed to start."
@@ -892,6 +892,11 @@ def build_app(args: Namespace) -> FastAPI:
     return app
 
 
+def additional_preparation(served_model_names, base_model_paths,
+                           args: Namespace):
+    return served_model_names, base_model_paths, args
+
+
 async def init_app_state(
     engine_client: EngineClient,
     model_config: ModelConfig,
@@ -912,6 +917,9 @@ async def init_app_state(
         BaseModelPath(name=name, model_path=args.model)
         for name in served_model_names
     ]
+
+    served_model_names, base_model_paths, args = additional_preparation(
+        served_model_names, base_model_paths, args)
 
     state.engine_client = engine_client
     state.log_stats = not args.disable_log_stats

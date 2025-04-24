@@ -9,6 +9,7 @@ from typing import List, Optional
 import cloudpickle
 
 from vllm import SamplingParams
+from vllm.config import VllmConfig
 from vllm.engine.llm_engine import LLMEngine
 from vllm.engine.mm_arg_utils import MMAsyncEngineArgs
 # yapf conflicts with isort for this block
@@ -52,7 +53,6 @@ class MMLLMEngine(MQLLMEngine):
                  use_async_sockets: bool,
                  *args,
                  log_requests: bool = True,
-                 engine_args: MMAsyncEngineArgs = None,
                  **kwargs) -> None:
         kwargs['is_multi_models_engine'] = True
         super().__init__(ipc_path,
@@ -61,13 +61,13 @@ class MMLLMEngine(MQLLMEngine):
                          log_requests=log_requests,
                          **kwargs)
         kwargs.pop('is_multi_models_engine', None)
+        engine_args = kwargs.pop('engine_args', None)
 
         self.engine_config = {
             'args': args,
             'kwargs': kwargs,
             'engine_args': engine_args
         }
-
         # get configs from args and kwargs, determine how many models to load
         original_vllm_config_list = kwargs.get('vllm_config')
         if not isinstance(original_vllm_config_list, List):
@@ -87,29 +87,33 @@ class MMLLMEngine(MQLLMEngine):
                 self._async_socket_engine_callback
 
     @classmethod
-    def from_engine_args(cls, engine_args: MMAsyncEngineArgs,
-                         usage_context: UsageContext, ipc_path: str):
+    def from_vllm_config(
+            cls,
+            vllm_config_list: List[VllmConfig],  # type: ignore
+            usage_context: UsageContext,
+            disable_log_requests: bool,
+            disable_log_stats: bool,
+            ipc_path: str,
+            engine_args: MMAsyncEngineArgs) -> "MMLLMEngine":
         """Creates an MQLLMEngine from the engine arguments."""
         # Setup plugins for each process
         from vllm.plugins import load_general_plugins
         load_general_plugins()
 
-        engine_configs = engine_args.create_engine_configs(usage_context)
-        engine_config = engine_configs[0]
-        executor_class = LLMEngine._get_executor_cls(engine_config)
+        vllm_config = vllm_config_list[0]
 
-        use_async_sockets = engine_config.model_config.use_async_output_proc
+        use_async_sockets = vllm_config.model_config.use_async_output_proc
 
         return cls(
+            vllm_config=vllm_config_list,
+            executor_class=LLMEngine._get_executor_cls(vllm_config),
             ipc_path=ipc_path,
-            use_async_sockets=use_async_sockets,
-            vllm_config=engine_configs,
-            executor_class=executor_class,
-            log_requests=not engine_args.disable_log_requests,
-            log_stats=not engine_args.disable_log_stats,
             usage_context=usage_context,
-            # chendi: engine_args is used by mm_engine.py
-            engine_args=engine_args)
+            use_async_sockets=use_async_sockets,
+            log_requests=(not disable_log_requests),
+            log_stats=(not disable_log_stats),
+            engine_args=engine_args,
+        )
 
     def cleanup(self):
         """Cleanup zeromq state on shutdown."""
@@ -168,7 +172,7 @@ class MMLLMEngine(MQLLMEngine):
                 frames = self.input_socket.recv_multipart(copy=False)
                 request = pickle.loads(frames[0].buffer)
 
-                print("request type is ", type(request))
+                logger.info("request type is %s", str(type(request)))
                 if isinstance(request, RPCProcessRequest):
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors
@@ -235,7 +239,7 @@ class MMLLMEngine(MQLLMEngine):
             self.engine.abort_request(request_id)
 
     def _handle_model_request(self, request: RPCModelRequest):
-        print("Get model request - ", request.models)
+        logger.info("Get model request - %s", str(request.models))
         """Handle RPCModelRequest by loading the models."""
         try:
             close_engines = []
@@ -261,7 +265,7 @@ class MMLLMEngine(MQLLMEngine):
                     engine_args.model = model
                     engine_args.tokenizer = model
                     engine_args.models = None
-                    vllm_config = engine_args.create_engine_configs()[0]
+                    vllm_config = engine_args.create_engine_config()[0]
                     args = self.engine_config['args']
                     kwargs = self.engine_config['kwargs']
                     kwargs['vllm_config'] = vllm_config
@@ -285,7 +289,7 @@ class MMLLMEngine(MQLLMEngine):
                                  new_models=[m[0] for m in new_models])
             ])
         except Exception:
-            print("error happens: ", traceback.format_exc())
+            logger.info("error happens: %s", str(traceback.format_exc()))
             rpc_err = RPCError(
                 request_id=request.request_id,
                 is_engine_errored=False,
@@ -309,12 +313,20 @@ def signal_handler(*_) -> None:
     raise KeyboardInterrupt("MQLLMEngine terminated")
 
 
-def run_mm_engine(engine_args: MMAsyncEngineArgs, usage_context: UsageContext,
-                  ipc_path: str, engine_alive):
+def run_mm_engine(vllm_config_list: List[VllmConfig],
+                  usage_context: UsageContext, ipc_path: str,
+                  disable_log_stats: bool, disable_log_requests: bool,
+                  engine_alive, engine_args) -> None:
+    logger.info("Multi Model LLM Engine starting up...")
     try:
-        engine = MMLLMEngine.from_engine_args(engine_args=engine_args,
-                                              usage_context=usage_context,
-                                              ipc_path=ipc_path)
+        engine = MMLLMEngine.from_vllm_config(
+            vllm_config_list=vllm_config_list,
+            usage_context=usage_context,
+            disable_log_stats=disable_log_stats,
+            disable_log_requests=disable_log_requests,
+            ipc_path=ipc_path,
+            engine_args=engine_args,
+        )
 
         signal.signal(signal.SIGTERM, signal_handler)
 

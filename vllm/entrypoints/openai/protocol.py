@@ -175,7 +175,7 @@ class ModelInfo(OpenAIBaseModel):
 
 
 class ModelConfigRequest(OpenAIBaseModel):
-    models: Optional[List[ModelInfo]] = None
+    models: Optional[list[ModelInfo]] = None
 
 
 class LogitsProcessorConstructor(BaseModel):

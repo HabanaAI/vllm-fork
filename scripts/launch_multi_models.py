@@ -72,7 +72,7 @@ def kill_existing_pid(pid):
 
 def launch_server(models, port, log_file="mm_vllm_server.log", timeout=300):
     """Launch a new vLLM server."""
-    mem_ratio = 9 // len(models) / 10
+    mem_ratio = 7 // len(models) / 10
     command = [
         "python3", "-m", "vllm.entrypoints.openai.mm_api_server", "--port",
         str(port), "--device", "hpu", "--dtype", "bfloat16",

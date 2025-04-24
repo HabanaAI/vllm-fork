@@ -51,7 +51,7 @@ class MMEngineArgs(EngineArgs):
             help='Name or path of the huggingface model to use.')
         return parser
 
-    def create_engine_configs(self, *args, **kwargs) -> List[VllmConfig]:
+    def create_engine_config(self, *args, **kwargs) -> List[VllmConfig]:
         engine_configs = []
 
         if self.models is not None:
@@ -59,10 +59,11 @@ class MMEngineArgs(EngineArgs):
                 tmp_args = copy.deepcopy(self)
                 tmp_args.model = model
                 tmp_args.tokenizer = model
+                tmp_args.models = None
                 engine_config = tmp_args.create_engine_config(*args, **kwargs)
-                engine_configs.append(engine_config)
+                engine_configs += engine_config
         else:
-            engine_config = self.create_engine_config(*args, **kwargs)
+            engine_config = super().create_engine_config(*args, **kwargs)
             engine_configs.append(engine_config)
         return engine_configs
 

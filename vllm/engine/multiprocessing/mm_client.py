@@ -59,6 +59,12 @@ class MMLLMEngineClient(MQLLMEngineClient):
             self.input_preprocessors.append(
                 InputPreprocessor(model_config, self.tokenizers[-1]))
 
+    @staticmethod
+    def is_unsupported_config(vllm_config_list: List[VllmConfig]):
+        # Pipeline parallel not yet supported
+        print(vllm_config_list)
+        return vllm_config_list[0].parallel_config.pipeline_parallel_size > 1
+
     async def get_tokenizer_mm(self,
                                model,
                                lora_request: Optional[LoRARequest] = None):
@@ -72,7 +78,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
         additional_message="Please use the 'prompt' parameter instead.",
     )
     async def update_model_config(
-            self, request_id: Optional[str],
+            self, request_id: str,
             model_list: Optional[List[str]]) -> Union[RPCModelResponse, str]:
         queue: asyncio.Queue[Union[RequestOutput,
                                    BaseException]] = asyncio.Queue()
@@ -92,7 +98,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
             request_output = await queue.get()
         finally:
             self.output_queues.pop(request_id)
-        print("request_output", request_output)
+        logger.info("request_output is %s", str(request_output))
         if isinstance(request_output, BaseException):
             return f"{request_output}"
         else:
@@ -107,6 +113,8 @@ class MMLLMEngineClient(MQLLMEngineClient):
     def _update_model_config(self, closed_models: Optional[List[str]],
                              new_models: Optional[List[str]]):
         # Create the tokenizer group.
+        closed_models = closed_models or []
+        new_models = new_models or []
         engine_config = self.engine_configs[0]
         model_config = self.model_configs[0]
         for model_name in new_models:
@@ -249,6 +257,8 @@ class MMLLMEngineClient(MQLLMEngineClient):
                     default_guided_backend=(self.decoding_config.guided_decoding_backend
                         if self.decoding_config
                         else DecodingConfig.guided_decoding_backend),
+                    model_config=self.model_config,
+                    reasoning_backend=self.decoding_config.reasoning_backend,
                 )
 
         # 1) Create output queue for this requests.
