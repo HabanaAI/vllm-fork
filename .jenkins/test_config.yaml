@@ -54,15 +54,15 @@ stages:
     steps:
     - name: test_all_g2_s
       flavor: g2.s
-      command: |
-        export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2
-        export PT_HPU_LAZY_MODE=1 && export VLLM_USE_V1=1 && export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2
-        cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=1 bash run-tests.sh -c configs/models-mss.txt -t 2
+      command: >
+        export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2 &&
+        export PT_HPU_LAZY_MODE=1 && export VLLM_USE_V1=1 && export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2 &&
+        cd .jenkins/lm-eval-harness && PT_HPU_LAZY_MODE=1 bash run-tests.sh -c configs/models-mss.txt -t 2 &&
   - name: tests_on_g2_m
     steps:
     - name: test_all_g2_m
       flavor: g2.m
-      command: |
-        export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large.txt -t 4
+      command: >
+        export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large.txt -t 4 &&
         export PT_HPU_LAZY_MODE=1 && export VLLM_USE_V1=1 && export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large.txt -t 4
       
