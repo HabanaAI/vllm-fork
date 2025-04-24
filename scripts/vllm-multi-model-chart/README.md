@@ -52,59 +52,71 @@ The Helm chart includes:
    * The `resources` section defines the resource limits and requests for the deployment.
 
 2. After configuring the [`values.yaml`](values.yaml) file, the Helm chart can be deployed to the cluster:
+
    ```
    cd scripts/vllm-multi-model-chart
    helm install -f values.yaml gaudi-multi-model .
    ```
+
 3. Monitor the job by check the pod status, and viewing the logs. It will take a few minutes for the model weights to
    download. Note that if the same PVC is reused, subsequent runs can use cached models files.
+
    ```
    kubectl get pods
 
    kubectl logs <gaudi-multi-model-deployment pod name> -f
    ```
+
    When it's ready you will see a message about Uvicorn running on port 8000.
 4. If you don't have an external IP for the node running the vLLM deployment, port forward in order to access the
    vLLM service from your local machine. In a separate terminal port forward:
+
    ```
    kubectl port-forward svc/gaudi-multi-model-service 8000:80
    ```
+
 5. Now that the service is up and running, you can use cURL commands to test the deployment. For example:
-   * List the running models:
-     ```
-     curl http://localhost:8000/v1/models
-     ```
+   List the running models:
 
-   * Query the served models with prompt inputs (change the `model`, depending on the names of the models that you
+   ```
+   curl http://localhost:8000/v1/models
+   ```
+
+   Query the served models with prompt inputs (change the `model`, depending on the names of the models that you
      served - by default, the values file uses `meta-llama/Llama-3.1-8B-Instruct` and `mistralai/Mistral-7B-Instruct-v0.3`):
-     ```
-     curl http://localhost:8000/v1/completions \
-        -H "Content-Type: application/json" \
-        -d '{
-            "model": "meta-llama/Llama-3.1-8B-Instruct",
-            "prompt": "San Francisco is a",
-            "max_tokens": 20,
-            "temperature": 0
-            }'
-     ```
+  
+   ```
+   curl http://localhost:8000/v1/completions \
+      -H "Content-Type: application/json" \
+   -d '{
+         "model": "meta-llama/Llama-3.1-8B-Instruct",
+         "prompt": "San Francisco is a",
+         "max_tokens": 20,
+         "temperature": 0
+         }'
+   ```
 
-   * Swap out the models being served:
-     ```
-     curl http://localhost:8000/v1/update_models \
-        -H "Content-Type: application/json" \
-        -d '{"models": [{"id":"mistralai/Mistral-7B-Instruct-v0.3"},{"id":"Qwen/Qwen2.5-7B-Instruct"}]}'
-     ```
+   Swap out the models being served:
+
+   ```
+   curl http://localhost:8000/v1/update_models \
+      -H "Content-Type: application/json" \
+      -d '{"models": [{"id":"mistralai/Mistral-7B-Instruct-v0.3"},{"id":"Qwen/Qwen2.5-7B-Instruct"}]}'
+   ```
 
 We have demonstrated serving multiple models using a single HPU from a Kubernetes cluster using vLLM. When you are done,
 the vLLM deployment and service can be shut down to free resources using:
+
 ```
 kubectl delete deployment gaudi-multi-model-deployment
 kubectl delete service gaudi-multi-model-service
 ```
+
 This leaves the PVC and secret resources for use with future deployments
 (using `helm upgrade -f values.yaml gaudi-multi-model .`).
 
 If you would like to delete all Helm chart resources, uninstall the chart:
+
 ```
 helm uninstall gaudi-multi-model
 ```

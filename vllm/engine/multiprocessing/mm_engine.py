@@ -87,13 +87,10 @@ class MMLLMEngine(MQLLMEngine):
                 self._async_socket_engine_callback
 
     @classmethod
-    def from_vllm_config(
-            cls,
-            vllm_config_list: List[VllmConfig],  # type: ignore
-            usage_context: UsageContext,
-            disable_log_requests: bool,
-            disable_log_stats: bool,
-            ipc_path: str,
+    def from_vllm_config(  # type: ignore[override]
+            cls, vllm_config_list: List[VllmConfig],
+            usage_context: UsageContext, disable_log_requests: bool,
+            disable_log_stats: bool, ipc_path: str,
             engine_args: MMAsyncEngineArgs) -> "MMLLMEngine":
         """Creates an MQLLMEngine from the engine arguments."""
         # Setup plugins for each process

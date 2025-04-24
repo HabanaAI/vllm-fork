@@ -127,5 +127,5 @@ nodeSelector: {}
 # -- Optionally specify [tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/) to run on tainted nodes
 tolerations: []
 
-# -- Optionally specify an [affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity) to contrain deployment pod to nodes with specific labels
+# -- Optionally specify an [affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity) to constrain deployment pod to nodes with specific labels
 affinity: {}

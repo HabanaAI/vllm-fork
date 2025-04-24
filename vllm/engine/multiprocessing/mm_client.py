@@ -79,7 +79,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
     )
     async def update_model_config(
             self, request_id: str,
-            model_list: Optional[List[str]]) -> Union[RPCModelResponse, str]:
+            model_list: List[str]) -> Union[RPCModelResponse, str]:
         queue: asyncio.Queue[Union[RequestOutput,
                                    BaseException]] = asyncio.Queue()
         self.output_queues[request_id] = queue

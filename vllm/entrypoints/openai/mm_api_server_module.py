@@ -69,5 +69,5 @@ def additional_preparation(served_model_names, base_model_paths,
 api_server.update_models = update_models  # type: ignore
 api_server.additional_preparation = additional_preparation
 api_server.build_async_engine_client = build_async_engine_client
-api_server.run_mp_engine = run_mm_engine
-api_server.MQLLMEngineClient = MMLLMEngineClient
+api_server.run_mp_engine = run_mm_engine  #type: ignore
+api_server.MQLLMEngineClient = MMLLMEngineClient  #type: ignore

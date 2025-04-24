@@ -960,7 +960,7 @@ class AsyncLLMEngine(EngineClient):
 
         return stream.generator()
 
-    async def generate(
+    async def generate(  # type: ignore[override]
         self,
         prompt: PromptType,
         sampling_params: SamplingParams,
