@@ -4,7 +4,7 @@ stages:
     steps:
     - name: test_all_g2
       flavor: g2
-      command: |
+      command: >
         export VLLM_SKIP_WARMUP=true && pip install -e tests/vllm_test_utils && PT_HPU_LAZY_MODE=1 pytest -v tests/entrypoints/llm/test_lazy_outlines.py -s -vvv --log-cli-level=INFO
         PT_HPU_LAZY_MODE=1 VLLM_SKIP_WARMUP=true pytest -v tests/quantization/test_awq.py::test_awq
         PT_HPU_LAZY_MODE=1 VLLM_SKIP_WARMUP=true pytest -v tests/quantization/test_gptq.py::test_gptq
