@@ -77,10 +77,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         speculative_config = self.speculative_config
         model_config = self.model_config
         speculative_args = {} if speculative_config is None \
-            or (speculative_config.draft_model_config.model ==
-                model_config.model) \
+            or (speculative_config.draft_model_config.hf_config.model_type ==
+                 model_config.hf_config.model_type) \
             or (speculative_config.draft_model_config.hf_config.model_type
-                not in ["medusa", "mlp_speculator", "eagle"]) \
+                not in ["medusa", "mlp_speculator", "eagle", "deepseek_mtp"]) \
                     else {"return_hidden_states": True}
 
         is_encoder_decoder_model = self._is_encoder_decoder_model()
@@ -256,12 +256,16 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 seq_group_metadata.is_prompt
                 for seq_group_metadata in seq_group_metadata_list
             ])
-            max_context_len = max([
-                max([
-                    len(v.prompt_token_ids) + len(v.output_token_ids)
-                    for v in seq_group_metadata.seq_data.values()
-                ]) for seq_group_metadata in seq_group_metadata_list
-            ])  # whoa, that's some spicy stuff right here
+            # for dummy run in DP, we don't have real seq, so use a dummy context_len here
+            if(len(seq_group_metadata_list) == 0):
+                max_context_len = 128
+            else:
+                max_context_len = max([
+                    max([
+                        len(v.prompt_token_ids) + len(v.output_token_ids)
+                        for v in seq_group_metadata.seq_data.values()
+                    ]) for seq_group_metadata in seq_group_metadata_list
+                ])  # whoa, that's some spicy stuff right here
             max_num_blocks = (
                 (max_context_len - 1) // self.cache_config.block_size) + 1
             input_stats = (f'is_prompt: {is_prompt}, '
