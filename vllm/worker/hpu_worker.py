@@ -85,15 +85,18 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         is_encoder_decoder_model = self._is_encoder_decoder_model()
         ModelRunnerClass: Type[HPUModelRunnerBase] = HPUModelRunner
+        is_causal = True
         if self.model_config.runner_type == "pooling":
             ModelRunnerClass = HPUPoolingModelRunner
         elif is_encoder_decoder_model:
             ModelRunnerClass = HPUEncoderDecoderModelRunner
+            is_causal = False
         self.model_runner: HPUModelRunnerBase = ModelRunnerClass(
             vllm_config=vllm_config,
             kv_cache_dtype=self.cache_config.cache_dtype,
             is_driver_worker=is_driver_worker,
             **speculative_args,
+            is_causal=is_causal,
         )
         if model_runner_cls is not None:
             self.model_runner = model_runner_cls(self.model_runner)
@@ -369,9 +372,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         This also warms up the model, which may record CUDA graphs.
         """
-        raise_if_cache_size_invalid(num_gpu_blocks,
-                                    self.cache_config.block_size,
-                                    self.model_config.max_model_len)
+        raise_if_cache_size_invalid(
+            num_gpu_blocks, self.cache_config.block_size,
+            self.model_config.max_model_len,
+            self.parallel_config.pipeline_parallel_size)
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
@@ -560,13 +564,13 @@ def init_worker_distributed_environment(
                                       parallel_config.pipeline_parallel_size)
 
 
-def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
-                                max_model_len) -> None:
+def raise_if_cache_size_invalid(num_gpu_blocks, block_size, max_model_len,
+                                pipeline_parallel_size) -> None:
     if num_gpu_blocks <= 0:
         raise ValueError("No available memory for the cache blocks. "
                          "Try increasing `gpu_memory_utilization` when "
                          "initializing the engine.")
-    max_seq_len = block_size * num_gpu_blocks
+    max_seq_len = block_size * (num_gpu_blocks // pipeline_parallel_size)
     if max_model_len > max_seq_len:
         raise ValueError(
             f"The model's max seq len ({max_model_len}) "
