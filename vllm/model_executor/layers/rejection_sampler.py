@@ -60,7 +60,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         else:
             logger.info("Use pytorch for rejection sampling.")
 
-        if os.environ.get('VLLM_MTP_PRINT_ACCPET_RATE', '0') != '0':
+        if os.environ.get('VLLM_MTP_PRINT_ACCPET_RATE', '0').lower() in ('true', '1'):
             self.total_true = 0
             self.total_false = 0
 
@@ -303,7 +303,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
             torch.full((1, ), 1, device=target_probs.device))
         accepted = uniform_rand < capped_ratio
 
-        if os.environ.get('VLLM_MTP_PRINT_ACCPET_RATE', '0') != '0':
+        if os.environ.get('VLLM_MTP_PRINT_ACCPET_RATE', '0').lower() in ('true', '1'):
             current_true = accepted.sum().item()
             current_false = accepted.numel() - current_true
             self.total_true += current_true
