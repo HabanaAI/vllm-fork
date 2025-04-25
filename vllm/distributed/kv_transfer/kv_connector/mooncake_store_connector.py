@@ -238,114 +238,56 @@ class MooncakeStoreConnector(KVConnectorBase):
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
-        if self.is_deepseek_mla:
-            input_tokens_tensor_cpu = model_input.input_tokens.to("cpu") # shape: [batch_size, seq_len_padding_to_128]
-            torch.hpu.synchronize()
-            seq_lens = model_input.attn_metadata.seq_lens # 2D list
-            start_layer = model_executable.model.start_layer
-            end_layer = model_executable.model.end_layer
-            num_kv_heads = 1
+        input_tokens_tensor_cpu = model_input.input_tokens.to("cpu")  # shape: [batch_size, seq_len_padding_to_128]
+        torch.hpu.synchronize()
+        seq_lens = model_input.attn_metadata.seq_lens  # 2D list
+        start_layer = model_executable.model.start_layer
+        end_layer = model_executable.model.end_layer
+        num_kv_heads = 1 if self.is_deepseek_mla else int(model_executable.model.config.num_key_value_heads / self.tp_size)
+        hidden_size = model_executable.model.config.hidden_size
+        num_attention_heads = model_executable.model.config.num_attention_heads
+        head_size = int(hidden_size / num_attention_heads)
 
-            # For each sequence in the batch, we will pack kv together, so we send
-            # 0. current_tokens [seq_len]
-            # 1. bool mask [seq_len]
-            # 2. key [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size)], [61, seq_len, 1, 576]
-            # 3. empty tensor
-            # 4. hidden_or_intermediate_states [1, hidden_size]
-            for idx, slen in enumerate(seq_lens):
-                if slen == 1: # we think this is a padding sequence, so we skip it
-                    continue
-                current_tokens_cpu = input_tokens_tensor_cpu[idx][:slen]
-                store_key_prefix = self.tensor_hash(current_tokens_cpu)
-                logger.debug(f"send token len: {slen}, token: {current_tokens_cpu}")
-                keys, values = [], []
-                start = 0
-                padded_total_size = (slen + self.block_size - 1) // self.block_size * self.block_size
-                current_slot_mapping = model_input.attn_metadata.slot_mapping[idx][start:padded_total_size]
-                self.padded_length_tensor[0] = padded_total_size
-                htorch.core.mark_step()
-                # ==== graph should start here ======
-                for layer_id in range(start_layer, end_layer):
-                    kv_cache = kv_caches[layer_id - start_layer]
+        for idx, slen in enumerate(seq_lens):
+            if slen == 1:  # Skip padding sequences
+                continue
+
+            current_tokens_cpu = input_tokens_tensor_cpu[idx][:slen]
+            store_key_prefix = self.tensor_hash(current_tokens_cpu)
+            logger.debug(f"send token len: {slen}, token: {current_tokens_cpu}")
+
+            padded_total_size = (slen + self.block_size - 1) // self.block_size * self.block_size
+            current_slot_mapping = model_input.attn_metadata.slot_mapping[idx][:padded_total_size]
+            self.padded_length_tensor[0] = padded_total_size
+            htorch.core.mark_step()
+
+            keys, values = [], []
+            for layer_id in range(start_layer, end_layer):
+                kv_cache = kv_caches[layer_id - start_layer]
+                if self.is_deepseek_mla:
                     key_cache = kv_cache[0].reshape(-1, num_kv_heads, self.k_v_head_size)
-                    # value_cache = kv_cache[1].reshape(-1, num_kv_heads, v_head_size)
-
                     keys.append(key_cache.index_select(0, current_slot_mapping).unsqueeze(0))
-                    # values.append(value_cache[current_slot_mapping].unsqueeze(0))
-
-                keys = torch.cat(keys, dim=0)
-                # values = torch.cat(values, dim=0)
-                # we pack kv together, only need send one tensor
-                kvcache_to_sent = keys
-                store_kvcache_key = f"{store_key_prefix}_{self.local_tp_rank}"
-                self.kv_store.put(store_kvcache_key, kvcache_to_sent)
-                
-                logger.debug(f"put kv cache key: {store_kvcache_key}")
-                
-                hidden_key = f"{store_key_prefix}_hidden_{self.local_tp_rank}"
-                self.kv_store.put(hidden_key,
-                                hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
-                # ==== graph should end here ======
-                htorch.core.mark_step()
-            logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
-        else:
-            # from pudb.remote import set_trace
-            # set_trace()
-            # pudb.remote.set_trace()
-            input_tokens_tensor_cpu = model_input.input_tokens.to("cpu") # shape: [batch_size, seq_len_padding_to_128]
-            torch.hpu.synchronize()
-            seq_lens = model_input.attn_metadata.seq_lens # 2D list
-            start_layer = model_executable.model.start_layer
-            end_layer = model_executable.model.end_layer
-            num_kv_heads = 1
-            model_config = model_executable.model.config
-            num_heads = int(model_config.num_key_value_heads / self.tp_size)
-            hidden_size = model_config.hidden_size
-            num_attention_heads = model_config.num_attention_heads
-            head_size = int(hidden_size / num_attention_heads)
-            # For each sequence in the batch, we will pack kv together, so we send
-            # 0. current_tokens [seq_len]
-            # 1. bool mask [seq_len]
-            # 2. key [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size)], [61, seq_len, 1, 576]
-            # 3. empty tensor
-            # 4. hidden_or_intermediate_states [1, hidden_size]
-            for idx, slen in enumerate(seq_lens):
-                if slen == 1: # we think this is a padding sequence, so we skip it
-                    continue
-                current_tokens_cpu = input_tokens_tensor_cpu[idx][:slen]
-                store_key_prefix = self.tensor_hash(current_tokens_cpu)
-                logger.debug(f"send token len: {slen}, token: {current_tokens_cpu}")
-                keys, values = [], []
-                start = 0
-                padded_total_size = (slen + self.block_size - 1) // self.block_size * self.block_size
-                current_slot_mapping = model_input.attn_metadata.slot_mapping[idx][start:padded_total_size]
-                self.padded_length_tensor[0] = padded_total_size
-                htorch.core.mark_step()
-                # ==== graph should start here ======
-                for layer_id in range(start_layer, end_layer):
-                    kv_cache = kv_caches[layer_id - start_layer]
-                    key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
-                    value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
-
+                else:
+                    key_cache = kv_cache[0].reshape(-1, num_kv_heads, head_size)
+                    value_cache = kv_cache[1].reshape(-1, num_kv_heads, head_size)
                     keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                     values.append(value_cache[current_slot_mapping].unsqueeze(0))
 
-                keys = torch.cat(keys, dim=0)
+            keys = torch.cat(keys, dim=0)
+            if self.is_deepseek_mla:
+                kvcache_to_sent = keys 
+            else:
                 values = torch.cat(values, dim=0)
                 kvcache_to_sent = torch.stack((keys, values), dim=0)
-                # we pack kv together, only need send one tensor
-                # kvcache_to_sent = keys
-                store_kvcache_key = f"{store_key_prefix}_{self.local_tp_rank}"
-                self.kv_store.put(store_kvcache_key, kvcache_to_sent)
-                
-                logger.debug(f"put kv cache key: {store_kvcache_key}")
-                
-                hidden_key = f"{store_key_prefix}_hidden_{self.local_tp_rank}"
-                self.kv_store.put(hidden_key,
-                                hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
-                # ==== graph should end here ======
-                htorch.core.mark_step()
-            logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
+            store_kvcache_key = f"{store_key_prefix}_{self.local_tp_rank}"
+            self.kv_store.put(store_kvcache_key, kvcache_to_sent)
+            logger.debug(f"put kv cache key: {store_kvcache_key}")
+
+            hidden_key = f"{store_key_prefix}_hidden_{self.local_tp_rank}"
+            self.kv_store.put(hidden_key, hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
+            htorch.core.mark_step()
+
+        logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
 
     def recv_kv_caches_and_hidden_states_hpu(
         self, model_executable: torch.nn.Module,
