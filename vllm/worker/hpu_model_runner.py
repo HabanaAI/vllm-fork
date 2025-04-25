@@ -1084,7 +1084,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
 
-
     def _get_position_pad(self) -> int:
         """
         For gemma3 models,
@@ -1095,7 +1094,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         """
         model_type = getattr(self.model_config.hf_config, 'model_type', '')
         return -1 if model_type == 'gemma3' else 0
-
 
     def _prepare_prompt(
         self,
