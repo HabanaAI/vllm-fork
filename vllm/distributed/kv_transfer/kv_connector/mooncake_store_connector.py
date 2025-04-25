@@ -474,6 +474,11 @@ class MooncakeStoreConnector(KVConnectorBase):
             input_tokens_list = []
             num_computed_tokens_list = []
             start_block_idx = 0
+            model_config = model_executable.model.config
+            num_heads = int(model_config.num_key_value_heads / self.tp_size)
+            hidden_size = model_config.hidden_size
+            num_attention_heads = model_config.num_attention_heads
+            head_size = getattr(model_config, "head_dim", int(hidden_size // num_attention_heads))
 
             # For each sequence in the batch, we patch kv tensor together, so we recv
             # 0. current_tokens [seq_len]
@@ -543,10 +548,8 @@ class MooncakeStoreConnector(KVConnectorBase):
                     current_layer_idx = i - model_executable.model.start_layer
                     kv_cache = kv_caches[current_layer_idx]
                     key_cache, value_cache = kv_cache[0], kv_cache[1]
-                    key = remote_k.unsqueeze(0).view(-1, 128, 32, 128)
-                    value = remote_v.unsqueeze(0).view(-1, 128, 32, 128)
-                    # key = torch.nn.functional.pad(key, (0, 0, 0, 0, 0, 128 - key.size(1)), mode="constant", value=0)
-                    # value = torch.nn.functional.pad(value, (0, 0, 0, 0, 0, 128 - value.size(1)), mode="constant", value=0)
+                    key = remote_k.unsqueeze(0).view(-1, self.block_size, num_heads, head_size)
+                    value = remote_v.unsqueeze(0).view(-1, self.block_size, num_heads, head_size)
                     self.cache_k(key, key_cache, block_indices_tensor, None)
                     self.cache_v(value, value_cache, block_indices_tensor, None)
                 start_block_idx = end_block_idx
