@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from typing import Optional, Union, get_args
 
 from vllm.engine.arg_utils import AsyncEngineArgs, nullable_str
+from vllm.engine.mm_arg_utils import MMAsyncEngineArgs
 from vllm.entrypoints.chat_utils import (ChatTemplateContentFormatOption,
                                          validate_chat_template)
 from vllm.entrypoints.openai.serving_models import (LoRAModulePath,
@@ -268,6 +269,13 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
         "If set to True, enable tracking server_load_metrics in the app state."
     )
 
+    return parser
+
+
+def make_mm_arg_parser(
+        parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
+    parser = make_arg_parser(parser)
+    parser = MMAsyncEngineArgs.add_cli_args(parser)
     return parser
 
 

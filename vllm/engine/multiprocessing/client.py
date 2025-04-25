@@ -87,23 +87,25 @@ class MQLLMEngineClient(EngineClient):
             every N seconds, confirming the engine is healthy
     """
 
-    def __init__(self, ipc_path: str, engine_config: VllmConfig,
+    def __init__(self, ipc_path: str, engine_config: Union[VllmConfig,
+                                                           List[VllmConfig]],
                  engine_pid: int):
         self.context = zmq.asyncio.Context()
         self._errored_with: Optional[BaseException] = None
 
         # Get the configs.
-        self.model_config = engine_config.model_config
-        self.decoding_config = engine_config.decoding_config
+        if not isinstance(engine_config, list):
+            self.model_config = engine_config.model_config
+            self.decoding_config = engine_config.decoding_config
 
-        # Create the tokenizer group.
-        self.tokenizer = init_tokenizer_from_configs(
-            model_config=self.model_config,
-            scheduler_config=engine_config.scheduler_config,
-            parallel_config=engine_config.parallel_config,
-            lora_config=engine_config.lora_config)
-        self.input_preprocessor = InputPreprocessor(self.model_config,
-                                                    self.tokenizer)
+            # Create the tokenizer group.
+            self.tokenizer = init_tokenizer_from_configs(
+                model_config=self.model_config,
+                scheduler_config=engine_config.scheduler_config,
+                parallel_config=engine_config.parallel_config,
+                lora_config=engine_config.lora_config)
+            self.input_preprocessor = InputPreprocessor(
+                self.model_config, self.tokenizer)
 
         # Send RPCGenerateRequest to the MQLLMEngine.
         self.input_socket: Socket = self.context.socket(zmq.constants.PUSH)
@@ -443,6 +445,7 @@ class MQLLMEngineClient(EngineClient):
         prompt: PromptType,
         sampling_params: SamplingParams,
         request_id: str,
+        model: Optional[str] = None,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
@@ -458,6 +461,7 @@ class MQLLMEngineClient(EngineClient):
         inputs: PromptType,
         sampling_params: SamplingParams,
         request_id: str,
+        model: Optional[str] = None,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
@@ -474,6 +478,7 @@ class MQLLMEngineClient(EngineClient):
         prompt: Optional[PromptType] = None,
         sampling_params: Optional[SamplingParams] = None,
         request_id: Optional[str] = None,
+        model: Optional[str] = None,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
