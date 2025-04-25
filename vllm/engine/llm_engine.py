@@ -1410,7 +1410,17 @@ class LLMEngine:
                 else seq_group_metadata_list[0].state.num_steps == 1
 
             # Add results to the output_queue
-            ctx.append_output(outputs=outputs,
+            if envs.VLLM_STEP0_FIRST_TOKEN and seq_group_metadata_list[0].is_prompt and \
+                len(outputs) > 1:
+                outputs = [outputs[-1]]
+                ctx.append_output(outputs=outputs,
+                                seq_group_metadata_list=seq_group_metadata_list,
+                                scheduler_outputs=scheduler_outputs,
+                                is_async=allow_async_output_proc,
+                                is_last_step=True,
+                                is_first_step_output=is_first_step_output)
+            else:
+                ctx.append_output(outputs=outputs,
                               seq_group_metadata_list=seq_group_metadata_list,
                               scheduler_outputs=scheduler_outputs,
                               is_async=allow_async_output_proc,
