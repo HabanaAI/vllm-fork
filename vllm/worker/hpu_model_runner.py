@@ -1733,6 +1733,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs)
 
+        selected_token_indices = None
         if not self.is_pooler:
             generators = self.get_generators(finished_requests_ids)
             sampling_metadata = SamplingMetadata.prepare(
@@ -2248,9 +2249,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
+        prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
         if not self.is_pooler:
             max_blocks = kv_caches[0][0].size(0)
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
+            decode_buckets = len(self.bucketing_ctx.decode_buckets)
+        else:
+            # When pooling we're not using decode phase
+            decode_buckets = 0
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
@@ -2263,9 +2269,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
-            cache_size_limit = 1 + multiplier * (
-                len(self.bucketing_ctx.prompt_buckets) +
-                len(self.bucketing_ctx.decode_buckets))
+            cache_size_limit = 1 + multiplier * (prompt_buckets +
+                                                 decode_buckets)
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
