@@ -286,22 +286,22 @@ class HpuModelAdapter(torch.nn.Module):
         self.is_causal = is_causal
         self.use_merged_prefill = VLLM_MERGED_PREFILL
 
-        # TODO FIX THIS?
-        # model_config = getattr(self.model, "config", None)
-        # self.model_is_mrope = uses_mrope(model_config)
+        model_config = getattr(self.model, "config", None)
+        self.model_is_mrope = uses_mrope(model_config)
 
-        # # This applies exclusively to Qwen2/2.5-VL model only(which use mrope)
-        # # We split the model into visual and language components and wrap them separately
-        # # with HPU graph. This is to ensure that we keeps the static and dynamic parts distint.
-        # if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
-        #     logger.warning(f"[Multimodal] HPU is not in Lazy Mode, "
-        #                    f"split graph has not impact")
-        # if htorch.utils.internal.is_lazy() and self.model_is_mrope:
-        #     logger.info("[Multimodal] Split Graph to Visual and Language")
-        #     self.model.visual = htorch.hpu.wrap_in_hpu_graph(
-        #         self.model.visual, disable_tensor_cache=True)
-        #     self.model.language_model.model = htorch.hpu.wrap_in_hpu_graph(
-        #         self.model.language_model.model, disable_tensor_cache=True)
+        # This applies exclusively to Qwen2/2.5-VL model only(which use mrope)
+        # We split the model into visual and language components and wrap them separately
+        # with HPU graph. This is to ensure that we keeps the static and dynamic parts distint.
+        if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
+            logger.warning(f"[Multimodal] HPU is not in Lazy Mode, "
+                           f"split graph has not impact")
+        if htorch.utils.internal.is_lazy() and self.model_is_mrope:
+            logger.info("[Multimodal] Split Graph to Visual and Language")
+            self.model.visual = htorch.hpu.wrap_in_hpu_graph(
+                self.model.visual, disable_tensor_cache=True)
+            #TODO: ACCURACY ISSUE with Qwen2Model with HPU GRAPH
+            #self.model.language_model.model = htorch.hpu.wrap_in_hpu_graph(
+            #    self.model.language_model.model, disable_tensor_cache=True)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -479,41 +479,41 @@ class HpuModelAdapter(torch.nn.Module):
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
 
-        # # TODO FIX THIS
-        # if self.model_is_mrope:
-        #     bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
-        #     self.model.visual.forward = functools.partial(
-        #         self.model.visual.forward,
-        #         bypass_hpu_graphs=bypass_hpu_graphs)
-        #     self.model.language_model.model.forward = functools.partial(
-        #         self.model.language_model.model.forward,
-        #         bypass_hpu_graphs=bypass_hpu_graphs)
+        if self.model_is_mrope:
+            bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
+            self.model.visual.forward = functools.partial(
+                self.model.visual.forward,
+                bypass_hpu_graphs=bypass_hpu_graphs)
+            #TODO: ACCURACY ISSUE with Qwen2Model with HPU GRAPH
+            #self.model.language_model.model.forward = functools.partial(
+            #    self.model.language_model.model.forward,
+            #    bypass_hpu_graphs=bypass_hpu_graphs)
 
-        #     # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
-        #     # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
-        #     # During warmup, this is ON by default, so we are turning it off here.
-        #     # Also, we moved this code block from model.forward() since we want to get
-        #     # embedding before pass it to model which is also aligned with VLLM V1.
-        #     compile_only_mode_context = functools.partial(
-        #         bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
+        # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
+        # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
+        # During warmup, this is ON by default, so we are turning it off here.
+        # Also, we moved this code block from model.forward() since we want to get
+        # embedding before pass it to model which is also aligned with VLLM V1.
+        compile_only_mode_context = functools.partial(
+            bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
 
-        #     with compile_only_mode_context():
-        #         # always calculate embeddings for multimodal
-        #         image_input = self.model._parse_and_validate_image_input(
-        #             **kwargs)
-        #         video_input = self.model._parse_and_validate_video_input(
-        #             **kwargs)
+        with compile_only_mode_context():
+            # always calculate embeddings for multimodal
+            image_input = self.model._parse_and_validate_image_input(
+                **kwargs)
+            video_input = self.model._parse_and_validate_video_input(
+                **kwargs)
 
-        #         inputs_embeds = self.model.get_input_embeddings_v0(
-        #             input_ids,
-        #             image_input=image_input,
-        #             video_input=video_input)
-        #         input_ids = None
+            inputs_embeds = self.model.get_input_embeddings_v0(
+                input_ids,
+                image_input=image_input,
+                video_input=video_input)
+            input_ids = None
 
-        #     kwargs.update({
-        #         "input_ids": input_ids,
-        #         "inputs_embeds": inputs_embeds
-        #     })
+        kwargs.update({
+            "input_ids": input_ids,
+            "inputs_embeds": inputs_embeds
+        })
 
         with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
             hidden_states = self.model(*args, **kwargs)
