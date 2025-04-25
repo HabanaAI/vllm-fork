@@ -489,31 +489,36 @@ class HpuModelAdapter(torch.nn.Module):
             #    self.model.language_model.model.forward,
             #    bypass_hpu_graphs=bypass_hpu_graphs)
 
-        # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
-        # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
-        # During warmup, this is ON by default, so we are turning it off here.
-        # Also, we moved this code block from model.forward() since we want to get
-        # embedding before pass it to model which is also aligned with VLLM V1.
-        compile_only_mode_context = functools.partial(
-            bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
+            # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
+            # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
+            # During warmup, this is ON by default, so we are turning it off here.
+            # Also, we moved this code block from model.forward() since we want to get
+            # embedding before pass it to model which is also aligned with VLLM V1.
+            compile_only_mode_context_false = functools.partial(
+                bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
 
-        with compile_only_mode_context():
-            # always calculate embeddings for multimodal
-            image_input = self.model._parse_and_validate_image_input(
-                **kwargs)
-            video_input = self.model._parse_and_validate_video_input(
-                **kwargs)
+            with compile_only_mode_context_false():
+                # always calculate embeddings for multimodal
+                image_input = self.model._parse_and_validate_image_input(
+                    **kwargs)
+                video_input = self.model._parse_and_validate_video_input(
+                    **kwargs)
 
-            inputs_embeds = self.model.get_input_embeddings_v0(
-                input_ids,
-                image_input=image_input,
-                video_input=video_input)
-            input_ids = None
+                inputs_embeds = self.model.get_input_embeddings_v0(
+                    input_ids,
+                    image_input=image_input,
+                    video_input=video_input)
+                input_ids = None
 
-        kwargs.update({
-            "input_ids": input_ids,
-            "inputs_embeds": inputs_embeds
-        })
+            kwargs.update({
+                "input_ids": input_ids,
+                "inputs_embeds": inputs_embeds
+            })
+            # done compute the visual tokens 
+            if "pixel_values" in kwargs:
+                kwargs.pop("pixel_values")
+            if "image_grid_thw" in kwargs:
+                kwargs.pop("image_grid_thw")
 
         with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
             hidden_states = self.model(*args, **kwargs)
