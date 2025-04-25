@@ -921,7 +921,6 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             x: torch.Tensor,
             fullattn_mask: Optional[torch.Tensor],
             rotary_pos_emb: torch.Tensor) -> torch.Tensor:
-
         assert_msg = (
             "Expect inputs to be 112x112 aligned. "
             "Please align before sending image or use this version "
@@ -1070,6 +1069,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         self.config = config
         self.multimodal_config = multimodal_config
+        self.vllm_config = vllm_config
+
 
         if is_hpu:
             qwen2_5_visionTransformer = Qwen2_5_VisionTransformerStaticShape
@@ -1362,7 +1363,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 in seconds) for each grid along the temporal dimension in the
                 3D position IDs. `None` if no videos are passed.
         """
-
         if intermediate_tensors is not None:
             inputs_embeds = None
 
@@ -1386,12 +1386,16 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     video_input=video_input)
                 input_ids = None
 
-        hidden_states = self.language_model.model(
-            input_ids=input_ids,
-            positions=positions,
-            intermediate_tensors=intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-        )
+        attn_meta = kwargs.pop('attn_metadata')
+        from vllm.forward_context import set_forward_context
+        with set_forward_context(attn_meta, self.vllm_config, 0):
+              hidden_states = self.language_model.model(
+                input_ids=input_ids,
+                positions=positions,
+                intermediate_tensors=intermediate_tensors,
+                inputs_embeds=inputs_embeds,
+            )
+
         return hidden_states
 
     def compute_logits(

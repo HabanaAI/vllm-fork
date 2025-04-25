@@ -295,13 +295,13 @@ class HpuModelAdapter(torch.nn.Module):
         if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
             logger.warning(f"[Multimodal] HPU is not in Lazy Mode, "
                            f"split graph has not impact")
+
         if htorch.utils.internal.is_lazy() and self.model_is_mrope:
             logger.info("[Multimodal] Split Graph to Visual and Language")
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
-                self.model.visual, disable_tensor_cache=True)
-            #TODO: ACCURACY ISSUE with Qwen2Model with HPU GRAPH
-            #self.model.language_model.model = htorch.hpu.wrap_in_hpu_graph(
-            #    self.model.language_model.model, disable_tensor_cache=True)
+                self.model.visual, disable_tensor_cache=False)
+            self.model = htorch.hpu.wrap_in_hpu_graph(
+                self.model, disable_tensor_cache=False)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -475,29 +475,24 @@ class HpuModelAdapter(torch.nn.Module):
         model_is_mrope = uses_mrope(model_config)
         if self.layer_names is not None and not model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
-        attn_meta = kwargs.pop('attn_metadata')
-        if 'kv_caches' in kwargs:
-            kwargs.pop('kv_caches')
-
         if self.model_is_mrope:
             bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
             self.model.visual.forward = functools.partial(
                 self.model.visual.forward,
                 bypass_hpu_graphs=bypass_hpu_graphs)
-            #TODO: ACCURACY ISSUE with Qwen2Model with HPU GRAPH
-            #self.model.language_model.model.forward = functools.partial(
-            #    self.model.language_model.model.forward,
-            #    bypass_hpu_graphs=bypass_hpu_graphs)
+            self.model.forward = functools.partial(
+                self.model.forward,
+                bypass_hpu_graphs=bypass_hpu_graphs)
 
             # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
             # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
             # During warmup, this is ON by default, so we are turning it off here.
             # Also, we moved this code block from model.forward() since we want to get
             # embedding before pass it to model which is also aligned with VLLM V1.
-            compile_only_mode_context_false = functools.partial(
+            compile_only_mode_context = functools.partial(
                 bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
 
-            with compile_only_mode_context_false():
+            with compile_only_mode_context():
                 # always calculate embeddings for multimodal
                 image_input = self.model._parse_and_validate_image_input(
                     **kwargs)
@@ -514,20 +509,23 @@ class HpuModelAdapter(torch.nn.Module):
                 "input_ids": input_ids,
                 "inputs_embeds": inputs_embeds
             })
-            # done compute the visual tokens 
-            if "pixel_values" in kwargs:
-                kwargs.pop("pixel_values")
-            if "image_grid_thw" in kwargs:
-                kwargs.pop("image_grid_thw")
 
-        with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
             hidden_states = self.model(*args, **kwargs)
-            if not get_pp_group().is_last_rank:
-                return hidden_states
-            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-            if selected_token_indices is not None:
-                hidden_states = hidden_states.index_select(
-                    0, selected_token_indices)
+        else:
+            attn_meta = kwargs.pop('attn_metadata')
+            if 'kv_caches' in kwargs:
+                kwargs.pop('kv_caches')
+            with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
+                #import pdb;pdb.set_trace()
+                hidden_states = self.model(*args, **kwargs)
+
+        if not get_pp_group().is_last_rank:
+            return hidden_states
+        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+        if selected_token_indices is not None:
+            hidden_states = hidden_states.index_select(
+                0, selected_token_indices)
+
         return hidden_states
 
     def compute_logits(self, *args, **kwargs):
@@ -2439,7 +2437,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             total_mem += used_mem
             total_batch_seq += batch_seq
 
-        if is_prompt:
+        if is_prompt and supports_multimodal(self.get_model()):
             #For multimodal total_batch_seq and total_mem, we store it in the
             #attribute for now.
             mm_outputs = self._warmup_multimodal_graph(
