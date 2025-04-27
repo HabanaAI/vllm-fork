@@ -42,8 +42,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.v_head_size = 512
         self.k_v_head_size = self.k_head_size + self.v_head_size
         self.block_size = 128
-        self.local_offset_start = self.k_v_head_size // self.tp_size * local_rank
-        self.local_offset_end = self.k_v_head_size // self.tp_size * (local_rank + 1)
         self.local_tp_rank = local_rank
         max_num_blocks = 1000
         self.block_indice_place_holder = torch.zeros(max_num_blocks, dtype=torch.int, device="hpu")
@@ -74,8 +72,6 @@ class MooncakeStoreConnector(KVConnectorBase):
             dtype = torch.float8_e4m3fn
         else:
             dtype = torch.bfloat16
-        self.padding_k_tensor = torch.zeros((self.block_size, self.k_v_head_size), dtype=dtype, device="hpu")
-        self.padding_v_tensor = torch.zeros((self.block_size, self.v_head_size), dtype=dtype, device="hpu")
         self.cache_k = VLLMKVCache()
         self.cache_v = VLLMKVCache()
         
@@ -229,7 +225,6 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         return hidden_or_intermediate_states, bypass_model_exec, model_input
 
-
     def send_kv_caches_and_hidden_states_hpu(
         self,
         model_executable: torch.nn.Module,
@@ -243,9 +238,11 @@ class MooncakeStoreConnector(KVConnectorBase):
         seq_lens = model_input.attn_metadata.seq_lens  # 2D list
         start_layer = model_executable.model.start_layer
         end_layer = model_executable.model.end_layer
-        num_kv_heads = 1 if self.is_deepseek_mla else int(model_executable.model.config.num_key_value_heads / self.tp_size)
-        hidden_size = model_executable.model.config.hidden_size
-        num_attention_heads = model_executable.model.config.num_attention_heads
+        num_kv_heads = 1
+        model_config = model_executable.model.config
+        num_heads = int(model_config.num_key_value_heads / self.tp_size)
+        hidden_size = model_config.hidden_size
+        num_attention_heads = model_config.num_attention_heads
         head_size = int(hidden_size / num_attention_heads)
 
         for idx, slen in enumerate(seq_lens):
@@ -268,8 +265,8 @@ class MooncakeStoreConnector(KVConnectorBase):
                     key_cache = kv_cache[0].reshape(-1, num_kv_heads, self.k_v_head_size)
                     keys.append(key_cache.index_select(0, current_slot_mapping).unsqueeze(0))
                 else:
-                    key_cache = kv_cache[0].reshape(-1, num_kv_heads, head_size)
-                    value_cache = kv_cache[1].reshape(-1, num_kv_heads, head_size)
+                    key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
+                    value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
                     keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                     values.append(value_cache[current_slot_mapping].unsqueeze(0))
 
@@ -296,219 +293,103 @@ class MooncakeStoreConnector(KVConnectorBase):
         kv_caches: List[torch.Tensor]
     ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForHPUWithSamplingMetadata"]:
-        # When bypass_model_exec is set to False, it means that at least for one
-        # request its corresponding KV cache or hidden state is missing.
-        # In this case we need to do prefilling to recompute missing KV cache
-        # and hidden states.
-        if self.is_deepseek_mla:
-            bypass_model_exec = True
+        
+        bypass_model_exec = True
+        input_tokens_tensor_cpu = model_input.input_tokens.to("cpu")
+        torch.hpu.synchronize()
 
-            input_tokens_tensor_cpu = model_input.input_tokens.to("cpu")
-            torch.hpu.synchronize()
-            
-            seq_lens_tensor = model_input.attn_metadata.seq_lens_tensor
-            seq_lens = seq_lens_tensor.tolist() #2D list
-            block_indices_list = attn_metadata.block_indices.tolist() 
+        seq_lens = model_input.attn_metadata.seq_lens_tensor.tolist()
+        block_indices_list = attn_metadata.block_indices.tolist()
+        hidden_or_intermediate_states_for_one_req = []
+        start_block_idx = 0
+        model_config = model_executable.model.config
+        num_heads = int(model_config.num_key_value_heads / self.tp_size)
+        hidden_size = model_config.hidden_size
+        num_attention_heads = model_config.num_attention_heads
+        head_size = int(hidden_size / num_attention_heads)
 
-            hidden_or_intermediate_states_for_one_req = []
-            input_tokens_list = []
-            num_computed_tokens_list = []
-            start_block_idx = 0
-
-            # For each sequence in the batch, we patch kv tensor together, so we recv
-            # 0. current_tokens [seq_len]
-            # 1. bool mask [seq_len]
-            # 2. key_values [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size)], [61, seq_len, 1, 576]
-            # 3. empty tensor
-            # 4. hidden_or_intermediate_states [1, hidden_size]
-            for idx, slen in enumerate(seq_lens):
-                current_tokens = input_tokens_tensor_cpu[idx][:slen]
-                num_blocks = (slen + 127) // 128
-                end_block_idx = start_block_idx + num_blocks
-                # self.block_indice_place_holder[:num_blocks] = attn_metadata.block_indices[start_block_idx:end_block_idx]
-                block_indices_tensor = torch.tensor(block_indices_list[start_block_idx:end_block_idx], device="hpu", dtype=torch.int32 )
-                # we think this is a padding sequence, so we skip it. but we still need write kv cache
-                if slen == 1:
-                    for i in range(model_executable.model.model.start_layer,
-                                model_executable.model.model.end_layer):
-                        current_layer_idx = i - model_executable.model.model.start_layer
-                        kv_cache = kv_caches[current_layer_idx]
-                        # key_cache, value_cache = kv_cache[0], kv_cache[1]
-                        key_cache = kv_cache[0]
+        for idx, slen in enumerate(seq_lens):
+            if slen == 1:
+                for i in range(model_executable.model.model.start_layer,
+                               model_executable.model.model.end_layer):
+                    current_layer_idx = i - model_executable.model.model.start_layer
+                    kv_cache = kv_caches[current_layer_idx]
+                    key_cache, value_cache = kv_cache[0], kv_cache[1]
+                    key_cache = kv_cache[0]
+                    if self.is_deepseek_mla:
+                        padding_k_tensor = torch.zeros((self.block_size, self.k_v_head_size), dtype=self.dtype, device="hpu")
                         self.cache_k(self.padding_k_tensor.unsqueeze(0),
-                                key_cache,
+                            key_cache,
+                            attn_metadata.block_indices[start_block_idx:end_block_idx],
+                            attn_metadata.block_offsets,
+                            )
+                    else:
+                        padding_k_tensor = torch.zeros((self.block_size, head_size), dtype=self.dtype, device="hpu")
+                        padding_v_tensor = torch.zeros((self.block_size, head_size), dtype=self.dtype, device="hpu")
+                        self.cache_k(self.padding_k_tensor.unsqueeze(0),
+                            key_cache,
+                            attn_metadata.block_indices[start_block_idx:end_block_idx],
+                            attn_metadata.block_offsets,
+                            )
+                        self.cache_v(self.padding_v_tensor.unsqueeze(0),
+                                value_cache,
                                 attn_metadata.block_indices[start_block_idx:end_block_idx],
                                 attn_metadata.block_offsets,
                                 )
-                        # self.cache_v(self.padding_v_tensor.unsqueeze(0),
-                        #         value_cache,
-                        #         attn_metadata.block_indices[start_block_idx:end_block_idx],
-                        #         attn_metadata.block_offsets,
-                        #         )
-                    # the first one should never be padding, so we can append the first one.
-                    hidden_or_intermediate_states_for_one_req.append(hidden_or_intermediate_states_for_one_req[0])
-                    start_block_idx = end_block_idx
-                    continue
-
-                # get roi for current seq
-                load_key_prefix = self.tensor_hash(current_tokens)
-                load_kvcache_key = f"{load_key_prefix}_{self.local_tp_rank}"
-                remote_kv = self.kv_store.get(load_kvcache_key)
-                hidden_key = f"{load_key_prefix}_hidden_{self.local_tp_rank}"
-                hidden = self.kv_store.get(hidden_key)
-                
-                if remote_kv is None or hidden is None:
-                    # didn't find any match.
-                    logger.warning(f"Didn't find any match, load_key_prefix: {load_kvcache_key}")
-                    bypass_model_exec = False
-                    continue
-
-                # collecting data for rebuilding the input
-                input_tokens_list.append(current_tokens)
-                num_computed_tokens = current_tokens.shape[0]
-                num_computed_tokens_list.append(num_computed_tokens)
-                
-                # it's padded to block size now.
-                key_values = remote_kv.to("hpu")
-                keys = key_values
-                # values = key_values[..., self.k_head_size:]
-
-                htorch.core.mark_step()
-                torch.hpu.synchronize()
-                # put received KV caches into paged memory layer by layer
-                # for each layer, we need to pad the key and value to 128, so 
-                # key shape should be [num_blocks, block_size, num_kv_heads(1,ommited), k_head_size]
-                # value shape should be [num_blocks, block_size, num_kv_heads(1,ommited), v_head_size]
-                for i in range(model_executable.model.start_layer,
-                            model_executable.model.end_layer):
-                    current_layer_idx = i - model_executable.model.start_layer
-                    kv_cache = kv_caches[current_layer_idx]
-
-                    key_cache, value_cache = kv_cache[0], kv_cache[1]
-
-                    # [num_layers, seq_len, num_kv_heads, k/v_head_size] -> [seq_len, k/v_head_size]
-                    key = keys[current_layer_idx].squeeze(-2).view(-1, self.block_size, self.k_v_head_size)
-                    # value = values[current_layer_idx].squeeze(-2) 
-
-                    # ====== D2D =======
-                    self.cache_k(key,
-                            key_cache,
-                            block_indices_tensor,
-                            None,
-                            )
+                # the first one should never be padding, so we can append the first one.
+                hidden_or_intermediate_states_for_one_req.append(hidden_or_intermediate_states_for_one_req[0])
                 start_block_idx = end_block_idx
-                hidden_or_intermediate_states_for_one_req.append(hidden.to("hpu"))
-                htorch.core.mark_step()
-        
-        else:
-            # from pudb.remote import set_trace
-            # set_trace()
-            bypass_model_exec = True
-
-            input_tokens_tensor = model_input.input_tokens.to("cpu")
-            torch.hpu.synchronize()
+                continue
             
-            seq_lens_tensor = model_input.attn_metadata.seq_lens_tensor
-            seq_lens = seq_lens_tensor.tolist() #2D list
-            block_indices_list = attn_metadata.block_indices.tolist() 
+            current_tokens = input_tokens_tensor_cpu[idx][:slen]
+            num_blocks = (slen + 127) // 128
+            end_block_idx = start_block_idx + num_blocks
+            block_indices_tensor = torch.tensor(
+                block_indices_list[start_block_idx:end_block_idx], device="hpu", dtype=torch.int32)
 
-            hidden_or_intermediate_states_for_one_req = []
-            input_tokens_list = []
-            num_computed_tokens_list = []
-            start_block_idx = 0
-            model_config = model_executable.model.config
-            num_heads = int(model_config.num_key_value_heads / self.tp_size)
-            hidden_size = model_config.hidden_size
-            num_attention_heads = model_config.num_attention_heads
-            head_size = getattr(model_config, "head_dim", int(hidden_size // num_attention_heads))
+            load_key_prefix = self.tensor_hash(current_tokens)
+            load_kvcache_key = f"{load_key_prefix}_{self.local_tp_rank}"
+            remote_kv = self.kv_store.get(load_kvcache_key)
+            hidden_key = f"{load_key_prefix}_hidden_{self.local_tp_rank}"
+            hidden = self.kv_store.get(hidden_key)
 
-            # For each sequence in the batch, we patch kv tensor together, so we recv
-            # 0. current_tokens [seq_len]
-            # 1. bool mask [seq_len]
-            # 2. key_values [num_layers, seq_len, num_kv_heads, (k_head_size + v_head_size)], [61, seq_len, 1, 576]
-            # 3. empty tensor
-            # 4. hidden_or_intermediate_states [1, hidden_size]
-            for idx, slen in enumerate(seq_lens):
-                start_pos = sum(seq_lens[:idx])
-                end_pos = start_pos + slen
-                # current_tokens = input_tokens_tensor[idx][:slen]
-                num_blocks = (slen + 127) // 128
-                end_block_idx = start_block_idx + num_blocks
-                # self.block_indice_place_holder[:num_blocks] = attn_metadata.block_indices[start_block_idx:end_block_idx]
-                block_indices_tensor = torch.tensor(block_indices_list[start_block_idx:end_block_idx], device="hpu", dtype=torch.int32 )
-                # we think this is a padding sequence, so we skip it. but we still need write kv cache
-                if slen == 1:
-                    for i in range(model_executable.model.model.start_layer,
-                                model_executable.model.model.end_layer):
-                        current_layer_idx = i - model_executable.model.model.start_layer
-                        kv_cache = kv_caches[current_layer_idx]
-                        key_cache, value_cache = kv_cache[0], kv_cache[1]
-                        # self.cache_k(self.padding_k_tensor.unsqueeze(0),
-                        #         key_cache,
-                        #         attn_metadata.block_indices[start_block_idx:end_block_idx],
-                        #         attn_metadata.block_offsets,
-                        #         )
-                        # self.cache_v(self.padding_v_tensor.unsqueeze(0),
-                        #         value_cache,
-                        #         attn_metadata.block_indices[start_block_idx:end_block_idx],
-                        #         attn_metadata.block_offsets,
-                        #         )
-                    # the first one should never be padding, so we can append the first one.
-                    hidden_or_intermediate_states_for_one_req.append(hidden_or_intermediate_states_for_one_req[0])
-                    start_block_idx = end_block_idx
-                    continue
+            if remote_kv is None or hidden is None:
+                logger.warning(f"Didn't find any match, load_key_prefix: {load_kvcache_key}")
+                bypass_model_exec = False
+                continue
 
-                # get roi for current seq
-                current_tokens = input_tokens_tensor[:, start_pos:end_pos]
-                load_key_prefix = self.tensor_hash(current_tokens)
-                load_kvcache_key = f"{load_key_prefix}_{self.local_tp_rank}"
-                remote_kv = self.kv_store.get(load_kvcache_key)
-                hidden_key = f"{load_key_prefix}_hidden_{self.local_tp_rank}"
-                hidden = self.kv_store.get(hidden_key)
-                
-                if remote_kv is None or hidden is None:
-                    # didn't find any match.
-                    logger.warning(f"Didn't find any match, load_key_prefix: {load_kvcache_key}")
-                    bypass_model_exec = False
-                    continue
+            num_computed_tokens = current_tokens.shape[0]
+            htorch.core.mark_step()
+            torch.hpu.synchronize()
 
-                # collecting data for rebuilding the input
-                input_tokens_list.append(current_tokens)
-                num_computed_tokens = current_tokens.shape[0]
-                num_computed_tokens_list.append(num_computed_tokens)
-                
-                # it's padded to block size now.
-                htorch.core.mark_step()
-                torch.hpu.synchronize()
-                # put received KV caches into paged memory layer by layer
-                # for each layer, we need to pad the key and value to 128, so 
-                # key shape should be [num_blocks, block_size, num_kv_heads(1,ommited), k_head_size]
-                # value shape should be [num_blocks, block_size, num_kv_heads(1,ommited), v_head_size]
-                for i in range(model_executable.model.start_layer,
+            # put received KV caches into paged memory layer by layer
+            for i in range(model_executable.model.start_layer,
                             model_executable.model.end_layer):
+                current_layer_idx = i - model_executable.model.start_layer
+                kv_cache = kv_caches[current_layer_idx]
+                key_cache, value_cache = kv_cache[0], kv_cache[1]
+                if self.is_deepseek_mla:
+                    remote_k = remote_kv[current_layer_idx] # to("hpu")?
+                    # [num_layers, seq_len, num_kv_heads, k/v_head_size] -> [seq_len, k/v_head_size]
+                    key = remote_k.squeeze(-2).view(-1, self.block_size, self.k_v_head_size)
+                    # ====== D2D =======
+                    self.cache_k(key, key_cache, block_indices_tensor, None)
+                else:
                     remote_k, remote_v = remote_kv[0][i], remote_kv[1][i]
-                    current_layer_idx = i - model_executable.model.start_layer
-                    kv_cache = kv_caches[current_layer_idx]
-                    key_cache, value_cache = kv_cache[0], kv_cache[1]
                     key = remote_k.unsqueeze(0).view(-1, self.block_size, num_heads, head_size)
                     value = remote_v.unsqueeze(0).view(-1, self.block_size, num_heads, head_size)
                     self.cache_k(key, key_cache, block_indices_tensor, None)
                     self.cache_v(value, value_cache, block_indices_tensor, None)
-                start_block_idx = end_block_idx
-                hidden_or_intermediate_states_for_one_req.append(hidden.to("hpu"))
-                htorch.core.mark_step()
-
-
+            
+            hidden_or_intermediate_states_for_one_req.append(hidden.to("hpu"))
+            start_block_idx = end_block_idx
+            htorch.core.mark_step()  
+        
         if not bypass_model_exec:
-            # Some of the KV cache is not retrieved
-            # Here we will fall back to normal model forwarding
-            # But optionally you can adjust model_input so that you only do
-            # prefilling on those tokens that are missing KV caches.
             logger.warning(
                 "[rank%d]: Failed to receive all KVs and hidden "
                 "states, redo model forwarding.", torch.distributed.get_rank())
             hidden_or_intermediate_states = None
-
         else:
             logger.debug(
                 "[rank%d]: Successfully received all KVs and hidden "
@@ -517,8 +398,6 @@ class MooncakeStoreConnector(KVConnectorBase):
                 hidden_or_intermediate_states_for_one_req, dim=0).to("hpu")
 
         return hidden_or_intermediate_states, bypass_model_exec, model_input
-
-
 
     @staticmethod
     def tensor_hash(tensor: torch.Tensor) -> int:
