@@ -244,11 +244,12 @@ class MooncakeStoreConnector(KVConnectorBase):
         start_layer = model_executable.model.start_layer
         end_layer = model_executable.model.end_layer
         num_kv_heads = 1
-        model_config = model_executable.model.config
-        num_heads = int(model_config.num_key_value_heads / self.tp_size)
-        hidden_size = model_config.hidden_size
-        num_attention_heads = model_config.num_attention_heads
-        head_size = int(hidden_size / num_attention_heads)
+        if not self.is_deepseek_mla:
+            model_config = model_executable.model.config
+            num_heads = int(model_config.num_key_value_heads / self.tp_size)
+            hidden_size = model_config.hidden_size
+            num_attention_heads = model_config.num_attention_heads
+            head_size = int(hidden_size / num_attention_heads)
 
         for idx, slen in enumerate(seq_lens):
             if slen == 1:  # Skip padding sequences
@@ -307,11 +308,12 @@ class MooncakeStoreConnector(KVConnectorBase):
         block_indices_list = attn_metadata.block_indices.tolist()
         hidden_or_intermediate_states_for_one_req = []
         start_block_idx = 0
-        model_config = model_executable.model.config
-        num_heads = int(model_config.num_key_value_heads / self.tp_size)
-        hidden_size = model_config.hidden_size
-        num_attention_heads = model_config.num_attention_heads
-        head_size = int(hidden_size / num_attention_heads)
+        if not self.is_deepseek_mla:
+            model_config = model_executable.model.config
+            num_heads = int(model_config.num_key_value_heads / self.tp_size)
+            hidden_size = model_config.hidden_size
+            num_attention_heads = model_config.num_attention_heads
+            head_size = int(hidden_size / num_attention_heads)
 
         for idx, slen in enumerate(seq_lens):
             if slen == 1:
