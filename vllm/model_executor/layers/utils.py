@@ -15,7 +15,10 @@ def get_token_bin_counts_and_mask(
     bin_counts = torch.zeros((num_seqs, vocab_size + 1),
                              dtype=torch.long,
                              device=tokens.device)
-    bin_counts.scatter_add_(1, tokens, torch.ones_like(tokens))
+    # To workaround scatter_add_ crash
+    # TODO: revert when the crash is fixed, as scatter_add
+    # fallback to CPU
+    bin_counts = bin_counts.scatter_add(1, tokens, torch.ones_like(tokens))
     bin_counts = bin_counts[:, :vocab_size]
     mask = bin_counts > 0
 
