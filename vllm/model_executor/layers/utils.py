@@ -48,12 +48,10 @@ def apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
                                                    vocab_size, num_seqs)
     output_bin_counts, output_mask = get_token_bin_counts_and_mask(
         output_tokens_tensor, vocab_size, num_seqs)
-    repetition_penalties = repetition_penalties.unsqueeze_(dim=1).repeat(
-        1, vocab_size)
-    logits[logits > 0] /= torch.where(prompt_mask | output_mask,
-                                      repetition_penalties, 1.0)[logits > 0]
-    logits[logits <= 0] *= torch.where(prompt_mask | output_mask,
-                                       repetition_penalties, 1.0)[logits <= 0]
+    repetition_penalties = repetition_penalties[:, None].repeat(1, vocab_size)
+    repetition_penalties.masked_fill_(~(prompt_mask | output_mask), 1.0)
+    logits = torch.where(logits > 0, logits / repetition_penalties,
+                         logits * repetition_penalties)
     # We follow the definition in OpenAI API.
     # Refer to https://platform.openai.com/docs/api-reference/parameter-details
     logits -= frequency_penalties.unsqueeze_(dim=1) * output_bin_counts
