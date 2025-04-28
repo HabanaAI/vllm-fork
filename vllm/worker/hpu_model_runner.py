@@ -489,10 +489,10 @@ class HpuModelAdapter(torch.nn.Module):
             # During warmup, this is ON by default, so we are turning it off here.
             # Also, we moved this code block from model.forward() since we want to get
             # embedding before pass it to model which is also aligned with VLLM V1.
-            compile_only_mode_context = functools.partial(
+            compile_only_mode_context_false = functools.partial(
                 bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
 
-            with compile_only_mode_context():
+            with compile_only_mode_context_false():
                 # always calculate embeddings for multimodal
                 image_input = self.model._parse_and_validate_image_input(
                     **kwargs)
@@ -510,13 +510,18 @@ class HpuModelAdapter(torch.nn.Module):
                 "inputs_embeds": inputs_embeds
             })
 
+            # done compute the visual tokens
+            if "pixel_values" in kwargs:
+                kwargs.pop("pixel_values")
+            if "image_grid_thw" in kwargs:
+                kwargs.pop("image_grid_thw")
+
             hidden_states = self.model(*args, **kwargs)
         else:
             attn_meta = kwargs.pop('attn_metadata')
             if 'kv_caches' in kwargs:
                 kwargs.pop('kv_caches')
             with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
-                #import pdb;pdb.set_trace()
                 hidden_states = self.model(*args, **kwargs)
 
         if not get_pp_group().is_last_rank:
@@ -2461,8 +2466,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  available_mem,
                                  starting_mem=0,
                                  total_batch_seq=0.001):
-        if not supports_multimodal(self.get_model()):
-            return None
+
         total_mem = starting_mem
         idx = 0
         phase = f'Graph/Multimodal'

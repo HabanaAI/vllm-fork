@@ -1385,16 +1385,27 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     image_input=image_input,
                     video_input=video_input)
                 input_ids = None
-
-        attn_meta = kwargs.pop('attn_metadata')
-        from vllm.forward_context import set_forward_context
-        with set_forward_context(attn_meta, self.vllm_config, 0):
-              hidden_states = self.language_model.model(
-                input_ids=input_ids,
-                positions=positions,
-                intermediate_tensors=intermediate_tensors,
-                inputs_embeds=inputs_embeds,
-            )
+        if is_hpu:
+            #In HPU, we are wrapping the language_model and the vision model
+            #seperately with HPU graph to avoid dynamicity inside the graph.
+            #set_foward_context needs to be called at this point to avoid
+            #accuracy issue rather than in HpuModelAdapter.
+            attn_meta = kwargs.pop('attn_metadata')
+            from vllm.forward_context import set_forward_context
+            with set_forward_context(attn_meta, self.vllm_config, 0):
+                hidden_states = self.language_model.model(
+                    input_ids=input_ids,
+                    positions=positions,
+                    intermediate_tensors=intermediate_tensors,
+                    inputs_embeds=inputs_embeds,
+                )
+        else:
+            hidden_states = self.language_model.model(
+                    input_ids=input_ids,
+                    positions=positions,
+                    intermediate_tensors=intermediate_tensors,
+                    inputs_embeds=inputs_embeds,
+                )
 
         return hidden_states
 
