@@ -299,9 +299,9 @@ class HpuModelAdapter(torch.nn.Module):
         if htorch.utils.internal.is_lazy() and self.model_is_mrope:
             logger.info("[Multimodal] Split Graph to Visual and Language")
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
-                self.model.visual, disable_tensor_cache=False)
+                self.model.visual, disable_tensor_cache=True)
             self.model = htorch.hpu.wrap_in_hpu_graph(
-                self.model, disable_tensor_cache=False)
+                self.model, disable_tensor_cache=True)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -2501,6 +2501,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
+
 
         return total_mem, total_batch_seq, captured_all
 
