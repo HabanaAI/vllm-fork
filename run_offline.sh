@@ -95,6 +95,10 @@ while [[ $# -gt 0 ]]; do
     --help)
         usage
         ;;
+    *)
+	    echo "unknown arg $i"
+	    exit
+	    ;;
     esac
 done
 

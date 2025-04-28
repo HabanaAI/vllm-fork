@@ -96,6 +96,14 @@ while [[ $# -gt 0 ]]; do
         SaveGenratedText=true
         shift 1
         ;;
+    --fp8)
+        FP8="On"
+        shift 1
+        ;;
+    --iter)
+        ITER=$2
+        shift 2
+        ;;
     --help)
         usage
         ;;
@@ -110,6 +118,7 @@ GMU=${GMU:-"0.9"}
 MML=${MML:-"32768"}
 NumPrompt=${NumPrompt:-"100"}
 TP=${TP:-"1"}
+ITER=${ITER:-"1"}
 
 # DataSet=${DataSet:-"lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench"}
 IFS=',' read -r -a DSArray <<<"$DataSet"
@@ -178,10 +187,25 @@ if [[ -n "$SaveGenratedText" ]]; then
     BenchSaveTextArg=" --save-result --result-dir ${OUTPUT_DIR}"
 fi
 
+ServerFP8Args=" "
+if [[ -n "$FP8" ]]; then
+    echo "INFO: running in FP8 mode requires OH installation and quantizaiton files...installing dependecies now"
+    git clone https://github.com/huggingface/optimum-habana.git /root/optimum-habana
+    cd /root/optimum-habana
+    git checkout v1.17.0
+    pip install . -q
+    git clone https://github.com/habana-internal/vllm-benchmarks.git /root/vllm-benchmarks
+    export QUANT_CONFIG=/root/vllm-benchmarks/models/llama/hqt/8b/quantization_config/maxabs_quant.json
+    # need to reinstall the transformers for vllm
+    cd $VLLM_DIR
+    pip install -r requirements-hpu-qwen2_5_vl.txt -q
+    ServerFP8Args=" --quantization inc --kv-cache-dtype fp8_inc --weights-load-device cpu"
+fi
+
 if [[ ! -n "$SkipServer" ]]; then
     echo "INFO: Lunching the server"
     logfile=${OUTPUT_DIR}/server.log
-    cmd="python -m vllm.entrypoints.openai.api_server --port 8080 --model $model --tensor-parallel-size $TP --max-num-seqs 128 --dtype bfloat16 --gpu-memory-util $GMU --max-num-batched-tokens 32768 --max-model-len $MML --block-size 128 &"
+    cmd="python -m vllm.entrypoints.openai.api_server --port 8080 --model $model --tensor-parallel-size $TP --max-num-seqs 128 --dtype bfloat16 --gpu-memory-util $GMU --max-num-batched-tokens 32768 --max-model-len $MML --block-size 128 ${ServerFP8Args} &"
     echo $cmd && echo $cmd >>$logfile
     eval $cmd 2>&1 | tee -a $logfile &
 else
@@ -226,13 +250,23 @@ if [ ${#DSArray[@]} -gt 0 ]; then
             --dataset-name $item --dataset-path ./sonnet.txt  --sonnet-input-len 2048 --sonnet-output-len 128 --sonnet-prefix-len 100 \
             --num-prompts $NumPrompt --request-rate inf --seed 0 --ignore_eos ${BenchSaveTextArg}"
         fi
-        logfile=${OUTPUT_DIR}/$(echo $item | cut -d"/" -f2).log
-        echo $cmd && echo $cmd >>$logfile
-        eval $cmd 2>&1 | tee -a $logfile
+
+        # running over the specified iterations
+        for j in $(seq $ITER); do
+            logfile=${OUTPUT_DIR}/$(echo $item | cut -d"/" -f2).iter$j.log
+            echo $cmd && echo $cmd >>$logfile
+            eval $cmd 2>&1 | tee -a $logfile
+        done
     done
 else
     echo "WARN: argument dataset is empty! no dataset test is conducted"
 fi
+
+## collect a summary of results
+PerfArray=("Request throughput (req/s)" "Output token throughput (tok/s)" "Total Token throughput (tok/s)")
+temp_file=$(mktemp)
+for item in "${PerfArray[@]}"; do grep "$item" ${OUTPUT_DIR}/*log >>$temp_file; done
+mv $temp_file ${OUTPUT_DIR}/summary.log
 
 # cleanup after done
 cleanup

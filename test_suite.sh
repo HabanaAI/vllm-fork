@@ -36,9 +36,9 @@ fi
 
 #Unit Test for Processor
 if $RunProcessorUT; then
-  pip uninstall -y transformers
-  pip install git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf
-  pytest tests/models/multimodal/processing/test_qwen2_5_vl.py -s -v;
+	pip uninstall -y transformers
+	pip install git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf
+	pytest tests/models/multimodal/processing/test_qwen2_5_vl.py -s -v
 fi
 
 #pytests
@@ -85,9 +85,16 @@ if $RandomizedImage; then
 fi
 
 if $RunOnlineDatasets; then
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench --num-prompts 500 -sgt
+	# tp=1 for datasets and text only
+	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench --num-prompts 400 -sgt
 	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt
+
+	## tp>1 tests
 	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 2
 	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 4
 	#bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 8
+
+	## tp=1 fp8 tests
+	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 400 -sgt --fp8
+	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt --fp8
 fi
