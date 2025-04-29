@@ -555,6 +555,8 @@ class EngineCoreProc(EngineCore):
                     break
                 assert not isinstance(outputs, bytes)
                 outputs.engine_index = engine_index
+                buffers = encoder.encode_into(outputs, buffer)
+                socket.send_multipart(buffers, copy=False)
 
                 # Reclaim buffers that zmq is finished with.
                 while pending and pending[-1][0].done:

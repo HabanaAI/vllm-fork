@@ -143,7 +143,7 @@ class Attention(nn.Module):
         # opaque custom op. For other platforms, we directly call them
         # and let torch.compile handle them.
         self.use_direct_call = not current_platform.is_cuda_alike(
-        ) and not current_platform.is_cpu()
+        ) and not current_platform.is_cpu() and not torch.hpu.is_available()
 
         self.use_output = attn_backend.accept_output_buffer
         compilation_config = get_current_vllm_config().compilation_config
@@ -362,6 +362,33 @@ class MultiHeadAttention(nn.Module):
 
         return out.reshape(bsz, q_len, -1)
 
+def wait_for_kv_layer_from_connector(layer_name: str):
+    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
+        return
+
+    connector = get_kv_transfer_group()
+
+    forward_context: ForwardContext = get_forward_context()
+    attn_metadata = forward_context.attn_metadata
+    if attn_metadata is None:
+        return
+    connector.wait_for_layer_load(layer_name)
+
+
+def maybe_save_kv_layer_to_connector(
+    layer_name: str,
+    kv_cache_layer: List[torch.Tensor],
+):
+    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
+        return
+
+    connector = get_kv_transfer_group()
+
+    forward_context: ForwardContext = get_forward_context()
+    attn_metadata = forward_context.attn_metadata
+    if attn_metadata is None:
+        return
+    connector.save_kv_layer(layer_name, kv_cache_layer, attn_metadata)
 
 def wait_for_kv_layer_from_connector(layer_name: str):
     if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
