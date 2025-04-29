@@ -103,7 +103,8 @@ class VisionBuckets:
 
     def _process_buckets(self, buckets):
         for bucket in buckets:
-            assert bucket % 8 == 0, 'Buckets needs to be multiples 8 (slices of 64)'
+            assert bucket % 8 == 0, (
+                f'Buckets needs to be multiples 8 (slices of 64)')
         return sorted(buckets)
 
     def get_multimodal_bucket(self, curr_num_image_patches):
@@ -290,9 +291,11 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
         self.model_is_mrope = uses_mrope(model_config)
 
-        # This applies exclusively to Qwen2/2.5-VL model only(which use mrope)
-        # We split the model into visual and language components and wrap them separately
-        # with HPU graph. This is to ensure that we keeps the static and dynamic parts distint.
+        # This applies exclusively to Qwen2/2.5-VL models
+        # both use mrope. We split the model into visual
+        # and language components and wrap them separately
+        # with HPU graph. This is to ensure that we keeps
+        # the static and dynamic parts distint.
         if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
             logger.warning("[Multimodal] HPU is not in Lazy Mode, "
                            "split graph has not impact")
@@ -483,11 +486,16 @@ class HpuModelAdapter(torch.nn.Module):
             self.model.forward = functools.partial(
                 self.model.forward, bypass_hpu_graphs=bypass_hpu_graphs)
 
-            # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
-            # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
-            # During warmup, this is ON by default, so we are turning it off here.
-            # Also, we moved this code block from model.forward() since we want to get
-            # embedding before pass it to model which is also aligned with VLLM V1.
+            # For Qwen2.5-VL multimodal embedding,
+            # this embedding part should be executed
+            # with PT_COMPILE_ONLY_MODE off at all times
+            # due to it's dynamicity.
+            # During warmup, this is ON by default, so we
+            # are turning it off here.
+            # Also, we moved this code block from
+            # model.forward() since we want to get
+            # embedding before pass it to model which is also
+            # aligned with VLLM V1.
             compile_only_mode_context_false = functools.partial(
                 bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
 
@@ -2065,7 +2073,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     num_patches,
                                                     sampling_params,
                                                     lora_request):
-        assert self.model_is_mrope, "Warmup compatible with Qwen2vl models"
+        assert self.model_is_mrope, (f"Warmup compatible with Qwen2vl models")
         if num_patches == _UNSET_NUM_PATCHES:
             # Using the largest bucket
             num_patches = self.get_model(
@@ -2073,7 +2081,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # get number of tokens from num_patches using merger
         # vision_config.spatial_merge_size
-        num_image_tokens = num_patches // 4  # TODO use the spatial_merge_size ** 2 insted of 4
+        # TODO use the spatial_merge_size ** 2 insted of 4
+        spatial_merge_size = 4
+        num_image_tokens = num_patches // spatial_merge_size
 
         image_token_id = self.get_model().config.image_token_id
         prompt_token_ids = [image_token_id] * num_image_tokens
@@ -2396,11 +2406,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multimodal_avail_mem = (multimodal_prompt_graph_mem_ratio *
                                     available_mem)
             available_mem = (available_mem - multimodal_avail_mem)
-            msg = (
-                f"Using {format_bytes(multimodal_avail_mem)} for multimodal prompt and "
-                f"{format_bytes(available_mem)} for text prompt "
-                f"(VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO={multimodal_prompt_graph_mem_ratio})"
-            )
+            msg = (f"Using {format_bytes(multimodal_avail_mem)} "
+                   f"for multimodal prompt and "
+                   f"{format_bytes(available_mem)} for text prompt "
+                   f"(VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO="
+                   f"{multimodal_prompt_graph_mem_ratio})")
             logger.info(msg)
 
         total_mem = starting_mem
