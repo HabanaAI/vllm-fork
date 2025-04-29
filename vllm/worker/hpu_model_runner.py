@@ -88,10 +88,11 @@ VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
 DUMMY_TOKEN_ID = -1
 
 
-class VisionBuckets():
+class VisionBuckets:
     '''
     This class is used to bucket image tokens
     '''
+
     def __init__(self):
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
@@ -293,8 +294,8 @@ class HpuModelAdapter(torch.nn.Module):
         # We split the model into visual and language components and wrap them separately
         # with HPU graph. This is to ensure that we keeps the static and dynamic parts distint.
         if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
-            logger.warning(f"[Multimodal] HPU is not in Lazy Mode, "
-                           f"split graph has not impact")
+            logger.warning("[Multimodal] HPU is not in Lazy Mode, "
+                           "split graph has not impact")
 
         if htorch.utils.internal.is_lazy() and self.model_is_mrope:
             logger.info("[Multimodal] Split Graph to Visual and Language")
@@ -478,11 +479,9 @@ class HpuModelAdapter(torch.nn.Module):
         if self.model_is_mrope:
             bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
             self.model.visual.forward = functools.partial(
-                self.model.visual.forward,
-                bypass_hpu_graphs=bypass_hpu_graphs)
+                self.model.visual.forward, bypass_hpu_graphs=bypass_hpu_graphs)
             self.model.forward = functools.partial(
-                self.model.forward,
-                bypass_hpu_graphs=bypass_hpu_graphs)
+                self.model.forward, bypass_hpu_graphs=bypass_hpu_graphs)
 
             # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
             # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
@@ -521,15 +520,16 @@ class HpuModelAdapter(torch.nn.Module):
             attn_meta = kwargs.pop('attn_metadata')
             if 'kv_caches' in kwargs:
                 kwargs.pop('kv_caches')
-            with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
+            with set_forward_context(attn_meta, self.vllm_config,
+                                     virtual_engine):
                 hidden_states = self.model(*args, **kwargs)
 
         if not get_pp_group().is_last_rank:
             return hidden_states
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         if selected_token_indices is not None:
-            hidden_states = hidden_states.index_select(
-                0, selected_token_indices)
+            hidden_states = hidden_states.index_select(0,
+                                                       selected_token_indices)
 
         return hidden_states
 
@@ -989,7 +989,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
         if htorch.utils.internal.is_lazy() and not self.model_is_mrope:
             return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
-                *args, **kwargs), disable_tensor_cache=True)
+                *args, **kwargs),
+                                                disable_tensor_cache=True)
         else:
             return HpuModelAdapter(*args, **kwargs)
 
@@ -2067,7 +2068,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert self.model_is_mrope, "Warmup compatible with Qwen2vl models"
         if num_patches == _UNSET_NUM_PATCHES:
             # Using the largest bucket
-            num_patches = self.get_model().vision_buckets.multimodal_buckets[-1]
+            num_patches = self.get_model(
+            ).vision_buckets.multimodal_buckets[-1]
 
         # get number of tokens from num_patches using merger
         # vision_config.spatial_merge_size
@@ -2086,13 +2088,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_data = SequenceData(prompt_token_ids_array)
 
         assert num_patches % 8 == 0, (
-            f"Expects num_patches to be multiples of 8, got: {num_patches}"
-        )
+            f"Expects num_patches to be multiples of 8, got: {num_patches}")
         image_h = num_patches // 8
         image_grid_thw = torch.tensor([1, image_h, 8])
 
-        image_grid_thw = torch.tensor([1, image_h, int(num_patches/image_h)])
-        pixel_values = torch.randn(image_grid_thw.prod(), 1176)  # TODO: figure out the variable name
+        image_grid_thw = torch.tensor([1, image_h, int(num_patches / image_h)])
+        pixel_values = torch.randn(image_grid_thw.prod(),
+                                   1176)  # TODO: figure out the variable name
 
         assert pixel_values.shape[0] % 64 == 0, (
             f"pixel_values must be sliced in 64 chunks, got: {pixel_values.shape}"
@@ -2397,7 +2399,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             msg = (
                 f"Using {format_bytes(multimodal_avail_mem)} for multimodal prompt and "
                 f"{format_bytes(available_mem)} for text prompt "
-                f"(VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO={multimodal_prompt_graph_mem_ratio})")
+                f"(VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO={multimodal_prompt_graph_mem_ratio})"
+            )
             logger.info(msg)
 
         total_mem = starting_mem
@@ -2448,16 +2451,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             mm_outputs = self._warmup_multimodal_graph(
                 kv_caches=kv_caches,
                 available_mem=multimodal_avail_mem,
-                starting_mem=0 if not hasattr(self, "mm_total_mem") else self.mm_total_mem,
-                total_batch_seq=0.001 if not hasattr(self, "mm_total_batch_seq")  else self.mm_total_batch_seq
-            )
+                starting_mem=0
+                if not hasattr(self, "mm_total_mem") else self.mm_total_mem,
+                total_batch_seq=0.001
+                if not hasattr(self, "mm_total_batch_seq") else
+                self.mm_total_batch_seq)
 
             if mm_outputs is not None:
                 mm_total_mem, total_mm_batch_seq, mm_captured_all = mm_outputs
                 total_mem = total_mem + mm_total_mem
                 captured_all = captured_all and mm_captured_all
                 self.mm_total_mem = mm_total_mem
-                self.mm_total_batch_seq= total_mm_batch_seq
+                self.mm_total_batch_seq = total_mm_batch_seq
 
         return total_mem, total_batch_seq, captured_all
 
@@ -2469,7 +2474,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         total_mem = starting_mem
         idx = 0
-        phase = f'Graph/Multimodal'
+        phase = 'Graph/Multimodal'
         num_candidates = len(self.multimodal_buckets)
         captured_all = True
         for idx, num_patches in enumerate(self.multimodal_buckets):
@@ -2501,7 +2506,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
-
 
         return total_mem, total_batch_seq, captured_all
 

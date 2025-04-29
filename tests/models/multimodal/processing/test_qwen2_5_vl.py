@@ -1,10 +1,6 @@
-# SPDX-License-Identifier: Apache-2.0
-
 import pytest
 
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.utils import cached_get_tokenizer
-# from vllm.model_executor.models.qwen2_5_vl import Qwen2_5_VLImageProcessorForceAlignment
 
 from ....conftest import _ImageAssets
 from ...utils import build_model_context
@@ -41,19 +37,12 @@ def test_processor_force_alignment_resize(
     #mm_processor_kwargs = {"force_alignment": True}
 
     ctx = build_model_context(
-        model_name=model_id,
-        tokenizer_name=model_id,
+        model_id,
         mm_processor_kwargs=None,
         limit_mm_per_prompt={"image": num_imgs},
     )
-    tokenizer = cached_get_tokenizer(
-        ctx.model_config.tokenizer,
-        trust_remote_code=ctx.model_config.trust_remote_code,
-    )
-    processor = MULTIMODAL_REGISTRY.create_processor(
-        ctx.model_config,
-        tokenizer=tokenizer,
-    )
+    processor = MULTIMODAL_REGISTRY.create_processor(ctx.model_config)
+    tokenizer = processor.info.get_tokenizer()
 
     # Build the image str / prompt based on the number of images we pass
     prompt = "<|vision_start|><|image_pad|><|vision_end|>" * num_imgs
@@ -96,19 +85,12 @@ def test_processor_force_alignment_resize_to_min_value(
     mm_processor_kwargs = {}
 
     ctx = build_model_context(
-        model_name=model_id,
-        tokenizer_name=model_id,
+        model_id,
         mm_processor_kwargs=None,
         limit_mm_per_prompt={"image": num_imgs},
     )
-    tokenizer = cached_get_tokenizer(
-        ctx.model_config.tokenizer,
-        trust_remote_code=ctx.model_config.trust_remote_code,
-    )
-    processor = MULTIMODAL_REGISTRY.create_processor(
-        ctx.model_config,
-        tokenizer=tokenizer,
-    )
+    processor = MULTIMODAL_REGISTRY.create_processor(ctx.model_config)
+    tokenizer = processor.info.get_tokenizer()
 
     prompt = "<|vision_start|><|image_pad|><|vision_end|>" * num_imgs
     mm_data = {"image": [image_assets[0].pil_image.resize(resize_shape)] * num_imgs}
@@ -126,3 +108,4 @@ def test_processor_force_alignment_resize_to_min_value(
     assert pixel_shape[0] == expected_pixels_shape_zero * num_imgs
     assert pixel_shape[1] == expected_pixels_shape_one
     assert pixel_shape[0] % 64 == 0
+
