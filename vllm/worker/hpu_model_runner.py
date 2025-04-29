@@ -2244,6 +2244,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.graphed_buckets.add((int(bs), int(seq_len), is_prompt))
             self.warmup_scenario(int(bs),
                                  int(seq_len),
+                                 0,
                                  is_prompt,
                                  kv_caches,
                                  is_pt_profiler_run=True)
