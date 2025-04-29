@@ -256,7 +256,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         renormalize: bool,
         topk_group: Optional[int] = None,
         num_expert_group: Optional[int] = None,
+        global_num_experts: int = -1,
+        expert_map: Optional[torch.Tensor] = None,
         custom_routing_function: Optional[Callable] = None,
+        scoring_func: str = "softmax",
+        e_score_correction_bias: Optional[torch.Tensor] = None,
+        activation: str = "silu",
         **kwargs,
     ):
         assert not use_grouped_topk, 'use_grouped_topk must be False on HPU'
@@ -264,7 +269,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                                           'not supported on HPU')
         assert topk_group is None, 'topk_group is not supported on HPU'
         if layer is not None:
-            return layer.hpu_fused_moe(x, router_logits, top_k)
+            return layer.hpu_fused_moe(x, router_logits, top_k, layer)
 
     def forward_tpu(
         self,
@@ -541,10 +546,13 @@ class FusedMoE(torch.nn.Module):
                            tp_rank=tp_rank,
                            expert_id=expert_id)
 
-    def _load_per_channel_weight_scale(self, expert_data: torch.Tensor,
-                                       shard_dim: int, shard_id: str,
+    def _load_per_channel_weight_scale(self,
+                                       expert_data: torch.Tensor,
+                                       shard_dim: int,
+                                       shard_id: str,
                                        loaded_weight: torch.Tensor,
-                                       tp_rank: int):
+                                       tp_rank: int,
+                                       expert_id: Optional[int] = None):
         # for per channel weight quantization
         if shard_id == "w2":
             expert_data.copy_(loaded_weight)
@@ -553,7 +561,8 @@ class FusedMoE(torch.nn.Module):
                            shard_dim=shard_dim,
                            loaded_weight=loaded_weight,
                            expert_data=expert_data,
-                           tp_rank=tp_rank)
+                           tp_rank=tp_rank,
+                           expert_id=expert_id)
 
     def _load_w13(self,
                   expert_data: torch.Tensor,
@@ -718,7 +727,8 @@ class FusedMoE(torch.nn.Module):
             # TODO @dsikka: once hardened, refactor to use vLLM Parameters
             # specific to each case
             quant_method = getattr(param, "quant_method", None)
-            if quant_method == FusedMoeWeightScaleSupported.CHANNEL.value:
+            if (quant_method == FusedMoeWeightScaleSupported.CHANNEL.value
+                    or current_platform.is_hpu()):
                 self._load_per_channel_weight_scale(
                     shard_id=shard_id,
                     shard_dim=shard_dim,
