@@ -296,6 +296,7 @@ class HpuModelAdapter(torch.nn.Module):
         # and language components and wrap them separately
         # with HPU graph. This is to ensure that we keeps
         # the static and dynamic parts distint.
+
         if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
             logger.warning("[Multimodal] HPU is not in Lazy Mode, "
                            "split graph has not impact")

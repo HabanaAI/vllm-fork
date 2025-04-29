@@ -33,8 +33,7 @@ def test_processor_force_alignment_resize(
     expected_pixels_shape_zero = (w_bar // 14) * (h_bar // 14)
     expected_pixels_shape_one = 1176
     expected_toks_per_img = expected_pixels_shape_zero // 4
-    mm_processor_kwargs = {}
-    #mm_processor_kwargs = {"force_alignment": True}
+    mm_processor_kwargs: dict[str, object] = {}
 
     ctx = build_model_context(
         model_id,
@@ -46,7 +45,9 @@ def test_processor_force_alignment_resize(
 
     # Build the image str / prompt based on the number of images we pass
     prompt = "<|vision_start|><|image_pad|><|vision_end|>" * num_imgs
-    mm_data = {"image": [image_assets[0].pil_image.resize(resize_shape)] * num_imgs}
+    mm_data = {
+        "image": [image_assets[0].pil_image.resize(resize_shape)] * num_imgs
+    }
 
     processed_inputs = processor.apply(prompt, mm_data, mm_processor_kwargs)
 
@@ -61,6 +62,7 @@ def test_processor_force_alignment_resize(
     assert pixel_shape[0] == expected_pixels_shape_zero * num_imgs
     assert pixel_shape[1] == expected_pixels_shape_one
     assert pixel_shape[0] % 64 == 0
+
 
 @pytest.mark.parametrize("model_id", ["Qwen/Qwen2.5-VL-3B-Instruct"])
 # yapf: disable
@@ -82,7 +84,7 @@ def test_processor_force_alignment_resize_to_min_value(
     expected_pixels_shape_one = 1176
     expected_toks_per_img = expected_pixels_shape_zero // 4
 
-    mm_processor_kwargs = {}
+    mm_processor_kwargs: dict[str, object] = {}
 
     ctx = build_model_context(
         model_id,
@@ -93,7 +95,9 @@ def test_processor_force_alignment_resize_to_min_value(
     tokenizer = processor.info.get_tokenizer()
 
     prompt = "<|vision_start|><|image_pad|><|vision_end|>" * num_imgs
-    mm_data = {"image": [image_assets[0].pil_image.resize(resize_shape)] * num_imgs}
+    mm_data = {
+        "image": [image_assets[0].pil_image.resize(resize_shape)] * num_imgs
+    }
 
     processed_inputs = processor.apply(prompt, mm_data, mm_processor_kwargs)
 
@@ -108,4 +112,3 @@ def test_processor_force_alignment_resize_to_min_value(
     assert pixel_shape[0] == expected_pixels_shape_zero * num_imgs
     assert pixel_shape[1] == expected_pixels_shape_one
     assert pixel_shape[0] % 64 == 0
-
