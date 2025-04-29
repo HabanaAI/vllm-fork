@@ -10,13 +10,14 @@ import torch.nn as nn
 from torch.func import functional_call
 from transformers import PretrainedConfig
 
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.multimodal import MultiModalPlaceholderMap, NestedTensors
-from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
-from vllm.utils import is_pin_memory_available
+from vllm.utils import (get_cuda_view_from_cpu_tensor, is_pin_memory_available,
+                        is_uva_available)
 
 logger = init_logger(__name__)
 
@@ -157,6 +158,26 @@ class AutoWeightsLoader:
 
             yield weight_qualname
 
+    def _add_loadable_non_param_tensors(self, module: nn.Module,
+                                        child_params: Dict[str, torch.Tensor]):
+        """
+        Add tensor names that are not in the model params that may be in the
+        safetensors, e.g., batch normalization stats.
+        """
+        if isinstance(module, (
+                nn.BatchNorm1d,
+                nn.BatchNorm2d,
+                nn.BatchNorm3d,
+                nn.LazyBatchNorm1d,
+                nn.LazyBatchNorm2d,
+                nn.LazyBatchNorm3d,
+                nn.SyncBatchNorm,
+        )):
+            module_state_dict = module.state_dict()
+            for stat_name in ("running_mean", "running_var",
+                              "num_batches_tracked"):
+                child_params[stat_name] = module_state_dict[stat_name]
+
     def _load_module(
         self,
         base_prefix: str,
@@ -184,6 +205,10 @@ class AutoWeightsLoader:
 
         child_modules = dict(module.named_children())
         child_params = dict(module.named_parameters(recurse=False))
+
+        # Add missing tensors the weight loader needs to be able to load
+        # that aren't registered as params, e.g., batchnorm statistics.
+        self._add_loadable_non_param_tensors(module, child_params)
 
         for child_prefix, child_weights in self._groupby_prefix(weights):
             prefix = self._get_qualname(base_prefix, child_prefix)
@@ -444,14 +469,6 @@ def merge_multimodal_embeddings(
     Note:
         This updates ``inputs_embeds`` in place.
     """
-    if current_platform.is_hpu():
-        return _hpu_merge_multimodal_embeddings(
-            input_ids,
-            inputs_embeds,
-            multimodal_embeddings,
-            placeholder_token_id,
-        )
-
     if isinstance(placeholder_token_id, list):
         placeholder_token_id = torch.tensor(placeholder_token_id,
                                             device=input_ids.device)
@@ -481,6 +498,16 @@ class PPMissingLayer(torch.nn.Identity):
 
     def __init__(self, *args, **kwargs):
         super().__init__()
+        self.return_tuple = kwargs.get("return_tuple", False)
+
+    def forward(self, *args, **kwargs):
+        """
+        Return the first arg from args or the first value from kwargs.
+
+        Wraps the input in a tuple if `self.return_tuple` is True.
+        """
+        input = args[0] if args else next(iter(kwargs.values()))
+        return (input, ) if self.return_tuple else input
 
 
 _CPU_OFFLOAD_BYTES = 0
@@ -494,7 +521,10 @@ def set_cpu_offload_max_bytes(max_bytes: int) -> None:
 
 
 def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
-    device = next(module.parameters()).device
+    if (params := next(module.parameters(), None)) is None:
+        return module
+
+    device = params.device
 
     if device == torch.device("cpu"):
         return module
@@ -504,6 +534,14 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
         return module
 
     pin_memory = is_pin_memory_available()
+    uva_available = is_uva_available()
+
+    if envs.VLLM_USE_V1:
+        assert uva_available, ("V1 CPU offloading requires"
+                               " uva (pin memory) support")
+        uva_offloading = True
+    else:
+        uva_offloading = False
 
     # offload parameters to CPU
     # use pin_memory if possible, which helps cudagraph capture speed
@@ -522,11 +560,16 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
                                        device='cpu',
                                        pin_memory=pin_memory)
         cpu_data.copy_(p.data)
-        p.data = cpu_data
+        if not uva_offloading:
+            p.data = cpu_data
+        else:
+            # keep the cpu data alive
+            p._vllm_offloaded_cpu_data = cpu_data
+            p.data = get_cuda_view_from_cpu_tensor(cpu_data)
         _CPU_OFFLOAD_BYTES += p.data.numel() * p.data.element_size()
         offloaded_parameters = True
 
-    if offloaded_parameters:
+    if offloaded_parameters and not uva_offloading:
         original_forward = module.forward
 
         def forward(*args, **kwargs):
@@ -655,26 +698,11 @@ def extract_layer_index(layer_name: str) -> int:
     return int_vals[0]
 
 
-def _hpu_merge_multimodal_embeddings(
-    input_ids: torch.Tensor,
-    inputs_embeds: torch.Tensor,
-    multimodal_embeddings: NestedTensors,
-    placeholder_token_id: torch.tensor,
+def cast_overflow_tensors(
+    tensors: torch.Tensor,
+    offset: float = 1000,
 ) -> torch.Tensor:
-    """
-    Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
-    positions in ``inputs_embeds`` corresponding to placeholder tokens in
-    ``input_ids``.
-    merge_multimodal_embeddings on HPU to avoid dynamicity.    
-    Note:
-        This updates ``inputs_embeds`` in place.
-    """
-    batch_size, seq_length, hidden_size = inputs_embeds.shape
-    inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
-    multimodal_embeddings = multimodal_embeddings.reshape(-1, hidden_size)
-    placeholder_token_id = torch.tensor(placeholder_token_id,
-                                        device=input_ids.device)
-    mask = torch.isin(input_ids.reshape(-1), placeholder_token_id)
-    inputs_embeds.index_put_((mask, ), multimodal_embeddings)
-    inputs_embeds = inputs_embeds.reshape(batch_size, seq_length, hidden_size)
-    return inputs_embeds
+    if tensors.isinf().any() or tensors.isnan().any():
+        clamp_value = torch.finfo(tensors.dtype).max - offset
+        tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
+    return tensors
