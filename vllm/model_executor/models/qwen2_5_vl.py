@@ -116,7 +116,7 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     range_indices = torch.logical_and(lesser, greater_eq).float()
     # can reduce sum externally or as batchmatmul
     if range_indices.shape[-1] > 40000:
-        logger.info(f"einsum running on CPU : {range_indices.shape}")
+        logger.info("einsum running on CPU :" + str(range_indices.shape))
         range_indices = range_indices.to("cpu")
         res = torch.einsum('bi,bj->ij', range_indices, range_indices)
         res = res.to("hpu")
@@ -404,8 +404,8 @@ class Qwen2_5_VisionAttention(nn.Module):
                     batch_size, 1, seq_len_N_t, seq_len_N_s,
                     -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
                 assert attn_mask.shape == mask_shape
-                if q1.shape[
-                        2] <= 65536:  # this crossover point should be investigated
+
+                if q1.shape[2] <= 65536:  # investigate this crosspoint
                     fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0)
                 else:
                     fused_out = AttentionLongSequence.forward(
@@ -873,10 +873,14 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             return pixel_values, image_grid_thw
 
         logger.info(
-            f"[MM_BUCKETING] Padding current number pixel {pixel_values.shape[0]} to {desired_number_of_pixels}"
+            "[Multimodal] Padding current number pixel " \
+                + str(pixel_values.shape[0]) \
+                + " to " \
+                + str(desired_number_of_pixels) \
+            "
         )
         # needs to make sure padding_len is even
-        assert padding_len % 64 == 0, '[testing version] padding needs to be multiple of 64'
+        assert padding_len % 64 == 0, 'padding needs to be multiple of 64'
 
         constant_value = -100
         pixel_values = torch.cat([
@@ -929,7 +933,13 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                                              grid_thw[:, 0]).cumsum(
                                                  dim=0, dtype=torch.int32)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
-        return hidden_states, rotary_pos_emb, cu_seqlens, cu_window_seqlens, window_index
+        return (
+            hidden_states,
+            rotary_pos_emb,
+            cu_seqlens,
+            cu_window_seqlens,
+            window_index,
+        )
 
     def forward(self, x: torch.Tensor, fullattn_mask: Optional[torch.Tensor],
                 rotary_pos_emb: torch.Tensor) -> torch.Tensor:
@@ -968,7 +978,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
         assert pixel_values.shape[0] % 64 == 0, (
             f"We need image h/w to be aligned to 112 for now. "
-            f"Which will make pixel_values be a multiple of (112/14)*(112/14)=64"
+            f"Which will make pixel_values be a multiple of "
+            f"(112/14)*(112/14)=64"
             f"(14 is patch size for ViT). "
             f"Got pixel_values shape {pixel_values.shape[0]}")
         offset = 0
@@ -983,19 +994,25 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
             offset += curr_img_size
             pixel_values_curr_img_padded, img_shape_padded = \
-                self.pad_multimodal_data(pixel_values_curr_img, img_shape, vision_buckets=vision_buckets)
+                self.pad_multimodal_data(
+                    pixel_values_curr_img,
+                    img_shape,
+                    vision_buckets=vision_buckets
+                )
 
             pixel_values_curr_img_padded, rot_pos_emb, \
                 cu_seqlens, _, window_index = self.pre_attn(
             pixel_values_curr_img_padded, img_shape_padded)
 
-            expanded_cu_seqlens = expand_to_max(cu_seqlens,
-                                                3)  # either a single image,
-            # or a single image and its accompanying pad image, so only max expansion to 3
+            # either a single image,
+            # or a single image and its accompanying pad image,
+            # so only max expansion to 3
+            expanded_cu_seqlens = expand_to_max(cu_seqlens, 3)
 
-            # Create full attention block mast before VisionTransformer to save memory/time
-            fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(
-                cu_seqlens)
+            # Create full attention block mask before VisionTransformer
+            # to save memory/time
+            fullatt_block_attn_mask = \
+                create_block_diagonal_attention_mask_outerprod(cu_seqlens)
             assert pixel_values_curr_img_padded.shape[
                 0] == expanded_cu_seqlens[-1] == rot_pos_emb.shape[0]
 
@@ -1341,7 +1358,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         if video_input is not None:
             if is_hpu:
                 logger.warning(
-                    "Video inputs have not been enabled/verified yet, ignoring video inputs"
+                    "Video inputs have not been enabled/verified yet," + \
+                    " ignoring video inputs"
                 )
                 return inputs_embeds
             video_embeds = self._process_video_input(video_input)

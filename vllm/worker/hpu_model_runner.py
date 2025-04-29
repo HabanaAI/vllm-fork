@@ -753,7 +753,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.device = self.device_config.device
         self.enforce_eager = self.model_config.enforce_eager
         self.max_num_seqs = self.scheduler_config.max_num_seqs
-        self.max_num_prefill_seqs = self.scheduler_config.max_num_prefill_seqs \
+        self.max_num_prefill_seqs = \
+            self.scheduler_config.max_num_prefill_seqs \
             if self.scheduler_config.max_num_prefill_seqs is not None \
                 else self.max_num_seqs
         self.max_model_len = self.scheduler_config.max_model_len
@@ -2108,7 +2109,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    1176)  # TODO: figure out the variable name
 
         assert pixel_values.shape[0] % 64 == 0, (
-            f"pixel_values must be sliced in 64 chunks, got: {pixel_values.shape}"
+            f"pixel_values must be sliced in 64 chunks, "
+            f"got: {pixel_values.shape}"
         )
 
         multi_modal_data = {
@@ -2489,7 +2491,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_candidates = len(self.multimodal_buckets)
         captured_all = True
         for idx, num_patches in enumerate(self.multimodal_buckets):
-            batch_size = 1  # Note: Multimodal buckets are indepedent of batch_size
+            batch_size = 1  # Note: Multimodal buckets do not change with bs
             _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
             seq_len = max_seq_len
             batch_seq = 1 * num_patches
@@ -2550,7 +2552,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         if supports_multimodal(model):
             self.multimodal_buckets = model.vision_buckets.multimodal_buckets
-            logger.info(f"Multimodal bucket : {self.multimodal_buckets}")
+            logger.info("Multimodal bucket : " + str(self.multimodal_buckets))
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
@@ -2883,7 +2885,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         ])
 
     def _get_num_patches_from_model_input(self, model_input):
-        if not model_input.multi_modal_kwargs or 'pixel_values' not in model_input.multi_modal_kwargs:
+        if not model_input.multi_modal_kwargs or \
+            'pixel_values' not in model_input.multi_modal_kwargs:
             return None
         pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
         if isinstance(pixel_values_list, torch.Tensor):
