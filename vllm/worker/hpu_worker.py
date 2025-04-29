@@ -107,7 +107,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.hpu_cache: Optional[List[List[torch.Tensor]]] = None
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
-        if envs.VLLM_TORCH_PROFILER_DIR:
+        if envs.VLLM_TORCH_PROFILER_DIR and is_driver_worker:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
             logger.info("Profiling enabled. Traces will be saved to: %s",
                         torch_profiler_trace_dir)
@@ -179,6 +179,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         return self.model_config.is_encoder_decoder
 
     def start_profile(self):
+        if not self.is_driver_worker:
+            return
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
         high_level_profiler = self.model_runner.profiler
@@ -192,9 +194,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             self.profiler.start()
 
     def stop_profile(self):
+        if not self.is_driver_worker:
+            return
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
         self.profiler.stop()
+        logger.info("HPUWorker Profiling stopped.")
 
     def _set_env_vars(self):
         local_rank = self.local_rank
