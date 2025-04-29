@@ -444,7 +444,7 @@ class EngineArgs:
                             help='Number of tensor parallel replicas.')
         parser.add_argument(
             '--enable-expert-parallel',
-            default=True,
+            action='store_true',
             help='Use expert parallelism instead of tensor parallelism '
             'for MoE layers.')
         parser.add_argument(
@@ -1157,7 +1157,7 @@ class EngineArgs:
         parallel_config = ParallelConfig(
             pipeline_parallel_size=self.pipeline_parallel_size,
             tensor_parallel_size=self.tensor_parallel_size,
-            enable_expert_parallel=False,#self.enable_expert_parallel,
+            enable_expert_parallel=self.enable_expert_parallel,
             max_parallel_loading_workers=self.max_parallel_loading_workers,
             disable_custom_all_reduce=self.disable_custom_all_reduce,
             tokenizer_pool_config=TokenizerPoolConfig.create_config(
