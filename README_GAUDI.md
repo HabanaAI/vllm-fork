@@ -185,8 +185,7 @@ INFO 08-01 21:37:59 hpu_model_runner.py:509] Generated 48 decode buckets: [(1, 1
 ```
 
 `min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, interval between `min` and `step`
-has special handling - `min` gets multiplied by consecutive powers of two, until `step` gets reached. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage,
-while allowing larger padding on larger batch sizes.
+has special handling - `min` gets multiplied by consecutive powers of two (i.e., min × 2, min × 4, min × 8, ...) until the multiplication reaches `step` value. We call this the ramp-up phase and it is used for handling lower batch sizes with minimum wastage, while allowing larger padding on larger batch sizes.
 
 **Example with ramp-up**
 
@@ -257,8 +256,7 @@ When HPU Graphs are used, they share the common memory pool ("usable memory") wi
 the model weights are loaded onto the device, and a forward pass of the model is executed on dummy data to estimate memory usage. Only after that, the `gpu_memory_utilization` flag is applied. At its default value,
 it marks 90% of the free device memory at that point as usable. Next, the KV cache is allocated, the model is warmed up, and HPU Graphs are captured. The `VLLM_GRAPH_RESERVED_MEM` environment variable defines
 the ratio of memory reserved for HPU Graph capture. With its default value (`VLLM_GRAPH_RESERVED_MEM=0.1`), 10% of the usable memory will be reserved for graph capture (referred to as "usable graph memory"),
-and the remaining 90% will be used for the KV cache. The environment variable `VLLM_GRAPH_PROMPT_RATIO` determines the ratio of usable graph memory reserved for prefill and decode graphs. By default
-(`VLLM_GRAPH_PROMPT_RATIO=0.3`), both stages share equal memory constraints. A lower value corresponds to less usable graph memory reserved for the prefill stage. For example, setting `VLLM_GRAPH_PROMPT_RATIO=0.2`
+and the remaining 90% will be used for the KV cache. The environment variable `VLLM_GRAPH_PROMPT_RATIO` determines the ratio of usable graph memory reserved for prefill and decode graphs. A lower value corresponds to less usable graph memory reserved for the prefill stage. For example, setting `VLLM_GRAPH_PROMPT_RATIO=0.2`
 reserves 20% of usable graph memory for prefill graphs, while 80% is allocated for decode graphs.
 
 > [!NOTE]
@@ -335,6 +333,7 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
 - `VLLM_HPU_LOG_STEP_CPU_FALLBACKS`: if `true` - logs CPU fallbacks for each vLLM engine step, but only if any fallback occurs. Disabled by default.
 - `VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL`: if `true` - logs CPU fallbacks for each vLLM engine step, even if no fallback occur. Disabled by default.
 - `VLLM_T_COMPILE_FULLGRAPH`: if `true` - PyTorch compile function raises an error if any graph breaks happened during compilation. This allows an easy detection of existing graph breaks, which usually reduce the performance. Disabled by default.
+- `VLLM_T_COMPILE_DYNAMIC_SHAPES`: if `true` - PyTorch compiles graph with dynamic options set to None. It causes using dynamic shapes when needed.
 
 **Performance Tuning Knobs:**
 
@@ -386,7 +385,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 
 - `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used, if `1` PyTorch Lazy backend for Gaudi will be used. `1` is the default.
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES` must be set to `true` for tensor parallel inference with HPU Graphs.
-- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava and qwen models.
+- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE` must be set to `false` for llava, qwen and roberta models.
 - `VLLM_PROMPT_USE_FLEX_ATTENTION` is enabled only for llama model, and allows to use torch.nn.attention.flex_attention instead of FusedSDPA. Note, this requires `VLLM_PROMPT_USE_FUSEDSDPA=0`
 
 # Quantization, FP8 Inference and Model Calibration Process
