@@ -123,5 +123,27 @@ class KVConnectorBase(ABC):
 
         raise NotImplementedError
 
+    @abstractmethod
+    def send_kv_caches_and_hidden_states_hpu(
+        self,
+        model_executable: torch.nn.Module,
+        model_input: "ModelInputForHPUWithSamplingMetadata",
+        kv_caches: List[torch.Tensor],
+        hidden_or_intermediate_states: Union[torch.Tensor,
+                                             IntermediateTensors],
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def recv_kv_caches_and_hidden_states_hpu(
+        self,
+        model_executable: torch.nn.Module,
+        model_input: "ModelInputForHPUWithSamplingMetadata",
+        attn_metadata: object,
+        kv_caches: List[torch.Tensor]
+    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+               "ModelInputForHPUWithSamplingMetadata"]:
+        raise NotImplementedError
+
 
 KVConnectorBaseType = Union[KVConnectorBase, KVConnectorBase_V1]

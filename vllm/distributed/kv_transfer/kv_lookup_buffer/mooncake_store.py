@@ -8,7 +8,7 @@ from this remote lookup buffer.
 import json
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 import torch
 from safetensors.torch import load as safetensors_load
@@ -63,7 +63,6 @@ class MooncakeStoreConfig:
 
 
 class MooncakeStore(KVStoreBufferBase):
-
     def __init__(
         self,
         config: VllmConfig,
@@ -125,8 +124,10 @@ class MooncakeStore(KVStoreBufferBase):
         value: torch.Tensor,
     ) -> None:
         """Put KVCache to Mooncake Store"""
-        device_id = value.device.index if value.device.type == 'cuda' else -1
-        device_tensor = torch.tensor(device_id, dtype=torch.int32)
+        device_id = value.device.index if value.device.type == 'hpu' else -1
+        logger.debug(f"putting, device id: {device_id}")
+        device_tensor = torch.tensor(device_id, dtype=torch.int32, device="cpu")
+        value = value.cpu()
         value_bytes = safetensors_save({
             "tensor": value,
             "device_id": device_tensor
@@ -154,7 +155,7 @@ class MooncakeStore(KVStoreBufferBase):
             device_id_tensor = loaded_tensors["device_id"]
             device_id = int(device_id_tensor.item())
             device = torch.device(
-                'cuda', device_id) if device_id >= 0 else torch.device('cpu')
+                'hpu', device_id) if device_id >= 0 else torch.device('cpu')
             return tensor.to(device)
 
         return None
