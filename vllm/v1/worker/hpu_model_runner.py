@@ -144,11 +144,12 @@ class HpuEnvFlags:
     def env_var_post_init(env_var, val, vllm_config):
         match env_var:
             case 'VLLM_SKIP_WARMUP':
+                val = False
                 if not val:
                     logger.warning(
                         "HPU warmup is currently not supported in V1. "
                         "Forcing warmup off.")
-                    val = True
+                    #val = True
             case 'VLLM_CONTIGUOUS_PA':
                 can_use_contiguous_pa = not vllm_config.cache_config.\
                     enable_prefix_caching
@@ -1975,7 +1976,7 @@ class HPUModelRunner:
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
-        for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
+        for i, (batch_size, seq_len, ctx) in enumerate(reversed(buckets)):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
@@ -2041,7 +2042,7 @@ class HPUModelRunner:
         if self.skip_warmup:
             logger.info("Skipping warmup...")
             return
-        max_blocks = kv_caches[0][0].size(0)
+        max_blocks = kv_caches[0][0].size(0) - 1
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(

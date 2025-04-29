@@ -2138,7 +2138,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
-        for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
+        for i, (batch_size, seq_len, ctx) in enumerate(reversed(buckets)):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
@@ -2220,7 +2220,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add((int(bs), int(seq_len), is_prompt))
-            self.warmup_scenario(int(bs), int(seq_len), is_prompt, True)
+            self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches, is_pt_profiler_run=True)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
