@@ -41,7 +41,7 @@ ktc = KVTransferConfig.from_cli(
 # Set GPU memory utilization to 0.8 for an A40 GPU with 40GB
 # memory. Reduce the value if your GPU has less memory.
 # Note that LMCache is not compatible with chunked prefill for now.
-llm = LLM(model="mistralai/Mistral-7B-Instruct-v0.2",
+llm = LLM(model="/root/litang/Mistral-7B-Instruct-v0.2/", #"mistralai/Mistral-7B-Instruct-v0.2",
           kv_transfer_config=ktc,
           max_model_len=8000,
           enable_chunked_prefill=False,
