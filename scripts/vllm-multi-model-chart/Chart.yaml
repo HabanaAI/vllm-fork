@@ -1,0 +1,12 @@
+apiVersion: v2
+name: vllm-multi-model-chart
+description: Serves multiple models using vLLM using a single Intel Gaudi HPU
+
+# Compatible Kubernetes versions
+kubeVersion: 1.27 - 1.29
+
+# Chart type
+type: application
+
+# Chart version
+version: 0.1.0
