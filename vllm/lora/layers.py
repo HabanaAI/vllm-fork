@@ -18,6 +18,7 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               tensor_model_parallel_all_gather,
                               tensor_model_parallel_all_reduce)
 from vllm.distributed.utils import divide
+from vllm.model_executor.custom_op import CustomOp
 # yapf: disable
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                LinearBase,
@@ -26,7 +27,6 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                ReplicatedLinear,
                                                RowParallelLinear)
 # yapf: enable
-from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.rotary_embedding import (
     LinearScalingRotaryEmbedding, RotaryEmbedding)
@@ -274,7 +274,7 @@ class VocabParallelEmbeddingWithLoRA(BaseLayerWithLoRA, CustomOp):
                                                add_input=True)
         # can be removed on moving to flat tensors
         full_output_org = full_output_org.view(shape[0], shape[1],
-                                                   full_output_org.shape[1])
+                                               full_output_org.shape[1])
         return full_output.view_as(full_output_org)
 
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
@@ -440,8 +440,8 @@ class BaseLinearLayerWithLoRA(BaseLayerWithLoRA):
                 lora_bias.T, non_blocking=True)
 
     def apply_hpu(self,
-              x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+                  x: torch.Tensor,
+                  bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         output = self.base_layer.quant_method.apply(self.base_layer, x, bias)
 
         # In transformers backend, x and output have extra batch dimension like
