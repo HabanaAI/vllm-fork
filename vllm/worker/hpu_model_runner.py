@@ -957,9 +957,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return False
         if self.skip_warmup:
             return True
-        #print((batch_size, seq_len, ctx, is_prompt))
-        print("is_prompt", is_prompt)
-        print("ctx", ctx)
         return (batch_size, seq_len, ctx, is_prompt) in self.graphed_buckets
 
     def _is_valid_bucket(self, bucket):
@@ -2219,9 +2216,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
         num_candidates = len(buckets)
-        phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
-        graphed = list(c[:2] for c in self.graphed_buckets
-                       if c[2] == is_prompt)
+        
+        phase = self._phase_warmup(is_prompt, buckets[0][2])
+        #print("buckets", buckets)
+        #graphed = list(c[:3] for c in self.graphed_buckets
+        #               if c[3] == is_prompt and c[2] == 0)
+        graphed = buckets
         if num_candidates == 0:
             num_candidates = 1
         msg = (f'{phase} captured:{len(graphed)} '
@@ -2241,7 +2241,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt = phase == 'prompt'
             graphs = graph == 't'
             if graphs:
-                self.graphed_buckets.add((int(bs), int(seq_len), is_prompt))
+                self.graphed_buckets.add((int(bs), int(seq_len), 0, is_prompt))
             self.warmup_scenario(int(bs),
                                  int(seq_len),
                                  0,
@@ -2385,6 +2385,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
+                self.log_graph_warmup_summary(
+                    self.bucketing_ctx.prefix_prefill_buckets, True, mem_post_prompt)
                 if not self.is_pooler:
                     self.log_graph_warmup_summary(
                         self.bucketing_ctx.decode_buckets, False,
@@ -2667,7 +2669,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            print("line2665")
             use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
             self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
