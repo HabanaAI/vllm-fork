@@ -2089,7 +2089,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     sampling_params,
                                                     lora_request):
         assert self.model_is_mrope, ("Warmup compatible with Qwen2vl models")
-        if num_patches == None:
+        if num_patches is None:
             # Using the largest bucket
             num_patches = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
