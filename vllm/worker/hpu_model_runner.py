@@ -52,7 +52,8 @@ from vllm.model_executor.models import supports_multimodal
 from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
-                             MultiModalRegistry)
+                             MultiModalPlaceholderDict, MultiModalRegistry)
+from vllm.multimodal.inputs import PlaceholderRange
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceData, SequenceGroupMetadata,
@@ -2103,10 +2104,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids = [image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
-            'image': [{
-                'offset': 0,
-                'length': len(prompt_token_ids)
-            }]
+            'image': [
+                PlaceholderRange(offset=0, length=len(prompt_token_ids))
+            ]
         }
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
@@ -2155,7 +2155,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
-        if is_prompt and self.model_is_mrope and num_patches:
+        if is_prompt and self.model_is_mrope:
             return self.create_dummy_multi_modal_seq_group_metadata(
                 group_id=group_id,
                 num_patches=num_patches,
