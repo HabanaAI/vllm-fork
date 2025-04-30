@@ -1425,7 +1425,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 input_ids = None
         if is_hpu:
             #In HPU, we are wrapping the language_model and the vision model
-            #seperately with HPU graph to avoid dynamicity inside the graph.
+            #separately with HPU graph to avoid dynamicity inside the graph.
             #set_foward_context needs to be called at this point to avoid
             #accuracy issue rather than in HpuModelAdapter.
             attn_meta = kwargs.pop('attn_metadata')

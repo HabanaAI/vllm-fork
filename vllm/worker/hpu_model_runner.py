@@ -295,7 +295,7 @@ class HpuModelAdapter(torch.nn.Module):
         # both use mrope. We split the model into visual
         # and language components and wrap them separately
         # with HPU graph. This is to ensure that we keeps
-        # the static and dynamic parts distint.
+        # the static and dynamic parts distinct.
 
         if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
             logger.warning("[Multimodal] HPU is not in Lazy Mode, "
@@ -1078,7 +1078,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not num_patches:
             return (batch_size, seq_len, is_prompt) in self.graphed_buckets
         #TODO: We might need to check both language bucket and multimodal bucket
-        # and return True only it's avialble, or return seperately.
+        # and return True only it's avialble, or return separately.
         return (num_patches) in self.graphed_multimodal_buckets
 
     def _is_valid_bucket(self, bucket):
@@ -2083,7 +2083,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # get number of tokens from num_patches using merger
         # vision_config.spatial_merge_size
-        # TODO use the spatial_merge_size ** 2 insted of 4
+        # TODO use the spatial_merge_size ** 2 instead of 4
         spatial_merge_size = 4
         num_image_tokens = num_patches // spatial_merge_size
 
