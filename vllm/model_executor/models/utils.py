@@ -444,13 +444,13 @@ def merge_multimodal_embeddings(
     Note:
         This updates ``inputs_embeds`` in place.
     """
-    if current_platform.is_hpu():
-        return _hpu_merge_multimodal_embeddings(
-            input_ids,
-            inputs_embeds,
-            multimodal_embeddings,
-            placeholder_token_id,
-        )
+    # if current_platform.is_hpu():
+    #     return _hpu_merge_multimodal_embeddings(
+    #         input_ids,
+    #         inputs_embeds,
+    #         multimodal_embeddings,
+    #         placeholder_token_id,
+    #     )
 
     if isinstance(placeholder_token_id, list):
         placeholder_token_id = torch.tensor(placeholder_token_id,
