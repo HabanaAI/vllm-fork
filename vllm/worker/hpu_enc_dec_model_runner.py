@@ -370,8 +370,7 @@ class HPUEncoderDecoderModelRunner(
                         is_prompt,
                         kv_caches,
                         is_pt_profiler_run=False,
-                        is_lora_profile_run=False,
-                        temperature=0) -> None:
+                        ) -> None:  # type: ignore[override]
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -435,8 +434,8 @@ class HPUEncoderDecoderModelRunner(
                                         group_id,
                                         seq_len,
                                         is_prompt,
-                                        lora_request=None,
-                                        temperature=0):
+                                        temperature=0
+                                        ):  # type: ignore[override]
         sampling_params = SamplingParams(temperature=temperature)
         num_blocks = math.ceil(seq_len / self.block_size)
         cross_block_table: Optional[List[int]] = None

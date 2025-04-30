@@ -100,7 +100,8 @@ class AttentionLongSequence:
             attn_output[:, :,
                         s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
                                                   False, None)
-            #TODO: markstep every so often, didn't experiment which one is optimal number.
+            # TODO: markstep after a couple of iterations
+            # need to experiment the optimal number.
             if i % 75 == 0:
                 htcore.mark_step()
         return attn_output
@@ -872,13 +873,12 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         if padding_len <= 0:
             return pixel_values, image_grid_thw
 
-        logger.info(
-            "[Multimodal] Padding current number pixel " \
-                + str(pixel_values.shape[0]) \
-                + " to " \
-                + str(desired_number_of_pixels) \
-            "
-        )
+        logger_msg = "[Multimodal] Padding current number pixel " \
+            + str(pixel_values.shape[0]) \
+            + " to " \
+            + str(desired_number_of_pixels)
+        logger.info(logger_msg)
+
         # needs to make sure padding_len is even
         assert padding_len % 64 == 0, 'padding needs to be multiple of 64'
 

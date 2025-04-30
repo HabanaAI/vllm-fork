@@ -807,8 +807,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                  self.use_merged_prefill,
                                                  self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
-        self.multimodal_buckets = [
-        ]  #This should be use HPUBucketingContext <<
+        self.multimodal_buckets: List[int] = [
+        ]  #TODO: Move to HPUBucketingContext
         self.graphed_multimodal_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -2465,10 +2465,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 kv_caches=kv_caches,
                 available_mem=multimodal_avail_mem,
                 starting_mem=0
-                if not hasattr(self, "mm_total_mem") else self.mm_total_mem,
+                if not hasattr(self, "mm_total_mem") \
+                    else self.mm_total_mem, # type: ignore
                 total_batch_seq=0.001
                 if not hasattr(self, "mm_total_batch_seq") else
-                self.mm_total_batch_seq)
+                self.mm_total_batch_seq) # type: ignore
 
             if mm_outputs is not None:
                 mm_total_mem, total_mm_batch_seq, mm_captured_all = mm_outputs
@@ -2552,7 +2553,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         if supports_multimodal(model):
             self.multimodal_buckets = model.vision_buckets.multimodal_buckets
-            logger.info("Multimodal bucket : " + str(self.multimodal_buckets))
+            logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
+            logger.info(logger_msg)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
