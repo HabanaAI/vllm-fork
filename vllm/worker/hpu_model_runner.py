@@ -78,7 +78,6 @@ _TYPE_CACHE = {}
 # Use caution when updating them!
 _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
-_UNSET_NUM_PATCHES = 9999999
 LORA_WARMUP_RANK = 8
 
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
@@ -2089,7 +2088,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     sampling_params,
                                                     lora_request):
         assert self.model_is_mrope, ("Warmup compatible with Qwen2vl models")
-        if num_patches == _UNSET_NUM_PATCHES:
+        if num_patches == None:
             # Using the largest bucket
             num_patches = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
@@ -2201,7 +2200,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             kv_caches=kv_caches,
             is_pt_profiler_run=False,
-            num_patches=_UNSET_NUM_PATCHES,
+            num_patches=None,
             is_lora_profile_run=True,
         )
         return
