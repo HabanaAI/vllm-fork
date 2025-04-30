@@ -52,7 +52,7 @@ from vllm.model_executor.models import supports_multimodal
 from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
-                             MultiModalPlaceholderDict, MultiModalRegistry)
+                             MultiModalRegistry)
 from vllm.multimodal.inputs import PlaceholderRange
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
@@ -2094,9 +2094,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_patches = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
 
-        # get number of tokens from num_patches using merger
+        # TODO: get number of tokens from num_patches using merger
         # vision_config.spatial_merge_size
-        # TODO use the spatial_merge_size ** 2 instead of 4
+        # use the spatial_merge_size ** 2 instead of 4
         spatial_merge_size = 4
         num_image_tokens = num_patches // spatial_merge_size
 
@@ -2104,9 +2104,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids = [image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
-            'image': [
-                PlaceholderRange(offset=0, length=len(prompt_token_ids))
-            ]
+            'image':
+            [PlaceholderRange(offset=0, length=len(prompt_token_ids))]
         }
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
