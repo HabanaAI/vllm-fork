@@ -970,11 +970,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _phase_warmup(self, is_prompt, ctx):
         if is_prompt:
             if ctx == 0:
-                phase = "prompt"
+                phase = PhaseType.PREFILL
             else:
-                phase = "prefix prefill"
+                phase = PhaseType.PREFIX_PREFILL
         else:
-            phase = "decode"
+            phase = PhaseType.DECODE
         return phase
 
     def _phase(self, attn_metadata):
@@ -992,20 +992,43 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              "attention metadata")
         return phase_type
 
-    def _check_config(self, batch_size, seq_len, attn_metadata, warmup_mode):
+    def _check_config(self, batch_size, seq_len, ctx, attn_metadata, warmup_mode):
         is_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
         if is_prefix_caching:
-            phase = self._phase(attn_metadata)
-            num_blocks = self._num_blocks(attn_metadata)
+            if warmup_mode:
+                phase = self._phase_warmup(attn_metadata.is_prompt, ctx)
+                num_blocks = ctx
+            else:            
+                phase = self._phase(attn_metadata)
+                if phase != PhaseType.DECODE:
+                    num_blocks = self._num_blocks(attn_metadata)
+                else:
+                    num_blocks = ctx
+            
+            
+            
             cfg = (batch_size, seq_len, num_blocks, phase)
+            '''if phase != PhaseType.DECODE:
+                print("phase", phase)
+                print("num_blocks", num_blocks)
+                print("seq_len", seq_len)
+                print("batch_size", batch_size)'''
         else:
             phase = 'prompt' if attn_metadata.is_prompt else 'decode'
             cfg = (batch_size, seq_len, phase)
+        '''if phase != PhaseType.DECODE:
+            print("cfg", cfg)
+            print("self.seen_configs", self.seen_configs)'''
+        if phase == PhaseType.DECODE:
+            print("cfg", cfg)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
-        if not seen and not warmup_mode:
+        #if 1, 640, 0
+        if batch_size == 1 and seq_len == 640 and num_blocks == 0:
+            print("self.seen_configs", self.seen_configs)
+        if not seen and not warmup_mode and phase == PhaseType.DECODE:
             logger.warning("Configuration: %s was not warmed-up!",
                            (phase.value, batch_size, seq_len,
                             num_blocks) if is_prefix_caching else
@@ -2143,7 +2166,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
         dim = "num_blocks"
-        if "Prompt" in phase:
+        #if "Prompt" in phase:
+        if phase == PhaseType.PREFILL:
             dim = "seq_len"
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
@@ -2670,7 +2694,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
-            self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
+            #print("ctx execute_model", ctx)
+            self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
