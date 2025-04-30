@@ -38,8 +38,8 @@ from transformers import BatchFeature
 from transformers.models.qwen2_5_vl import Qwen2_5_VLProcessor
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import (
     Qwen2_5_VLConfig, Qwen2_5_VLVisionConfig)
-
 from vllm_hpu_extension.flags import enabled_flags
+
 from vllm.config import VllmConfig
 from vllm.distributed import parallel_state
 from vllm.distributed import utils as dist_utils
@@ -78,6 +78,7 @@ is_hpu = current_platform.is_hpu()
 if is_hpu:
     import habana_frameworks.torch.core as htcore
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
 
 class AttentionLongSequence:
 
@@ -317,7 +318,8 @@ class Qwen2_5_VisionAttention(nn.Module):
                 f"Qwen2.5-VL does not support {self.attn_backend} backend now."
             )
 
-        self.softmax_mode = 'fp32' if "fp32_softmax" in enabled_flags() else 'None'
+        self.softmax_mode = 'fp32' if "fp32_softmax" in enabled_flags(
+        ) else 'None'
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -416,8 +418,8 @@ class Qwen2_5_VisionAttention(nn.Module):
                     v_i = v[:, start_idx:end_idx]
                     q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                      for x in [q_i, k_i, v_i])
-                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False, None,
-                                self.softmax_mode)
+                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False,
+                                               None, self.softmax_mode)
                     output_i = rearrange(output_i, "b h s d -> b s h d ")
                     outputs.append(output_i)
                 context_layer = torch.cat(outputs, dim=1)
@@ -434,9 +436,9 @@ class Qwen2_5_VisionAttention(nn.Module):
                     -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
                 assert attn_mask.shape == mask_shape
 
-                if q1.shape[2] <= 65536:  # investigate this crosspoint
-                    fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0, False, None,
-                        self.softmax_mode )
+                if q1.shape[2] <= 65536:  # need to investigate this crosspoint
+                    fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0,
+                                                False, None, self.softmax_mode)
                 else:
                     fused_out = AttentionLongSequence.forward(
                         q1, k1, v1, attn_mask, 64, self.softmax_mode)
