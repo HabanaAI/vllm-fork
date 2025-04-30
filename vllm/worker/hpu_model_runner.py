@@ -44,7 +44,7 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
-from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
@@ -115,6 +115,15 @@ class VisionBuckets:
 
     def __repr__(self):
         return str(self.multimodal_buckets)
+
+
+class Singleton(type):
+    _instances: Dict[type, object] = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super().__call__(*args, **kwargs)
+        return cls._instances[cls]
 
 
 class PhaseType(Enum):
@@ -280,6 +289,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
+        # self.sampler = get_sampler()
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
@@ -545,8 +555,8 @@ class HpuModelAdapter(torch.nn.Module):
     def compute_logits(self, *args, **kwargs):
         return self.model.compute_logits(*args, **kwargs)
 
-    def sample(self, *args, **kwargs):
-        return self.model.sample(*args, **kwargs)
+    # def sample(self, *args, **kwargs):
+    #    return self.sampler(*args, **kwargs)
 
     def make_empty_intermediate_tensors(self, *args, **kwargs):
         return self.model.make_empty_intermediate_tensors(*args, **kwargs)
@@ -556,9 +566,9 @@ class HpuModelAdapter(torch.nn.Module):
 
     # sampler property will be used by spec_decode_worker
     # don't rename
-    @property
-    def sampler(self):
-        return self.model.sampler
+    # @property
+    # def sampler(self):
+    #    return self.model.sampler
 
     # lm_head property will be used by spec_decode_worker
     # don't rename
@@ -835,6 +845,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             ModelInputForHPUWithSamplingMetadata] = []
         self.spec_decode_enabled = \
             self.vllm_config.speculative_config is not None
+        self.sampler = get_sampler()
 
     def _set_gc_threshold(self) -> None:
         """
@@ -3063,7 +3074,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # in case of multi-step scheduling
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
-                self.model.model.sampler.include_gpu_probs_tensor = True
+                self.sampler.include_gpu_probs_tensor = True
             cache_orig_output_tokens_len: List[Dict] = []
 
             def try_revert_dummy_output_tokens():
@@ -3140,7 +3151,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                      f'bs{batch_size}_'
                                      f'seq{seq_len}'),
                         args=profiler_args):
-                    output = self.model.sample(
+                    output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
                     )
@@ -3268,7 +3279,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 return [output] if self.is_driver_worker else []
             else:
                 return []
-
         return output if type(output) is list else [output]
 
     def _delayed_sampler_outputs(self, model_input):
@@ -3327,6 +3337,23 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             sampler_outputs.append(
                 CompletionSequenceGroupOutput(seq_outputs, None))
         return SamplerOutput(sampler_outputs)
+
+    def shutdown_inc(self):
+        can_finalize_inc = False
+        from contextlib import suppress
+        with suppress(AttributeError):
+            can_finalize_inc = (self.model_config.quantization == 'inc') and \
+                (self.model.model is not None) and \
+                self.inc_initialized_successfully and \
+                not getattr(self, "_is_inc_finalized", False)
+        if can_finalize_inc:
+            from neural_compressor.torch.quantization import (
+                finalize_calibration)
+            finalize_calibration(self.model.model)
+            self._is_inc_finalized = True
+
+    def __del__(self):
+        self.shutdown_inc()
 
     def _patch_prev_output(self):
         assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
