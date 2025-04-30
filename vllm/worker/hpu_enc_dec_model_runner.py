@@ -364,13 +364,14 @@ class HPUEncoderDecoderModelRunner(
                              False)
         return
 
-    def warmup_scenario(self,
-                        batch_size,
-                        seq_len,
-                        is_prompt,
-                        kv_caches,
-                        is_pt_profiler_run=False,
-                        ) -> None:  # type: ignore[override]
+    def warmup_scenario(
+        self,
+        batch_size,
+        seq_len,
+        is_prompt,
+        kv_caches,
+        is_pt_profiler_run=False,
+    ) -> None:  # type: ignore[override]
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -430,12 +431,12 @@ class HPUEncoderDecoderModelRunner(
         self.profiler.end()
         gc.collect()
 
-    def create_dummy_seq_group_metadata(self,
-                                        group_id,
-                                        seq_len,
-                                        is_prompt,
-                                        temperature=0
-                                        ):  # type: ignore[override]
+    def create_dummy_seq_group_metadata(
+            self,
+            group_id,
+            seq_len,
+            is_prompt,
+            temperature=0):  # type: ignore[override]
         sampling_params = SamplingParams(temperature=temperature)
         num_blocks = math.ceil(seq_len / self.block_size)
         cross_block_table: Optional[List[int]] = None

@@ -104,7 +104,7 @@ class VisionBuckets:
     def _process_buckets(self, buckets):
         for bucket in buckets:
             assert bucket % 8 == 0, (
-                f'Buckets needs to be multiples 8 (slices of 64)')
+                'Buckets needs to be multiples 8 (slices of 64)')
         return sorted(buckets)
 
     def get_multimodal_bucket(self, curr_num_image_patches):
@@ -2075,7 +2075,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     num_patches,
                                                     sampling_params,
                                                     lora_request):
-        assert self.model_is_mrope, (f"Warmup compatible with Qwen2vl models")
+        assert self.model_is_mrope, ("Warmup compatible with Qwen2vl models")
         if num_patches == _UNSET_NUM_PATCHES:
             # Using the largest bucket
             num_patches = self.get_model(
@@ -2110,8 +2110,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         assert pixel_values.shape[0] % 64 == 0, (
             f"pixel_values must be sliced in 64 chunks, "
-            f"got: {pixel_values.shape}"
-        )
+            f"got: {pixel_values.shape}")
 
         multi_modal_data = {
             "pixel_values": pixel_values,
