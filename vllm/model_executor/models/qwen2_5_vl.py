@@ -116,7 +116,8 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     range_indices = torch.logical_and(lesser, greater_eq).float()
     # can reduce sum externally or as batchmatmul
     if range_indices.shape[-1] > 40000:
-        logger.info("einsum running on CPU :" + str(range_indices.shape))
+        log_msg = "einsum running on CPU :" + str(range_indices.shape)
+        logger.info(log_msg)
         range_indices = range_indices.to("cpu")
         res = torch.einsum('bi,bj->ij', range_indices, range_indices)
         res = res.to("hpu")
@@ -188,7 +189,7 @@ class Qwen2_5_VLVideoPixelInputs(TypedDict):
 
     second_per_grid_ts: torch.Tensor
     """
-    The video time interval (in seconds) for each grid along the temporal 
+    The video time interval (in seconds) for each grid along the temporal
     dimension in the 3D position IDs. Returned when `videos` is not `None`.
     """
 
@@ -695,8 +696,10 @@ class Qwen2_5_VisionTransformer(nn.Module):
             llm_grid_w = grid_w // self.spatial_merge_size
             index = torch.arange(grid_t * llm_grid_h * llm_grid_w).reshape(
                 grid_t, llm_grid_h, llm_grid_w)
-            pad_h = vit_merger_window_size - llm_grid_h % vit_merger_window_size
-            pad_w = vit_merger_window_size - llm_grid_w % vit_merger_window_size
+            pad_h = \
+                vit_merger_window_size - llm_grid_h % vit_merger_window_size
+            pad_w = \
+                vit_merger_window_size - llm_grid_w % vit_merger_window_size
             num_windows_h = (llm_grid_h + pad_h) // vit_merger_window_size
             num_windows_w = (llm_grid_w + pad_w) // vit_merger_window_size
             index_padded = F.pad(index, (0, pad_w, 0, pad_h), 'constant', -100)
@@ -785,7 +788,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         # transformers
         hidden_states = hidden_states.unsqueeze(1)
 
-        # pre-compute seqlens for window/full attn to reduce cuMemcpy operations
+        # pre-compute seqlens for window/full attn to reduce cuMemcpy ops
         max_seqlen_full, seqlens_full = self.compute_attn_mask_seqlen(
             cu_seqlens)
         max_seqlen_window, seqlens_window = self.compute_attn_mask_seqlen(
@@ -858,7 +861,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
       - forward (static shape)
       - post_attn (dynamic)
     and we should call get_image_embeds instead of forward, allowing
-    the forward method ro run with HPU_Graphs, whereas the 
+    the forward method ro run with HPU_Graphs, whereas the
     pre_attn and post_attn methods are allow to be dynamic.
     """
 
@@ -946,9 +949,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             "Expect inputs to be 112x112 aligned. "
             "Please align before sending image or use this version "
             "of transformer that does the resizing/alignment automatically:"
-            "pip install "
-            "git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf"
-        )
+            "pip install -r requirements-hpu-qwen2_5_vl.txt")
         assert x.shape[0] % 64 == 0, assert_msg
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
@@ -1001,7 +1002,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
             pixel_values_curr_img_padded, rot_pos_emb, \
                 cu_seqlens, _, window_index = self.pre_attn(
-            pixel_values_curr_img_padded, img_shape_padded)
+                pixel_values_curr_img_padded, img_shape_padded)
 
             # either a single image,
             # or a single image and its accompanying pad image,
@@ -1356,10 +1357,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         if video_input is not None:
             if is_hpu:
-                logger.warning(
-                    "Video inputs have not been enabled/verified yet," + \
-                    " ignoring video inputs"
-                )
+                logger.warning("Video inputs have not been enabled yet, "
+                               "ignoring video inputs")
                 return inputs_embeds
             video_embeds = self._process_video_input(video_input)
             inputs_embeds = merge_multimodal_embeddings(
@@ -1423,10 +1422,10 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                     video_input=video_input)
                 input_ids = None
         if is_hpu:
-            #In HPU, we are wrapping the language_model and the vision model
-            #separately with HPU graph to avoid dynamicity inside the graph.
-            #set_foward_context needs to be called at this point to avoid
-            #accuracy issue rather than in HpuModelAdapter.
+            # In HPU, we are wrapping the language_model and the vision model
+            # separately with HPU graph to avoid dynamicity inside the graph.
+            # set_foward_context needs to be called at this point to avoid
+            # accuracy issue rather than in HpuModelAdapter.
             attn_meta = kwargs.pop('attn_metadata')
             from vllm.forward_context import set_forward_context
             with set_forward_context(attn_meta, self.vllm_config, 0):
