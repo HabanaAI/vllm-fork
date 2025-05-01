@@ -183,22 +183,23 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             return
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
-        high_level_profiler = self.model_runner.profiler
-        with high_level_profiler.record_event('internal', 'start_profiler'):
-            # Clean up the queue
-            while True:
-                try:
-                    high_level_profiler.profiling_trace_events.get_nowait()
-                except queue.Empty:
-                    break
-            self.profiler.start()
+        self.model_runner.pt_profiler = self.profiler
+        # high_level_profiler = self.model_runner.profiler
+        # with high_level_profiler.record_event('internal', 'start_profiler'):
+        #     # Clean up the queue
+        #     while True:
+        #         try:
+        #             high_level_profiler.profiling_trace_events.get_nowait()
+        #         except queue.Empty:
+        #             break
+        #     self.profiler.start()
 
     def stop_profile(self):
         if not self.is_driver_worker:
             return
-        if self.profiler is None:
+        if self.model_runner.pt_profiler is None:
             raise RuntimeError("Profiler is not enabled.")
-        self.profiler.stop()
+        self.model_runner.pt_profiler.stop()
         logger.info("HPUWorker Profiling stopped.")
 
     def _set_env_vars(self):
