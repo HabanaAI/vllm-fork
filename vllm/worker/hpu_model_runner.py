@@ -2113,10 +2113,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert num_patches % 8 == 0, (
             f"Expects num_patches to be multiples of 8, got: {num_patches}")
         image_h = num_patches // 8
-        image_grid_thw = torch.tensor([1, image_h, 8])
-
-        image_grid_thw = torch.tensor([1, image_h, int(num_patches / image_h)])
-        pixel_values = torch.randn(image_grid_thw.prod(),
+        image_grid_thw = torch.tensor(
+            [[1, image_h, int(num_patches / image_h)]]
+        )
+        pixel_values = torch.randn(image_grid_thw[0].prod(),
                                    1176)  # TODO: figure out the variable name
 
         assert pixel_values.shape[0] % 64 == 0, (
