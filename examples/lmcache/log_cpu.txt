@@ -1,0 +1,117 @@
+INFO 04-29 20:30:14 [__init__.py:239] Automatically detected platform cuda.
+INFO 04-29 20:30:21 [config.py:717] This model supports multiple tasks: {'score', 'embed', 'classify', 'generate', 'reward'}. Defaulting to 'generate'.
+INFO 04-29 20:30:21 [config.py:2003] Chunked prefill is enabled with max_num_batched_tokens=16384.
+INFO 04-29 20:30:23 [core.py:58] Initializing a V1 LLM engine (v0.8.5.dev321+gcde384cd9.d20250429) with config: model='/root/litang/Mistral-7B-Instruct-v0.2/', speculative_config=None, tokenizer='/root/litang/Mistral-7B-Instruct-v0.2/', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, override_neuron_config=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=8000, download_dir=None, load_format=LoadFormat.AUTO, tensor_parallel_size=1, pipeline_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, kv_cache_dtype=auto,  device_config=cuda, decoding_config=DecodingConfig(guided_decoding_backend='auto', reasoning_backend=None), observability_config=ObservabilityConfig(show_hidden_metrics=False, otlp_traces_endpoint=None, collect_model_forward_time=False, collect_model_execute_time=False), seed=None, served_model_name=/root/litang/Mistral-7B-Instruct-v0.2/, num_scheduler_steps=1, multi_step_stream_outputs=True, enable_prefix_caching=True, chunked_prefill_enabled=True, use_async_output_proc=True, disable_mm_preprocessor_cache=False, mm_processor_kwargs=None, pooler_config=None, compilation_config={"level":3,"custom_ops":["none"],"splitting_ops":["vllm.unified_attention","vllm.unified_attention_with_output"],"use_inductor":true,"compile_sizes":[],"use_cudagraph":true,"cudagraph_num_of_warmups":1,"cudagraph_capture_sizes":[512,504,496,488,480,472,464,456,448,440,432,424,416,408,400,392,384,376,368,360,352,344,336,328,320,312,304,296,288,280,272,264,256,248,240,232,224,216,208,200,192,184,176,168,160,152,144,136,128,120,112,104,96,88,80,72,64,56,48,40,32,24,16,8,4,2,1],"max_capture_size":512}
+2025-04-29 20:30:24,663 - INFO - flashinfer.jit: Prebuilt kernels not found, using JIT backend
+WARNING 04-29 20:30:24 [utils.py:2522] Methods determine_num_available_blocks,device_config,get_cache_block_size_bytes,initialize_cache not implemented in <vllm.v1.worker.gpu_worker.Worker object at 0x73eed95e5a60>
+INFO 04-29 20:30:25 [parallel_state.py:1004] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0
+ERROR 04-29 20:30:25 [core.py:396] EngineCore failed to start.
+ERROR 04-29 20:30:25 [core.py:396] Traceback (most recent call last):
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/v1/engine/core.py", line 387, in run_engine_core
+ERROR 04-29 20:30:25 [core.py:396]     engine_core = EngineCoreProc(*args, **kwargs)
+ERROR 04-29 20:30:25 [core.py:396]                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/v1/engine/core.py", line 329, in __init__
+ERROR 04-29 20:30:25 [core.py:396]     super().__init__(vllm_config, executor_class, log_stats,
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/v1/engine/core.py", line 64, in __init__
+ERROR 04-29 20:30:25 [core.py:396]     self.model_executor = executor_class(vllm_config)
+ERROR 04-29 20:30:25 [core.py:396]                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/executor/executor_base.py", line 52, in __init__
+ERROR 04-29 20:30:25 [core.py:396]     self._init_executor()
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/executor/uniproc_executor.py", line 46, in _init_executor
+ERROR 04-29 20:30:25 [core.py:396]     self.collective_rpc("init_device")
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/executor/uniproc_executor.py", line 56, in collective_rpc
+ERROR 04-29 20:30:25 [core.py:396]     answer = run_method(self.driver_worker, method, args, kwargs)
+ERROR 04-29 20:30:25 [core.py:396]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/utils.py", line 2456, in run_method
+ERROR 04-29 20:30:25 [core.py:396]     return func(*args, **kwargs)
+ERROR 04-29 20:30:25 [core.py:396]            ^^^^^^^^^^^^^^^^^^^^^
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/worker/worker_base.py", line 604, in init_device
+ERROR 04-29 20:30:25 [core.py:396]     self.worker.init_device()  # type: ignore
+ERROR 04-29 20:30:25 [core.py:396]     ^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/v1/worker/gpu_worker.py", line 135, in init_device
+ERROR 04-29 20:30:25 [core.py:396]     init_worker_distributed_environment(self.vllm_config, self.rank,
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/v1/worker/gpu_worker.py", line 329, in init_worker_distributed_environment
+ERROR 04-29 20:30:25 [core.py:396]     ensure_kv_transfer_initialized(vllm_config)
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/distributed/kv_transfer/kv_transfer_state.py", line 63, in ensure_kv_transfer_initialized
+ERROR 04-29 20:30:25 [core.py:396]     _KV_CONNECTOR_AGENT = KVConnectorFactory.create_connector_v1(
+ERROR 04-29 20:30:25 [core.py:396]                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 04-29 20:30:25 [core.py:396]   File "/root/litang/github/test/vllm/vllm/distributed/kv_transfer/kv_connector/factory.py", line 63, in create_connector_v1
+ERROR 04-29 20:30:25 [core.py:396]     assert issubclass(connector_cls, KVConnectorBase_V1)
+ERROR 04-29 20:30:25 [core.py:396]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 04-29 20:30:25 [core.py:396] AssertionError
+Process EngineCore_0:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core.py", line 400, in run_engine_core
+    raise e
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core.py", line 387, in run_engine_core
+    engine_core = EngineCoreProc(*args, **kwargs)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core.py", line 329, in __init__
+    super().__init__(vllm_config, executor_class, log_stats,
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core.py", line 64, in __init__
+    self.model_executor = executor_class(vllm_config)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/executor/executor_base.py", line 52, in __init__
+    self._init_executor()
+  File "/root/litang/github/test/vllm/vllm/executor/uniproc_executor.py", line 46, in _init_executor
+    self.collective_rpc("init_device")
+  File "/root/litang/github/test/vllm/vllm/executor/uniproc_executor.py", line 56, in collective_rpc
+    answer = run_method(self.driver_worker, method, args, kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/utils.py", line 2456, in run_method
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/worker/worker_base.py", line 604, in init_device
+    self.worker.init_device()  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/v1/worker/gpu_worker.py", line 135, in init_device
+    init_worker_distributed_environment(self.vllm_config, self.rank,
+  File "/root/litang/github/test/vllm/vllm/v1/worker/gpu_worker.py", line 329, in init_worker_distributed_environment
+    ensure_kv_transfer_initialized(vllm_config)
+  File "/root/litang/github/test/vllm/vllm/distributed/kv_transfer/kv_transfer_state.py", line 63, in ensure_kv_transfer_initialized
+    _KV_CONNECTOR_AGENT = KVConnectorFactory.create_connector_v1(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/distributed/kv_transfer/kv_connector/factory.py", line 63, in create_connector_v1
+    assert issubclass(connector_cls, KVConnectorBase_V1)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/root/litang/github/test/vllm/examples/lmcache/cpu_offload_lmcache_v0.py", line 100, in <module>
+    main()
+  File "/root/litang/github/test/vllm/examples/lmcache/cpu_offload_lmcache_v0.py", line 74, in main
+    with build_llm_with_lmcache() as llm:
+  File "/usr/lib/python3.12/contextlib.py", line 137, in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/examples/lmcache/cpu_offload_lmcache_v0.py", line 41, in build_llm_with_lmcache
+    llm = LLM(model="/root/litang/Mistral-7B-Instruct-v0.2/",
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/utils.py", line 1161, in inner
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/entrypoints/llm.py", line 247, in __init__
+    self.llm_engine = LLMEngine.from_engine_args(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/engine/llm_engine.py", line 510, in from_engine_args
+    return engine_cls.from_vllm_config(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/v1/engine/llm_engine.py", line 112, in from_vllm_config
+    return cls(vllm_config=vllm_config,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/v1/engine/llm_engine.py", line 92, in __init__
+    self.engine_core = EngineCoreClient.make_client(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core_client.py", line 73, in make_client
+    return SyncMPClient(vllm_config, executor_class, log_stats)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core_client.py", line 494, in __init__
+    super().__init__(
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core_client.py", line 398, in __init__
+    self._wait_for_engine_startup()
+  File "/root/litang/github/test/vllm/vllm/v1/engine/core_client.py", line 430, in _wait_for_engine_startup
+    raise RuntimeError("Engine core initialization failed. "
+RuntimeError: Engine core initialization failed. See root cause above.

@@ -1,0 +1,90 @@
+INFO 04-30 05:58:31 [__init__.py:248] Automatically detected platform hpu.
+INFO 04-30 05:58:41 [config.py:602] This model supports multiple tasks: {'embed', 'classify', 'score', 'generate', 'reward'}. Defaulting to 'generate'.
+WARNING 04-30 05:58:41 [arg_utils.py:1775] Detected VLLM_USE_V1=1 with hpu. Usage should be considered experimental. Please report any issues on Github.
+INFO 04-30 05:58:41 [config.py:1643] Disabled the custom all-reduce kernel because it is not supported on current platform.
+INFO 04-30 05:58:41 [config.py:1799] Chunked prefill is enabled with max_num_batched_tokens=8192.
+INFO 04-30 05:58:41 [core.py:61] Initializing a V1 LLM engine (v0.6.3.dev3761+g6d938e09d.d20250430) with config: model='meta-llama/Meta-Llama-3.1-8B-Instruct', speculative_config=None, tokenizer='meta-llama/Meta-Llama-3.1-8B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, override_neuron_config=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=8000, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, disable_custom_all_reduce=True, quantization=None, enforce_eager=False, kv_cache_dtype=auto,  device_config=hpu, decoding_config=DecodingConfig(guided_decoding_backend='xgrammar', reasoning_backend=None), observability_config=ObservabilityConfig(show_hidden_metrics=False, otlp_traces_endpoint=None, collect_model_forward_time=False, collect_model_execute_time=False), seed=None, served_model_name=meta-llama/Meta-Llama-3.1-8B-Instruct, num_scheduler_steps=1, multi_step_stream_outputs=True, enable_prefix_caching=True, chunked_prefill_enabled=True, use_async_output_proc=True, disable_mm_preprocessor_cache=False, mm_processor_kwargs=None, pooler_config=None, compilation_config={"splitting_ops":[],"compile_sizes":[],"cudagraph_capture_sizes":[512,504,496,488,480,472,464,456,448,440,432,424,416,408,400,392,384,376,368,360,352,344,336,328,320,312,304,296,288,280,272,264,256,248,240,232,224,216,208,200,192,184,176,168,160,152,144,136,128,120,112,104,96,88,80,72,64,56,48,40,32,24,16,8,4,2,1],"max_capture_size":512}
+INFO 04-30 05:58:41 [parallel_state.py:943] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0
+============================= HPU PT BRIDGE CONFIGURATION ON RANK = 0 ============= 
+ PT_HPU_LAZY_MODE = 1
+ PT_HPU_RECIPE_CACHE_CONFIG = ,false,1024
+ PT_HPU_MAX_COMPOUND_OP_SIZE = 9223372036854775807
+ PT_HPU_LAZY_ACC_PAR_MODE = 1
+ PT_HPU_ENABLE_REFINE_DYNAMIC_SHAPES = 0
+ PT_HPU_EAGER_PIPELINE_ENABLE = 1
+ PT_HPU_EAGER_COLLECTIVE_PIPELINE_ENABLE = 1
+ PT_HPU_ENABLE_LAZY_COLLECTIVES = 1
+---------------------------: System Configuration :---------------------------
+Num CPU Cores : 160
+CPU RAM       : 1007 GB
+------------------------------------------------------------------------------
+Creating v1 connector with name: %s LMCacheConnectorV1
+WARNING 04-30 05:58:44 [base.py:58] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+[33;20m[2025-04-30 05:58:44,890] LMCache WARNING:[0m No LMCache configuration file is set. Trying to read configurations from the environment variables. [3m(utils.py:35:lmcache.integration.vllm.utils)[0m
+[33;20m[2025-04-30 05:58:44,890] LMCache WARNING:[0m You can set the configuration file through the environment variable: LMCACHE_CONFIG_FILE [3m(utils.py:37:lmcache.integration.vllm.utils)[0m
+[32;20m[2025-04-30 05:58:44,891] LMCache INFO:[0m LMCache Configuration: {'chunk_size': 256, 'local_cpu': True, 'max_local_cpu_size': '5.0 GB', 'local_disk': None, 'max_local_disk_size': '0.0 GB', 'remote_url': None, 'remote_serde': None, 'save_decode_cache': False, 'enable_blending': False, 'blend_recompute_ratio': 0.15, 'blend_min_tokens': 256, 'enable_p2p': False, 'lookup_url': None, 'distributed_url': None, 'error_handling': False, 'enable_controller': False, 'lmcache_instance_id': 'lmcache_default_instance', 'enable_nixl': False, 'nixl_role': None, 'nixl_peer_host': None, 'nixl_peer_port': 0, 'nixl_buffer_size': 0, 'nixl_buffer_device': None, 'nixl_enable_gc': False} [3m(config.py:452:lmcache.experimental.config)[0m
+[32;20m[2025-04-30 05:58:44,891] LMCache INFO:[0m Creating LMCacheEngine instance vllm-instance [3m(cache_engine.py:444:lmcache.experimental.cache_engine)[0m
+[32;20m[2025-04-30 05:58:45,444] LMCache INFO:[0m Creating LMCacheEngine with config: LMCacheEngineConfig(chunk_size=256, local_cpu=True, max_local_cpu_size=5.0, local_disk=None, max_local_disk_size=0.0, remote_url=None, remote_serde=None, save_decode_cache=False, enable_blending=False, blend_recompute_ratio=0.15, blend_min_tokens=256, blend_special_str=' # # ', enable_p2p=False, lookup_url=None, distributed_url=None, error_handling=False, enable_controller=False, lmcache_instance_id='lmcache_default_instance', controller_url=None, lmcache_worker_url=None, enable_nixl=False, nixl_role=None, nixl_peer_host=None, nixl_peer_port=0, nixl_buffer_size=0, nixl_buffer_device=None, nixl_enable_gc=False) [3m(cache_engine.py:73:lmcache.experimental.cache_engine)[0m
+[32;20m[2025-04-30 05:58:45,445] LMCache INFO:[0m Initializing usage context. [3m(usage_context.py:243:lmcache.usage_context)[0m
+INFO 04-30 05:58:47 [hpu_model_runner.py:178] HpuEnvFlags VLLM_SKIP_WARMUP: True
+INFO 04-30 05:58:47 [hpu_model_runner.py:178] HpuEnvFlags VLLM_ENABLE_BUCKETING: True
+INFO 04-30 05:58:47 [hpu_model_runner.py:178] HpuEnvFlags VLLM_CONTIGUOUS_PA: False
+WARNING 04-30 05:58:47 [hpu.py:99] Pin memory is not supported on HPU.
+INFO 04-30 05:58:47 [hpu.py:39] Using HPUAttentionV1 backend.
+INFO 04-30 05:58:47 [hpu_model_runner.py:680] Bucketing is ON.
+max_model_len and max_prompt_seq are not set. Using default value max_prompt_seq=1024. This may cause issues.
+max_model_len and max_decode_seq are not set. Using default value max_decode_seq=2048. This may cause issues.
+INFO 04-30 05:58:48 [hpu_model_runner.py:1873] Starting to load model meta-llama/Meta-Llama-3.1-8B-Instruct...
+INFO 04-30 05:58:48 [hpu.py:39] Using HPUAttentionV1 backend.
+Detected flags: [-compile_one_hot -cpu -flex_attention -fp32_softmax +fsdpa -gaudi +gaudi2 -gaudi3]
+INFO 04-30 05:58:49 [loader.py:447] Loading weights on hpu...
+INFO 04-30 05:58:49 [weight_utils.py:265] Using model weights format ['*.safetensors']
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:02,  1.03it/s]
+INFO 04-30 05:58:51 [core_client.py:416] Waiting for 1 core engine proc(s) to start: {0}
+Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:01<00:01,  1.10it/s]
+Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:02<00:00,  1.12it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.49it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.31it/s]
+
+INFO 04-30 05:58:53 [loader.py:452] Loading weights took 3.07 seconds
+INFO 04-30 05:58:53 [hpu_model_runner.py:1877] Loading model weights took 15.1179 GB
+INFO 04-30 05:58:53 [hpu_model_runner.py:1894] Wrapping in HPUGraph took 0.0000 GB
+INFO 04-30 05:58:53 [hpu_worker.py:164] Model profiling run took 0 B of device memory (15.12 GiB/94.62 GiB used) and 0 B of host memory (318.9 GiB/1007 GiB used)
+INFO 04-30 05:58:53 [hpu_worker.py:191] Free device memory: 79.51 GiB, 63.61 GiB usable (gpu_memory_utilization=0.8), 6.361 GiB reserved for HPUGraphs (VLLM_GRAPH_RESERVED_MEM=0.1), 16 MiB reserved for KV cache dummy block 57.23 GiB reserved for usable KV cache
+INFO 04-30 05:58:53 [kv_cache_utils.py:578] GPU KV cache size: 468,736 tokens
+INFO 04-30 05:58:53 [kv_cache_utils.py:581] Maximum concurrency for 8,000 tokens per request: 58.59x
+INFO 04-30 05:58:53 [hpu_model_runner.py:2113] Skipping warmup...
+INFO 04-30 05:58:53 [core.py:159] init engine (profile, create kv cache, warmup model) took 0.42 seconds
+Creating v1 connector with name: %s LMCacheConnectorV1
+WARNING 04-30 05:58:53 [base.py:58] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+INFO 04-30 05:58:53 [core_client.py:424] Core engine process 0 ready.
+Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]ERROR 04-30 05:58:53 [core.py:383] EngineCore hit an exception: Traceback (most recent call last):
+ERROR 04-30 05:58:53 [core.py:383]   File "/usr/local/lib/python3.10/dist-packages/zmq/sugar/socket.py", line 740, in send_multipart
+ERROR 04-30 05:58:53 [core.py:383]     memoryview(msg)
+ERROR 04-30 05:58:53 [core.py:383] TypeError: memoryview: a bytes-like object is required, not 'int'
+ERROR 04-30 05:58:53 [core.py:383] 
+ERROR 04-30 05:58:53 [core.py:383] During handling of the above exception, another exception occurred:
+ERROR 04-30 05:58:53 [core.py:383] 
+ERROR 04-30 05:58:53 [core.py:383] Traceback (most recent call last):
+ERROR 04-30 05:58:53 [core.py:383]   File "/root/litang/github/test/vllm-fork/vllm/v1/engine/core.py", line 376, in run_engine_core
+ERROR 04-30 05:58:53 [core.py:383]     engine_core.run_busy_loop()
+ERROR 04-30 05:58:53 [core.py:383]   File "/root/litang/github/test/vllm-fork/vllm/v1/engine/core.py", line 398, in run_busy_loop
+ERROR 04-30 05:58:53 [core.py:383]     self._process_engine_step()
+ERROR 04-30 05:58:53 [core.py:383]   File "/root/litang/github/test/vllm-fork/vllm/v1/engine/core.py", line 427, in _process_engine_step
+ERROR 04-30 05:58:53 [core.py:383]     outputs = self.step_fn()
+ERROR 04-30 05:58:53 [core.py:383]   File "/root/litang/github/test/vllm-fork/vllm/v1/engine/core.py", line 202, in step
+ERROR 04-30 05:58:53 [core.py:383]     scheduler_output = self.scheduler.schedule()
+ERROR 04-30 05:58:53 [core.py:383]   File "/root/litang/github/test/vllm-fork/vllm/v1/core/sched/scheduler.py", line 313, in schedule
+ERROR 04-30 05:58:53 [core.py:383]     self.connector.get_num_new_matched_tokens(
+ERROR 04-30 05:58:53 [core.py:383]   File "/root/litang/github/test/vllm-fork/vllm/distributed/kv_transfer/kv_connector/v1/lmcache_connector.py", line 109, in get_num_new_matched_tokens
+ERROR 04-30 05:58:53 [core.py:383]     return self._lmcache_engine.get_num_new_matched_tokens(
+ERROR 04-30 05:58:53 [core.py:383]   File "/usr/local/lib/python3.10/dist-packages/lmcache-0.2.1-py3.10.egg/lmcache/integration/vllm/vllm_v1_adapter.py", line 550, in get_num_new_matched_tokens
+ERROR 04-30 05:58:53 [core.py:383]     num_external_hit_tokens = self.lookup_client.lookup(token_ids)
+ERROR 04-30 05:58:53 [core.py:383]   File "/usr/local/lib/python3.10/dist-packages/lmcache-0.2.1-py3.10.egg/lmcache/integration/vllm/vllm_v1_adapter.py", line 73, in lookup
+ERROR 04-30 05:58:53 [core.py:383]     self.socket.send_multipart(request, copy=False)
+ERROR 04-30 05:58:53 [core.py:383]   File "/usr/local/lib/python3.10/dist-packages/zmq/sugar/socket.py", line 745, in send_multipart
+ERROR 04-30 05:58:53 [core.py:383]     raise TypeError(
+ERROR 04-30 05:58:53 [core.py:383] TypeError: Frame 0 (200) does not support the buffer interface.
+ERROR 04-30 05:58:53 [core.py:383] 
+CRITICAL 04-30 05:58:53 [core_client.py:359] Got fatal signal from worker processes, shutting down. See stack trace above for root cause issue.
