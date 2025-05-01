@@ -2089,16 +2089,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     sampling_params,
                                                     lora_request):
         assert self.model_is_mrope, ("Warmup compatible with Qwen2vl models")
+        if not hasattr(self.get_model().config, "vision_config"):
+            raise ValueError("Expect mrope model to have vision_config")
+        vision_config = self.get_model().config.vision_config
+        if not hasattr(vision_config, "spatial_merge_size"):
+            raise ValueError("Expect mrope model to have spatial_merge_size")
+
         if num_patches is None:
             # Using the largest bucket
             num_patches = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
 
-        # TODO: get number of tokens from num_patches using merger
-        # vision_config.spatial_merge_size
-        # use the spatial_merge_size ** 2 instead of 4
-        spatial_merge_size = 4
-        num_image_tokens = num_patches // spatial_merge_size
+        spatial_merge_unit = vision_config.spatial_merge_size ** 2
+        num_image_tokens = num_patches // spatial_merge_unit
 
         image_token_id = self.get_model().config.image_token_id
         prompt_token_ids = [image_token_id] * num_image_tokens
