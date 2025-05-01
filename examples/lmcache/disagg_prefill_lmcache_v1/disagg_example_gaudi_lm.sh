@@ -88,47 +88,47 @@ main() {
 
     trap cleanup INT
     trap cleanup USR1
-    trap cleanup TERM
-    echo "Launching lmcache at localhost port 8000"
+    trap cleanup TERM    
 
     echo "Launching prefiller, decoder and proxy..."
     echo "Please check prefiller.log, decoder.log and proxy.log for logs."
 
-    python -m lmcache.experimental.server localhost 4000 2>&1 &
-
-    bash disagg_vllm_launcher.sh prefiller \
+    echo "starting lmcache "
+    python -m lmcache.experimental.server localhost 8100 2>&1 &
+    echo "start prefiller "
+    bash disagg_vllm_launcher_gaudi_lm.sh prefiller \
         > >(tee prefiller.log) 2>&1 &
     prefiller_pid=$!
     PIDS+=($prefiller_pid)
-
-    bash disagg_vllm_launcher.sh decoder  \
+    echo "start decoder "
+    bash disagg_vllm_launcher_gaudi_lm.sh decoder  \
         > >(tee decoder.log)  2>&1 &
     decoder_pid=$!
     PIDS+=($decoder_pid)
 
     python3 disagg_proxy_server.py \
         --host localhost \
-        --port 3000 \
+        --port 1000 \
         --prefiller-host localhost \
-        --prefiller-port 3100 \
+        --prefiller-port 1100 \
         --decoder-host localhost \
-        --decoder-port 3200  \
+        --decoder-port 1200  \
         > >(tee proxy.log)    2>&1 &
     proxy_pid=$!
     PIDS+=($proxy_pid)
 
-    wait_for_server 3100
-    wait_for_server 3200
-    wait_for_server 3000
+    wait_for_server 1100
+    wait_for_server 1200
+    wait_for_server 1000
 
     echo "All servers are up. Starting benchmark..."
 
     # begin benchmark
     cd ../../../benchmarks/
-    python benchmark_serving.py --port 3000 --seed $(date +%s) \
+    python benchmark_serving.py --port 1000 --seed $(date +%s) \
         --model /root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/ \
-        --dataset-name random --random-input-len 7500 --random-output-len 200 \
-        --num-prompts 10 --burstiness 100 --request-rate 3.6 | tee benchmark.log
+        --dataset-name random --random-input-len 8000 --random-output-len 200 \
+        --num-prompts 100 --burstiness 100 --request-rate 3.6 | tee benchmark.log
 
     echo "Benchmarking done. Cleaning up..."
 
