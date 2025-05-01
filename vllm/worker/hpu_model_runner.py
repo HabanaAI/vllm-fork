@@ -2100,7 +2100,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_patches = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
 
-        spatial_merge_unit = vision_config.spatial_merge_size ** 2
+        spatial_merge_unit = vision_config.spatial_merge_size**2
         num_image_tokens = num_patches // spatial_merge_unit
 
         image_token_id = self.get_model().config.image_token_id
@@ -2117,8 +2117,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             f"Expects num_patches to be multiples of 8, got: {num_patches}")
         image_h = num_patches // 8
         image_grid_thw = torch.tensor(
-            [[1, image_h, int(num_patches / image_h)]]
-        )
+            [[1, image_h, int(num_patches / image_h)]])
         pixel_values = torch.randn(image_grid_thw[0].prod(),
                                    1176)  # TODO: figure out the variable name
 
