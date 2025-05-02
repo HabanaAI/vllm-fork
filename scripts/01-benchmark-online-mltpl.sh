@@ -46,7 +46,6 @@ max_model_len=9216    # Max model len
 request_rate="inf"    # Request rate (inf = unlimited)
 multi_step=1          # Number of scheduler steps
 
-
 #===========================================================
 # START the LOOP
 #===========================================================
