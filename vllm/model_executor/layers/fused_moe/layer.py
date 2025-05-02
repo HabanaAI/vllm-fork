@@ -16,8 +16,6 @@ from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
 
 is_hpu = current_platform.is_hpu()
-if is_hpu:
-    import torch.nn.functional as F
 
 if current_platform.is_cuda_alike():
     from .fused_moe import fused_experts
@@ -217,25 +215,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             layer.hpu_fused_moe.set_MoeOp_weights(layer.w13_weight,
                                                   layer.w2_weight)
             layer.hpu_fused_moe.set_MoeOp_ep_rank(layer.ep_rank)
-
-            routing_weights = F.softmax(router_logits,
-                                        dim=1,
-                                        dtype=torch.float32)
-            routing_weights, selected_experts = torch.topk(routing_weights,
-                                                           top_k,
-                                                           dim=-1)
-            if renormalize:
-                routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-            routing_weights = routing_weights.to(x.dtype)
-
-            final_hidden_states = layer.hpu_fused_moe.MoeOp(
-                hidden_states=x,
-                expert_routing_table=selected_experts,
-                router_weights=routing_weights,
-                permuted_weights=True,
-                activation="silu",
-            )
-            return final_hidden_states.view(-1, x.shape[1])
+            layer.hpu_fused_moe.set_MoeOp_world_size(layer.tp_size *
+                                                     layer.ep_size)
+            return layer.hpu_fused_moe(x, router_logits, top_k)
 
     def forward_tpu(
         self,
