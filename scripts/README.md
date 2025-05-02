@@ -17,7 +17,10 @@ bash 03-accuracy_gsm8k.sh --model_path ${model_path} --tp_size 1
 ### Benchmark
 ```bash
 cd scripts;
-bash 01-benchmark-online.sh --model_path ${model_path} --tp_size 1
+bash 01-benchmark-online-30B.sh --model_path ${model_path}
+bash 01-benchmark-online-32B.sh --model_path ${model_path}
+bash 01-benchmark-online-235B.sh --model_path ${model_path}
+bash 01-benchmark-online-235B-tp8.sh --model_path ${model_path}
 ```
 
 ## Run with FP8
@@ -47,5 +50,7 @@ bash 03-accuracy_gsm8k_fp8.sh --model_path ${model_path} --tp_size 1
 ### Benchmark
 ```bash
 cd scripts;
-bash 01-benchmark-online_fp8.sh  --model_path ${model_path} --tp_size 1
+bash 01-benchmark-online_fp8_30B.sh  --model_path ${model_path}
+bash 01-benchmark-online_fp8_32B.sh  --model_path ${model_path}
+bash 01-benchmark-online_fp8_235B.sh  --model_path ${model_path}
 ```
