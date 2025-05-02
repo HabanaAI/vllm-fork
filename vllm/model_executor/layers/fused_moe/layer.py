@@ -215,8 +215,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             layer.hpu_fused_moe.set_MoeOp_weights(layer.w13_weight,
                                                   layer.w2_weight)
             layer.hpu_fused_moe.set_MoeOp_ep_rank(layer.ep_rank)
-            layer.hpu_fused_moe.set_MoeOp_world_size(layer.tp_size *
-                                                     layer.ep_size)
             return layer.hpu_fused_moe(x, router_logits, top_k)
 
     def forward_tpu(
