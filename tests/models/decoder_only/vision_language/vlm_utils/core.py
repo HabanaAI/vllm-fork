@@ -51,6 +51,10 @@ def run_test(
     model_info.check_available_online(on_fail="skip")
     model_info.check_transformers_version(on_fail="skip")
 
+    # Disable other modalities to save memory
+    default_limits = {"image": 0, "video": 0, "audio": 0}
+    limit_mm_per_prompt = default_limits | limit_mm_per_prompt
+
     vllm_outputs_per_mm = []
     hf_outputs_per_mm = []
 
@@ -63,7 +67,7 @@ def run_test(
         "disable_mm_preprocessor_cache": True,
     }
     if model_info.tokenizer:
-        vllm_runner_kwargs_["tokenizer"] = model_info.tokenizer
+        vllm_runner_kwargs_["tokenizer_name"] = model_info.tokenizer
     if model_info.tokenizer_mode:
         vllm_runner_kwargs_["tokenizer_mode"] = model_info.tokenizer_mode
     if model_info.hf_overrides:

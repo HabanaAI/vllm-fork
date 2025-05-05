@@ -68,6 +68,17 @@ def qwen2_vllm_to_hf_output(
     return output_ids, hf_output_str, out_logprobs
 
 
+def kimiv_vl_vllm_to_hf_output(
+        vllm_output: RunnerOutput,
+        model: str) -> tuple[list[int], str, Optional[SampleLogprobs]]:
+    """Sanitize vllm output [kimi_vl models] to be comparable with hf output."""
+    output_ids, output_str, out_logprobs = vllm_output
+
+    hf_output_str = output_str + "<|im_end|>[EOS]"
+
+    return output_ids, hf_output_str, out_logprobs
+
+
 def llava_image_vllm_to_hf_output(vllm_output: RunnerOutput,
                                   model: str) -> RunnerOutput:
     config = AutoConfig.from_pretrained(model)
@@ -204,11 +215,25 @@ def idefics3_trunc_hf_output(hf_output: RunnerOutput,
     return output_ids, output_str, out_logprobs
 
 
+def smolvlm_trunc_hf_output(hf_output: RunnerOutput,
+                            model: str) -> RunnerOutput:
+    # Based on Idefics3
+    return idefics3_trunc_hf_output(hf_output, model)
+
+
 def minicpmv_trunc_hf_output(hf_output: RunnerOutput,
                              model: str) -> RunnerOutput:
     output_ids, output_str, out_logprobs = hf_output
     if output_str.endswith("<|eot_id|>"):
         output_str = output_str.split("<|eot_id|>")[0]
+    return output_ids, output_str, out_logprobs
+
+
+def minimax_vl_01_hf_output(hf_output: RunnerOutput,
+                            model: str) -> RunnerOutput:
+    output_ids, output_str, out_logprobs = hf_output
+    if output_str.endswith("<end_of_sentence>"):
+        output_str = output_str.split("<end_of_sentence>")[0]
     return output_ids, output_str, out_logprobs
 
 
@@ -610,6 +635,17 @@ def minicpmv_26_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
     return hf_model
 
 
+def minimax_vl_01_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
+    orig_generate = hf_model.model.generate
+
+    def _generate(self, *args, image_sizes=None, **kwargs):
+        return orig_generate(*args, decode_text=False, **kwargs)
+
+    hf_model.model.generate = types.MethodType(_generate, hf_model.model)
+
+    return hf_model
+
+
 def molmo_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
     """Patches and returns an instance of the HfRunner to use for Molmo."""
     hf_processor = hf_model.processor
@@ -639,4 +675,34 @@ def molmo_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
 
     hf_model.model.generate = types.MethodType(_generate, hf_model.model)
 
+    return hf_model
+
+
+def ovis2_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
+    """Patches and returns an instance of the HfRunner to use for Ovis2."""
+    hf_model.model.visual_tokenizer.to(hf_model.dtype)
+    hf_model.model.vte.to(hf_model.dtype)
+    hf_model.model.llm.to(hf_model.dtype)
+
+    hf_model.model.get_output_embeddings = lambda: \
+        hf_model.model.llm.get_output_embeddings()
+
+    def processor(*args, text="", images=None, **kwargs):
+        text_tokenizer = hf_model.model.get_text_tokenizer()
+        images = [images] if isinstance(images, Image) else images
+
+        text = text.split("<|im_start|>user\n")[1].split("<|im_end|>\n")[0]
+
+        prompt, input_ids, pixel_values = hf_model.model.preprocess_inputs(
+            text_or_conversations=text, images=images)
+        attention_mask = torch.ne(input_ids, text_tokenizer.pad_token_id)
+
+        inputs = {
+            "inputs": input_ids.unsqueeze(0),
+            "pixel_values": pixel_values.unsqueeze(0),
+            "attention_mask": attention_mask.unsqueeze(0),
+        }
+        return BatchFeature(data=inputs, tensor_type="pt")
+
+    hf_model.processor = processor
     return hf_model
