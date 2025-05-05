@@ -9,7 +9,7 @@ fi
 
 if [[ $# -eq 1 ]]; then
     echo "Using default model: meta-llama/Llama-3.1-8B-Instruct"
-    MODEL="meta-llama/Llama-3.1-8B-Instruct"
+    MODEL="/root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
 else
     echo "Using model: $2"
     MODEL=$2
@@ -20,12 +20,14 @@ if [[ $1 == "prefiller" ]]; then
     # Prefiller listens on port 8100
     prefill_config_file=$SCRIPT_DIR/configs/lmcache-prefiller-config.yaml
 
-    UCX_TLS=cuda_ipc,cuda_copy,tcp \
-        LMCACHE_CONFIG_FILE=$prefill_config_file \
+    UCX_TLS=tcp \
+        #LMCACHE_CONFIG_FILE=$prefill_config_file \
         LMCACHE_USE_EXPERIMENTAL=True \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        CUDA_VISIBLE_DEVICES=0 \
+        HABANA_VISIBLE_DEVICES=0 \
+        LMCACHE_LOCAL_CPU=False \
+        LMCACHE_REMOTE_SERDE="naive" \
         vllm serve $MODEL \
         --port 8100 \
         --disable-log-requests \
@@ -38,12 +40,14 @@ elif [[ $1 == "decoder" ]]; then
     # Decoder listens on port 8200
     decode_config_file=$SCRIPT_DIR/configs/lmcache-decoder-config.yaml
 
-    UCX_TLS=cuda_ipc,cuda_copy,tcp \
-        LMCACHE_CONFIG_FILE=$decode_config_file \
+    UCX_TLS=tcp \
+        #LMCACHE_CONFIG_FILE=$decode_config_file \
         LMCACHE_USE_EXPERIMENTAL=True \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        CUDA_VISIBLE_DEVICES=1 \
+        HABANA_VISIBLE_DEVICES=0 \
+        LMCACHE_LOCAL_CPU=False \
+        LMCACHE_REMOTE_SERDE="naive" \
         vllm serve $MODEL \
         --port 8200 \
         --disable-log-requests \

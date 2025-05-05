@@ -45,7 +45,7 @@ prompts = [
 
 def run_store(store_done, prompts):
     # We use GPU 0 for KV cache store process.
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["HABANA_VISIBLE_DEVICES"] = "0"
 
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=10)
 
@@ -53,7 +53,7 @@ def run_store(store_done, prompts):
         '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}')
     # Set GPU memory utilization to 0.8 for an A40 GPU with 40GB
     # memory. Reduce the value if your GPU has less memory.
-    llm = LLM(model="mistralai/Mistral-7B-Instruct-v0.2",
+    llm = LLM(model="/root/litang/Mistral-7B-Instruct-v0.2/",
               kv_transfer_config=ktc,
               max_model_len=8000,
               gpu_memory_utilization=0.8,
@@ -72,7 +72,7 @@ def run_store(store_done, prompts):
 
 def run_retrieve(store_done, prompts, timeout=1):
     # We use GPU 1 for KV cache retrieve process.
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["HABANA_VISIBLE_DEVICES"] = "1"
 
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=10)
 
@@ -80,7 +80,7 @@ def run_retrieve(store_done, prompts, timeout=1):
         '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}')
     # Set GPU memory utilization to 0.8 for an A40 GPU with 40GB
     # of memory. Reduce the value if your GPU has less memory.
-    llm = LLM(model="mistralai/Mistral-7B-Instruct-v0.2",
+    llm = LLM(model="/root/litang/Mistral-7B-Instruct-v0.2/",
               kv_transfer_config=ktc,
               max_model_len=8000,
               gpu_memory_utilization=0.8,
@@ -112,13 +112,13 @@ def main():
     store_process = Process(target=run_store, args=(store_done, prompts))
     retrieve_process = Process(target=run_retrieve, args=(store_done, prompts))
     lmcache_server_process = run_lmcache_server(port)
-
+    print("libin kvshare store start")
     # Start KV cache store process
     store_process.start()
-
+    print("libin kvshare retrieve start")
     # Start KV cache retrieve process
     retrieve_process.start()
-
+    print("libin kvshare retrieve done")
     # Clean up the processes
     store_process.join()
     retrieve_process.terminate()

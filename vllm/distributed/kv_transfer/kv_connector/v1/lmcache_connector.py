@@ -107,8 +107,8 @@ class LMCacheConnectorV1(KVConnectorBase_V1):
             the number of tokens that can be loaded from the 
             external KV cache beyond what is already computed.
         """
-        return 0 #self._lmcache_engine.get_num_new_matched_tokens(
-            #request, num_computed_tokens)
+        return self._lmcache_engine.get_num_new_matched_tokens(
+            request, num_computed_tokens)
 
     def update_state_after_alloc(self, request: "Request",
                                  num_external_tokens: int):

@@ -106,6 +106,8 @@ if TYPE_CHECKING:
     VLLM_TPU_DISABLE_TOPK_TOPP_OPTIMIZATION: bool = False
     VLLM_TPU_BUCKET_PADDING_GAP: int = 0
     VLLM_USE_DEEP_GEMM: bool = False
+    VLLM_MSGPACK_ZERO_COPY_THRESHOLD: int = 256
+
 
 
 def get_default_cache_root():
@@ -697,6 +699,16 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Allow use of DeepGemm kernels for fused moe ops.
     "VLLM_USE_DEEP_GEMM":
     lambda: bool(int(os.getenv("VLLM_USE_DEEP_GEMM", "0"))),
+    
+    # Control the threshold for msgspec to use 'zero copy' for
+    # serialization/deserialization of tensors. Tensors below
+    # this limit will be encoded into the msgpack buffer, and
+    # tensors above will instead be sent via a separate message.
+    # While the sending side still actually copies the tensor
+    # in all cases, on the receiving side, tensors above this
+    # limit will actually be zero-copy decoded.
+    "VLLM_MSGPACK_ZERO_COPY_THRESHOLD":
+    lambda: int(os.getenv("VLLM_MSGPACK_ZERO_COPY_THRESHOLD", "256")),
 }
 
 # end-env-vars-definition

@@ -22,7 +22,7 @@ check_hf_token() {
 
 check_num_gpus() {
     # can you check if the number of GPUs are >=2 via nvidia-smi?
-    num_gpus=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+    num_gpus=$(hl-smi --query-gpu=name --format=csv,noheader | wc -l)
     if [ "$num_gpus" -lt 2 ]; then
         echo "You need at least 2 GPUs to run disaggregated prefill."
         exit 1
@@ -78,10 +78,10 @@ wait_for_server() {
 
 
 main() {
-    check_hf_token
+    #check_hf_token
     check_num_gpus
     ensure_python_library_installed lmcache
-    ensure_python_library_installed nixl
+    #ensure_python_library_installed nixl
     ensure_python_library_installed pandas
     ensure_python_library_installed datasets
     ensure_python_library_installed vllm
@@ -89,7 +89,8 @@ main() {
     trap cleanup INT
     trap cleanup USR1
     trap cleanup TERM
-
+    echo "Launching lmcache at localhost port 8000"
+    python -m lmcache.experimental.server localhost 8000 2>&1 &
     echo "Launching prefiller, decoder and proxy..."
     echo "Please check prefiller.log, decoder.log and proxy.log for logs."
 
@@ -123,7 +124,7 @@ main() {
     # begin benchmark
     cd ../../../benchmarks/
     python benchmark_serving.py --port 9000 --seed $(date +%s) \
-        --model meta-llama/Llama-3.1-8B-Instruct \
+        --model /root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/ \
         --dataset-name random --random-input-len 7500 --random-output-len 200 \
         --num-prompts 200 --burstiness 100 --request-rate 3.6 | tee benchmark.log
 
