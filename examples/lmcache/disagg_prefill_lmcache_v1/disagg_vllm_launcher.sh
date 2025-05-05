@@ -23,11 +23,12 @@ if [[ $1 == "prefiller" ]]; then
     UCX_TLS=tcp \
         #LMCACHE_CONFIG_FILE=$prefill_config_file \
         LMCACHE_USE_EXPERIMENTAL=True \
+        LMCACHE_LOCAL_CPU=False \
+        LMCACHE_REMOTE_SERDE="naive" \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         HABANA_VISIBLE_DEVICES=0 \
-        LMCACHE_LOCAL_CPU=False \
-        LMCACHE_REMOTE_SERDE="naive" \
+        LMCACHE_REMOTE_URL="lm://localhost:8000" \
         vllm serve $MODEL \
         --port 8100 \
         --disable-log-requests \
@@ -42,12 +43,13 @@ elif [[ $1 == "decoder" ]]; then
 
     UCX_TLS=tcp \
         #LMCACHE_CONFIG_FILE=$decode_config_file \
+        LMCACHE_LOCAL_CPU=False \
+        LMCACHE_REMOTE_SERDE="naive" \
         LMCACHE_USE_EXPERIMENTAL=True \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        HABANA_VISIBLE_DEVICES=0 \
-        LMCACHE_LOCAL_CPU=False \
-        LMCACHE_REMOTE_SERDE="naive" \
+        LMCACHE_REMOTE_URL="lm://localhost:8000" \
+        HABANA_VISIBLE_DEVICES=1 \
         vllm serve $MODEL \
         --port 8200 \
         --disable-log-requests \

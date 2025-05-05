@@ -90,9 +90,12 @@ main() {
     trap cleanup USR1
     trap cleanup TERM
     echo "Launching lmcache at localhost port 8000"
-    python -m lmcache.experimental.server localhost 8000 2>&1 &
+    
+
     echo "Launching prefiller, decoder and proxy..."
     echo "Please check prefiller.log, decoder.log and proxy.log for logs."
+
+    python -m lmcache.experimental.server localhost 8000 2>&1 &
 
     bash disagg_vllm_launcher.sh prefiller \
         > >(tee prefiller.log) 2>&1 &
@@ -126,7 +129,7 @@ main() {
     python benchmark_serving.py --port 9000 --seed $(date +%s) \
         --model /root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/ \
         --dataset-name random --random-input-len 7500 --random-output-len 200 \
-        --num-prompts 200 --burstiness 100 --request-rate 3.6 | tee benchmark.log
+        --num-prompts 10 --burstiness 100 --request-rate 3.6 | tee benchmark.log
 
     echo "Benchmarking done. Cleaning up..."
 
