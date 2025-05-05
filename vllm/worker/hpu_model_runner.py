@@ -2088,6 +2088,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
+            #print("shape", inputs)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
@@ -2099,6 +2100,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             context_size=seq_len if is_prompt else 1,
                             dtype=self.model_config.dtype,
                             device=self.device)
+                print("2102 self.execute_model")
+                print("intermediate_tensors", intermediate_tensors)
                 self.execute_model(inputs,
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
@@ -2173,7 +2176,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f"batch_size:{batch_size} "
                f"{dim}:{seq_len} "
                f"ctx:{ctx} "
-               f"free_mem:{free_mem}")
+               f"free_mem:{HabanaMemoryProfiler.current_free_device_memory()}")
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
@@ -2225,9 +2228,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 captured_all = False
                 continue
             graphed_bucket = (batch_size, seq_len, ctx, is_prompt)
+            print("graphed_bucket", graphed_bucket)
+            
             if graphed_bucket in self.graphed_buckets:
                 continue
+
             self.graphed_buckets.add(graphed_bucket)
+            print("self.graphed_buckets", self.graphed_buckets)
             self.log_warmup(phase, idx, num_candidates, batch_size, seq_len, ctx)
             with HabanaMemoryProfiler() as mem_prof:
                 self.warmup_scenario(batch_size,
@@ -2240,6 +2247,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
+            print("used_mem", used_mem)
             available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
@@ -2358,15 +2366,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         f"{format_bytes(decode_available_memory)} for decode "
                         f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
                     logger.info(msg)
-                    mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
-                        self.warmup_graphs(
-                        prompt_strategy, self.bucketing_ctx.prompt_buckets,
-                        True, kv_caches, prompt_available_memory)
                     
                     mem_post_prefix_prefill, prefix_prefill_batch_seq, prefix_prefill_captured_all = \
                         self.warmup_graphs(
                         prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
                         True, kv_caches, prefix_prefill_available_memory)
+
+                    
+                    mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
+                        self.warmup_graphs(
+                        prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                        True, kv_caches, prompt_available_memory)
+                    
 
                     decode_strategy = os.environ.get(
                         'VLLM_GRAPH_DECODE_STRATEGY', 'max_bs')
@@ -2748,6 +2759,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
             #print("ctx execute_model", ctx)
+            print("use_graphs", use_graphs)
             self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None
