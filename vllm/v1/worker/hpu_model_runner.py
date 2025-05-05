@@ -1489,8 +1489,6 @@ class HPUModelRunner:
                                logits_indices,
                                kv_caches,
                                warmup_mode=False):
-        print('token_ids', token_ids.shape, position_ids.shape,
-              logits_indices.shape)
 
         # FORWARD.
         batch_size = token_ids.size(0)
@@ -1680,7 +1678,6 @@ class HPUModelRunner:
         decode_output_tokens_device = None
         ######################### PREFILLS #########################
         # Prefills run with shape [padded_prefill_bs, padded_prefill_len]
-        print(num_prefills, num_decodes)
         if num_prefills > 0:
             htorch.core.mark_step()
             for idx, (req_id, prompt_len, token_ids, position_ids,
@@ -2068,7 +2065,6 @@ class HPUModelRunner:
         req = NewRequestData(
             req_id=req_id,
             prompt_token_ids=prompt_token_ids,
-            prompt=None,
             mm_inputs=[],
             mm_hashes=[],
             mm_positions=[],
