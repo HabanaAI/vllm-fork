@@ -2213,9 +2213,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             phase = f'Graph/{self._phase_warmup(is_prompt, ctx)}'
             if is_prompt:
                 if ctx:
-                    batch_seq = batch_size * seq_len 
-                else:
                     batch_seq = batch_size * seq_len * ctx
+                else:
+                    batch_seq = batch_size * seq_len
             else:
                 batch_seq = batch_size
             print(batch_seq)
@@ -2352,7 +2352,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         f"/{format_bytes(free_mem)} "
                         "of free device memory for HPUGraphs, "
                         f"{format_bytes(prompt_available_memory)} \
-                            for prompt and "
+                            for prompt and " \
+                        f"{format_bytes(prefix_prefill_available_memory)} \
+                            for prefix_prefill and "
                         f"{format_bytes(decode_available_memory)} for decode "
                         f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
                     logger.info(msg)
@@ -2377,8 +2379,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     # buckets were captured and we have some free
                     # graph-allocated space left. Let's try to use it for
                     # capturing more prompt buckets.
-                    if (mem_post_decode + mem_post_prompt < graph_free_mem
-                            and not prompt_captured_all
+                    if (mem_post_decode + mem_post_prompt + mem_post_prefix_prefill < graph_free_mem
+                            and not prompt_captured_all 
+                            and not prefix_prefill_captured_all
                             and decode_captured_all):
                         mem_post_prompt, _, prompt_captured_all = (
                             self.warmup_graphs(
@@ -2400,9 +2403,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         # buckets were captured and we have some free
                         # graph-allocated space left. Let's try to use it for
                         # capturing more decode buckets.
-                        if mem_post_decode + mem_post_prompt < graph_free_mem \
+                        if mem_post_decode + mem_post_prompt + mem_post_prefix_prefill < graph_free_mem \
                             and not decode_captured_all \
-                                and prompt_captured_all:
+                            and prefix_prefill_captured_all \
+                            and prompt_captured_all:
                             mem_post_decode, _, _ = self.warmup_graphs(
                                 decode_strategy,
                                 self.bucketing_ctx.decode_buckets, False,
@@ -2410,12 +2414,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 mem_post_decode, mem_post_decode,
                                 decode_batch_seq)
                 else:
-                    prompt_available_memory = graph_free_mem
+                    prompt_available_memory = graph_free_mem / 2
+                    prefix_prefill_available_memory = graph_free_mem / 2
                     msg = (
                         f"Using {format_bytes(graph_free_mem)}"
                         f"/{format_bytes(free_mem)} "
                         "of free device memory for HPUGraphs, "
                         f"{format_bytes(prompt_available_memory)} for prompt")
+                    logger.info(msg)
+                    prompt_strategy = os.environ.get(
+                        'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
+                    
+                    msg = (
+                        f"Using {format_bytes(graph_free_mem)}"
+                        f"/{format_bytes(free_mem)} "
+                        "of free device memory for HPUGraphs, "
+                        f"{format_bytes(prefix_prefill_available_memory)} for prefix_prefill")
                     logger.info(msg)
                     prompt_strategy = os.environ.get(
                         'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
@@ -2432,11 +2446,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 self.bucketing_ctx.prompt_buckets, True,
                                 kv_caches, graph_free_mem - mem_post_prompt,
                                 mem_post_prompt, prompt_batch_seq))
+                        
+                    mem_post_prefix_prefill, prefix_prefill_batch_seq, prefix_prefill_captured_all = \
+                        self.warmup_graphs(
+                        prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
+                        True, kv_caches, prefix_prefill_available_memory)
+                    if mem_post_prefix_prefill < graph_free_mem \
+                        and not prefix_prefill_captured_all:
+                        mem_post_prefix_prefill, _, prefix_prefill_captured_all = (
+                            self.warmup_graphs(
+                                prompt_strategy,
+                                self.bucketing_ctx.prefix_prefill_buckets, True,
+                                kv_caches, graph_free_mem - mem_post_prefix_prefill,
+                                mem_post_prefix_prefill, prefix_prefill_batch_seq))
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.prefix_prefill_buckets, True, mem_post_prompt)
+                    self.bucketing_ctx.prefix_prefill_buckets, True, mem_post_prefix_prefill)
                 if not self.is_pooler:
                     self.log_graph_warmup_summary(
                         self.bucketing_ctx.decode_buckets, False,
