@@ -14,6 +14,7 @@ usage() {
     echo " --mix_prompt_lenght              run with randomized prompt lenght in each iter (--iter)"
     echo " --shuffle_images                 randomly shuffle the source images"
     echo " --mix_prompts                    run both image and text modality together"
+    echo " --max_num_seq                    setting the max_num_seq for vllm engine"
     exit 1
 }
 
@@ -92,21 +93,24 @@ while [[ $# -gt 0 ]]; do
         VLLMV1="On"
         shift 1
         ;;
+    --max_num_seq | -mns)
+        MaxNumSeq=$2
+        shift 2
+        ;;
     --help)
         usage
         ;;
     *)
-	    echo "unknown arg $i"
-	    exit
-	    ;;
+        echo "unknown arg $i"
+        exit
+        ;;
     esac
 done
 
 #Set Default values
 iter=${iter:-1}
 ImageInput=${ImageInput:-"on"}
-#ImageWidth=${ImageWidth:-"1200"}
-#ImageHeight=${ImageHeight:-"600"}
+MaxNumSeq=${MaxNumSeq:-"5"}
 video=${video}
 
 if [[ -n $HELP ]]; then
@@ -140,14 +144,6 @@ if [[ -n $InstallVLLM ]]; then
         pip install git+https://github.com/huggingface/transformers.git@6b550462139655d488d4c663086a63e98713c6b9
     fi
     cd ..
-fi
-
-if false; then
-    export VLLM_GRAPH_RESERVED_MEM=0.05 # default 0.1
-    export VLLM_GRAPH_PROMPT_RATIO=0.3  # 0.3 default
-    export VLLM_HPU_LOG_STEP_GRAPH_COMPILATION=true
-    export PT_HPU_METRICS_GC_DETAILS=1
-    export VLLM_HPU_LOG_STEP_CPU_FALLBACKS=1
 fi
 
 if [[ -n "$SKIPWARMUP" ]]; then
@@ -189,9 +185,12 @@ fi
 
 if [[ "$model" == *"Qwen2"* ]]; then
     #export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false; unset VLLM_QWEN_SPLIT_GRAPHS
-    export VLLM_QWEN_SPLIT_GRAPHS=true
+    export VLLM_QWEN_SPLIT_GRAPHS=true # to split vision and llm graphs
     unset PT_HPUGRAPH_DISABLE_TENSOR_CACHE
+    #export VLLM_FP32_SOFTMAX=true # for accuracy
 fi
+# to increase the perf.
+#export VLLM_DELAYED_SAMPLING=true
 
 if [[ -n "$video" ]]; then
     ARGS="-m $model -v $videofile --iter $iter $EXTRAARGS"
@@ -207,6 +206,7 @@ else
     fi
 fi
 if [[ -n "$GMU" ]]; then ARGS="$ARGS --gpu_mem_usage $GMU"; fi
+ARGS="$ARGS --max_num_seq $MaxNumSeq"
 
 cmd="python offline_inferece.py $ARGS"
 echo $cmd && eval $cmd

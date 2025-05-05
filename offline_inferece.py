@@ -129,7 +129,7 @@ def get_llm(args):
         model=model,
         enforce_eager=False,
         max_model_len=32768,
-        max_num_seqs=5,
+        max_num_seqs=args.max_num_seq,
         gpu_memory_utilization=args.gpu_mem_usage,
         limit_mm_per_prompt={
             "image": args.limit_mm_image,
@@ -273,6 +273,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-ris", "--random_img_size", action="store_true", help="Randomly resize image"
+    )
+    parser.add_argument(
+        "-mns", "--max_num_seq", type=int, default=5, help="control the max_num_seq in llm engine"
     )
 
     # Parse the arguments

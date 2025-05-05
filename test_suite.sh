@@ -42,7 +42,7 @@ if $RunProcessorUT; then
 fi
 
 #pytests
-if $RunPytests && [[ "$ModelName" == *"Qwen"* ]]; then pytest tests/models/decoder_only/vision_language/test_models.py -s -v -k "[qwen2_5"; fi
+if $RunPytests && [[ "$ModelName" == *"Qwen"* ]]; then pytest tests/models/decoder_only/vision_language/test_models.py -s -v -k "[qwen2_5_vl"; fi
 
 # larger image sizes
 if $RunLargeImages; then
