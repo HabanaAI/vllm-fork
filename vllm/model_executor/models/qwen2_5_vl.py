@@ -26,6 +26,7 @@
 """Inference-only Qwen2.5-VL model compatible with HuggingFace weights."""
 
 import math
+import os
 from functools import partial
 from typing import (Callable, Iterable, List, Literal, Mapping, Optional, Set,
                     Tuple, TypedDict, Union)
@@ -38,7 +39,6 @@ from transformers import BatchFeature
 from transformers.models.qwen2_5_vl import Qwen2_5_VLProcessor
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import (
     Qwen2_5_VLConfig, Qwen2_5_VLVisionConfig)
-from vllm_hpu_extension.flags import enabled_flags
 
 from vllm.config import VllmConfig
 from vllm.distributed import parallel_state
@@ -318,8 +318,9 @@ class Qwen2_5_VisionAttention(nn.Module):
                 f"Qwen2.5-VL does not support {self.attn_backend} backend now."
             )
 
-        self.softmax_mode = 'fp32' if "fp32_softmax" in enabled_flags(
-        ) else 'None'
+        self.softmax_mode = 'fp32' if os.environ.get(
+            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
+                                                             ] else 'None'
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
