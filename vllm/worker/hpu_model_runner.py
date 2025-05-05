@@ -88,6 +88,7 @@ VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
 DUMMY_TOKEN_ID = -1
 UNSET_NUM_PATCHES = 9999999
 
+
 class VisionBuckets:
     '''
     This class is used to bucket image tokens
