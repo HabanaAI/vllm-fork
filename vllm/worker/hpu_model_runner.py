@@ -86,7 +86,7 @@ VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
-
+UNSET_NUM_PATCHES = 9999999
 
 class VisionBuckets:
     '''
@@ -2095,7 +2095,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not hasattr(vision_config, "spatial_merge_size"):
             raise ValueError("Expect mrope model to have spatial_merge_size")
 
-        if num_patches is None:
+        if num_patches == UNSET_NUM_PATCHES:
             # Using the largest bucket
             num_patches = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
@@ -2156,14 +2156,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
-        if is_prompt and self.model_is_mrope:
+        if is_prompt and self.model_is_mrope and num_patches:
             return self.create_dummy_multi_modal_seq_group_metadata(
                 group_id=group_id,
                 num_patches=num_patches,
                 sampling_params=sampling_params,
                 lora_request=lora_request,
             )
-        if is_prompt:
+        elif is_prompt:
             input_len = seq_len
             output_len = 0
             block_tables = None
@@ -2201,7 +2201,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             kv_caches=kv_caches,
             is_pt_profiler_run=False,
-            num_patches=None,
+            num_patches=UNSET_NUM_PATCHES,
             is_lora_profile_run=True,
         )
         return
