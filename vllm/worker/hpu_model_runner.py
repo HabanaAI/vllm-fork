@@ -87,6 +87,8 @@ VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
 
+_SAMPLING_EPS = 1e-5
+
 
 class Singleton(type):
     _instances: Dict[type, object] = {}
@@ -2784,8 +2786,25 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     continue
 
+                is_prev_output_patched = False
                 if use_delayed_sampling:
                     fake_output = self._delayed_sampler_outputs(model_input)
+                    if not model_input.is_prompt:
+                        penalty_are_requested = any([
+                            abs(sg.sampling_params.presence_penalty)
+                            >= _SAMPLING_EPS
+                            or abs(sg.sampling_params.frequency_penalty)
+                            >= _SAMPLING_EPS
+                            or abs(sg.sampling_params.repetition_penalty)
+                            >= _SAMPLING_EPS
+                            for sg in sampling_metadata.seq_groups
+                        ])
+                        # When penalty is requested, move _patch_prev_output
+                        # before sampler, as output_token_ids is required
+                        # but not yet updated for some requests.
+                        if penalty_are_requested:
+                            is_prev_output_patched = True
+                            self._patch_prev_output()
                 elif model_input.async_callback is not None:
                     model_input.async_callback()
 
@@ -2803,7 +2822,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
-                        self._patch_prev_output()
+                        if not is_prev_output_patched:
+                            self._patch_prev_output()
                         output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
                         self.cached_step_outputs.append(output)
