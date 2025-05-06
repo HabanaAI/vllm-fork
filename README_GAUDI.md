@@ -412,7 +412,7 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
       - block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`): `max(128, (max_num_seqs*max_model_len/block_size)`
 
 > [!NOTE]
-> If the model config reports an unusually high `max_model_len`, set it to max `input_tokens+output_tokens` rounded up to a multiple of `block_size` as per actual requirements.
+> If the model config reports a high `max_model_len`, set it to max `input_tokens+output_tokens` rounded up to a multiple of `block_size` as per actual requirements.
 
 > [!TIP]
 > When a deployed workload does not utilize the full context that a model can handle, it is good practice to limit the maximum values upfront based on the input and output token lengths that will be generated after serving the vLLM server.<br><br>**Example:**<br><br>Let's assume that we want to deploy text generation model Qwen2.5-1.5B, which has a defined `max_position_embeddings` of 131072 (our `max_model_len`). At the same time, we know that our workload pattern will not use the full context length because we expect a maximum input token size of 1K and predict generating a maximum of 2K tokens as output. In this case, starting the vLLM server to be ready for the full context length is unnecessary. Instead, we should limit it upfront to achieve faster service preparation and decrease warmup time. The recommended values in this example should be:
@@ -425,7 +425,7 @@ INFO 08-02 17:38:43 hpu_executor.py:91] init_cache_engine took 37.92 GiB of devi
 
 Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM execution:
 
-- `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used. If `1`, PyTorch Lazy backend for Gaudi will be used. The default is `1`.
+- `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used. If `1`, PyTorch Lazy backend for Gaudi will be used. The default is `0`.
 
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES`: must be set to `true` for tensor parallel inference with HPU Graphs. The default is `true`.
 - `PT_HPUGRAPH_DISABLE_TENSOR_CACHE`: must be set to `false` for LLaVA, qwen, and RoBERTa models. The default is `false`.
@@ -548,7 +548,7 @@ vLLM works with a multi-node environment setup via Ray. To run models on multipl
 > Following commands should be run on the host and NOT inside the container.
 
 ```bash
-cd /opt/habanalabs/qual/Gaudi 2/bin 
+cd /opt/habanalabs/qual/gaudi2/bin 
 ./manage_network_ifs.sh --status 
 # All the ports should be in 'up' state. Try flipping the state
 ./manage_network_ifs.sh --down 
@@ -588,18 +588,18 @@ vllm serve meta-llama/Llama-3.1-405B-Instruct --dtype bfloat16 --max-model-len  
 # Other Online Serving Examples
 
 Please refer to this [collection](https://github.com/HabanaAI/Gaudi-tutorials/tree/main/PyTorch/vLLM_Tutorials/Benchmarking_on_vLLM/Online_Static#quick-start) of static-batched online serving example scripts designed to help the user reproduce performance numbers with vLLM on Gaudi for various types of models and varying context lengths. Below is a list of the models and example scripts provided for 2K and 4K context length scenarios:
-- deepseek-r1-distill-llama-70b_Gaudi 3_1.20_contextlen-2k
-- deepseek-r1-distill-llama-70b_Gaudi 3_1.20_contextlen-4k
-- llama-3.1-70b-instruct_Gaudi 3_1.20_contextlen-2k
-- llama-3.1-70b-instruct_Gaudi 3_1.20_contextlen-4k
-- llama-3.1-8b-instruct_Gaudi 3_1.20_contextlen-2k
-- llama-3.1-8b-instruct_Gaudi 3_1.20_contextlen-4k
-- llama-3.3-70b-instruct_Gaudi 3_1.20_contextlen-2k
-- llama-3.3-70b-instruct_Gaudi 3_1.20_contextlen-4k
+- deepseek-r1-distill-llama-70b_gaudi3_1.20_contextlen-2k
+- deepseek-r1-distill-llama-70b_gaudi3_1.20_contextlen-4k
+- llama-3.1-70b-instruct_gaudi3_1.20_contextlen-2k
+- llama-3.1-70b-instruct_gaudi3_1.20_contextlen-4k
+- llama-3.1-8b-instruct_gaudi3_1.20_contextlen-2k
+- llama-3.1-8b-instruct_gaudi3_1.20_contextlen-4k
+- llama-3.3-70b-instruct_gaudi3_1.20_contextlen-2k
+- llama-3.3-70b-instruct_gaudi3_1.20_contextlen-4k
 
 # Troubleshooting
 
-The following steps address OOM-related errors:
+The following steps address Out of Memory related errors:
 - Increase `gpu_memory_utilization` - This addresses insufficient overall memory. The vLLM pre-allocates HPU cache by using `gpu_memory_utilization%` of device memory. By default, `gpu_memory_utilization` is set to 0.9. By increasing this utilization, you can provide more KV cache space.
 - Decrease `max_num_seqs` or `max_num_batched_tokens` - This may reduce the number of concurrent requests in a batch, thereby requiring less KV cache space when overall usable memory is limited.
 - Increase `tensor_parallel_size` - This approach shards model weights, so each GPU has more memory available for KV cache.
