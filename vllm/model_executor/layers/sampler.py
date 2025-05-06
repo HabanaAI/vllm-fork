@@ -23,6 +23,8 @@ from vllm.sequence import (VLLM_INVALID_TOKEN_ID,
                            CompletionSequenceGroupOutput, Logprob,
                            PromptLogprobs, SampleLogprobs, SequenceOutput)
 from vllm.spec_decode.metrics import SpecDecodeWorkerMetrics
+from vllm.v1.sample.ops.topk_topp_sampler import (
+    apply_top_k_top_p as apply_top_k_top_p_v1)
 
 if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
     import flashinfer.sampling
@@ -214,10 +216,26 @@ class Sampler(nn.Module):
         self._do_penalties = do_penalties
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
-        self._top_k_scalar = top_k_scalar
-        self._top_p_scalar = top_p_scalar
 
-        self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
+        sampler_type = os.getenv("VLLM_SAMPLER_TYPE", "v0")
+        if sampler_type == "v0":
+            self._top_k_scalar = torch.tensor(
+                [top_k_scalar], device="hpu") if top_k_scalar else None
+            self._top_p_scalar = torch.tensor(
+                [top_p_scalar], device="hpu") if top_p_scalar else None
+            self._apply_top_k_top_p_opt = _apply_top_k_top_p
+        elif sampler_type == "v1":
+            self._top_k_scalar = torch.tensor(
+                [top_k_scalar], device="hpu") if top_k_scalar else None
+            self._top_p_scalar = torch.tensor(
+                [top_p_scalar], device="hpu") if top_p_scalar else None
+            self._apply_top_k_top_p_opt = apply_top_k_top_p_v1
+        elif sampler_type == "intel":
+            self._top_k_scalar = top_k_scalar
+            self._top_p_scalar = top_p_scalar
+            self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
+        else:
+            raise ValueError(f"Unknown sampler type: {sampler_type}")
 
     def forward(
         self,

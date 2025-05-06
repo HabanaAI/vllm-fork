@@ -347,6 +347,13 @@ async def benchmark(
     benchmark_start_time = time.perf_counter()
     tasks: list[asyncio.Task] = []
     async for request in get_request(input_requests, request_rate, burstiness):
+        extra_body = {
+            "top_p": 0.9,
+            "top_k": random.randint(
+                2, 20
+            ),  # Intel sampler: 6127 (7092); V1 sampler: 6312 (7304, 7525)
+            "temperature": 1.0,
+        }
         prompt, prompt_len, output_len, mm_content = request.prompt, \
             request.prompt_len, request.expected_output_len, \
                 request.multi_modal_data
@@ -671,7 +678,7 @@ def main(args: argparse.Namespace):
         k: v
         for k, v in {
             "top_p": args.top_p,
-            "top_k": args.top_k,
+            "top_k": random.randint(2, 10),
             "min_p": args.min_p,
             "temperature": args.temperature
         }.items() if v is not None
