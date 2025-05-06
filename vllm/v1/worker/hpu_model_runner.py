@@ -2086,7 +2086,7 @@ class HPUModelRunner:
         seq_lengths = [b * block_size - 1 for b in blocks]
         return seq_lengths
 
-    def _exec_dummy_scenario(self, prompt_cfg, decode_cfg):
+    def _execute_dummy_scenario(self, prompt_cfg, decode_cfg):
         from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
         requests: list[NewRequestData] = []
         scheduled_tokens: dict[str, int] = {}
@@ -2098,8 +2098,8 @@ class HPUModelRunner:
                                         scheduled_tokens,
                                         num_computed_tokens=prompt_ctx_len,
                                         total_tokens=prompt_seq_len,
-                                        scheduled_tokens=prompt_seq_len -
-                                        prompt_ctx_len)
+                                        scheduled_tokens=(prompt_seq_len -
+                                                          prompt_ctx_len))
         if decode_cfg:
             decode_bs, decode_blocks = decode_cfg
             decode_seq_lengths = self._generate_seq_lengths(
@@ -2145,7 +2145,7 @@ class HPUModelRunner:
         torch.hpu.synchronize()
         profiler.start()
         for _ in range(steps):
-            self._exec_dummy_scenario(prompt_cfg, decode_cfg)
+            self._execute_dummy_scenario(prompt_cfg, decode_cfg)
             torch.hpu.synchronize()
             profiler.step()
         profiler.stop()
