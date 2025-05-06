@@ -588,8 +588,8 @@ vllm serve meta-llama/Llama-3.1-405B-Instruct --dtype bfloat16 --max-model-len  
 # Other Online Serving Examples
 
 Please refer to this [collection](https://github.com/HabanaAI/Gaudi-tutorials/tree/main/PyTorch/vLLM_Tutorials/Benchmarking_on_vLLM/Online_Static#quick-start) of static-batched online serving example scripts designed to help the user reproduce performance numbers with vLLM on Gaudi for various types of models and varying context lengths. Below is a list of the models and example scripts provided for 2K and 4K context length scenarios:
-- deepseek-r1-distill-llama-70b_Gaudi 3_1.20_contextlen-2k
-- deepseek-r1-distill-llama-70b_Gaudi 3_1.20_contextlen-4k
+- deepseek-r1-distill-llama-70b_gaudi3_1.20_contextlen-2k
+- deepseek-r1-distill-llama-70b_gaudi3_1.20_contextlen-4k
 - llama-3.1-70b-instruct_gaudi3_1.20_contextlen-2k
 - llama-3.1-70b-instruct_gaudi3_1.20_contextlen-4k
 - llama-3.1-8b-instruct_gaudi3_1.20_contextlen-2k
