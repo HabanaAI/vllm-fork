@@ -2161,7 +2161,7 @@ class HPUModelRunner:
         if profile_cfg:
             cfg = profile_cfg.split('_')
             assert cfg[0] in ['prompt', 'decode']
-            return (cfg[0], int(cfg[1]), int(cfg[2]), cfg[3])
+            return (cfg[0], int(cfg[1]), int(cfg[2]), cfg[3] == 't')
         return None
 
     def _read_profiling_cfg(self):
@@ -2173,6 +2173,9 @@ class HPUModelRunner:
             os.environ.get('VLLM_PT_PROFILE', None))
         if legacy_cfg and not (prompt_cfg or decode_cfg):
             phase, bs, seq_or_blocks, use_graphs = legacy_cfg
+            assert use_graphs != self.model_config.enforce_eager, \
+                "'use_graphs' is out of sync with model config. " \
+                "Either change the flag or change vllm engine parameters"
             if phase == 'prompt':
                 prompt_cfg = (bs, seq_or_blocks, 0)
             else:
