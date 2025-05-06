@@ -512,6 +512,7 @@ Configuration: (prompt, 1, 36864) was not warmed-up!
 ```bash
 Sequence group cmpl-3cbf19b0c6d74b3f90b5d5db2ed2385e-0 is preempted by PreemptionMode.RECOMPUTE mode because there is not enough KV cache space. This can affect the end-to-end performance. Increase gpu_memory_utilization or tensor_parallel_size to provide more KV cache memory.
 ```
+
 ## Multi-Step Scheduling Feature Usage
 
 Enabling Multi-Step Scheduling is recommended for better decode performance. Refer to vllm-project#6854 for more details.
