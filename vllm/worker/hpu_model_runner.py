@@ -159,8 +159,10 @@ def flatten(in_list):
 
 
 def make_cpu_tensor(data, max_len, pad, dtype, flat) -> torch.Tensor:
+    #print("make data", len(data[0]))
     if flat:
         data = [flatten(data)]
+    #print("make data2", len(data[0]))
     return make_tensor_with_pad(data,
                                 max_len=max_len,
                                 pad=pad,
@@ -1009,7 +1011,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             
             
             
-            cfg = (batch_size, seq_len, num_blocks, phase)
+            cfg = (batch_size, seq_len, num_blocks, phase.value)
             '''if phase != PhaseType.DECODE:
                 print("phase", phase)
                 print("num_blocks", num_blocks)
@@ -1023,12 +1025,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             print("self.seen_configs", self.seen_configs)'''
         #if phase != PhaseType.DECODE:
         #    print("cfg", cfg)
+        #if phase != PhaseType.DECODE:    
+        #    print("check_configs", cfg)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         #if 1, 640, 0
         #if batch_size == 1 and seq_len == 640 and num_blocks == 0:
         #    print("self.seen_configs", self.seen_configs)
+
         if not seen and not warmup_mode:
+            print(cfg)
+            print(self.seen_configs)
+
             logger.warning("Configuration: %s was not warmed-up!",
                            (phase.value, batch_size, seq_len,
                             num_blocks) if is_prefix_caching else
@@ -1126,7 +1134,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if len(seq_group_metadata_list) == 0:
             return PreparePromptMetadata.empty()
-
+        
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
@@ -1261,9 +1269,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             target_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
 
-        max_prompt_len = max(
+        if sum(context_lens) != 0:
+            max_prompt_len = max(
+            self.bucketing_ctx.get_padded_prefix_prefill_seq_len(target_query_len),
+            self.block_size)
+        else:
+            max_prompt_len = max(
             self.bucketing_ctx.get_padded_prompt_seq_len(target_query_len),
             self.block_size)
+        
 
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
@@ -1301,6 +1315,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     device='cpu')
         else:
             prefix_block_list_tensor = None
+        #if not ctx:
+        #    import pdb; pdb.set_trace()
 
         input_tokens_tensor = make_cpu_tensor(input_tokens,
                                               max_len=max_prompt_len,
@@ -1325,6 +1341,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                        pad=_PAD_SLOT_ID,
                                        dtype=torch.long,
                                        flat=self.use_merged_prefill)
+
 
         attn_bias = None
         seq_lens_tensor = None
@@ -1978,17 +1995,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         seq_len,
                                         is_prompt,
                                         lora_request=None,
-                                        temperature=0):
+                                        temperature=0,
+                                        ctx = 0):
         if self.is_pooler:
             sampling_params = None
         else:
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
+        block_list = None
+        computed_block_nums = None
         if is_prompt:
             input_len = seq_len
             output_len = 0
             block_tables = None
+            if ctx:
+                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * 128}
+                computed_block_nums = ([1] * ctx)#{group_id: [_PAD_BLOCK_ID] * ctx}
+                #print(computed_block_nums)
         else:
             input_len = seq_len - 1
             output_len = 1
@@ -2002,6 +2026,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      is_prompt=(output_len == 0),
                                      seq_data={group_id: seq_data},
                                      sampling_params=sampling_params,
+                                     computed_block_nums=computed_block_nums,
                                      block_tables=block_tables,
                                      lora_request=lora_request)
 
@@ -2066,8 +2091,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
-                    temperature=temperature) for i in range(batch_size)
+                    temperature=temperature, ctx = ctx) for i in range(batch_size)
             ]
+            #if ctx != 0:
+            #    print(seqs)
+            #    exit()
         else:
             # FIXME: seq_len is actually number of blocks
             blocks = [seq_len // batch_size for _ in range(batch_size)]
@@ -2100,8 +2128,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             context_size=seq_len if is_prompt else 1,
                             dtype=self.model_config.dtype,
                             device=self.device)
-                print("2102 self.execute_model")
-                print("intermediate_tensors", intermediate_tensors)
                 self.execute_model(inputs,
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
@@ -2221,20 +2247,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     batch_seq = batch_size * seq_len
             else:
                 batch_seq = batch_size
-            print(batch_seq)
+            #print(batch_seq)
             print("ctx7770", ctx)
             mem_estimate = batch_seq / total_batch_seq * total_mem
             if mem_estimate >= available_mem:
                 captured_all = False
                 continue
             graphed_bucket = (batch_size, seq_len, ctx, is_prompt)
-            print("graphed_bucket", graphed_bucket)
+            #print("graphed_bucket", graphed_bucket)
             
             if graphed_bucket in self.graphed_buckets:
                 continue
 
             self.graphed_buckets.add(graphed_bucket)
-            print("self.graphed_buckets", self.graphed_buckets)
+            #print("self.graphed_buckets", self.graphed_buckets)
             self.log_warmup(phase, idx, num_candidates, batch_size, seq_len, ctx)
             with HabanaMemoryProfiler() as mem_prof:
                 self.warmup_scenario(batch_size,
@@ -2488,6 +2514,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
         self.profiler.end()
+        print("self.seen_configs", self.seen_configs)
+        
 
     def finish_measurements(self):
         from neural_compressor.torch.quantization import finalize_calibration
@@ -2681,6 +2709,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         seqs=None,
         ctx: int = 1
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        #if model_input.is_prompt:
+        #    print("model_input", model_input)
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
@@ -2759,9 +2789,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
             #print("ctx execute_model", ctx)
-            print("use_graphs", use_graphs)
+            #print("use_graphs", use_graphs)
             self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
-
+            #if is_prompt:
+            #    print("check_configs", batch_size, seq_len, ctx)
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
             if self.lora_config:
