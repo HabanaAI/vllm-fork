@@ -538,7 +538,8 @@ vllm serve <model_path> --device hpu --tensor-parallel-size 8 --pipeline_paralle
 
 vLLM works with a multi-node environment setup via Ray. To run models on multiple nodes, follow the procedure below.
 
-**Prerequisites**
+## Prerequisites
+Perform the following on all nodes:
 
 - Install the latest [vllm-fork](https://github.com/HabanaAI/vllm-fork/blob/habana_main/README_GAUDI.md#build-and-install-vllm).
 
@@ -564,19 +565,19 @@ export GLOO_SOCKET_IFNAME=eth0
 export HCCL_SOCKET_IFNAME=eth0
 ```
 
-1. Start Ray on the head node:
+## 1. Start Ray on the head node:
 
 ```bash
 ray start --head --port=6379
 ```
 
-2. Add workers to the Ray cluster:
+## 2. Add workers to the Ray cluster:
 
 ```bash
 ray start --address='<ip-of-ray-head-node>:6379'
 ```
 
-3. Start the vLLM server:
+## 3. Start the vLLM server:
 
 ```bash
 vllm serve meta-llama/Llama-3.1-405B-Instruct --dtype bfloat16 --max-model-len  2048 --block-size 128 --max-num-seqs 32 --tensor-parallel-size 16 --distributed-executor-backend ray
