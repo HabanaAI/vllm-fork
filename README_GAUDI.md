@@ -177,7 +177,7 @@ The following configurations have been validated to function with Gaudi 2 or Gau
 | [Qwen/Qwen2-72B-Instruct](https://huggingface.co/Qwen/Qwen2-72B-Instruct)     | 8    | BF16    |Gaudi 2|
 | [Qwen/Qwen2.5-72B-Instruct](https://huggingface.co/Qwen/Qwen2.5-72B-Instruct)     | 8    | BF16    |Gaudi 2|
 | [meta-llama/CodeLlama-34b-Instruct-hf](https://huggingface.co/meta-llama/CodeLlama-34b-Instruct-hf)     | 1    | BF16    |Gaudi 3|
-| [deepseek-ai/DeepSeek-R1](https://huggingface.co/deepseek-ai/DeepSeek-R1)     | 8    | FP8, BF16    |Gaudi 2, Gaudi 3|
+| [deepseek-ai/DeepSeek-R1](https://huggingface.co/deepseek-ai/DeepSeek-R1)<br> [quick start scripts](https://github.com/HabanaAI/vllm-fork/blob/deepseek_r1/scripts/DEEPSEEK_R1_ON_GAUDI.md)   | 8    | FP8, BF16    |Gaudi 2, Gaudi 3|
 
 # Performance Tuning
 
