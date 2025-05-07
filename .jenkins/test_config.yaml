@@ -113,6 +113,20 @@ stages:
       - name: multimodal_small_g3_tp2_mss
         flavor: g3.s
         command: cd .jenkins/vision && PT_HPU_LAZY_MODE=1 bash run-tests.sh -c configs/models-mss.txt -t 2
+  - name: tests_embedding
+    steps:
+      - name: embedding_small_lazy_g3_tp1
+        flavor: g3
+        command: cd .jenkins/embedding && PT_HPU_LAZY_MODE=1 bash run-tests.sh -c configs/models-small.txt -t 1
+      - name: embedding_roberta_lazy_g3_tp1
+        flavor: g3
+        command: cd .jenkins/embedding && PT_HPU_LAZY_MODE=1 PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false bash run-tests.sh -c configs/models-roberta.txt -t 1
+      - name: embedding_small_torch_compile_g3_tp1
+        flavor: g3
+        command: cd .jenkins/embedding && PT_HPU_LAZY_MODE=0 bash run-tests.sh -c configs/models-small.txt -t 1
+      - name: embedding_roberta_torch_compile_g3_tp1
+        flavor: g3
+        command: cd .jenkins/embedding && PT_HPU_LAZY_MODE=0 PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false bash run-tests.sh -c configs/models-roberta.txt -t 1
   - name: tests_int4_quantization
     steps:
       - name: test_awq
