@@ -1801,12 +1801,38 @@ class HPUModelRunner:
         return model_runner_output
 
     def load_model(self) -> None:
+        import habana_frameworks.torch.core as htcore
+        if self.model_config.quantization == 'inc' or \
+            self.model_config.quantization == 'fp8':
+            htcore.hpu_set_env()
         logger.info("Starting to load model %s...", self.model_config.model)
         with HabanaMemoryProfiler() as m:  # noqa: SIM117
             self.model = get_model(vllm_config=self.vllm_config)
         self.model_memory_usage = m.consumed_device_memory
         logger.info("Loading model weights took %.4f GB",
                     self.model_memory_usage / float(2**30))
+            
+        if self.model_config.quantization == 'inc':
+            logger.info("Preparing model with INC..")
+            with HabanaMemoryProfiler() as m_inc:
+                from neural_compressor.torch.quantization import (
+                    FP8Config, convert, prepare)
+                config = FP8Config.from_json_file(
+                    os.getenv("QUANT_CONFIG", ""))
+                if config.measure:
+                    self.model = prepare(self.model, config)
+                elif config.quantize:
+                    self.model = convert(self.model, config)
+                htcore.hpu_initialize(self.model,
+                                      mark_only_scales_as_const=True)
+            self.inc_initialized_successfully = True
+            self.model_memory_usage = m.consumed_device_memory
+            logger.info("Preparing model with INC took %.4f GB",
+                    self.model_memory_usage / float(2**30))
+        elif not is_fake_hpu():
+            self.model = self.model.to("hpu")
+            htcore.mark_step()
+
         hidden_layer_markstep_interval = int(
             os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
         model_config = getattr(self.model, "config", None)
