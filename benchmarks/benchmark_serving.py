@@ -350,8 +350,7 @@ async def benchmark(
     async for request in get_request(input_requests, request_rate, burstiness):
         extra_body = {
             "top_p": 0.9,
-            "top_k":
-            k_i,  # Intel sampler: 6127 (7092); V1 sampler: 6312 (7304, 7525)
+            "top_k": k_i,
             "temperature": 1.0,
         }
         k_i += 1
