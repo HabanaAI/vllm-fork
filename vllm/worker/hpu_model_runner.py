@@ -75,7 +75,7 @@ _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
-                                       'false').lower() == 'true'
+                                       'true').lower() == 'true'
 DUMMY_TOKEN_ID = -1
 
 
@@ -1597,6 +1597,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
+        logger.info(f"profiling run with {max_batch_size=}, {max_seq_len=}")
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
         return
