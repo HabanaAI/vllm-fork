@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
+
 import pytest
 
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
-from ....conftest import _ImageAssets
+from ....conftest import ImageTestAssets
 from ...utils import build_model_context
 
 
@@ -20,7 +21,7 @@ from ...utils import build_model_context
 # yapf: enable
 @pytest.mark.parametrize("num_imgs", [1, 2])
 def test_processor_force_alignment_resize(
-    image_assets: _ImageAssets,
+    image_assets: ImageTestAssets,
     model_id: str,
     resize_shape: tuple[int, int],
     num_imgs: int,
@@ -75,7 +76,7 @@ def test_processor_force_alignment_resize(
 # yapf: enable
 @pytest.mark.parametrize("num_imgs", [1])
 def test_processor_force_alignment_resize_to_min_value(
-    image_assets: _ImageAssets,
+    image_assets: ImageTestAssets,
     model_id: str,
     resize_shape: tuple[int, int],
     num_imgs: int,
