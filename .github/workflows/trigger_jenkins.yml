@@ -17,6 +17,7 @@ jobs:
       pr_branch: ${{ steps.extract_pr.outputs.pr_branch }}
       pr_target_branch: ${{ steps.extract_pr.outputs.pr_target_branch }}
       pr_sha: ${{ steps.extract_pr.outputs.pr_sha }}
+      is_version_branch: ${{ steps.extract_pr.outputs.is_version_branch }}
     steps:
       - name: 'Checkout Repository'
         uses: actions/checkout@v4
@@ -26,7 +27,7 @@ jobs:
           token: ${{ secrets.GH_PAT }}
       - name: Parse Comment
         run: |
-          MAINTAINERS=$(grep -E '^[^#]' .github/CODEOWNERS | tr -d '@*')
+          MAINTAINERS=$(grep -Eh '^[^#]' .github/CODEOWNERS .github/TESTOWNERS | tr -d '@*' | tr '\n' ' ')
           COMMENTER=${{ github.event.comment.user.login }}
           echo "Maintainers are: ${MAINTAINERS}"
           echo "Commenter Is: ${COMMENTER}"
@@ -51,6 +52,9 @@ jobs:
             echo "pr_target_branch=$target_branch" >> "$GITHUB_OUTPUT"
             pr_sha=$(curl -sH "Authorization: token ${{ secrets.GH_PAT }}" https://api.github.com/repos/${{github.repository}}/pulls/${PR_NUMBER} | jq -r '.head.sha')
             echo "pr_sha=$pr_sha" >> $GITHUB_OUTPUT
+            version_regex='^v([0-9]+)\.([0-9]+)\.([0-9]+)_next$'
+            is_version_branch=$([[ $target_branch =~ $version_regex ]] && echo true || echo "")
+            echo "is_version_branch=$is_version_branch" >> "$GITHUB_OUTPUT"
   DependencyReview:
     name: Dependency Review
     runs-on: ubuntu-latest
@@ -218,16 +222,23 @@ jobs:
           env:
             TARGET_BRANCH: ${{ needs.read_codeowners.outputs.pr_target_branch }}
             RELEASED_SYNAPSE_VERSION: ${{ vars.RELEASED_SYNAPSE_VERSION }}
-            BASE_BRANCH: ${{ needs.read_codeowners.outputs.pr_branch }}      
+            BASE_BRANCH: ${{ needs.read_codeowners.outputs.pr_branch }}
+            IS_VERSION_BRANCH: ${{ needs.read_codeowners.outputs.is_version_branch }}
           run: |
-            version_regex='^v([0-9]+)\.([0-9]+)\.([0-9]+)$'
-            if [[ $TARGET_BRANCH =~ $version_regex ]]; then
+            LOG_REDIRECTION="\&>"
+            LOG_REGEX=""
+            if [ -n "${IS_VERSION_BRANCH}" ]; then
               synapse_version=${TARGET_BRANCH#v}
+              synapse_version=${synapse_version%_*}
+              synapse_build_endpoint="https://dms.habana-labs.com/api/v1.1/guide/info/${synapse_version}/latest?type=docker-pt"
             else
               synapse_version=${RELEASED_SYNAPSE_VERSION#v}
+              LOG_REDIRECTION="'"
+              LOG_REGEX=".*$"
+              synapse_build_endpoint="https://dms.habana-labs.com/api/v1.1/branch/info/v${synapse_version}"
             fi
-            echo "Using SynapseAI version ${synapse_version}"            
-            synapse_build=$(curl "https://dms.habana-labs.com/api/v1.1/branch/info/v$synapse_version" | jq -r ".release_id")
+            echo "Using SynapseAI version ${synapse_version}"
+            synapse_build=$(curl "${synapse_build_endpoint}" | jq -r ".release_id")
             pt_version=${{ vars.PT_VERSION }}
             BUILD_TAG="Github-vLLM-Fork-${{ github.event.number }}-${{github.run_number}}"
             safe_cmd=${TEST_COMMAND//&/\\&}
@@ -239,17 +250,28 @@ jobs:
             sed -i "s/##PYTORCH_VERSION##/${pt_version}/g" pod.yml
             sed -i "s|##GIT_BRANCH##|$BASE_BRANCH|g" pod.yml
             sed -i "s|##CMD##|$safe_cmd|g" pod.yml
+            sed -i "s|##LOG_REDIRECTION##$LOG_REGEX|$LOG_REDIRECTION|g" pod.yml
             echo "Pod Template Created"
         - name: Run Test
+          env:
+            IS_VERSION_BRANCH: ${{ needs.read_codeowners.outputs.is_version_branch }}
           run: |
             random_string=$(tr -dc 'a-z0-9' </dev/urandom | head -c 10)
+            pod_name="vllm-fork-${{github.event.issue.number}}-${random_string}"
+            set +e
             hlctl create containers \
                 --file=pod.yml \
                 --flavor=${{ matrix.tests.flavor}} \
-                --name="vllm-fork-${{github.event.issue.number}}-${random_string}" \
+                --name="${pod_name}" \
                 --namespace="framework" \
                 --retry \
                 --shm=10240
+            test_status=$?
+            set -e
+            if [ -n "${IS_VERSION_BRANCH}" ]; then
+              echo "Logs are available at https://logs-browser.k8s-infra.habana-labs.com/files/${pod_name}-tfjob"
+            fi
+            exit $test_status
         - name: Create Commit Status(Failure)
           uses: actions/github-script@v7
           if: failure()

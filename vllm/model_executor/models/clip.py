@@ -15,6 +15,7 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+from vllm.model_executor.models.interfaces import SupportsQuant
 
 from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs
 
@@ -27,9 +28,6 @@ class CLIPEncoderInfo(VisionEncoderInfo[CLIPVisionConfig]):
         image_width: int,
         image_height: int,
     ) -> int:
-        return self.get_patch_grid_length()**2 + 1
-
-    def get_max_image_tokens(self) -> int:
         return self.get_patch_grid_length()**2 + 1
 
     def get_image_size(self) -> int:
@@ -250,7 +248,7 @@ class CLIPEncoder(nn.Module):
     def forward(
         self, inputs_embeds: torch.Tensor, return_all_hidden_states: bool
     ) -> Union[torch.Tensor, list[torch.Tensor]]:
-        hidden_states_pool = []
+        hidden_states_pool = [inputs_embeds]
         hidden_states = inputs_embeds
 
         for encoder_layer in self.layers:
@@ -335,10 +333,10 @@ class CLIPVisionTransformer(nn.Module):
         return encoder_outputs
 
 
-class CLIPVisionModel(nn.Module):
-
+class CLIPVisionModel(nn.Module, SupportsQuant):
     config_class = CLIPVisionConfig
     main_input_name = "pixel_values"
+    packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"]}
 
     def __init__(
         self,

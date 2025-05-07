@@ -93,12 +93,17 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
             externally (before the next schedule() call)
         """
         # Sequences can be in RUNNING or FINISHED_ABORTED state
-        # once scheduled, as a sequence is moved to FINSIHED_ABORTED
+        # once scheduled, as a sequence is moved to FINISHED_ABORTED
         # if a client disconnects from the api server.
         seqs = sequence_group.get_seqs(status=SequenceStatus.RUNNING)
         if seqs is None:
             seqs = sequence_group.get_seqs(
                 status=SequenceStatus.FINISHED_ABORTED)
+
+        for output in outputs:
+            if output.samples[0].output_token != VLLM_INVALID_TOKEN_ID:
+                sequence_group.metrics.spec_token_acceptance_counts[
+                    output.step_index] += 1
 
         assert seqs, "Expected RUNNING or FINISHED_ABORTED sequences"
         assert len(seqs) == 1, (
@@ -173,7 +178,7 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
         # generates a fixed number of tokens without evaluating stopping
         # conditions within the block. This can cause an eos token to be
         # unintentionally ignored.
-        if not sampling_params.ignore_eos:
+        if not sampling_params.ignore_eos and self.detokenizer:
             eos_token_id = self.get_tokenizer_for_seq(seq).eos_token_id
             # Avoiding .index calls as exception throwing in the happy path
             # is expensive.

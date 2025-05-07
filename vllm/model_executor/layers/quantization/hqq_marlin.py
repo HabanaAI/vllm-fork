@@ -8,6 +8,7 @@ from vllm import _custom_ops as ops
 from vllm.logger import init_logger
 from vllm.model_executor.layers.linear import (LinearBase, LinearMethodBase,
                                                UnquantizedLinearMethod)
+from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.layers.quantization.utils.marlin_utils import (
@@ -33,6 +34,7 @@ class HQQMarlinConfig(QuantizationConfig):
         group_size: int,
         skip_modules: Optional[List[str]] = None,
     ) -> None:
+        super().__init__()
         assert group_size == 64, ("The only supported HQQ group size is "
                                   "currently 64.")
         assert weight_bits == 4, ("The only supported HQQ quantization "
@@ -49,7 +51,7 @@ class HQQMarlinConfig(QuantizationConfig):
                 f"group_size={self.group_size})")
 
     @classmethod
-    def get_name(cls) -> str:
+    def get_name(cls) -> QuantizationMethods:
         return "hqq"
 
     @classmethod
