@@ -1052,7 +1052,7 @@ class HPUModelRunner:
         return padded_batch_size, padded_prompt_len
 
     def _prefill_find_batch_size(self, num_scheduled_tokens, batch_idx,
-                                 num_reqs, fake_prefix_prefill, bucketing):
+                                 num_reqs, bucketing):
         num_prefills: int
         padded_batch_size: int
         padded_prompt_len: int
@@ -1065,21 +1065,9 @@ class HPUModelRunner:
             num_prefills = possible_batch_size
             batch_req_ids = self.input_batch.req_ids[batch_idx:batch_idx +
                                                      num_prefills]
-            batch_context_lens = self.input_batch.num_computed_tokens_cpu[
-                batch_idx:batch_idx + num_prefills]
-            batch_num_prompt_tokens = self.input_batch.num_prompt_tokens[
-                batch_idx:batch_idx + num_prefills]
-            batch_num_scheduled_tokens = num_scheduled_tokens[
-                batch_idx:batch_idx + num_prefills]
 
             prompt_lens = num_scheduled_tokens[batch_idx:batch_idx +
                                                num_prefills]
-
-            if fake_prefix_prefill:
-                for i in range(num_prefills):
-                    if batch_context_lens[i] > 0 and batch_num_scheduled_tokens[
-                            i] != batch_num_prompt_tokens[i]:
-                        prompt_lens[i] = batch_num_prompt_tokens[i]
 
             max_prompt_len = max(prompt_lens)
             num_tokens = sum(prompt_lens)
@@ -1116,7 +1104,6 @@ class HPUModelRunner:
         prefill_attn_metadata = []
         prefill_logits_indices = []
         block_table_cpu_tensor = self.input_batch.block_table.get_cpu_tensor()
-        fake_prefix_prefill = False
 
         # DECODES are the first num_decodes REQUESTS.
         # PREFILLS are the next num_reqs - num_decodes REQUESTS.
@@ -1132,15 +1119,14 @@ class HPUModelRunner:
 
             batch_req_ids, padded_batch_size, padded_prompt_len = (
                 self._prefill_find_batch_size(num_scheduled_tokens, batch_idx,
-                                              num_reqs, fake_prefix_prefill,
-                                              bucketing))
+                                              num_reqs, bucketing))
             num_prefills = len(batch_req_ids)
             context_lens = self.input_batch.num_computed_tokens_cpu[
                 batch_idx:batch_idx + num_prefills]
             batch_num_scheduled_tokens = num_scheduled_tokens[
                 batch_idx:batch_idx + num_prefills]
 
-            use_prefix_prefill = any(context_lens) and not fake_prefix_prefill
+            use_prefix_prefill = any(context_lens)
             # TODO(kzawora): this is an ugly hack for prefix caching, remove
             # padded_batch_size = num_prefills
             if use_prefix_prefill:
