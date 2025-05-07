@@ -217,7 +217,7 @@ class Sampler(nn.Module):
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
 
-        sampler_type = os.getenv("VLLM_SAMPLER_TYPE", "v0")
+        sampler_type = os.getenv("VLLM_SAMPLER_TYPE", "intel")
         if sampler_type == "v0":
             self._top_k_scalar = torch.tensor(
                 [top_k_scalar], device="hpu") if top_k_scalar else None
@@ -234,6 +234,10 @@ class Sampler(nn.Module):
             self._top_k_scalar = top_k_scalar
             self._top_p_scalar = top_p_scalar
             self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
+        elif sampler_type == "intel-v2":
+            self._top_k_scalar = top_k_scalar
+            self._top_p_scalar = top_p_scalar
+            self._apply_top_k_top_p_opt = apply_top_k_top_p_v2
         else:
             raise ValueError(f"Unknown sampler type: {sampler_type}")
 
@@ -297,12 +301,13 @@ class Sampler(nn.Module):
         if do_top_p_top_k and flashinfer_top_k_top_p_sampling is None:
             # If we have a scalar p and k, we can use the optimized version.
             if self._top_k_scalar and self._top_p_scalar:
-                logits = self._apply_top_k_top_p_opt(logits,
-                                                     self._top_p_scalar,
-                                                     self._top_k_scalar)
+                logits = self._apply_top_k_top_p_opt(logits=logits,
+                                                     p=self._top_p_scalar,
+                                                     k=self._top_k_scalar)
             else:
-                logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
-                                            sampling_tensors.top_ks)
+                logits = _apply_top_k_top_p(logits=logits,
+                                            p=sampling_tensors.top_ps,
+                                            k=sampling_tensors.top_ks)
 
         if do_min_p:
             logits = _apply_min_p(logits, sampling_tensors.min_ps)
@@ -494,6 +499,46 @@ class ApplyToppTopkScalar:
         new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
 
         return new_logits
+
+
+def apply_top_k_top_p_v2(
+    logits: torch.Tensor,
+    k: int,
+    p: int,
+) -> torch.Tensor:
+
+    if os.getenv('VLLM_HANDLE_TOPK_DUPLICATES', '0').lower() in ['1', 'true']:
+        return apply_top_k_top_p_v1(logits, torch.Tensor([k]),
+                                    torch.Tensor([p]))
+
+    if k == 1:
+        new_logits = torch.full(logits.shape,
+                                -float("inf"),
+                                device=logits.device)
+        vals, idx = torch.max(logits, keepdim=True, dim=1)
+        new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
+        return new_logits
+
+    vals, idx = torch.topk(logits, k=k, dim=1, sorted=True)
+
+    idx = torch.fliplr(idx)
+    vals = torch.fliplr(vals)
+
+    top_k_smallest_val_idx = vals.size(1) - k
+    top_k_mask = vals[:, top_k_smallest_val_idx].unsqueeze(1)
+    top_k_mask = vals < top_k_mask
+    vals.masked_fill_(top_k_mask, -float("inf"))
+
+    probs_sort = vals.softmax(dim=-1)
+    probs_sum = probs_sort.cumsum(dim=-1)
+    top_p_mask = probs_sum <= (1 - p)
+    top_p_mask[:, -1] = False
+    vals.masked_fill_(top_p_mask, -float("inf"))
+
+    new_logits = torch.full(logits.shape, -float("inf"), device=logits.device)
+    new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
+
+    return new_logits
 
 
 def _apply_min_tokens_penalty(
