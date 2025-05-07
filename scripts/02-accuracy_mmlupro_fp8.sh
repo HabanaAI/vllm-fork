@@ -18,7 +18,6 @@ else
     ep_size=1
 fi
 
-echo ${ep_size}
 if [ "${ep_size}" -gt 1 ]; then
     enable_expert_parallel="True"
 else
