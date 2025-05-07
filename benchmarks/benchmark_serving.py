@@ -679,7 +679,7 @@ def main(args: argparse.Namespace):
         k: v
         for k, v in {
             "top_p": args.top_p,
-            "top_k": random.randint(2, 10),
+            "top_k": args.top_k,
             "min_p": args.min_p,
             "temperature": args.temperature
         }.items() if v is not None
