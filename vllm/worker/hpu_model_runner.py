@@ -878,7 +878,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     vllm_config=self.vllm_config,
                     layer_names=path_to_rope,
                     is_causal=self.is_causal,
-                    sampler=self.sampler,)
+                    sampler=self.sampler)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
             with HabanaMemoryProfiler() as m_wrap:
