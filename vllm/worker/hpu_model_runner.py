@@ -81,8 +81,6 @@ _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
-VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
-                                       'false').lower() == 'true'
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
@@ -747,6 +745,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Speculative decoding is not supported with "
                 "contiguous PA, please set VLLM_CONTIGUOUS_PA=false")
         # For both multi-step scheduling and delayed sampling
+        self.is_single_step = \
+            self.vllm_config.scheduler_config.num_scheduler_steps == 1
         self.cached_step_outputs: List[torch.Tensor] = []
         self.is_pooler = False
         self.is_causal = is_causal
@@ -756,6 +756,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.spec_decode_enabled = \
             self.vllm_config.speculative_config is not None
         self.sampler = get_sampler()
+        default_use_delayed_sampling = (not self.spec_decode_enabled
+                                        and not is_fake_hpu()
+                                        and self.is_single_step)
+        default_use_delayed_sampling = 'true' if default_use_delayed_sampling \
+            else 'false'
+        self.use_delayed_sampling = (os.environ.get(
+            'VLLM_DELAYED_SAMPLING',
+            default_use_delayed_sampling).lower() == 'true')
 
     def _set_gc_threshold(self) -> None:
         """
@@ -2099,9 +2107,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            is_single_step = \
-                self.vllm_config.scheduler_config.num_scheduler_steps == 1
-            if is_prompt or is_single_step:
+            if is_prompt or self.is_single_step:
                 intermediate_tensors = None
                 if not get_pp_group().is_first_rank:
                     intermediate_tensors = \
@@ -2614,7 +2620,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
+        use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
         assert not (use_delayed_sampling and
