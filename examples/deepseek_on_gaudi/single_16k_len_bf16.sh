@@ -19,8 +19,6 @@ export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
 export PT_HPU_LAZY_MODE=1
 export VLLM_MLA_DISABLE_REQUANTIZATION=1
 
-export VLLM_EP_SIZE=8
-
 block_size=128
 
 # memory footprint tuning params

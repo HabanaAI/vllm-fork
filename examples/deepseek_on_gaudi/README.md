@@ -89,7 +89,7 @@ pip install datasets
 bash benchmark_vllm_client.sh
 ```
 
-This script calls the standard vLLM benchmark serving tool to check the vLLM throughput.
+This script calls the standard vLLM benchmark serving tool to check the vLLM throughput. The input and output are both 1k. Concurrency 1 and 32 are used.
 
 ### **7. Check the vLLM Accuracy**
 
