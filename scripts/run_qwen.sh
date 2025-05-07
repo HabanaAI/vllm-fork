@@ -60,7 +60,7 @@ elif [ "$MODE" == "quant" ]; then
 
 else
   echo "Unknown mode: $MODE"
-  echo "Valid modes are: bf16, calib"
+  echo "Valid modes are: bf16, calib, quant"
   exit 1
 fi
 
