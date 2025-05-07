@@ -2092,14 +2092,15 @@ class HPUModelRunner:
         scheduled_tokens: dict[str, int] = {}
 
         if prompt_cfg:
-            prompt_bs, prompt_seq_len, prompt_ctx_len = prompt_cfg
+            prompt_bs, prompt_query_len, prompt_blocks = prompt_cfg
+            prompt_ctx_len = prompt_blocks * self.block_size
+            prompt_total_tokens = prompt_query_len + prompt_ctx_len
             for _ in range(prompt_bs):
                 self._add_dummy_request(requests,
                                         scheduled_tokens,
                                         num_computed_tokens=prompt_ctx_len,
-                                        total_tokens=prompt_seq_len,
-                                        scheduled_tokens=(prompt_seq_len -
-                                                          prompt_ctx_len))
+                                        total_tokens=prompt_total_tokens,
+                                        scheduled_tokens=prompt_query_len)
         if decode_cfg:
             decode_bs, decode_blocks = decode_cfg
             decode_seq_lengths = self._generate_seq_lengths(
