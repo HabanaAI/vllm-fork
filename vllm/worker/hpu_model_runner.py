@@ -2258,9 +2258,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
-            cache_size_limit = 1 + multiplier * (
-                len(self.bucketing_ctx.prompt_buckets) +
-                len(self.bucketing_ctx.decode_buckets))
+            if self.is_pooler:
+                 cache_size_limit = 1 + multiplier * (
+                len(self.bucketing_ctx.prompt_buckets))
+            else:
+                cache_size_limit = 1 + multiplier * (
+                    len(self.bucketing_ctx.prompt_buckets) +
+                    len(self.bucketing_ctx.decode_buckets))
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
