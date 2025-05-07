@@ -2,8 +2,14 @@ from vllm import LLM
 from vllm.sampling_params import SamplingParams
 from huggingface_hub import hf_hub_download
 from datetime import datetime, timedelta
+import os
 
-model_name = "mistralai/Pixtral-Large-Instruct-2411"
+os.environ['VLLM_SKIP_WARMUP']='true'
+os.environ['PT_HPU_LAZY_MODE']='1'
+os.environ['PT_HPUGRAPH_DISABLE_TENSOR_CACHE']='0'
+os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES']='true'
+os.environ['PT_HPU_WEIGHT_SHARING']='0'
+model_name = "/mnt/weka/llm/pixtral/Pixtral-12B-2409"
 # model_name = "mistralai/Pixtral-12B-2409"
 
 def load_system_prompt(repo_id: str, filename: str) -> str:
@@ -36,11 +42,20 @@ def main():
         SYSTEM_PROMPT = load_system_prompt(model_name, "SYSTEM_PROMPT.txt")
         messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
-    sampling_params = SamplingParams(max_tokens=512)
+    sampling_params = SamplingParams(max_tokens=5192)
 
     # note that running this model on GPU requires over 300 GB of GPU RAM
 
-    llm = LLM(model=model_name, max_model_len=1024*8, config_format="mistral", load_format="mistral", tokenizer_mode="mistral", tensor_parallel_size=1, limit_mm_per_prompt={"image": 4})
+    llm = LLM(model=model_name, 
+              max_model_len=1024*8, 
+              config_format="mistral", 
+              load_format="mistral", 
+              tokenizer_mode="mistral",
+              dtype='bfloat16', 
+              enforce_eager=False,
+              tensor_parallel_size=1, 
+              limit_mm_per_prompt={"image": 4}
+            )
 
     outputs = llm.chat(messages, sampling_params=sampling_params)
 
