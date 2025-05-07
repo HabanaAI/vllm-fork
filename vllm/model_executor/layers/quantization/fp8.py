@@ -846,6 +846,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             e_score_correction_bias=e_score_correction_bias,
         )
 
+        if current_platform.is_hpu():
+            topk_ids = topk_ids.view(*x.shape[:-1], -1)
+            topk_weights = topk_weights.view(*x.shape[:-1], -1)
+            return layer.moe_op(x, topk_ids.to(torch.int64),
+                                topk_weights.to(x.dtype))
         if self.use_marlin:
             return torch.ops.vllm.fused_marlin_moe(
                 x,
@@ -859,12 +864,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 quant_type_id=scalar_types.float8_e4m3fn.id,
                 global_num_experts=global_num_experts,
                 expert_map=expert_map)
-        if current_platform.is_hpu():
-            topk_ids = topk_ids.view(*x.shape[:-1], -1)
-            topk_weights = topk_weights.view(*x.shape[:-1], -1)
-            return layer.moe_op(x, topk_ids.to(torch.int64),
-                                topk_weights.to(x.dtype))
-
         return fused_experts(
             x,
             layer.w13_weight,

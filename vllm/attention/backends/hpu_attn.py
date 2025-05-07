@@ -197,7 +197,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
     def forward(
         self,
         layer: AttentionLayer,
-        hidden_states_or_q_c: torch.Tensor,  # query in unified attn
+        q: torch.Tensor,
         k_c_normed: torch.Tensor,  # key in unified attn
         k_pe: torch.Tensor,  # value in unified attn
         kv_cache: torch.Tensor,
@@ -208,27 +208,31 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             raise NotImplementedError(
                 "output is not yet supported for MLAImplBase")
 
-        batch_size = hidden_states_or_q_c.shape[0]
-
+        batch_size = q.shape[0]
         is_prefill = attn_metadata.is_prompt
 
+        # Restore head dim (for rotary embedding)
         k_pe = k_pe.view(-1, 1, self.qk_rope_head_dim)
-
+        q = q.view(-1, self.num_heads, self.qk_head_dim)
         assert hasattr(attn_metadata,
                        "input_positions"), f"attn meta: {attn_metadata}"
 
+        input_positions = attn_metadata.input_positions.view(-1)
         if not is_prefill:
-            q_nope, q_pe = self._q_proj_and_k_up_proj(hidden_states_or_q_c)
-            input_positions = attn_metadata.input_positions.view(-1)
+            # decode
+            q_nope, q_pe = q.split(
+                [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+            # Convert from (B, N, P) to (N, B, P)
+            q_nope = q_nope.transpose(0, 1)
+            # Multiply (N, B, P) x (N, P, L) -> (N, B, L)
+            decode_ql_nope = torch.bmm(q_nope, self.W_UK_T)
+            # Convert from (N, B, L) to (B, N, L)
+            decode_ql_nope = decode_ql_nope.transpose(0, 1)
             q_pe, k_pe = \
                 self.rotary_emb(input_positions, q_pe, k_pe)
         else:
-            q = self.q_proj(hidden_states_or_q_c)[0]\
-                .view(-1, self.num_heads, self.qk_head_dim)
-
+            # prefill
             q_pe = q[..., self.qk_nope_head_dim:]
-
-            input_positions = attn_metadata.input_positions.view(-1)
             q[..., self.qk_nope_head_dim:], k_pe = \
                 self.rotary_emb(input_positions, q_pe, k_pe)
 
@@ -255,8 +259,9 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             return self._forward_prefill(q, k_c_normed, k_pe, attn_metadata,
                                          batch_size)
         else:
-            return self._forward_decode(q_nope, q_pe, (k_cache, v_cache),
-                                        attn_metadata, batch_size)
+            return self._forward_decode(decode_ql_nope, q_pe,
+                                        (k_cache, v_cache), attn_metadata,
+                                        batch_size)
 
     def _forward_prefill(  # type: ignore
             self, q: torch.Tensor, k_c_normed: torch.Tensor,
@@ -269,14 +274,20 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
 
         k = torch.cat((k_nope, k_pe.expand((*k_nope.shape[:-1], -1))), dim=-1)
 
-        # For MLA the v head dim is smaller than qk head dim so we pad out
-        # v with 0s to match the qk head dim
-        v_padded = torch.nn.functional.pad(v, [0, q.shape[-1] - v.shape[-1]],
-                                           value=0)
         q = q.view(batch_size, -1, self.num_heads, self.qk_head_dim)
         k = k.view(batch_size, -1, self.num_heads, self.qk_head_dim)
-        v_padded = v_padded.view(batch_size, -1, self.num_heads,
-                                 self.qk_head_dim)
+        v = v.view(batch_size, -1, self.num_heads, self.v_head_dim)
+
+        to_pad = self.qk_head_dim - self.v_head_dim
+        if to_pad > 0:
+            v_padding = torch.zeros(*v.shape[:-1],
+                                    q.shape[-1] - v.shape[-1],
+                                    device=v.device,
+                                    dtype=v.dtype)
+            v_padded = torch.cat((v, v_padding), dim=-1)
+        else:
+            v_padded = v
+
         out = ops.prompt_attention(
             impl=self.prefill_impl,
             query=q,
@@ -295,7 +306,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         attn_output = attn_output[..., :v.shape[-1]]\
                 .reshape(batch_size, -1, self.num_heads * v.shape[-1])
 
-        return self.o_proj(attn_output)[0]
+        return attn_output
 
     def _forward_decode(  # type: ignore
             self, q_nope: torch.Tensor, q_pe: torch.Tensor,
@@ -322,7 +333,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             values_fetch_func=None,
             kv_lora_rank=self.kv_lora_rank)
         output = output.view(batch_size, 1, -1)
-        result = self._v_up_proj_and_o_proj(output)
+        result = self._v_up_proj(output)
         result = result.view(batch_size, 1, -1)
         return result
 
