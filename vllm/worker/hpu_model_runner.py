@@ -756,8 +756,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.spec_decode_enabled = \
             self.vllm_config.speculative_config is not None
         self.sampler = get_sampler()
-        default_use_delayed_sampling = 'true' \
-            if not self.spec_decode_enabled else 'false'
+        default_use_delayed_sampling = (not self.spec_decode_enabled
+                                        and not is_fake_hpu())
+        default_use_delayed_sampling = 'true' if default_use_delayed_sampling \
+            else 'false'
         self.use_delayed_sampling = (os.environ.get(
             'VLLM_DELAYED_SAMPLING',
             default_use_delayed_sampling).lower() == 'true')
