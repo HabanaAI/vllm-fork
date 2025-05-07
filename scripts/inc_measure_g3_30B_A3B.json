@@ -11,5 +11,5 @@
         "names": ["lm_head"]
     },
     "quantize_weight": false,
-    "dump_stats_path": "./scripts/nc_workspace_measure_kvache_g3_30B_A3B/inc_measure_output"
+    "dump_stats_path": "./nc_workspace_measure_kvache_g3_30B_A3B/inc_measure_output"
 }

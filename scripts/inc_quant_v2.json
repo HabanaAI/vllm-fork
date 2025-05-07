@@ -14,5 +14,5 @@
             "mlp\\.gate\\b"
         ]
     },
-    "dump_stats_path": "./scripts/nc_workspace_measure_kvache_v2/inc_measure_output"
+    "dump_stats_path": "nc_workspace_measure_kvache_v2/inc_measure_output"
 }
