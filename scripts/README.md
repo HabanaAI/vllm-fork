@@ -57,7 +57,6 @@ QUANT_CONFIG=inc_quant_g2_235B_A22B.json bash 03-accuracy_gsm8k_fp8.sh --model_p
 ### Benchmark
 ```bash
 cd scripts;
-bash 01-benchmark-online_fp8_30B.sh  --model_path ${model_path}
-bash 01-benchmark-online_fp8_32B.sh  --model_path ${model_path}
-bash 01-benchmark-online_fp8_235B.sh  --model_path ${model_path}
+QUANT_CONFIG=inc_quant_g3_30B_A3B.json bash 01-benchmark-online_fp8.sh  --model_path ${model_path}
+QUANT_CONFIG=inc_quant_g2_235B_A22B.json bash 01-benchmark-online_fp8_235B.sh  --model_path ${model_path} --tp_size 8 --ep_size 8
 ```
