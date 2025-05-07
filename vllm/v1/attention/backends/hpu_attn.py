@@ -64,8 +64,8 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
     @classmethod
     def make_cached_prefill_metadata(cls, seq_lens_tensor, context_lens_tensor,
                                      num_prefills, num_prefill_tokens,
-                                     input_positions, slot_mapping,
-                                     block_list, block_size):
+                                     input_positions, slot_mapping, block_list,
+                                     block_size):
         return cls(is_prompt=True,
                    block_list=block_list,
                    block_mapping=None,
@@ -86,7 +86,8 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
 
     @classmethod
     def make_decode_metadata(cls, block_list, block_usage, block_groups,
-                             input_positions, num_decode_tokens, slot_mapping, block_size):
+                             input_positions, num_decode_tokens, slot_mapping,
+                             block_size):
         return cls(is_prompt=False,
                    block_mapping=None,
                    block_indices_with_offsets=None,
