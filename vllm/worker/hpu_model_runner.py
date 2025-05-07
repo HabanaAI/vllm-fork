@@ -82,7 +82,7 @@ _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
-                                       'false').lower() == 'true'
+                                       'true').lower() == 'true'
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
@@ -747,6 +747,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Speculative decoding is not supported with "
                 "contiguous PA, please set VLLM_CONTIGUOUS_PA=false")
         # For both multi-step scheduling and delayed sampling
+        self.is_single_step = \
+            self.vllm_config.scheduler_config.num_scheduler_steps == 1
         self.cached_step_outputs: List[torch.Tensor] = []
         self.is_pooler = False
         self.is_causal = is_causal
@@ -2099,9 +2101,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            is_single_step = \
-                self.vllm_config.scheduler_config.num_scheduler_steps == 1
-            if is_prompt or is_single_step:
+            if is_prompt or self.is_single_step:
                 intermediate_tensors = None
                 if not get_pp_group().is_first_rank:
                     intermediate_tensors = \
