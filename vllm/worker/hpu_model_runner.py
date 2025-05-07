@@ -706,6 +706,62 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
 
+    def _maybe_init_alibi_biases(self) -> None:
+        layers = None
+        layer_alibi_config = None
+        if (not hasattr(self.model, "config")
+                or not hasattr(self.model.config, "architectures")):
+            pass
+        elif "BaichuanForCausalLM" in self.model.config.architectures:
+            if self.model.config.hidden_size != 4096:
+                layers = self.model.model.layers
+                layer_alibi_config = lambda layer: (
+                    layer.self_attn.attn,
+                    layer.self_attn.max_position_embeddings,
+                )
+        elif "JAISLMHeadModel" in self.model.config.architectures:
+            if self.model.config.position_embedding_type == "alibi":
+                layers = self.model.transformer.h
+                layer_alibi_config = lambda layer: (
+                    layer.attn.attn,
+                    self.model.config.max_position_embeddings,
+                )
+        elif "FalconForCausalLM" in self.model.config.architectures:
+            if self.model.config.alibi:
+                layers = self.model.transformer.h
+                layer_alibi_config = lambda layer: (
+                    layer.self_attention.attn,
+                    getattr(self.model.config, "max_position_embeddings", 8192
+                            ),
+                )
+        elif "MPTForCausalLM" in self.model.config.architectures:
+            if self.model.config.attn_config['alibi']:
+                layers = self.model.transformer.blocks
+                layer_alibi_config = lambda layer: (
+                    layer.attn.attn,
+                    self.model.config.max_seq_len,
+                )
+        elif "BloomForCausalLM" in self.model.config.architectures:
+            layers = self.model.transformer.h
+            layer_alibi_config = lambda layer: (
+                layer.self_attention.attn,
+                None,
+            )
+
+        if (layers is not None and layer_alibi_config is not None):
+            self.use_alibi = True
+            prev_attn = None
+            for layer in layers:
+                attn, max_seq_len = layer_alibi_config(layer)
+                if (hasattr(attn.impl, "_maybe_init_alibi_biases")):
+                    attn.impl._maybe_init_alibi_biases(
+                        max_seq_len=max_seq_len,
+                        prev_attn=prev_attn,
+                    )
+                prev_attn = attn
+        else:
+            self.use_alibi = False
+
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
@@ -777,6 +833,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
 
+            self._maybe_init_alibi_biases()
             hidden_layer_markstep_interval = int(
                 os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
             model_config = getattr(self.model, "config", None)
@@ -1061,7 +1118,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_list=prefix_block_list_tensor,
             block_mapping=None,
             block_usage=None,
+            # Set by later "precompute_indices_and_offsets" function call
             block_indices=None,
+            # Set by later "precompute_indices_and_offsets" function call
             block_offsets=None,
             block_scales=None,
             block_groups=None,
@@ -1073,6 +1132,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=num_prefill_tokens,
             num_decode_tokens=0,
             slot_mapping=slot_mapping,
+            alibi_blocks=None,
             multi_modal_placeholder_index_maps=placeholder_index_maps)
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         for t in multi_modal_kwargs:
@@ -1291,6 +1351,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                    dtype=torch.long,
                                                    device='cpu')
 
+        alibi_blocks = None
+        if self.use_alibi:
+            alibi_blocks = self._compute_alibi_block(block_tables, seq_lens,
+                                                     len(block_groups))
+            alibi_blocks = alibi_blocks.to(  # type: ignore
+                self.device, non_blocking=True)
+
         block_list = torch.tensor(block_list, dtype=torch.int, device='cpu')
         block_groups = torch.tensor(block_groups,
                                     dtype=torch.int,
@@ -1327,12 +1394,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             block_list=block_list,
+            # Set by later "_set_block_mapping" function call
             block_mapping=None,
             block_usage=block_usage,
+            # Set by later "precompute_indices_and_offsets" function call
             block_indices=None,
+            # Set by later "precompute_indices_and_offsets" function call
             block_offsets=None,
             block_scales=None,
             block_groups=block_groups,
+            # Set by later "_set_block_mapping" function call
             attn_bias=None,
             seq_lens_tensor=None,
             encoder_seq_lens=encoder_seq_lens,
@@ -1345,6 +1416,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=0,
             num_decode_tokens=num_decode_tokens,
             slot_mapping=slot_mapping,
+            alibi_blocks=alibi_blocks,
             multi_modal_placeholder_index_maps=None)
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
@@ -1354,6 +1426,63 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      lora_requests=lora_requests,
                                      slot_mapping=slot_mapping,
                                      lora_ids=lora_ids)
+
+    def _compute_alibi_block(self, block_tables, seq_lens, num_blocks):
+        """
+        Compute the ALiBi offsets for each block during decoding.
+
+        For each block in each sequence, this function assigns position-based
+        offsets according to ALiBi logic. It returns a tensor that captures
+        these offsets for all sequences and blocks, which is then used for
+        decode-time ALiBi bias creation.
+
+        Args:
+            block_tables:
+                A list of lists, where each inner list contains block indices
+                assigned to a particular sequence.
+            seq_lens:
+                A list of sequence lengths corresponding to each sequence.
+            num_blocks:
+                The total number of blocks across all sequences for which
+                ALiBi offsets need to be computed.
+
+        Returns:
+            A torch.Tensor of shape [num_blocks, block_size], containing ALiBi
+            offsets for each block.
+        """
+        # Create intermediary and output structures
+        max_block_table_len = max(
+            len(block_table) for block_table in block_tables)
+        alibi_offsets = torch.arange(-max_block_table_len * self.block_size +
+                                     1,
+                                     1,
+                                     dtype=torch.long,
+                                     device='cpu')
+        alibi_blocks = torch.zeros((num_blocks, self.block_size),
+                                   dtype=torch.long,
+                                   device='cpu')
+
+        # Assign biases per token
+        for batch_idx in range(len(block_tables)):
+            seq_len = seq_lens[batch_idx]
+            for seq_idx in range(len(block_tables[batch_idx])):
+                block_idx = block_tables[batch_idx][seq_idx]
+
+                # Calculate the number of valid positions in the current block
+                valid_length = seq_len - seq_idx * self.block_size
+                if valid_length > 0:
+                    current_block_length = min(valid_length, self.block_size)
+                    offset_end = current_block_length - valid_length
+                    if offset_end == 0:
+                        alibi_blocks[
+                            block_idx][:current_block_length] = alibi_offsets[
+                                -valid_length:]
+                    else:
+                        alibi_blocks[
+                            block_idx][:current_block_length] = alibi_offsets[
+                                -valid_length:offset_end]
+
+        return alibi_blocks
 
     def prepare_input_tensors(
         self,
@@ -1555,6 +1684,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_offsets',
             'block_scales',
             'block_groups',
+            'alibi_blocks',
         ])
         return attention_metadata
 
