@@ -48,6 +48,9 @@ stages:
       - name: v0_gsm8k_large_g3_tp2_part2
         flavor: g3.s
         command: export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large-2.txt -t 2
+      - name: v0_gsm8k_large_g3_tp2_ep
+        flavor: g3.s
+        command: export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large-ep.txt -t 2
       - name: v0_gsm8k_large_g2_tp4
         flavor: g2.m
         command: export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large.txt -t 4
