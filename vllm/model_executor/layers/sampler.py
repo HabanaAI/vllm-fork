@@ -508,8 +508,9 @@ def apply_top_k_top_p_v2(
 ) -> torch.Tensor:
 
     if os.getenv('VLLM_HANDLE_TOPK_DUPLICATES', '0').lower() in ['1', 'true']:
-        return apply_top_k_top_p_v1(logits, torch.Tensor([k]),
-                                    torch.Tensor([p]))
+        return apply_top_k_top_p_v1(logits=logits,
+                                    k=torch.Tensor([k]),
+                                    p=torch.Tensor([p]))
 
     if k == 1:
         new_logits = torch.full(logits.shape,
