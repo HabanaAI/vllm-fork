@@ -54,6 +54,10 @@ elif [ "$MODE" == "calib" ]; then
   echo "Calibrate model ${MODEL} with config ${QUANT_CONFIG}"
   python run_example_tp_qwen.py $COMMON_ARGS --inc --dataset pile --nprompts 512
 
+elif [ "$MODE" == "quant" ]; then
+  echo "Quantize model ${MODEL} with config ${QUANT_CONFIG}"
+  python run_example_tp_qwen.py $COMMON_ARGS --inc
+
 else
   echo "Unknown mode: $MODE"
   echo "Valid modes are: bf16, calib"
