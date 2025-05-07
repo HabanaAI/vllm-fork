@@ -10,7 +10,6 @@ To achieve the best performance on HPU, please follow the methods outlined in th
 
 ## Requirements
 
-- Ubuntu 22.04 LTS OS
 - Python 3.10
 - Intel Gaudi 2 and 3 AI accelerators
 - Intel Gaudi software version 1.21.0 and above
