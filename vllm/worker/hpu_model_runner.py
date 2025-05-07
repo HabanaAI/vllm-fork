@@ -2259,8 +2259,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
             if self.is_pooler:
-                 cache_size_limit = 1 + multiplier * (
-                len(self.bucketing_ctx.prompt_buckets))
+                cache_size_limit = 1 + multiplier * (len(
+                    self.bucketing_ctx.prompt_buckets))
             else:
                 cache_size_limit = 1 + multiplier * (
                     len(self.bucketing_ctx.prompt_buckets) +
