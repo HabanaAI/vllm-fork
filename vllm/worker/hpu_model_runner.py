@@ -1864,7 +1864,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
                                  True)
             raise AssertionError("Finished profiling")
-        max_blocks = kv_caches[0][0].size(0)
+        max_blocks = kv_caches[0][0].size(0) // self.parallel_config.pipeline_parallel_size
         self.bucketing_ctx.generate_prompt_buckets()
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
         
