@@ -81,8 +81,6 @@ _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
-VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
-                                       'true').lower() == 'true'
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
@@ -758,6 +756,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.spec_decode_enabled = \
             self.vllm_config.speculative_config is not None
         self.sampler = get_sampler()
+        default_use_delayed_sampling = 'true' \
+            if not self.spec_decode_enabled else 'false'
+        self.use_delayed_sampling = (os.environ.get(
+            'VLLM_DELAYED_SAMPLING',
+            default_use_delayed_sampling).lower() == 'true')
 
     def _set_gc_threshold(self) -> None:
         """
@@ -2614,7 +2617,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
+        use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
         assert not (use_delayed_sampling and
