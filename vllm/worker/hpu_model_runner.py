@@ -792,27 +792,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         config = self.model_config.hf_config
         return uses_mrope(config)
 
-    # Chendi: Requested to be added by INC team
-    def _remove_duplicate_submodules_(self, model, inc_config):
-        # FIXME: (Yi)  for deepseek v3 only
-        self_attn = model.model.layers[0].self_attn
-        for layer in model.model.layers:
-            self_attn = layer.self_attn
-            # delete attrs: q_b_proj, kv_b_proj, o_proj in self_attn,
-            # as they have been transferred to the MLAImpl.
-            if hasattr(self_attn, "q_b_proj"):
-                delattr(self_attn, "q_b_proj")
-            if hasattr(self_attn, "kv_b_proj"):
-                delattr(self_attn, "kv_b_proj")
-            if hasattr(self_attn, "o_proj"):
-                delattr(self_attn, "o_proj")
-
-    def _inc_preprocess_(self, model: torch.nn.Module, inc_config):
-        architectures = getattr(self.model_config.hf_config, "architectures",
-                                [])
-        if "DeepseekV3ForCausalLM" in architectures:
-            self._remove_duplicate_submodules_(model, inc_config)
-
     def _is_quant_with_inc(self):
         quant_config = os.getenv("QUANT_CONFIG", None) is not None
         return (self.model_config.quantization == "inc" or quant_config)
@@ -872,7 +851,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         "false") in ("1", "true")
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", ""))
-                    self._inc_preprocess_(self.model, config)
                     if config.measure:
                         self.model = prepare(self.model, config)
                     elif config.quantize:
