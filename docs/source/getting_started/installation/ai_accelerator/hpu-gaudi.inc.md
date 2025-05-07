@@ -7,7 +7,6 @@ This tab provides instructions on how to run vLLM with Intel Gaudi devices.
 
 ## Requirements
 
-- Ubuntu 22.04 LTS OS
 - Python 3.10
 - Intel Gaudi 2 and 3 AI accelerators
 - Intel Gaudi software version 1.21.0 and above
@@ -57,7 +56,7 @@ vLLM releases are being performed periodically to align with Intel® Gaudi® sof
 ```console
 git clone https://github.com/HabanaAI/vllm-fork.git
 cd vllm-fork
-git checkout v0.6.6.post1+Gaudi-1.20.0
+git checkout v0.7.2+Gaudi-1.21.0
 pip install --upgrade pip
 pip install -r requirements-hpu.txt
 python setup.py develop
