@@ -1,15 +1,17 @@
 # Enable LLAMA4 on vllm hpu
 
 ## deploy
+
 ```
-docker run -d -it --runtime=habana --name llama4-vllm-1.21 -v /software:/software -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --ipc=host --net=host -e HF_HOME=/data/huggingface vault.habana.ai/gaudi-docker/1.20.1/ubuntu24.04/habanalabs/pytorch-installer-2.6.0:latest /bin
-/bash
+docker run -d -it --runtime=habana --name llama4-vllm-1.21 -v /software:/software -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --ipc=host --net=host -e HF_HOME=/data/huggingface vault.habana.ai/gaudi-docker/1.20.1/ubuntu24.04/habanalabs/pytorch-installer-2.6.0:latest /bin/bash
 
 docker exec -it llama4-vllm-1.21 /bin/bash
 
+pip install huggingface_hub[cli]
 cd /data/models; huggingface-cli download --local-dir Llama-4-Scout-17B-16E-Instruct meta-llama/Llama-4-Scout-17B-16E-Instruct --token ${YOUR_TOKEN}
 
-cd /software/users/${YOUR NAME}/;
+
+mkdir -p /software/users/${YOUR NAME}; cd /software/users/${YOUR NAME}/;
 git clone https://github.com/HabanaAI/vllm-fork -b llama4
 pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation;
 
@@ -19,13 +21,14 @@ pip install -r requirements-hpu.txt; VLLM_TARGET_DEVICE=hpu pip install -e .  --
 pip install git+https://github.com/HabanaAI/vllm-hpu-extension.git@145c63d
 
 # install dependencies for llama4
-pip install pydantic msgspec cachetools cloudpickle psutil zmq blake3 py-cpuinfo aiohttp openai uvloop fastapi uvicorn watchfiles partial_json_parser python-multipart gguf llguidance prometheus_client numba compressed_tensors
+pip install pydantic msgspec cachetools cloudpickle psutil zmq blake3 py-cpuinfo aiohttp openai uvloop fastapi uvicorn watchfiles partial_json_parser python-multipart gguf llguidance prometheus_client numba compressed_tensors datasets
 
 ```
 
 ## run example
+
 ```
-PT_HPU_LAZY_MODE=1 python llama4-scripts/test_vllm.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
+PT_HPU_LAZY_MODE=1 python3 llama4-scripts/test_vllm.py --model_id /data/models/Llama-4-Scout-17B-16E-Instruct/ 2>&1 | tee llama4-scripts/llama4_vllm.log
 ```
 
 ## FP8 quantization
@@ -45,6 +48,7 @@ QUANT_CONFIG=measure.json PT_HPU_LAZY_MODE=1 python test_measure.py --model_id m
 # quantization
 QUANT_CONFIG=quant.json PT_HPU_LAZY_MODE=1 python test_vllm_quant.py --model_id meta-llama/Llama-4-Maverick-17B-128E-Instruct
 ```
+
 # MMLU Pro test
 
 ``` bash
@@ -73,7 +77,6 @@ bash run_chartqa_acc.sh
 ### Run following to test Llama-4-Scout-17B-16E-Instruct.
 
 Expected result:
-
 
 ```
 -----------------------------------
@@ -167,13 +170,14 @@ Prompt: '<|begin_of_text|><|begin_of_text|><|header_start|>user<|header_end|>\n\
 Generated text:
  The image on the left shows a large anthropomorphic rabbit standing on a path, with a cottage in the background. The image on the right shows a cat sitting on a stone path, with a cottage in the background.
 
-The images appear to be computer-generated images of anthropomorphic animals, possibly from a children's story or animation. The images feature a rabbit and a cat, both dressed in clothing, and set against a backdrop of rolling hills and countryside. The overall atmosphere of the images is one of whimsy and fantasy, with bright colors and detailed textures that bring the characters to life. 
+The images appear to be computer-generated images of anthropomorphic animals, possibly from a children's story or animation. The images feature a rabbit and a cat, both dressed in clothing, and set against a backdrop of rolling hills and countryside. The overall atmosphere of the images is one of whimsy and fantasy, with bright colors and detailed textures that bring the characters to life.
 
 The images may be intended to evoke a sense of nostalgia or wonder, and could be used in a variety of contexts, such as advertising, illustration, or animation.
 
 ```
 
 ### Run following test meta-llama/Llama-4-Maverick-17B-128E-Instruct.
+
 ```
 python test_vllm.py meta-llama/Llama-4-Maverick-17B-128E-Instruct
 ```
@@ -288,5 +292,3 @@ curl http://localhost:8000/v1/completions \
 # ---log looks like this --
 #'{"id":"cmpl-8f45d8f2afc64d3ab1b14baab6695831","object":"text_completion","created":1743461366,"model":"meta-llama/Llama-4-Scout-17B-16E-Instruct","choices":[{"index":0,"text":" city known for its vibrant culture,","logprobs":null,"finish_reason":"length","stop_reason":null,"prompt_logprobs":null}],"usage":{"prompt_tokens":5,"total_tokens":12,"completion_tokens":7,"prompt_tokens_details":null}}
 ```
-
-
