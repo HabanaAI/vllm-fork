@@ -6,7 +6,6 @@ from typing import Dict, Optional, Union
 import torch
 import torch.jit
 import torch.nn as nn
-from vllm.platforms import current_platform
 
 from vllm.platforms import current_platform
 
@@ -97,8 +96,10 @@ class SpecDecodeBaseSampler(nn.Module):
             tensor is [batch_size, k + num_bonus_tokens]
         """
         if current_platform.is_hpu():
-            return self._create_output_hpu(accepted, substitute_token_ids, draft_token_ids, bonus_token_ids)
-        return self._create_output_native(accepted, substitute_token_ids, draft_token_ids, bonus_token_ids)
+            return self._create_output_hpu(accepted, substitute_token_ids,
+                                           draft_token_ids, bonus_token_ids)
+        return self._create_output_native(accepted, substitute_token_ids,
+                                          draft_token_ids, bonus_token_ids)
 
     def _create_output_native(
             self,
