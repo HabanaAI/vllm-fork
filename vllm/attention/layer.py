@@ -353,6 +353,8 @@ class MultiHeadAttention(nn.Module):
                                                      scale=self.scale)
             out = out.transpose(1, 2)
 
+            # back to bsz, q_len, num_head, and head_size
+            out = out.permute(0, 2, 1, 3)
         elif self.attn_backend == _Backend.PALLAS_VLLM_V1:
             query, key, value = (x.transpose(1, 2)
                                  for x in (query, key, value))
