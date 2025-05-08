@@ -2830,6 +2830,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not get_pp_group().is_last_rank:
                     return hidden_states
 
+                # In case there are any logits processors pending
+                # we need to sync with host earlier
+                if use_delayed_sampling \
+                   and self.is_driver_worker:
+                    self._patch_prev_output()
+
                 # Compute the logits.
                 with self.profiler.record_event(
                         'internal',
@@ -2866,7 +2872,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
-                        self._patch_prev_output()
                         output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
                         self.cached_step_outputs.append(output)
