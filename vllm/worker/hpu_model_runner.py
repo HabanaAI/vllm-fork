@@ -159,10 +159,8 @@ def flatten(in_list):
 
 
 def make_cpu_tensor(data, max_len, pad, dtype, flat) -> torch.Tensor:
-    #print("make data", len(data[0]))
     if flat:
         data = [flatten(data)]
-    #print("make data2", len(data[0]))
     return make_tensor_with_pad(data,
                                 max_len=max_len,
                                 pad=pad,
@@ -698,7 +696,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.graphed_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
-        if self.vllm_config.cache_config.enable_prefix_caching:
+        self.use_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
+        if self.use_prefix_caching:
             os.environ.setdefault("VLLM_CONTIGUOUS_PA", "False")
             assert os.environ.get(
                 "VLLM_CONTIGUOUS_PA",
@@ -995,10 +994,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return phase_type
 
     def _check_config(self, batch_size, seq_len, ctx, attn_metadata, warmup_mode):
-        is_prefix_caching = self.vllm_config.cache_config.enable_prefix_caching
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
-        if is_prefix_caching:
+        if self.use_prefix_caching:
             if warmup_mode:
                 phase = self._phase_warmup(attn_metadata.is_prompt, ctx)
                 num_blocks = ctx
@@ -1008,46 +1006,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     num_blocks = self._num_blocks(attn_metadata)
                 else:
                     num_blocks = 1 # constant for rework
-            
-            
-            
             cfg = (batch_size, seq_len, num_blocks, phase.value)
-            '''if phase != PhaseType.DECODE:
-                print("phase", phase)
-                print("num_blocks", num_blocks)
-                print("seq_len", seq_len)
-                print("batch_size", batch_size)'''
         else:
             phase = 'prompt' if attn_metadata.is_prompt else 'decode'
             cfg = (batch_size, seq_len, phase)
-        if phase != PhaseType.DECODE:
-            print("cfg", cfg)
-        '''    print("self.seen_configs", self.seen_configs)'''
-        #if phase != PhaseType.DECODE:
-        #    print("cfg", cfg)
-        #if phase != PhaseType.DECODE:    
-        #    print("check_configs", cfg)
-
-        #print(self.seen_configs)
+        seen = cfg in self.seen_configs
+        # only for debug - TODO remove
         if warmup_mode and phase != PhaseType.DECODE:
             print("cfg", cfg)
-        seen = cfg in self.seen_configs
-        
         if not seen and not warmup_mode:
-            print("cfg1035", cfg)
-            print(self.seen_configs)
+            print("not seen", self.seen_configs)
         self.seen_configs.add(cfg)
-        #if 1, 640, 0
-        #if batch_size == 1 and seq_len == 640 and num_blocks == 0:
-        #    print("self.seen_configs", self.seen_configs)
-
         if not seen and not warmup_mode:
-            #print(cfg)
-            #print(self.seen_configs)
-
             logger.warning("Configuration: %s was not warmed-up!",
                            (phase.value, batch_size, seq_len,
-                            num_blocks) if is_prefix_caching else
+                            num_blocks) if self.use_prefix_caching else
                            (phase, batch_size, seq_len))
 
     def _get_mrope_positions_and_delta(self, seq_data, mm_kwargs, context_len):
@@ -1142,7 +1115,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if len(seq_group_metadata_list) == 0:
             return PreparePromptMetadata.empty()
-        
+
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
@@ -1173,7 +1146,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 # Prefix is not supported with sliding_window
                 context_len = len(computed_block_nums) * self.block_size
                 if context_len == seq_len \
-                and self.vllm_config.cache_config.enable_prefix_caching:
+                and self.use_prefix_caching:
                     # Fully cached prompt - compute only last token
                     context_len = context_len - 1
                 prompt_tokens = prompt_tokens[context_len:]
@@ -1323,8 +1296,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     device='cpu')
         else:
             prefix_block_list_tensor = None
-        #if not ctx:
-        #    import pdb; pdb.set_trace()
 
         input_tokens_tensor = make_cpu_tensor(input_tokens,
                                               max_len=max_prompt_len,
@@ -1349,7 +1320,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                        pad=_PAD_SLOT_ID,
                                        dtype=torch.long,
                                        flat=self.use_merged_prefill)
-
 
         attn_bias = None
         seq_lens_tensor = None
@@ -2019,8 +1989,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_tables = None
             if ctx:
                 block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * 128}
-                computed_block_nums = ([1] * ctx)#{group_id: [_PAD_BLOCK_ID] * ctx}
-                #print(computed_block_nums)
+                computed_block_nums = ([1] * ctx)
         else:
             input_len = seq_len - 1
             output_len = 1
@@ -2060,7 +2029,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
                         temperature=0) -> None:
-        #print("line2063", batch_size, seq_len, ctx,)
         phase = self._phase_warmup(is_prompt, ctx)
         use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
         scenario_name = ("warmup_"
@@ -2095,7 +2063,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
         if is_prompt:
-            #print("line2096", seq_len)
             seqs = [
                 self.create_dummy_seq_group_metadata(
                     i,
@@ -2105,9 +2072,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature, ctx = ctx) for i in range(batch_size)
             ]
-            #if ctx != 0:
-            #    print(seqs)
-            #    exit()
         else:
             # FIXME: seq_len is actually number of blocks
             blocks = [seq_len // batch_size for _ in range(batch_size)]
@@ -2128,7 +2092,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            #print("shape", inputs)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
@@ -2223,7 +2186,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             phase = self._phase_warmup(is_prompt, ctx)
             self.log_warmup(phase, i,
                             len(buckets), batch_size, seq_len, ctx)
-            #print("line2223", batch_size, seq_len, ctx,)
             self.warmup_scenario(batch_size, seq_len, ctx, is_prompt, kv_caches)
 
     def warmup_graphs(self,
@@ -2236,7 +2198,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                       total_batch_seq=0.001):
         total_mem = starting_mem
         idx = 0
-        #phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
         
         num_candidates = len(buckets)
         ordering : Union[Callable[[Any], Tuple[Any, Any]], \
@@ -2261,22 +2222,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     batch_seq = batch_size * seq_len
             else:
                 batch_seq = batch_size
-            #print(batch_seq)
-            #print("ctx7770", ctx)
             mem_estimate = batch_seq / total_batch_seq * total_mem
             if mem_estimate >= available_mem:
                 captured_all = False
-                #print("continue2263", batch_size, seq_len, ctx)
                 continue
             graphed_bucket = (batch_size, seq_len, ctx, is_prompt)
-            #print("graphed_bucket", graphed_bucket)
-            
             if graphed_bucket in self.graphed_buckets:
-                #print("continue2269", batch_size, seq_len, ctx)
                 continue
 
             self.graphed_buckets.add(graphed_bucket)
-            #print("self.graphed_buckets", self.graphed_buckets)
             self.log_warmup(phase, idx, num_candidates, batch_size, seq_len, ctx)
             with HabanaMemoryProfiler() as mem_prof:
                 self.warmup_scenario(batch_size,
@@ -2289,7 +2243,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
-            #print("used_mem", used_mem)
             available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
@@ -2300,7 +2253,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         num_candidates = len(buckets)
         
         phase = self._phase_warmup(is_prompt, buckets[0][2])
-        #print("buckets", buckets)
+        # TODO - verify
         #graphed = list(c[:3] for c in self.graphed_buckets
         #               if c[3] == is_prompt and c[2] == 0)
         graphed = buckets
@@ -2317,10 +2270,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not self.is_pooler:
             max_blocks = kv_caches[0][0].size(0)
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
+        if self.use_prefix_caching:
+            self.bucketing_ctx.generate_prefix_prefill_buckets()
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, ctx, graph = profile.split('_')
-            #is_prompt = phase == 'prompt'
             is_prompt = phase != 'decode'
             graphs = graph == 't'
             if graphs:
@@ -2372,9 +2326,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     kv_caches)
             self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets, True,
                                     kv_caches)
-            #print(self.bucketing_ctx.prefix_prefill_buckets)
-            #print(len(self.bucketing_ctx.prefix_prefill_buckets))
-            #exit()
             if not self.is_pooler:
                 self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,
                                         False, kv_caches)
@@ -2412,8 +2363,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         f"{format_bytes(decode_available_memory)} for decode "
                         f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
                     logger.info(msg)
-
-
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
                         prompt_strategy, self.bucketing_ctx.prompt_buckets,
@@ -2423,8 +2372,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.warmup_graphs(
                         prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
                         True, kv_caches, prefix_prefill_available_memory)
-
-                    
 
                     decode_strategy = os.environ.get(
                         'VLLM_GRAPH_DECODE_STRATEGY', 'max_bs')
@@ -2730,8 +2677,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         seqs=None,
         ctx: int = 1
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        #if model_input.is_prompt:
-        #    print("model_input", model_input)
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
@@ -2809,16 +2754,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
-            #print("ctx execute_model", ctx)
-            #print("use_graphs", use_graphs)
-
             self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
             if warmup_mode:
                 phase = self._phase_warmup(attn_metadata.is_prompt, ctx).value
             else:            
                 phase = self._phase(attn_metadata).value
-            #if is_prompt:
-            #    print("check_configs", batch_size, seq_len, ctx)
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
             if self.lora_config:
