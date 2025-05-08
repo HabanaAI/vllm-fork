@@ -283,13 +283,13 @@ def get_path_to_rope(model: torch.nn.Module):
 
 class HpuModelAdapter(torch.nn.Module):
 
-    def __init__(self, model, vllm_config, layer_names, is_causal):
+    def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
         super().__init__()
         self.model = model
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
-        # self.sampler = get_sampler()
+        self.sampler = sampler
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
@@ -498,6 +498,9 @@ class HpuModelAdapter(torch.nn.Module):
         return self.model.make_empty_intermediate_tensors(*args, **kwargs)
 
     def generate_proposals(self, *args, **kwargs):
+        if hasattr(self.model, "sampler"):
+            # Speculative decoding
+            self.model.sampler = self.sampler
         return self.model.generate_proposals(*args, **kwargs)
 
     # sampler property will be used by spec_decode_worker
@@ -724,6 +727,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.kv_cache_dtype,
             self.block_size,
             self.model_config.is_attention_free,
+            use_mla=self.model_config.use_mla,
         ) if needs_attn_backend else None
 
         # Multi-modal data support
@@ -818,6 +822,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         config = self.model_config.hf_config
         return uses_mrope(config)
 
+    def _is_quant_with_inc(self):
+        quant_config = os.getenv("QUANT_CONFIG", None) is not None
+        return (self.model_config.quantization == "inc" or quant_config)
+
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
         if self.model_config.quantization == 'inc' or \
@@ -862,19 +870,26 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 )
                 self.model = self.lora_manager.create_lora_manager(self.model)
 
-            if self.model_config.quantization == 'inc':
+            if self._is_quant_with_inc():
                 logger.info("Preparing model with INC..")
                 with HabanaMemoryProfiler() as m_inc:
                     from neural_compressor.torch.quantization import (
                         FP8Config, convert, prepare)
+
+                    disable_mark_scales_as_const = os.getenv(
+                        "VLLM_DISABLE_MARK_SCALES_AS_CONST",
+                        "false") in ("1", "true")
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", ""))
                     if config.measure:
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
-                    htcore.hpu_initialize(self.model,
-                                          mark_only_scales_as_const=True)
+                    if not disable_mark_scales_as_const:
+                        htcore.hpu_initialize(self.model,
+                                              mark_only_scales_as_const=True)
+                    if torch.distributed.is_initialized():
+                        torch.distributed.barrier()
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
@@ -901,7 +916,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.model,
                     vllm_config=self.vllm_config,
                     layer_names=path_to_rope,
-                    is_causal=self.is_causal)
+                    is_causal=self.is_causal,
+                    sampler=self.sampler)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
             with HabanaMemoryProfiler() as m_wrap:
@@ -1428,6 +1444,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=placeholder_index_maps,
             enable_kv_scales_calculation=False,
+            input_positions=input_positions,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         for t in multi_modal_kwargs:
@@ -1737,7 +1754,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=None,
             enable_kv_scales_calculation=False,
-        )
+            input_positions=input_positions)
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
                                      attn_metadata=attn_metadata,
@@ -2052,6 +2069,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_indices',
             'block_offsets',
             'block_groups',
+            'input_positions',
         ])
         return attention_metadata
 
@@ -2175,9 +2193,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if is_pt_profiler_run and self.is_driver_worker:
             profiler = setup_profiler()
             profiler.start()
-        for _ in range(times):
+        for time_index in range(times):
             inputs = self.prepare_model_input_align_worker(
                 seqs, align_worker=align_worker)
+            # Chendi: Necessary fix for warmup with TP>1
+            if time_index == 0:
+                if self.is_driver_worker:
+                    broadcast_tensor_dict(
+                        {"input_tokens": inputs.input_tokens}, src=0)
+                else:
+                    broadcast_tensor_dict(src=0)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
@@ -2507,7 +2532,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         finalize_calibration(self.model.model)
 
     def shutdown_inc(self):
-        can_finalize_inc = (self.model_config.quantization == 'inc') and \
+        can_finalize_inc = self._is_quant_with_inc() and \
             (self.model.model is not None) and \
             self.inc_initialized_successfully and \
             not getattr(self, "_is_inc_finalized", False)

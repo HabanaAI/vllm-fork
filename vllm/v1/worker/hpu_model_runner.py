@@ -1222,12 +1222,12 @@ class HPUModelRunner:
                 slot_mapping, self.device)
             logits_indices_device = _async_h2d_tensor_copy(
                 logits_indices, self.device)
-
             prefill_request_ids.append(batch_req_ids)
             prefill_prompt_lens.append(batch_num_scheduled_tokens)
             prefill_token_ids.append(token_ids_device)
             prefill_position_ids.append(positions_device)
             prefill_logits_indices.append(logits_indices_device)
+
             attn_metadata = None
             if use_prefix_prefill:
                 # Prefix caching
@@ -1257,6 +1257,7 @@ class HPUModelRunner:
                     context_lens_tensor=context_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                     block_list=block_list_device)
             else:
@@ -1264,6 +1265,7 @@ class HPUModelRunner:
                     seq_lens_tensor=seq_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                 )
             # ATTN_METADATA.
@@ -1389,6 +1391,7 @@ class HPUModelRunner:
                 block_list=block_list_device,
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
+                input_positions=None,
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
             ))
@@ -1874,6 +1877,7 @@ class HPUModelRunner:
                 seq_lens_tensor=seq_lens_device,
                 num_prefills=batch_size,
                 num_prefill_tokens=batch_size * seq_or_block,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
         else:
             block_tables = [
@@ -1895,6 +1899,7 @@ class HPUModelRunner:
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
                 num_decode_tokens=batch_size,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
@@ -2040,16 +2045,16 @@ class HPUModelRunner:
             #self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
             #                     True)
             raise AssertionError("Finished profiling")
-        if self.skip_warmup:
-            logger.info("Skipping warmup...")
-            return
         max_blocks = kv_caches[0][0].size(0)
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
-            cache_size_limit = len(self.bucketing_ctx.prompt_buckets) + len(
-                self.bucketing_ctx.decode_buckets) + 1
+            multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
+                                        'true').lower() in ('1', 'true') else 1
+            cache_size_limit = 1 + multiplier * (
+                len(self.bucketing_ctx.prompt_buckets) +
+                len(self.bucketing_ctx.decode_buckets))
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
@@ -2057,6 +2062,10 @@ class HPUModelRunner:
             torch._dynamo.config.accumulated_cache_size_limit = max(
                 cache_size_limit * 8,
                 torch._dynamo.config.accumulated_cache_size_limit)
+
+        if self.skip_warmup:
+            logger.info("Skipping warmup...")
+            return
 
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
         start_time = time.perf_counter()
