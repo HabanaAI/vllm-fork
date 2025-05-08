@@ -1827,7 +1827,7 @@ class HPUModelRunner:
                 htcore.hpu_initialize(self.model,
                                       mark_only_scales_as_const=True)
             self.inc_initialized_successfully = True
-            self.model_memory_usage = m.consumed_device_memory
+            self.model_memory_usage = m_inc.consumed_device_memory
             logger.info("Preparing model with INC took %.4f GB",
                         self.model_memory_usage / float(2**30))
         elif not is_fake_hpu():
