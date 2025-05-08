@@ -162,7 +162,6 @@ The following configurations have been validated to function with Gaudi 2 or Gau
 | [meta-llama/Llama-3.2-11B-Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision)     | 1    | BF16, FP8    | Gaudi 2, Gaudi 3|
 | [meta-llama/Llama-3.2-90B-Vision](https://huggingface.co/meta-llama/Llama-3.2-90B-Vision)     | 4, 8 (min. for Gaudi 2)    | BF16, FP8    | Gaudi 2, Gaudi 3|
 | [meta-llama/Llama-3.2-90B-Vision-Instruct](https://huggingface.co/meta-llama/Llama-3.2-90B-Vision-Instruct)     | 4, 8 (min. for Gaudi 2)    | BF16    | Gaudi 2, Gaudi 3 |
-| [meta-llama/Meta-Llama-3.2-405B](https://huggingface.co/meta-llama/Llama-3.2-405B)     | 8  | BF16    | Gaudi 3|
 | [meta-llama/Meta-Llama-3.3-70B](https://huggingface.co/meta-llama/Llama-3.3-70B)     | 4  | BF16, FP8    | Gaudi 3|
 | [meta-llama/Granite-3B-code-instruct-128k](https://huggingface.co/ibm-granite/granite-3b-code-instruct-128k)     | 1  | BF16    | Gaudi 3|
 | [meta-llama/Granite-3.0-8B-instruct](https://huggingface.co/ibm-granite/granite-3.0-8b-instruct)     | 1  | BF16, FP8    | Gaudi 2, Gaudi 3|
