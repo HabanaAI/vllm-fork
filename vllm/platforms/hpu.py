@@ -11,8 +11,9 @@ from vllm.logger import init_logger
 from .interface import Platform, PlatformEnum, _Backend
 
 if TYPE_CHECKING:
-    from vllm.config import VllmConfig
+    from vllm.config import ModelConfig, VllmConfig
 else:
+    ModelConfig = None
     VllmConfig = None
 
 logger = init_logger(__name__)
@@ -37,6 +38,9 @@ class HpuPlatform(Platform):
         if use_v1:
             logger.info("Using HPUAttentionV1 backend.")
             return "vllm.v1.attention.backends.hpu_attn.HPUAttentionBackendV1"
+        if use_mla:
+            logger.info("Using HPUAttentionMLA backend.")
+            return "vllm.attention.backends.hpu_attn.HPUMLAAttentionBackend"
         logger.info("Using HPUAttention backend.")
         return "vllm.attention.backends.hpu_attn.HPUAttentionBackend"
 
@@ -52,8 +56,11 @@ class HpuPlatform(Platform):
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
 
         scheduler_config = vllm_config.scheduler_config
-
         parallel_config = vllm_config.parallel_config
+        if scheduler_config.is_multi_step:
+            parallel_config.worker_cls = \
+                "vllm.worker.multi_step_hpu_worker.MultiStepHPUWorker"
+
         if parallel_config.worker_cls == "auto":
             if envs.VLLM_USE_V1:
                 parallel_config.worker_cls = \
@@ -101,3 +108,16 @@ class HpuPlatform(Platform):
     @classmethod
     def get_punica_wrapper(cls) -> str:
         return "vllm.lora.punica_wrapper.punica_hpu.PunicaWrapperHPU"
+
+    @classmethod
+    def get_device_communicator_cls(cls) -> str:
+        return "vllm.distributed.device_communicators.hpu_communicator.HpuCommunicator"  # noqa
+
+    @classmethod
+    def supports_structured_output(cls) -> bool:
+        return True
+
+    @classmethod
+    def supports_v1(cls, model_config: ModelConfig) -> bool:
+        # V1 support on HPU is experimental
+        return True
