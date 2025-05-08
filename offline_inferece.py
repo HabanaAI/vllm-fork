@@ -59,6 +59,7 @@ def get_multi_modal_prompt(args, modality, index=0):
             f"Describe this image"
             f"<|im_end|>\n<|im_start|>assistant\n"
         )
+
         filename = get_images(index, args.shuffle_images)
         filename2 = get_images(index + 1, args.shuffle_images)
         image = Image.open(filename)
@@ -125,17 +126,36 @@ def get_multi_modal_prompt(args, modality, index=0):
 def get_llm(args):
     model = args.model
     assert "Qwen2" in model
-    return LLM(
-        model=model,
-        enforce_eager=False,
-        max_model_len=32768,
-        max_num_seqs=args.max_num_seq,
-        gpu_memory_utilization=args.gpu_mem_usage,
-        limit_mm_per_prompt={
-            "image": args.limit_mm_image,
-            "video": args.limit_mm_video,
-        },
-    )
+    kwargs={}
+    if args.awq:
+        kwargs={'quantization':'awq_hpu'}
+    elif args.inc:
+        kwargs={'quantization':'inc','kv_cache_dtype':'fp8_inc'}
+
+    if "VL" in model:
+        return LLM(
+            model=model,
+            enforce_eager=False,
+            max_model_len=32768,
+            max_num_seqs=args.max_num_seq,
+            tensor_parallel_size=args.tp,
+            gpu_memory_utilization=args.gpu_mem_usage,
+            limit_mm_per_prompt={
+                "image": 1,#args.limit_mm_image,
+                "video": 0,#args.limit_mm_video,
+            },
+            **kwargs,
+        )
+    else:
+        return LLM(
+            model=model,
+            enforce_eager=False,
+            max_model_len=32768,
+            max_num_seqs=args.max_num_seq,
+            tensor_parallel_size=args.tp,
+            gpu_memory_utilization=args.gpu_mem_usage,
+            **kwargs,
+        )
 
 
 def get_modality_from_args(args):
@@ -277,6 +297,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-mns", "--max_num_seq", type=int, default=5, help="control the max_num_seq in llm engine"
     )
+    parser.add_argument("--awq", action="store_true", help="HPU AWQ quantization")
+    parser.add_argument("--inc", action="store_true", help="INC FP8 quantization")
+    parser.add_argument("--tp", type=int, default=1, help="tensor parallel size")
 
     # Parse the arguments
     args = parser.parse_args()

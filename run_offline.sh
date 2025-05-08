@@ -15,6 +15,9 @@ usage() {
     echo " --shuffle_images                 randomly shuffle the source images"
     echo " --mix_prompts                    run both image and text modality together"
     echo " --max_num_seq                    setting the max_num_seq for vllm engine"
+    echo " --awq                            run with hpu-awq quantization"
+    echo " --inc                            run with inc fp8 quantization"
+    echo " --tp                             mi,ber pf tensor parallel size"
     exit 1
 }
 
@@ -95,6 +98,18 @@ while [[ $# -gt 0 ]]; do
         ;;
     --max_num_seq | -mns)
         MaxNumSeq=$2
+        shift 2
+        ;;
+    --awq)
+        AWQ="On"
+        shift 1
+        ;;
+    --inc)
+        INC="On"
+        shift 1
+        ;;
+    --tp)
+        TP=$2
         shift 2
         ;;
     --help)
@@ -185,12 +200,15 @@ fi
 
 if [[ "$model" == *"Qwen2"* ]]; then
     #export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=false; unset VLLM_QWEN_SPLIT_GRAPHS
-    export VLLM_QWEN_SPLIT_GRAPHS=true # to split vision and llm graphs
+    #export VLLM_QWEN_SPLIT_GRAPHS=true
     unset PT_HPUGRAPH_DISABLE_TENSOR_CACHE
     #export VLLM_FP32_SOFTMAX=true # for accuracy
+    #export VLLM_FP32_SOFTMAX_VISION=true # for accuracy, will have perf drop for prefill
 fi
+
 # to increase the perf.
 #export VLLM_DELAYED_SAMPLING=true
+
 
 if [[ -n "$video" ]]; then
     ARGS="-m $model -v $videofile --iter $iter $EXTRAARGS"
@@ -206,7 +224,9 @@ else
     fi
 fi
 if [[ -n "$GMU" ]]; then ARGS="$ARGS --gpu_mem_usage $GMU"; fi
+if [[ -n "$AWQ" ]]; then ARGS="$ARGS --awq"; fi
+if [[ -n "$INC" ]]; then ARGS="$ARGS --inc"; fi
+if [[ -n "$TP" ]]; then ARGS="$ARGS --tp $TP"; fi
 ARGS="$ARGS --max_num_seq $MaxNumSeq"
-
 cmd="python offline_inferece.py $ARGS"
 echo $cmd && eval $cmd
