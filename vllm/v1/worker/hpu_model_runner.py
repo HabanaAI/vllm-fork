@@ -2039,7 +2039,7 @@ class HPUModelRunner:
         from vllm.sampling_params import SamplingParams
         from vllm.v1.core.sched.output import NewRequestData
 
-        num_blocks = round_up(total_tokens, 128) // 128
+        num_blocks = round_up(total_tokens, self.block_size) // self.block_size
         prompt_token_ids = list(range(total_tokens))
 
         req_id = f'req-{len(requests)}'
