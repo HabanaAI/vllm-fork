@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, List, Tuple, Union
 if TYPE_CHECKING:
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
     from vllm.config import VllmConfig
-
+    from vllm.worker.hpu_model_runner import (
+        ModelInputForHPUWithSamplingMetadata)
 import torch
 
 from vllm.distributed.kv_transfer.kv_connector.factory import (
