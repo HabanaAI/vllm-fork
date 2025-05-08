@@ -497,11 +497,17 @@ class HpuModelAdapter(torch.nn.Module):
 
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
-            image_input = self.model._parse_and_validate_image_input(**kwargs)
-            video_input = self.model._parse_and_validate_video_input(**kwargs)
-            inputs_embeds = self.model.get_input_embeddings_v0(
-                input_ids, image_input=image_input, video_input=video_input)
-            input_ids = None
+            if self.model.config.model_type == 'qwen2_5_omni_thinker':
+                multimodal_embeddings = self.model.get_multimodal_embeddings_v0(**kwargs)
+                inputs_embeds = self.model.get_input_embeddings_v0(
+                    input_ids, multimodal_embeddings)
+                input_ids = None
+            else:
+                image_input = self.model._parse_and_validate_image_input(**kwargs)
+                video_input = self.model._parse_and_validate_video_input(**kwargs)
+                inputs_embeds = self.model.get_input_embeddings_v0(
+                    input_ids, image_input=image_input, video_input=video_input)
+                input_ids = None
 
         return inputs_embeds
 
@@ -2129,7 +2135,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         spatial_merge_unit = vision_config.spatial_merge_size**2
         num_image_tokens = num_patches // spatial_merge_unit
 
-        image_token_id = self.get_model().config.image_token_id
+        if self.get_model().config.model_type == 'qwen2_5_omni_thinker':
+            image_token_id = self.get_model().config.image_token_index
+        else:
+            image_token_id = self.get_model().config.image_token_id
         prompt_token_ids = [image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {

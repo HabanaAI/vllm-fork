@@ -42,6 +42,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.models.qwen2_5_vl import (
     Qwen2_5_VisionTransformer, Qwen2_5_VLImageEmbeddingInputs,
+    Qwen2_5_VisionTransformerStaticShape,
     Qwen2_5_VLImageInputs, Qwen2_5_VLImagePixelInputs,
     Qwen2_5_VLProcessingInfo, Qwen2_5_VLVideoEmbeddingInputs,
     Qwen2_5_VLVideoInputs, Qwen2_5_VLVideoPixelInputs)
@@ -61,6 +62,7 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         PlaceholderFeaturesInfo,
                                         PromptReplacement, PromptUpdate)
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.tokenizer import decode_tokens, encode_tokens
 
@@ -75,7 +77,7 @@ except (ImportError, ModuleNotFoundError):
     flash_attn = None
 
 logger = init_logger(__name__)
-
+is_hpu = current_platform.is_hpu()
 
 def _qwen2_5_omni_thinker_field_config(hf_inputs: Mapping[str, torch.Tensor]):
     audio_feature_lengths = hf_inputs.get("audio_feature_lengths",
@@ -661,10 +663,20 @@ class Qwen2_5OmniConditionalGenerationMixin:
             return image_input["image_embeds"].type(self.visual.dtype)
 
         grid_thw = image_input["image_grid_thw"]
+        if grid_thw.ndim == 1:
+            grid_thw = grid_thw.unsqueeze(0)
         assert grid_thw.ndim == 2
 
         pixel_values = image_input["pixel_values"].type(self.visual.dtype)
-        image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
+        if is_hpu:
+            assert isinstance(self.visual, Qwen2_5_VisionTransformerStaticShape)
+            image_embeds = self.visual.get_image_embeds(
+                pixel_values,
+                grid_thw=grid_thw,
+                vision_buckets=self.vision_buckets,
+            )
+        else:
+            image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
         # Split concatenated embeddings for each image item.
         merge_size = self.visual.spatial_merge_size
         sizes = grid_thw.prod(-1) // merge_size // merge_size
@@ -729,7 +741,11 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
                 "in the audio tower part.")
 
         self.audio_tower = Qwen2_5OmniAudioEncoder(thinker_config.audio_config)
-        self.visual = Qwen2_5_VisionTransformer(
+        if is_hpu:
+            qwen2_5_visionTransformer = Qwen2_5_VisionTransformerStaticShape
+        else:
+            qwen2_5_visionTransformer = Qwen2_5_VisionTransformer
+        self.visual = qwen2_5_visionTransformer(
             vision_config=thinker_config.vision_config,
             norm_eps=getattr(thinker_config.text_config, "rms_norm_eps", 1e-6),
             quant_config=quant_config,
@@ -844,7 +860,6 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
         inputs_embeds = self.language_model.get_input_embeddings(input_ids)
         if multimodal_embeddings is None:
             return inputs_embeds
-
         for embeddings, modality in multimodal_embeddings:
             if modality == "audio":
                 placeholder_token_id = self.config.audio_token_index

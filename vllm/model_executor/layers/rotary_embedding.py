@@ -1411,16 +1411,25 @@ class MRotaryEmbedding(RotaryEmbedding):
                 llm_pos_ids_list.append(llm_pos_ids)
                 audio_idx += 1
             elif src_item[idx] == image_token_id:
-                grid_t = image_grid_thw[image_idx][0]
-                grid_hs = image_grid_thw[:, 1]
-                grid_ws = image_grid_thw[:, 2]
+                if image_grid_thw.ndim == 1:
+                    grid_t = image_grid_thw[0]
+                    grid_hs = image_grid_thw[1]
+                    grid_ws = image_grid_thw[2]
+                else:
+                    grid_t = image_grid_thw[image_idx][0]
+                    grid_hs = image_grid_thw[:, 1]
+                    grid_ws = image_grid_thw[:, 2]
                 t_index = (torch.arange(grid_t) * 1 * tokens_per_second).long()
                 llm_pos_ids = cls._get_llm_pos_ids_for_vision(
                     start_idx, image_idx, spatial_merge_size, t_index, grid_hs,
                     grid_ws)
                 llm_pos_ids_list.append(llm_pos_ids)
-                vision_seqlen = image_grid_thw[image_idx].prod() // (
-                    spatial_merge_size**2)
+                if image_grid_thw.ndim == 1:
+                    vision_seqlen = image_grid_thw.prod() // (
+                        spatial_merge_size**2)
+                else:
+                    vision_seqlen = image_grid_thw[image_idx].prod() // (
+                        spatial_merge_size**2)
                 new_src_item.extend([image_token_id] * vision_seqlen)
                 image_idx += 1
             elif src_item[idx] == video_token_id and not use_audio_in_video:
@@ -1516,8 +1525,14 @@ class MRotaryEmbedding(RotaryEmbedding):
         grid_ws: torch.Tensor,
     ) -> torch.Tensor:
         llm_pos_ids_list = []
-        llm_grid_h = grid_hs[vision_idx] // spatial_merge_size
-        llm_grid_w = grid_ws[vision_idx] // spatial_merge_size
+        if grid_hs.ndim == 0:
+            llm_grid_h = grid_hs // spatial_merge_size
+        else:
+            llm_grid_h = grid_hs[vision_idx] // spatial_merge_size
+        if grid_ws.ndim == 0:
+            llm_grid_w = grid_ws // spatial_merge_size
+        else:
+            llm_grid_w = grid_ws[vision_idx] // spatial_merge_size
         h_index = (torch.arange(llm_grid_h).view(1, -1, 1).expand(
             len(t_index), -1, llm_grid_w).flatten())
         w_index = (torch.arange(llm_grid_w).view(1, 1, -1).expand(
