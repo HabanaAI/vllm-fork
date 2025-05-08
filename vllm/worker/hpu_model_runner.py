@@ -389,9 +389,10 @@ class HpuModelAdapter(torch.nn.Module):
         if 'virtual_engine' in kwargs:
             virtual_engine = kwargs.pop('virtual_engine')
         input_ids = kwargs['input_ids']
-        attn_metadata = self._update_metadata(
-            kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
+        attn_metadata = self._update_metadata(kwargs['attn_metadata'],
+                                              input_ids.size(0),
+                                              input_ids.size(1),
+                                              input_ids.device, self.dtype)
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
@@ -2617,7 +2618,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         is_prefill_run = model_input.attn_metadata.is_prompt
 
         # check if the current run is profiling
-        is_profile_run = kv_caches is None or kv_caches[0] is None or (kv_caches[0][0].numel() == 0)
+        is_profile_run = kv_caches is None or kv_caches[0] is None or (
+            kv_caches[0][0].numel() == 0)
         # check if the current run is prefill
         return self.vllm_config.kv_transfer_config.is_kv_consumer and (
             not is_profile_run) and is_prefill_run
@@ -2641,7 +2643,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         is_prefill_run = model_input.attn_metadata.is_prompt
 
         # check if the current run is profiling
-        is_profile_run = kv_caches is None or kv_caches[0] is None or (kv_caches[0][0].numel() == 0)
+        is_profile_run = kv_caches is None or kv_caches[0] is None or (
+            kv_caches[0][0].numel() == 0)
         # check if the current run is prefill
 
         return self.vllm_config.kv_transfer_config.is_kv_producer and (
@@ -2897,11 +2900,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_batch_size': real_batch_size
                 }
                 if not bypass_model_exec:
-                    with self.profiler.record_event('internal', model_event_name, args=profiler_args):
+                    with self.profiler.record_event('internal',
+                                                    model_event_name,
+                                                    args=profiler_args):
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
-                            selected_token_indices=sampling_metadata.selected_token_indices
-                        )
+                            selected_token_indices=sampling_metadata.
+                            selected_token_indices)
                         if warmup_mode == True:
                             torch.hpu.synchronize()
                             import torch.distributed as dist
@@ -2915,7 +2920,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # NOTE: the send operation is non-blocking
                 cur_time = time.time()
                 if self.need_send_kv(model_input, kv_caches, warmup_mode):
-                    get_kv_transfer_group().send_kv_caches_and_hidden_states_hpu(
+                    get_kv_transfer_group(
+                    ).send_kv_caches_and_hidden_states_hpu(
                         # model_executable is used to know which layer the current
                         # worker is working on, so that we can send KV for only those
                         # layers.
