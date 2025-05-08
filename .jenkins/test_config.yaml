@@ -35,7 +35,7 @@ stages:
       - name: v0_gsm8k_g2_deepseek-v2-lite_tp1
         flavor: g3
         command: export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-deepseek.txt -t 1
-      - name: v0_gsm8k_g2_qwen3_moe_tp12
+      - name: v0_gsm8k_g2_qwen3_moe_tp2_ep
         flavor: g3.s
         command: export PT_HPU_LAZY_MODE=1 && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-qwen3-moe.txt -t 2
       #- name: v1_gsm8k_small_g3_tp1
