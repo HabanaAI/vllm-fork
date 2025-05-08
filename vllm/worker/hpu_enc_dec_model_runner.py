@@ -39,8 +39,8 @@ _PAD_BLOCK_ID = 0
 
 class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
 
-    def __init__(self, model, vllm_config, layer_names, is_causal):
-        super().__init__(model, vllm_config, layer_names, False)
+    def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
+        super().__init__(model, vllm_config, layer_names, is_causal, sampler)
 
         # We only wrap the language model in HPU graph because some Ops in
         # vision model will fallback to CPU and cause the graph building fail.
@@ -622,7 +622,7 @@ class HPUEncoderDecoderModelRunner(
                 # in case of multi-step scheduling
                 # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
-                self.model.model.sampler.include_gpu_probs_tensor = True
+                self.sampler.include_gpu_probs_tensor = True
             cache_orig_output_tokens_len: List[Dict] = []
 
             def try_revert_dummy_output_tokens():
@@ -681,7 +681,7 @@ class HPUEncoderDecoderModelRunner(
                                      f'{"prompt" if is_prompt else "decode"}_'
                                      f'bs{batch_size}_'
                                      f'seq{seq_len}')):
-                    output = self.model.sample(
+                    output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
                     )
