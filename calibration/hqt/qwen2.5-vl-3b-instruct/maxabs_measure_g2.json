@@ -1,0 +1,15 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "allowlist": {
+        "types": [],
+        "names": []
+    },
+    "blocklist": {
+        "types": [],
+        "names": []
+    },
+    "quantize_weight": false,
+    "dump_stats_path": "./calibration/g2/qwen2.5-3b-instruct/g2/inc_output"
+}

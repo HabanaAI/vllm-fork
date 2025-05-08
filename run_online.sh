@@ -189,13 +189,17 @@ fi
 
 ServerFP8Args=" "
 if [[ -n "$FP8" ]]; then
+    if [[ -z "${QUANT_CONFIG}" ]]; then
+        echo "ERRO: QUANT_CONFIG env var is not set. please set the proper quant config env"
+        echo "INFO: check under ./calibration/ folder for more info"
+        exit 1
+    fi
+
     echo "INFO: running in FP8 mode requires OH installation and quantizaiton files...installing dependecies now"
     git clone https://github.com/huggingface/optimum-habana.git /root/optimum-habana
     cd /root/optimum-habana
     git checkout v1.17.0
     pip install . -q
-    git clone https://github.com/habana-internal/vllm-benchmarks.git /root/vllm-benchmarks
-    export QUANT_CONFIG=/root/vllm-benchmarks/models/llama/hqt/8b/quantization_config/maxabs_quant.json
     # need to reinstall the transformers for vllm
     cd $VLLM_DIR
     pip install -r requirements-hpu-qwen2_5_vl.txt -q
