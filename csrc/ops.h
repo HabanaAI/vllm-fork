@@ -52,6 +52,15 @@ void paged_attention_v2(
     const int64_t blocksparse_vert_stride, const int64_t blocksparse_block_size,
     const int64_t blocksparse_head_sliding_step);
 
+#ifndef USE_ROCM
+void merge_attn_states(torch::Tensor& output,
+                       std::optional<torch::Tensor> output_lse,
+                       const torch::Tensor& prefix_output,
+                       const torch::Tensor& prefix_lse,
+                       const torch::Tensor& suffix_output,
+                       const torch::Tensor& suffix_lse);
+#endif
+
 void rms_norm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight,
               double epsilon);
 
@@ -88,6 +97,9 @@ void batched_rotary_embedding(torch::Tensor& positions, torch::Tensor& query,
 
 void silu_and_mul(torch::Tensor& out, torch::Tensor& input);
 
+void silu_and_mul_quant(torch::Tensor& out, torch::Tensor& input,
+                        torch::Tensor& scale);
+
 void mul_and_silu(torch::Tensor& out, torch::Tensor& input);
 
 void gelu_and_mul(torch::Tensor& out, torch::Tensor& input);
@@ -118,6 +130,12 @@ void advance_step_flashinfer(
     torch::Tensor& slot_mapping, torch::Tensor& block_tables,
     torch::Tensor& paged_kv_indices, torch::Tensor& paged_kv_indptr,
     torch::Tensor& paged_kv_last_page_len, torch::Tensor& block_table_bounds);
+
+void cutlass_mla_decode(torch::Tensor const& out, torch::Tensor const& q_nope,
+                        torch::Tensor const& q_pe,
+                        torch::Tensor const& kv_c_and_k_pe_cache,
+                        torch::Tensor const& seq_lens,
+                        torch::Tensor const& page_table, double scale);
 
 torch::Tensor get_cuda_view_from_cpu_tensor(torch::Tensor& cpu_tensor);
 

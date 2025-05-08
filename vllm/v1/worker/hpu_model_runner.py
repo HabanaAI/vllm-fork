@@ -27,6 +27,7 @@ from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.sampler import get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
@@ -309,6 +310,7 @@ class HpuModelAdapter:
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
         self.layer_names = layer_names
+
         enforce_eager = vllm_config.model_config.enforce_eager
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
         ) and not enforce_eager:
@@ -487,17 +489,17 @@ class HpuModelAdapter:
     def compute_logits(self, *args, **kwargs):
         return self.model.compute_logits(*args, **kwargs)
 
-    def sample(self, *args, **kwargs):
-        return self.model.sample(*args, **kwargs)
+    # def sample(self, *args, **kwargs):
+    #    return self.sampler(*args, **kwargs)
 
     def generate_proposals(self, *args, **kwargs):
         return self.model.generate_proposals(*args, **kwargs)
 
     # sampler property will be used by spec_decode_worker
     # don't rename
-    @property
-    def sampler(self):
-        return self.model.sampler
+    # @property
+    # def sampler(self):
+    #    return self.model.sampler
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
@@ -591,6 +593,8 @@ class HPUModelRunner:
         self.speculative_config = vllm_config.speculative_config
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
+
+        self.sampler = get_sampler()
 
         # NOTE(kzawora) update_env is a hack to work around VLLMKVCache in
         # hpu-extension which selects fetch_from_cache implementation based
@@ -689,7 +693,6 @@ class HPUModelRunner:
         self._tokenizer = init_tokenizer_from_configs(
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
-            parallel_config=vllm_config.parallel_config,
             lora_config=vllm_config.lora_config).tokenizer
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
@@ -787,7 +790,6 @@ class HPUModelRunner:
             self.requests[req_id] = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
-                prompt=new_req_data.prompt,
                 mm_inputs=new_req_data.mm_inputs,
                 mm_positions=new_req_data.mm_positions,
                 sampling_params=sampling_params,
@@ -1220,12 +1222,12 @@ class HPUModelRunner:
                 slot_mapping, self.device)
             logits_indices_device = _async_h2d_tensor_copy(
                 logits_indices, self.device)
-
             prefill_request_ids.append(batch_req_ids)
             prefill_prompt_lens.append(batch_num_scheduled_tokens)
             prefill_token_ids.append(token_ids_device)
             prefill_position_ids.append(positions_device)
             prefill_logits_indices.append(logits_indices_device)
+
             attn_metadata = None
             if use_prefix_prefill:
                 # Prefix caching
@@ -1255,6 +1257,7 @@ class HPUModelRunner:
                     context_lens_tensor=context_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                     block_list=block_list_device)
             else:
@@ -1262,6 +1265,7 @@ class HPUModelRunner:
                     seq_lens_tensor=seq_lens_tensor_device,
                     num_prefills=num_prefills,
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
+                    input_positions=None,
                     slot_mapping=slot_mapping_device,
                 )
             # ATTN_METADATA.
@@ -1387,6 +1391,7 @@ class HPUModelRunner:
                 block_list=block_list_device,
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
+                input_positions=None,
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
             ))
@@ -1544,8 +1549,8 @@ class HPUModelRunner:
             tgt_token_ids = prompt_token_ids[start_tok:start_tok + num_logits]
 
             # Compute prompt logprobs.
-            logprobs = self.model.sampler.compute_logprobs(logits)
-            token_ids, logprobs, ranks = self.model.sampler.gather_logprobs(
+            logprobs = self.sampler.compute_logprobs(logits)
+            token_ids, logprobs, ranks = self.sampler.gather_logprobs(
                 logprobs, num_prompt_logprobs, tgt_token_ids)
 
             # Transfer GPU->CPU async.
@@ -1668,7 +1673,7 @@ class HPUModelRunner:
                 htorch.core.mark_step()
                 sampling_metadata = self._prepare_sampling(
                     batch_changed, req_id, pad_to=logits_device.shape[0])
-                sampler_output = self.model.sample(
+                sampler_output = self.sampler(
                     logits=logits_device, sampling_metadata=sampling_metadata)
                 htorch.core.mark_step()
                 prefill_sampler_outputs.append(sampler_output)
@@ -1699,8 +1704,8 @@ class HPUModelRunner:
                 batch_changed,
                 pd_info.decode_req_ids,
                 pad_to=logits_device.shape[0])
-            sampler_output = self.model.sample(
-                logits=logits_device, sampling_metadata=sampling_metadata)
+            sampler_output = self.sampler(logits=logits_device,
+                                          sampling_metadata=sampling_metadata)
             decode_sampler_outputs.append(sampler_output)
             decode_output_tokens_device = sampler_output.sampled_token_ids
             htorch.core.mark_step()
@@ -1872,6 +1877,7 @@ class HPUModelRunner:
                 seq_lens_tensor=seq_lens_device,
                 num_prefills=batch_size,
                 num_prefill_tokens=batch_size * seq_or_block,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
         else:
             block_tables = [
@@ -1893,6 +1899,7 @@ class HPUModelRunner:
                 block_usage=block_usage_device,
                 block_groups=block_groups_device,
                 num_decode_tokens=batch_size,
+                input_positions=None,
                 slot_mapping=slot_mapping_device)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
@@ -1932,7 +1939,7 @@ class HPUModelRunner:
             generators=generators,
             max_num_logprobs=max_num_logprobs,
         )
-        tokens_all_random = self.model.sample(logits, sampling_metadata)
+        tokens_all_random = self.sampler(logits, sampling_metadata)
         htorch.core.mark_step()
         sampling_metadata = SamplingMetadata(
             temperature=temperature_device,
@@ -1945,7 +1952,7 @@ class HPUModelRunner:
             generators=generators,
             max_num_logprobs=max_num_logprobs,
         )
-        tokens_all_greedy = self.model.sample(logits, sampling_metadata)
+        tokens_all_greedy = self.sampler(logits, sampling_metadata)
         htorch.core.mark_step()
         sampling_metadata = SamplingMetadata(
             temperature=temperature_device,
@@ -1958,7 +1965,7 @@ class HPUModelRunner:
             generators=generators,
             max_num_logprobs=max_num_logprobs,
         )
-        tokens_mixed = self.model.sample(logits, sampling_metadata)
+        tokens_mixed = self.sampler(logits, sampling_metadata)
         htorch.core.mark_step()
         return tokens_all_random, tokens_all_greedy, tokens_mixed
 
@@ -2038,16 +2045,16 @@ class HPUModelRunner:
             #self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
             #                     True)
             raise AssertionError("Finished profiling")
-        if self.skip_warmup:
-            logger.info("Skipping warmup...")
-            return
         max_blocks = kv_caches[0][0].size(0)
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
-            cache_size_limit = len(self.bucketing_ctx.prompt_buckets) + len(
-                self.bucketing_ctx.decode_buckets) + 1
+            multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
+                                        'true').lower() in ('1', 'true') else 1
+            cache_size_limit = 1 + multiplier * (
+                len(self.bucketing_ctx.prompt_buckets) +
+                len(self.bucketing_ctx.decode_buckets))
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
@@ -2055,6 +2062,10 @@ class HPUModelRunner:
             torch._dynamo.config.accumulated_cache_size_limit = max(
                 cache_size_limit * 8,
                 torch._dynamo.config.accumulated_cache_size_limit)
+
+        if self.skip_warmup:
+            logger.info("Skipping warmup...")
+            return
 
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
         start_time = time.perf_counter()
