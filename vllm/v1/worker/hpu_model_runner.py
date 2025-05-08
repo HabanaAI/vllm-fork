@@ -1821,7 +1821,7 @@ class HPUModelRunner:
         logger.info("Loading model weights took %.4f GB",
                     self.model_memory_usage / float(2**30))
 
-        if self.model_config.quantization == 'inc':
+        if self._is_quant_with_inc():
             logger.info("Preparing model with INC..")
             with HabanaMemoryProfiler() as m_inc:
                 from neural_compressor.torch.quantization import (FP8Config,
