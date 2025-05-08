@@ -107,7 +107,7 @@ if [ "$model_path" = "" ]; then
     exit
 fi
 
-model_name=$( echo "$model_path" | awk -F/ '{print $NF}' )
+model_name=$( echo $model_path | sed 's:/*$::' | awk -F/ '{print $NF}' )
 input_min=${input_range[0]}
 input_max=${input_range[1]}
 output_min=${output_range[0]}
@@ -119,17 +119,26 @@ fi
 
 if [ "$num_hpu" -gt 1 ]; then
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
-    unset HLS_MODULE_ID
-    if [ "$module_ids" != "None" ]; then
-        export HABANA_VISIBLE_MODULES=$module_ids
-    fi
-else
-    unset HABANA_VISIBLE_MODULES
-    if [ "$module_ids" != "None" ]; then
-        export HLS_MODULE_ID=$module_ids
-    fi
 fi
 
+if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+    IFS="," read -r -a MODULES <<< "$module_ids"
+    # check if the length of module_ids is equal to num_hpu
+    if [ ${#MODULES[@]} -ne "$num_hpu" ]; then
+        echo "The number of module IDs should be equal to the number of HPUs."
+        exit
+    fi
+    export HABANA_VISIBLE_MODULES=$module_ids
+
+    # set up numactl based on module ids
+    set_numactl
+elif [ "$module_ids" == "None" ]; then
+    echo "No module IDs specified, skip numactl"
+    NUMA_CTL=""
+else
+    echo "The specified module IDs should be a comma-separated list of integers instead of $module_ids."
+    exit
+fi
 echo "Starting vllm server for ${model_name} from ${model_path} with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
 
 device=$(hl-smi -Q name -f csv | tail -n 1)
@@ -194,17 +203,20 @@ else
     export VLLM_PROMPT_USE_FUSEDSDPA=true
 fi
 
-export TOKENIZERS_PARALLELISM=true
-export VLLM_GRAPH_RESERVED_MEM=${VLLM_GRAPH_RESERVED_MEM:-"0.2"}
-export VLLM_GRAPH_PROMPT_RATIO=${VLLM_GRAPH_PROMPT_RATIO:-"0.8"}
-gpu_memory_utilization=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
 
-set_numactl
+# set up environment variables
+set_env
+
+# set up bucketing based on input/output range and max_num_batched_tokens
 set_bucketing
+
+gpu_memory_utilization=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
+max_seq_len_to_capture=${VLLM_MAX_SEQ_LEN_TO_CAPTURE:-"8192"}
 
 ${NUMA_CTL} \
 python3 -m vllm.entrypoints.openai.api_server \
     --host "${host}" --port "${port}" \
+    --device hpu \
     --model  "${model_path}" \
     --trust-remote-code \
     --tensor-parallel-size "${num_hpu}" \
@@ -214,7 +226,10 @@ python3 -m vllm.entrypoints.openai.api_server \
     --max-num-seqs "$max_num_seqs" \
     --max-num-batched-tokens "$max_num_batched_tokens" \
     --max-model-len "$max_model_len" \
+    --max-seq-len-to-capture "$max_seq_len_to_capture" \
+    --use-v2-block-manager \
     --use-padding-aware-scheduling \
     --num-scheduler-steps "${scheduler_steps}" \
+    --distributed_executor_backend mp \
     --gpu-memory-utilization "${gpu_memory_utilization}" \
     |& tee "${case_name}".log
