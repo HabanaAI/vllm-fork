@@ -644,6 +644,8 @@ class HPUModelRunner:
         # Lazy initialization
         # self.model: nn.Module  # set after load_model
         self.kv_caches: list[torch.Tensor] = []
+        self.inc_initialized_successfully = False
+        self._is_inc_finalized = False
 
         # Request states.
         self.requests: dict[str, CachedRequestState] = {}
@@ -2189,6 +2191,20 @@ class HPUModelRunner:
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
+
+    def shutdown_inc(self):
+        can_finalize_inc = (self.model_config.quantization == 'inc') and \
+            (self.model.model is not None) and \
+            self.inc_initialized_successfully == True and \
+            self._is_inc_finalized == False
+        if can_finalize_inc:
+            from neural_compressor.torch.quantization import (
+                finalize_calibration)
+            finalize_calibration(self.model.model)
+            self._is_inc_finalized = True
+
+    def __del__(self):
+        self.shutdown_inc()
 
     @torch.inference_mode()
     def profile_run(self) -> None:
