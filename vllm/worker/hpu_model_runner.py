@@ -2133,8 +2133,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         {"input_tokens": inputs.input_tokens}, src=0)
                 else:
                     broadcast_tensor_dict(src=0)
-            is_single_step = \
-                self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or self.is_single_step:
                 intermediate_tensors = None
                 if not get_pp_group().is_first_rank:
