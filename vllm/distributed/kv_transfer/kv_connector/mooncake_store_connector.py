@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, List, Tuple, Union
 
 import torch
 
+from vllm.attention import AttentionMetadata
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
 from vllm.distributed.kv_transfer.kv_connector.utils import (
@@ -52,7 +53,8 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.padded_length_tensor = torch.zeros(1,
                                                 dtype=torch.int,
                                                 device="hpu")
-        self.is_deepseek = config.model_config.is_deepseek_mla and config.model_config.use_mla_opt
+        self.is_deepseek = config.model_config.is_deepseek_mla and \
+                           config.model_config.use_mla_opt
         # Init kv_store
         if self.config.kv_connector == "MooncakeStoreConnector":
             # Check if MOONCAKE_CONFIG_PATH is set
@@ -242,8 +244,8 @@ class MooncakeStoreConnector(KVConnectorBase):
 
             current_tokens_cpu = input_tokens_tensor_cpu[idx][:slen]
             store_key_prefix = self.tensor_hash(current_tokens_cpu)
-            logger.debug(
-                f"send token len: {slen}, token: {current_tokens_cpu}")
+            logger.debug("send token len: %s, token: %s", slen,
+                         current_tokens_cpu)
 
             padded_total_size = (slen + self.block_size -
                                  1) // self.block_size * self.block_size
@@ -275,7 +277,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                 kvcache_to_sent = torch.stack((keys, values), dim=0)
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
             self.kv_store.put(store_kvcache_key, kvcache_to_sent)
-            logger.debug(f"put kv cache key: {store_kvcache_key}")
+            logger.debug("put kv cache key: %s", store_kvcache_key)
 
             hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
             self.kv_store.put(
@@ -289,7 +291,7 @@ class MooncakeStoreConnector(KVConnectorBase):
     def recv_kv_caches_and_hidden_states_hpu(
         self, model_executable: torch.nn.Module,
         model_input: "ModelInputForHPUWithSamplingMetadata",
-        attn_metadata: object, kv_caches: List[torch.Tensor]
+        attn_metadata: AttentionMetadata, kv_caches: List[torch.Tensor]
     ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForHPUWithSamplingMetadata"]:
         # When bypass_model_exec is set to False, it means that at least for one
@@ -302,7 +304,7 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         seq_lens = model_input.attn_metadata.seq_lens_tensor.tolist()
         block_indices_list = attn_metadata.block_indices.tolist()
-        hidden_or_intermediate_states_for_one_req = []
+        hidden_or_intermediate_states_for_one_req: list[torch.Tensor] = []
         input_tokens_list = []
         num_computed_tokens_list = []
         start_block_idx = 0
@@ -317,12 +319,13 @@ class MooncakeStoreConnector(KVConnectorBase):
                 device="hpu",
                 dtype=torch.int32)
 
-            # we think this is a padding sequence, so we skip it. but we still need write kv cache
+            # we think this is a padding sequence, so we skip it.
+            # but we still need write kv cache.
             if slen == 1:
                 for i in range(model_executable.model.model.start_layer,
                                model_executable.model.model.end_layer):
-                    current_layer_idx = i - model_executable.model.model.start_layer
-                    kv_cache = kv_caches[current_layer_idx]
+                    cur_layer_idx = i - model_executable.model.model.start_layer
+                    kv_cache = kv_caches[cur_layer_idx]
                     key_cache, value_cache = kv_cache[0], kv_cache[1]
                     key_cache = kv_cache[0]
                     if self.is_deepseek:
@@ -331,7 +334,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                             dtype=self.dtype,
                             device="hpu")
                         self.cache_k(
-                            self.padding_k_tensor.unsqueeze(0),
+                            padding_k_tensor.unsqueeze(0),
                             key_cache,
                             attn_metadata.
                             block_indices[start_block_idx:end_block_idx],
@@ -347,20 +350,21 @@ class MooncakeStoreConnector(KVConnectorBase):
                             dtype=self.dtype,
                             device="hpu")
                         self.cache_k(
-                            self.padding_k_tensor.unsqueeze(0),
+                            padding_k_tensor.unsqueeze(0),
                             key_cache,
                             attn_metadata.
                             block_indices[start_block_idx:end_block_idx],
                             attn_metadata.block_offsets,
                         )
                         self.cache_v(
-                            self.padding_v_tensor.unsqueeze(0),
+                            padding_v_tensor.unsqueeze(0),
                             value_cache,
                             attn_metadata.
                             block_indices[start_block_idx:end_block_idx],
                             attn_metadata.block_offsets,
                         )
-                # the first one should never be padding, so we can append the first one.
+                # the first one should never be padding,
+                # so we can append the first one.
                 hidden_or_intermediate_states_for_one_req.append(
                     hidden_or_intermediate_states_for_one_req[0])
                 start_block_idx = end_block_idx
@@ -375,9 +379,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             hidden = self.kv_store.get(hidden_key)
 
             if remote_kv is None or hidden is None:
-                logger.warning(
-                    f"Didn't find any match, load_key_prefix: {load_kvcache_key}"
-                )
+                logger.warning("Didn't find any match, load_key_prefix: %s",
+                               load_kvcache_key)
                 bypass_model_exec = False
                 continue
 
@@ -391,12 +394,13 @@ class MooncakeStoreConnector(KVConnectorBase):
             # put received KV caches into paged memory layer by layer
             for i in range(model_executable.model.start_layer,
                            model_executable.model.end_layer):
-                current_layer_idx = i - model_executable.model.start_layer
-                kv_cache = kv_caches[current_layer_idx]
+                cur_layer_idx = i - model_executable.model.start_layer
+                kv_cache = kv_caches[cur_layer_idx]
                 key_cache, value_cache = kv_cache[0], kv_cache[1]
                 if self.is_deepseek:
-                    remote_k = remote_kv[current_layer_idx]  # to("hpu")?
-                    # [num_layers, seq_len, num_kv_heads, k/v_head_size] -> [seq_len, k/v_head_size]
+                    remote_k = remote_kv[cur_layer_idx]
+                    # [num_layers, seq_len, num_kv_heads, k/v_head_size]
+                    # -> [seq_len, k/v_head_size]
                     key = remote_k.squeeze(-2).view(-1, self.block_size,
                                                     self.k_v_head_size)
                     # ====== D2D =======
