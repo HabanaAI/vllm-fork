@@ -1127,11 +1127,12 @@ class HPUModelRunner:
                 batch_idx:batch_idx + num_prefills]
 
             use_prefix_prefill = any(context_lens)
-            # TODO(kzawora): this is an ugly hack for prefix caching, remove
-            # padded_batch_size = num_prefills
-            if use_prefix_prefill:
-                padded_batch_size = num_prefills
-                #padded_prompt_len = max(batch_num_scheduled_tokens)
+            print('use_prefix',
+                  use_prefix_prefill,
+                  context_lens,
+                  num_prefills,
+                  padded_batch_size,
+                  flush=True)
 
             padded_prompt_lens = [
                 padded_prompt_len for _ in range(padded_batch_size)
@@ -1155,11 +1156,8 @@ class HPUModelRunner:
             dummy_slots = itertools.cycle(
                 range(self._PAD_SLOT_ID, self._PAD_SLOT_ID + self.block_size))
             slot_mapping.apply_(lambda _, ds=dummy_slots: next(ds))
-            # NOTE(kzawora): this has no right to work on prefix prefills
-            iterable = zip(batch_num_scheduled_tokens, [0] *
-                           len(batch_num_scheduled_tokens)
-                           ) if not use_prefix_prefill else zip(
-                               batch_num_scheduled_tokens, context_lens)
+
+            iterable = zip(batch_num_scheduled_tokens, context_lens)
             for i, (prompt_scheduled_tokens,
                     prompt_start_idx) in enumerate(iterable):
                 # Prepare and sanitize token ids (cpu)
