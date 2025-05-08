@@ -47,7 +47,6 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
                    block_list=None,
                    block_mapping=None,
                    block_usage=None,
-                   block_indices_with_offsets=None,
                    block_groups=None,
                    attn_bias=None,
                    num_decode_tokens=0,
@@ -70,7 +69,6 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
                    block_list=block_list,
                    block_mapping=None,
                    block_usage=None,
-                   block_indices_with_offsets=None,
                    block_groups=None,
                    attn_bias=None,
                    num_decode_tokens=0,
@@ -90,7 +88,6 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
                              block_size):
         return cls(is_prompt=False,
                    block_mapping=None,
-                   block_indices_with_offsets=None,
                    attn_bias=None,
                    seq_lens_tensor=None,
                    context_lens_tensor=None,

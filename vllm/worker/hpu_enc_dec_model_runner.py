@@ -81,12 +81,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
                                      cross_attn_bias=cross_attn_bias)
         return metadata
 
-    def _set_cross_indices_with_offsets(self, metadata):
-        cross_slot_mapping = metadata.cross_slot_mapping.flatten()
-        metadata = metadata._replace(
-            cross_block_indices_with_offsets=cross_slot_mapping)
-        return metadata
-
     def _update_seq_lens(self, attn_metadata, batch_size, seq_len, device):
         # Set the seq_lens to after-padding sequence lengths to prevent
         # graph recapturing.
@@ -103,7 +97,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         if max(attn_metadata.encoder_seq_lens) == 0:
             return attn_metadata
         if attn_metadata.is_prompt:
-            attn_metadata = self._set_cross_indices_with_offsets(attn_metadata)
             attn_metadata = self._update_seq_lens(attn_metadata, batch_size,
                                                   seq_len, device)
         else:
@@ -510,7 +503,6 @@ class HPUEncoderDecoderModelRunner(
             'slot_mapping',
             'is_prompt',
             'block_size',
-            'block_indices_with_offsets',
             'block_groups',
             'num_prefill_tokens',
             'num_decode_tokens',
@@ -518,7 +510,6 @@ class HPUEncoderDecoderModelRunner(
             'seq_lens',
             'encoder_seq_lens',
             'encoder_seq_lens_tensor',
-            'cross_block_indices_with_offsets',
             'cross_block_list',
             'cross_slot_mapping',
             'cross_block_mapping',

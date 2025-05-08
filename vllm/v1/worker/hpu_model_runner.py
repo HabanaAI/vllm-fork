@@ -413,22 +413,6 @@ class HpuModelAdapter:
                                      attn_bias=attn_bias)
         return metadata
 
-    def _set_indices_with_offsets(self, metadata, block_size, is_prompt):
-        indices_with_offsets = metadata.slot_mapping.flatten()
-        if is_prompt:
-            indices = torch.div(indices_with_offsets,
-                                block_size,
-                                rounding_mode="floor")
-            indices = indices.unflatten(0, (-1, block_size))[:, 0]
-            indices = indices.unsqueeze(1) * block_size
-            offsets = torch.arange(block_size,
-                                   device=indices.device).unsqueeze(0)
-            indices_with_offsets = (indices + offsets).flatten()
-
-        metadata = metadata._replace(
-            block_indices_with_offsets=indices_with_offsets)
-        return metadata
-
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
         if attn_metadata.is_prompt:
@@ -437,9 +421,6 @@ class HpuModelAdapter:
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-        attn_metadata = self._set_indices_with_offsets(attn_metadata,
-                                                       self.block_size,
-                                                       attn_metadata.is_prompt)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -555,7 +536,7 @@ def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
     attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
         'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
         'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt',
-        'block_size', 'block_indices_with_offsets', 'block_groups'
+        'block_size', 'block_groups'
     ])
     return attention_metadata
 
