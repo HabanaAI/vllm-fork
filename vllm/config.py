@@ -16,6 +16,7 @@ from typing import (TYPE_CHECKING, Any, Callable, ClassVar, Counter, Dict,
 
 import torch
 from pydantic import BaseModel, Field, PrivateAttr
+from torch.distributed import ProcessGroup, ReduceOp
 from transformers import PretrainedConfig
 
 import vllm.envs as envs
@@ -666,6 +667,23 @@ class ModelConfig:
                 "fallback to the eager mode.")
             self.enforce_eager = True
 
+    def _verify_with_expert_parallelism(self) -> None:
+        num_expert_names = [
+            "moe_num_experts",  # Dbrx
+            "num_experts",  # Jamba
+            "n_routed_experts",  # DeepSeek
+            "num_local_experts",  # Mixtral
+        ]
+        num_experts = 0
+        for name in num_expert_names:
+            num_experts = getattr(self.hf_text_config, name, 0)
+            if num_experts > 0:
+                break
+        if num_experts < 1:
+            raise ValueError(
+                "Number of experts in the model must be greater than 0 "
+                "when expert parallelism is enabled.")
+
     def verify_async_output_proc(self, parallel_config, speculative_config,
                                  device_config) -> None:
         if not self.use_async_output_proc:
@@ -719,6 +737,9 @@ class ModelConfig:
                 " must be divisible by tensor parallel size "
                 f"({tensor_parallel_size}).")
 
+        if parallel_config.enable_expert_parallel:
+            self._verify_with_expert_parallelism()
+
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         if pipeline_parallel_size > 1:
             architectures = getattr(self.hf_config, "architectures", [])
@@ -763,7 +784,7 @@ class ModelConfig:
     def is_deepseek_mla(self) -> bool:
         return (hasattr(self.hf_text_config, "model_type")) \
                 and (self.hf_text_config.model_type in \
-                    ('deepseek_v2', 'deepseek_v3'))\
+                    ('deepseek_v2', 'deepseek_v3', 'deepseek_mtp'))\
                 and (self.hf_text_config.kv_lora_rank is not None)
 
     def get_head_size(self) -> int:
@@ -856,8 +877,12 @@ class ModelConfig:
     def get_layers_start_end_indices(
             self, parallel_config: "ParallelConfig") -> Tuple[int, int]:
         from vllm.distributed.utils import get_pp_indices
-        total_num_hidden_layers = getattr(self.hf_text_config,
-                                          "num_hidden_layers", 0)
+        if self.hf_text_config.model_type == "deepseek_mtp":
+            total_num_hidden_layers = getattr(self.hf_text_config,
+                                              "num_nextn_predict_layers", 0)
+        else:
+            total_num_hidden_layers = getattr(self.hf_text_config,
+                                              "num_hidden_layers", 0)
         pp_rank = parallel_config.rank // parallel_config.tensor_parallel_size
         pp_size = parallel_config.pipeline_parallel_size
         start, end = get_pp_indices(total_num_hidden_layers, pp_rank, pp_size)
@@ -1286,6 +1311,12 @@ class ParallelConfig:
 
     pipeline_parallel_size: int = 1  # Number of pipeline parallel groups.
     tensor_parallel_size: int = 1  # Number of tensor parallel groups.
+    data_parallel_size: int = 1  # Number of data parallel groups.
+    data_parallel_rank: int = 0  # Rank of the data parallel group.
+    # IP of the data parallel master.
+    data_parallel_master_ip: str = "127.0.0.1"
+    data_parallel_master_port: int = 29500  # Port of the data parallel master.
+    enable_expert_parallel: bool = False  # Use EP instead of TP for MoE layers.
 
     # Maximum number of multiple batches
     # when load model sequentially. To avoid RAM OOM when using tensor
@@ -1319,9 +1350,54 @@ class ParallelConfig:
     worker_cls: str = "auto"
     sd_worker_cls: str = "auto"
 
+    # world_size is TPxPP, it affects the number of workers we create.
     world_size: int = field(init=False)
+    # world_size_across_dp is TPxPPxDP, it is the size of the world
+    # including data parallelism.
+    world_size_across_dp: int = field(init=False)
 
     rank: int = 0
+
+    def get_next_dp_init_port(self) -> int:
+        """
+        We might need to initialize process groups in multiple
+        processes that is related to data parallelism,
+        e.g. both in the worker and in the engine, which
+        can live in different processes. To avoid port conflicts, we
+        increment the port number each time we need to initialize a
+        new process group related to data parallelism.
+        """
+        answer = self.data_parallel_master_port
+        self.data_parallel_master_port += 1
+        return answer
+
+    def stateless_init_dp_group(self) -> "ProcessGroup":
+        from vllm.distributed.utils import (
+            stateless_init_torch_distributed_process_group)
+
+        # use gloo since the engine process might not have cuda device
+        dp_group = stateless_init_torch_distributed_process_group(
+            self.data_parallel_master_ip,
+            self.get_next_dp_init_port(),
+            self.data_parallel_rank,
+            self.data_parallel_size,
+            backend="gloo")
+
+        return dp_group
+
+    @staticmethod
+    def has_unfinished_dp(dp_group: "ProcessGroup",
+                                      has_unfinished: bool) -> bool:
+        tensor = torch.tensor([has_unfinished],
+                              dtype=torch.int32,
+                              device="cpu")
+        # dp rank 0: has_unfinished_seqs=True
+        # dp rank 1: has_unfinished_seqs=False
+        # aggregated: has_unfinished_seqs=True
+        # so this is an OR operation, i.e. MAX in integers
+        torch.distributed.all_reduce(tensor, op=ReduceOp.MAX, group=dp_group)
+        aggregated_has_unfinished = bool(tensor.item())
+        return aggregated_has_unfinished
 
     def compute_hash(self):
         """
@@ -1339,6 +1415,12 @@ class ParallelConfig:
     def __post_init__(self) -> None:
         self.world_size = self.pipeline_parallel_size * \
             self.tensor_parallel_size
+
+        self.data_parallel_size = envs.VLLM_DP_SIZE
+        self.data_parallel_rank = envs.VLLM_DP_RANK
+        self.data_parallel_master_ip = envs.VLLM_DP_MASTER_IP
+        self.data_parallel_master_port = envs.VLLM_DP_MASTER_PORT
+        self.world_size_across_dp = self.world_size * self.data_parallel_size
 
         ray_only_devices = ["tpu"]
         from vllm.platforms import current_platform
@@ -1556,7 +1638,7 @@ class SchedulerConfig:
     def _verify_args(self) -> None:
         if (self.max_num_batched_tokens < self.max_model_len
                 and not self.chunked_prefill_enabled):
-            raise ValueError(
+            logger.warning(
                 f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
                 f"smaller than max_model_len ({self.max_model_len}). "
                 "This effectively limits the maximum sequence length to "
@@ -1664,6 +1746,18 @@ class SpeculativeConfig:
         return hash_str
 
     @staticmethod
+    def hf_config_override(hf_config: PretrainedConfig) -> PretrainedConfig:
+        if hf_config.model_type == "deepseek_v3":
+            hf_config.model_type = "deepseek_mtp"
+        if hf_config.model_type == "deepseek_mtp":
+            n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
+            hf_config.update({
+                "n_predict": n_predict,
+                "architectures": ["DeepSeekMTPModel"]
+            })
+        return hf_config
+
+    @staticmethod
     def maybe_create_spec_config(
         target_model_config: ModelConfig,
         target_parallel_config: ParallelConfig,
@@ -1745,12 +1839,18 @@ class SpeculativeConfig:
             Optional["SpeculativeConfig"]: An instance of SpeculativeConfig if
                 the necessary conditions are met, else None.
         """
-
         if speculative_model is None:
             if num_speculative_tokens is not None:
-                raise ValueError("num_speculative_tokens was provided without "
-                                 "speculative_model.")
-            return None
+                if target_model_config.hf_text_config.model_type \
+                        == "deepseek_v3":
+                    # use the draft model from the same model:
+                    speculative_model = target_model_config.model
+                else:
+                    raise ValueError(
+                        "num_speculative_tokens was provided without "
+                        "speculative_model.")
+            else:
+                return None
 
         if (speculative_disable_by_batch_size is not None
                 and speculative_disable_by_batch_size < 2):
@@ -1804,6 +1904,7 @@ class SpeculativeConfig:
                 max_seq_len_to_capture=target_model_config.
                 max_seq_len_to_capture,
                 max_logprobs=target_model_config.max_logprobs,
+                hf_overrides=SpeculativeConfig.hf_config_override,
             )
 
             draft_hf_config = draft_model_config.hf_config
@@ -1811,19 +1912,17 @@ class SpeculativeConfig:
             if (num_speculative_tokens is not None
                     and hasattr(draft_hf_config, "num_lookahead_tokens")):
                 draft_hf_config.num_lookahead_tokens = num_speculative_tokens
-
             n_predict = getattr(draft_hf_config, "n_predict", None)
             if n_predict is not None:
                 if num_speculative_tokens is None:
                     # Default to max value defined in draft model config.
                     num_speculative_tokens = n_predict
-                elif num_speculative_tokens > n_predict:
-                    # Verify provided value doesn't exceed the maximum
-                    # supported by the draft model.
+                elif num_speculative_tokens > n_predict and \
+                        num_speculative_tokens % n_predict != 0:
+                    # Ensure divisibility for MTP module reuse.
                     raise ValueError(
-                        "This speculative model supports a maximum of "
-                        f"num_speculative_tokens={n_predict}, but "
-                        f"{num_speculative_tokens=} was provided.")
+                        f"{num_speculative_tokens=} must be divisible by "
+                        f"{n_predict=}")
 
             speculative_draft_tensor_parallel_size = \
                 SpeculativeConfig._verify_and_get_draft_model_tensor_parallel_size(
@@ -1925,8 +2024,9 @@ class SpeculativeConfig:
                 speculative_draft_tensor_parallel_size = 1
                 if target_parallel_config.tensor_parallel_size > 1:
                     logger.warning(
-                        "MLPSpeculator cannot currently be run with tp>1; "
-                        "setting speculative_draft_tensor_parallel_size=1")
+                        "%s cannot currently be run with tp>1; "
+                        "setting speculative_draft_tensor_parallel_size=1",
+                        draft_hf_config.model_type)
             else:
                 speculative_draft_tensor_parallel_size = \
                     target_parallel_config.tensor_parallel_size
@@ -1961,6 +2061,8 @@ class SpeculativeConfig:
             ray_workers_use_nsight=target_parallel_config.
             ray_workers_use_nsight,
             placement_group=target_parallel_config.placement_group,
+            enable_expert_parallel=target_parallel_config.
+            enable_expert_parallel,
         )
 
         return draft_parallel_config
@@ -2622,7 +2724,7 @@ class KVTransferConfig(BaseModel):
 
     # The device used by kv connector to buffer the KV cache.
     # Currently only support 'cuda'.
-    kv_buffer_device: Optional[str] = "cuda"
+    kv_buffer_device: Optional[str] = "cpu"
 
     # The buffer size for TorchDistributedConnector. Measured in number of
     # bytes. Recommended value: 1e9 (about 1GB).

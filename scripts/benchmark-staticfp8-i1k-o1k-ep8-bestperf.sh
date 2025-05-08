@@ -11,11 +11,11 @@ if [ $((total_len % 128)) -ne 0 ]; then
 fi
 ep_size=8
 moe_n_slice=1
-gpu_utils=0.92
-bs=448
-num_prompts=448
-request_rate=inf
-log_name="[staticfp8-dmoe-fp8kv-delayedsampling]static-online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
+gpu_utils=0.98
+bs=512
+num_prompts=512
+request_rate=16
+log_name="[staticfp8]static-online-gaudi3-${gpu_utils}util-TPparallel${tp_parrallel}-EP${ep_size}-loop${moe_n_slice}moegroups-multistep${multi_step}_nprompt${num_prompts}_rrate${request_rate}_bs${bs}_i${in_len}_o${out_len}_mdllen${total_len}"
 
 VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / 128))
 VLLM_DECODE_BLOCK_BUCKET_MAX=$((total_len * bs / 128 + 128))
@@ -23,6 +23,8 @@ model="/data/models/DeepSeek-R1-static/"
 tokenizer="/data/models/DeepSeek-R1-static/"
 model_name="DeepSeek-R1"
 
+VLLM_GRAPH_RESERVED_MEM=0.05 \
+VLLM_USE_FP8_MATMUL=true \
 VLLM_DELAYED_SAMPLING=true \
 HABANA_VISIBLE_DEVICES="ALL" \
 VLLM_MOE_N_SLICE=${moe_n_slice} \
@@ -47,7 +49,7 @@ python -m vllm.entrypoints.openai.api_server \
     --dtype bfloat16 \
     --use-v2-block-manager \
     --num_scheduler_steps ${multi_step}\
-    --max-model-len 4096 \
+    --max-model-len 8192 \
     --distributed_executor_backend mp \
     --gpu_memory_utilization ${gpu_utils} \
     --kv_cache_dtype "fp8_inc" \
@@ -64,10 +66,6 @@ done
 sleep 10s
 echo ${pid}
 
-hl-smi -l > tee benchmark_logs/${log_name}_smi.log &
-hl_pid=$(($!-1))
-
-
 start_time=$(date +%s)
 echo "Start to benchmark"
 python benchmarks/benchmark_serving.py --backend vllm --model ${model} --tokenizer ${tokenizer} --dataset-name sonnet --dataset-path benchmarks/sonnet.txt --request-rate ${request_rate} --num-prompts ${num_prompts} --port 8080 --sonnet-input-len ${in_len} --sonnet-output-len ${out_len} --sonnet-prefix-len 100 2>&1 | tee benchmark_logs/${log_name}_run1.log
@@ -76,14 +74,4 @@ echo "Time elapsed: $((end_time - start_time))s"
 
 sleep 10
 
-# start_time=$(date +%s)
-# echo "Start to benchmark"
-# python benchmarks/benchmark_serving.py --backend vllm --model ${model} --tokenizer ${tokenizer} --dataset-name sonnet --dataset-path benchmarks/sonnet.txt --request-rate ${request_rate} --num-prompts ${num_prompts} --port 8080 --sonnet-input-len ${in_len} --sonnet-output-len ${out_len} --sonnet-prefix-len 100 2>&1 | tee benchmark_logs/${log_name}_run2.log
-# end_time=$(date +%s)
-# echo "Time elapsed: $((end_time - start_time))s"
-
-# sleep 10
-
 kill ${pid}
-kill ${hl_pid}
-#--backend openai-chat --endpoint "v1/chat/completions"

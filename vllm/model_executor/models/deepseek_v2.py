@@ -111,10 +111,6 @@ class DeepseekV2MoE(nn.Module):
         self.routed_scaling_factor = config.routed_scaling_factor
         self.n_shared_experts = config.n_shared_experts
         self.routed_scaling_factor = config.routed_scaling_factor
-        if self.tp_size > config.n_routed_experts:
-            raise ValueError(
-                f"Tensor parallel size {self.tp_size} is greater than "
-                f"the number of experts {config.n_routed_experts}.")
 
         if config.hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {config.hidden_act}. "
@@ -142,7 +138,7 @@ class DeepseekV2MoE(nn.Module):
             use_grouped_topk=True,
             num_expert_group=config.n_group,
             topk_group=config.topk_group,
-            tp_size=self.tp_size // self.ep_size,
+            tp_size=self.tp_size,
             ep_size=self.ep_size,
             prefix=f"{prefix}.experts",
             scoring_func=config.scoring_func,
@@ -679,8 +675,9 @@ class DeepseekV2Model(nn.Module):
 
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
+            kvcaches = None if kv_caches is None else kv_caches[i - self.start_layer]
             hidden_states, residual = layer(positions, hidden_states,
-                                            kv_caches[i - self.start_layer],
+                                            kvcaches,
                                             attn_metadata, residual)
 
         if not get_pp_group().is_last_rank:
@@ -781,13 +778,9 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             if "rotary_emb.inv_freq" in name:
                 continue
 
-            # TODO(simon): support nextn predict layers
-            if hasattr(self.config, "num_nextn_predict_layers"
-                       ) and self.config.num_nextn_predict_layers > 0:
-                assert self.config.num_nextn_predict_layers == 1
-                layer_idx = self.config.num_hidden_layers
-                if name.startswith(f"model.layers.{layer_idx}"):
-                    continue
+            spec_layer = get_spec_layer_idx_from_weight_name(self.config, name)
+            if spec_layer is not None:
+                continue  # skip spec decode layers for main model
 
             for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 # Skip non-stacked layers and experts (experts handled below).
@@ -863,3 +856,15 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
 class DeepseekV3ForCausalLM(DeepseekV2ForCausalLM):
     pass
+
+
+def get_spec_layer_idx_from_weight_name(config: PretrainedConfig,
+                                        weight_name: str) -> Optional[int]:
+    if hasattr(config,
+               "num_nextn_predict_layers") and (config.num_nextn_predict_layers
+                                                > 0):
+        layer_idx = config.num_hidden_layers
+        for i in range(config.num_nextn_predict_layers):
+            if weight_name.startswith(f"model.layers.{layer_idx+i}."):
+                return layer_idx + i
+    return None

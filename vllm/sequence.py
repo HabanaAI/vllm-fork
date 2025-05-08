@@ -1305,12 +1305,16 @@ class ExecuteModelRequest(
     previous_hidden_states: Optional[HiddenStates] = None
     # The number of forward steps to run.
     num_steps: int = 1
+    # The step index for spec model input.
+    spec_step_idx: Optional[int] = None
     # Finished request ids since last step.
     finished_requests_ids: List[str] = msgspec.field(default_factory=list)
     # The last sampled token ids for multi step decoding.
     last_sampled_token_ids: Optional[torch.Tensor] = None
     # Async callback
     async_callback: Optional[Callable] = None
+    # Dummy batch
+    is_dummy_batch: bool = False
 
     @property
     def is_first_multi_step(self) -> bool:
