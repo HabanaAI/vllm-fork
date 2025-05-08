@@ -1572,6 +1572,10 @@ class HPUModelRunner:
 
         return prompt_logprobs_dict
 
+    def _is_quant_with_inc(self):
+        quant_config = os.getenv("QUANT_CONFIG", None) is not None
+        return (self.model_config.quantization == "inc" or quant_config)
+    
     @torch.inference_mode()
     def execute_model(
         self,
@@ -2193,7 +2197,7 @@ class HPUModelRunner:
         logger.info(msg)
 
     def shutdown_inc(self):
-        can_finalize_inc = (self.model_config.quantization == 'inc') and \
+        can_finalize_inc = self._is_quant_with_inc() and \
             (self.model.model is not None) and \
             self.inc_initialized_successfully and \
             not self._is_inc_finalized
