@@ -1,0 +1,2 @@
+model_name: "/mnt/weka/data/pytorch/sentence-transformers/all-roberta-large-v1"
+dtype: "bfloat16"
