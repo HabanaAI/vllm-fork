@@ -111,30 +111,6 @@ class DeepseekV2MoE(nn.Module):
         if config.hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {config.hidden_act}. "
                              "Only silu is supported for now.")
-        if is_hpu:
-            self.experts = FusedMoE(
-                num_experts=config.n_routed_experts,
-                top_k=config.num_experts_per_tok,
-                hidden_size=config.hidden_size,
-                intermediate_size=config.moe_intermediate_size,
-                reduce_results=False,
-                renormalize=config.norm_topk_prob,
-                quant_config=quant_config,
-                use_grouped_topk=False,
-                prefix=f"{prefix}.experts")
-        else:
-            self.experts = FusedMoE(
-                num_experts=config.n_routed_experts,
-                top_k=config.num_experts_per_tok,
-                hidden_size=config.hidden_size,
-                intermediate_size=config.moe_intermediate_size,
-                reduce_results=False,
-                renormalize=config.norm_topk_prob,
-                quant_config=quant_config,
-                use_grouped_topk=True,
-                num_expert_group=config.n_group,
-                topk_group=config.topk_group,
-                prefix=f"{prefix}.experts")
 
         self.gate = ReplicatedLinear(config.hidden_size,
                                      config.n_routed_experts,
@@ -159,6 +135,7 @@ class DeepseekV2MoE(nn.Module):
             num_expert_group=config.n_group,
             topk_group=config.topk_group,
             prefix=f"{prefix}.experts",
+            tp_size=self.tp_size,
             scoring_func=config.scoring_func,
             e_score_correction_bias=self.gate.e_score_correction_bias)
 
@@ -175,7 +152,8 @@ class DeepseekV2MoE(nn.Module):
             )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        num_tokens, hidden_dim = hidden_states.shape
+        input_shape = hidden_states.shape
+        hidden_dim = input_shape[-1]
         hidden_states = hidden_states.view(-1, hidden_dim)
         if self.n_shared_experts is not None:
             shared_output = self.shared_experts(hidden_states)
@@ -202,7 +180,7 @@ class DeepseekV2MoE(nn.Module):
             final_hidden_states = tensor_model_parallel_all_reduce(
                 final_hidden_states)
 
-        return final_hidden_states.view(num_tokens, hidden_dim)
+        return final_hidden_states.view(*input_shape)
 
 
 def yarn_get_mscale(scale: float = 1, mscale: float = 1) -> float:
@@ -512,9 +490,7 @@ class DeepseekV2MLAAttention(nn.Module):
             qk_head_dim=self.qk_head_dim,
             v_head_dim=self.v_head_dim,
             rotary_emb=self.rotary_emb,
-            q_proj=self.q_proj if self.q_lora_rank is None else self.q_b_proj,
             kv_b_proj=self.kv_b_proj,
-            o_proj=self.o_proj,
         )
 
         self.prefix = prefix
@@ -526,17 +502,22 @@ class DeepseekV2MLAAttention(nn.Module):
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
         if self.q_lora_rank is not None:
-            ckq = self.q_a_proj(hidden_states)[0]
-            hidden_states_or_q_c = self.q_a_layernorm(ckq)
+            q_c = self.q_a_proj(hidden_states)[0]
+            q_c = self.q_a_layernorm(q_c)
+            q = self.q_b_proj(q_c)[0]
         else:
-            hidden_states_or_q_c = hidden_states
+            q = self.q_proj(hidden_states)[0]
         kv_c, k_pe = self.kv_a_proj_with_mqa(hidden_states)[0].split(
             [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
-        return self.mla_attn(hidden_states_or_q_c,
-                             kv_c_normed,
-                             k_pe,
-                             output_shape=hidden_states.shape)
+
+        attn_out = self.mla_attn(
+            q,
+            kv_c_normed,
+            k_pe,
+            output_shape=(hidden_states.shape[0],
+                          self.num_local_heads * self.v_head_dim))
+        return self.o_proj(attn_out)[0]
 
 
 class DeepseekV2DecoderLayer(nn.Module):
@@ -609,8 +590,6 @@ class DeepseekV2DecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        if is_hpu:
-            _batch_size = positions.shape[0]
         # Self Attention
         if residual is None:
             residual = hidden_states
@@ -636,11 +615,6 @@ class DeepseekV2DecoderLayer(nn.Module):
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
             hidden_states, residual)
-        if is_hpu:
-            # need reshape from tensor(x0, y0) to tensor(x1) for hpu
-            hidden_states = hidden_states.reshape(
-                hidden_states.shape[0] * hidden_states.shape[1],
-                hidden_states.shape[2])
         hidden_states = self.mlp(hidden_states)
 
         if isinstance(self.mlp,
@@ -652,10 +626,6 @@ class DeepseekV2DecoderLayer(nn.Module):
             # of DeepseekV2MOE
             hidden_states *= 1. / self.routed_scaling_factor
             residual *= 1. / self.routed_scaling_factor
-        if is_hpu:
-            hidden_states = hidden_states.reshape(
-                _batch_size, hidden_states.shape[0] // _batch_size,
-                hidden_states.shape[1])
 
         return hidden_states, residual
 
@@ -742,6 +712,15 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
+        if is_hpu:
+            import habana_frameworks.torch as htorch
+
+            assert htorch.utils.internal.is_lazy(), \
+                (
+                "Deepseek currently supports only lazy mode on HPU, "
+                "please set PT_HPU_LAZY_MODE=1"
+                )
+
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         self.config = config

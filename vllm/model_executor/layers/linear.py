@@ -2,7 +2,7 @@
 
 import itertools
 from abc import abstractmethod
-from typing import Any, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -252,6 +252,15 @@ class LinearBase(torch.nn.Module):
         self, x: torch.Tensor
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
         raise NotImplementedError
+
+    # Chendi: Necessary base func added by INC team
+    def get_dequant_weights_func(
+        self, ) -> Optional[Callable[[torch.nn.Module], torch.Tensor]]:
+        if self.quant_method is not None:
+            quant_method = self.quant_method
+            if hasattr(quant_method, "dequant_block_fp8_weight"):
+                return quant_method.dequant_block_fp8_weight
+        return None
 
 
 class ReplicatedLinear(LinearBase):
@@ -934,6 +943,15 @@ class QKVParallelLinear(ColumnParallelLinear):
 
         shard_offset = self._get_shard_offset_mapping(loaded_shard_id)
         shard_size = self._get_shard_size_mapping(loaded_shard_id)
+
+        # Note(simon): This is needed for Qwen3's fp8 quantization.
+        if isinstance(param, BlockQuantScaleParameter):
+            assert self.quant_method is not None
+            assert hasattr(self.quant_method, "quant_config")
+            weight_block_size = self.quant_method.quant_config.weight_block_size
+            block_n, _ = weight_block_size[0], weight_block_size[1]
+            shard_offset = (shard_offset + block_n - 1) // block_n
+            shard_size = (shard_size + block_n - 1) // block_n
 
         param.load_qkv_weight(loaded_weight=loaded_weight,
                               num_heads=self.num_kv_head_replicas,
