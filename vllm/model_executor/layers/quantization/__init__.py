@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Dict, List, Type
+from typing import Literal, Type, get_args
 
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
 
-QUANTIZATION_METHODS: List[str] = [
+QuantizationMethods = Literal[
     "aqlm",
     "awq",
     "awq_hpu",
@@ -16,15 +16,15 @@ QUANTIZATION_METHODS: List[str] = [
     "fbgemm_fp8",
     "modelopt",
     "nvfp4",
-    # The order of gptq methods is important for config.py iteration over
-    # override_quantization_method(..)
     "marlin",
+    "bitblas",
     "gguf",
     "gptq_marlin_24",
     "gptq_marlin",
+    "gptq_hpu",
+    "gptq_bitblas",
     "awq_marlin",
     "gptq",
-    "gptq_hpu",
     "compressed-tensors",
     "bitsandbytes",
     "qqq",
@@ -34,8 +34,10 @@ QUANTIZATION_METHODS: List[str] = [
     "ipex",
     "inc",
     "quark",
-    "moe_wna16"
+    "moe_wna16",
+    "torchao",
 ]
+QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
 # The customized quantization methods which will be added to this dict.
 _CUSTOMIZED_METHOD_TO_QUANT_CONFIG = {}
@@ -90,6 +92,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     from .aqlm import AQLMConfig
     from .awq import AWQConfig
     from .awq_marlin import AWQMarlinConfig
+    from .bitblas import BitBLASConfig
     from .bitsandbytes import BitsAndBytesConfig
     from .compressed_tensors.compressed_tensors import (  # noqa: E501
         CompressedTensorsConfig)
@@ -99,6 +102,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     from .fp8 import Fp8Config
     from .gguf import GGUFConfig
     from .gptq import GPTQConfig
+    from .gptq_bitblas import GPTQBitBLASConfig
     from .gptq_marlin import GPTQMarlinConfig
     from .gptq_marlin_24 import GPTQMarlin24Config
     from .hqq_marlin import HQQMarlinConfig
@@ -110,9 +114,10 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     from .neuron_quant import NeuronQuantConfig
     from .ptpc_fp8 import PTPCFp8Config
     from .qqq import QQQConfig
+    from .torchao import TorchAOConfig
     from .tpu_int8 import Int8TpuConfig
 
-    method_to_config: Dict[str, Type[QuantizationConfig]] = {
+    method_to_config: dict[str, Type[QuantizationConfig]] = {
         "aqlm": AQLMConfig,
         "awq": AWQConfig,
         "awq_hpu": AWQHPUConfig,
@@ -122,15 +127,15 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
         "fbgemm_fp8": FBGEMMFp8Config,
         "modelopt": ModelOptFp8Config,
         "nvfp4": ModelOptNvFp4Config,
-        # The order of gptq methods is important for config.py iteration over
-        # override_quantization_method(..)
         "marlin": MarlinConfig,
+        "bitblas": BitBLASConfig,
         "gguf": GGUFConfig,
         "gptq_marlin_24": GPTQMarlin24Config,
         "gptq_marlin": GPTQMarlinConfig,
+        "gptq_hpu": GPTQHPUConfig,
+        "gptq_bitblas": GPTQBitBLASConfig,
         "awq_marlin": AWQMarlinConfig,
         "gptq": GPTQConfig,
-        "gptq_hpu": GPTQHPUConfig,
         "compressed-tensors": CompressedTensorsConfig,
         "bitsandbytes": BitsAndBytesConfig,
         "ptpc_fp8": PTPCFp8Config,
@@ -142,6 +147,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
         "inc": INCConfig,
         "quark": QuarkConfig,
         "moe_wna16": MoeWNA16Config,
+        "torchao": TorchAOConfig,
     }
     # Update the `method_to_config` with customized quantization methods.
     method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)
@@ -151,6 +157,7 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
 
 __all__ = [
     "QuantizationConfig",
+    "QuantizationMethods",
     "get_quantization_config",
     "QUANTIZATION_METHODS",
 ]
