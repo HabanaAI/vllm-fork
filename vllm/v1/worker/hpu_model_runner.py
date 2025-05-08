@@ -1811,14 +1811,15 @@ class HPUModelRunner:
         self.model_memory_usage = m.consumed_device_memory
         logger.info("Loading model weights took %.4f GB",
                     self.model_memory_usage / float(2**30))
-            
+
         if self.model_config.quantization == 'inc':
             logger.info("Preparing model with INC..")
             with HabanaMemoryProfiler() as m_inc:
-                from neural_compressor.torch.quantization import (
-                    FP8Config, convert, prepare)
-                config = FP8Config.from_json_file(
-                    os.getenv("QUANT_CONFIG", ""))
+                from neural_compressor.torch.quantization import (FP8Config,
+                                                                  convert,
+                                                                  prepare)
+                config = FP8Config.from_json_file(os.getenv(
+                    "QUANT_CONFIG", ""))
                 if config.measure:
                     self.model = prepare(self.model, config)
                 elif config.quantize:
@@ -1828,7 +1829,7 @@ class HPUModelRunner:
             self.inc_initialized_successfully = True
             self.model_memory_usage = m.consumed_device_memory
             logger.info("Preparing model with INC took %.4f GB",
-                    self.model_memory_usage / float(2**30))
+                        self.model_memory_usage / float(2**30))
         elif not is_fake_hpu():
             self.model = self.model.to("hpu")
             htcore.mark_step()
