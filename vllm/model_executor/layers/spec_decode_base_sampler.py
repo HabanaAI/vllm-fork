@@ -108,7 +108,6 @@ class SpecDecodeBaseSampler(nn.Module):
             draft_token_ids: torch.Tensor,  # [batch_size, k]
             bonus_token_ids: torch.Tensor,  # [batch_size]
     ) -> torch.Tensor:
-        """Native implementation of _create_output that works on all platforms except HPU."""
         batch_size, k = substitute_token_ids.shape
         bonus_token_ids = bonus_token_ids.squeeze(-1)
         # Determine the index of the first False value for each row.
@@ -155,7 +154,6 @@ class SpecDecodeBaseSampler(nn.Module):
             draft_token_ids: torch.Tensor,  # [batch_size, k]
             bonus_token_ids: torch.Tensor,  # [batch_size]
     ) -> torch.Tensor:
-        """HPU-specific implementation of _create_output that handles boolean tensor max operation correctly."""
         batch_size, k = substitute_token_ids.shape
         bonus_token_ids = bonus_token_ids.squeeze(-1)
         # Determine the index of the first False value for each row.
