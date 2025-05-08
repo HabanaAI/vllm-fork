@@ -2196,7 +2196,7 @@ class HPUModelRunner:
         can_finalize_inc = (self.model_config.quantization == 'inc') and \
             (self.model.model is not None) and \
             self.inc_initialized_successfully and \
-            not self._is_inc_finalized 
+            not self._is_inc_finalized
         if can_finalize_inc:
             from neural_compressor.torch.quantization import (
                 finalize_calibration)
