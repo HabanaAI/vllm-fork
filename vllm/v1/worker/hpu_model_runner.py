@@ -1575,7 +1575,7 @@ class HPUModelRunner:
     def _is_quant_with_inc(self):
         quant_config = os.getenv("QUANT_CONFIG", None) is not None
         return (self.model_config.quantization == "inc" or quant_config)
-    
+
     @torch.inference_mode()
     def execute_model(
         self,
