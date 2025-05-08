@@ -2061,11 +2061,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_lora_profile_run=False,
                         temperature=0) -> None:
         #print("line2063", batch_size, seq_len, ctx,)
+        phase = self._phase_warmup(is_prompt, ctx)
         use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
         scenario_name = ("warmup_"
-                         f"{'prompt' if is_prompt else 'decode'}_"
+                         f"{phase.value}_"
                          f"bs{batch_size}_"
                          f"seq{seq_len}_"
+                         f"ctx{ctx}_"
                          f"graphs{'T' if use_graphs else 'F'}")
         # This represents the maximum number of different requests
         # that will have unique loras, an therefore the max amount of memory
@@ -2317,14 +2319,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
-            phase, bs, seq_len, graph = profile.split('_')
-            is_prompt = phase == 'prompt'
+            phase, bs, seq_len, ctx, graph = profile.split('_')
+            #is_prompt = phase == 'prompt'
+            is_prompt = phase != 'decode'
             graphs = graph == 't'
             if graphs:
-                self.graphed_buckets.add((int(bs), int(seq_len), 0, is_prompt))
+                self.graphed_buckets.add((int(bs), int(seq_len), int(ctx), is_prompt))
             self.warmup_scenario(int(bs),
                                  int(seq_len),
-                                 0,
+                                 int(ctx),
                                  is_prompt,
                                  kv_caches,
                                  is_pt_profiler_run=True)
@@ -2810,6 +2813,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             #print("use_graphs", use_graphs)
 
             self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
+            if warmup_mode:
+                phase = self._phase_warmup(attn_metadata.is_prompt, ctx).value
+            else:            
+                phase = self._phase(attn_metadata).value
             #if is_prompt:
             #    print("check_configs", batch_size, seq_len, ctx)
             lora_mask: torch.Tensor = None
@@ -2839,9 +2846,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             htorch.core.mark_step()
             if self.is_driver_worker:
                 model_event_name = ("model_"
-                                    f"{'prompt' if is_prompt else 'decode'}_"
+                                    f"{phase}_"
                                     f"bs{batch_size}_"
                                     f"seq{seq_len}_"
+                                    f"ctx{ctx}_"
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
@@ -2902,9 +2910,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 with self.profiler.record_event(
                         'internal',
                     ('compute_logits_'
-                     f'{"prompt" if is_prompt else "decode"}_bs'
+                     f'{phase}_bs'
                      f'{batch_size}_'
-                     f'seq{seq_len}'),
+                     f'seq{seq_len}_ctx'
+                     f'{ctx}'),
                         args=profiler_args):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
@@ -2922,9 +2931,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 with self.profiler.record_event(
                         'internal', ('sample_'
-                                     f'{"prompt" if is_prompt else "decode"}_'
+                                     f'{phase}_'
                                      f'bs{batch_size}_'
-                                     f'seq{seq_len}'),
+                                     f'seq{seq_len}_'
+                                     f'ctx{ctx}'),
                         args=profiler_args):
                     output = self.model.sample(
                         logits=logits,
