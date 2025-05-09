@@ -2347,6 +2347,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_buckets = 0
         if self.use_prefix_caching:
             self.bucketing_ctx.generate_prefix_prefill_buckets()
+            prefix_prefill_buckets = len(self.bucketing_ctx.decode_buckets)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, ctx, graph = profile.split('_')
@@ -2364,14 +2365,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
-            cache_size_limit = 1 + multiplier * (
-                len(self.bucketing_ctx.prompt_buckets) +
-                len(self.bucketing_ctx.prefix_prefill_buckets) +
-                len(self.bucketing_ctx.decode_buckets))
-'''
             cache_size_limit = 1 + multiplier * (prompt_buckets +
-                                                 decode_buckets)
-'''
+                                                 decode_buckets +
+                                                 prefix_prefill_buckets)
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
