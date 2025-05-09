@@ -13,5 +13,5 @@
             "fused_scaled_dot_product_attention"
         ]
     },
-    "dump_stats_path": "./calibration/vllm-hpu-extension/calibration/g2/qwen2.5-3b-instruct/g2/inc_output"
+    "dump_stats_path": "./calibration/vllm-hpu-extension/calibration/g2/qwen2.5-vl-3b-instruct/g2/inc_output"
 }
