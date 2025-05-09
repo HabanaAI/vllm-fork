@@ -31,7 +31,7 @@ def main():
             "content": [
                 {
                     "type": "text",
-                    "text": "Which of the depicted countries has the best food? Which the second and third and fourth?",
+                    "text": "Which of the depicted countries has the best food? Which the second and third and fourth? Name the country, its color on the map and one its city that is visible on the map, but is not the capital. Make absolutely sure to only name a city that can be seen on the map.",
                 },
                 {"type": "image_url", "image_url": {"url": image_url}},
             ],
