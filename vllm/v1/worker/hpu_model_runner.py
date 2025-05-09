@@ -1907,8 +1907,7 @@ class HPUModelRunner:
             seq_lens_device = _async_h2d_tensor_copy(seq_lens, self.device)
             if num_blocks:
                 prefix_block_tables = torch.ones(
-                    (batch_size, num_blocks),
-                    dtype=torch.int32,
+                    (batch_size, num_blocks), dtype=torch.int32,
                     device='cpu') * self._PAD_BLOCK_ID
                 #for i, n in enumerate(num_blocks):
                 #    prefix_block_tables[i, :n] = block_table_cpu_tensor[
@@ -2044,11 +2043,13 @@ class HPUModelRunner:
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
-        for i, (batch_size, seq_len, num_blocks) in enumerate(reversed(buckets)):
+        for i, (batch_size, seq_len,
+                num_blocks) in enumerate(reversed(buckets)):
             phase = self._phase_warmup(is_prompt, num_blocks)
-            self.log_warmup(phase, i,
-                            len(buckets), batch_size, seq_len, num_blocks)
-            self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt, kv_caches)
+            self.log_warmup(phase, i, len(buckets), batch_size, seq_len,
+                            num_blocks)
+            self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt,
+                                 kv_caches)
             torch.hpu.synchronize()
 
     def warmup_graphs(self,
@@ -2093,9 +2094,11 @@ class HPUModelRunner:
             if graphed_bucket in self.graphed_buckets:
                 continue
             self.graphed_buckets.add(graphed_bucket)
-            self.log_warmup(phase, idx, num_candidates, batch_size, seq_len, num_blocks)
+            self.log_warmup(phase, idx, num_candidates, batch_size, seq_len,
+                            num_blocks)
             with HabanaMemoryProfiler() as mem_prof:
-                self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt, kv_caches)
+                self.warmup_scenario(batch_size, seq_len, num_blocks,
+                                     is_prompt, kv_caches)
             #TODO(kzawora): align_workers
             used_mem = mem_prof.consumed_device_memory
             available_mem -= used_mem
@@ -2293,8 +2296,8 @@ class HPUModelRunner:
             self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
                                     kv_caches)
             print(self.bucketing_ctx.prompt_buckets)
-            self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets, True,
-                                    kv_caches)
+            self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets,
+                                    True, kv_caches)
             print(self.bucketing_ctx.prefix_prefill_buckets)
             self.warmup_all_buckets(self.bucketing_ctx.decode_buckets, False,
                                     kv_caches)
