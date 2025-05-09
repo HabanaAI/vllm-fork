@@ -576,14 +576,21 @@ def main(args: argparse.Namespace):
                                             tokenizer=tokenizer,
                                             return_prompt_formatted=False)
         else:
-            assert tokenizer.chat_template or tokenizer.default_chat_template, (
-                "Tokenizer/model must have chat template for sonnet dataset.")
-            input_requests = dataset.sample(num_requests=args.num_prompts,
-                                            input_len=args.sonnet_input_len,
-                                            output_len=args.sonnet_output_len,
-                                            prefix_len=args.sonnet_prefix_len,
-                                            tokenizer=tokenizer,
-                                            return_prompt_formatted=True)
+            # TODO: AttributeError: 'MistralTokenizer' object has no attribute 'chat_template'
+            # assert (
+            #     tokenizer.chat_template or tokenizer.default_chat_template
+            # ), "Tokenizer/model must have chat template for sonnet dataset."
+            input_requests = sample_sonnet_requests(
+                dataset_path=args.dataset_path,
+                num_requests=args.num_prompts,
+                input_len=args.sonnet_input_len,
+                output_len=args.sonnet_output_len,
+                prefix_len=args.sonnet_prefix_len,
+                tokenizer=tokenizer,
+            )
+            input_requests = [(prompt_formatted, prompt_len, output_len, None)
+                              for prompt, prompt_formatted, prompt_len,
+                              output_len, _ in input_requests]
 
     elif args.dataset_name == "hf":
         # all following datasets are implemented from the
