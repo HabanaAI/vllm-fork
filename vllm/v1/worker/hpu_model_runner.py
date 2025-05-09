@@ -1459,6 +1459,16 @@ class HPUModelRunner:
             return 0
         return attn_metadata.block_list.numel()
 
+    def _phase_warmup(self, is_prompt, ctx):
+        if is_prompt:
+            if ctx == 0:
+                phase = PhaseType.PREFILL
+            else:
+                phase = PhaseType.PREFIX_PREFILL
+        else:
+            phase = PhaseType.DECODE
+        return phase
+
     def _phase(self, attn_metadata):
         phase_type: PhaseType
         is_prompt = attn_metadata.is_prompt
@@ -1870,7 +1880,7 @@ class HPUModelRunner:
                f'buckets:{sorted(list(graphed))}')
         logger.info(msg)
 
-    def warmup_scenario(self, batch_size, seq_or_block, is_prompt,
+    def warmup_scenario(self, batch_size, seq_or_block, num_blocks, is_prompt,
                         kv_caches) -> None:
         """Dummy warmup run for memory usage and graph compilation."""
 
@@ -1895,12 +1905,41 @@ class HPUModelRunner:
                                    device='cpu')
             seq_lens.fill_(seq_or_block)
             seq_lens_device = _async_h2d_tensor_copy(seq_lens, self.device)
-            attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
-                seq_lens_tensor=seq_lens_device,
-                num_prefills=batch_size,
-                num_prefill_tokens=batch_size * seq_or_block,
-                input_positions=None,
-                slot_mapping=slot_mapping_device)
+            if num_blocks:
+                prefix_block_tables = torch.ones(
+                    (batch_size, num_blocks),
+                    dtype=torch.int32,
+                    device='cpu') * self._PAD_BLOCK_ID
+                #for i, n in enumerate(num_blocks):
+                #    prefix_block_tables[i, :n] = block_table_cpu_tensor[
+                #        batch_idx + i, :n]
+                '''context_lens_tensor = torch.zeros((batch_size),
+                                                  dtype=torch.int32,
+                                                  device='cpu')
+                context_lens_tensor[:num_prefills] = torch.tensor(context_lens,
+                                                                  device='cpu')
+                '''
+                block_list_device = _async_h2d_tensor_copy(
+                    prefix_block_tables.flatten(), self.device)
+                #context_lens_tensor_device = _async_h2d_tensor_copy(
+                #    context_lens_tensor, self.device)
+                attn_metadata = \
+                    HPUAttentionMetadataV1.make_cached_prefill_metadata(
+                    seq_lens_tensor=seq_lens_device,
+                    context_lens_tensor=seq_lens_device,
+                    num_prefills=batch_size,
+                    num_prefill_tokens=batch_size * seq_or_block,
+                    input_positions=None,
+                    slot_mapping=slot_mapping_device,
+                    block_list=block_list_device)
+            else:
+                #block_list = None
+                attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
+                    seq_lens_tensor=seq_lens_device,
+                    num_prefills=batch_size,
+                    num_prefill_tokens=batch_size * seq_or_block,
+                    input_positions=None,
+                    slot_mapping=slot_mapping_device)
         else:
             block_tables = [
                 x.tolist()
@@ -1991,7 +2030,7 @@ class HPUModelRunner:
         htorch.core.mark_step()
         return tokens_all_random, tokens_all_greedy, tokens_mixed
 
-    def log_warmup(self, phase, i, max_i, batch_size, seq_len):
+    def log_warmup(self, phase, i, max_i, batch_size, seq_len, num_blocks):
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
         dim = "num_blocks"
@@ -2000,14 +2039,16 @@ class HPUModelRunner:
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
                f"{dim}:{seq_len} "
+               f"ctx:{num_blocks} "
                f"free_mem:{free_mem}")
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
-        for i, (batch_size, seq_len, ctx) in enumerate(reversed(buckets)):
-            self.log_warmup('Prompt' if is_prompt else 'Decode', i,
-                            len(buckets), batch_size, seq_len)
-            self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
+        for i, (batch_size, seq_len, num_blocks) in enumerate(reversed(buckets)):
+            phase = self._phase_warmup(is_prompt, num_blocks)
+            self.log_warmup(phase, i,
+                            len(buckets), batch_size, seq_len, num_blocks)
+            self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt, kv_caches)
             torch.hpu.synchronize()
 
     def warmup_graphs(self,
@@ -2020,7 +2061,7 @@ class HPUModelRunner:
                       total_batch_seq=0.001):
         total_mem = starting_mem
         idx = 0
-        phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
+        #phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
         num_candidates = len(buckets)
         ordering : Union[Callable[[Any], tuple[Any, Any]], \
             Callable[[Any], tuple[Any, Any, Any]]]
@@ -2033,20 +2074,28 @@ class HPUModelRunner:
                 f'Unsupported graph allocation strategy: {strategy}')
         buckets = list(sorted(buckets, key=ordering))
         captured_all = True
-        for idx, (batch_size, seq_len) in enumerate(buckets):
+        for idx, (batch_size, seq_len, num_blocks) in enumerate(buckets):
             # Graph memory usage is proportional to seq dimension in a batch
-            batch_seq = batch_size * seq_len if is_prompt else batch_size
+            phase = f'Graph/{self._phase_warmup(is_prompt, num_blocks)}'
+            #batch_seq = batch_size * seq_len if is_prompt else batch_size
+            if is_prompt:
+                if num_blocks:
+                    batch_seq = batch_size * seq_len * num_blocks
+                else:
+                    batch_seq = batch_size * seq_len
+            else:
+                batch_seq = batch_size
             mem_estimate = batch_seq / total_batch_seq * total_mem
             if mem_estimate >= available_mem:
                 captured_all = False
                 continue
-            graphed_bucket = (batch_size, seq_len, is_prompt)
+            graphed_bucket = (batch_size, seq_len, num_blocks, is_prompt)
             if graphed_bucket in self.graphed_buckets:
                 continue
             self.graphed_buckets.add(graphed_bucket)
-            self.log_warmup(phase, idx, num_candidates, batch_size, seq_len)
+            self.log_warmup(phase, idx, num_candidates, batch_size, seq_len, num_blocks)
             with HabanaMemoryProfiler() as mem_prof:
-                self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
+                self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt, kv_caches)
             #TODO(kzawora): align_workers
             used_mem = mem_prof.consumed_device_memory
             available_mem -= used_mem
@@ -2200,7 +2249,8 @@ class HPUModelRunner:
             logger.info("Skipping warmup...")
             return
         kv_caches = self.kv_caches
-        max_blocks = kv_caches[0][0].size(0)
+        max_blocks = kv_caches[0][0].size(0) - 1
+        self.bucketing_ctx.generate_prefix_prefill_buckets()
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
@@ -2242,6 +2292,10 @@ class HPUModelRunner:
         ) if can_use_compile_only_mode else contextlib.nullcontext():
             self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
                                     kv_caches)
+            print(self.bucketing_ctx.prompt_buckets)
+            self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets, True,
+                                    kv_caches)
+            print(self.bucketing_ctx.prefix_prefill_buckets)
             self.warmup_all_buckets(self.bucketing_ctx.decode_buckets, False,
                                     kv_caches)
 
@@ -2256,10 +2310,12 @@ class HPUModelRunner:
                 graph_free_mem = graph_free_mem
                 prompt_graph_mem_ratio = float(
                     os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
-                prompt_available_memory = (prompt_graph_mem_ratio *
-                                           graph_free_mem)
+
+                prompt_available_memory = graph_free_mem / 2
+                prefix_prefill_available_memory = graph_free_mem / 2
                 decode_available_memory = (graph_free_mem -
-                                           prompt_available_memory)
+                                           prompt_available_memory -
+                                           prefix_prefill_available_memory)
                 msg = (
                     f"Using {format_bytes(graph_free_mem)}"
                     f"/{format_bytes(free_mem)} "
@@ -2276,6 +2332,10 @@ class HPUModelRunner:
                     self.warmup_graphs(
                     prompt_strategy, self.bucketing_ctx.prompt_buckets,
                     True, kv_caches, prompt_available_memory)
+                mem_post_prefix_prefill, prefix_prefill_batch_seq, prefix_prefill_captured_all = \
+                            self.warmup_graphs(
+                            prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
+                            True, kv_caches, prefix_prefill_available_memory)
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
                     decode_strategy, self.bucketing_ctx.decode_buckets,
