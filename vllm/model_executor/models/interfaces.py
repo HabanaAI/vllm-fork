@@ -56,6 +56,18 @@ class SupportsMultiModal(Protocol):
         """
         ...
 
+    def get_language_model(self) -> torch.nn.Module:
+        """
+        Returns the underlying language model used for text generation.
+
+        This is typically the `torch.nn.Module` instance responsible for 
+        processing the merged multimodal embeddings and producing hidden states
+
+        Returns:
+            torch.nn.Module: The core language model component.
+        """
+        ...
+
     # Only for models that support v0 chunked prefill
     # TODO(ywang96): Remove this overload once v0 is deprecated
     @overload
@@ -214,9 +226,9 @@ class SupportsPP(Protocol):
         intermediate_tensors: Optional["IntermediateTensors"],
     ) -> Union[Tensor, "IntermediateTensors"]:
         """
-        Accept :class:`IntermediateTensors` when PP rank > 0.
+        Accept {class}`IntermediateTensors` when PP rank > 0.
 
-        Return :class:`IntermediateTensors` only for the last PP rank.
+        Return {class}`IntermediateTensors` only for the last PP rank.
         """
         ...
 
