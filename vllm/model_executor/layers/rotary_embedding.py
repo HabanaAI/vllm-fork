@@ -262,14 +262,15 @@ class RotaryEmbedding(CustomOp):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         from habana_frameworks.torch.hpex.kernels import (
             RotaryPosEmbeddingMode, apply_rotary_pos_emb)
-        if offsets is not None:
-            offsets = offsets.view(positions.shape[0], -1)
-            positions = positions + offsets
-        positions = positions.flatten()
-        num_tokens = positions.shape[0]
-        cos_sin = self.cos_sin_cache.index_select(0, positions).view(
-            num_tokens, 1, -1)
-        cos, sin = cos_sin.chunk(2, dim=-1)
+
+        # Prepare cos-sin caches for long-context + LoRA with offsets for every
+        # forward, since the offset information wasn't available previously
+        if hasattr(self, "scaling_factors") or hasattr(
+                self, "scaling_factor") or self.sin is None:
+            self.prepare_cos_sin(positions, offsets)
+        if self.recompute_cos_sin:
+            self.prepare_cos_sin(positions, offsets, recompute_cos_sin=True)
+        num_tokens = positions.shape[0] * positions.shape[1]
         # HPU RoPE kernel requires hidden dimension for cos and sin to be equal
         # to query hidden dimension, so the original tensors need to be
         # expanded
@@ -280,27 +281,26 @@ class RotaryEmbedding(CustomOp):
         rope_mode: RotaryPosEmbeddingMode
         if self.is_neox_style:
             rope_mode = RotaryPosEmbeddingMode.BLOCKWISE
-            cos = torch.cat((cos, cos), dim=-1)
-            sin = torch.cat((sin, sin), dim=-1)
         else:
             rope_mode = RotaryPosEmbeddingMode.PAIRWISE
-            sin = torch.repeat_interleave(sin,
-                                          2,
-                                          dim=-1,
-                                          output_size=cos_sin.shape[-1])
-            cos = torch.repeat_interleave(cos,
-                                          2,
-                                          dim=-1,
-                                          output_size=cos_sin.shape[-1])
-
+        sin = self.sin
+        cos = self.cos
         query_shape = query.shape
         query = query.view(num_tokens, -1, self.head_size)
+
+        if self.head_size == self.rotary_dim and key is not None:
+            # Avoid unnecessary slicing and concatenation
+            key_shape = key.shape
+            key = key.view(num_tokens, -1, self.head_size)
+            query = apply_rotary_pos_emb(query, cos, sin, None, 0, rope_mode)
+            key = apply_rotary_pos_emb(key, cos, sin, None, 0, rope_mode)
+            return query.reshape(query_shape), key.reshape(key_shape)
+
         query_rot = query[..., :self.rotary_dim]
         query_pass = query[..., self.rotary_dim:]
         query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
                                          rope_mode)
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
-
         if key is not None:
             key_shape = key.shape
             key = key.view(num_tokens, -1, self.head_size)
