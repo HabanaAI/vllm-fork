@@ -244,13 +244,13 @@ class RotaryEmbedding(CustomOp):
                                  self.cos_sin_cache, self.is_neox_style)
         return query, key
 
-    def forward_hpu(
+     def forward_hpu(
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
-        key: torch.Tensor,
+        key: Optional[torch.Tensor] = None,
         offsets: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         from habana_frameworks.torch.hpex.kernels import (
             RotaryPosEmbeddingMode, apply_rotary_pos_emb)
 
@@ -277,12 +277,12 @@ class RotaryEmbedding(CustomOp):
         sin = self.sin
         cos = self.cos
         query_shape = query.shape
-        key_shape = key.shape
         query = query.view(num_tokens, -1, self.head_size)
-        key = key.view(num_tokens, -1, self.head_size)
 
-        if self.head_size == self.rotary_dim:
+        if self.head_size == self.rotary_dim and key is not None:
             # Avoid unnecessary slicing and concatenation
+            key_shape = key.shape
+            key = key.view(num_tokens, -1, self.head_size)
             query = apply_rotary_pos_emb(query, cos, sin, None, 0, rope_mode)
             key = apply_rotary_pos_emb(key, cos, sin, None, 0, rope_mode)
             return query.reshape(query_shape), key.reshape(key_shape)
@@ -292,11 +292,14 @@ class RotaryEmbedding(CustomOp):
         query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
                                          rope_mode)
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
-
-        key_rot = key[..., :self.rotary_dim]
-        key_pass = key[..., self.rotary_dim:]
-        key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0, rope_mode)
-        key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
+        if key is not None:
+            key_shape = key.shape
+            key = key.view(num_tokens, -1, self.head_size)
+            key_rot = key[..., :self.rotary_dim]
+            key_pass = key[..., self.rotary_dim:]
+            key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0,
+                                           rope_mode)
+            key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
         return query, key
 
     def forward_neuron(
