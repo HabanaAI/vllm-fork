@@ -4,6 +4,9 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source ./pd_xpyd/dp_d_env.sh
 export MOONCAKE_CONFIG_PATH=./pd_xpyd/2p2d_mooncake_d0.json
 
+export VLLM_DP_SIZE=4
+export VLLM_EP_SIZE=32
+
 TOTAL_INSTANCES=8
 
 if [ -z "$1" ]; then

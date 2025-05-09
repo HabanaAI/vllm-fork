@@ -2,7 +2,10 @@
 #set -x
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source ./pd_xpyd/dp_d_env.sh
-export MOONCAKE_CONFIG_PATH=./pd_xpyd/2p2d_mooncake_d0.json
+export MOONCAKE_CONFIG_PATH=./pd_xpyd/2p2d_mooncake_d1.json
+
+export VLLM_DP_SIZE=4
+export VLLM_EP_SIZE=32
 
 TOTAL_INSTANCES=8
 
@@ -11,7 +14,7 @@ if [ -z "$1" ]; then
     echo "run with default mode n=8"
     NUM_GROUPS=8
 else
-    NUM_GROUPS=${1:-1}
+    NUM_GROUPS=${1:-8}
 fi
 
 NUM_INSTANCES=$((TOTAL_INSTANCES / NUM_GROUPS))
@@ -21,10 +24,10 @@ export VLLM_DP_SIZE=$dp_size
 
 for ((i=0; i<NUM_GROUPS; i++))
 do
-  
-  RANK=$((0 + i))
+
+  RANK=$((NUM_GROUPS + i))
   port=$((8200 + i))
-  
+
   VLLM_DP_RANK=$RANK python3 -m vllm.entrypoints.openai.api_server \
     --model "$model_path" \
     --port "$port" \
