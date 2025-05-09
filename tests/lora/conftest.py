@@ -234,7 +234,9 @@ def llama_2_7b_engine_extra_embeddings():
     if current_platform.is_hpu():
         with patch("vllm.worker.hpu_model_runner.get_model",
                    get_model_patched):
-            engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
+            engine = vllm.LLM("meta-llama/Llama-2-7b-hf",
+                              enforce_eager=True,
+                              enable_lora=False)
     else:
         with patch("vllm.worker.model_runner.get_model", get_model_patched):
             engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
@@ -265,3 +267,15 @@ def run_with_both_engines_lora(request, monkeypatch):
         monkeypatch.setenv('VLLM_USE_V1', '0')
 
     yield
+
+
+@pytest.fixture
+def reset_default_device():
+    """
+    Some tests, such as `test_punica_ops.py`, explicitly set the 
+    default device, which can affect subsequent tests. Adding this fixture 
+    helps avoid this problem.
+    """
+    original_device = torch.get_default_device()
+    yield
+    torch.set_default_device(original_device)

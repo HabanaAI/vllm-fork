@@ -21,7 +21,7 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (AttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 from vllm.v1.outputs import ModelRunnerOutput
-from vllm.v1.utils import bind_kv_cache
+from vllm.v1.utils import bind_kv_cache, report_usage_stats
 from vllm.v1.worker.tpu_model_runner import TPUModelRunner
 
 logger = init_logger(__name__)
@@ -133,6 +133,10 @@ class TPUWorker:
         # Init ModelRunner here, so that we have access to self.device.
         self.model_runner = TPUModelRunner(self.vllm_config, self.device)
 
+        if rank == 0:
+            # If usage stat is enabled, collect relevant info.
+            report_usage_stats(self.vllm_config)
+
     def determine_available_memory(self) -> int:
         kv_caches: dict[str, torch.Tensor] = {}
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
@@ -156,13 +160,19 @@ class TPUWorker:
             self.vllm_config.compilation_config.static_forward_context,
             runner_kv_caches)
 
-        self.model_runner._dummy_run(
-            runner_kv_caches,
-            num_tokens=self.scheduler_config.max_num_batched_tokens,
-        )
+        # `max_num_tokens >= max_num_batched_tokens` due to padding.
+        self.model_runner.profile_run(self.model_runner.max_num_tokens)
 
         # Synchronize before measuring the memory usage.
         xm.wait_device_ops()
+
+        # During the profiling run, the model runs without KV cache. After
+        # the profiling run, the model always runs with KV cache. Here we clear
+        # the dynamo cache and cached bytecode to ensure the model always has
+        # one compiled bytecode. Having one FX graph/cached bytecode per
+        # compiled model is required for `support_torch_compile` decorator to
+        # skip dynamo guard.
+        self.model_runner.reset_dynamo_cache()
 
         # Get the maximum amount of memory used by the model weights and
         # intermediate activations.

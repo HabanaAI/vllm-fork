@@ -13,6 +13,7 @@ from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.fused_moe.layer import (FusedMoE,
                                                         FusedMoEMethodBase)
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
+from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -31,7 +32,7 @@ class GGUFConfig(QuantizationConfig):
     def __repr__(self) -> str:
         return ("GGUFConfig()")
 
-    def get_name(self) -> str:
+    def get_name(self) -> QuantizationMethods:
         return "gguf"
 
     def get_supported_act_dtypes(self) -> List[torch.dtype]:
@@ -338,9 +339,15 @@ class GGUFMoEMethod(FusedMoEMethodBase):
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
+        apply_router_weight_on_input: bool = False,
         activation: str = "silu",
     ):
         assert activation == "silu", "Only SiLU activation is supported."
+        if apply_router_weight_on_input:
+            raise NotImplementedError(
+                "Apply router weight on input is not supported for"
+                "fused GGUF MoE method.")
+
         topk_weights, topk_ids = FusedMoE.select_experts(
             hidden_states=x,
             router_logits=router_logits,

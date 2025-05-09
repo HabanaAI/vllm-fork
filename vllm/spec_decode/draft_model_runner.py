@@ -6,6 +6,7 @@ import torch
 
 from vllm.forward_context import set_forward_context
 from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.platforms import current_platform
 
 try:
     try:
@@ -19,9 +20,10 @@ try:
             from vllm.attention.backends.hpu_attn import (
                 HPUPagedAttentionMetadata as FlashAttentionMetadata)
 except (ModuleNotFoundError, ImportError, AssertionError) as err:
-    raise RuntimeError(
-        "Draft model speculative decoding currently only supports"
-        "CUDA and ROCm and HPU attention backend.") from err
+    if current_platform.is_cuda_alike():
+        raise RuntimeError(
+            "Draft model speculative decoding currently only supports"
+            "CUDA and ROCm and HPU attention backend.") from err
 
 from vllm.logger import init_logger
 from vllm.multimodal import MultiModalKwargs
@@ -38,6 +40,14 @@ debug_advance_input = False
 # A flag to allow GPU advance step for draft model runner.
 # Set to False for debugging.
 allow_gpu_advance_step = True
+
+
+class GeneralTP1DraftModelRunner(ModelRunnerWrapperBase):
+
+    def __init__(self, model_runner: ModelRunnerBase):
+        super().__init__(model_runner)
+
+        self.indices_of_seq_with_bonus_tokens = None
 
 
 class TP1DraftModelRunner(ModelRunnerWrapperBase):
@@ -205,6 +215,9 @@ class TP1DraftModelRunner(ModelRunnerWrapperBase):
             if self.prompt_adapter_config is not None:
                 raise ValueError("TP1DraftModelRunner has no support for "
                                  "prompt_adapter_config")
+            if model_input.inputs_embeds is not None:
+                raise ValueError("TP1DraftModelRunner has no support for "
+                                 "inputs_embeds")
             if model_input.multi_modal_kwargs:
                 raise ValueError(
                     "TP1DraftModelRunner has no support for multi_modal_kwargs"
@@ -246,9 +259,16 @@ class TP1DraftModelRunner(ModelRunnerWrapperBase):
 
         # Get model
         if use_cuda_graph:
-            graph_batch_size = model_input.input_tokens.shape[0]
-            model_executable = (self.graph_runners[model_input.virtual_engine]
-                                [graph_batch_size])
+            if model_input.inputs_embeds is None:
+                graph_batch_size = model_input.input_tokens.shape[0]
+                model_executable = (
+                    self.graph_runners[model_input.virtual_engine][(
+                        graph_batch_size, False)])
+            else:
+                graph_batch_size = model_input.inputs_embeds.shape[0]
+                model_executable = (
+                    self.graph_runners[model_input.virtual_engine][(
+                        graph_batch_size, True)])
 
             if previous_hidden_states is not None:
                 hidden_states = torch.cat([
@@ -285,6 +305,7 @@ class TP1DraftModelRunner(ModelRunnerWrapperBase):
                                      self.vllm_config):
                 hidden_states = model_executable(
                     input_ids=model_input.input_tokens,
+                    inputs_embeds=None,
                     positions=model_input.input_positions,
                     intermediate_tensors=intermediate_tensors,
                     **MultiModalKwargs.as_kwargs(multi_modal_kwargs,
@@ -299,7 +320,7 @@ class TP1DraftModelRunner(ModelRunnerWrapperBase):
             if not self.is_driver_worker:
                 return []
             # Sample the next token.
-            output = self.model.sample(
+            output = self.model_runner.sampler(
                 logits=logits,
                 sampling_metadata=model_input.sampling_metadata,
             )
