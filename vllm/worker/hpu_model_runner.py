@@ -2350,14 +2350,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             prefix_prefill_buckets = len(self.bucketing_ctx.decode_buckets)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
-            phase, bs, seq_len, ctx, graph = profile.split('_')
+            if self.use_prefix_caching:
+                phase, bs, seq_len, ctx, graph = profile.split('_')
+                cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
+            else:
+                phase, bs, seq_len, graph = profile.split('_')
+                cfg = (int(bs), int(seq_len), is_prompt)
             is_prompt = phase != 'decode'
             graphs = graph == 't'
             if graphs:
-                self.graphed_buckets.add((int(bs), int(seq_len), int(ctx), is_prompt))
+                self.graphed_buckets.add(cfg)
             self.warmup_scenario(int(bs),
                                  int(seq_len),
-                                 int(ctx),
+                                 int(ctx) if ctx else None,
                                  is_prompt,
                                  kv_caches,
                                  is_pt_profiler_run=True)
@@ -2367,7 +2372,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         'true').lower() == 'true' else 1
             cache_size_limit = 1 + multiplier * (prompt_buckets +
                                                  decode_buckets +
-                                                 prefix_prefill_buckets)
+                                                 prefix_prefill_buckets if prefix_prefill_buckets else None)
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
@@ -2399,8 +2404,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) if can_use_compile_only_mode else contextlib.nullcontext():
             self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
                                     kv_caches)
-            self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets, True,
-                                    kv_caches)
+            if self.use_prefix_caching:
+                self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets, True,
+                                        kv_caches)
             if not self.is_pooler:
                 self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,
                                         False, kv_caches)
@@ -2421,19 +2427,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     prompt_graph_mem_ratio = float(
                         os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
                     prompt_available_memory = (prompt_graph_mem_ratio *
-                                               graph_free_mem) / 2
-                    prefix_prefill_available_memory = (prompt_graph_mem_ratio *
-                                               graph_free_mem) / 2
-                    decode_available_memory = (graph_free_mem - 
-                                               prompt_available_memory -
-                                               prefix_prefill_available_memory)
+                                               graph_free_mem)
+                    decode_available_memory = (graph_free_mem -
+                                               prompt_available_memory)
+                    if self.use_prefix_caching:
+                        prompt_available_memory = prompt_available_memory / 2
+                        prefix_prefill_available_memory = (prompt_graph_mem_ratio *
+                                                   graph_free_mem) / 2
+                        decode_available_memory = (decode_available_memory -
+                                                   prefix_prefill_available_memory)
+                        
                     msg = (
                         f"Using {format_bytes(graph_free_mem)}"
                         f"/{format_bytes(free_mem)} "
                         "of free device memory for HPUGraphs, "
                         f"{format_bytes(prompt_available_memory)} \
                             for prompt and " \
-                        f"{format_bytes(prefix_prefill_available_memory)} \
+                        f"{format_bytes(prefix_prefill_available_memory) if self.use_prefix_caching else 0} \
                             for prefix_prefill and "
                         f"{format_bytes(decode_available_memory)} for decode "
                         f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
@@ -2443,10 +2453,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         prompt_strategy, self.bucketing_ctx.prompt_buckets,
                         True, kv_caches, prompt_available_memory)
                     
-                    mem_post_prefix_prefill, prefix_prefill_batch_seq, prefix_prefill_captured_all = \
-                        self.warmup_graphs(
-                        prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
-                        True, kv_caches, prefix_prefill_available_memory)
+                    if self.use_prefix_caching:
+                        mem_post_prefix_prefill, prefix_prefill_batch_seq, prefix_prefill_captured_all = \
+                            self.warmup_graphs(
+                            prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
+                            True, kv_caches, prefix_prefill_available_memory)
 
                     decode_strategy = os.environ.get(
                         'VLLM_GRAPH_DECODE_STRATEGY', 'max_bs')
@@ -2461,7 +2472,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     # capturing more prompt buckets.
                     if (mem_post_decode + mem_post_prompt + mem_post_prefix_prefill < graph_free_mem
                             and not prompt_captured_all 
-                            and not prefix_prefill_captured_all
+                            and not prefix_prefill_captured_all if self.use_prefix_caching else True
                             and decode_captured_all):
                         mem_post_prompt, _, prompt_captured_all = (
                             self.warmup_graphs(
@@ -2471,13 +2482,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 mem_post_decode, mem_post_prompt,
                                 prompt_batch_seq))
 
-                        mem_post_prefix_prefill, _, prefix_prefill_captured_all = (
-                            self.warmup_graphs(
-                                prompt_strategy,
-                                self.bucketing_ctx.prefix_prefill_buckets, True,
-                                kv_caches, graph_free_mem - mem_post_prefix_prefill -
-                                mem_post_decode, mem_post_prefix_prefill,
-                                prefix_prefill_batch_seq))
+                        if self.use_prefix_caching:
+                            mem_post_prefix_prefill, _, prefix_prefill_captured_all = (
+                                self.warmup_graphs(
+                                    prompt_strategy,
+                                    self.bucketing_ctx.prefix_prefill_buckets, True,
+                                    kv_caches, graph_free_mem - mem_post_prefix_prefill -
+                                    mem_post_decode, mem_post_prefix_prefill,
+                                    prefix_prefill_batch_seq))
+                        else:
+                            mem_post_prefix_prefill = 0
                         # Not all decode buckets were captured, but all prompt
                         # and prefix_prefills
                         # buckets were captured and we have some free
@@ -2542,8 +2556,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
-                self.log_graph_warmup_summary(
-                    self.bucketing_ctx.prefix_prefill_buckets, True, mem_post_prefix_prefill)
+                if self.use_prefix_caching:
+                    self.log_graph_warmup_summary(
+                        self.bucketing_ctx.prefix_prefill_buckets, True, mem_post_prefix_prefill)
                 if not self.is_pooler:
                     self.log_graph_warmup_summary(
                         self.bucketing_ctx.decode_buckets, False,
