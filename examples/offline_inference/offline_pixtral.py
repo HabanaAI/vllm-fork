@@ -25,7 +25,7 @@ def main():
             "content": [
                 {
                     "type": "text",
-                    "text": "Which of the depicted countries has the best food? Which the second and third and fourth?",
+                    "text": "Which of the depicted countries has the best food? Which the second and third and fourth? Name the country, its color on the map and one its city that is visible on the map, but is not the capital. Make absolutely sure to only name a city that can be seen on the map.",
                 },
                 {"type": "image_url", "image_url": {"url": image_url}},
             ],
@@ -40,7 +40,7 @@ def main():
 
     # note that running this model on GPU requires over 300 GB of GPU RAM
 
-    llm = LLM(model=model_name, max_model_len=1024*8, config_format="mistral", load_format="mistral", tokenizer_mode="mistral", tensor_parallel_size=1, limit_mm_per_prompt={"image": 4})
+    llm = LLM(model=model_name, max_model_len=1024*8, dtype="bfloat16", config_format="mistral", load_format="mistral", tokenizer_mode="mistral", tensor_parallel_size=1, enforce_eager=True, limit_mm_per_prompt={"image": 4})
 
     outputs = llm.chat(messages, sampling_params=sampling_params)
 
