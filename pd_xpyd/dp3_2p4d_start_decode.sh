@@ -1,10 +1,10 @@
 #!/bin/bash
-#set -x
+set -x
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source ./pd_xpyd/dp_d_env.sh
 export MOONCAKE_CONFIG_PATH=./pd_xpyd/2p4d_mooncake_d3.json
 
-export VLLM_DP_SIZE=4
+export VLLM_DP_SIZE=32
 export VLLM_EP_SIZE=32
 
 TOTAL_INSTANCES=8
@@ -19,13 +19,13 @@ fi
 
 NUM_INSTANCES=$((TOTAL_INSTANCES / NUM_GROUPS))
 
-dp_size=$((2 * NUM_GROUPS))
+dp_size=$((4 * NUM_GROUPS))
 export VLLM_DP_SIZE=$dp_size
 
 for ((i=0; i<NUM_GROUPS; i++))
 do
   
-  RANK=$((0 + i))
+  RANK=$((NUM_GROUPS * 3 + i))
   port=$((8200 + i))
   
   VLLM_DP_RANK=$RANK python3 -m vllm.entrypoints.openai.api_server \
