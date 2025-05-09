@@ -200,6 +200,7 @@ class SupportsPP(Protocol):
     def make_empty_intermediate_tensors(
         self,
         batch_size: int,
+        context_size: int,
         dtype: torch.dtype,
         device: torch.device,
     ) -> "IntermediateTensors":
