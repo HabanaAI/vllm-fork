@@ -7,6 +7,7 @@ from this remote lookup buffer.
 """
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -183,4 +184,39 @@ class MooncakeStore(KVLookupBufferBase):
                 'hpu', device_id) if device_id >= 0 else torch.device('cpu')
             return tensor.to(device)
 
+        return None
+
+    def put_unsafe(
+        self,
+        key: str,
+        value: Optional[torch.Tensor],
+    ) -> None:
+        """Put KVCache to Mooncake Store"""
+        value = value.cpu()
+        start_serde = time.time()
+        data_ptr = value.data_ptr()
+        element_size = value.element_size()
+        numel = value.numel()
+        value_bytes = bytes((ctypes.c_byte * (numel * element_size)).from_address(data_ptr))
+        end_serde = time.time()
+        try:
+            self.store.put(key, value_bytes)
+        except TypeError as err:
+            logger.error("Failed to put value into Mooncake Store: %s", err)
+            raise TypeError("Mooncake Store Put Type Error.") from err
+        end_put = time.time()
+        logger.info(f"contiguous time: {end_serde - start_serde}, put time: {end_put - end_serde}")
+
+
+    def get_unsafe(self, key: str, shape, ranks) -> Optional[torch.Tensor]:
+        """Get KVCache from Mooncake Store without type checking"""
+        start_get = time.time()
+        data = self.store.get(key)
+        end_get = time.time()
+        if data:
+            tensor = torch.frombuffer(data, dtype=torch.bfloat16).clone()
+            tensor = tensor.reshape(shape)            
+            end_from_buffer = time.time()
+            logger.info(f"from buffer time: {end_from_buffer - end_get}, get time: {end_get - start_get}")
+            return tensor
         return None
