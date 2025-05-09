@@ -461,7 +461,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
-        slot_mapping = attn_metadata.slot_mapping.flatten()
+        slot_mapping = attn_metadata.slot_mapping.flatten(
+        ) if attn_metadata.slot_mapping is not None else None
         key_cache = None
         value_cache = None
         if kv_cache is not None and isinstance(kv_cache, tuple):
@@ -579,7 +580,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         else:
             assert value is None
 
-        cross_slot_mapping = attn_metadata.cross_slot_mapping.flatten()
+        cross_slot_mapping = attn_metadata.cross_slot_mapping.flatten(
+        ) if attn_metadata.cross_slot_mapping is not None else None
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
