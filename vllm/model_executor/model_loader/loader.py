@@ -26,6 +26,7 @@ from transformers import AutoModelForCausalLM
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from vllm.attention import Attention
+from vllm.distributed import get_tp_group
 from vllm.config import (LoadConfig, LoadFormat, ModelConfig, ParallelConfig,
                          VllmConfig, set_current_vllm_config)
 from vllm.distributed import (get_tensor_model_parallel_rank,
@@ -168,7 +169,7 @@ def _process_weights_after_loading(model: nn.Module, model_config: ModelConfig,
             if current_platform.is_hpu():
                 torch.hpu.synchronize()
                 if torch.distributed.is_initialized():
-                    torch.distributed.barrier()
+                    get_tp_group().barrier()
 
     # Currently only used by MLA.
     # NOTE: This intentionally happens after other modules so we can easily
@@ -182,7 +183,7 @@ def _process_weights_after_loading(model: nn.Module, model_config: ModelConfig,
             if current_platform.is_hpu():
                 torch.hpu.synchronize()
                 if torch.distributed.is_initialized():
-                    torch.distributed.barrier()
+                    get_tp_group().barrier()
 
 
 class BaseModelLoader(ABC):
