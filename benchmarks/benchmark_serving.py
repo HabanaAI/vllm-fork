@@ -883,9 +883,10 @@ def main(args: argparse.Namespace):
                               for prompt, prompt_formatted, prompt_len,
                               output_len, _ in input_requests]
         else:
-            assert (
-                tokenizer.chat_template or tokenizer.default_chat_template
-            ), "Tokenizer/model must have chat template for sonnet dataset."
+            # TODO: AttributeError: 'MistralTokenizer' object has no attribute 'chat_template'
+            # assert (
+            #     tokenizer.chat_template or tokenizer.default_chat_template
+            # ), "Tokenizer/model must have chat template for sonnet dataset."
             input_requests = sample_sonnet_requests(
                 dataset_path=args.dataset_path,
                 num_requests=args.num_prompts,
