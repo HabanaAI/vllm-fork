@@ -382,12 +382,8 @@ class HpuModelAdapter(torch.nn.Module):
 
     def forward_update_meta_only(self, *args, **kwargs):
         kwargs = kwargs.copy()
-        selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
-        virtual_engine = 0
-        if 'virtual_engine' in kwargs:
-            virtual_engine = kwargs.pop('virtual_engine')
         input_ids = kwargs['input_ids']
         attn_metadata = self._update_metadata(kwargs['attn_metadata'],
                                               input_ids.size(0),
@@ -2870,10 +2866,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             broadcast_data["attn_metadata"])
                     })
                 # Receive KV cache in distributed KV cache transfer setting
-                # In disagg prefill setting, it will also recv hidden states and bypass
-                # model forwarding
-                # In KV cache database setting, it will change the model input so that
-                # we can skip prefilling on tokens that successfully received KV caches
+                # In disagg prefill setting, it will also recv hidden states
+                # and bypass model forwarding. In KV cache database setting,
+                # it will change the model input so that we can skip prefilling
+                # on tokens that successfully received KV caches
                 # NOTE: The receive operation is blocking
                 bypass_model_exec = False
                 if self.need_recv_kv(model_input, kv_caches, warmup_mode):
@@ -2885,15 +2881,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     hidden_states, bypass_model_exec, model_input = \
                     get_kv_transfer_group().recv_kv_caches_and_hidden_states_hpu(
                         # model is used to know which layer the current worker
-                        # is working on, so that we can receive KV for only those
-                        # layers.
+                        # is working on, so that we can receive KV for
+                        # only those layers.
                         self.get_model(),
                         model_input,
                         attn_metadata,
                         kv_caches=kv_caches
                     )
                     now = time.time()
-                    logger.info(f"KV transfer recv time: {now - cur_time}")
+                    logger.info("KV transfer recv time: %s", now - cur_time)
 
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
@@ -2907,7 +2903,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
                             selected_token_indices)
-                        if warmup_mode == True:
+                        if warmup_mode:
                             torch.hpu.synchronize()
                             import torch.distributed as dist
                             if dist.is_initialized():
@@ -2922,16 +2918,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if self.need_send_kv(model_input, kv_caches, warmup_mode):
                     get_kv_transfer_group(
                     ).send_kv_caches_and_hidden_states_hpu(
-                        # model_executable is used to know which layer the current
-                        # worker is working on, so that we can send KV for only those
-                        # layers.
+                        # model_executable is used to know which layer the
+                        # current worker is working on, so that we can send KV
+                        # for only those layers.
                         self.get_model(),
                         model_input,
                         kv_caches,
                         hidden_states,
                     )
                     now = time.time()
-                    logger.info(f"KV transfer send time: {now - cur_time}")
+                    logger.info("KV transfer send time: %f", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(

@@ -126,7 +126,7 @@ class MooncakeStore(KVStoreBufferBase):
     ) -> None:
         """Put KVCache to Mooncake Store"""
         device_id = value.device.index if value.device.type == 'hpu' else -1
-        logger.debug(f"putting, device id: {device_id}")
+        logger.debug("putting, device id: %s", device_id)
         device_tensor = torch.tensor(device_id,
                                      dtype=torch.int32,
                                      device="cpu")
