@@ -17,16 +17,13 @@ docker run -it --runtime=habana \
     -e HABANA_VISIBLE_DEVICES=all \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --net=host --ipc=host \
-    vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:1.20.1-97
+    vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
  ```
 
 2. Install vLLM：
 ``` bash
 git clone -b aice/v1.20.1 https://github.com/HabanaAI/vllm-fork
-git clone -b aice/v1.20.1 https://github.com/HabanaAI/vllm-hpu-extension
-
-VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork --no-build-isolation
-pip install -e vllm-hpu-extension --no-build-isolation
+VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork
 ```
 
 3. If you need use multimodal models like Qwen-VL, GLM-4V, we recommend using Pillow-SIMD instead of Pillow to improve the image processing performance.
