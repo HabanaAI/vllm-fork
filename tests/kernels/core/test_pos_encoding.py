@@ -24,6 +24,7 @@ CUDA_DEVICES = [
 if current_platform.is_hpu():
     import habana_frameworks.torch as htorch
     CUDA_DEVICES = ['hpu']
+USE_KEY = [True, False]
 
 
 def _get_flat_tensor_shape(batch_size: int, seq_len: int, num_heads: int,
@@ -49,6 +50,7 @@ TENSORS_SHAPES_FN = [_get_batch_tensor_shape, _get_flat_tensor_shape]
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("use_key", USE_KEY)
 @torch.inference_mode()
 def test_rotary_embedding(
     is_neox_style: bool,
@@ -61,6 +63,7 @@ def test_rotary_embedding(
     dtype: torch.dtype,
     seed: int,
     device: str,
+    use_key: bool,
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
@@ -77,7 +80,7 @@ def test_rotary_embedding(
     positions = torch.randint(0, max_position, (batch_size, seq_len))
     query_shape = tensor_shape_fn(batch_size, seq_len, num_heads, head_size)
     query = torch.randn(query_shape, dtype=dtype)
-    key = torch.randn_like(query)
+    key = torch.randn_like(query) if use_key else None
 
     # NOTE(woosuk): The reference implementation should be executed first
     # because the custom kernel is in-place.
@@ -90,10 +93,14 @@ def test_rotary_embedding(
                                ref_query,
                                atol=get_default_atol(out_query),
                                rtol=get_default_rtol(out_query))
-    torch.testing.assert_close(out_key,
-                               ref_key,
-                               atol=get_default_atol(out_key),
-                               rtol=get_default_rtol(out_key))
+    if use_key:
+        torch.testing.assert_close(out_key,
+                                   ref_key,
+                                   atol=get_default_atol(out_key),
+                                   rtol=get_default_rtol(out_key))
+    else:
+        assert ref_key is None and out_key is None, \
+            "expected returned key to be None"
 
 
 @pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
@@ -106,6 +113,7 @@ def test_rotary_embedding(
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("use_key", USE_KEY)
 @torch.inference_mode()
 def test_batched_rotary_embedding(
     is_neox_style: bool,
@@ -118,6 +126,7 @@ def test_batched_rotary_embedding(
     dtype: torch.dtype,
     seed: int,
     device: str,
+    use_key: bool,
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
@@ -134,7 +143,7 @@ def test_batched_rotary_embedding(
     positions = torch.randint(0, max_position, (batch_size, seq_len))
     query_shape = tensor_shape_fn(batch_size, seq_len, num_heads, head_size)
     query = torch.randn(query_shape, dtype=dtype)
-    key = torch.randn_like(query)
+    key = torch.randn_like(query) if use_key else None
 
     # NOTE(woosuk): The reference implementation should be executed first
     # because the custom kernel is in-place.
@@ -152,10 +161,14 @@ def test_batched_rotary_embedding(
                                ref_query,
                                atol=get_default_atol(out_query),
                                rtol=get_default_rtol(out_query))
-    torch.testing.assert_close(out_key,
-                               ref_key,
-                               atol=get_default_atol(out_key),
-                               rtol=get_default_rtol(out_key))
+    if use_key:
+        torch.testing.assert_close(out_key,
+                                   ref_key,
+                                   atol=get_default_atol(out_key),
+                                   rtol=get_default_rtol(out_key))
+    else:
+        assert ref_key is None and out_key is None, \
+            "expected returned key to be None"
 
 
 @pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
@@ -167,6 +180,7 @@ def test_batched_rotary_embedding(
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("use_key", USE_KEY)
 @torch.inference_mode()
 def test_batched_rotary_embedding_multi_lora(
     is_neox_style: bool,
@@ -178,6 +192,7 @@ def test_batched_rotary_embedding_multi_lora(
     dtype: torch.dtype,
     seed: int,
     device: str,
+    use_key: bool,
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
@@ -197,7 +212,7 @@ def test_batched_rotary_embedding_multi_lora(
                         seq_len,
                         num_heads * head_size,
                         dtype=dtype)
-    key = torch.randn_like(query)
+    key = torch.randn_like(query) if use_key else None
 
     offset_map = torch.tensor(
         list(
@@ -223,10 +238,14 @@ def test_batched_rotary_embedding_multi_lora(
                                ref_query,
                                atol=get_default_atol(out_query),
                                rtol=get_default_rtol(out_query))
-    torch.testing.assert_close(out_key,
-                               ref_key,
-                               atol=get_default_atol(out_key),
-                               rtol=get_default_rtol(out_key))
+    if use_key:
+        torch.testing.assert_close(out_key,
+                                   ref_key,
+                                   atol=get_default_atol(out_key),
+                                   rtol=get_default_rtol(out_key))
+    else:
+        assert ref_key is None and out_key is None, \
+            "expected returned key to be None"
 
 
 @torch.inference_mode()
