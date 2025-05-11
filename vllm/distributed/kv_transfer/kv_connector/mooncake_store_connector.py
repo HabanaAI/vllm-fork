@@ -53,8 +53,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.padded_length_tensor = torch.zeros(1,
                                                 dtype=torch.int,
                                                 device="hpu")
-        self.is_deepseek = config.model_config.is_deepseek_mla and \
-                           config.model_config.use_mla_opt
+        self.is_deepseek = config.model_config.is_deepseek_mla
         # Init kv_store
         if self.config.kv_connector == "MooncakeStoreConnector":
             # Check if MOONCAKE_CONFIG_PATH is set
