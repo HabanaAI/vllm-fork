@@ -73,7 +73,7 @@ class MooncakeStore(KVLookupBufferBase):
     ):
 
         try:
-            from mooncake.store import MooncakeDistributedStore
+            from mooncake import MooncakeDistributedStore
         except ImportError as e:
             raise ImportError(
                 "Please install mooncake by following the instructions at "
@@ -197,10 +197,10 @@ class MooncakeStore(KVLookupBufferBase):
         data_ptr = value.data_ptr()
         element_size = value.element_size()
         numel = value.numel()
-        value_bytes = bytes((ctypes.c_byte * (numel * element_size)).from_address(data_ptr))
+        total_size = element_size * numel
         end_serde = time.time()
         try:
-            self.store.put(key, value_bytes)
+            self.store.put_unsafe(key, data_ptr, total_size)
         except TypeError as err:
             logger.error("Failed to put value into Mooncake Store: %s", err)
             raise TypeError("Mooncake Store Put Type Error.") from err
@@ -208,14 +208,14 @@ class MooncakeStore(KVLookupBufferBase):
         logger.info(f"contiguous time: {end_serde - start_serde}, put time: {end_put - end_serde}")
 
 
-    def get_unsafe(self, key: str, shape, ranks) -> Optional[torch.Tensor]:
+    def get_unsafe(self, key: str, shape) -> Optional[torch.Tensor]:
         """Get KVCache from Mooncake Store without type checking"""
         start_get = time.time()
         data = self.store.get(key)
         end_get = time.time()
         if data:
-            tensor = torch.frombuffer(data, dtype=torch.bfloat16).clone()
-            tensor = tensor.reshape(shape)            
+            tensor = torch.frombuffer(data, dtype=torch.bfloat16)
+            tensor = tensor.reshape(shape)
             end_from_buffer = time.time()
             logger.info(f"from buffer time: {end_from_buffer - end_get}, get time: {end_get - start_get}")
             return tensor

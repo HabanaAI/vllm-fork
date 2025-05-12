@@ -240,8 +240,10 @@ class MooncakeStoreConnector(KVConnectorBase):
         if self.rank != 0:
             # only the first rank will send kv cache
             return
+        start_time = time.time()
         input_tokens_tensor_cpu = model_input.input_tokens.to("cpu") # shape: [batch_size, seq_len_padding_to_128]
         torch.hpu.synchronize()
+        logger.info(f"input tokens tensor cpu time: {time.time() - start_time}")
         seq_lens = model_input.attn_metadata.seq_lens # 2D list
         start_layer = model_executable.model.start_layer
         end_layer = model_executable.model.end_layer
@@ -254,10 +256,12 @@ class MooncakeStoreConnector(KVConnectorBase):
         # 3. empty tensor
         # 4. hidden_or_intermediate_states [1, hidden_size]
         for idx, slen in enumerate(seq_lens):
+            start_time = time.time()
             if slen == 1: # we think this is a padding sequence, so we skip it
                 continue
             current_tokens_cpu = input_tokens_tensor_cpu[idx][:slen]
             store_key_prefix = self.tensor_hash(current_tokens_cpu)
+            logger.debug(f"hash takes time: {time.time() - start_time}")
             logger.debug(f"send token len: {slen}, token: {current_tokens_cpu}")
             keys, values = [], []
             start = 0
@@ -277,9 +281,11 @@ class MooncakeStoreConnector(KVConnectorBase):
             keys = torch.cat(keys, dim=0)
             # values = torch.cat(values, dim=0)
             # we pack kv together, only need send one tensor
-            kvcache_to_sent = keys
+            kvcache_to_sent = keys.cpu()
+            logger.debug(f"kv cache reshape time: {time.time() - start_time}")
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
-            self.kv_store.put(store_kvcache_key, kvcache_to_sent)
+            # self.kv_store.put(store_kvcache_key, kvcache_to_sent)
+            self.kv_store.put_unsafe(store_kvcache_key, kvcache_to_sent)
             
             logger.debug(f"put kv cache key: {store_kvcache_key}")
             
@@ -288,6 +294,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                               hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
             # ==== graph should end here ======
             htorch.core.mark_step()
+            logger.debug(f"kv cache reshape + put time: {time.time() - start_time}")
         logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
 
 
@@ -355,7 +362,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             load_key_prefix = self.tensor_hash(current_tokens)
             # For deepseek, we only need recv first rank
             load_kvcache_key = f"{load_key_prefix}_0"
-            remote_kv = self.kv_store.get(load_kvcache_key)
+            shape = (61, num_blocks * 128, self.k_v_head_size)
+            # remote_kv = self.kv_store.get(load_kvcache_key)
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape)
             hidden_key = f"{load_key_prefix}_hidden_0"
             hidden = self.kv_store.get(hidden_key)
             

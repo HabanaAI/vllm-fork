@@ -2840,7 +2840,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 else:
                     logger.debug("Bypassing model execution")
 
-                # torch.hpu.synchronize()
+                torch.hpu.synchronize()
                 # Sending KV cache in distributed KV cache transfer setting
                 # NOTE: the send operation is non-blocking
                 cur_time = time.time()
