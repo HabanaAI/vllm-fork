@@ -25,6 +25,7 @@ def launch_enc_dec_model(config, question):
     dtype = config.get('dtype', 'bfloat16')
     max_num_seqs = config.get('max_num_seqs', 128)
     max_model_len = config.get('max_model_len', 4096)
+    enforce_eager = config.get('enforce_eager', False)
     enable_expert_parallel = config.get('enable_expert_parallel', False)
     tensor_parallel_size = TP_SIZE
     num_scheduler_steps = config.get('num_scheduler_steps', 1)
@@ -36,6 +37,7 @@ def launch_enc_dec_model(config, question):
         max_model_len=max_model_len,
         max_num_seqs=max_num_seqs,
         enable_expert_parallel=enable_expert_parallel,
+        enforce_eager=enforce_eager,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     messages = [{

@@ -4,3 +4,4 @@ max_model_len: 4096
 max_num_seqs: 32
 num_prompts: 4
 enable_expert_parallel: True
+enforce_eager: True
