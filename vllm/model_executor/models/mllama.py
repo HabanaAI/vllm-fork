@@ -1072,7 +1072,7 @@ class MllamaTextCrossAttention(CustomOp):
                 cached_k = torch.cat([k[s:e] for s, e in kv_range_for_decode])
                 cached_v = torch.cat([v[s:e] for s, e in kv_range_for_decode])
                 slot_mapping = torch.cat([
-                    attn_metadata.slot_mapping[s:e]
+                    attn_metadata.cross_slot_mapping[s:e]
                     for s, e in kv_range_for_decode
                 ])
                 key_cache = self.attn.impl.k_cache(cached_k, key_cache,
