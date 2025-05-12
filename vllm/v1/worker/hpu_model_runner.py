@@ -322,6 +322,7 @@ def get_path_to_rope(model: torch.nn.Module):
 class HpuModelAdapter(torch.nn.Module):
 
     def __init__(self, model, vllm_config, layer_names):
+        super().__init__()
         self.model = model
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
