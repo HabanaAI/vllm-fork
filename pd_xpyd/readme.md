@@ -4,15 +4,14 @@
 ## Mooncake Installation
 
 ### enable huge page on your host OS
+0. exit docker to host OS, run following commands:
 ```bash
-exit docker to host OS, run following commands:
-
 echo always > /sys/kernel/mm/transparent_hugepage/enabled
 echo 32768 > /proc/sys/vm/nr_hugepages
 cat /proc/meminfo |grep Huge
 cat /proc/sys/vm/nr_hugepages
 ```
-enter docker container before moving to the next steps
+1. enter docker container before moving to the next steps
 
 ### Install via pip
 ```bash
