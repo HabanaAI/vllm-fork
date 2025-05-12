@@ -73,6 +73,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             dtype = torch.float8_e4m3fn
         else:
             dtype = torch.bfloat16
+        self.dtype = dtype
         self.padding_k_tensor = torch.zeros((self.block_size, self.k_v_head_size), dtype=dtype, device="hpu")
         self.padding_v_tensor = torch.zeros((self.block_size, self.v_head_size), dtype=dtype, device="hpu")
         self.cache_k = VLLMKVCache()
@@ -364,7 +365,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             load_kvcache_key = f"{load_key_prefix}_0"
             shape = (61, num_blocks * 128, self.k_v_head_size)
             # remote_kv = self.kv_store.get(load_kvcache_key)
-            remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape)
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape, self.dtype)
             hidden_key = f"{load_key_prefix}_hidden_0"
             hidden = self.kv_store.get(hidden_key)
             
