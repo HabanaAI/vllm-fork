@@ -17,10 +17,16 @@ else
     model="/mnt/weka/llm/qwen3_pre_release/Qwen3-30B-A3B-250425/"
 fi
 
-if [ $# -eq 4 ] && [ "$3" == "--tp_size" ]; then
+if [ $# -gt 4 ] && [ "$3" == "--tp_size" ]; then
     tp_size=$4
 else
     tp_size=1
+fi
+
+if [ $# -eq 6 ] && [ "$5" == "--ep_size" ]; then
+    ep_size=$6
+else
+    ep_size=1
 fi
 
 model_name=$(basename ${model})
@@ -30,7 +36,6 @@ tokenizer=$model
 
 # Hardware Configuration
 tp_parallel=${tp_size}         # Tensor parallelism size
-ep_size=1            # Expert parallelism size
 moe_n_slice=1         # MoE groups
 gpu_utils=0.95        # GPU memory utilization
 

@@ -33,29 +33,30 @@ bash 01-benchmark-online-235B-tp8.sh --model_path ${model_path}
 ### Calibration 
 
 ```bash
-cd vllm-fork
+cd vllm-fork/scripts
 export OFFICIAL_MODEL=/path/to/qwen/model
-bash run_qwen.sh calib ${OFFICIAL_MODEL}
+# --tokenizer is optional
+QUANT_CONFIG=inc_meaure_g3_235B_A22B.json bash run_qwen.sh calib ${OFFICIAL_MODEL} --tokenizer ${OFFICIAL_MODEL} --tp_size 8 --ep_size 8
 ```
 
 ### Quantization 
 ```bash
-cd vllm-fork
+cd vllm-fork/scripts
 export OFFICIAL_MODEL=/path/to/qwen/model
-bash ./scripts/run_qwen.sh quant ${OFFICIAL_MODEL} 
+# --tokenizer is optional
+QUANT_CONFIG=inc_quant_g3_235B_A22B.json bash run_qwen.sh quant ${OFFICIAL_MODEL} --tokenizer ${OFFICIAL_MODEL} --tp_size 8 --ep_size 8
 ```
 
 ### Evaluate accuracy
 ```bash
 cd scripts;
-bash 02-accuracy_mmlupro_fp8.sh --model_path ${model_path} --tp_size 1
-bash 03-accuracy_gsm8k_fp8.sh --model_path ${model_path} --tp_size 1
+QUANT_CONFIG=inc_quant_g3_235B_A22B.json bash 02-accuracy_mmlupro_fp8.sh --model_path ${model_path} --tp_size 8 --ep_size 8
+QUANT_CONFIG=inc_quant_g2_235B_A22B.json bash 03-accuracy_gsm8k_fp8.sh --model_path ${model_path} --tp_size 8 --ep_size 8
 ```
 
 ### Benchmark
 ```bash
 cd scripts;
-bash 01-benchmark-online_fp8_30B.sh  --model_path ${model_path}
-bash 01-benchmark-online_fp8_32B.sh  --model_path ${model_path}
-bash 01-benchmark-online_fp8_235B.sh  --model_path ${model_path}
+QUANT_CONFIG=inc_quant_g3_30B_A3B.json bash 01-benchmark-online_fp8.sh  --model_path ${model_path}
+QUANT_CONFIG=inc_quant_g2_235B_A22B.json bash 01-benchmark-online_fp8_235B.sh  --model_path ${model_path} --tp_size 8 --ep_size 8
 ```
