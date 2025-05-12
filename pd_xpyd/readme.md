@@ -8,7 +8,7 @@
 ```bash
 echo always > /sys/kernel/mm/transparent_hugepage/enabled
 echo 32768 > /proc/sys/vm/nr_hugepages
-cat /proc/meminfo |grep Huge
+cat /proc/meminfo | grep Huge
 cat /proc/sys/vm/nr_hugepages
 ```
 1. enter docker container before moving to the next steps
