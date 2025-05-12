@@ -16,7 +16,8 @@ from pydantic import TypeAdapter
 from vllm.config import ModelConfig
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.chat_utils import (ChatTemplateContentFormatOption,
-                                         ConversationMessage)
+                                         ConversationMessage,
+                                         random_tool_call_id)
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
@@ -362,9 +363,10 @@ class OpenAIServingChat(OpenAIServing):
 
                     function_name_returned = True
                     delta_message = DeltaMessage(tool_calls=[
-                        DeltaToolCall(function=DeltaFunctionCall(
-                            name=current_tool_call["name"],
-                            arguments=arguments),
+                        DeltaToolCall(id=random_tool_call_id(),
+                                      function=DeltaFunctionCall(
+                                          name=current_tool_call["name"],
+                                          arguments=arguments),
                                       index=len(obj) - 1,
                                       type="function")
                     ])
@@ -381,8 +383,7 @@ class OpenAIServingChat(OpenAIServing):
                                     # instead of name every time
                                     name=None,
                                     arguments=delta_text),
-                                index=len(obj) - 1,
-                                type="function")
+                                index=len(obj) - 1)
                         ])
                     else:
                         delta_message = None
@@ -424,7 +425,7 @@ class OpenAIServingChat(OpenAIServing):
             self._should_stream_with_reasoning_parsing(request))
 
         all_previous_token_ids: Optional[list[list[int]]]
-        function_name_returned: Optional[list[bool]] = None
+        function_name_returned = [False] * num_choices
 
         # Only one of these will be used, thus previous_texts and
         # all_previous_token_ids will not be used twice in the same iteration.
@@ -434,7 +435,6 @@ class OpenAIServingChat(OpenAIServing):
             all_previous_token_ids = [[]] * num_choices
         elif request.tool_choice == "required":
             previous_texts = [""] * num_choices
-            function_name_returned = [False] * num_choices
             all_previous_token_ids = None
         else:
             previous_texts, all_previous_token_ids = None, None
@@ -585,16 +585,27 @@ class OpenAIServingChat(OpenAIServing):
 
                     # handle streaming deltas for tools with named tool_choice
                     if tool_choice_function_name:
+                        if function_name_returned[i]:
+                            delta_tool_call = DeltaToolCall(
+                                function=DeltaFunctionCall(
+                                    arguments=delta_text),
+                                index=i)
+                        else:
+                            delta_tool_call = DeltaToolCall(
+                                id=random_tool_call_id(),
+                                type="function",
+                                function=DeltaFunctionCall(
+                                    name=tool_choice_function_name,
+                                    arguments=delta_text),
+                                index=i)
+                            function_name_returned[i] = True
+
                         delta_message = DeltaMessage(tool_calls=[
-                            DeltaToolCall(function=DeltaFunctionCall(
-                                name=tool_choice_function_name,
-                                arguments=delta_text),
-                                          index=i)
+                            delta_tool_call,
                         ])
 
                     elif request.tool_choice == "required":
                         assert previous_texts is not None
-                        assert function_name_returned is not None
                         previous_text = previous_texts[i]
                         current_text = previous_text + delta_text
                         fn_name_returned = function_name_returned[i]
@@ -762,7 +773,7 @@ class OpenAIServingChat(OpenAIServing):
                             total_tokens=num_prompt_tokens + completion_tokens,
                         )
 
-                    data = chunk.model_dump_json(exclude_unset=True)
+                    data = chunk.model_dump_json(exclude_none=True)
                     yield f"data: {data}\n\n"
 
             # once the final token is handled, if stream_options.include_usage
