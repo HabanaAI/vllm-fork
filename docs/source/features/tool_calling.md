@@ -215,6 +215,13 @@ AI21's Jamba-1.5 models are supported.
 
 Flags: `--tool-call-parser jamba`
 
+### DeepSeek-V3 Models (`deepseek_v3`)
+
+Supported models:
+* `deepseek-ai/DeepSeek-V3-0324`
+
+Flags: `--tool-call-parser deepseek_v3 --chat-template examples/tool_chat_template_deepseekv3.jinja`
+
 ### Models with Pythonic Tool Calls (`pythonic`)
 
 A growing number of models output a python list to represent tool calls instead of using JSON. This has the advantage of inherently supporting parallel tool calls and removing ambiguity around the JSON schema required for tool calls. The `pythonic` tool parser can support such models.
