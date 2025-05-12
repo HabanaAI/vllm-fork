@@ -395,7 +395,7 @@ class HpuModelAdapter(torch.nn.Module):
             block_groups.masked_fill_(oob_values, batch_size)
             metadata = metadata._replace(block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
-        
+
         # Torch compile dynamo doesn't support calling any named tuple
         # dynamic methods other than len and get_attr so we need to
         # mimic behaviour of tuple._replace manually
@@ -1822,8 +1822,6 @@ class HPUModelRunner:
         path_to_rope = get_path_to_rope(self.model)
         torch.hpu.synchronize()
 
-
-
         with HabanaMemoryProfiler() as m:  # noqa: SIM117
             self.model = _maybe_wrap_in_hpu_graph(self.model,
                                                   vllm_config=self.vllm_config,
@@ -1832,7 +1830,6 @@ class HPUModelRunner:
         logger.info("Wrapping in HPUGraph took %.4f GB",
                     self.model_memory_usage / float(2**30))
 
-
         with HabanaMemoryProfiler() as m:
             self._maybe_compile(self.model,
                                 vllm_config=self.vllm_config,
@@ -1840,8 +1837,6 @@ class HPUModelRunner:
         self.model_memory_usage = m.consumed_device_memory
         logger.info("Compilation took %.4f GB",
                     self.model_memory_usage / float(2**30))
-
-                    
 
     def _maybe_compile(self, *args, **kwargs):
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
@@ -1876,7 +1871,8 @@ class HPUModelRunner:
             )
         else:
             for children_name, children_module in module.named_children():
-                self._regional_compilation(children_module, module, children_name)
+                self._regional_compilation(children_module, module,
+                                           children_name)
 
     def _compile_region(self, model, name, module):
         module = self._compile(module)
