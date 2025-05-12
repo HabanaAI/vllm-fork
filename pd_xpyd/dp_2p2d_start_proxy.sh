@@ -26,4 +26,5 @@ python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo.py \
     --model $MODEL_PATH \
     --prefill 10.239.129.9:8100 \
     --decode $DECODE_ARGS \
-    --port 8868
+    --port 8868 \
+#    --generator_on_p_node
