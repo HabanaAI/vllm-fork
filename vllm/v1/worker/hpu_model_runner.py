@@ -51,7 +51,7 @@ from vllm_hpu_extension.bucketing.common import get_bucketing_context
 
 logger = init_logger(__name__)
 
-_TYPE_CACHE = {}
+_TYPE_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def setup_profiler(warmup, active):
