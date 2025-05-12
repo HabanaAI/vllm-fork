@@ -95,7 +95,7 @@ class HPUMLAAttentionBackend(AttentionBackend):
         num_kv_heads: int,
         head_size: int,
     ) -> Tuple[int, ...]:
-        return (num_blocks, block_size, head_size)
+        return (num_blocks * block_size, head_size)
 
     @staticmethod
     def swap_blocks(
@@ -234,22 +234,18 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             q[..., self.qk_nope_head_dim:], k_pe = \
                 self.rotary_emb(input_positions, q_pe, k_pe)
 
-        block_indices = attn_metadata.block_indices
-        block_offsets = attn_metadata.block_offsets
+        slot_mapping = attn_metadata.slot_mapping.flatten(
+        ) if attn_metadata.slot_mapping is not None else None
 
         latent_vec_k = torch.concat(
             (k_c_normed, k_pe.view(batch_size, -1, self.qk_rope_head_dim)),
             dim=-1)
         latent_vec_k = latent_vec_k.view(
             -1, self.qk_rope_head_dim + self.kv_lora_rank)
-        if is_prefill:
-            latent_vec_k = latent_vec_k.unflatten(0,
-                                                  (block_indices.size(0), -1))
 
         # write the latent and rope to kv cache
         if kv_cache is not None and len(kv_cache) == 2:
-            self.latent_cache_k(latent_vec_k, kv_cache[0], block_indices,
-                                block_offsets)
+            self.latent_cache_k(latent_vec_k, kv_cache[0], slot_mapping)
             k_cache = kv_cache[0]
             v_cache = None
 
@@ -311,8 +307,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             kv_cache: torch.Tensor, attn_metadata: HPUAttentionMetadata,
             batch_size: int) -> torch.Tensor:
         query = torch.cat([q_nope, q_pe], dim=-1)
-
-        key_cache = kv_cache[0].unsqueeze(2)
+        key_cache = kv_cache[0].unsqueeze(1)
         value_cache = kv_cache[1]  # value_cache is None
         output = HPUPagedAttention.forward_decode(
             query=query,
@@ -322,6 +317,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             block_mapping=attn_metadata.block_mapping,
             block_bias=attn_metadata.attn_bias,
             block_groups=attn_metadata.block_groups,
+            block_size=attn_metadata.block_size,
             scale=self.scale,
             matmul_qk_op=self.matmul_qk,
             matmul_av_op=self.matmul_av,
