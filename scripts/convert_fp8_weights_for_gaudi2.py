@@ -28,7 +28,7 @@ def convert_files(input_path, output_path):
         print(f"processing {safetensors_path}")
         with safe_open(safetensors_path, framework="pt",
                        device="cpu") as tensor_file:
-            for k in tensor_file:
+            for k in tensor_file.keys():
                 tensor = tensor_file.get_tensor(k)
                 # tensor = tensor.squeeze(-1)
                 if "proj" in k:
