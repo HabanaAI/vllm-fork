@@ -113,7 +113,7 @@ if [ "$model_path" = "" ]; then
     exit
 fi
 
-model_name=$( echo $model_path | sed 's:/*$::' | awk -F/ '{print $NF}' )
+model_name=$(basename "$model_path")
 
 if [ "$num_hpu" -gt 1 ]; then
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
