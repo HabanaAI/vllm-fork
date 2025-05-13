@@ -2439,6 +2439,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         prompt_strategy, self.bucketing_ctx.prompt_buckets,
                         True, kv_caches, prompt_available_memory)
                     
+                    mem_post_prefix_prefill = 0
                     if self.use_prefix_caching:
                         mem_post_prefix_prefill, prefix_prefill_batch_seq, \
                         prefix_prefill_captured_all = self.warmup_graphs(
