@@ -30,6 +30,7 @@ from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 
 if current_platform.is_hpu():
+    import habana_frameworks.torch as htorch
     from vllm.model_executor.layers.quantization.utils.fp8_utils import (
         dynamic_quant, dequant_block_fp8_weight_naive,
         apply_fp8_linear_hpu_dynamic, pad_block_fp8_weight_naive)
@@ -69,10 +70,6 @@ class Fp8Config(QuantizationConfig):
                 raise ValueError(
                     "The quantization block size of weight must have 2 "
                     f"dimensions, but got {len(weight_block_size)} dimensions")
-            if activation_scheme != "dynamic":
-                raise ValueError("The block-wise quantization only supports "
-                                 "dynamic activation scheme for now, but got "
-                                 f"{activation_scheme} activation scheme.")
         self.weight_block_size = weight_block_size
 
     @classmethod
@@ -229,7 +226,6 @@ class Fp8LinearMethod(LinearMethodBase):
                 scale[:] = torch.finfo(torch.float32).min
                 layer.register_parameter("weight_scale", scale)
             else:
-                assert self.quant_config.activation_scheme == "dynamic"
                 scale = BlockQuantScaleParameter(
                     data=torch.empty(
                         (output_size_per_partition + block_n - 1) // block_n,
@@ -275,6 +271,9 @@ class Fp8LinearMethod(LinearMethodBase):
                 layer.weight.data.copy_(weight)
                 layer.weight_scale_inv = Parameter(weight_scale_inv,
                                                    requires_grad=False)
+                if self.quant_config.activation_scheme == "static":
+                    layer.input_scale = Parameter(layer.input_scale.max(),
+                                                requires_grad=False)
                 torch.hpu.synchronize()
             return
 
@@ -354,16 +353,33 @@ class Fp8LinearMethod(LinearMethodBase):
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         if current_platform.is_hpu():
-            
-            # TODO@yangulei: remove this after TP>1 crash is fixed
-            torch.hpu.synchronize()
-            return apply_fp8_linear_hpu_dynamic(
-                input=x,
-                weight=layer.weight,
-                weight_scale=layer.weight_scale_inv,
-                input_scale=layer.input_scale,
-                bias=bias,
-            )
+            if self.quant_config.activation_scheme == "dynamic":
+                # TODO@yangulei: remove this after TP>1 crash is fixed
+                htorch.core.mark_step()
+                return apply_fp8_linear_hpu_dynamic(
+                    input=x,
+                    weight=layer.weight,
+                    weight_scale=layer.weight_scale_inv,
+                    input_scale=layer.input_scale,
+                    bias=bias,
+                )
+            elif self.quant_config.activation_scheme == "static":
+                x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x,
+                                                     1.0 / layer.input_scale,
+                                                     False, False,
+                                                     torch.float8_e4m3fn)[0]
+                res = torch.ops.hpu.fp8_gemm_v2(
+                    A=x_fp8,
+                    trans_A=False,
+                    B=layer.weight,
+                    trans_B=True,
+                    D=None,
+                    out_dtype=x.dtype,
+                    A_scale_inv=layer.input_scale,
+                    B_scale_inv=layer.weight_scale_inv,
+                    bias=bias,
+                    accumulate=False)
+                return res
 
         if self.use_marlin:
             return apply_fp8_marlin_linear(
@@ -416,7 +432,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
         self.block_quant = self.quant_config.weight_block_size is not None
-        assert self.quant_config.activation_scheme == "dynamic", "Currently only support dynamic activation scheme for HPU"
 
     def create_weights(self, layer: Module, num_experts: int, hidden_size: int,
                        intermediate_size_per_partition: int, params_dtype: torch.dtype,
@@ -496,7 +511,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             )
             layer.register_parameter("w13_weight_scale_inv", w13_weight_scale)
             layer.register_parameter("w2_weight_scale_inv", w2_weight_scale)
-            assert self.quant_config.activation_scheme == "dynamic"
 
         # Add the quantization method used (per tensor/grouped/channel)
         # to ensure the weight scales are loaded in properly
