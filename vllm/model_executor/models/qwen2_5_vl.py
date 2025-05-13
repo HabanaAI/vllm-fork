@@ -128,12 +128,6 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     return res.bool()
 
 
-def expand_to_max(indices, max_num_images):
-    return torch.nn.functional.pad(indices,
-                                   (0, max_num_images - indices.shape[0]),
-                                   value=indices[-1])
-
-
 # === Vision Inputs === #
 
 
@@ -1040,17 +1034,12 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                 cu_seqlens, _, window_index = self.pre_attn(
                 pixel_values_curr_img_padded, img_shape_padded)
 
-            # either a single image,
-            # or a single image and its accompanying pad image,
-            # so only max expansion to 3
-            expanded_cu_seqlens = expand_to_max(cu_seqlens, 3)
-
             # Create full attention block mask before VisionTransformer
             # to save memory/time
             fullatt_block_attn_mask = \
                 create_block_diagonal_attention_mask_outerprod(cu_seqlens)
             assert pixel_values_curr_img_padded.shape[
-                0] == expanded_cu_seqlens[-1] == rot_pos_emb.shape[0]
+                0] == cu_seqlens[-1] == rot_pos_emb.shape[0]
 
             htcore.mark_step()
             hidden_states = self.forward(pixel_values_curr_img_padded,
