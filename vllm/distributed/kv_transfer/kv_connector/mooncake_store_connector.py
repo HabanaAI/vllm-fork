@@ -42,9 +42,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.kv_helper = kv_helper(config)
         self.local_tp_rank = local_rank
         self.rank = rank
-        self.k_head_size = 64
-        self.v_head_size = 512
-        self.k_v_head_size = self.k_head_size + self.v_head_size
         self.block_size = 128
         max_num_blocks = 1000
         self.block_indice_place_holder = torch.zeros(max_num_blocks,
@@ -53,7 +50,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.padded_length_tensor = torch.zeros(1,
                                                 dtype=torch.int,
                                                 device="hpu")
-        self.is_deepseek = config.model_config.is_deepseek_mla
         # Init kv_store
         if self.config.kv_connector == "MooncakeStoreConnector":
             # Check if MOONCAKE_CONFIG_PATH is set
@@ -234,7 +230,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         seq_lens = model_input.attn_metadata.seq_lens  # 2D list
         start_layer = model_executable.model.start_layer
         end_layer = model_executable.model.end_layer
-        num_kv_heads = 1
         num_heads, head_size = self.kv_helper.get_model_args(model_executable)
 
         for idx, slen in enumerate(seq_lens):
@@ -256,9 +251,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             keys, values = [], []
             for layer_id in range(start_layer, end_layer):
                 kv_cache = kv_caches[layer_id - start_layer]
-                if self.is_deepseek:
-                    key_cache = kv_cache[0].reshape(-1, num_kv_heads,
-                                                    self.k_v_head_size)
+                if self.kv_helper.is_mla():
+                    key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
                     keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                 else:
                     key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
@@ -268,7 +262,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                         value_cache[current_slot_mapping].unsqueeze(0))
 
             keys = torch.cat(keys, dim=0)
-            if self.is_deepseek:
+            if self.kv_helper.is_mla():
                 # we pack kv together, only need send one tensor
                 kvcache_to_sent = keys
             else:
@@ -327,9 +321,9 @@ class MooncakeStoreConnector(KVConnectorBase):
                     kv_cache = kv_caches[cur_layer_idx]
                     key_cache, value_cache = kv_cache[0], kv_cache[1]
                     key_cache = kv_cache[0]
-                    if self.is_deepseek:
+                    if self.kv_helper.is_mla():
                         padding_k_tensor = torch.zeros(
-                            (self.block_size, self.k_v_head_size),
+                            (self.block_size, head_size),
                             dtype=self.dtype,
                             device="hpu")
                         self.cache_k(
@@ -396,12 +390,12 @@ class MooncakeStoreConnector(KVConnectorBase):
                 cur_layer_idx = i - model_executable.model.start_layer
                 kv_cache = kv_caches[cur_layer_idx]
                 key_cache, value_cache = kv_cache[0], kv_cache[1]
-                if self.is_deepseek:
+                if self.kv_helper.is_mla():
                     remote_k = remote_kv[cur_layer_idx]
                     # [num_layers, seq_len, num_kv_heads, k/v_head_size]
                     # -> [seq_len, k/v_head_size]
                     key = remote_k.squeeze(-2).view(-1, self.block_size,
-                                                    self.k_v_head_size)
+                                                    head_size)
                     # ====== D2D =======
                     self.cache_k(key, key_cache, block_indices_tensor, None)
                 else:
