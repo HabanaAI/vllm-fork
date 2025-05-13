@@ -757,21 +757,10 @@ class Qwen2VisionTransformer(nn.Module):
                                                     dim=0, dtype=torch.int32)
             cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
 
-            # either a single image,
-            # or a single image and its accompanying pad image,
-            # so only max expansion to 3
-            #expanded_cu_seqlens = expand_to_max(cu_seqlens, 3)
-
             # Create full attention block mask before VisionTransformer
             # to save memory/time
             fullatt_block_attn_mask = \
                 create_block_diagonal_attention_mask_outerprod(cu_seqlens)
-
-            print(f"PRE_ATTN: grid_thw:{grid_thw}, \
-                    padded_grid_thw:{grid_thw_padded}, \
-                    cu_seqlens:{cu_seqlens}, \
-                    rotary_pos_emb{rotary_pos_emb.shape}, \
-                    pixel_values_padded:{pixel_values_padded.shape}")
 
             htcore.mark_step()
             hidden_states = self.forward(pixel_values_padded,
