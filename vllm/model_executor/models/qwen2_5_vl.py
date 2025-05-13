@@ -981,7 +981,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             "Expect inputs to be 112x112 aligned. "
             "Please align before sending image or use this version "
             "of transformer that does the resizing/alignment automatically:"
-            "pip install -r requirements-hpu-qwen2_5_vl.txt")
+            "pip install git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280")
         assert x.shape[0] % 64 == 0, assert_msg
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
@@ -1013,7 +1013,11 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             f"Which will make pixel_values be a multiple of "
             f"(112/14)*(112/14)=64"
             f"(14 is patch size for ViT). "
-            f"Got pixel_values shape {pixel_values.shape[0]}")
+            f"Got pixel_values shape {pixel_values.shape[0]}"
+            f"Please install this version of transformer"
+            f"which automatically does the 112 alignment"
+            f"pip install git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280"
+            f"or pass in images that are 112 aligned")
         offset = 0
         results = []
         # process each image one by one

@@ -1,1 +1,0 @@
-transformers @ git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280
