@@ -773,28 +773,12 @@ class Qwen2_5_VisionTransformer(nn.Module):
         # windows attention
         window_index, cu_window_seqlens = self.get_window_index(grid_thw)
 
-        if is_hpu:
-            # NOTE: unique_consecutive is a dynamic operation
-            # we are using `remove_duplicates_cpu` instead
-            def remove_duplicates_cpu(a):
-                return [
-                    a[i] for i in range(len(a)) if i == 0 or a[i - 1] != a[i]
-                ]
-
-            cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
-            cu_window_seqlens = torch.tensor(
-                cu_window_seqlens,
-                device=hidden_states.device,
-                dtype=grid_thw.dtype
-                if torch.jit.is_tracing() else torch.int32)
-
-        else:
-            cu_window_seqlens = torch.tensor(
-                cu_window_seqlens,
-                device=hidden_states.device,
-                dtype=grid_thw.dtype
-                if torch.jit.is_tracing() else torch.int32)
-            cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
+        cu_window_seqlens = torch.tensor(
+            cu_window_seqlens,
+            device=hidden_states.device,
+            dtype=grid_thw.dtype
+            if torch.jit.is_tracing() else torch.int32)
+        cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = hidden_states.size()
         hidden_states = hidden_states.reshape(
