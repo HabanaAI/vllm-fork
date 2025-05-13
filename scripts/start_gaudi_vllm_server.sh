@@ -154,8 +154,8 @@ case "$dtype" in
         export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
         export PT_HPU_WEIGHT_SHARING=0
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
-	model_basename=$(basename ${model_name})
-	if [ ${model_basename} == "Qwen3-235B-A22B" ]; then
+	model_basename=$(basename "${model_name}")
+	if [ "${model_basename}" == "Qwen3-235B-A22B" ] || [ "${model_basename}" == "Qwen3-30B-A3B" ]; then
 	    QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
 	fi
         dtype="bfloat16"
