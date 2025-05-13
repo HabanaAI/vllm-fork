@@ -776,8 +776,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=hidden_states.device,
-            dtype=grid_thw.dtype
-            if torch.jit.is_tracing() else torch.int32)
+            dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32)
         cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = hidden_states.size()
@@ -959,7 +958,9 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             "Expect inputs to be 112x112 aligned. "
             "Please align before sending image or use this version "
             "of transformer that does the resizing/alignment automatically: "
-            "pip install git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280")
+            "pip install "
+            "git+https://github.com/malkomes/transformers.git"
+            "@ac372cd18f836c41f57cdce46094db00019d4280")
         assert x.shape[0] % 64 == 0, assert_msg
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
@@ -994,7 +995,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             f"Got pixel_values shape {pixel_values.shape[0]}"
             f"Please install this version of transformer"
             f"which automatically does the 112 alignment "
-            f"pip install git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280 "
+            f"pip install git+https://github.com/malkomes/transformers.git"
+            f"@ac372cd18f836c41f57cdce46094db00019d4280 "
             f"or pass in images that are 112 aligned")
         offset = 0
         results = []
@@ -1022,8 +1024,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             # to save memory/time
             fullatt_block_attn_mask = \
                 create_block_diagonal_attention_mask_outerprod(cu_seqlens)
-            assert pixel_values_curr_img_padded.shape[
-                0] == cu_seqlens[-1] == rot_pos_emb.shape[0]
+            assert pixel_values_curr_img_padded.shape[0] == cu_seqlens[
+                -1] == rot_pos_emb.shape[0]
 
             htcore.mark_step()
             hidden_states = self.forward(pixel_values_curr_img_padded,
