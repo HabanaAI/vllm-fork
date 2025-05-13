@@ -555,7 +555,7 @@ def main(args: argparse.Namespace):
 
     is_multi_modal = any(request.multi_modal_data is not None
                          for request in requests)
-    request_outputs: Optional[list[RequestOutput]] = None
+    request_outputs = None
     if args.backend == "vllm":
         if args.async_engine:
             elapsed_time = uvloop.run(
