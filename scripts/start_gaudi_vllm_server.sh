@@ -107,7 +107,7 @@ if [ "$model_path" = "" ]; then
     exit
 fi
 
-model_name=$( echo $model_path | sed 's:/*$::' | awk -F/ '{print $NF}' )
+model_name=$(basename "$model_path")
 input_min=${input_range[0]}
 input_max=${input_range[1]}
 output_min=${output_range[0]}
@@ -119,7 +119,6 @@ fi
 
 if [ "$num_hpu" -gt 1 ]; then
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
-    export VLLM_EP_SIZE=$num_hpu #TODO: remove the export when --enable-expert-parallel is enabled.
 fi
 
 if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
@@ -150,12 +149,10 @@ case "$dtype" in
         echo Running with dtype="$dtype" ;;
     "fp8")
         echo Running with dtype="$dtype"
-	# TODO: quant config is different for different card number
         export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
         export PT_HPU_WEIGHT_SHARING=0
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
-	model_basename=$(basename "${model_name}")
-	if [ "${model_basename}" == "Qwen3-235B-A22B" ] || [ "${model_basename}" == "Qwen3-30B-A3B" ]; then
+	if [ "${model_name}" == "Qwen3-235B-A22B" ] || [ "${model_name}" == "Qwen3-30B-A3B" ]; then
 	    QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
 	fi
         dtype="bfloat16"
