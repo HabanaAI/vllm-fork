@@ -30,6 +30,9 @@ from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 
 if current_platform.is_hpu():
+    from vllm.model_executor.layers.quantization.utils.fp8_utils import (
+        dynamic_quant, dequant_block_fp8_weight_naive,
+        apply_fp8_linear_hpu_dynamic, pad_block_fp8_weight_naive)
     from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
 
@@ -253,9 +256,28 @@ class Fp8LinearMethod(LinearMethodBase):
                 layer.register_parameter("input_scale", None)
 
     def process_weights_after_loading(self, layer: Module) -> None:
-        # Block quant doesn't need to process weights after loading
+        # Block quant weights doesn't need to be processed except for HPU
         if self.block_quant:
+            if current_platform.is_hpu():
+                # Convert to channelwise quantization on HPU
+                weight, orig_M, orig_N = pad_block_fp8_weight_naive(
+                    layer.weight.data, layer.weight_scale_inv.data,
+                    self.quant_config.weight_block_size)
+                weight, weight_scale_inv = dynamic_quant(
+                    dequant_block_fp8_weight_naive(
+                        weight,
+                        layer.weight_scale_inv.data,
+                        self.quant_config.weight_block_size,
+                        original_M=orig_M,
+                        original_N=orig_N,
+                        do_unpad=True))
+                weight_scale_inv = weight_scale_inv.squeeze(-1)
+                layer.weight.data.copy_(weight)
+                layer.weight_scale_inv = Parameter(weight_scale_inv,
+                                                   requires_grad=False)
+                torch.hpu.synchronize()
             return
+
         layer.weight = torch.nn.Parameter(layer.weight.data,
                                           requires_grad=False)
         # If checkpoint not serialized fp8, quantize the weights.
@@ -331,6 +353,14 @@ class Fp8LinearMethod(LinearMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if current_platform.is_hpu():
+            return apply_fp8_linear_hpu_dynamic(
+                input=x,
+                weight=layer.weight,
+                weight_scale=layer.weight_scale_inv,
+                input_scale=layer.input_scale,
+                bias=bias,
+            )
 
         if self.use_marlin:
             return apply_fp8_marlin_linear(
