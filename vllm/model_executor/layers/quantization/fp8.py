@@ -354,6 +354,9 @@ class Fp8LinearMethod(LinearMethodBase):
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         if current_platform.is_hpu():
+            
+            # TODO@yangulei: remove this after TP>1 crash is fixed
+            torch.hpu.synchronize()
             return apply_fp8_linear_hpu_dynamic(
                 input=x,
                 weight=layer.weight,
