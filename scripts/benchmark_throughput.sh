@@ -113,7 +113,7 @@ if [ "$model_path" = "" ]; then
     exit
 fi
 
-model_name=$( echo $model_path | sed 's:/*$::' | awk -F/ '{print $NF}' )
+model_name=$(basename "$model_path")
 
 if [ "$num_hpu" -gt 1 ]; then
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
@@ -174,6 +174,9 @@ case "$dtype" in
         export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
         export PT_HPU_WEIGHT_SHARING=0
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
+        if [ "${model_name}" == "Qwen3-235B-A22B" ] || [ "${model_name}" == "Qwen3-30B-A3B" ]; then
+	    QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
+        fi
         dtype="bfloat16"
         ;;
     "awq")

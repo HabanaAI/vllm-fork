@@ -107,7 +107,7 @@ if [ "$model_path" = "" ]; then
     exit
 fi
 
-model_name=$( echo $model_path | sed 's:/*$::' | awk -F/ '{print $NF}' )
+model_name=$(basename "$model_path")
 input_min=${input_range[0]}
 input_max=${input_range[1]}
 output_min=${output_range[0]}
@@ -152,6 +152,9 @@ case "$dtype" in
         export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
         export PT_HPU_WEIGHT_SHARING=0
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
+	if [ "${model_name}" == "Qwen3-235B-A22B" ] || [ "${model_name}" == "Qwen3-30B-A3B" ]; then
+	    QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
+	fi
         dtype="bfloat16"
         ;;
     "awq")
