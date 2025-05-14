@@ -32,6 +32,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+from math import ceil
 from transformers import BatchFeature
 from transformers.models.qwen2_5_vl import (Qwen2_5_VLProcessor)
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import (
@@ -356,7 +357,7 @@ class Qwen2_5_VisionAttention(nn.Module):
             # if the mask if None we are doing window attention
             fullattn_mask = cu_seqlens
 
-            if fullattn_mask is None:  # performs window attention
+            if False:#fullattn_mask is None:  # performs window attention
                 # we assume image is 112 aligned in both h/w dims
                 # in other words, x % 64 = 0
                 # that simplifies the slicing of window attention
@@ -792,16 +793,51 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
     pre_attn and post_attn methods are allow to be dynamic.
     """
 
+    def pad_multimodal_data_wh(self, pixel_values, image_grid_thw):
+        vit_merger_window_size = (self.window_size //
+                  self.spatial_merge_size // self.patch_size)
+        grid_t, grid_h, grid_w = image_grid_thw[0]
+        # x has already been flatted by spatial_merge_unit
+        flatten_grid_h = grid_h // self.spatial_merge_size
+        flatten_grid_w = grid_w * self.spatial_merge_size
+        # pad grid_w and grid_h
+        padded_grid_h = \
+            ceil(grid_h / self.spatial_merge_size / vit_merger_window_size) * \
+                self.spatial_merge_size * vit_merger_window_size
+        padded_grid_w = \
+            ceil(grid_w / self.spatial_merge_size / vit_merger_window_size) * \
+                self.spatial_merge_size * vit_merger_window_size
+        flatten_padded_grid_h = padded_grid_h // self.spatial_merge_size
+        flatten_padded_grid_w = padded_grid_w * self.spatial_merge_size
+        pad_h = flatten_padded_grid_h - flatten_grid_h
+        pad_w = flatten_padded_grid_w - flatten_grid_w
+        # pad pixel_values
+        _, embed_size = pixel_values.size()
+        pixel_values = pixel_values.reshape(grid_t,
+                                            flatten_grid_h, 
+                                            flatten_grid_w, 
+                                            -1)
+        pixel_values = F.pad(pixel_values,
+                             (0,0,0,pad_w,0,pad_h,0,0),
+                             "constant",
+                             -100)
+        pixel_values = pixel_values.reshape(-1, embed_size)
+        new_grid_thw = torch.Tensor([[grid_t, padded_grid_h, padded_grid_w]]) \
+            .to(torch.int32) \
+            .to(image_grid_thw.device)
+        return pixel_values, new_grid_thw
+
     def pad_multimodal_data(self, pixel_values, image_grid_thw, vision_buckets):
-        assert pixel_values.shape[
-            0] % 64 == 0, 'needs 64 aligned resolution'
+
+        pixel_values, image_grid_thw = \
+            self.pad_multimodal_data_wh(pixel_values, image_grid_thw)
 
         desired_number_of_pixels = vision_buckets.get_multimodal_bucket(pixel_values.shape[0])
         padding_len = desired_number_of_pixels - pixel_values.shape[0]
         if padding_len <= 0:
             return pixel_values, image_grid_thw
 
-        logger.info(
+        logger.debug(
             f"[MM_BUCKETING] Padding current number pixel {pixel_values.shape[0]} to {desired_number_of_pixels}"
         )
         # needs to make sure padding_len is even
@@ -820,7 +856,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
         return pixel_values, image_grid_thw
 
-    def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor):
+    def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor, vision_buckets):
         # patchify
         hidden_states = x.to(device=self.device, dtype=self.dtype)
         hidden_states = self.patch_embed(hidden_states)
@@ -828,8 +864,18 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         # compute position embedding
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
 
+        # pad input tensors
+        attention_mask = \
+            torch.ones(hidden_states.shape[0],1).to(hidden_states.device)
+        rotary_pos_emb, _ = \
+            self.pad_multimodal_data(rotary_pos_emb, grid_thw, vision_buckets)
+        hidden_states, _ = \
+            self.pad_multimodal_data(hidden_states, grid_thw, vision_buckets)
+        attention_mask, padded_grid_thw =\
+            self.pad_multimodal_data(attention_mask, grid_thw, vision_buckets)
+
         # windows attention
-        window_index, cu_window_seqlens = self.get_window_index(grid_thw)
+        window_index, cu_window_seqlens = self.get_window_index(padded_grid_thw)
 
         # NOTE: unique_consecutive is a dynamic operation
         # we are using `remove_duplicates_cpu` instead
@@ -854,18 +900,18 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         rotary_pos_emb = rotary_pos_emb[window_index, :, :]
         rotary_pos_emb = rotary_pos_emb.reshape(seq_len, -1)
-        cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2],
-                                             grid_thw[:, 0]).cumsum(
-                                                 dim=0, dtype=torch.int32)
-        cu_seqlens = F.pad(cu_seqlens, (1, 0), "constant", 0)
-        return hidden_states, rotary_pos_emb, cu_seqlens, cu_window_seqlens, window_index
+        attention_mask = attention_mask.reshape(
+            seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
+        attention_mask = attention_mask[window_index, :]
+        attention_mask = attention_mask.reshape(seq_len)
+        return hidden_states, rotary_pos_emb, None, cu_window_seqlens, \
+               window_index, attention_mask.bool(), grid_thw
 
-    def forward(
-            self,
-            x: torch.Tensor,
-            fullattn_mask: Optional[torch.Tensor],
-            rotary_pos_emb: torch.Tensor) -> torch.Tensor:
-
+    def forward(self,
+                x: torch.Tensor,
+                fullattn_mask: Optional[torch.Tensor],
+                windowattn_mask: Optional[torch.Tensor],
+                rotary_pos_emb: torch.Tensor) -> torch.Tensor:
         assert_msg = (
             "Expect inputs to be 112x112 aligned. "
             "Please align before sending image or use this version "
@@ -877,19 +923,59 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             htcore.mark_step()
+            cu_seqlens = fullattn_mask \
+                if layer_num in self.fullatt_block_indexes else windowattn_mask
             hidden_states = blk(hidden_states,
-                                cu_seqlens=fullattn_mask if layer_num in self.fullatt_block_indexes else None,
+                                cu_seqlens=cu_seqlens,
                                 rotary_pos_emb=rotary_pos_emb)
         return hidden_states
 
     def post_attn(self, hidden_states: torch.Tensor,
-                  window_index: torch.Tensor):
+                  window_index: torch.Tensor,
+                  grid_thw: torch.Tensor,
+                  grid_thw_padded: torch.Tensor):
         # adapter
         hidden_states = self.merger(hidden_states)
         reverse_indices = torch.argsort(window_index)
 
         hidden_states = hidden_states[reverse_indices, :]
-        return hidden_states
+
+        grid_t, gird_h, grid_w = grid_thw[0]
+        llm_grid_h = gird_h // self.spatial_merge_size
+        llm_grid_w = grid_w // self.spatial_merge_size
+        grid_t, padded_grid_h, padded_grid_w = grid_thw_padded
+        padded_llm_grid_h = padded_grid_h // self.spatial_merge_size
+        padded_llm_grid_w = padded_grid_w // self.spatial_merge_size
+        hidden_states = \
+            hidden_states[:grid_t*padded_llm_grid_h*padded_llm_grid_w]
+        hidden_states = hidden_states.reshape(grid_t,
+                                              padded_llm_grid_h,
+                                              padded_llm_grid_w,
+                                              -1)
+        orig_hidden_states = hidden_states[:, :llm_grid_h, :llm_grid_w, :]
+        orig_hidden_states = \
+            orig_hidden_states.reshape(grid_t*llm_grid_h*llm_grid_w, -1)
+
+        return orig_hidden_states
+
+    def create_block_diagonal_attention_mask_outerprod(self,
+                                                       indices,
+                                                       attention_mask):
+        seqlens = attention_mask.shape[0]
+        fullatt_block_attn_mask = \
+            attention_mask.unsqueeze(0) * attention_mask.unsqueeze(1)
+        window_block_attn_mask = torch.zeros(
+            seqlens, seqlens, device=attention_mask.device, dtype=torch.bool
+        )
+        for i in range(1, len(indices)):
+            start_idx = indices[i - 1]
+            end_idx = indices[i]
+            window_block_attn_mask[start_idx:end_idx, start_idx:end_idx] = \
+                attention_mask[start_idx:end_idx].unsqueeze(0) * \
+                attention_mask[start_idx:end_idx].unsqueeze(1)
+
+        return fullatt_block_attn_mask, window_block_attn_mask
+
 
     def get_image_embeds(
         self,
@@ -897,13 +983,6 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         grid_thw: torch.Tensor,
         vision_buckets,
     ) -> torch.Tensor:
-
-        assert pixel_values.shape[0] % 64 == 0, (
-            f"We need image h/w to be aligned to 112 for now. "
-            f"Which will make pixel_values be a multiple of (112/14)*(112/14)=64"
-            f"(14 is patch size for ViT). "
-            f"Got pixel_values shape {pixel_values.shape[0]}"
-        )
         offset = 0
         results = []
         # process each image one by one
@@ -914,27 +993,30 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             pixel_values_curr_img = pixel_values[offset : offset + curr_img_size, :]
 
             offset += curr_img_size
-            pixel_values_curr_img_padded, img_shape_padded = \
-                self.pad_multimodal_data(pixel_values_curr_img, img_shape, vision_buckets=vision_buckets)
 
             pixel_values_curr_img_padded, rot_pos_emb, \
-                cu_seqlens, _, window_index = self.pre_attn(
-            pixel_values_curr_img_padded, img_shape_padded)
+                _, cu_window_seqlens, window_index, \
+                attention_mask, img_shape_padded = self.pre_attn(
+                    pixel_values_curr_img,
+                    img_shape,
+                    vision_buckets)
 
-            expanded_cu_seqlens = expand_to_max(cu_seqlens, 3) # either a single image,
-            # or a single image and its accompanying pad image, so only max expansion to 3
-
-            # Create full attention block mast before VisionTransformer to save memory/time
-            fullatt_block_attn_mask = create_block_diagonal_attention_mask_outerprod(cu_seqlens)
-            assert pixel_values_curr_img_padded.shape[0] == expanded_cu_seqlens[-1] == rot_pos_emb.shape[0]
+            fullatt_block_attn_mask, window_block_attn_mask = \
+                self.create_block_diagonal_attention_mask_outerprod(
+                    cu_window_seqlens,
+                    attention_mask)
 
             htcore.mark_step()
             hidden_states = self.forward(pixel_values_curr_img_padded,
                                     rotary_pos_emb=rot_pos_emb,
-                                    fullattn_mask=fullatt_block_attn_mask)
+                                    fullattn_mask=fullatt_block_attn_mask,
+                                    windowattn_mask=window_block_attn_mask)
             htcore.mark_step()
 
-            image_embeds = self.post_attn(hidden_states, window_index)
+            image_embeds = self.post_attn(hidden_states,
+                                          window_index,
+                                          img_shape,
+                                          img_shape_padded[0])
             # slice image_embeds to remove the padded parts
             pad_index = img_shape_padded[0].prod() // self.spatial_merge_unit
             results += [image_embeds[:pad_index , :]]
