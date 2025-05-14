@@ -32,7 +32,7 @@ stages:
         command: >-
           export PT_HPU_LAZY_MODE=1 && 
           cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2
-      - name: v0_gsm8k_g2_deepseek-v2-lite_tp1
+      - name: v0_gsm8k_deepseek-v2-lite_tp1
         flavor: g3
         command: >-
           export PT_HPU_LAZY_MODE=1 && 
@@ -115,6 +115,12 @@ stages:
           cd .jenkins/lm-eval-harness && 
           PT_HPU_LAZY_MODE=1 
           bash run-tests.sh -c configs/models-fp8.txt -t 2
+      - name: gsm8k_deepseek-v2-lite_tp1_fp8
+        flavor: g3
+        command: >-
+          cd .jenkins/lm-eval-harness && 
+          PT_HPU_LAZY_MODE=1 
+          bash run-tests.sh -c configs/models-deepseek-fp8.txt -t 1
   - name: test_gsm8k_mss
     steps:
       - name: gsm8k_small_g3_tp1_mss
