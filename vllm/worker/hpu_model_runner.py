@@ -1036,23 +1036,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _check_config(self, batch_size, seq_len, ctx, attn_metadata, warmup_mode):
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
-        if True:
-            if warmup_mode:
-                phase = self._phase(attn_metadata.is_prompt, ctx)
-                num_blocks = ctx
-            else:            
-                phase = self._phase(attn_metadata.is_prompt, attn_metadata.block_list)
-                if phase != 'decode':
-                    num_blocks = self._num_blocks(attn_metadata)
-                else:
-                    num_blocks = 1 # constant for rework
-            cfg = (batch_size, seq_len, num_blocks, phase)
+        if warmup_mode:
+            phase = self._phase(attn_metadata.is_prompt, ctx)
+            num_blocks = ctx
+        else:            
+            phase = self._phase(attn_metadata.is_prompt, attn_metadata.block_list)
+            num_blocks = self._num_blocks(attn_metadata)
+        cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
-        # only for debug - TODO remove
-        if warmup_mode and phase != PhaseType.DECODE:
-            print("cfg", cfg)
-        if not seen and not warmup_mode:
-            print("not seen", self.seen_configs)
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
             logger.warning("Configuration: %s was not warmed-up!",
@@ -2134,7 +2125,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
-                    temperature=temperature) for i, b in enumerate(blocks)
+                    temperature=temperature, ctx=ctx) for i, b in enumerate(blocks)
             ]
         torch.hpu.synchronize()
         profiler = None
@@ -2161,7 +2152,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             context_size=seq_len if is_prompt else 1,
                             dtype=self.model_config.dtype,
                             device=self.device)
-                print("line2139", batch_size, seq_len, ctx,)
                 self.execute_model(inputs,
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
@@ -2228,13 +2218,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def log_warmup(self, phase, i, max_i, batch_size, seq_len, ctx):
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
-        dim = "num_blocks"
-        if phase in ['prompt', 'prefill']:
-            dim = "seq_len"
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
-               f"{dim}:{seq_len} "
-               f"ctx:{ctx} "
+               f"query_len:{seq_len} "
+               f"num_blocks:{ctx} "
                f"free_mem:{free_mem}")
         logger.info(msg)
 
@@ -2561,9 +2548,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
-        self.profiler.end()
-        #print("self.seen_configs", self.seen_configs)
-        
+        self.profiler.end()        
 
     def finish_measurements(self):
         from neural_compressor.torch.quantization import finalize_calibration
@@ -2835,12 +2820,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
-            self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
             if warmup_mode:
                 phase = self._phase(attn_metadata.is_prompt, ctx)
-            else:            
+            else:
                 phase = self._phase(attn_metadata.is_prompt, attn_metadata.block_list)
+            if phase == 'decode':
+                if not warmup_mode:
+                    ctx = seq_len
+                seq_len = 1
+            use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
+            self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
             if self.lora_config:
