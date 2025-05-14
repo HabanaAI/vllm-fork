@@ -21,7 +21,6 @@ class PyHcclCommunicator:
     def __init__(
         self,
         group: StatelessProcessGroup,
-        device: Union[int, str, torch.device],
         library_path: Optional[str] = None,
     ):
         """
@@ -66,32 +65,23 @@ class PyHcclCommunicator:
             self.unique_id = hcclUniqueId()
 
         self.unique_id = group.broadcast_obj(self.unique_id, src=0)
-        if isinstance(device, int):
-            device = torch.device(f"hpu:{device}")
-        elif isinstance(device, str):
-            device = torch.device(device)
-        assert isinstance(device, torch.device)
-        self.device = device
-        
+
         htorch.core.mark_step()
         self.comm: hcclComm_t = self.hccl.hcclCommInitRank(
             self.world_size, self.unique_id, self.rank)
 
         # A small all_reduce for warmup.
-        data = torch.ones(1, device=device)
+        data = torch.ones(1, device="hpu")
         out = self.all_reduce(data)
         del data
         torch.hpu.synchronize()
 
     def all_reduce(self,
                    in_tensor: torch.Tensor,
-                   op: ReduceOp = ReduceOp.SUM,
-                   stream=None) -> torch.Tensor:
+                   op: ReduceOp = ReduceOp.SUM) -> torch.Tensor:
         if self.disabled:
             return None
-        assert in_tensor.device == self.device, (
-            f"this hccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {in_tensor.device}")
+        assert in_tensor.device.type == "hpu", f"the input tensor should be on hpu"
 
         out_tensor = torch.empty_like(in_tensor)
 
@@ -110,13 +100,11 @@ class PyHcclCommunicator:
 
     def all_gather(self,
                    output_tensor: torch.Tensor,
-                   input_tensor: torch.Tensor,
-                   stream=None):
+                   input_tensor: torch.Tensor):
         if self.disabled:
             return
-        assert input_tensor.device == self.device, (
-            f"this hccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {input_tensor.device}")
+        assert input_tensor.device.type == "hpu", f"the input tensor should be on hpu"
+
         htorch.core.mark_step()
         torch.hpu.synchronize()
         self.hccl.hcclAllGather(
@@ -130,14 +118,12 @@ class PyHcclCommunicator:
     def reduce_scatter(self,
                        output_tensor: torch.Tensor,
                        input_tensor: torch.Tensor,
-                       op: ReduceOp = ReduceOp.SUM,
-                       stream=None):
+                       op: ReduceOp = ReduceOp.SUM):
         if self.disabled:
             return
-        assert input_tensor.device == self.device, (
-            f"this hccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {input_tensor.device}")
-        
+        assert input_tensor.device.type == "hpu", f"the input tensor should be on hpu"
+        assert output_tensor.device.type == "hpu", f"the output tensor should be on hpu"
+
         htorch.core.mark_step()
         torch.hpu.synchronize()
         self.hccl.hcclReduceScatter(
@@ -149,13 +135,11 @@ class PyHcclCommunicator:
         htorch.core.mark_step()
         torch.hpu.synchronize()
 
-    def send(self, tensor: torch.Tensor, dst: int, stream=None):
+    def send(self, tensor: torch.Tensor, dst: int):
         if self.disabled:
             return
-        assert tensor.device == self.device, (
-            f"this hccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {tensor.device}")
-        
+        assert tensor.device.type == "hpu", f"the input tensor should be on hpu"
+
         htorch.core.mark_step()
         torch.hpu.synchronize()
         self.hccl.hcclSend(buffer_type(htutils.experimental._data_ptr(tensor)), tensor.numel(),
@@ -164,13 +148,11 @@ class PyHcclCommunicator:
         htorch.core.mark_step()
         torch.hpu.synchronize()
 
-    def recv(self, tensor: torch.Tensor, src: int, stream=None):
+    def recv(self, tensor: torch.Tensor, src: int):
         if self.disabled:
             return
-        assert tensor.device == self.device, (
-            f"this hccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {tensor.device}")
-        
+        assert tensor.device.type == "hpu", f"the input tensor should be on hpu"
+
         htorch.core.mark_step()
         torch.hpu.synchronize()
         self.hccl.hcclRecv(buffer_type(htutils.experimental._data_ptr(tensor)), tensor.numel(),
@@ -179,12 +161,10 @@ class PyHcclCommunicator:
         htorch.core.mark_step()
         torch.hpu.synchronize()
 
-    def broadcast(self, tensor: torch.Tensor, src: int, stream=None):
+    def broadcast(self, tensor: torch.Tensor, src: int):
         if self.disabled:
             return
-        assert tensor.device == self.device, (
-            f"this hccl communicator is created to work on {self.device}, "
-            f"but the input tensor is on {tensor.device}")
+        assert tensor.device.type == "hpu", f"the input tensor should be on hpu"
         sendbuff = buffer_type(htutils.experimental._data_ptr(tensor))
         recvbuff = buffer_type(htutils.experimental._data_ptr(tensor))
 
