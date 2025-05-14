@@ -16,8 +16,8 @@ fi
 ep_size=16
 moe_n_slice=1
 gpu_utils=0.95
-bs=64
-num_prompts=640
+bs=512
+num_prompts=1536
 request_rate=inf
 # block_size=256 #not valid  api_server.py: error: argument --block-size: invalid choice: 256 (choose from 1, 8, 16, 32, 64, 128)
 block_size=128
@@ -34,6 +34,8 @@ if [ $prompt_seq_min -lt 128 ]; then
 fi
 prompt_seq_max=$((in_len + possible_extra_tokens))
 total_len_aligned=$(((total_len + block_size - 1) / block_size * block_size + possible_extra_tokens))
+total_len_aligned_max_num_batch=$((total_len_aligned * 4))
+echo "total_len_aligned_max_num_batch = ${total_len_aligned_max_num_batch}"
 VLLM_DECODE_BLOCK_BUCKET_MIN=$((in_len * bs / block_size - block_step))
 if [ $VLLM_DECODE_BLOCK_BUCKET_MIN -lt 128 ]; then
     VLLM_DECODE_BLOCK_BUCKET_MIN=128
@@ -47,9 +49,9 @@ model_name="Pixtral-Large-Instruct-2411"
 logs_dir="${script_dir}/logs"
 mkdir -p "${logs_dir}"
 
-# VLLM_TORCH_PROFILER_DIR="${script_dir}/profile" \
-# VLLM_PROFILER_ENABLED="full" \
 # VLLM_SKIP_WARMUP=true \
+# VLLM_TORCH_PROFILER_DIR="${script_dir}/profile" \
+# VLLM_PROFILER_ENABLED="true" \
 VLLM_PROMPT_BS_BUCKET_MIN=1 \
 VLLM_PROMPT_BS_BUCKET_MAX=$prompt_bs_max \
 VLLM_PROMPT_SEQ_BUCKET_MIN=${prompt_seq_min} \
@@ -67,6 +69,7 @@ PT_HPU_WEIGHT_SHARING=0 \
 python3 -m vllm.entrypoints.openai.api_server \
     --port 18080 \
     --model ${model} \
+    --served_model_name "pixtrallarge" \
     --tensor-parallel-size ${tp_parrallel} \
     --max-num-seqs ${bs} \
     --disable-log-requests \
@@ -74,12 +77,11 @@ python3 -m vllm.entrypoints.openai.api_server \
     --use-v2-block-manager \
     --num_scheduler_steps ${multi_step} \
     --max-model-len ${total_len_aligned} \
-    --max-num-batched-tokens ${total_len_aligned} \
+    --max-num-batched-tokens ${total_len_aligned_max_num_batch} \
     --use-padding-aware-scheduling \
     --block-size ${block_size} \
     --distributed_executor_backend ray \
     --gpu_memory_utilization ${gpu_utils} \
-    --override-generation-config='{"attn_temperature_tuning": true}' \
     --config-format mistral \
     --load-format mistral \
     --tokenizer_mode mistral \
@@ -99,29 +101,30 @@ sleep 10s
 echo ${pid}
 
 ########################################################## Concurrency 64 Sonnet #################################################################
-max_concurrency_client=64
-echo "Startig benchmark..."
-pushd "${vllm_dir}"
-start_time=$(date +%s)
-python3 ./benchmarks/benchmark_serving.py \
-    --backend vllm \
-    --model ${model} \
-    --tokenizer-mode ${tokenizer_mode} \
-    --dataset-name sonnet \
-    --dataset-path ./benchmarks/sonnet.txt \
-    --request-rate ${request_rate} \
-    --percentile-metrics ttft,tpot,itl,e2el \
-    --ignore-eos \
-    --num-prompts ${num_prompts} \
-    --port 18080 \
-    --sonnet-input-len ${in_len} \
-    --sonnet-output-len ${out_len} \
-    --sonnet-prefix-len 100 \
-    --max-concurrency ${max_concurrency_client} \
-    --save-result 2>&1 | tee "${logs_dir}/g3-${model_name}-in${in_len}-out${out_len}-req${request_rate}-num_prompts${num_prompts}-concurrency${max_concurrency_client}.log"
-end_time=$(date +%s)
-popd
-echo "Time elapsed: $((end_time - start_time))s"
-sleep 10
+# max_concurrency_client=${bs}
+# echo "Startig benchmark..."
+# pushd "${vllm_dir}"
+# start_time=$(date +%s)
+# python3 ./benchmarks/benchmark_serving.py \
+#     --backend vllm \
+#     --model ${model} \
+#     --dataset-name sonnet \
+#     --dataset-path ./benchmarks/sonnet.txt \
+#     --request-rate ${request_rate} \
+#     --percentile-metrics ttft,tpot,itl,e2el \
+#     --ignore-eos \
+#     --num-prompts ${num_prompts} \
+#     --port 18080 \
+#     --sonnet-input-len ${in_len} \
+#     --sonnet-output-len ${out_len} \
+#     --sonnet-prefix-len 100 \
+#     --max-concurrency ${max_concurrency_client} \
+#     --save-result 2>&1 | tee "${logs_dir}/g3-${model_name}-in${in_len}-out${out_len}-req${request_rate}-num_prompts${num_prompts}-concurrency${max_concurrency_client}.log"
+# end_time=$(date +%s)
+# popd
+# echo "Time elapsed: $((end_time - start_time))s"
+# sleep 10
 
-kill ${pid}
+# kill ${pid}
+
+    # --tokenizer-mode ${tokenizer_mode} \
