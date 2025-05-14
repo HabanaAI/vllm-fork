@@ -20,6 +20,7 @@ def copy_other_files(input_path, output_path):
                 os.path.join(output_path, file),
             )
 
+
 def get_input_scales(pkl_path):
     input_scales = {}
     if pkl_path is not None:
@@ -27,13 +28,13 @@ def get_input_scales(pkl_path):
             input_scales = pickle.load(file)
     return input_scales
 
+
 def convert_files(input_path, output_path, scales_path):
     all_safetensors = glob(f"{input_path}/*.safetensors")
     # sort by file name
     all_safetensors.sort()
 
     input_scales = get_input_scales(scales_path)
-    print(f"{input_scales.keys()=}")
 
     tensor_mapping = {}
 
@@ -71,11 +72,12 @@ def convert_files(input_path, output_path, scales_path):
         save_file(tensors, new_tensor_path)
 
     if input_scales.keys():
-        print(f"warning: the following input_scales are unused:")
+        print("warning: the following input_scales are unused:")
         for k in input_scales.keys():
             print(k)
 
-    tensor_mapping_file = os.path.join(input_path, "model.safetensors.index.json")
+    tensor_mapping_file = os.path.join(input_path,
+                                       "model.safetensors.index.json")
     print(f"Saving tensor mapping to {tensor_mapping_file}")
     state_dict_mapping = {
         "metadata": {},
@@ -107,10 +109,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-s",
         "--scales_path",
-        help=(
-            "Path to the .pkl file containing the input scales used for "
-            "static activation quantization."
-        ),
+        help=("Path to the .pkl file containing the input scales used for "
+              "static activation quantization."),
     )
     args = parser.parse_args()
     input_path = args.input_path
@@ -122,6 +122,6 @@ if __name__ == "__main__":
     # create output directory if it does not exist
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    
+
     copy_other_files(input_path, output_path)
     convert_files(input_path, output_path, scales_path)
