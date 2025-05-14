@@ -849,9 +849,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     from neural_compressor.torch.quantization import (
                         FP8Config, convert, prepare)
 
-                    disable_mark_scales_as_const = os.getenv(
-                        "VLLM_DISABLE_MARK_SCALES_AS_CONST",
-                        "false") in ("1", "true")
                     disable_fp8_const_folding = os.getenv(
                         "VLLM_DISABLE_FP8_CONST_FOLDING",
                         "true") in ("1", "true")
@@ -861,14 +858,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
-                    if disable_fp8_const_folding:
-                        htcore.hpu_initialize(model=self.model,
-                                              mark_scales=False,
-                                              mark_non_scales=False)
-                    if not disable_mark_scales_as_const and \
-                        not disable_fp8_const_folding:
-                        htcore.hpu_initialize(self.model,
-                                              mark_only_scales_as_const=True)
+                    htcore.hpu_inference_initialize(
+                        model=self.model,
+                        mark_scales=not disable_fp8_const_folding,
+                        mark_non_scales=False)
+
                     if torch.distributed.is_initialized():
                         torch.distributed.barrier()
                 self.inc_initialized_successfully = True
