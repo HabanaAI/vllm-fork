@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-from multiprocessing import Process
 
 import vllm
 from vllm.distributed import cleanup_dist_env_and_memory
