@@ -154,6 +154,9 @@ case "$dtype" in
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
 	if [ "${model_name}" == "Qwen3-235B-A22B" ] || [ "${model_name}" == "Qwen3-30B-A3B" ]; then
 	    QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
+	    if [ "$num_hpu" -gt 1 ]; then
+		SERVER_FLAGS=(--enable-expert-parallel)
+	    fi
 	fi
         dtype="bfloat16"
         ;;
@@ -235,4 +238,5 @@ python3 -m vllm.entrypoints.openai.api_server \
     --num-scheduler-steps "${scheduler_steps}" \
     --distributed_executor_backend mp \
     --gpu-memory-utilization "${gpu_memory_utilization}" \
+    "${SERVER_FLAGS[@]}" \
     |& tee "${case_name}".log
