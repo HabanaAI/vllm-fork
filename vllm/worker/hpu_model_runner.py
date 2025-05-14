@@ -736,8 +736,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.use_contiguous_pa = envs.VLLM_USE_HPU_CONTIGUOUS_CACHE_FETCH
 
         self._set_gc_threshold()
-        self.use_prefix_caching = (self.vllm_config.
-                                   cache_config.enable_prefix_caching)
+        self.use_prefix_caching = (
+            self.vllm_config.cache_config.enable_prefix_caching)
         if self.use_prefix_caching:
             os.environ.setdefault("VLLM_CONTIGUOUS_PA", "False")
             assert os.environ.get(
@@ -1019,7 +1019,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _phase(self, is_prompt, ctx):
         phase_type: PhaseType
         if self.use_prefix_caching:
-            is_prefix_prefill = is_prompt and ctx is not None and ctx is not 0
+            is_prefix_prefill = is_prompt and ctx is not None and ctx != 0
             if is_prompt and is_prefix_prefill:
                 phase_type = PhaseType.PREFIX_PREFILL
             elif is_prompt and not is_prefix_prefill:
@@ -1027,28 +1027,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             elif not is_prompt:
                 phase_type = PhaseType.DECODE
             else:
-                raise ValueError("Unrecognized pass type, likely due to malformed "
-                                 "attention metadata")
+                raise ValueError(
+                    "Unrecognized pass type, likely due to malformed "
+                    "attention metadata")
         else:
             return 'prompt' if is_prompt else 'decode'
         return phase_type.value
 
-    def _check_config(self, batch_size, seq_len, ctx, attn_metadata, warmup_mode):
+    def _check_config(self, batch_size, seq_len, ctx, attn_metadata,
+                      warmup_mode):
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
         if warmup_mode:
             phase = self._phase(attn_metadata.is_prompt, ctx)
             num_blocks = ctx
-        else:            
-            phase = self._phase(attn_metadata.is_prompt, attn_metadata.block_list)
+        else:
+            phase = self._phase(attn_metadata.is_prompt,
+                                attn_metadata.block_list)
             num_blocks = self._num_blocks(attn_metadata)
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
             logger.warning("Configuration: %s was not warmed-up!",
-                           (phase, batch_size, seq_len,
-                            num_blocks))
+                           (phase, batch_size, seq_len, num_blocks))
 
     def _get_mrope_positions_and_delta(self, seq_data, mm_kwargs, context_len):
         image_grid_thw = mm_kwargs.get("image_grid_thw", None)
@@ -1279,13 +1281,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if sum(context_lens) != 0:
             max_prompt_len = max(
-            self.bucketing_ctx.get_padded_prefix_prefill_seq_len(target_query_len),
-            self.block_size)
+                self.bucketing_ctx.get_padded_prefix_prefill_seq_len(
+                    target_query_len), self.block_size)
         else:
             max_prompt_len = max(
-            self.bucketing_ctx.get_padded_prompt_seq_len(target_query_len),
-            self.block_size)
-        
+                self.bucketing_ctx.get_padded_prompt_seq_len(target_query_len),
+                self.block_size)
 
         lora_ids: List[int] = []
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
@@ -2017,7 +2018,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         is_prompt,
                                         lora_request=None,
                                         temperature=0,
-                                        ctx = 0):
+                                        ctx=0):
         if self.is_pooler:
             sampling_params = None
         else:
@@ -2112,7 +2113,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
-                    temperature=temperature, ctx = ctx) for i in range(batch_size)
+                    temperature=temperature,
+                    ctx=ctx) for i in range(batch_size)
             ]
         else:
             # FIXME: seq_len is actually number of blocks
@@ -2125,7 +2127,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
-                    temperature=temperature, ctx=ctx) for i, b in enumerate(blocks)
+                    temperature=temperature,
+                    ctx=ctx) for i, b in enumerate(blocks)
             ]
         torch.hpu.synchronize()
         profiler = None
@@ -2228,9 +2231,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
         for i, (batch_size, seq_len, ctx) in enumerate(reversed(buckets)):
             phase = self._phase(is_prompt, ctx)
-            self.log_warmup(phase, i,
-                            len(buckets), batch_size, seq_len, ctx)
-            self.warmup_scenario(batch_size, seq_len, ctx, is_prompt, kv_caches)
+            self.log_warmup(phase, i, len(buckets), batch_size, seq_len, ctx)
+            self.warmup_scenario(batch_size, seq_len, ctx, is_prompt,
+                                 kv_caches)
 
     def warmup_graphs(self,
                       strategy,
@@ -2273,7 +2276,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if graphed_bucket in self.graphed_buckets:
                 continue
             self.graphed_buckets.add(graphed_bucket)
-            self.log_warmup(phase, idx, num_candidates, batch_size, seq_len, ctx)
+            self.log_warmup(phase, idx, num_candidates, batch_size, seq_len,
+                            ctx)
             with HabanaMemoryProfiler() as mem_prof:
                 self.warmup_scenario(batch_size,
                                      seq_len,
@@ -2319,7 +2323,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prefix_prefill_buckets = 0
         if self.use_prefix_caching:
             self.bucketing_ctx.generate_prefix_prefill_buckets()
-            prefix_prefill_buckets = len(self.bucketing_ctx.prefix_prefill_buckets)
+            prefix_prefill_buckets = len(
+                self.bucketing_ctx.prefix_prefill_buckets)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             is_prompt = False
@@ -2343,9 +2348,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
-            cache_size_limit = 1 + multiplier * (prompt_buckets +
-                                                 decode_buckets +
-                                                 prefix_prefill_buckets)
+            cache_size_limit = 1 + multiplier * (
+                prompt_buckets + decode_buckets + prefix_prefill_buckets)
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
@@ -2378,8 +2382,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
                                     kv_caches)
             if self.use_prefix_caching:
-                self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets, True,
-                                        kv_caches)
+                self.warmup_all_buckets(
+                    self.bucketing_ctx.prefix_prefill_buckets, True, kv_caches)
             if not self.is_pooler:
                 self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,
                                         False, kv_caches)
@@ -2401,22 +2405,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
                     prompt_available_memory = (prompt_graph_mem_ratio *
                                                graph_free_mem)
+                    prefix_prefill_available_memory = 0
                     decode_available_memory = (graph_free_mem -
                                                prompt_available_memory)
                     if self.use_prefix_caching:
                         prompt_available_memory = prompt_available_memory / 2
-                        prefix_prefill_available_memory = (prompt_graph_mem_ratio *
-                                                   graph_free_mem) / 2
-                        decode_available_memory = (decode_available_memory -
-                                                   prefix_prefill_available_memory)
-                        
+                        prefix_prefill_available_memory = (
+                            prompt_graph_mem_ratio * graph_free_mem) / 2
+                        decode_available_memory = (
+                            decode_available_memory -
+                            prefix_prefill_available_memory)
+
                     msg = (
                         f"Using {format_bytes(graph_free_mem)}"
                         f"/{format_bytes(free_mem)} "
                         "of free device memory for HPUGraphs, "
                         f"{format_bytes(prompt_available_memory)} \
                             for prompt and " \
-                        f"{format_bytes(prefix_prefill_available_memory) if self.use_prefix_caching else 0} \
+                        f"{format_bytes(prefix_prefill_available_memory)} \
                             for prefix_prefill and "
                         f"{format_bytes(decode_available_memory)} for decode "
                         f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
@@ -2425,12 +2431,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.warmup_graphs(
                         prompt_strategy, self.bucketing_ctx.prompt_buckets,
                         True, kv_caches, prompt_available_memory)
-                    
+
                     mem_post_prefix_prefill = 0
                     if self.use_prefix_caching:
                         mem_post_prefix_prefill, prefix_prefill_batch_seq, \
                         prefix_prefill_captured_all = self.warmup_graphs(
-                            prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
+                            prompt_strategy,
+                            self.bucketing_ctx.prefix_prefill_buckets,
                             True, kv_caches, prefix_prefill_available_memory)
 
                     decode_strategy = os.environ.get(
@@ -2446,9 +2453,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     # capturing more prompt buckets.
                     sum_mem = (mem_post_decode + mem_post_prompt +
                                mem_post_prefix_prefill)
-                    if (sum_mem < graph_free_mem
-                            and not prompt_captured_all 
-                            and (not prefix_prefill_captured_all 
+                    if (sum_mem < graph_free_mem and not prompt_captured_all
+                            and (not prefix_prefill_captured_all
                                  if self.use_prefix_caching else True)
                             and decode_captured_all):
                         mem_post_prompt, _, prompt_captured_all = (
@@ -2460,12 +2466,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 prompt_batch_seq))
 
                         if self.use_prefix_caching:
-                            mem_post_prefix_prefill, _, prefix_prefill_captured_all = (
+                            (mem_post_prefix_prefill,
+                             _,
+                             prefix_prefill_captured_all) = (
                                 self.warmup_graphs(
                                     prompt_strategy,
-                                    self.bucketing_ctx.prefix_prefill_buckets, True,
-                                    kv_caches, graph_free_mem - mem_post_prefix_prefill -
-                                    mem_post_decode, mem_post_prefix_prefill,
+                                    self.bucketing_ctx.prefix_prefill_buckets,
+                                    True, kv_caches, graph_free_mem -
+                                    mem_post_prefix_prefill - mem_post_decode,
+                                    mem_post_prefix_prefill,
                                     prefix_prefill_batch_seq))
                         else:
                             mem_post_prefix_prefill = 0
@@ -2474,7 +2483,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         # buckets were captured and we have some free
                         # graph-allocated space left. Let's try to use it for
                         # capturing more decode buckets.
-                        if mem_post_decode + mem_post_prompt + mem_post_prefix_prefill < graph_free_mem \
+                        sum_post_mem = (mem_post_decode + mem_post_prompt + 
+                                        mem_post_prefix_prefill)
+                        if sum_mem < graph_free_mem \
                             and not decode_captured_all \
                             and prefix_prefill_captured_all \
                             and prompt_captured_all:
@@ -2495,12 +2506,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     logger.info(msg)
                     prompt_strategy = os.environ.get(
                         'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
-                    
+
                     msg = (
                         f"Using {format_bytes(graph_free_mem)}"
                         f"/{format_bytes(free_mem)} "
                         "of free device memory for HPUGraphs, "
-                        f"{format_bytes(prefix_prefill_available_memory)} for prefix_prefill")
+                        f"{format_bytes(prefix_prefill_available_memory)} "
+                        f"for prefix_prefill"
+                    )
                     logger.info(msg)
                     prompt_strategy = os.environ.get(
                         'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
@@ -2517,25 +2530,32 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 self.bucketing_ctx.prompt_buckets, True,
                                 kv_caches, graph_free_mem - mem_post_prompt,
                                 mem_post_prompt, prompt_batch_seq))
-                        
-                    mem_post_prefix_prefill, prefix_prefill_batch_seq, prefix_prefill_captured_all = \
+
+                    (mem_post_prefix_prefill,
+                     prefix_prefill_batch_seq,
+                     prefix_prefill_captured_all) = \
                         self.warmup_graphs(
-                        prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
+                        prompt_strategy,
+                        self.bucketing_ctx.prefix_prefill_buckets,
                         True, kv_caches, prefix_prefill_available_memory)
                     if mem_post_prefix_prefill < graph_free_mem \
                         and not prefix_prefill_captured_all:
-                        mem_post_prefix_prefill, _, prefix_prefill_captured_all = (
+                        (mem_post_prefix_prefill, 
+                         _, prefix_prefill_captured_all) = (
                             self.warmup_graphs(
                                 prompt_strategy,
-                                self.bucketing_ctx.prefix_prefill_buckets, True,
-                                kv_caches, graph_free_mem - mem_post_prefix_prefill,
-                                mem_post_prefix_prefill, prefix_prefill_batch_seq))
+                                self.bucketing_ctx.prefix_prefill_buckets,
+                                True, kv_caches,
+                                graph_free_mem - mem_post_prefix_prefill,
+                                mem_post_prefix_prefill,
+                                prefix_prefill_batch_seq))
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
                 if self.use_prefix_caching:
                     self.log_graph_warmup_summary(
-                        self.bucketing_ctx.prefix_prefill_buckets, True, mem_post_prefix_prefill)
+                        self.bucketing_ctx.prefix_prefill_buckets, True,
+                        mem_post_prefix_prefill)
                 if not self.is_pooler:
                     self.log_graph_warmup_summary(
                         self.bucketing_ctx.decode_buckets, False,
@@ -2548,7 +2568,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
-        self.profiler.end()        
+        self.profiler.end()
 
     def finish_measurements(self):
         from neural_compressor.torch.quantization import finalize_calibration
@@ -2823,13 +2843,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if warmup_mode:
                 phase = self._phase(attn_metadata.is_prompt, ctx)
             else:
-                phase = self._phase(attn_metadata.is_prompt, attn_metadata.block_list)
+                phase = self._phase(attn_metadata.is_prompt,
+                                    attn_metadata.block_list)
             if phase == 'decode':
                 if not warmup_mode:
                     ctx = seq_len
                 seq_len = 1
             use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
-            self._check_config(batch_size, seq_len, ctx, attn_metadata, warmup_mode)
+            self._check_config(batch_size, seq_len, ctx, attn_metadata,
+                               warmup_mode)
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
             if self.lora_config:
@@ -2933,14 +2955,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     return hidden_states
 
                 # Compute the logits.
-                with self.profiler.record_event(
-                        'internal',
-                    ('compute_logits_'
-                     f'{phase}_bs'
-                     f'{batch_size}_'
-                     f'seq{seq_len}_ctx'
-                     f'{ctx}'),
-                        args=profiler_args):
+                with self.profiler.record_event('internal',
+                                                ('compute_logits_'
+                                                 f'{phase}_bs'
+                                                 f'{batch_size}_'
+                                                 f'seq{seq_len}_ctx'
+                                                 f'{ctx}'),
+                                                args=profiler_args):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -2955,13 +2976,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 elif model_input.async_callback is not None:
                     model_input.async_callback()
 
-                with self.profiler.record_event(
-                        'internal', ('sample_'
-                                     f'{phase}_'
-                                     f'bs{batch_size}_'
-                                     f'seq{seq_len}_'
-                                     f'ctx{ctx}'),
-                        args=profiler_args):
+                with self.profiler.record_event('internal', ('sample_'
+                                                             f'{phase}_'
+                                                             f'bs{batch_size}_'
+                                                             f'seq{seq_len}_'
+                                                             f'ctx{ctx}'),
+                                                args=profiler_args):
                     output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
