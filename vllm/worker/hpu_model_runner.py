@@ -2476,16 +2476,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 prompt_batch_seq))
 
                         if self.use_prefix_caching:
-                            (mem_post_prefix_prefill,
-                             _,
+                            (mem_post_prefix_prefill, _,
                              prefix_prefill_captured_all) = (
-                                self.warmup_graphs(
-                                    prompt_strategy,
-                                    self.bucketing_ctx.prefix_prefill_buckets,
-                                    True, kv_caches, graph_free_mem -
-                                    mem_post_prefix_prefill - mem_post_decode,
-                                    mem_post_prefix_prefill,
-                                    prefix_prefill_batch_seq))
+                                 self.warmup_graphs(
+                                     prompt_strategy,
+                                     self.bucketing_ctx.prefix_prefill_buckets,
+                                     True, kv_caches, graph_free_mem -
+                                     mem_post_prefix_prefill - mem_post_decode,
+                                     mem_post_prefix_prefill,
+                                     prefix_prefill_batch_seq))
                         else:
                             mem_post_prefix_prefill = 0
                         # Not all decode buckets were captured, but all prompt
@@ -2493,9 +2492,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         # buckets were captured and we have some free
                         # graph-allocated space left. Let's try to use it for
                         # capturing more decode buckets.
-                        sum_post_mem = (mem_post_decode + mem_post_prompt + 
+                        sum_post_mem = (mem_post_decode + mem_post_prompt +
                                         mem_post_prefix_prefill)
-                        if sum_mem < graph_free_mem \
+                        if sum_post_mem < graph_free_mem \
                             and not decode_captured_all \
                             and prefix_prefill_captured_all \
                             and prompt_captured_all:
@@ -2517,13 +2516,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     prompt_strategy = os.environ.get(
                         'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
 
-                    msg = (
-                        f"Using {format_bytes(graph_free_mem)}"
-                        f"/{format_bytes(free_mem)} "
-                        "of free device memory for HPUGraphs, "
-                        f"{format_bytes(prefix_prefill_available_memory)} "
-                        f"for prefix_prefill"
-                    )
+                    msg = (f"Using {format_bytes(graph_free_mem)}"
+                           f"/{format_bytes(free_mem)} "
+                           "of free device memory for HPUGraphs, "
+                           f"{format_bytes(prefix_prefill_available_memory)} "
+                           f"for prefix_prefill")
                     logger.info(msg)
                     prompt_strategy = os.environ.get(
                         'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
@@ -2550,15 +2547,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         True, kv_caches, prefix_prefill_available_memory)
                     if mem_post_prefix_prefill < graph_free_mem \
                         and not prefix_prefill_captured_all:
-                        (mem_post_prefix_prefill, 
-                         _, prefix_prefill_captured_all) = (
-                            self.warmup_graphs(
-                                prompt_strategy,
-                                self.bucketing_ctx.prefix_prefill_buckets,
-                                True, kv_caches,
-                                graph_free_mem - mem_post_prefix_prefill,
-                                mem_post_prefix_prefill,
-                                prefix_prefill_batch_seq))
+                        (mem_post_prefix_prefill, _,
+                         prefix_prefill_captured_all) = (self.warmup_graphs(
+                             prompt_strategy,
+                             self.bucketing_ctx.prefix_prefill_buckets, True,
+                             kv_caches,
+                             graph_free_mem - mem_post_prefix_prefill,
+                             mem_post_prefix_prefill,
+                             prefix_prefill_batch_seq))
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
