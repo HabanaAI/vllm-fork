@@ -18,7 +18,6 @@ from vllm.lora.peft_helper import PEFTHelper
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import (LRUCacheWorkerLoRAManager,
                                       WorkerLoRAManager)
-from vllm.model_executor.layers.linear import RowParallelLinear
 from vllm.platforms import current_platform
 
 EMBEDDING_MODULES = {
