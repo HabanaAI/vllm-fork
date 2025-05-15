@@ -9,82 +9,101 @@ import json
 import argparse
 
 
-def copy_other_files(input_path, output_path):
+def copy_non_safetensor_files(input_path, output_path):
     import shutil
-
-    for file in os.listdir(input_path):
-        if file.endswith(".json") or file.endswith(".py"):
-            print(f"copying {file} to {output_path}")
-            shutil.copyfile(
-                os.path.join(input_path, file),
-                os.path.join(output_path, file),
-            )
+    shutil.copytree(
+        input_path,
+        output_path,
+        dirs_exist_ok=True,
+        ignore=lambda src, names:
+        [name for name in names if name.endswith(".safetensors")],
+    )
 
 
 def get_input_scales(pkl_path):
     input_scales = {}
-    if pkl_path is not None:
-        with open(pkl_path, 'rb') as file:
-            input_scales = pickle.load(file)
+    assert pkl_path is not None and os.path.exists(pkl_path)
+    with open(pkl_path, 'rb') as file:
+        input_scales = pickle.load(file)
     return input_scales
 
 
-def convert_files(input_path, output_path, scales_path):
-    all_safetensors = glob(f"{input_path}/*.safetensors")
-    # sort by file name
-    all_safetensors.sort()
+def update_static_config_json(output_path):
+    config_file = os.path.join(output_path, "config.json")
+    with open(config_file, "rb") as f:
+        config = json.load(f)
+    config["quantization_config"]["activation_scheme"] = "static"
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=4)
 
-    input_scales = get_input_scales(scales_path)
+
+def convert_and_rescale_weights(input_path, output_path, scales_path):
+
+    print("Copying non-safetensor files...")
+    copy_non_safetensor_files(input_path, output_path)
+
+    is_static = scales_path is not None
+
+    if is_static:
+        print(f"Loading input scales from {scales_path}")
+        input_scales = get_input_scales(scales_path)
+
+        print("Updating config.json to set activation_scheme to static...")
+        update_static_config_json(output_path)
+    else:
+        input_scales = {}
+
+    safetensor_files = glob(f"{input_path}/*.safetensors")
+    safetensor_files.sort()
 
     tensor_mapping = {}
 
-    for safetensors_path in all_safetensors:
+    for safetensor_file in safetensor_files:
         tensors = {}
-        safetensors_name = os.path.basename(safetensors_path)
-        print(f"processing {safetensors_path}")
-        with safe_open(safetensors_path, framework="pt",
+        safetensor_name = os.path.basename(safetensor_file)
+        print(f"Processing {safetensor_file}")
+        with safe_open(safetensor_file, framework="pt",
                        device="cpu") as tensor_file:
-            for k in tensor_file.keys():
-                tensor = tensor_file.get_tensor(k)
-                # tensor = tensor.squeeze(-1)
-                if "proj" in k:
-                    if k.endswith("weight"):
+            for tensor_name in tensor_file.keys():
+                tensor = tensor_file.get_tensor(tensor_name)
+                if "proj" in tensor_name:
+                    if tensor_name.endswith("weight"):
                         tensor = (tensor.float() * 240.0 / 448.0).to(
                             torch.float8_e4m3fn)
-                        input_scale_name = k.replace(".weight", ".input_scale")
-                        if input_scale_name in input_scales.keys():
-                            input_scale = input_scales.pop(input_scale_name)
+                        input_scale_key = tensor_name.replace(
+                            ".weight", ".input_scale")
+                        if input_scale_key in input_scales:
+                            input_scale = input_scales.pop(input_scale_key)
                             input_scale = input_scale * 448.0 / 240.0
-                            tensors[input_scale_name] = input_scale
-                            tensor_mapping[input_scale_name] = safetensors_name
-                    elif k.endswith("weight_scale_inv") or k.endswith(
-                            "input_scale_inv"):
-                        # "scale_inv" in deepseek-r1 is actually "scale"
+                            tensors[input_scale_key] = input_scale
+                            tensor_mapping[input_scale_key] = safetensor_name
+                    elif tensor_name.endswith("weight_scale_inv"):
                         tensor = tensor.float() * 448.0 / 240.0
                     else:
-                        raise NotImplementedError(f"Cannot convert {k}")
+                        raise NotImplementedError(
+                            f"Cannot convert {tensor_name}")
                 else:
-                    print(f"Skipping conversion for {k}")
-                tensors[k] = tensor
-                tensor_mapping[k] = safetensors_name
-        new_tensor_path = safetensors_path.replace(input_path, output_path)
-        print(f"saving to {new_tensor_path}")
-        save_file(tensors, new_tensor_path)
+                    print(f"Skipping conversion for {tensor_name}")
+                tensors[tensor_name] = tensor
+                tensor_mapping[tensor_name] = safetensor_name
+        output_tensor_path = safetensor_file.replace(input_path, output_path)
+        print(f"Saving to {output_tensor_path}")
+        save_file(tensors, output_tensor_path)
 
-    if input_scales.keys():
-        print("warning: the following input_scales are unused:")
-        for k in input_scales.keys():
-            print(k)
+    if input_scales:
+        print("Warning: the following input_scales are unused:")
+        for input_scale_key in input_scales:
+            print(input_scale_key)
 
-    tensor_mapping_file = os.path.join(input_path,
-                                       "model.safetensors.index.json")
-    print(f"Saving tensor mapping to {tensor_mapping_file}")
-    state_dict_mapping = {
-        "metadata": {},
-        "weight_map": tensor_mapping,
-    }
-    with open(tensor_mapping_file, "w") as f:
-        json.dump(state_dict_mapping, f, indent=4, sort_keys=True)
+    if is_static:
+        tensor_mapping_file = os.path.join(output_path,
+                                           "model.safetensors.index.json")
+        print(f"Updating tensor mapping in {tensor_mapping_file}")
+        with open(tensor_mapping_file, "rb") as f:
+            state_dict_mapping = json.load(f)
+        state_dict_mapping["weight_map"] = tensor_mapping
+        with open(tensor_mapping_file, "w") as f:
+            json.dump(state_dict_mapping, f, indent=4, sort_keys=True)
 
 
 if __name__ == "__main__":
@@ -109,19 +128,23 @@ if __name__ == "__main__":
     parser.add_argument(
         "-s",
         "--scales_path",
+        default=None,
         help=("Path to the .pkl file containing the input scales used for "
               "static activation quantization."),
     )
     args = parser.parse_args()
+
     input_path = args.input_path
-    output_path = args.output_path
-    scales_path = args.scales_path
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input path {input_path} does not exist.")
 
+    output_path = args.output_path
     # create output directory if it does not exist
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    copy_other_files(input_path, output_path)
-    convert_files(input_path, output_path, scales_path)
+    scales_path = args.scales_path
+    if scales_path and not os.path.exists(scales_path):
+        raise FileNotFoundError(f"Scales path {scales_path} does not exist.")
+
+    convert_and_rescale_weights(input_path, output_path, scales_path)
