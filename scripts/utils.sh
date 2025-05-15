@@ -17,6 +17,7 @@ set_env(){
     # performance tuning
     export VLLM_DELAYED_SAMPLING=${VLLM_DELAYED_SAMPLING:-"true"}
     export VLLM_ZERO_PADDING=${VLLM_ZERO_PADDING:-"true"}
+    export VLLM_CONFIG_HIDDEN_LAYERS=${VLLM_CONFIG_HIDDEN_LAYERS:-"1"}
 
     # MoE sepcific
     export VLLM_EP_SIZE=${VLLM_EP_SIZE:-"${num_hpu}"}
