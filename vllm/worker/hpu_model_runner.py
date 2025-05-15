@@ -482,9 +482,6 @@ class HpuModelAdapter(torch.nn.Module):
         if not self.model_is_mrope:
             return None
 
-        bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
-        self.model.visual.forward = functools.partial(
-            self.model.visual.forward, bypass_hpu_graphs=bypass_hpu_graphs)
 
         # For Qwen2.5-VL multimodal embedding,
         # this embedding part should be executed
@@ -533,20 +530,17 @@ class HpuModelAdapter(torch.nn.Module):
             kwargs.update({
                 'input_ids': None,
             })
-
         attn_meta = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
-
         with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
             hidden_states = self.model(*args, **kwargs)
-
-        if not get_pp_group().is_last_rank:
-            return hidden_states
-        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        if selected_token_indices is not None:
-            hidden_states = hidden_states.index_select(0,
-                                                       selected_token_indices)
+            if not get_pp_group().is_last_rank:
+                return hidden_states
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+            if selected_token_indices is not None:
+                hidden_states = hidden_states.index_select(0,
+                    selected_token_indices)
 
         return hidden_states
 
