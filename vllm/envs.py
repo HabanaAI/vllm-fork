@@ -733,6 +733,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # limit will actually be zero-copy decoded.
     "VLLM_MSGPACK_ZERO_COPY_THRESHOLD":
     lambda: int(os.getenv("VLLM_MSGPACK_ZERO_COPY_THRESHOLD", "256")),
+
+    # If PP-group comms cannot use HCCL/NCCL/etc,
+    # set VLLM_PP_USE_CPU_COMS=1 to force PP comms over
+    # Gloo on CPU and avoid hangs (send/recv/broadcast).
+    "VLLM_PP_USE_CPU_COMS":
+    lambda: bool(int(os.getenv("VLLM_PP_USE_CPU_COMS", "0"))),
 }
 
 # end-env-vars-definition
