@@ -501,14 +501,10 @@ class HpuModelAdapter(torch.nn.Module):
 
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
-            image_input = self.model._parse_and_validate_image_input(
-                **kwargs)
-            video_input = self.model._parse_and_validate_video_input(
-                **kwargs)
+            image_input = self.model._parse_and_validate_image_input(**kwargs)
+            video_input = self.model._parse_and_validate_video_input(**kwargs)
             inputs_embeds = self.model.get_input_embeddings_v0(
-                input_ids,
-                image_input=image_input,
-                video_input=video_input)
+                input_ids, image_input=image_input, video_input=video_input)
             input_ids = None
 
         return inputs_embeds
