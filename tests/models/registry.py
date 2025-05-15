@@ -366,8 +366,7 @@ _MULTIMODAL_EXAMPLE_MODELS = {
                                                       hf_overrides={"architectures": ["QwenVLForConditionalGeneration"]}),  # noqa: E501
     "Qwen2AudioForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen2-Audio-7B-Instruct"),  # noqa: E501
     "Qwen2VLForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen2-VL-2B-Instruct"),  # noqa: E501
-    "Qwen2_5_VLForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen2.5-VL-3B-Instruct",  # noqa: E501
-                                                          min_transformers_version="4.48.9"),  # noqa: E501
+    "Qwen2_5_VLForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen2.5-VL-3B-Instruct"),  # noqa: E501
     "Qwen2_5OmniModel": _HfExamplesInfo("Qwen/Qwen2.5-Omni-3B",
                                         min_transformers_version="4.52"),
     "SkyworkR1VChatModel": _HfExamplesInfo("Skywork/Skywork-R1V-38B"),
