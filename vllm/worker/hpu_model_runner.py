@@ -33,8 +33,8 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
 from vllm.config import DeviceConfig, VllmConfig
-from vllm.distributed import broadcast_tensor_dict, get_pp_group
-from vllm.distributed.parallel_state import get_world_group
+from vllm.distributed import broadcast_tensor_dict
+from vllm.distributed.parallel_state import get_pp_group, get_world_group
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
@@ -2295,6 +2295,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
+        max_batch_size = self.bucketing_ctx.get_padded_batch_size(
+            max_batch_size, True)
 
         # Using batch_size 1 is profile multimodal models
         max_batch_size = max_batch_size if not self.model_is_mrope else 1
@@ -2516,8 +2518,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
+            torch.distributed.barrier()
         if is_prompt:
             self._warmup_multimodal(kv_caches)
+            torch.distributed.barrier()
 
     def warmup_graphs(self,
                       strategy,
@@ -2582,6 +2586,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
+            torch.distributed.barrier()
 
         if is_prompt and supports_multimodal(self.get_model()):
             #For multimodal total_batch_seq and total_mem, we store it in the
@@ -2698,6 +2703,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  kv_caches,
                                  is_pt_profiler_run=True)
             raise AssertionError("Finished profiling")
+        self.bucketing_ctx.generate_prompt_buckets()
+        if not self.is_pooler:
+            max_blocks = kv_caches[0][0].size(0)
+            self.bucketing_ctx.generate_decode_buckets(max_blocks)
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1

@@ -48,7 +48,8 @@ from vllm.sequence import IntermediateTensors
 
 from . import mixtral
 from .interfaces import SupportsLoRA, SupportsPP
-from .utils import AutoWeightsLoader, make_layers, maybe_prefix
+from .utils import (AutoWeightsLoader, make_empty_intermediate_tensors_factory,
+                    make_layers, maybe_prefix)
 
 
 class GraniteMoeMoE(nn.Module):
@@ -273,6 +274,10 @@ class GraniteMoeModel(nn.Module):
             prefix=f"{prefix}.layers")
 
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+        self.make_empty_intermediate_tensors = (
+            make_empty_intermediate_tensors_factory(
+                ["hidden_states", "residual"], config.hidden_size))
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)

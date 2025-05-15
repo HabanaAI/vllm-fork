@@ -176,10 +176,11 @@ class RMSNorm(CustomOp):
         if HPUFusedRMSNorm is None:
             return self.forward_native(x, residual)
         if residual is not None:
-            residual.add_(x)
+            # NOTE(Tanner): Required to resolve empty tensor RTE on DeepSeek with PP>1
+            # According to Xinyu this can be removed once we are on 1.22.0.
+            residual = residual + x
             x = residual
             x = HPUFusedRMSNorm.apply(x.float(), self.weight.float(),
-
                                       self.variance_epsilon)
             return x.to(residual.dtype), residual
 

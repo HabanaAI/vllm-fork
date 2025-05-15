@@ -198,6 +198,7 @@ class GroupCoordinator:
     use_device_communicator: bool  # whether to use device communicator
     device_communicator: DeviceCommunicatorBase  # device communicator
     mq_broadcaster: Optional[Any]  # shared memory broadcaster
+    force_cpu_for_pp: bool
 
     def __init__(
         self,
@@ -207,6 +208,7 @@ class GroupCoordinator:
         use_device_communicator: bool,
         use_message_queue_broadcaster: bool = False,
         group_name: Optional[str] = None,
+        force_cpu_for_pp: bool = False,
     ):
         group_name = group_name or "anonymous"
         self.unique_name = _get_unique_name(group_name)
@@ -262,6 +264,7 @@ class GroupCoordinator:
         if use_message_queue_broadcaster and self.world_size > 1:
             self.mq_broadcaster = MessageQueue.create_from_process_group(
                 self.cpu_group, 1 << 22, 6)
+        self.force_cpu_for_pp: bool = force_cpu_for_pp
 
         from vllm.platforms import current_platform
         self.use_custom_op_call = (current_platform.is_cuda_alike()
@@ -650,6 +653,14 @@ class GroupCoordinator:
                 torch.distributed.send(tensor,
                                        dst=self.ranks[dst],
                                        group=metadata_group)
+            elif self.force_cpu_for_pp:
+                # use metadata_group for CPU tensors
+                orig_device = tensor.device
+                tensor = tensor.to('cpu')
+                torch.distributed.send(tensor,
+                                    dst=self.ranks[dst],
+                                    group=metadata_group)
+                tensor = tensor.to(orig_device)
             else:
                 # use group for GPU tensors
                 torch.distributed.send(tensor,
@@ -707,6 +718,14 @@ class GroupCoordinator:
                     torch.distributed.recv(tensor,
                                            src=self.ranks[src],
                                            group=metadata_group)
+                elif self.force_cpu_for_pp:
+                    # use metadata_group for CPU tensors
+                    orig_device = tensor.device
+                    tensor = tensor.to('cpu')
+                    torch.distributed.recv(tensor,
+                                        src=self.ranks[src],
+                                        group=metadata_group)
+                    tensor = tensor.to(orig_device)
                 else:
                     # use group for GPU tensors
                     torch.distributed.recv(tensor,
@@ -792,6 +811,8 @@ def init_model_parallel_group(
         use_device_communicator=True,
         use_message_queue_broadcaster=use_message_queue_broadcaster,
         group_name=group_name,
+        force_cpu_for_pp=envs.VLLM_PP_USE_CPU_COMS \
+            if group_name.lower() == "pp" else False,
     )
 
 

@@ -733,6 +733,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # limit will actually be zero-copy decoded.
     "VLLM_MSGPACK_ZERO_COPY_THRESHOLD":
     lambda: int(os.getenv("VLLM_MSGPACK_ZERO_COPY_THRESHOLD", "256")),
+
+    # When running pipeline parallelism on multiple nodes the primary communication channel
+    # for parralel communications may not be able to communicate. This would result in hangs
+    # after all_reduce/send/recv operations which PP group uses. To resolve this issue
+    # VLLM_PP_USE_CPU_COMS can be used to force PP communications through GLOO on the CPU.
+    "VLLM_PP_USE_CPU_COMS":
+    lambda: bool(int(os.getenv("VLLM_PP_USE_CPU_COMS", "0"))),
 }
 
 # end-env-vars-definition

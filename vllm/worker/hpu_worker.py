@@ -11,7 +11,7 @@ import json
 import os
 import queue
 import time
-from typing import List, Optional, Set, Tuple, Type
+from typing import Dict, List, Optional, Set, Tuple, Type
 
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
@@ -21,7 +21,7 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 import vllm.envs as envs
 from vllm.config import ParallelConfig, VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
-                              init_distributed_environment)
+                              get_tp_group, init_distributed_environment)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -354,7 +354,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                              cache_block_size)
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
         self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
@@ -377,6 +376,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+            num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
@@ -528,9 +529,10 @@ def init_worker_distributed_environment(
 
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
-
-    if parallel_config.pipeline_parallel_size > 1:
-        # torch-ccl xpu need a collective API warm up
+    
+    if parallel_config.pipeline_parallel_size > 1 and \
+        not envs.VLLM_PP_USE_CPU_COMS:
+        # torch-ccl hpu need a collective API warm up
         # before calling send/recv API
         get_pp_group().all_reduce(torch.zeros(1).to('hpu'))
     if torch.distributed.is_initialized():
@@ -551,7 +553,10 @@ def init_worker_distributed_environment(
     # A small all_reduce for warmup & checking conformance.
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
-    torch.distributed.all_reduce(dummy_tensor_hpu)
+    if not envs.VLLM_PP_USE_CPU_COMS:
+        torch.distributed.all_reduce(dummy_tensor_hpu)
+    else:
+        get_tp_group().all_reduce(dummy_tensor_hpu)
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
 
