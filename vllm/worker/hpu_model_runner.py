@@ -479,7 +479,7 @@ class HpuModelAdapter(torch.nn.Module):
                a 'prepare_cos_sin' method.")
 
     def compute_input_embeddings_for_mrope(self, **kwargs):
-        if not self.model_is_mrope or "pixel_values" not in kwargs:
+        if not self.model_is_mrope:
             return None
 
         bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
@@ -529,9 +529,11 @@ class HpuModelAdapter(torch.nn.Module):
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None and not self.model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
-        if self.model_is_mrope and kwargs['inputs_embeds'] is not None:
+        if self.model_is_mrope:
             # inputs_embeds was computed on execute_model
-            # here we replace the input_ids if they were not None
+            # now we always want to use the inputs_embeds
+            # even if the prompt is text only
+            # that keeps all the shapes consistent with warmup
             kwargs.update({
                 'input_ids': None,
             })
