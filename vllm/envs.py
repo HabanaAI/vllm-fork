@@ -872,6 +872,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # latency penalty when a request eventually comes.
     "VLLM_SLEEP_WHEN_IDLE":
     lambda: bool(int(os.getenv("VLLM_SLEEP_WHEN_IDLE", "0"))),
+
+    # If PP-group comms cannot use HCCL/NCCL/etc,
+    # set VLLM_PP_USE_CPU_COMS=1 to force PP comms over
+    # Gloo on CPU and avoid hangs (send/recv/broadcast).
+    "VLLM_PP_USE_CPU_COMS":
+    lambda: bool(int(os.getenv("VLLM_PP_USE_CPU_COMS", "0"))),
 }
 
 # --8<-- [end:env-vars-definition]

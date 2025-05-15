@@ -1,19 +1,20 @@
 # Copyright (C) 2025 Habana Labs, Ltd. an Intel Company
 # SPDX-License-Identifier: Apache-2.0
 
-FROM vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.1:latest
+FROM artifactory-kfs.habana-labs.com/docker-local/1.22.0/ubuntu22.04/habanalabs/pytorch-installer-2.7.1:1.22.0-568
 
 COPY ./ /workspace/vllm
 
 WORKDIR /workspace/vllm
 
 RUN pip install --upgrade pip && \
-    pip install -v -r requirements-hpu.txt
+    pip install -v -r requirements-hpu.txt && \
+    pip install lm_eval lm_eval[api] pytest
 
 ENV no_proxy=localhost,127.0.0.1
 ENV PT_HPU_ENABLE_LAZY_COLLECTIVES=true
 
-RUN VLLM_TARGET_DEVICE=hpu python3 setup.py install
+RUN VLLM_TARGET_DEVICE=hpu python3 setup.py develop
 
 # install development dependencies (for testing)
 RUN python3 -m pip install -e tests/vllm_test_utils
