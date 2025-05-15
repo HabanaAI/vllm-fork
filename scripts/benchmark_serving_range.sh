@@ -14,7 +14,7 @@ echo "Benchmarking ${model_path} for vllm server '${host}:${port}' with input_ma
 
 log_name=benchmark_serving_${model_name}_random_in-${input}_out-${output}_ratio-${ratio}_rate-${request_rate}_prompts-${num_prompts}_$(date +%F-%H-%M-%S)
 
-python ../benchmarks/benchmark_serving.py \
+python3 ../benchmarks/benchmark_serving.py \
     --backend vllm \
     --model $model_path \
     --trust-remote-code \
