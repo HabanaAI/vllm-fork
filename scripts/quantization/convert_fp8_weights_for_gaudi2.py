@@ -107,15 +107,23 @@ def convert_and_rescale_weights(input_path, output_path, scales_path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=(
-        "Convert FP8 E4M3FN weights to FP8 E4M3FNUZ format for Gaudi2 and "
-        "rescale the corresponding weight_scale_inv values."))
+    parser = argparse.ArgumentParser(
+        description=(
+            "Convert FP8 E4M3FN weights to FP8 E4M3FNUZ format for Gaudi2. "
+            "Rescale the corresponding weight_scale_inv values. "
+            "If --scales_path is provided, merge input_scales from the file "
+            "into the output safetensors files and set activation_scheme in "
+            "config.json to 'static'."
+        )
+    )
     parser.add_argument(
         "-i",
         "--input_path",
         required=True,
-        help=("Path to the directory containing the official model weights in "
-              ".safetensors format."),
+        help=(
+            "Path to the directory containing the original model weights "
+            "in .safetensors format."
+        ),
     )
     parser.add_argument(
         "-o",
