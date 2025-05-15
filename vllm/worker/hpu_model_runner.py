@@ -312,21 +312,14 @@ class HpuModelAdapter(torch.nn.Module):
         self.model_is_mrope = uses_mrope(model_config)
 
         # This applies exclusively to Qwen2/2.5-VL models
-        # both use mrope. We split the model into visual
-        # and language components and wrap them separately
-        # with HPU graph. This is to ensure that we keeps
+        # both use mrope. We wrap the visual and language
+        # models separately with HPU graph.
+        # This is to ensure that we keeps
         # the static and dynamic parts distinct.
-
-        if not htorch.utils.internal.is_lazy() and self.model_is_mrope:
-            logger.warning("[Multimodal] HPU is not in Lazy Mode, "
-                           "split graph has not impact")
-
         if htorch.utils.internal.is_lazy() and self.model_is_mrope:
-            logger.info("[Multimodal] Split Graph to Visual and Language")
+            logger.info("[Multimodal] Wrapping Visual Model")
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                 self.model.visual, disable_tensor_cache=True)
-            self.model = htorch.hpu.wrap_in_hpu_graph(
-                self.model, disable_tensor_cache=True)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -487,13 +480,11 @@ class HpuModelAdapter(torch.nn.Module):
 
     def compute_input_embeddings_for_mrope(self, **kwargs):
         if not self.model_is_mrope or "pixel_values" not in kwargs:
-            return kwargs
+            return None
 
         bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
         self.model.visual.forward = functools.partial(
             self.model.visual.forward, bypass_hpu_graphs=bypass_hpu_graphs)
-        self.model.forward = functools.partial(
-            self.model.forward, bypass_hpu_graphs=bypass_hpu_graphs)
 
         # For Qwen2.5-VL multimodal embedding,
         # this embedding part should be executed
@@ -520,15 +511,7 @@ class HpuModelAdapter(torch.nn.Module):
                 video_input=video_input)
             input_ids = None
 
-        # done compute the visual tokens
-        kwargs.pop("pixel_values")
-        kwargs.pop("image_grid_thw", None)
-
-        kwargs.update({
-            "input_ids": input_ids,
-            "inputs_embeds": inputs_embeds
-        })
-        return kwargs
+        return inputs_embeds
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -546,17 +529,19 @@ class HpuModelAdapter(torch.nn.Module):
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None and not self.model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
-        if self.model_is_mrope:
-            # precompute input embeddings
-            kwargs = self.compute_input_embeddings_for_mrope(**kwargs)
+        if self.model_is_mrope and kwargs['inputs_embeds'] is not None:
+            # inputs_embeds was computed on execute_model
+            # here we replace the input_ids if they were not None
+            kwargs.update({
+                'input_ids': None,
+            })
+
+        attn_meta = kwargs.pop('attn_metadata')
+        if 'kv_caches' in kwargs:
+            kwargs.pop('kv_caches')
+
+        with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
             hidden_states = self.model(*args, **kwargs)
-        else:
-            attn_meta = kwargs.pop('attn_metadata')
-            if 'kv_caches' in kwargs:
-                kwargs.pop('kv_caches')
-            with set_forward_context(attn_meta, self.vllm_config,
-                                     virtual_engine):
-                hidden_states = self.model(*args, **kwargs)
 
         if not get_pp_group().is_last_rank:
             return hidden_states
@@ -1046,7 +1031,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        if htorch.utils.internal.is_lazy() and not self.model_is_mrope:
+        if htorch.utils.internal.is_lazy():
             return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
                 *args, **kwargs),
                                                 disable_tensor_cache=True)
@@ -3199,6 +3184,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
+
+                if self.model_is_mrope:
+                    # run multimodal encoder for mrope before forward
+                    inputs_embeds = \
+                        self.model.compute_input_embeddings_for_mrope(
+                            **execute_model_kwargs
+                        )
+                    execute_model_kwargs.update({
+                        'inputs_embeds': inputs_embeds,
+                    })
+                    # done compute the visual tokens
+                    execute_model_kwargs.pop('pixel_values', None)
+                    execute_model_kwargs.pop('image_grid_thw', None)
 
                 with self.profiler.record_event('internal',
                                                 model_event_name,
