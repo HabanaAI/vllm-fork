@@ -482,7 +482,6 @@ class HpuModelAdapter(torch.nn.Module):
         if not self.model_is_mrope:
             return None
 
-
         # For Qwen2.5-VL multimodal embedding,
         # this embedding part should be executed
         # with PT_COMPILE_ONLY_MODE off at all times
@@ -539,8 +538,8 @@ class HpuModelAdapter(torch.nn.Module):
                 return hidden_states
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
             if selected_token_indices is not None:
-                hidden_states = hidden_states.index_select(0,
-                    selected_token_indices)
+                hidden_states = hidden_states.index_select(
+                    0, selected_token_indices)
 
         return hidden_states
 
