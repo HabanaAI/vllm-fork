@@ -78,7 +78,8 @@ h  Help info
 Here is a recommended example to start vLLM service on Qwen2-72B-Instruct model with 4 cards. Intel(R) Gaudi(R) module ID 0,1,2,3 are selected, input length range is 800 ~ 1024, output length range is 400 ~ 512, data type is BF16 and the vLLM service port is 30001. 
 The model weight are the standard models files which can be downloaded from [HuggingFace](https://huggingface.co/) or [ModelScope](https://www.modelscope.cn/) 
 ``` bash
-bash start_gaudi_vllm_server.sh -w "/models/Qwen2-72B-Instruct" \
+bash start_gaudi_vllm_server.sh \
+    -w "/models/Qwen2-72B-Instruct" \
     -n 4 \
     -m 0,1,2,3 \ 
     -b 128 \
@@ -144,7 +145,8 @@ Note: Ensure that the subdirectory names under quantization match the modelPath 
 #### 4. Start vLLM service on Qwen2.5-72B-Instruct model with FP8 precision.
 It will take much more time to do warm-up with FP8 precision. Suggest creating the warm-up cache files to accelerate the warm-up for next time. 
 ```bash
-bash start_gaudi_vllm_server.sh -w "/models/Qwen2.5-72B-Instruct" \
+bash start_gaudi_vllm_server.sh \
+    -w "/models/Qwen2.5-72B-Instruct" \
     -n 2 \
     -m 0,1 \ 
     -b 128 \
@@ -159,18 +161,31 @@ bash start_gaudi_vllm_server.sh -w "/models/Qwen2.5-72B-Instruct" \
 
 - #### Loading fp8 models directly
 Gaudi2 uses `fp8_e4m3fnuz` instead of `fp8_e4m3fn`, so the fp8 weights and the corresponding scales have to be converted by [convert_fp8_weights_for_gaudi2.py](quantization/convert_fp8_weights_for_gaudi2.py) first. vLLM on Gaudi supports dynamic and static activation quantization with extra `input_scales` provided, for example:
-```bash
+``` bash
 # convert Qwen3-32B-FP8 with dynamic activation quantization
 python3 convert_fp8_weights_for_gaudi2.py \
     -i /models/Qwen3-32B-FP8 \
-    -o /models/Qwen3-32B-FP8-dynamic
+    -o /models/Qwen3-32B-FP8-G2-dynamic
 
 # convert Qwen3-32B-FP8 with static activation quantization
 python3 convert_fp8_weights_for_gaudi2.py \
     -i /models/Qwen3-32B-FP8 \
-    -o /models/Qwen3-32B-FP8-dynamic \
+    -o /models/Qwen3-32B-FP8-G2-static \
     -s quantization/Qwen3-32B-w8afp8_input_scales.pickle
 ```
+Then the converted models could be used as normal bfloat16/float16 ones as in the following example:
+``` bash
+bash start_gaudi_vllm_server.sh \
+    -w "/models/Qwen3-32B-FP8-G2-static" \
+    -n 2 \
+    -m 0,1 \ 
+    -b 128 \
+    -i 800,1024 \
+    -o 400,512 \
+    -l 4096 \
+    -t 8192
+```
+
 > Note that loading fp8 models directly is experimental and currently tested on Qwen3 models only.
 
 
@@ -229,7 +244,8 @@ We can cache the recipe to disk and skip warm-up during the benchmark to save wa
 Then the second warm-up can use the cached files to accelerate the warm-up. If the vLLM version, max_num_seqs, input range or output range is changed, the warm-up will be re-done. 
 The extra parameter is like "-c [cache_files_path]" and the full example command is like below.
 ``` bash
-bash start_gaudi_vllm_server.sh -w "/models/Qwen2-72B-Instruct" \
+bash start_gaudi_vllm_server.sh \
+    -w "/models/Qwen2-72B-Instruct" \
     -n 4 \
     -m 0,1,2,3 \ 
     -b 128 \
@@ -244,7 +260,8 @@ bash start_gaudi_vllm_server.sh -w "/models/Qwen2-72B-Instruct" \
 ### skip warm-up for online serving
 You may and the parameter "-s" to skip the warm-up. vLLM server can be started very quickly. The warm-up is done during the inference serving and the performance may be impacted a little. 
 ``` bash
-bash start_gaudi_vllm_server.sh -w "/models/Qwen2-72B-Instruct" \
+bash start_gaudi_vllm_server.sh \
+    -w "/models/Qwen2-72B-Instruct" \
     -n 4 \
     -m 0,1,2,3 \ 
     -b 128 \
