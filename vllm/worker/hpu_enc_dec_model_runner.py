@@ -42,10 +42,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
     def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
         super().__init__(model, vllm_config, layer_names, is_causal, sampler)
 
-        if htorch.utils.internal.is_lazy():
-            self.model = htorch.hpu.wrap_in_hpu_graph(
-                self.model, disable_tensor_cache=True)
-
     def _set_cross_block_mapping(self, metadata, batch_size, device, dtype):
         mask = torch.arange(0,
                             self.block_size,
@@ -126,10 +122,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         kwargs['attn_metadata'] = self._update_cross_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
-        if htorch.utils.internal.is_lazy():
-            bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
-            self.model.forward = partial(self.model.forward,
-                                         bypass_hpu_graphs=bypass_hpu_graphs)
         # TODO: Change the input_ids to 1D to match the public vllm
         # implementation and avoid shape mismatch issues with some
         # models(i.e. Mllama). But currently this will cause graph
@@ -140,7 +132,8 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
             virtual_engine = kwargs.pop('virtual_engine')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
-        with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
+        attn_metadata = kwargs.pop("attn_metadata")
+        with set_forward_context(attn_metadata, self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
@@ -212,7 +205,11 @@ class HPUEncoderDecoderModelRunner(
         return list(itertools.chain(*in_list))
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        return HpuModelAdapterEncoderDecoder(*args, **kwargs)
+        return htorch.hpu.wrap_in_hpu_graph(
+            HpuModelAdapterEncoderDecoder(*args, **kwargs),
+            disable_tensor_cache=True,
+        ) if htorch.utils.internal.is_lazy() else HpuModelAdapterEncoderDecoder(
+            *args, **kwargs)
 
     def prepare_model_input(
         self,
