@@ -17,7 +17,8 @@ import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.flags import enabled_flags
-from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
+from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
+                                         HabanaMemoryProfiler, format_bytes)
 
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
@@ -582,9 +583,11 @@ class HPUModelRunner:
         self,
         vllm_config: VllmConfig,
         device: torch.device = 'hpu',
+        is_driver_worker: bool = False,
     ):
         # TODO: use ModelRunnerBase.__init__(self, vllm_config=vllm_config)
         environment.set_model_config(vllm_config.model_config)
+        self.is_driver_worker = is_driver_worker
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -605,6 +608,7 @@ class HPUModelRunner:
         self.enable_bucketing = self.env_flags.enable_bucketing
         self.use_contiguous_pa = self.env_flags.use_contiguous_pa
         self.skip_warmup = self.env_flags.skip_warmup
+        
 
         model_config = self.model_config
         cache_config = self.cache_config
@@ -681,6 +685,8 @@ class HPUModelRunner:
         self.max_prefill_batch_size = 1  # TODO(kzawora): add knob for that
         self.padding_aware_scheduling = True  # TODO(kzawora): add knob for that
         self.padding_ratio_threshold = 0.9  # TODO(kzawora): add knob for that
+        # Profiler stats
+        self.profiler = HabanaHighLevelProfiler()
         self.seen_configs: set = set()
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
@@ -1408,6 +1414,10 @@ class HPUModelRunner:
             bucketing=True
     ) -> tuple[PrefillInputData, Optional[DecodeInputData]]:
 
+        self.event_start = self.profiler.get_timestamp_us()
+        print("num_decodes", num_decodes)
+        base_event_name = 'prompt' if num_decodes else 'decode'
+        self.profiler.start('internal', base_event_name)
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         assert total_num_scheduled_tokens > 0
 
@@ -1490,9 +1500,19 @@ class HPUModelRunner:
         # FORWARD.
         batch_size = token_ids.size(0)
         seq_len = self._seq_len(attn_metadata)
-        num_blocks = self._num_blocks(attn_metadata)
+        num_blocks = self._num_blocks(attn_metadata)        
 
         is_prompt = attn_metadata.is_prompt
+        phase = "prompt" if is_prompt else "decode"
+        if self.is_driver_worker:
+            model_event_name = ("model_"
+                                f"{phase}_"
+                                f"bs{batch_size}_"
+                                f"seq{seq_len}_"
+                                f"ctx{num_blocks}_"
+                                f"graphs{'T' if use_graphs else 'F'}")
+        else:
+            model_event_name = 'model_executable'
         self._check_config(batch_size, seq_len, num_blocks, attn_metadata,
                            warmup_mode)
         additional_kwargs = {}
@@ -1502,10 +1522,19 @@ class HPUModelRunner:
                                           is_prompt)
             additional_kwargs.update({"bypass_hpu_graphs": not use_graphs})
         trimmed_attn_metadata = trim_attn_metadata(attn_metadata)
-        hidden_states = self.model.forward(input_ids=token_ids,
-                                           positions=position_ids,
-                                           attn_metadata=trimmed_attn_metadata,
-                                           kv_caches=kv_caches)
+        
+        profiler_args = {
+            'real_seq_len': seq_len,
+            'real_batch_size': batch_size
+        }
+
+        with self.profiler.record_event('internal',
+                                        model_event_name,
+                                        args=profiler_args):
+            hidden_states = self.model.forward(input_ids=token_ids,
+                                            positions=position_ids,
+                                            attn_metadata=trimmed_attn_metadata,
+                                            kv_caches=kv_caches)
         #hidden_states = hidden_states[:num_scheduled_tokens]
         # NOTE(kzawora): returning hidden_states is required in prompt logprobs
         # scenarios, as they will do logit processing on their own
@@ -1513,7 +1542,16 @@ class HPUModelRunner:
 
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states[logits_indices]
-        logits = self.model.compute_logits(hidden_states, None)
+        # Compute the logits.
+        with self.profiler.record_event(
+                'internal',
+            ('compute_logits_'
+                f'{phase}_bs'
+                f'{batch_size}_'
+                f'seq{seq_len}_ctx'
+                f'{num_blocks}'),
+                args=profiler_args):
+            logits = self.model.compute_logits(hidden_states, None)
         return non_flattened_hidden_states, logits
 
     def _get_prompt_logprobs_dict(
@@ -1690,10 +1728,33 @@ class HPUModelRunner:
                     token_ids, position_ids, attn_metadata, logits_indices,
                     self.kv_caches)
                 htorch.core.mark_step()
+
+                '''if self.is_driver_worker:
+                    model_event_name = ("model_"
+                                    f"{phase}_"
+                                    f"bs{batch_size}_"
+                                    f"seq{seq_len}_"
+                                    f"ctx{ctx}_"
+                                    f"graphs{'T' if use_graphs else 'F'}")
+                batch_size = token_ids.size(0)
+                seq_len = self._seq_len(attn_metadata)
+                num_blocks = self._num_blocks(attn_metadata)      
+                is_prompt = attn_metadata.is_prompt
+                profiler_args = {
+                    'real_seq_len': seq_len,
+                    'real_batch_size': batch_size
+                }
+
+                with self.profiler.record_event('internal',
+                                        model_event_name,
+                                        args=profiler_args):
+                
+                '''
                 sampling_metadata = self._prepare_sampling(
                     batch_changed, req_id, pad_to=logits_device.shape[0])
                 sampler_output = self.sampler(
                     logits=logits_device, sampling_metadata=sampling_metadata)
+                
                 htorch.core.mark_step()
                 prefill_sampler_outputs.append(sampler_output)
                 if self.input_batch.num_prompt_logprobs:
@@ -1964,10 +2025,19 @@ class HPUModelRunner:
         logger.info(msg)
 
     def warmup_scenario(self, batch_size, seq_or_block, num_blocks, is_prompt,
-                        kv_caches) -> None:
+                        kv_caches, is_pt_profiler_run = True) -> None:
         """Dummy warmup run for memory usage and graph compilation."""
 
+
         query_seq_len = seq_or_block if is_prompt else 1
+        phase = "prompt" if is_prompt else "decode"
+        use_graphs = self._use_graphs(batch_size, query_seq_len, num_blocks, is_prompt)
+        scenario_name = ("warmup_"
+            f"{phase}_"
+            f"bs{batch_size}_"
+            f"seq{query_seq_len}_"
+            f"ctx{num_blocks}_"
+            f"graphs{'T' if use_graphs else 'F'}")
         input_ids = torch.zeros((batch_size, query_seq_len),
                                 dtype=torch.int32,
                                 device='cpu')
@@ -1981,80 +2051,82 @@ class HPUModelRunner:
         input_ids_device = _async_h2d_tensor_copy(input_ids, self.device)
         position_ids_device = _async_h2d_tensor_copy(position_ids, self.device)
         slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
-
-        if is_prompt:
-            seq_lens = torch.zeros((batch_size),
-                                   dtype=torch.int32,
-                                   device='cpu')
-            seq_lens.fill_(seq_or_block)
-            seq_lens_device = _async_h2d_tensor_copy(seq_lens, self.device)
-            if num_blocks:
-                prefix_block_tables = torch.ones(
-                    (batch_size, num_blocks), dtype=torch.int32,
-                    device='cpu') * self._PAD_BLOCK_ID
-                #for i, n in enumerate(num_blocks):
-                #    prefix_block_tables[i, :n] = block_table_cpu_tensor[
-                #        batch_idx + i, :n]
-                '''context_lens_tensor = torch.zeros((batch_size),
-                                                  dtype=torch.int32,
-                                                  device='cpu')
-                context_lens_tensor[:num_prefills] = torch.tensor(context_lens,
-                                                                  device='cpu')
-                '''
-                block_list_device = _async_h2d_tensor_copy(
-                    prefix_block_tables.flatten(), self.device)
-                #context_lens_tensor_device = _async_h2d_tensor_copy(
-                #    context_lens_tensor, self.device)
-                attn_metadata = \
-                    HPUAttentionMetadataV1.make_cached_prefill_metadata(
-                    seq_lens_tensor=seq_lens_device,
-                    context_lens_tensor=seq_lens_device,
-                    num_prefills=batch_size,
-                    num_prefill_tokens=batch_size * seq_or_block,
-                    input_positions=None,
-                    slot_mapping=slot_mapping_device,
-                    block_list=block_list_device)
+        self.profiler.start('internal', scenario_name)
+        times = 3 if use_graphs or is_pt_profiler_run else 1
+        for time_index in range(times):
+            if is_prompt:
+                seq_lens = torch.zeros((batch_size),
+                                    dtype=torch.int32,
+                                    device='cpu')
+                seq_lens.fill_(seq_or_block)
+                seq_lens_device = _async_h2d_tensor_copy(seq_lens, self.device)
+                if num_blocks:
+                    prefix_block_tables = torch.ones(
+                        (batch_size, num_blocks), dtype=torch.int32,
+                        device='cpu') * self._PAD_BLOCK_ID
+                    #for i, n in enumerate(num_blocks):
+                    #    prefix_block_tables[i, :n] = block_table_cpu_tensor[
+                    #        batch_idx + i, :n]
+                    '''context_lens_tensor = torch.zeros((batch_size),
+                                                    dtype=torch.int32,
+                                                    device='cpu')
+                    context_lens_tensor[:num_prefills] = torch.tensor(context_lens,
+                                                                    device='cpu')
+                    '''
+                    block_list_device = _async_h2d_tensor_copy(
+                        prefix_block_tables.flatten(), self.device)
+                    #context_lens_tensor_device = _async_h2d_tensor_copy(
+                    #    context_lens_tensor, self.device)
+                    attn_metadata = \
+                        HPUAttentionMetadataV1.make_cached_prefill_metadata(
+                        seq_lens_tensor=seq_lens_device,
+                        context_lens_tensor=seq_lens_device,
+                        num_prefills=batch_size,
+                        num_prefill_tokens=batch_size * seq_or_block,
+                        input_positions=None,
+                        slot_mapping=slot_mapping_device,
+                        block_list=block_list_device)
+                else:
+                    #block_list = None
+                    attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
+                        seq_lens_tensor=seq_lens_device,
+                        num_prefills=batch_size,
+                        num_prefill_tokens=batch_size * seq_or_block,
+                        input_positions=None,
+                        slot_mapping=slot_mapping_device)
             else:
-                #block_list = None
-                attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
-                    seq_lens_tensor=seq_lens_device,
-                    num_prefills=batch_size,
-                    num_prefill_tokens=batch_size * seq_or_block,
+                block_tables = [
+                    x.tolist()
+                    for x in np.array_split(np.arange(seq_or_block), batch_size)
+                ]
+                block_list, block_groups, block_usage = \
+                    self.get_habana_paged_attn_buffers(
+                    block_tables=block_tables,
+                    slot_mapping=slot_mapping,
+                    bucketing=True)
+                block_list_device = _async_h2d_tensor_copy(block_list, self.device)
+                block_usage_device = _async_h2d_tensor_copy(
+                    block_usage, self.device)
+                block_groups_device = _async_h2d_tensor_copy(
+                    block_groups, self.device)
+                attn_metadata = HPUAttentionMetadataV1.make_decode_metadata(
+                    block_list=block_list_device,
+                    block_usage=block_usage_device,
+                    block_groups=block_groups_device,
+                    num_decode_tokens=batch_size,
                     input_positions=None,
                     slot_mapping=slot_mapping_device)
-        else:
-            block_tables = [
-                x.tolist()
-                for x in np.array_split(np.arange(seq_or_block), batch_size)
-            ]
-            block_list, block_groups, block_usage = \
-                self.get_habana_paged_attn_buffers(
-                block_tables=block_tables,
-                slot_mapping=slot_mapping,
-                bucketing=True)
-            block_list_device = _async_h2d_tensor_copy(block_list, self.device)
-            block_usage_device = _async_h2d_tensor_copy(
-                block_usage, self.device)
-            block_groups_device = _async_h2d_tensor_copy(
-                block_groups, self.device)
-            attn_metadata = HPUAttentionMetadataV1.make_decode_metadata(
-                block_list=block_list_device,
-                block_usage=block_usage_device,
-                block_groups=block_groups_device,
-                num_decode_tokens=batch_size,
-                input_positions=None,
-                slot_mapping=slot_mapping_device)
 
-        logits_indices = torch.arange(0, batch_size, device='cpu')
-        logits_indices_device = _async_h2d_tensor_copy(logits_indices,
-                                                       self.device)
-        # Dummy run.
-        htorch.core.mark_step()
-        logits = self._execute_model_generic(input_ids_device,
-                                             position_ids_device,
-                                             attn_metadata,
-                                             logits_indices_device, kv_caches,
-                                             True)
+            logits_indices = torch.arange(0, batch_size, device='cpu')
+            logits_indices_device = _async_h2d_tensor_copy(logits_indices,
+                                                        self.device)
+            # Dummy run.
+            htorch.core.mark_step()
+            logits = self._execute_model_generic(input_ids_device,
+                                                position_ids_device,
+                                                attn_metadata,
+                                                logits_indices_device, kv_caches,
+                                                True)
         # TODO: do sampling on logits, warmup sampler and prefill joiner
         htorch.core.mark_step()
         temperature = torch.ones(batch_size, dtype=torch.float32, device='cpu')
@@ -2069,6 +2141,7 @@ class HPUModelRunner:
         }  # NOTE(kzawora): idk what to set here
         max_num_logprobs = 0  # NOTE(kzawora): idk what to set here
         # NOTE(kzawora: do this in a smarter way)
+        self.profiler.end()
         return None
         htorch.core.mark_step()
         sampling_metadata = SamplingMetadata(
@@ -2358,6 +2431,7 @@ class HPUModelRunner:
             logger.info("Skipping warmup...")
             return
 
+        self.profiler.start('internal', 'warmup')
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
         start_time = time.perf_counter()
 
@@ -2463,6 +2537,7 @@ class HPUModelRunner:
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
+        self.profiler.end()
 
     def shutdown_inc(self):
         can_finalize_inc = self._is_quant_with_inc() and \
