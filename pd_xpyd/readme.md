@@ -8,7 +8,7 @@
 
 ```bash
 apt install etcd -y
-pip3 install mooncake-transfer-engine==0.3.0
+pip install mooncake-transfer-engine==0.3.0b3
 ```
 
 ### Install from Source
@@ -18,7 +18,7 @@ pip3 install mooncake-transfer-engine==0.3.0
 apt install git wget curl net-tools sudo iputils-ping etcd -y
 
 # Clone the Mooncake repository
-git clone https://github.com/kvcache-ai/Mooncake.git -b v0.3.0
+git clone https://github.com/kvcache-ai/Mooncake.git -b v0.3.0-beta
 cd Mooncake
 
 # Install dependencies
@@ -70,7 +70,9 @@ mooncake_master --enable_gc true --port 50001
 
 ```bash
 export MOONCAKE_CONFIG_PATH=./mooncake.json
-export PT_HPU_LAZY_MODE=1 
+export PT_HPU_LAZY_MODE=1
+export VLLM_MLA_DISABLE_REQUANTIZATION=1
+export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
 
 python3 -m vllm.entrypoints.openai.api_server \
     --model deepseek-ai/DeepSeek-R1 \
@@ -84,7 +86,9 @@ python3 -m vllm.entrypoints.openai.api_server \
 
 ```bash
 export MOONCAKE_CONFIG_PATH=./mooncake.json
-export PT_HPU_LAZY_MODE=1 
+export PT_HPU_LAZY_MODE=1
+export VLLM_MLA_DISABLE_REQUANTIZATION=1
+export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
 
 python3 -m vllm.entrypoints.openai.api_server \
     --model deepseek-ai/DeepSeek-R1 \
