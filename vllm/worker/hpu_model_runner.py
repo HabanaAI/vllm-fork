@@ -23,10 +23,10 @@ import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing.common import get_bucketing_context
-from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
+from vllm_hpu_extension.runtime import get_config
 
 import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
@@ -266,7 +266,8 @@ class HpuModelAdapter(torch.nn.Module):
     def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
         super().__init__()
         self.model = model
-        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
+        self.prefill_use_fusedsdpa = get_config(
+        ).prompt_attn_impl == 'fsdpa_impl'
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
         self.sampler = sampler
