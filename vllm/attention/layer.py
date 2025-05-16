@@ -307,7 +307,7 @@ class MultiHeadAttention(nn.Module):
                                value,
                                None,
                                dropout_p=0.0,
-                               is_causal=False,
+                               is_causal=True,
                                scale=self.scale,
                                softmax_mode="fast",
                                recompute_mode=True,
