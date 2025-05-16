@@ -42,14 +42,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.kv_helper = kv_helper(config)
         self.local_tp_rank = local_rank
         self.rank = rank
-        self.block_size = 128
-        max_num_blocks = 1000
-        self.block_indice_place_holder = torch.zeros(max_num_blocks,
-                                                     dtype=torch.int,
-                                                     device="hpu")
-        self.padded_length_tensor = torch.zeros(1,
-                                                dtype=torch.int,
-                                                device="hpu")
+        self.block_size = config.cache_config.block_size
         # Init kv_store
         if self.config.kv_connector == "MooncakeStoreConnector":
             # Check if MOONCAKE_CONFIG_PATH is set
@@ -245,7 +238,6 @@ class MooncakeStoreConnector(KVConnectorBase):
                                  1) // self.block_size * self.block_size
             current_slot_mapping = model_input.attn_metadata.slot_mapping[
                 idx][:padded_total_size]
-            self.padded_length_tensor[0] = padded_total_size
             htorch.core.mark_step()
             # ==== graph should start here ======
             keys, values = [], []
@@ -298,8 +290,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         seq_lens = model_input.attn_metadata.seq_lens_tensor.tolist()
         block_indices_list = attn_metadata.block_indices.tolist()
         hidden_or_intermediate_states_for_one_req: list[torch.Tensor] = []
-        input_tokens_list = []
-        num_computed_tokens_list = []
         start_block_idx = 0
         num_heads, head_size = self.kv_helper.get_model_args(model_executable)
 
@@ -377,10 +367,6 @@ class MooncakeStoreConnector(KVConnectorBase):
                 bypass_model_exec = False
                 continue
 
-            # collecting data for rebuilding the input
-            input_tokens_list.append(current_tokens)
-            num_computed_tokens = current_tokens.shape[0]
-            num_computed_tokens_list.append(num_computed_tokens)
             htorch.core.mark_step()
             torch.hpu.synchronize()
 
