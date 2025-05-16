@@ -51,7 +51,7 @@ elif [[ $1 == "decoder" ]]; then
         WORLD_SIZE=2 \
         vllm serve $MODEL \
         --port 1200 \
-        --gpu_memory_utilization 0.6 \
+        --gpu_memory_utilization 0.5 \
         --disable-log-requests \
         --enforce-eager \
         --kv-transfer-config \

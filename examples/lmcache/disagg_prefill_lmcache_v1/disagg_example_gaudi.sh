@@ -126,7 +126,7 @@ main() {
     cd ../../../benchmarks/
     python benchmark_serving.py --port 1000 --seed $(date +%s) \
         --model /root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/ \
-        --dataset-name random --random-input-len 7500 --random-output-len 200 \
+        --dataset-name random --random-input-len 8000 --random-output-len 200 \
         --num-prompts 10 --burstiness 100 --request-rate 3.6 | tee benchmark.log
 
     echo "Benchmarking done. Cleaning up..."
