@@ -2873,7 +2873,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # NOTE: The receive operation is blocking
                 bypass_model_exec = False
                 if self.need_recv_kv(model_input, kv_caches, warmup_mode):
-                    cur_time = time.time()
                     attn_metadata = self.model.forward_update_meta_only(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
@@ -2888,8 +2887,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         attn_metadata,
                         kv_caches=kv_caches
                     )
-                    now = time.time()
-                    logger.info("KV transfer recv time: %s", now - cur_time)
 
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
@@ -2911,10 +2908,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 else:
                     logger.debug("Bypassing model execution")
 
-                # torch.hpu.synchronize()
                 # Sending KV cache in distributed KV cache transfer setting
-                # NOTE: the send operation is non-blocking
-                cur_time = time.time()
+                # TODO: update send operation to blocking one.
                 if self.need_send_kv(model_input, kv_caches, warmup_mode):
                     get_kv_transfer_group(
                     ).send_kv_caches_and_hidden_states_hpu(
@@ -2926,8 +2921,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         kv_caches,
                         hidden_states,
                     )
-                    now = time.time()
-                    logger.info("KV transfer send time: %f", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
