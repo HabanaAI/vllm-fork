@@ -23,6 +23,10 @@ os.environ["LMCACHE_CHUNK_SIZE"] = "256"
 os.environ["LMCACHE_LOCAL_CPU"] = "True"
 # Set local CPU memory limit to 5.0 GB
 os.environ["LMCACHE_MAX_LOCAL_CPU_SIZE"] = "5.0"
+os.environ["LMCACHE_REMOTE_URL"] = f"lm://localhost:{port}"
+# Set the serializer/deserializer between vllm and LMCache server
+# `naive` indicates using raw bytes of the tensor without any compression
+os.environ["LMCACHE_REMOTE_SERDE"] = "naive"
 
 # This example script runs two requests with a shared prefix.
 shared_prompt = "Hello, how are you?" * 1000
