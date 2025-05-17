@@ -37,12 +37,12 @@ fi
 #Unit Test for Processor
 if $RunProcessorUT; then
 	pip uninstall -y transformers
-	pip install git+https://github.com/malkomes/transformers.git@e4269f72aebb00b82cc232866e6565597f6ceacf
+	pip install https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280
 	pytest tests/models/multimodal/processing/test_qwen2_5_vl.py -s -v
 fi
 
 #pytests
-if $RunPytests && [[ "$ModelName" == *"Qwen"* ]]; then pytest tests/models/decoder_only/vision_language/test_models.py -s -v -k "[qwen2_5_vl"; fi
+if $RunPytests && [[ "$ModelName" == *"Qwen"* ]]; then VLLM_SKIP_WARMUP=true pytest tests/models/multimodal/generation/test_common.py -s -v -k qwen2_5_vl; fi
 
 # larger image sizes
 if $RunLargeImages; then
@@ -86,15 +86,14 @@ fi
 
 if $RunOnlineDatasets; then
 	# tp=1 for datasets and text only
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench --num-prompts 400 -sgt
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt
+	QUANT_CONFIG=/root/vllm-fork/calibration/vllm-hpu-extension/calibration/g2/qwen2.5-vl-3b-instruct/maxabs_quant_g2.json bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1,LIME-DATA/infovqa,echo840/OCRBench --num-prompts 400 -sgt
+	QUANT_CONFIG=/root/vllm-fork/calibration/vllm-hpu-extension/calibration/g2/qwen2.5-vl-3b-instruct/maxabs_quant_g2.json bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt
 
 	## tp>1 tests
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 2
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 4
-	#bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 8
+	QUANT_CONFIG=/root/vllm-fork/calibration/vllm-hpu-extension/calibration/g2/qwen2.5-vl-3b-instruct/maxabs_quant_g2.json bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 2
+	QUANT_CONFIG=/root/vllm-fork/calibration/vllm-hpu-extension/calibration/g2/qwen2.5-vl-3b-instruct/maxabs_quant_g2.json bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 100 -tp 4
 
 	## tp=1 fp8 tests
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 400 -sgt --fp8
-	bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt --fp8
+	QUANT_CONFIG=/root/vllm-fork/calibration/vllm-hpu-extension/calibration/g2/qwen2.5-vl-3b-instruct/maxabs_quant_g2.json bash run_online.sh -m $ModelName --skip_warmup --hpu -ds lmarena-ai/vision-arena-bench-v0.1 --num-prompts 400 -sgt --fp8
+	QUANT_CONFIG=/root/vllm-fork/calibration/vllm-hpu-extension/calibration/g2/qwen2.5-vl-3b-instruct/maxabs_quant_g2.json bash run_online.sh -m $ModelName --skip_warmup --hpu -ds sonnet --num-prompts 1000 -sgt --fp8
 fi

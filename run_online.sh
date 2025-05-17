@@ -202,7 +202,7 @@ if [[ -n "$FP8" ]]; then
     pip install . -q
     # need to reinstall the transformers for vllm
     cd $VLLM_DIR
-    pip install -r requirements-hpu-qwen2_5_vl.txt -q
+    pip install git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280
     ServerFP8Args=" --quantization inc --kv-cache-dtype fp8_inc --weights-load-device cpu"
 fi
 
