@@ -1404,7 +1404,7 @@ class HPUModelRunner:
     ) -> tuple[PrefillInputData, Optional[DecodeInputData]]:
 
         self.event_start = self.profiler.get_timestamp_us()
-        print("num_decodes", num_decodes)
+        #print("num_decodes", num_decodes)
         base_event_name = 'prompt' if num_decodes else 'decode'
         self.profiler.start('internal', base_event_name)
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
@@ -1687,11 +1687,12 @@ class HPUModelRunner:
         num_decodes = len(pd_info.decode_req_ids)
         num_prefills = len(pd_info.prompt_req_ids)
         num_reqs = num_decodes + num_prefills
-        prefill_data, decode_data = self._prepare_inputs(
-            scheduler_output,
-            num_prefills,
-            num_decodes,
-            bucketing=self.enable_bucketing)
+        with self.profiler.record_event('internal', 'prepare_input_tensors'):
+            prefill_data, decode_data = self._prepare_inputs(
+                scheduler_output,
+                num_prefills,
+                num_decodes,
+                bucketing=self.enable_bucketing)
 
         #num_padded_decodes = decode_data.token_ids.shape[
         #    0] if num_decodes > 0 else 0
@@ -2464,6 +2465,9 @@ class HPUModelRunner:
 
                 prompt_available_memory = graph_free_mem / 2
                 prefix_prefill_available_memory = graph_free_mem / 2
+                print("self.bucketing_ctx.prefix_prefill_buckets", self.bucketing_ctx.prefix_prefill_buckets) 
+                print("prefix_prefill_available_memory", prefix_prefill_available_memory)
+                #exit()
                 decode_available_memory = (graph_free_mem -
                                            prompt_available_memory -
                                            prefix_prefill_available_memory)
