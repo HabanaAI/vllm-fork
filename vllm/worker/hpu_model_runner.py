@@ -2365,6 +2365,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         lora_logits_mask.index_select(
                             0, sampling_metadata.selected_token_indices))
 
+                if use_delayed_sampling and self.is_driver_worker:
+                    self._patch_prev_output()
                 # Compute the logits.
                 with self.profiler.record_event(
                         'internal',
@@ -2397,7 +2399,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
-                        self._patch_prev_output()
+                        # self._patch_prev_output()
                         output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
                         self.cached_step_outputs.append(output)
