@@ -76,6 +76,10 @@ class PyHcclCommunicator:
         del data
         torch.hpu.synchronize()
 
+
+    def __del__(self):
+        self.hccl.hcclCommDestroy(self.comm)
+
     def all_reduce(self,
                    in_tensor: torch.Tensor,
                    op: ReduceOp = ReduceOp.SUM) -> torch.Tensor:
