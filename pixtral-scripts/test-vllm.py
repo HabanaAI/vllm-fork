@@ -157,6 +157,8 @@ def main():
     llm = LLM(
         model=model_id,
         tokenizer_mode="mistral",
+        config_format="mistral", 
+        load_format="mistral",
         dtype='bfloat16',
         enforce_eager=False,
         max_model_len=16384,
