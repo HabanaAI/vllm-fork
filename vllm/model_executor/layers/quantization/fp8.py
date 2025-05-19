@@ -628,6 +628,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         if self.block_quant:
             assert self.quant_config.activation_scheme == "dynamic"
             if current_platform.is_hpu():
+                import vllm_hpu_extension.ops as hpu_ops
                 layer = hpu_ops.fp8_block_moe_prepare_weights(layer)
                 return
             if current_platform.is_fp8_fnuz():
@@ -741,6 +742,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     layer.w13_input_scale.max(), requires_grad=False)
                 layer.w2_input_scale = torch.nn.Parameter(
                     layer.w2_input_scale.max(), requires_grad=False)
+            if current_platform.is_hpu():
+                import vllm_hpu_extension.ops as hpu_ops
+                layer = hpu_ops.fp8_channel_moe_prepare_weights(layer)
+                return
             if current_platform.is_fp8_fnuz():
                 # Normalize the weights and scales
                 w13_weight, w13_weight_scale, w13_input_scale = \
