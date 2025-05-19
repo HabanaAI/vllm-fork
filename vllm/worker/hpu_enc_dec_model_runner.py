@@ -39,8 +39,8 @@ _PAD_BLOCK_ID = 0
 
 class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
 
-    def __init__(self, model, vllm_config, layer_names, is_causal):
-        super().__init__(model, vllm_config, layer_names, is_causal)
+    def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
+        super().__init__(model, vllm_config, layer_names, is_causal, sampler)
 
         # We only wrap the language model in HPU graph because some Ops in
         # vision model will fallback to CPU and cause the graph building fail.
@@ -448,7 +448,10 @@ class HPUEncoderDecoderModelRunner(
             max_mm_tokens,
             self.mm_registry,
             is_encoder_data=True)
-        seq_len = max(seq_len, 1)
+        max_mm_num = max(
+            self.mm_registry.get_mm_limits_per_prompt(
+                self.model_config).values())
+        seq_len = max(seq_len, max_mm_num)
         if is_prompt:
             output_len = 0
             block_tables = None
