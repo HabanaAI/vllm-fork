@@ -68,7 +68,7 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
 from vllm.multimodal.profiling import BaseDummyInputsBuilder, ProcessorInputs
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
-from vllm.transformers_utils.tokenizer import decode_tokens
+from vllm.transformers_utils.tokenizer import decode_tokens, encode_tokens
 
 from .interfaces import MultiModalEmbeddings, SupportsMultiModal, SupportsPP
 from .utils import (AutoWeightsLoader, WeightsMapper,
@@ -503,6 +503,36 @@ class Qwen2_5OmniThinkerMultiModalProcessor(
                 replacement=video_replacement_fn,
             ),
         ]
+
+    def _apply_hf_processor_main(
+        self,
+        prompt: Union[str, list[int]],
+        mm_items: MultiModalDataItems,
+        hf_processor_mm_kwargs: Mapping[str, object],
+        *,
+        enable_hf_prompt_replacement: bool,
+    ) -> tuple[list[int], MultiModalKwargs, bool]:
+        """
+        Qwen2.5-Omni reimplements this function to handle `use_audio_in_video`.
+        """
+        if isinstance(prompt, str):
+            if enable_hf_prompt_replacement:
+                return self._apply_hf_processor_text_mm(
+                    prompt_text=prompt,
+                    mm_items=mm_items,
+                    hf_processor_mm_kwargs=hf_processor_mm_kwargs,
+                )
+            tokenizer = self.info.get_tokenizer()
+            prompt_ids = encode_tokens(tokenizer, prompt)
+        else:
+            prompt_ids = self._apply_hf_processor_tokens_only(prompt)
+
+        mm_kwargs = self._apply_hf_processor_mm_only(
+            mm_items=mm_items,
+            hf_processor_mm_kwargs=hf_processor_mm_kwargs,
+        )
+
+        return prompt_ids, mm_kwargs
 
     def _apply_hf_processor_mm_only(
         self,
