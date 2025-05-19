@@ -13,6 +13,7 @@ from .base import KVConnectorBase
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
+logger = init_logger(__name__)
 
 class KVConnectorFactory:
     _registry: Dict[str, Callable[[], Type[KVConnectorBaseType]]] = {}
@@ -52,20 +53,33 @@ class KVConnectorFactory:
         if not envs.VLLM_USE_V1:
             raise ValueError("Attempting to initialize a V1 Connector, "
                              f"but found {envs.VLLM_USE_V1=}")
+            
+        supported_kv_connector = [
+            "PyNcclConnector", "MooncakeConnector", "LMCacheConnector",
+            "MooncakeStoreConnector", "SharedStorageConnector", "LMCacheConnectorV1"
 
         connector_name = config.kv_transfer_config.kv_connector
-        connector_cls = cls._registry[connector_name]()
-        assert issubclass(connector_cls, KVConnectorBase_V1)
-        print("Creating v1 connector with name: %s", connector_name)
-        # NOTE(Kuntai): v1 connector is explicitly separated into two roles.
-        # Scheduler connector:
-        # - Co-locate with scheduler process
-        # - Should only be used inside the Scheduler class
-        # Worker connector:
-        # - Co-locate with worker process
-        # - Should only be used inside the forward context & attention layer
-        # We build separately to enforce strict separation
-        return connector_cls(config, role)
+        if connector_name in supported_kv_connector:
+            logger.info(f"Creating v1 connector with name: {connector_name}")
+            if connector_name in ["LMCacheConnector", "LMCacheConnectorV1"]:
+                from .v1.lmcache_connector import LMCacheConnectorV1
+                return LMCacheConnectorV1(config, role)
+            else:
+                connector_cls = cls._registry[connector_name]()
+                    assert issubclass(connector_cls, KVConnectorBase_V1)
+                    print("Creating v1 connector with name: %s", connector_name)
+                    # NOTE(Kuntai): v1 connector is explicitly separated into two roles.
+                    # Scheduler connector:
+                    # - Co-locate with scheduler process
+                    # - Should only be used inside the Scheduler class
+                    # Worker connector:
+                    # - Co-locate with worker process
+                    # - Should only be used inside the forward context & attention layer
+                    # We build separately to enforce strict separation
+                    return connector_cls(config, role)
+        else:
+            raise ValueError(f"Unsupported connector type: "
+                             f"{config.kv_connector}")
 
 # Register various connectors here.
 # The registration should not be done in each individual file, as we want to
