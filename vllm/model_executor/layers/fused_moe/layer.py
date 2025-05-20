@@ -211,14 +211,15 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         assert topk_group is None, 'topk_group is not supported on HPU'
 
         if layer is not None:
-
-            # layer.hpu_fused_moe.set_MoeOp_weights(layer.w13_weight,
-            #                                       layer.w2_weight)
-            # layer.hpu_fused_moe.set_MoeOp_ep_rank(layer.ep_rank)
-            
-            layer.hpu_fused_moe.MoeOp.w13_weight = layer.w13_weight
-            layer.hpu_fused_moe.MoeOp.w2_weight = layer.w2_weight
-            layer.hpu_fused_moe.MoeOp.ep_rank = layer.ep_rank
+            import os
+            #BF16_OR_VLLM_FP8_STATIC_MOE_ENABLED is true when running BF16 or
+            # FP8 static MoE is enabled, elsewise it is false.
+            enable_staticMoe = os.environ.get(
+                "BF16_OR_VLLM_FP8_STATIC_MOE_ENABLED", False)
+            if enable_staticMoe:
+                layer.hpu_fused_moe.MoeOp.w13_weight = layer.w13_weight
+                layer.hpu_fused_moe.MoeOp.w2_weight = layer.w2_weight
+                layer.hpu_fused_moe.MoeOp.ep_rank = layer.ep_rank
             return layer.hpu_fused_moe(x, router_logits, top_k)
 
     def forward_tpu(
@@ -322,9 +323,10 @@ class FusedMoE(torch.nn.Module):
             num_experts = self.num_experts
             ep_shift = self.ep_rank * num_experts
             experts_min, experts_max = ep_shift, num_experts + ep_shift - 1
-            
+
             from vllm_hpu_extension.ops import DynamicFusedMOE
-            self.hpu_fused_moe = DynamicFusedMOE(self.num_experts,experts_min, experts_max)
+            self.hpu_fused_moe = DynamicFusedMOE(self.num_experts, experts_min,
+                                                 experts_max)
 
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
