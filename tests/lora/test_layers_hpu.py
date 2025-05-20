@@ -310,8 +310,7 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
         # TODO - remove reshape once we move to flat tensors
         lora_shape = lora_result.shape
         expected_result = torch.cat(expected_results)
-        expected_result = expected_result.reshape(lora_shape[0],
-                                                  lora_shape[1],
+        expected_result = expected_result.reshape(lora_shape[0], lora_shape[1],
                                                   lora_shape[2])
 
         rtol, atol = TOLERANCES[lora_result.dtype]
@@ -478,8 +477,7 @@ def test_embeddings_with_new_embeddings(dist_init, num_loras, device,
         # TODO - remove reshape once we move to flat tensors
         lora_shape = lora_result.shape
         expected_result = torch.cat(expected_results)
-        expected_result = expected_result.reshape(lora_shape[0],
-                                                  lora_shape[1],
+        expected_result = expected_result.reshape(lora_shape[0], lora_shape[1],
                                                   lora_shape[2])
 
         rtol, atol = TOLERANCES[lora_result.dtype]
