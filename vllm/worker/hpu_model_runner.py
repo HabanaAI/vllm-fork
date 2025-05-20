@@ -465,13 +465,14 @@ class HpuModelAdapter(torch.nn.Module):
             self._prepare_cos_sin(kwargs['positions'])
 
         if self.model_is_mrope:
-            bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
-            self.model.visual.forward = functools.partial(
-                self.model.visual.forward,
-                bypass_hpu_graphs=bypass_hpu_graphs)
-            self.model.language_model.model.forward = functools.partial(
-                self.model.language_model.model.forward,
-                bypass_hpu_graphs=bypass_hpu_graphs)
+            if 'bypass_hpu_graphs' in kwargs:
+                bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
+                self.model.visual.forward = functools.partial(
+                    self.model.visual.forward,
+                    bypass_hpu_graphs=bypass_hpu_graphs)
+                self.model.language_model.model.forward = functools.partial(
+                    self.model.language_model.model.forward,
+                    bypass_hpu_graphs=bypass_hpu_graphs)
 
             # For Qwen2.5-VL multimodal embedding, this embedding part should be executed
             # with PT_COMPILE_ONLY_MODE off at all times due to it's dynamicity.
