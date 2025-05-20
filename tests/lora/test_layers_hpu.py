@@ -352,7 +352,6 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
         expected_result = embedding(
             torch.cat(inputs).reshape(num_loras * 3, -1))
 
-
         rtol, atol = TOLERANCES[lora_result.dtype]
         torch.testing.assert_close(lora_result,
                                    expected_result,
