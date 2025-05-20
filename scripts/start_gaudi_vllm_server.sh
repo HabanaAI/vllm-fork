@@ -230,6 +230,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --max-num-batched-tokens "$max_num_batched_tokens" \
     --max-model-len "$max_model_len" \
     --max-seq-len-to-capture "$max_seq_len_to_capture" \
+    --disable-log-requests \
     --use-v2-block-manager \
     --use-padding-aware-scheduling \
     --num-scheduler-steps "${scheduler_steps}" \
