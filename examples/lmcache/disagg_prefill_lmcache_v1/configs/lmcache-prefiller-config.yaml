@@ -4,7 +4,7 @@ max_local_cpu_size: 0
 max_local_disk_size: 0
 remote_serde: NULL
 
-enable_nixl: False
+enable_nixl: True
 nixl_role: "SENDER"
 nixl_peer_host: "localhost"
 nixl_peer_port: 55555
