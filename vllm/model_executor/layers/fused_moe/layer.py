@@ -211,15 +211,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         assert topk_group is None, 'topk_group is not supported on HPU'
 
         if layer is not None:
-            import os
-            #BF16_OR_VLLM_FP8_STATIC_MOE_ENABLED is true when running BF16 or
-            # FP8 static MoE is enabled, elsewise it is false.
-            enable_staticMoe = os.environ.get(
-                "BF16_OR_VLLM_FP8_STATIC_MOE_ENABLED", False)
-            if enable_staticMoe:
-                layer.hpu_fused_moe.MoeOp.w13_weight = layer.w13_weight
-                layer.hpu_fused_moe.MoeOp.w2_weight = layer.w2_weight
-                layer.hpu_fused_moe.MoeOp.ep_rank = layer.ep_rank
+            layer.hpu_fused_moe.MoeOp.w13_weight = layer.w13_weight
+            layer.hpu_fused_moe.MoeOp.w2_weight = layer.w2_weight
+            layer.hpu_fused_moe.MoeOp.ep_rank = layer.ep_rank
             return layer.hpu_fused_moe(x, router_logits, top_k)
 
     def forward_tpu(
