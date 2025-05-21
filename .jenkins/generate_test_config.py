@@ -122,17 +122,6 @@ def generate_env_aliases_with_defaults() -> dict:
         },
     }
 
-def generate_test_config(flat_config_path: str, output_path: str):
-    """Generates the test configuration YAML with default env_aliases."""
-    env_aliases = generate_env_aliases_with_defaults()
-    with open(flat_config_path, 'r') as file:
-        flat_config = yaml.safe_load(file)
-
-    clustered_config = clusterize_tests(flat_config, env_aliases)
-
-    with open(output_path, 'w') as file:
-        yaml.dump(clustered_config, file, default_flow_style=False, sort_keys=False)
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Flatten a hierarchical YAML template into a flat configuration.")
     parser.add_argument("--template-path", type=str, required=True, help="Path to the YAML template file.")
