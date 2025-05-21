@@ -376,6 +376,7 @@ class HPUEncoderDecoderModelRunner(
                         kv_caches,
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
+                        is_profile_run=False,
                         temperature=0) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"

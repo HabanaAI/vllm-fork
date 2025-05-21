@@ -826,8 +826,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
             *args, **kwargs)
 
-    def _use_graphs(self, batch_size, seq_len, is_prompt):
+    def _use_graphs(self,
+                    batch_size,
+                    seq_len,
+                    is_prompt,
+                    is_profile_run=False):
         if self.enforce_eager:
+            return False
+        if is_profile_run:
             return False
         if self.skip_warmup:
             return True
@@ -1598,8 +1604,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              self.max_num_batched_tokens // max_seq_len)
 
         logger.info(f"profiling run with {max_batch_size=}, {max_seq_len=}")
-        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
-                             False, True)
+        self.warmup_scenario(max_batch_size,
+                             max_seq_len,
+                             True,
+                             kv_caches,
+                             False,
+                             True,
+                             is_profile_run=True)
         return
 
     def warmup_scenario(self,
@@ -1609,8 +1620,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         kv_caches,
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
+                        is_profile_run=False,
                         temperature=0) -> None:
-        use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+        use_graphs = self._use_graphs(batch_size,
+                                      seq_len,
+                                      is_prompt,
+                                      is_profile_run=is_profile_run)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
                          f"bs{batch_size}_"
@@ -1674,7 +1689,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
-                self.execute_model(inputs, kv_caches, warmup_mode=True)
+                self.execute_model(inputs,
+                                   kv_caches,
+                                   warmup_mode=True,
+                                   profile_run_mode=is_profile_run)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
@@ -1682,6 +1700,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.execute_model(inputs,
                                    kv_caches,
                                    warmup_mode=True,
+                                   profile_run_mode=is_profile_run,
                                    num_steps=2,
                                    seqs=seqs)
                 inputs = dataclasses.replace(inputs,
@@ -1690,6 +1709,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.execute_model(inputs,
                                    kv_caches,
                                    warmup_mode=True,
+                                   profile_run_mode=is_profile_run,
                                    num_steps=2,
                                    seqs=seqs)
             torch.hpu.synchronize()
@@ -2212,6 +2232,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
         warmup_mode=False,
+        profile_run_mode=False,
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
@@ -2289,7 +2310,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+            use_graphs = self._use_graphs(batch_size,
+                                          seq_len,
+                                          is_prompt,
+                                          is_profile_run=profile_run_mode)
             self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
 
             lora_mask: torch.Tensor = None
