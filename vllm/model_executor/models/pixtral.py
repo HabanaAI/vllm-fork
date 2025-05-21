@@ -48,6 +48,12 @@ from .interfaces import MultiModalEmbeddings, SupportsMultiModal, SupportsPP
 from .utils import (flatten_bn, init_vllm_registered_model, maybe_prefix,
                     merge_multimodal_embeddings)
 from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs
+from vllm.platforms import current_platform
+
+is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 try:
     from xformers import ops as xops
@@ -715,8 +721,11 @@ class Attention(nn.Module):
         k = torch.transpose(k, 1, 2)
         v = torch.transpose(v, 1, 2)
 
-        # IMPROVEMENT: Replace with fusedSDPA for HPU
-        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, mask)
+        # Use FusedSDPA if HPU
+        if is_hpu:
+            out = FusedSDPA.apply(q, k, v, mask, 0.0, False, None)
+        else:
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v, mask)
 
         return torch.transpose(out, 1, 2)
 
