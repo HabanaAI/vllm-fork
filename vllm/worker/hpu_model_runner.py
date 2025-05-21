@@ -982,7 +982,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.model_memory_usage = m.consumed_device_memory
         msg = f"Loading model weights took in total {m.get_summary_string()}"
         logger.info(msg)
-        self.add_vision_buckets_to_model()
+
+        # Models that process images at different resolutions
+        # need to be warmed up. Current tested for MRoPE models only.
+        self.add_vision_buckets_to_mrope_models()
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -1202,13 +1205,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
 
-    '''
-    Qwen2.5VL requires the bucket's information
-    '''
-
-    def add_vision_buckets_to_model(self):
-        model = self.get_model()
-        if supports_multimodal(model):
+    def add_vision_buckets_to_mrope_models(self):
+        if self.model_is_mrope:
+            model = self.get_model()
             model.vision_buckets = VisionBuckets()
 
     def _prepare_prompt(
@@ -2392,7 +2391,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def _warmup_multimodal(self, kv_caches):
-        if not supports_multimodal(self.get_model()):
+        if not self.get_model().is_mrope_model:
             return
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         seq_len = max_seq_len
@@ -2428,7 +2427,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                       starting_mem=0,
                       total_batch_seq=0.001):
 
-        if is_prompt and supports_multimodal(self.get_model()):
+        if is_prompt and self.model_is_mrope:
             multimodal_prompt_graph_mem_ratio = float(
                 os.environ.get('VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO', '0.3'))
             multimodal_avail_mem = (multimodal_prompt_graph_mem_ratio *
@@ -2483,7 +2482,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             total_mem += used_mem
             total_batch_seq += batch_seq
 
-        if is_prompt and supports_multimodal(self.get_model()):
+        if is_prompt and self.model_is_mrope:
             #For multimodal total_batch_seq and total_mem, we store it in the
             #attribute for now.
             mm_outputs = self._warmup_multimodal_graph(
@@ -2580,8 +2579,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # When pooling we're not using decode phase
             decode_buckets = 0
 
-        model = self.get_model()
-        if supports_multimodal(model):
+        if self.model_is_mrope:
+            model = self.get_model()
             self.multimodal_buckets = model.vision_buckets.multimodal_buckets
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
             logger.info(logger_msg)
