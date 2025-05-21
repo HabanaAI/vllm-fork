@@ -397,7 +397,12 @@ class Gemma3Model(nn.Module):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
-        for layer in self.layers[self.start_layer:self.end_layer]:
+        for idx, layer in enumerate(self.layers[self.start_layer:self.end_layer]):
+            #print(f'text: {idx}, {hidden_states.sum()} {residual}')
+            #if idx == 0 and hidden_states.shape[-1] < 1300:  # 1280 vs 1244
+            #    # when compared with hidden_states[...,:1244,:].. matches GPU exactly
+            #    breakpoint()
+            #    print()
             hidden_states, residual = layer(
                 positions,
                 hidden_states,

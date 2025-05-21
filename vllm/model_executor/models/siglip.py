@@ -313,7 +313,8 @@ class SiglipEncoder(nn.Module):
         hidden_states_pool = [inputs_embeds]
         hidden_states = inputs_embeds
 
-        for encoder_layer in self.layers:
+        for idx, encoder_layer in enumerate(self.layers):
+            #print(f'{idx} -> {hidden_states.sum()}... {hidden_states[0,:4,:4]}')
             hidden_states, _ = encoder_layer(hidden_states)
             if return_all_hidden_states:
                 hidden_states_pool.append(hidden_states)
@@ -431,10 +432,11 @@ class SiglipVisionTransformer(nn.Module):
         )
 
         # Handle post-norm (if applicable) and stacks feature layers if needed
+        #print(f'BEFORE resolve_visual_encoder_outputs', encoder_outputs.sum(), encoder_outputs[0, :4, :4])
         encoder_outputs = resolve_visual_encoder_outputs(
             encoder_outputs, feature_sample_layers, self.post_layernorm,
             self.config.num_hidden_layers)
-
+        #print(f'AFTER resolve_visual_encoder_outputs', encoder_outputs.sum(), encoder_outputs[0, :4, :4])
         # TODO: add this back when pooled_output is used in inference.
         # if self.use_head:
         # pooled_output = self.head(encoder_outputs)
