@@ -182,7 +182,8 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         if not can_parent_schedule or not is_prefill:
             return can_parent_schedule
         new_batch_size = self._num_curr_prefill_seqs + num_new_seqs
-        if self.max_num_prefill_seqs is not None and (new_batch_size > self.max_num_prefill_seqs):
+        if self.max_num_prefill_seqs is not None and (
+                new_batch_size > self.max_num_prefill_seqs):
             return False
         new_max_seq_len = max(max(self._max_seq_len, max_seq_len), 1)
         padding_fn = self._padding_fn_selector()
