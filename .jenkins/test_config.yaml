@@ -118,7 +118,7 @@ stages:
   - name: test_gsm8k_fp8_bypass_inc
     steps:
       - name: gsm8k_fp8_llama4_scout_g3_tp2_compressed_tensor
-        flavor: g3
+        flavor: g3.s
         command: >-
           cd .jenkins/lm-eval-harness && 
           PT_HPU_LAZY_MODE=1 
