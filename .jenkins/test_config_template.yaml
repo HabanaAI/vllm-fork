@@ -1,0 +1,185 @@
+env_aliases:
+  runtime:
+    eager:
+      PT_HPU_LAZY_MODE: '0'
+    lazy:
+      PT_HPU_LAZY_MODE: '1'
+    default: lazy
+  engine:
+    v0:
+      VLLM_USE_V1: '0'
+    v1:
+      VLLM_USE_V1: '1'
+    default: v0
+  warmup:
+    skip_warmup:
+      VLLM_SKIP_WARMUP: 'true'
+    do_warmup:
+      VLLM_SKIP_WARMUP: 'false'
+    default: skip_warmup
+
+# Define reusable anchors globally
+name_template: &name_template '{{ runtime }}_{{ name }}_{{ engine }}_{{ flavor }}'
+env:
+  default_env: &default_env {runtime: [eager, lazy], engine: [v0, v1], warmup: [skip_warmup]}
+  v0_env: &v0_env {runtime: [eager, lazy], engine: [v0], warmup: [skip_warmup]}
+  v1_env: &v1_env {runtime: [eager, lazy], engine: [v1], warmup: [skip_warmup]}
+
+suites:
+- name: test_gsm8k_small_models
+  tests:
+  - name: gsm8k_small_tp1
+    env: *default_env
+    name_template: *name_template
+    flavors: [g2, g3]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1'
+  - name: gsm8k_small_tp2
+    env: *default_env
+    name_template: *name_template
+    flavors: [g2.s, g3.s]
+    command: 'export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2'
+  - name: gsm8k_small_g3_tp1_part2
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small-2.txt -t 1'
+  - name: gsm8k_small_g3_tp1_part3
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small-3.txt -t 1'
+  - name: gsm8k_g2_deepseek-v2-lite_tp1
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-deepseek.txt -t 1'
+- name: test_gsm8k_large_models
+  tests:
+  - name: gsm8k_large_g3_tp2_part1
+    env: *default_env
+    name_template: *name_template
+    flavors: [g3.s]
+    command: 'export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large.txt -t 2'
+  - name: gsm8k_large_g3_tp2_part2
+    env: *default_env
+    name_template: *name_template
+    flavors: [g3.s]
+    command: 'export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large-2.txt -t 2'
+  - name: gsm8k_large_g2_tp4
+    env: *default_env
+    name_template: *name_template
+    flavors: [g2.m]
+    command: 'export VLLM_CONTIGUOUS_PA=false && cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-large.txt -t 4'
+- name: test_gsm8k_fp8
+  tests:
+  - name: gsm8k_small_g3_tp1_fp8
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-fp8-g3-tp1.txt -t 1'
+  - name: gsm8k_small_g3_tp2_fp8
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3.s]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-fp8.txt -t 2'
+- name: test_gsm8k_mss
+  tests:
+  - name: gsm8k_small
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2, g3]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-mss.txt -t 1'
+  - name: gsm8k_small_tp2_mss
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2.s, g3.s]
+    command: 'cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-mss.txt -t 2'
+- name: test_gsm8k_spec_decode
+  tests:
+  - name: gsm8k_small_g2_tp1_mlp_spec_decode
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'VLLM_CONTIGUOUS_PA=false pytest -v tests/spec_decode/e2e/test_mlp_correctness.py::test_mlp_e2e_greedy_correctness'
+  - name: gsm8k_small_g2_tp1_medusa_spec_decode
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'VLLM_CONTIGUOUS_PA=false pytest -v tests/spec_decode/e2e/test_medusa_correctness.py::test_medusa_e2e_greedy_correctness'
+  - name: gsm8k_small_g2_tp1_eagle_spec_decode
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'VLLM_CONTIGUOUS_PA=false pytest -v tests/spec_decode/e2e/test_eagle_correctness.py::test_eagle_e2e_greedy_correctness'
+- name: test_deepseek_mtp
+  tests:
+  - name: test_deepseek_mtp_correctness
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3]
+    command: 'VLLM_CONTIGUOUS_PA=false pytest -v tests/spec_decode/e2e/test_mtp_correctness.py::test_mtp_e2e_greedy_correctness'
+- name: tests_lora
+  tests:
+  - name: test_llama_lora
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'VLLM_SKIP_WARMUP=true pytest -v tests/lora/test_llama_hpu.py::test_llama_lora_1x'
+  - name: test_multilora
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'VLLM_SKIP_WARMUP=true pytest -v tests/lora/test_multilora_hpu.py::test_llama_multilora_1x'
+- name: tests_multimodal
+  tests:
+  - name: multimodal_small_g3_tp1
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3]
+    command: 'cd .jenkins/vision && bash run-tests.sh -c configs/models-small.txt -t 1'
+  - name: multimodal_small_g3_tp2
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3.s]
+    command: 'cd .jenkins/vision && bash run-tests.sh -c configs/models-small.txt -t 2'
+  - name: multimodal_small_g3_tp1_mss
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3]
+    command: 'cd .jenkins/vision && bash run-tests.sh -c configs/models-mss.txt -t 1'
+  - name: multimodal_small_g3_tp2_mss
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3.s]
+    command: 'cd .jenkins/vision && bash run-tests.sh -c configs/models-mss.txt -t 2'
+  - name: multimodal_llama4_scout_g3_tp2_ep
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g3.s]
+    command: 'cd .jenkins/vision && bash run-tests.sh -c configs/models-llama4-scout.txt -t 2'
+- name: tests_int4_quantization
+  tests:
+  - name: test_awq
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'pytest -v tests/quantization/test_awq.py::test_awq'
+  - name: test_gptq
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'pytest -v tests/quantization/test_gptq.py::test_gptq'
+- name: tests_guided_decode
+  tests:
+  - name: test_lazy_outlines
+    env: *v0_env
+    name_template: *name_template
+    flavors: [g2]
+    command: 'pip install -e tests/vllm_test_utils && pytest -v tests/entrypoints/llm/test_lazy_outlines.py -s -vvv --log-cli-level=INFO'
+- name: test_v1_basic_uts
+  tests:
+  - name: test_v1_core_engine_worker
+    env: *v1_env
+    name_template: *name_template
+    flavors: [g2, g3]
+    command: 'pytest -v -s -vvv --log-cli-level=INFO tests/v1/core -k "not kv_connector" && pytest -v -s -vvv --log-cli-level=INFO tests/v1/engine && pytest -v -s -vvv --log-cli-level=INFO tests/v1/worker'
