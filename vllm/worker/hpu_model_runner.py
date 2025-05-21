@@ -2391,7 +2391,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def _warmup_multimodal(self, kv_caches):
-        if not self.get_model().is_mrope_model:
+        if not self.is_mrope_model:
             return
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         seq_len = max_seq_len
