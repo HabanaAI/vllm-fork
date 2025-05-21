@@ -509,7 +509,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         self.block_quant = self.quant_config.weight_block_size is not None
         
         # Slicing the batched tokens for DynamicMoE to reduce the memory consumption
-        self.moe_slice_length = int(os.environ.get("VLLM_MOE_SLICE_LENGTH", 8192))
+        self.moe_slice_length = int(os.environ.get("VLLM_MOE_SLICE_LENGTH", 102400))
 
         self.moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 8))
         self.enable_dmoe_dynamic_scale = os.environ.get("VLLM_DMOE_DYNAMIC_SCALE", False) in ["1", "true"]
