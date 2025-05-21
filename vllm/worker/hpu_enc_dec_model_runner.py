@@ -360,23 +360,26 @@ class HPUEncoderDecoderModelRunner(
         max_seq_len = min(self.max_num_batched_tokens // max_batch_size,
                           max_seq_len)
 
-        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
+        self.warmup_scenario(max_batch_size, max_seq_len, 0, True, kv_caches,
                              False)
         return
 
     def warmup_scenario(self,
                         batch_size,
                         seq_len,
+                        ctx,
                         is_prompt,
                         kv_caches,
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
                         temperature=0) -> None:
-        use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+        phase = self._phase(is_prompt, ctx)
+        use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
         scenario_name = ("warmup_"
-                         f"{'prompt' if is_prompt else 'decode'}_"
+                         f"{phase}_"
                          f"bs{batch_size}_"
                          f"seq{seq_len}_"
+                         f"ctx{ctx}_"
                          f"graphs{'T' if use_graphs else 'F'}")
         self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
@@ -414,7 +417,8 @@ class HPUEncoderDecoderModelRunner(
                                    kv_caches,
                                    warmup_mode=True,
                                    num_steps=2,
-                                   seqs=seqs)
+                                   seqs=seqs,
+                                   ctx=ctx)
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=False,
                                              is_last_step=True)
@@ -422,7 +426,8 @@ class HPUEncoderDecoderModelRunner(
                                    kv_caches,
                                    warmup_mode=True,
                                    num_steps=2,
-                                   seqs=seqs)
+                                   seqs=seqs,
+                                   ctx=ctx)
             torch.hpu.synchronize()
             if profiler:
                 profiler.step()
@@ -436,7 +441,8 @@ class HPUEncoderDecoderModelRunner(
                                         seq_len,
                                         is_prompt,
                                         lora_request=None,
-                                        temperature=0):
+                                        temperature=0,
+                                        ctx=0):
         sampling_params = SamplingParams(temperature=temperature)
         num_blocks = math.ceil(seq_len / self.block_size)
         cross_block_table: Optional[List[int]] = None
@@ -452,10 +458,14 @@ class HPUEncoderDecoderModelRunner(
             self.mm_registry.get_mm_limits_per_prompt(
                 self.model_config).values())
         seq_len = max(seq_len, max_mm_num)
+        computed_block_nums = None
         if is_prompt:
             output_len = 0
             block_tables = None
             cross_block_table = None
+            if ctx:
+                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * 128}
+                computed_block_nums = ([1] * ctx)
         else:
             output_len = 1
             block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
@@ -480,6 +490,7 @@ class HPUEncoderDecoderModelRunner(
             is_prompt=is_prompt,
             seq_data={group_id: seq_data},
             sampling_params=sampling_params,
+            computed_block_nums=computed_block_nums,
             block_tables=block_tables,
             encoder_seq_data=encoder_dummy_data.seq_data,
             multi_modal_data=decoder_dummy_data.multi_modal_data,
@@ -537,14 +548,39 @@ class HPUEncoderDecoderModelRunner(
         ])
         return attention_metadata
 
-    def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
-        cfg = (batch_size, seq_len, is_prompt)
+    def _phase(self, is_prompt, ctx):
+        if self.use_prefix_caching:
+            is_prefix_prefill = is_prompt and ctx is not None and ctx != 0
+            if is_prompt and is_prefix_prefill:
+                phase_type = PhaseType.PREFIX_PREFILL
+            elif is_prompt and not is_prefix_prefill:
+                phase_type = PhaseType.PREFILL
+            elif not is_prompt:
+                phase_type = PhaseType.DECODE
+            else:
+                raise ValueError(
+                    "Unrecognized pass type, likely due to malformed "
+                    "attention metadata")
+            return 'prompt' if is_prompt else 'decode'
+        return phase_type.value
+
+    def _check_config(self, batch_size, seq_len, ctx, attn_metadata,
+                      warmup_mode):
+        cfg: Optional[tuple] = None
+        assert cfg is None, "Configs changed between 2D and 3D"
+        if warmup_mode:
+            phase = self._phase(attn_metadata.is_prompt, ctx)
+            num_blocks = ctx
+        else:
+            phase = self._phase(attn_metadata.is_prompt,
+                                attn_metadata.block_list)
+            num_blocks = self._num_blocks(attn_metadata)
+        cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            phase = 'prompt' if is_prompt else 'decode'
-            logger.warning("Configuration: (%s, %s, %s) was not warmed-up!",
-                           phase, batch_size, seq_len)
+            logger.warning("Configuration: %s was not warmed-up!",
+                           (phase, batch_size, seq_len, num_blocks))
 
     def add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -569,6 +605,7 @@ class HPUEncoderDecoderModelRunner(
         warmup_mode=False,
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
+        ctx: int = 1
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
@@ -594,8 +631,18 @@ class HPUEncoderDecoderModelRunner(
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
-            self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+            if warmup_mode:
+                phase = self._phase(attn_metadata.is_prompt, ctx)
+            else:
+                phase = self._phase(attn_metadata.is_prompt,
+                                    attn_metadata.block_list)
+            if phase == 'decode':
+                if not warmup_mode:
+                    ctx = seq_len
+                seq_len = 1
+            use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
+            self._check_config(batch_size, seq_len, ctx, attn_metadata,
+                               warmup_mode)
 
             execute_model_kwargs = {
                 "input_ids": input_tokens,
@@ -615,9 +662,10 @@ class HPUEncoderDecoderModelRunner(
             htorch.core.mark_step()
             if self.is_driver_worker:
                 model_event_name = ("model_"
-                                    f"{'prompt' if is_prompt else 'decode'}_"
+                                    f"{phase}_"
                                     f"bs{batch_size}_"
                                     f"seq{seq_len}_"
+                                    f"ctx{ctx}_"
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
@@ -661,12 +709,13 @@ class HPUEncoderDecoderModelRunner(
                         selected_token_indices)
 
                 # Compute the logits.
-                with self.profiler.record_event(
-                        'internal',
-                    ('compute_logits_'
-                     f'{"prompt" if is_prompt else "decode"}_bs'
-                     f'{batch_size}_'
-                     f'seq{seq_len}')):
+                with self.profiler.record_event('internal',
+                                                ('compute_logits_'
+                                                 f'{phase}_bs'
+                                                 f'{batch_size}_'
+                                                 f'seq{seq_len}_ctx'
+                                                 f'{ctx}'),
+                                                args=profiler_args):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -679,11 +728,12 @@ class HPUEncoderDecoderModelRunner(
                 if model_input.async_callback is not None:
                     model_input.async_callback()
                 # Sample the next token.
-                with self.profiler.record_event(
-                        'internal', ('sample_'
-                                     f'{"prompt" if is_prompt else "decode"}_'
-                                     f'bs{batch_size}_'
-                                     f'seq{seq_len}')):
+                with self.profiler.record_event('internal', ('sample_'
+                                                             f'{phase}_'
+                                                             f'bs{batch_size}_'
+                                                             f'seq{seq_len}_'
+                                                             f'ctx{ctx}'),
+                                                args=profiler_args):
                     output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,

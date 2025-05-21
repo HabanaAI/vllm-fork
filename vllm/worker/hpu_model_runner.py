@@ -1033,10 +1033,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _phase(self, is_prompt, ctx):
         phase_type: PhaseType
         if self.use_prefix_caching:
-            is_prefix_prefill = is_prompt and ctx is not None and ctx != 0
-            if is_prompt and is_prefix_prefill:
+            is_prefix = ctx is not None and (
+                                    isinstance(ctx, torch.Tensor)
+                                    or (not isinstance(ctx, torch.Tensor)
+                                    and ctx != 0))
+            if is_prompt and is_prefix:
                 phase_type = PhaseType.PREFIX_PREFILL
-            elif is_prompt and not is_prefix_prefill:
+            elif is_prompt:
                 phase_type = PhaseType.PREFILL
             elif not is_prompt:
                 phase_type = PhaseType.DECODE
@@ -2343,14 +2346,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
             else:
                 phase, bs, seq_len, graph = profile.split('_')
-                cfg = (int(bs), int(seq_len), is_prompt)
+                if phase == 'prompt':
+                    ctx = 0
+                else:
+                    ctx = 1
+                cfg = (int(bs), int(seq_len), ctx, is_prompt)
             is_prompt = phase != 'decode'
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
             self.warmup_scenario(int(bs),
                                  int(seq_len),
-                                 int(ctx) if ctx else None,
+                                 int(ctx),
                                  is_prompt,
                                  kv_caches,
                                  is_pt_profiler_run=True)
@@ -2430,9 +2437,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         f"Using {format_bytes(graph_free_mem)}"
                         f"/{format_bytes(free_mem)} "
                         "of free device memory for HPUGraphs, "
-                        f"{format_bytes(prompt_available_memory)} \
-                            for prompt and " \
-                        f"{format_bytes(prefix_prefill_available_memory)} \
+                        f"{format_bytes(prompt_available_memory)}
+                            for prompt and "
+                        f"{format_bytes(prefix_prefill_available_memory)}
                             for prefix_prefill and "
                         f"{format_bytes(decode_available_memory)} for decode "
                         f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
