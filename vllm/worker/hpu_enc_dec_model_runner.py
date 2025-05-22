@@ -693,8 +693,7 @@ class HPUEncoderDecoderModelRunner(
                                                  f'{phase}_bs'
                                                  f'{batch_size}_'
                                                  f'seq{seq_len}_ctx'
-                                                 f'{ctx}'),
-                                                args=profiler_args):
+                                                 f'{ctx}')):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -711,8 +710,7 @@ class HPUEncoderDecoderModelRunner(
                                                              f'{phase}_'
                                                              f'bs{batch_size}_'
                                                              f'seq{seq_len}_'
-                                                             f'ctx{ctx}'),
-                                                args=profiler_args):
+                                                             f'ctx{ctx}')):
                     output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
