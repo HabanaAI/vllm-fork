@@ -511,7 +511,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
         ray.get(parallel_worker_tasks)
 
     def _check_ray_adag_installation(self):
-        import pkg_resources
+        import pkg_resources  # type: ignore
         from packaging import version
 
         required_version = version.parse("2.40")
