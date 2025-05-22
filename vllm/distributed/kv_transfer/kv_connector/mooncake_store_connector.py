@@ -9,7 +9,8 @@ import hashlib
 from typing import TYPE_CHECKING, List, Tuple, Union
 
 import torch
-
+import time
+import threading
 from vllm.attention import AttentionMetadata
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
@@ -261,13 +262,20 @@ class MooncakeStoreConnector(KVConnectorBase):
                 values = torch.cat(values, dim=0)
                 kvcache_to_sent = torch.stack((keys, values), dim=0)
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
-            self.kv_store.put(store_kvcache_key, kvcache_to_sent)
+            # Use a non-blocking approach by starting a background thread for put
+            # self.kv_store.put(store_kvcache_key, kvcache_to_sent)
+            threading.Thread(target=self.kv_store.put, args=(store_kvcache_key, kvcache_to_sent), 
+                                   daemon=False).start()
             logger.debug("put kv cache key: %s", store_kvcache_key)
 
             hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
-            self.kv_store.put(
-                hidden_key,
-                hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
+            # self.kv_store.put(
+            #     hidden_key,
+            #     hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
+            threading.Thread(target=self.kv_store.put, 
+                             args=(hidden_key, hidden_or_intermediate_states[idx].unsqueeze(0).cpu()), 
+                                   daemon=False).start()
+            
             # ==== graph should end here ======
             htorch.core.mark_step()
 
@@ -357,8 +365,13 @@ class MooncakeStoreConnector(KVConnectorBase):
             load_key_prefix = self.tensor_hash(current_tokens)
             # For deepseek, we only need recv first rank
             load_kvcache_key = f"{load_key_prefix}_0"
+            # Wait until the key is available in the kv_store
+            while not self.kv_store.contains(load_kvcache_key):
+                time.sleep(0.01)
             remote_kv = self.kv_store.get(load_kvcache_key)
             hidden_key = f"{load_key_prefix}_hidden_0"
+            while not self.kv_store.contains(hidden_key):
+                time.sleep(0.01)
             hidden = self.kv_store.get(hidden_key)
 
             if remote_kv is None or hidden is None:
