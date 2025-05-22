@@ -36,6 +36,12 @@ _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 
 
+class PhaseType(Enum):
+    PREFILL = 'prefill'
+    PREFIX_PREFILL = 'prefix_prefill'
+    DECODE = 'decode'
+
+
 class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
 
     def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
@@ -531,7 +537,7 @@ class HPUEncoderDecoderModelRunner(
                                     and ctx != 0))
             if is_prompt and is_prefix:
                 phase_type = PhaseType.PREFIX_PREFILL
-            elif is_prompt and not is_prefix_prefill:
+            elif is_prompt:
                 phase_type = PhaseType.PREFILL
             elif not is_prompt:
                 phase_type = PhaseType.DECODE
