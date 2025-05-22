@@ -243,7 +243,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             keys, values = [], []
             for layer_id in range(start_layer, end_layer):
                 kv_cache = kv_caches[layer_id - start_layer]
-                if self.kv_helper.is_mla():
+                if self.kv_helper.use_mla():
+                    # for MLA model,  we hold only one tensor to store
+                    # both K and V cache. so Value cache tensor is empty.
                     key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
                     keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                 else:
@@ -254,7 +256,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                         value_cache[current_slot_mapping].unsqueeze(0))
 
             keys = torch.cat(keys, dim=0)
-            if self.kv_helper.is_mla():
+            if self.kv_helper.use_mla():
                 # we pack kv together, only need send one tensor
                 kvcache_to_sent = keys
             else:
@@ -300,7 +302,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             block_indices_tensor = torch.tensor(
                 block_indices_list[start_block_idx:end_block_idx],
                 device="hpu",
-                dtype=torch.int32)
+                dtype=torch.long)
 
             # we think this is a padding sequence, so we skip it.
             # but we still need write kv cache.
@@ -311,7 +313,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                     kv_cache = kv_caches[cur_layer_idx]
                     key_cache, value_cache = kv_cache[0], kv_cache[1]
                     key_cache = kv_cache[0]
-                    if self.kv_helper.is_mla():
+                    if self.kv_helper.use_mla():
                         padding_k_tensor = torch.zeros(
                             (self.block_size, head_size),
                             dtype=self.dtype,
@@ -376,7 +378,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                 cur_layer_idx = i - model_executable.model.start_layer
                 kv_cache = kv_caches[cur_layer_idx]
                 key_cache, value_cache = kv_cache[0], kv_cache[1]
-                if self.kv_helper.is_mla():
+                if self.kv_helper.use_mla():
                     remote_k = remote_kv[cur_layer_idx]
                     # [num_layers, seq_len, num_kv_heads, k/v_head_size]
                     # -> [seq_len, k/v_head_size]
