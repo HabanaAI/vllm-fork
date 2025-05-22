@@ -242,7 +242,7 @@ class VocabParallelEmbedding(torch.nn.Module):
                 "the 'embedding' method, see UnquantizedEmbeddingMethod.")
 
         self.linear_method: QuantizeMethodBase = linear_method
-
+        self.quant_method: QuantizeMethodBase = linear_method  #for inc
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
         # Divide the weight matrix along the vocaburaly dimension.
