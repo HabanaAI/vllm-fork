@@ -586,23 +586,15 @@ class DeepseekV2DecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> torch.Tensor:
         # Self Attention
-        if residual is None:
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
-        else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
-        hidden_states = self.self_attn(
+        hidden_states = hidden_states + self.self_attn(
             positions=positions,
-            hidden_states=hidden_states,
+            hidden_states=self.input_layernorm(hidden_states),
             kv_cache=kv_cache,
             attn_metadata=attn_metadata,
         )
 
         # Fully Connected
-        hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
-        hidden_states = self.mlp(hidden_states)
+        hidden_states = hidden_states + self.mlp(self.post_attention_layernorm(hidden_states))
         return hidden_states, residual
 
 
@@ -671,7 +663,7 @@ class DeepseekV2Model(nn.Module):
         else:
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
-            residual = intermediate_tensors["residual"]
+            residual = None
 
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
@@ -682,11 +674,10 @@ class DeepseekV2Model(nn.Module):
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
-                "hidden_states": hidden_states,
-                "residual": residual
+                "hidden_states": hidden_states
             })
 
-        hidden_states, _ = self.norm(hidden_states, residual)
+        hidden_states = self.norm(hidden_states, residual)
         return hidden_states
 
 
