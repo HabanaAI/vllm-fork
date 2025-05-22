@@ -416,7 +416,17 @@ class VocabParallelEmbedding(torch.nn.Module):
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
         # Reduce across all the model parallel GPUs.
-        output = tensor_model_parallel_all_reduce(output_parallel)
+        import os
+        use_fake_comm = os.getenv("FAKE_COMM", "False").lower() == "true"
+
+        if not use_fake_comm:
+            output = tensor_model_parallel_all_reduce(output_parallel)
+        else:
+            import habana_frameworks.torch as htorch
+            htorch.core.mark_step()
+            output = output_parallel
+            htorch.core.mark_step()
+
         return output
 
     def extra_repr(self) -> str:

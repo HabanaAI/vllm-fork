@@ -216,6 +216,7 @@ class LlamaAttention(nn.Module):
                 and attn_metadata.seq_lens_tensor is not None):
             attn_output = attn_output * mask.unsqueeze(-1)
         output, _ = self.o_proj(attn_output)
+
         return output
 
 
@@ -354,6 +355,7 @@ class LlamaModel(nn.Module):
                 ["hidden_states", "residual"], config.hidden_size))
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
+
         return self.embed_tokens(input_ids)
 
     def forward(
