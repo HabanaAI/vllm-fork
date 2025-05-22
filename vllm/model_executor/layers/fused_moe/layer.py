@@ -294,7 +294,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             import torch.nn.functional as F
             topk_weights = F.softmax(router_logits, dim=1, dtype=torch.float32)
             topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
-            topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
+            if renormalize:
+                topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
             topk_weights = topk_weights.to(x.dtype)
         topk_ids = topk_ids.view(*x.shape[:-1], -1)
         topk_weights = topk_weights.view(*x.shape[:-1], -1)
