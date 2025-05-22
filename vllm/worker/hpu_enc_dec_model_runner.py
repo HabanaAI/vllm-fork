@@ -539,6 +539,7 @@ class HPUEncoderDecoderModelRunner(
                 raise ValueError(
                     "Unrecognized pass type, likely due to malformed "
                     "attention metadata")
+        else:
             return 'prompt' if is_prompt else 'decode'
         return phase_type.value
 
