@@ -2322,6 +2322,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             is_prompt = False
+            ctx = 0
             if self.use_prefix_caching:
                 phase, bs, seq_len, ctx, graph = profile.split('_')
                 ctx = int(ctx)
