@@ -2328,11 +2328,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
             else:
                 phase, bs, seq_len, graph = profile.split('_')
-                if phase == 'prompt':
-                    ctx = 0
-                else:
-                    ctx = 1
-                cfg = (int(bs), int(seq_len), ctx, is_prompt)
+                ctx = 0 if phase == 'prompt' else 1
+                cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
             is_prompt = phase != 'decode'
             graphs = graph == 't'
             if graphs:
@@ -2760,7 +2757,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         warmup_mode=False,
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
-        ctx: int = 1
+        ctx_blocks: int = 1
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
@@ -2842,16 +2839,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
             if warmup_mode:
-                phase = self._phase(attn_metadata.is_prompt, ctx)
+                phase = self._phase(attn_metadata.is_prompt, ctx_blocks)
             else:
                 phase = self._phase(attn_metadata.is_prompt,
                                     attn_metadata.block_list)
             if phase == 'decode':
                 if not warmup_mode:
-                    ctx = seq_len
+                    ctx_blocks = seq_len
                 seq_len = 1
-            use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
-            self._check_config(batch_size, seq_len, ctx, attn_metadata,
+            use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks, is_prompt)
+            self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None
             lora_logits_mask: torch.Tensor = None
@@ -2930,7 +2927,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"{phase}_"
                                     f"bs{batch_size}_"
                                     f"seq{seq_len}_"
-                                    f"ctx{ctx}_"
+                                    f"ctx{ctx_blocks}_"
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
@@ -2999,7 +2996,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                  f'{phase}_bs'
                                                  f'{batch_size}_'
                                                  f'seq{seq_len}_ctx'
-                                                 f'{ctx}'),
+                                                 f'{ctx_blocks}'),
                                                 args=profiler_args):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
@@ -3019,7 +3016,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                              f'{phase}_'
                                                              f'bs{batch_size}_'
                                                              f'seq{seq_len}_'
-                                                             f'ctx{ctx}'),
+                                                             f'ctx{ctx_blocks}'),
                                                 args=profiler_args):
                     output = self.sampler(
                         logits=logits,
