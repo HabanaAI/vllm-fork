@@ -20,7 +20,7 @@ from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
 from vllm.utils import bind_kv_cache, is_fake_hpu
 from vllm.worker.hpu_model_runner import (HpuModelAdapter, HPUModelRunnerBase,
                                           ModelInputForHPUWithSamplingMetadata,
-                                          setup_profiler, subtuple)
+                                          setup_profiler, subtuple, PhaseType)
 from vllm.worker.model_runner_base import (
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict)
@@ -34,12 +34,6 @@ logger = init_logger(__name__)
 # Use caution when updating them!
 _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
-
-
-class PhaseType(Enum):
-    PREFILL = 'prefill'
-    PREFIX_PREFILL = 'prefix_prefill'
-    DECODE = 'decode'
 
 
 class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
