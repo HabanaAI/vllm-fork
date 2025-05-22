@@ -525,8 +525,11 @@ class HPUEncoderDecoderModelRunner(
 
     def _phase(self, is_prompt, ctx):
         if self.use_prefix_caching:
-            is_prefix_prefill = is_prompt and ctx is not None and ctx != 0
-            if is_prompt and is_prefix_prefill:
+            is_prefix = ctx is not None and (
+                                    isinstance(ctx, torch.Tensor)
+                                    or (not isinstance(ctx, torch.Tensor)
+                                    and ctx != 0))
+            if is_prompt and is_prefix:
                 phase_type = PhaseType.PREFIX_PREFILL
             elif is_prompt and not is_prefix_prefill:
                 phase_type = PhaseType.PREFILL
