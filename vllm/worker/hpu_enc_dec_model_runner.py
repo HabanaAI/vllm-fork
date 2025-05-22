@@ -20,7 +20,7 @@ from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
 from vllm.utils import bind_kv_cache, is_fake_hpu
 from vllm.worker.hpu_model_runner import (HpuModelAdapter, HPUModelRunnerBase,
                                           ModelInputForHPUWithSamplingMetadata,
-                                          setup_profiler, subtuple, PhaseType)
+                                          PhaseType, setup_profiler, subtuple)
 from vllm.worker.model_runner_base import (
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict)
@@ -526,9 +526,8 @@ class HPUEncoderDecoderModelRunner(
     def _phase(self, is_prompt, ctx):
         if self.use_prefix_caching:
             is_prefix = ctx is not None and (
-                                    isinstance(ctx, torch.Tensor)
-                                    or (not isinstance(ctx, torch.Tensor)
-                                    and ctx != 0))
+                isinstance(ctx, torch.Tensor) or
+                (not isinstance(ctx, torch.Tensor) and ctx != 0))
             if is_prompt and is_prefix:
                 phase_type = PhaseType.PREFIX_PREFILL
             elif is_prompt:
@@ -619,7 +618,8 @@ class HPUEncoderDecoderModelRunner(
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks, is_prompt)
+            use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks,
+                                          is_prompt)
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
 
@@ -706,11 +706,12 @@ class HPUEncoderDecoderModelRunner(
                 if model_input.async_callback is not None:
                     model_input.async_callback()
                 # Sample the next token.
-                with self.profiler.record_event('internal', ('sample_'
-                                                             f'{phase}_'
-                                                             f'bs{batch_size}_'
-                                                             f'seq{seq_len}_'
-                                                             f'ctx{ctx_blocks}')):
+                with self.profiler.record_event('internal',
+                                                ('sample_'
+                                                 f'{phase}_'
+                                                 f'bs{batch_size}_'
+                                                 f'seq{seq_len}_'
+                                                 f'ctx{ctx_blocks}')):
                     output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,

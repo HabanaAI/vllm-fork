@@ -1019,9 +1019,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         phase_type: PhaseType
         if self.use_prefix_caching:
             is_prefix = ctx is not None and (
-                                    isinstance(ctx, torch.Tensor)
-                                    or (not isinstance(ctx, torch.Tensor)
-                                    and ctx != 0))
+                isinstance(ctx, torch.Tensor) or
+                (not isinstance(ctx, torch.Tensor) and ctx != 0))
             if is_prompt and is_prefix:
                 phase_type = PhaseType.PREFIX_PREFILL
             elif is_prompt:
@@ -2325,11 +2324,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt = False
             if self.use_prefix_caching:
                 phase, bs, seq_len, ctx, graph = profile.split('_')
-                cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
             else:
                 phase, bs, seq_len, graph = map(str, profile.split('_'))
                 ctx = 0 if phase == 'prompt' else 1
-                cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
+            cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
             is_prompt = phase != 'decode'
             graphs = graph == 't'
             if graphs:
@@ -2847,7 +2845,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks, is_prompt)
+            use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks,
+                                          is_prompt)
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None
@@ -3012,11 +3011,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 elif model_input.async_callback is not None:
                     model_input.async_callback()
 
-                with self.profiler.record_event('internal', ('sample_'
-                                                             f'{phase}_'
-                                                             f'bs{batch_size}_'
-                                                             f'seq{seq_len}_'
-                                                             f'ctx{ctx_blocks}'),
+                with self.profiler.record_event('internal',
+                                                ('sample_'
+                                                 f'{phase}_'
+                                                 f'bs{batch_size}_'
+                                                 f'seq{seq_len}_'
+                                                 f'ctx{ctx_blocks}'),
                                                 args=profiler_args):
                     output = self.sampler(
                         logits=logits,
