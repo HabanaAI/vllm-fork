@@ -361,7 +361,10 @@ class HPUEncoderDecoderModelRunner(
         times = 3 if use_graphs or is_pt_profiler_run else 1
         if is_prompt:
             seqs = [
-                self.create_dummy_seq_group_metadata(i, seq_len, is_prompt, temperature)
+                self.create_dummy_seq_group_metadata(i,
+                                                     seq_len,
+                                                     is_prompt,
+                                                     temperature=temperature)
                 for i in range(batch_size)
             ]
         else:
@@ -371,7 +374,8 @@ class HPUEncoderDecoderModelRunner(
             seqs = [
                 self.create_dummy_seq_group_metadata(i,
                                                      b * self.block_size - 1,
-                                                     is_prompt, temperature)
+                                                     is_prompt,
+                                                     temperature=temperature)
                 for i, b in enumerate(blocks)
             ]
         torch.hpu.synchronize()
