@@ -349,6 +349,7 @@ class HPUEncoderDecoderModelRunner(
         is_prompt,
         kv_caches,
         is_pt_profiler_run=False,
+        temperature=0,
     ) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
@@ -360,7 +361,7 @@ class HPUEncoderDecoderModelRunner(
         times = 3 if use_graphs or is_pt_profiler_run else 1
         if is_prompt:
             seqs = [
-                self.create_dummy_seq_group_metadata(i, seq_len, is_prompt)
+                self.create_dummy_seq_group_metadata(i, seq_len, is_prompt, temperature)
                 for i in range(batch_size)
             ]
         else:
@@ -370,7 +371,7 @@ class HPUEncoderDecoderModelRunner(
             seqs = [
                 self.create_dummy_seq_group_metadata(i,
                                                      b * self.block_size - 1,
-                                                     is_prompt)
+                                                     is_prompt, temperature)
                 for i, b in enumerate(blocks)
             ]
         torch.hpu.synchronize()
