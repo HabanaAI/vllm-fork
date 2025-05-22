@@ -2324,10 +2324,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt = False
             if self.use_prefix_caching:
                 phase, bs, seq_len, ctx, graph = profile.split('_')
+                cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
             else:
                 phase, bs, seq_len, graph = map(str, profile.split('_'))
                 ctx = 0 if phase == 'prompt' else 1
-            cfg = (int(bs), int(seq_len), int(ctx), is_prompt)
+                cfg = (int(bs), int(seq_len), ctx, is_prompt)
             is_prompt = phase != 'decode'
             graphs = graph == 't'
             if graphs:
