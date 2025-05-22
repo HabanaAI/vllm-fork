@@ -82,8 +82,6 @@ _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
-VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
-                                       'false').lower() == 'true'
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
@@ -399,18 +397,6 @@ class HpuModelAdapter(torch.nn.Module):
         metadata = TrimmedAttentionMetadata(**metadata_dict)  # type: ignore
         return metadata
 
-    def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
-        slot_mapping = metadata.slot_mapping.flatten()
-        indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt and not self.use_merged_prefill:
-            indices = indices.unflatten(0, (-1, block_size))[:, 0]
-            offsets = None
-        else:
-            offsets = torch.fmod(slot_mapping, block_size)
-        metadata = metadata._replace(block_offsets=offsets,
-                                     block_indices=indices)
-        return metadata
-
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
 
@@ -420,9 +406,6 @@ class HpuModelAdapter(torch.nn.Module):
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-        attn_metadata = self._set_indices_and_offsets(attn_metadata,
-                                                      self.block_size,
-                                                      attn_metadata.is_prompt)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -442,7 +425,11 @@ class HpuModelAdapter(torch.nn.Module):
                 current_module = getattr(current_module, layer)
             elif isinstance(layer,
                             int):  # Indexed-based access (like ModuleList)
-                current_module = list(current_module._modules.values())[layer]
+                module_list = list(current_module._modules.values())
+                if layer >= len(module_list):
+                    # for MTP models, last layer is MTP layer
+                    layer = -1
+                current_module = module_list[layer]
 
         # At the end, we should be at the RotaryEmbedding layer.
         if hasattr(current_module, 'prepare_cos_sin'):
@@ -602,6 +589,7 @@ class ModelInputForHPU(ModelRunnerInputBase):
     async_callback: Optional[Callable] = None
     is_first_multi_step: bool = True
     is_last_step: bool = True
+    previous_hidden_states: Optional[torch.Tensor] = None
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
@@ -778,6 +766,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Speculative decoding is not supported with "
                 "contiguous PA, please set VLLM_CONTIGUOUS_PA=false")
         # For both multi-step scheduling and delayed sampling
+        self.is_single_step = \
+            self.vllm_config.scheduler_config.num_scheduler_steps == 1
         self.cached_step_outputs: List[torch.Tensor] = []
         self.is_pooler = False
         self.is_causal = is_causal
@@ -787,6 +777,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.spec_decode_enabled = \
             self.vllm_config.speculative_config is not None
         self.sampler = get_sampler()
+        default_use_delayed_sampling = (not self.spec_decode_enabled
+                                        and not is_fake_hpu()
+                                        and self.is_single_step
+                                        and not self.lora_config)
+        default_use_delayed_sampling = 'true' if default_use_delayed_sampling \
+            else 'false'
+        self.use_delayed_sampling = (os.environ.get(
+            'VLLM_DELAYED_SAMPLING',
+            default_use_delayed_sampling).lower() == 'true')
 
     def _set_gc_threshold(self) -> None:
         """
@@ -1428,11 +1427,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
+            block_size=self.block_size,
             block_list=prefix_block_list_tensor,
             block_mapping=None,
             block_usage=None,
-            block_indices=None,
-            block_offsets=None,
             block_groups=None,
             attn_bias=attn_bias,
             seq_lens=seq_lens,
@@ -1447,10 +1445,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_positions=input_positions,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
-        for t in multi_modal_kwargs:
-            if torch.is_tensor(multi_modal_kwargs[t]):
-                multi_modal_kwargs[t] = multi_modal_kwargs[t].to(
-                    self.device, non_blocking=True)
+        multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
+                                                        device=self.device)
 
         return PreparePromptMetadata(input_tokens=input_tokens_tensor,
                                      input_positions=input_positions,
@@ -1734,11 +1730,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
+            block_size=self.block_size,
             block_list=block_list,
             block_mapping=None,
             block_usage=block_usage,
-            block_indices=None,
-            block_offsets=None,
             block_groups=block_groups,
             attn_bias=None,
             seq_lens_tensor=None,
@@ -2066,8 +2061,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_usage',
             'slot_mapping',
             'is_prompt',
-            'block_indices',
-            'block_offsets',
+            'block_size',
             'block_groups',
             'input_positions',
         ])
@@ -2203,9 +2197,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         {"input_tokens": inputs.input_tokens}, src=0)
                 else:
                     broadcast_tensor_dict(src=0)
-            is_single_step = \
-                self.vllm_config.scheduler_config.num_scheduler_steps == 1
-            if is_prompt or is_single_step:
+            if is_prompt or self.is_single_step:
                 intermediate_tensors = None
                 if not get_pp_group().is_first_rank:
                     intermediate_tensors = \
@@ -2520,6 +2512,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
+        if os.getenv('VLLM_FULL_WARMUP',
+                     'true').strip().lower() in ("1", "true"):
+            # Since the model is warmed up for all possible tensor sizes,
+            # Dynamo can skip checking the guards
+            torch.compiler.set_stance(skip_guard_eval_unsafe=True)
         elapsed_time = end_time - start_time
         msg = (
             f"Warmup finished in {elapsed_time:.0f} secs, "
@@ -2740,7 +2737,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
+        use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
         assert not (use_delayed_sampling and
@@ -2749,6 +2746,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         assert not (use_delayed_sampling and self.spec_decode_enabled), \
             'Delayed sampling is not compatible with speculative decoding!'
         assert model_input.input_tokens is not None
+        output = None
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
             num_cached = len(self.cached_step_outputs)
@@ -2828,6 +2826,38 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
+            if model_input.multi_modal_kwargs is not None \
+                and 'embed_is_patch' in model_input.multi_modal_kwargs:
+
+                def fix_embed_is_patch(embed_is_patch):
+                    if isinstance(embed_is_patch, torch.Tensor):
+                        if embed_is_patch.dim() == 3:
+                            result = []
+                            if embed_is_patch.size(1) > 1:
+                                embed_is_patch = embed_is_patch.transpose(0, 1)
+                            for i in range(embed_is_patch.size(0)):
+                                result.append(embed_is_patch[i])
+                            return result
+                        elif embed_is_patch.dim() == 2:
+                            result = []
+                            result.append(embed_is_patch)
+                            return result
+                    elif isinstance(embed_is_patch, (list, tuple)):
+                        # Apply only once per item, avoid repeated recursion
+                        result = []
+                        for item in embed_is_patch:
+                            fixed = fix_embed_is_patch(item)
+                            if isinstance(fixed, list):
+                                result.extend(fixed)
+                            else:
+                                result.append(fixed)
+                        return result
+                    else:
+                        return None
+
+                model_input.multi_modal_kwargs[
+                    'embed_is_patch'] = fix_embed_is_patch(
+                        model_input.multi_modal_kwargs['embed_is_patch'])
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -2922,6 +2952,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not get_pp_group().is_last_rank:
                     return hidden_states
 
+                # In case there are any logits processors pending
+                # we need to sync with host earlier
+                if use_delayed_sampling \
+                   and self.is_driver_worker:
+                    self._patch_prev_output()
+
                 # Compute the logits.
                 with self.profiler.record_event(
                         'internal',
@@ -2958,7 +2994,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
                     if use_delayed_sampling and self.is_driver_worker:
-                        self._patch_prev_output()
                         output = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
                         self.cached_step_outputs.append(output)
@@ -3061,7 +3096,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     output.sampled_token_probs = output.sampled_token_probs[:
                                                                             real_batch_size]
                     output.logprobs = output.logprobs[:real_batch_size]
-                if self.return_hidden_states:
+                if self.return_hidden_states and isinstance(
+                        output, SamplerOutput):
                     # we only need to pass hidden states of most recent token
                     assert model_input.sampling_metadata is not None
                     hidden_states = hidden_states[:real_batch_size]
@@ -3141,10 +3177,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         can_finalize_inc = False
         from contextlib import suppress
         with suppress(AttributeError):
-            can_finalize_inc = (self.model_config.quantization == 'inc') and \
-                (self.model.model is not None) and \
-                self.inc_initialized_successfully and \
-                not getattr(self, "_is_inc_finalized", False)
+            can_finalize_inc = (self._is_quant_with_inc()
+                                and (self.model.model is not None)
+                                and self.inc_initialized_successfully and
+                                not getattr(self, "_is_inc_finalized", False))
         if can_finalize_inc:
             from neural_compressor.torch.quantization import (
                 finalize_calibration)
