@@ -218,6 +218,13 @@ class Sampler(nn.Module):
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
 
+    @torch.compile(backend='hpu_backend',fullgraph=True, dynamic=False)
+    def compute_probs_and_logprobs(self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+        return probs, logprobs
+
+
     def forward(
         self,
         logits: torch.Tensor,
@@ -284,9 +291,10 @@ class Sampler(nn.Module):
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
-        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+#        probs = torch.softmax(logits, dim=-1, dtype=torch.float) # MOVED TO FUNCTION
         # Compute the log probabilities.
-        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+#        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float) # MOVED TO FUNCTION
+        (probs, logprobs) = self.compute_probs_and_logprobs(logits)
 
         # Sample the next tokens.
         maybe_deferred_sample_results, maybe_sampled_tokens_tensor = _sample(
