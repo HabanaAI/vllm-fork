@@ -3,7 +3,6 @@ import dataclasses
 import gc
 import itertools
 import math
-from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union, cast
 
 import habana_frameworks.torch as htorch
@@ -42,13 +41,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
     def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
         super().__init__(model, vllm_config, layer_names, is_causal, sampler)
 
-        # We only wrap the language model in HPU graph because some Ops in
-        # vision model will fallback to CPU and cause the graph building fail.
-        if htorch.utils.internal.is_lazy() and hasattr(self.model,
-                                                       "language_model"):
-            self.model.language_model = htorch.hpu.wrap_in_hpu_graph(
-                self.model.language_model, disable_tensor_cache=True)
-
     def _set_cross_block_mapping(self, metadata, batch_size, device, dtype):
         mask = torch.arange(0,
                             self.block_size,
@@ -81,16 +73,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
                                      cross_attn_bias=cross_attn_bias)
         return metadata
 
-    def _set_cross_indices_and_offsets(self, metadata, block_size):
-        cross_slot_mapping = metadata.cross_slot_mapping.flatten()
-        indices = torch.div(cross_slot_mapping,
-                            block_size,
-                            rounding_mode="floor")
-        offsets = torch.fmod(cross_slot_mapping, block_size)
-        metadata = metadata._replace(cross_block_offsets=offsets,
-                                     cross_block_indices=indices)
-        return metadata
-
     def _update_seq_lens(self, attn_metadata, batch_size, seq_len, device):
         # Set the seq_lens to after-padding sequence lengths to prevent
         # graph recapturing.
@@ -107,8 +89,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         if max(attn_metadata.encoder_seq_lens) == 0:
             return attn_metadata
         if attn_metadata.is_prompt:
-            attn_metadata = self._set_cross_indices_and_offsets(
-                attn_metadata, self.block_size)
             attn_metadata = self._update_seq_lens(attn_metadata, batch_size,
                                                   seq_len, device)
         else:
@@ -129,12 +109,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         kwargs['attn_metadata'] = self._update_cross_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
-        if htorch.utils.internal.is_lazy() and hasattr(self.model,
-                                                       "language_model"):
-            bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
-            self.model.language_model.forward = partial(
-                self.model.language_model.forward,
-                bypass_hpu_graphs=bypass_hpu_graphs)
         # TODO: Change the input_ids to 1D to match the public vllm
         # implementation and avoid shape mismatch issues with some
         # models(i.e. Mllama). But currently this will cause graph
@@ -143,9 +117,9 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         virtual_engine = 0
         if 'virtual_engine' in kwargs:
             virtual_engine = kwargs.pop('virtual_engine')
-        attn_metadata = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
+        attn_metadata = kwargs.pop("attn_metadata")
         with set_forward_context(attn_metadata, self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
@@ -218,7 +192,11 @@ class HPUEncoderDecoderModelRunner(
         return list(itertools.chain(*in_list))
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
-        return HpuModelAdapterEncoderDecoder(*args, **kwargs)
+        return htorch.hpu.wrap_in_hpu_graph(
+            HpuModelAdapterEncoderDecoder(*args, **kwargs),
+            disable_tensor_cache=True,
+        ) if htorch.utils.internal.is_lazy(
+        ) else HpuModelAdapterEncoderDecoder(*args, **kwargs)
 
     def prepare_model_input(
         self,
@@ -528,8 +506,7 @@ class HPUEncoderDecoderModelRunner(
             'block_usage',
             'slot_mapping',
             'is_prompt',
-            'block_indices',
-            'block_offsets',
+            'block_size',
             'block_groups',
             'num_prefill_tokens',
             'num_decode_tokens',
@@ -537,8 +514,6 @@ class HPUEncoderDecoderModelRunner(
             'seq_lens',
             'encoder_seq_lens',
             'encoder_seq_lens_tensor',
-            'cross_block_indices',
-            'cross_block_offsets',
             'cross_block_list',
             'cross_slot_mapping',
             'cross_block_mapping',
