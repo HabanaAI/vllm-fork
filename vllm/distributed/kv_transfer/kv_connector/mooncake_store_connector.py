@@ -6,11 +6,12 @@ The MooncakeStoreConnector transfers KV caches between prefill vLLM workers
 database-style KVStore.
 """
 import hashlib
+import threading
+import time
 from typing import TYPE_CHECKING, List, Tuple, Union
 
 import torch
-import time
-import threading
+
 from vllm.attention import AttentionMetadata
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
@@ -264,18 +265,21 @@ class MooncakeStoreConnector(KVConnectorBase):
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
             # Use a non-blocking approach by starting a background thread for put
             # self.kv_store.put(store_kvcache_key, kvcache_to_sent)
-            threading.Thread(target=self.kv_store.put, args=(store_kvcache_key, kvcache_to_sent), 
-                                   daemon=False).start()
+            threading.Thread(target=self.kv_store.put,
+                             args=(store_kvcache_key, kvcache_to_sent),
+                             daemon=False).start()
             logger.debug("put kv cache key: %s", store_kvcache_key)
 
             hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
             # self.kv_store.put(
             #     hidden_key,
             #     hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
-            threading.Thread(target=self.kv_store.put, 
-                             args=(hidden_key, hidden_or_intermediate_states[idx].unsqueeze(0).cpu()), 
-                                   daemon=False).start()
-            
+            threading.Thread(
+                target=self.kv_store.put,
+                args=(hidden_key,
+                      hidden_or_intermediate_states[idx].unsqueeze(0).cpu()),
+                daemon=False).start()
+
             # ==== graph should end here ======
             htorch.core.mark_step()
 
@@ -308,7 +312,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             block_indices_tensor = torch.tensor(
                 block_indices_list[start_block_idx:end_block_idx],
                 device="hpu",
-                dtype=torch.int32)
+                dtype=torch.long)
 
             # we think this is a padding sequence, so we skip it.
             # but we still need write kv cache.
