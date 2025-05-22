@@ -437,11 +437,19 @@ class GroupCoordinator:
             gather_list = [torch.empty_like(input_) for _ in range(world_size)]
         else:
             gather_list = None
+        import os
+        use_fake_comm = os.getenv("FAKE_COMM", "False").lower() == "true"
+
         # Gather.
-        torch.distributed.gather(input_,
-                                 gather_list,
-                                 dst=self.ranks[dst],
-                                 group=self.device_group)
+        if not use_fake_comm:
+
+            torch.distributed.gather(input_,
+                                     gather_list,
+                                     dst=self.ranks[dst],
+                                     group=self.device_group)
+        else:
+            import habana_frameworks.torch as htorch
+            htorch.core.mark_step()
         if self.rank_in_group == dst:
             output_tensor = torch.cat(gather_list, dim=dim)
         else:
