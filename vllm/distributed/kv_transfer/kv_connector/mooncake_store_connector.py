@@ -246,11 +246,10 @@ class MooncakeStoreConnector(KVConnectorBase):
                 if self.kv_helper.use_mla():
                     # for MLA model,  we hold only one tensor to store
                     # both K and V cache. so Value cache tensor is empty.
-                    key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
+                    key_cache = kv_cache[0]
                     keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                 else:
-                    key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
-                    value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
+                    key_cache, value_cache = kv_cache[0], kv_cache[1]
                     keys.append(key_cache[current_slot_mapping].unsqueeze(0))
                     values.append(
                         value_cache[current_slot_mapping].unsqueeze(0))
@@ -290,7 +289,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         torch.hpu.synchronize()
 
         seq_lens = model_input.attn_metadata.seq_lens_tensor.tolist()
-        block_indices_list = attn_metadata.block_indices.tolist()
+        slot_mapping = attn_metadata.slot_mapping.flatten()
         hidden_or_intermediate_states_for_one_req: list[torch.Tensor] = []
         start_block_idx = 0
         num_heads, head_size = self.kv_helper.get_model_args(model_executable)
@@ -299,55 +298,33 @@ class MooncakeStoreConnector(KVConnectorBase):
             current_tokens = input_tokens_tensor_cpu[idx][:slen]
             num_blocks = (slen + 127) // 128
             end_block_idx = start_block_idx + num_blocks
-            block_indices_tensor = torch.tensor(
-                block_indices_list[start_block_idx:end_block_idx],
-                device="hpu",
-                dtype=torch.long)
 
             # we think this is a padding sequence, so we skip it.
             # but we still need write kv cache.
             if slen == 1:
-                for i in range(model_executable.model.model.start_layer,
-                               model_executable.model.model.end_layer):
-                    cur_layer_idx = i - model_executable.model.model.start_layer
+                for i in range(model_executable.model.start_layer,
+                               model_executable.model.end_layer):
+                    cur_layer_idx = i - model_executable.model.start_layer
                     kv_cache = kv_caches[cur_layer_idx]
                     key_cache, value_cache = kv_cache[0], kv_cache[1]
-                    key_cache = kv_cache[0]
                     if self.kv_helper.use_mla():
                         padding_k_tensor = torch.zeros(
                             (self.block_size, head_size),
                             dtype=self.dtype,
                             device="hpu")
-                        self.cache_k(
-                            padding_k_tensor.unsqueeze(0),
-                            key_cache,
-                            attn_metadata.
-                            block_indices[start_block_idx:end_block_idx],
-                            attn_metadata.block_offsets,
-                        )
+                        self.cache_k(padding_k_tensor, key_cache, slot_mapping)
                     else:
                         padding_k_tensor = torch.zeros(
-                            (self.block_size, head_size),
+                            (self.block_size, num_heads, head_size),
                             dtype=self.dtype,
                             device="hpu")
                         padding_v_tensor = torch.zeros(
-                            (self.block_size, head_size),
+                            (self.block_size, num_heads, head_size),
                             dtype=self.dtype,
                             device="hpu")
-                        self.cache_k(
-                            padding_k_tensor.unsqueeze(0),
-                            key_cache,
-                            attn_metadata.
-                            block_indices[start_block_idx:end_block_idx],
-                            attn_metadata.block_offsets,
-                        )
-                        self.cache_v(
-                            padding_v_tensor.unsqueeze(0),
-                            value_cache,
-                            attn_metadata.
-                            block_indices[start_block_idx:end_block_idx],
-                            attn_metadata.block_offsets,
-                        )
+                        self.cache_k(padding_k_tensor, key_cache, slot_mapping)
+                        self.cache_v(padding_v_tensor, value_cache,
+                                     slot_mapping)
                 # the first one should never be padding,
                 # so we can append the first one.
                 hidden_or_intermediate_states_for_one_req.append(
@@ -380,21 +357,11 @@ class MooncakeStoreConnector(KVConnectorBase):
                 key_cache, value_cache = kv_cache[0], kv_cache[1]
                 if self.kv_helper.use_mla():
                     remote_k = remote_kv[cur_layer_idx]
-                    # [num_layers, seq_len, num_kv_heads, k/v_head_size]
-                    # -> [seq_len, k/v_head_size]
-                    key = remote_k.squeeze(-2).view(-1, self.block_size,
-                                                    head_size)
-                    # ====== D2D =======
-                    self.cache_k(key, key_cache, block_indices_tensor, None)
+                    self.cache_k(remote_k, key_cache, slot_mapping)
                 else:
                     remote_k, remote_v = remote_kv[0][i], remote_kv[1][i]
-                    key = remote_k.unsqueeze(0).view(-1, self.block_size,
-                                                     num_heads, head_size)
-                    value = remote_v.unsqueeze(0).view(-1, self.block_size,
-                                                       num_heads, head_size)
-                    self.cache_k(key, key_cache, block_indices_tensor, None)
-                    self.cache_v(value, value_cache, block_indices_tensor,
-                                 None)
+                    self.cache_k(remote_k, key_cache, slot_mapping)
+                    self.cache_v(remote_v, value_cache, slot_mapping)
 
             hidden_or_intermediate_states_for_one_req.append(hidden.to("hpu"))
             start_block_idx = end_block_idx

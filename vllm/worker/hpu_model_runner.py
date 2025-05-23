@@ -2621,7 +2621,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         """Check if we need to send kv-cache to the other worker.
         We need to send KV when
             1. current vLLM instance is KV cache producer/prefill vLLM instance
-            2. this batch is not a profiling run
+            2. this batch is not a profiling run or a warmup run.
             3. this batch is a prefill run
         Args:
             model_input: input to the model executable
