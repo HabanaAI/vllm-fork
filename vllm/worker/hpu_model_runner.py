@@ -2153,7 +2153,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
-                                   ctx=ctx)
+                                   ctx_blocks=ctx)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
@@ -2163,7 +2163,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    warmup_mode=True,
                                    num_steps=2,
                                    seqs=seqs,
-                                   ctx=ctx)
+                                   ctx_blocks=ctx)
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=False,
                                              is_last_step=True)
@@ -2172,7 +2172,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    warmup_mode=True,
                                    num_steps=2,
                                    seqs=seqs,
-                                   ctx=ctx)
+                                   ctx_blocks=ctx)
             torch.hpu.synchronize()
             if profiler:
                 profiler.step()

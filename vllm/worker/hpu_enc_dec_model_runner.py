@@ -396,7 +396,7 @@ class HPUEncoderDecoderModelRunner(
                                    warmup_mode=True,
                                    num_steps=2,
                                    seqs=seqs,
-                                   ctx=ctx)
+                                   ctx_blocks=ctx)
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=False,
                                              is_last_step=True)
@@ -405,7 +405,7 @@ class HPUEncoderDecoderModelRunner(
                                    warmup_mode=True,
                                    num_steps=2,
                                    seqs=seqs,
-                                   ctx=ctx)
+                                   ctx_blocks=ctx)
             torch.hpu.synchronize()
             if profiler:
                 profiler.step()
