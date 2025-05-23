@@ -32,9 +32,10 @@ pip install -e .
 - Calibration 
 
 ```bash
-cd vllm-fork/scripts-fp8
+cd vllm-fork/scripts/qwen3
+pip install datasets
 export OFFICIAL_MODEL=/path/to/qwen/model
-bash /run_qwen.sh calib ${OFFICIAL_MODEL}
+bash ./run_qwen.sh calib ${OFFICIAL_MODEL}
 ```
 
 ```

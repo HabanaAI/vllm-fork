@@ -211,9 +211,16 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         assert topk_group is None, 'topk_group is not supported on HPU'
 
         if layer is not None:
-            layer.hpu_fused_moe.MoeOp.w13_weight = layer.w13_weight
-            layer.hpu_fused_moe.MoeOp.w2_weight = layer.w2_weight
-            layer.hpu_fused_moe.MoeOp.ep_rank = layer.ep_rank
+            if layer.quant_config is None:  #BF16
+                if hasattr(layer.hpu_fused_moe.MoeOp, "w13_weight"):
+                    layer.hpu_fused_moe.MoeOp.w13_weight = layer.w13_weight
+
+                if hasattr(layer.hpu_fused_moe.MoeOp, "w2_weight"):
+                    layer.hpu_fused_moe.MoeOp.w2_weight = layer.w2_weight
+
+                if hasattr(layer.hpu_fused_moe.MoeOp, "ep_rank"):
+                    layer.hpu_fused_moe.MoeOp.ep_rank = layer.ep_rank
+
             return layer.hpu_fused_moe(x, router_logits, top_k)
 
     def forward_tpu(
@@ -327,7 +334,7 @@ class FusedMoE(torch.nn.Module):
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
             raise ValueError("Only softmax scoring function is supported for "
                              "non-grouped topk.")
-
+        self.quant_config = quant_config
         if quant_config is None:
             self.quant_method: Optional[QuantizeMethodBase] = (
                 UnquantizedFusedMoEMethod())
