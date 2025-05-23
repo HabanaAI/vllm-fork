@@ -144,7 +144,7 @@ def custom_tuple_replace(obj: object,
     fields = _TYPE_CACHE[typename]['fields']
     values = {
         field: getattr(obj, field)
-        for field in fields
+        for field in fields # type: ignore
     }
     values.update(to_override)
     return cached_type(**values) # type: ignore
