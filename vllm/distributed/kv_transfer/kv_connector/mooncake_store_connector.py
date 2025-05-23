@@ -300,7 +300,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             block_indices_tensor = torch.tensor(
                 block_indices_list[start_block_idx:end_block_idx],
                 device="hpu",
-                dtype=torch.int32)
+                dtype=torch.long)
 
             # we think this is a padding sequence, so we skip it.
             # but we still need write kv cache.
