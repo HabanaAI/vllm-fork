@@ -507,21 +507,19 @@ def subtuple(obj: object,
     return _TYPE_CACHE[typename]['type'](**values)  # type: ignore
 
 
-def custom_tuple_replace(obj: object,
-                         typename: str,
-                         **to_override):
+def custom_tuple_replace(obj: object, typename: str, **to_override):
     # Torch compile dynamo doesn't support calling any named tuple
-    # dynamic methods other than len and get_attr. This function is 
+    # dynamic methods other than len and get_attr. This function is
     # a torch.compile friendly version of tuple._replace
 
     cached_type = _TYPE_CACHE[typename]['type']
     fields = _TYPE_CACHE[typename]['fields']
     values = {
         field: getattr(obj, field)
-        for field in fields # type: ignore
+        for field in fields  # type: ignore
     }
     values.update(to_override)
-    return cached_type(**values) # type: ignore
+    return cached_type(**values)  # type: ignore
 
 
 def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
