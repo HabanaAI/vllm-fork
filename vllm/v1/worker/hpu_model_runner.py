@@ -568,7 +568,7 @@ class HPUModelRunner:
         self,
         vllm_config: VllmConfig,
         device: torch.device = 'hpu',
-        is_driver_worker: bool = False,
+        is_driver_worker: bool = True,
     ):
         # TODO: use ModelRunnerBase.__init__(self, vllm_config=vllm_config)
         environment.set_model_config(vllm_config.model_config)
@@ -1493,15 +1493,7 @@ class HPUModelRunner:
 
         is_prompt = attn_metadata.is_prompt
         phase = "prompt" if is_prompt else "decode"
-        if self.is_driver_worker:
-            model_event_name = ("model_"
-                                f"{phase}_"
-                                f"bs{batch_size}_"
-                                f"seq{seq_len}_"
-                                f"ctx{num_blocks}_"
-                                f"graphs{'T' if use_graphs else 'F'}")
-        else:
-            model_event_name = 'model_executable'
+        
         self._check_config(batch_size, seq_len, num_blocks, attn_metadata,
                            warmup_mode)
         additional_kwargs = {}
@@ -1511,7 +1503,16 @@ class HPUModelRunner:
                                           is_prompt)
             additional_kwargs.update({"bypass_hpu_graphs": not use_graphs})
         trimmed_attn_metadata = trim_attn_metadata(attn_metadata)
-        
+        print("is driver")
+        if self.is_driver_worker:
+            model_event_name = ("model_"
+                                f"{phase}_"
+                                f"bs{batch_size}_"
+                                f"seq{seq_len}_"
+                                f"ctx{num_blocks}_"
+                                f"graphs{'T' if use_graphs else 'F'}")
+        else:
+            model_event_name = 'model_executable'
         profiler_args = {
             'real_seq_len': seq_len,
             'real_batch_size': batch_size
@@ -1687,6 +1688,7 @@ class HPUModelRunner:
         num_decodes = len(pd_info.decode_req_ids)
         num_prefills = len(pd_info.prompt_req_ids)
         num_reqs = num_decodes + num_prefills
+        print("profile here")
         with self.profiler.record_event('internal', 'prepare_input_tensors'):
             prefill_data, decode_data = self._prepare_inputs(
                 scheduler_output,
@@ -2075,7 +2077,8 @@ class HPUModelRunner:
                         num_prefill_tokens=batch_size * seq_or_block,
                         input_positions=None,
                         slot_mapping=slot_mapping_device,
-                        block_list=block_list_device)
+                        block_list=block_list_device,
+                        block_size=self.block_size)
                 else:
                     #block_list = None
                     attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
@@ -2083,7 +2086,8 @@ class HPUModelRunner:
                         num_prefills=batch_size,
                         num_prefill_tokens=batch_size * seq_or_block,
                         input_positions=None,
-                        slot_mapping=slot_mapping_device)
+                        slot_mapping=slot_mapping_device,
+                        block_size=self.block_size)
             else:
                 block_tables = [
                     x.tolist()
@@ -2105,7 +2109,8 @@ class HPUModelRunner:
                     block_groups=block_groups_device,
                     num_decode_tokens=batch_size,
                     input_positions=None,
-                    slot_mapping=slot_mapping_device)
+                    slot_mapping=slot_mapping_device,
+                    block_size=self.block_size)
 
 
             logits_indices = torch.arange(0, batch_size, device='cpu')
