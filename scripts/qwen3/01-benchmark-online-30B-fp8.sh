@@ -170,7 +170,7 @@ for req_in_out in "${req_in_out_list[@]}"; do
         --model ${model} \
         --tokenizer ${tokenizer} \
         --dataset-name sonnet \
-        --dataset-path ../benchmarks/sonnet.txt \
+        --dataset-path ../../benchmarks/sonnet.txt \
         --request-rate ${request_rate} \
         --percentile-metrics ttft,tpot,itl,e2el \
         --ignore-eos \
