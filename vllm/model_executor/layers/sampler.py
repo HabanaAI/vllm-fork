@@ -218,6 +218,7 @@ class Sampler(nn.Module):
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
 
+
     @torch.compile(backend='hpu_backend',fullgraph=True, dynamic=False)
     def compute_probs_and_logprobs(self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         probs = torch.softmax(logits, dim=-1, dtype=torch.float)
@@ -567,6 +568,7 @@ def _random_sample(
 # Note that we always sample with replacement.
 # probs will be modified in place, but this is fine, as we pass
 # in a copy already.
+@torch.compile(backend='hpu_backend',fullgraph=True, dynamic=False)
 def _multinomial(
     probs: torch.Tensor,
     num_samples: int,
