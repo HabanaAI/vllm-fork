@@ -1384,6 +1384,8 @@ class CacheConfig:
     """
     split_qkv: bool = False
     """Whether to split the QKV calculations."""
+    split_gate_up: bool = False
+    """Whether to split the gate and up calculations in MLP block."""
     calculate_kv_scales: bool = False
     """This enables dynamic calculation of `k_scale` and `v_scale` when
     kv_cache_dtype is fp8. If `False`, the scales will be loaded from the model
