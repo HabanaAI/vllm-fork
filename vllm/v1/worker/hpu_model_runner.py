@@ -16,10 +16,10 @@ import numpy as np
 import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
-import vllm.hpu_utils as hpu_utils
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
+import vllm.hpu_utils as hpu_utils
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import get_attn_backend
@@ -1905,7 +1905,8 @@ class HPUModelRunner:
     def _compile(self, module):
         if not hasattr(self, '_compile_config'):
             self._compile_config = hpu_utils.HPUCompileConfig()
-            return torch.compile(module, **self._compile_config.get_compile_args())
+            return torch.compile(module,
+                                 **self._compile_config.get_compile_args())
 
     def _use_graphs(self, batch_size, seq_len, num_blocks, phase):
         if self.model_config.enforce_eager:

@@ -36,6 +36,7 @@ else:
 # Get Intel HPU arguments passed to torch compile
 htc_config = hpu_utils.HPUCompileConfig()
 
+
 def get_sampler() -> torch.nn.Module:
     if envs.VLLM_USE_V1:
         # Lazy import: the v1 package isn't distributed
@@ -221,13 +222,12 @@ class Sampler(nn.Module):
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
 
-
     @torch.compile(**htc_config.get_compile_args())
-    def compute_probs_and_logprobs(self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def compute_probs_and_logprobs(
+            self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         probs = torch.softmax(logits, dim=-1, dtype=torch.float)
         logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
         return probs, logprobs
-
 
     def forward(
         self,
@@ -295,8 +295,10 @@ class Sampler(nn.Module):
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
+
+
 #        probs = torch.softmax(logits, dim=-1, dtype=torch.float) # MOVED TO FUNCTION
-        # Compute the log probabilities.
+# Compute the log probabilities.
 #        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float) # MOVED TO FUNCTION
         (probs, logprobs) = self.compute_probs_and_logprobs(logits)
 

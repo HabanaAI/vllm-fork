@@ -1,6 +1,6 @@
-import habana_frameworks.torch as htorch
-import torch
+# SPDX-License-Identifier: Apache-2.0
 import os
+
 
 class HPUCompileConfig:
     def __init__(self):
