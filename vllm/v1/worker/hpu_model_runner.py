@@ -1905,8 +1905,8 @@ class HPUModelRunner:
     def _compile(self, module):
         if not hasattr(self, '_compile_config'):
             self._compile_config = hpu_utils.HPUCompileConfig()
-            return torch.compile(module,
-                                 **self._compile_config.get_compile_args())
+        return torch.compile(module,
+                             **self._compile_config.get_compile_args())
 
     def _use_graphs(self, batch_size, seq_len, num_blocks, phase):
         if self.model_config.enforce_eager:
