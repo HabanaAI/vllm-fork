@@ -1,6 +1,6 @@
 # Parameterize base image components
 ARG VERSION=1.22.0
-ARG BASE_NAME=ubuntu22.04
+ARG BASE_NAME=ubuntu24.04
 ARG PT_VERSION=2.7.0
 ARG REVISION=270
 # Parameterize commit/branch for vllm-fork checkout
