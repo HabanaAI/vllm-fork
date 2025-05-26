@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 
 import vllm.envs as envs
+import vllm.hpu_utils as hpu_utils
 from vllm.model_executor.layers.utils import apply_penalties
 from vllm.model_executor.sampling_metadata import (SamplingMetadata,
                                                    SamplingTensors,
@@ -32,6 +33,8 @@ if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
 else:
     flashinfer_top_k_top_p_sampling = None
 
+# Get Intel HPU arguments passed to torch compile
+htc_config = hpu_utils.HPUCompileConfig()
 
 def get_sampler() -> torch.nn.Module:
     if envs.VLLM_USE_V1:
@@ -219,7 +222,7 @@ class Sampler(nn.Module):
         self._do_min_p = do_min_p
 
 
-    @torch.compile(backend='hpu_backend',fullgraph=True, dynamic=False)
+    @torch.compile(**htc_config.get_compile_args())
     def compute_probs_and_logprobs(self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         probs = torch.softmax(logits, dim=-1, dtype=torch.float)
         logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
@@ -568,7 +571,7 @@ def _random_sample(
 # Note that we always sample with replacement.
 # probs will be modified in place, but this is fine, as we pass
 # in a copy already.
-@torch.compile(backend='hpu_backend',fullgraph=True, dynamic=False)
+@torch.compile(**htc_config.get_compile_args())
 def _multinomial(
     probs: torch.Tensor,
     num_samples: int,
