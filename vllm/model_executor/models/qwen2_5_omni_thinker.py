@@ -696,7 +696,15 @@ class Qwen2_5OmniConditionalGenerationMixin:
 
         pixel_values_videos = video_input["pixel_values_videos"].type(
             self.visual.dtype)
-        video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
+        if is_hpu:
+            assert isinstance(self.visual, Qwen2_5_VisionTransformerStaticShape)
+            video_embeds = self.visual.get_image_embeds(
+                pixel_values_videos,
+                grid_thw=grid_thw,
+                vision_buckets=self.vision_buckets,
+            )
+        else:
+            video_embeds = self.visual(pixel_values_videos, grid_thw=grid_thw)
         # Split concatenated embeddings for each video item.
         merge_size = self.visual.spatial_merge_size
         sizes = grid_thw.prod(-1) // merge_size // merge_size

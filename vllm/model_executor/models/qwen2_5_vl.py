@@ -985,12 +985,6 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         attention_mask = attention_mask[window_index, :]
         attention_mask = attention_mask.reshape(1,1,1,seq_len)
-        cu_window_seqlens = torch.arange(0,
-                                         seq_len+1,
-                                         self.vit_merger_window_size * \
-                                            self.vit_merger_window_size * \
-                                            self.spatial_merge_unit,
-                                         device=hidden_states.device)
         return hidden_states, rotary_pos_emb, None, cu_window_seqlens, \
                window_index, attention_mask.bool(), grid_thw
 
@@ -1060,39 +1054,42 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         results = []
         # process each image one by one
         for img_idx in range(grid_thw.shape[0]):
-            img_shape = grid_thw[img_idx, :].unsqueeze(0)
+            img_shape = grid_thw[img_idx, :].unsqueeze(0).clone()
+            # For video, we process frames separately
+            grid_t = grid_thw[img_idx,0]
+            img_shape[0, 0] = 1
             curr_img_size = img_shape.prod()
+            for _ in torch.arange(0, grid_t):
+                pixel_values_curr_img = pixel_values[offset:offset +
+                                                    curr_img_size, :]
 
-            pixel_values_curr_img = pixel_values[offset:offset +
-                                                 curr_img_size, :]
+                offset += curr_img_size
 
-            offset += curr_img_size
+                pixel_values_curr_img_padded, rot_pos_emb, \
+                    _, cu_window_seqlens, window_index, \
+                    attention_mask, img_shape_padded = self.pre_attn(
+                        pixel_values_curr_img,
+                        img_shape,
+                        vision_buckets)
 
-            pixel_values_curr_img_padded, rot_pos_emb, \
-                _, cu_window_seqlens, window_index, \
-                attention_mask, img_shape_padded = self.pre_attn(
-                    pixel_values_curr_img,
-                    img_shape,
-                    vision_buckets)
+                fullatt_block_attn_mask = \
+                    attention_mask[0,0,:,:] * attention_mask[0,0,0,:].unsqueeze(1)
 
-            fullatt_block_attn_mask = \
-                attention_mask[0,0,:,:] * attention_mask[0,0,0,:].unsqueeze(1)
+                htcore.mark_step()
+                hidden_states = self.forward(pixel_values_curr_img_padded,
+                                        rotary_pos_emb=rot_pos_emb,
+                                        fullattn_mask=fullatt_block_attn_mask,
+                                        windowattn_mask=attention_mask,
+                                        cu_window_seqlens=cu_window_seqlens)
+                htcore.mark_step()
 
-            htcore.mark_step()
-            hidden_states = self.forward(pixel_values_curr_img_padded,
-                                    rotary_pos_emb=rot_pos_emb,
-                                    fullattn_mask=fullatt_block_attn_mask,
-                                    windowattn_mask=attention_mask,
-                                    cu_window_seqlens=cu_window_seqlens)
-            htcore.mark_step()
-
-            image_embeds = self.post_attn(hidden_states,
-                                          window_index,
-                                          img_shape,
-                                          img_shape_padded[0])
-            # slice image_embeds to remove the padded parts
-            pad_index = img_shape_padded[0].prod() // self.spatial_merge_unit
-            results += [image_embeds[:pad_index, :]]
+                image_embeds = self.post_attn(hidden_states,
+                                              window_index,
+                                              img_shape,
+                                              img_shape_padded[0])
+                # slice image_embeds to remove the padded parts
+                pad_index = img_shape_padded[0].prod() // self.spatial_merge_unit
+                results += [image_embeds[:pad_index, :]]
         results_cat = torch.concat(results)
         image_embeds = results_cat
         return image_embeds
