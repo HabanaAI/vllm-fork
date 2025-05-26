@@ -29,6 +29,7 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 
 import vllm.envs as envs
+import vllm.hpu_utils as hpu_utils
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
@@ -975,23 +976,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _compile(self, module):
         if not hasattr(self, '_compile_config'):
-            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
-                                  'false').strip().lower() in ("1", "true")
-            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
-                                'false').strip().lower() in ("1", "true")
-            self._compile_config = {'fullgraph': fullgraph, 'dynamic': dynamic}
-        fullgraph = self._compile_config['fullgraph']
-        dynamic = self._compile_config['dynamic']
-        if dynamic:
-            return torch.compile(module,
-                                 backend='hpu_backend',
-                                 fullgraph=fullgraph,
-                                 options={"force_static_compile": True})
-        else:
-            return torch.compile(module,
-                                 backend='hpu_backend',
-                                 fullgraph=fullgraph,
-                                 dynamic=False)
+            self._compile_config = hpu_utils.HPUCompileConfig()
+            return torch.compile(module, **self._compile_config.get_compile_args())
 
     def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
