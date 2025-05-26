@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
+import vllm.hpu_utils as hpu_utils
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
@@ -1903,23 +1904,8 @@ class HPUModelRunner:
 
     def _compile(self, module):
         if not hasattr(self, '_compile_config'):
-            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
-                                  'false').strip().lower() in ("1", "true")
-            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
-                                'false').strip().lower() in ("1", "true")
-            self._compile_config = {'fullgraph': fullgraph, 'dynamic': dynamic}
-        fullgraph = self._compile_config['fullgraph']
-        dynamic = self._compile_config['dynamic']
-        if dynamic:
-            return torch.compile(module,
-                                 backend='hpu_backend',
-                                 fullgraph=fullgraph,
-                                 options={"force_static_compile": True})
-        else:
-            return torch.compile(module,
-                                 backend='hpu_backend',
-                                 fullgraph=fullgraph,
-                                 dynamic=False)
+            self._compile_config = hpu_utils.HPUCompileConfig()
+            return torch.compile(module, **self._compile_config.get_compile_args())
 
     def _use_graphs(self, batch_size, seq_len, num_blocks, phase):
         if self.model_config.enforce_eager:
