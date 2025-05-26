@@ -1,5 +1,6 @@
 import habana_frameworks.torch as htorch
 import torch
+import os
 
 class HPUCompileConfig:
     def __init__(self):
