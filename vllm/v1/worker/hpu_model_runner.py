@@ -129,7 +129,8 @@ class PrefillBatchContents:
 
     def _data(self):
         return (self.req_ids, self.num_tokens, self.token_ids,
-                self.token_positions, self.token_slots, self.token_logits, self.context_lens, self.context_blocks)
+                self.token_positions, self.token_slots, self.token_logits,
+                self.context_lens, self.context_blocks)
 
     def merge(self, *other):
         for o in other:
@@ -150,7 +151,8 @@ class PrefillInputData:
 
     def _data(self):
         return (self.request_ids, self.prompt_lens, self.token_ids,
-                self.position_ids, self.attn_metadata, self.logits_indices, self.logits_requests)
+                self.position_ids, self.attn_metadata, self.logits_indices,
+                self.logits_requests)
 
     def merge(self, *other):
         for o in other:
@@ -388,6 +390,9 @@ class HpuModelAdapter(torch.nn.Module):
         if (attn_metadata is None or
             (self.prefill_use_fusedsdpa and attn_metadata.block_list is None)
                 or not attn_metadata.is_prompt):
+            return attn_metadata
+
+        if attn_metadata.attn_bias is not None:
             return attn_metadata
 
         prefill_metadata = attn_metadata
@@ -987,7 +992,9 @@ class HPUModelRunner:
 
             # Must be prompt
             assert num_computed_tokens < num_prompt_tokens
-            assert len(self.requests[req_id].output_token_ids) == 0, f'req_id: {req_id}, {len(self.requests[req_id].output_token_ids)}'
+            assert len(
+                self.requests[req_id].output_token_ids
+            ) == 0, f'req_id: {req_id}, {len(self.requests[req_id].output_token_ids)}'
 
             prompt_req_ids.append(req_id)
             prompt_scheduled_tokens.append(num_scheduled_tokens)
@@ -1181,7 +1188,9 @@ class HPUModelRunner:
             ]
             num_tokens = len(token_ids)
             prompt_tokens = self.input_batch.num_prompt_tokens[batch_idx]
-            token_logits = [num_tokens - 1] if (context_len + num_tokens >= prompt_tokens) else []
+            token_logits = [num_tokens -
+                            1] if (context_len +
+                                   num_tokens >= prompt_tokens) else []
             context_blocks = round_up(context_len,
                                       self.block_size) // self.block_size
             context_blocks = block_ids[:context_blocks]
@@ -1205,6 +1214,28 @@ class HPUModelRunner:
             else:
                 all_batch_contents.append(new_batch_contents)
         return all_batch_contents
+
+    def _make_attn_bias(self, token_lens, context_lens):
+        seq_pos = [list(range(sl)) for sl in token_lens]
+        seq_idx = [[i] * sl for i, sl in enumerate(context_lens)]
+
+        seq_pos = self._align(seq_pos, itertools.repeat(-1))
+        seq_idx = self._align(seq_idx, itertools.repeat(-1))
+
+        seq_pos_t = torch.tensor(seq_pos, device='cpu', dtype=torch.int32)
+        seq_idx_t = torch.tensor(seq_idx, device='cpu', dtype=torch.int32)
+
+        q_seq_idx_t = seq_idx_t.unsqueeze(-1)
+        kv_seq_idx_t = seq_idx_t.unsqueeze(-2)
+        q_seq_pos_t = seq_pos_t.unsqueeze(-1)
+        kv_seq_pos_t = seq_pos_t.unsqueeze(-2)
+        seq_idx_t = q_seq_idx_t != kv_seq_idx_t
+        seq_pos_t = kv_seq_pos_t > q_seq_pos_t
+        off_value = -math.inf
+        attn_mask = (seq_idx_t | seq_pos_t)
+        attn_bias = torch.zeros_like(attn_mask, dtype=dtype)
+        attn_bias.masked_fill_(attn_mask, off_value)
+        return attn_bias.unsqueeze(1)
 
     def _form_prefill_batch(self, contents):
         if len(contents.req_ids) == 0:
@@ -1243,17 +1274,22 @@ class HPUModelRunner:
                 cur_offset += ntok
             else:
                 cur_offset += len(token_ids[0])
-        print('logits_indices', logits_indices)
-        print('logits_requests', logits_requests)
 
         total_tokens = sum(num_tokens)
+        if USE_MERGED_PREFILL:
+            attn_bias = self._make_attn_bias(num_tokens, context_lens).to(
+                'hpu', non_blocking=True)
+        else:
+            attn_bias = None
+
         num_tokens = _async_h2d_tensor(num_tokens, torch.int32)
         token_ids = _async_h2d_tensor(token_ids, torch.int32)
         token_positions = _async_h2d_tensor(token_positions, torch.int32)
         token_slots = _async_h2d_tensor(token_slots, torch.int32)
         logits_indices = _async_h2d_tensor(logits_indices, torch.int32)
         context_lens = _async_h2d_tensor(context_lens, torch.int32)
-        context_blocks = _async_h2d_tensor(context_blocks, torch.int32).flatten()
+        context_blocks = _async_h2d_tensor(context_blocks,
+                                           torch.int32).flatten()
 
         if has_context:
             attn_metadata = HPUAttentionMetadataV1.make_cached_prefill_metadata(
@@ -1263,14 +1299,16 @@ class HPUModelRunner:
                 num_prefill_tokens=total_tokens,
                 input_positions=token_positions,
                 slot_mapping=token_slots,
-                block_list=context_blocks)
+                block_list=context_blocks,
+                attn_bias=attn_bias)
         else:
             attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
                 seq_lens_tensor=num_tokens,
                 num_prefills=len(req_ids),
                 num_prefill_tokens=total_tokens,
                 input_positions=token_positions,
-                slot_mapping=token_slots)
+                slot_mapping=token_slots,
+                attn_bias=attn_bias)
 
         return PrefillInputData(request_ids=[req_ids],
                                 prompt_lens=[num_tokens],
@@ -1666,8 +1704,8 @@ class HPUModelRunner:
         if num_prefills > 0:
             htorch.core.mark_step()
             for idx, (req_id, prompt_len, token_ids, position_ids,
-                      attn_metadata,
-                      logits_indices, logits_requests) in enumerate(prefill_data.zipped()):
+                      attn_metadata, logits_indices,
+                      logits_requests) in enumerate(prefill_data.zipped()):
                 htorch.core.mark_step()
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
@@ -1678,7 +1716,8 @@ class HPUModelRunner:
                     batch_changed, req_id, pad_to=logits_device.shape[0])
                 sampler_output = self.sampler(
                     logits=logits_device, sampling_metadata=sampling_metadata)
-                prefill_sampled_token_ids.append(sampler_output.sampled_token_ids.flatten())
+                prefill_sampled_token_ids.append(
+                    sampler_output.sampled_token_ids.flatten())
                 prefill_sampled_requests.extend(logits_requests)
                 htorch.core.mark_step()
 
@@ -1698,23 +1737,32 @@ class HPUModelRunner:
                 pad_to=logits_device.shape[0])
             sampler_output = self.sampler(logits=logits_device,
                                           sampling_metadata=sampling_metadata)
-            decode_sampled_token_ids.append(sampler_output.sampled_token_ids.flatten())
-            decode_sampled_requests.extend(self.input_batch.req_ids[:num_decodes])
+            decode_sampled_token_ids.append(
+                sampler_output.sampled_token_ids.flatten())
+            decode_sampled_requests.extend(
+                self.input_batch.req_ids[:num_decodes])
             htorch.core.mark_step()
 
         # From this point onward, all operations are done on CPU.
         # We already have tokens. Let's copy the data to
         # CPU as is, and then discard padded tokens.
 
-        prefill_sampled_token_ids = [tensor.cpu() for tensor in prefill_sampled_token_ids]
-        decode_sampled_token_ids = [tensor.cpu()[:num_decodes] for tensor in decode_sampled_token_ids]
+        prefill_sampled_token_ids = [
+            tensor.cpu() for tensor in prefill_sampled_token_ids
+        ]
+        decode_sampled_token_ids = [
+            tensor.cpu()[:num_decodes] for tensor in decode_sampled_token_ids
+        ]
         sampled_token_ids_list = torch.cat(decode_sampled_token_ids +
                                            prefill_sampled_token_ids).tolist()
         sampled_token_requests = decode_sampled_requests + prefill_sampled_requests
         max_req_index = max(self.input_batch.req_id_to_index.values())
-        postprocessed_sampled_token_ids = [[] for _ in range(max_req_index + 1)]
-        for tok_id, req_id in zip(sampled_token_ids_list, sampled_token_requests):
-            postprocessed_sampled_token_ids[self.input_batch.req_id_to_index[req_id]].append(tok_id)
+        postprocessed_sampled_token_ids = [[]
+                                           for _ in range(max_req_index + 1)]
+        for tok_id, req_id in zip(sampled_token_ids_list,
+                                  sampled_token_requests):
+            postprocessed_sampled_token_ids[
+                self.input_batch.req_id_to_index[req_id]].append(tok_id)
 
         # NOTE(kzawora): idk what happens if part of batch doesn't have logprobs
 
@@ -1726,7 +1774,8 @@ class HPUModelRunner:
                        scheduler_output.num_scheduled_tokens[req_id])
             token_ids = postprocessed_sampled_token_ids[i]
             num_tokens = len(token_ids)
-            self.input_batch.token_ids_cpu[i, seq_len:seq_len + num_tokens] = token_ids
+            self.input_batch.token_ids_cpu[i, seq_len:seq_len +
+                                           num_tokens] = token_ids
             self.input_batch.num_tokens[i] += len(token_ids)
             req_state.output_token_ids.extend(token_ids)
 
