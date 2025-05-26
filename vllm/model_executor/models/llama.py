@@ -71,12 +71,12 @@ class LlamaMLP(nn.Module):
         bias: bool = False,
         prefix: str = "",
         reduce_results: bool = True,
-        split_gate_up: bool = False,
     ) -> None:
         super().__init__()
 
-        self.split_gate_up = split_gate_up
-        if self.split_gate_up:
+        self.bias = bias
+        if self.bias:
+            # Split gate and up projection to better pipeline add bias
             self.gate_proj = ColumnParallelLinear(
                 input_size=hidden_size,
                 output_size=intermediate_size,
@@ -108,13 +108,13 @@ class LlamaMLP(nn.Module):
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
-        if self.split_gate_up:
+        if self.bias:
             self.act_fn = torch.nn.functional.silu
         else:
             self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        if self.split_gate_up:
+        if self.bias:
             x = self.act_fn(self.gate_proj(x)[0]) * self.up_proj(x)[0]
         else:
             x, _ = self.gate_up_proj(x)
@@ -305,7 +305,6 @@ class LlamaDecoderLayer(nn.Module):
             quant_config=quant_config,
             bias=getattr(config, "mlp_bias", False),
             prefix=f"{prefix}.mlp",
-            split_gate_up=cache_config.split_gate_up,
         )
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
@@ -386,7 +385,6 @@ class LlamaModel(nn.Module):
                 ["hidden_states", "residual"], config.hidden_size))
 
         self.split_qkv = cache_config.split_qkv
-        self.split_gate_up = cache_config.split_gate_up
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -449,7 +447,11 @@ class LlamaModel(nn.Module):
                 (".qkv_proj.k_proj", ".k_proj", "k"),
                 (".qkv_proj.v_proj", ".v_proj", "v"),
             ]
-        if not self.split_gate_up:
+
+        # If MLP bias is enabled, we run the gate and up projections separately
+        # to pipeline the bias addition.
+        mlp_bias = getattr(self.config, "mlp_bias", False)
+        if not mlp_bias:
             stacked_params_mapping.extend([
                 # (param_name, shard_name, shard_id)
                 (".gate_up_proj", ".gate_proj", 0),

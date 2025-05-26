@@ -399,7 +399,6 @@ class EngineArgs:
     model_impl: str = ModelConfig.model_impl
 
     split_qkv: Optional[bool] = False
-    split_gate_up: Optional[bool] = False
     calculate_kv_scales: bool = CacheConfig.calculate_kv_scales
 
     additional_config: Optional[Dict[str, Any]] = None
@@ -863,11 +862,6 @@ class EngineArgs:
             action='store_true',
             default=EngineArgs.split_qkv,
             help='Whether to separate q, k and v calculations.')
-        parser.add_argument(
-            '--split-gate-up',
-            action='store_true',
-            default=EngineArgs.split_gate_up,
-            help='Whether to separate gate and up calculations.')
         # vLLM arguments
         # vllm_kwargs = get_kwargs(VllmConfig)
         vllm_group = parser.add_argument_group(
@@ -1060,7 +1054,6 @@ class EngineArgs:
             cpu_offload_gb=self.cpu_offload_gb,
             calculate_kv_scales=self.calculate_kv_scales,
             split_qkv=self.split_qkv,
-            split_gate_up=self.split_gate_up,
         )
 
         # Get the current placement group if Ray is initialized and
