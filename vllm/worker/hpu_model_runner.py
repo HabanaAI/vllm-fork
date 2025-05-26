@@ -1671,6 +1671,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_lens_tensor=None,
             encoder_seq_lens=encoder_seq_lens,
             encoder_seq_lens_tensor=encoder_seq_lens_tensor,
+            max_encoder_seq_len=max(encoder_seq_lens, default=0),
             cross_block_list=cross_block_list,
             cross_block_groups=cross_block_groups,
             cross_block_usage=cross_block_usage,
@@ -2434,7 +2435,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
         if os.getenv('VLLM_FULL_WARMUP',
-                     'true').strip().lower() in ("1", "true"):
+                     'false').strip().lower() in ("1", "true"):
             # Since the model is warmed up for all possible tensor sizes,
             # Dynamo can skip checking the guards
             torch.compiler.set_stance(skip_guard_eval_unsafe=True)
