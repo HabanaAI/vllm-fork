@@ -33,7 +33,6 @@ if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
 else:
     flashinfer_top_k_top_p_sampling = None
 
-# Get Intel HPU arguments passed to torch compile
 htc_config = hpu_utils.HPUCompileConfig()
 
 
@@ -295,11 +294,6 @@ class Sampler(nn.Module):
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
-
-
-#        probs = torch.softmax(logits, dim=-1, dtype=torch.float) # MOVED TO FUNCTION
-# Compute the log probabilities.
-#        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float) # MOVED TO FUNCTION
         (probs, logprobs) = self.compute_probs_and_logprobs(logits)
 
         # Sample the next tokens.
