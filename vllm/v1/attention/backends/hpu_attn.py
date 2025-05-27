@@ -40,32 +40,10 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
     context_lens_tensor: Optional[torch.Tensor]
 
     @classmethod
-    def make_prefill_metadata(cls, seq_lens_tensor, num_prefills,
-                              input_positions, num_prefill_tokens,
-                              slot_mapping, attn_bias):
-        return cls(is_prompt=True,
-                   block_list=None,
-                   block_mapping=None,
-                   block_usage=None,
-                   block_indices=None,
-                   block_offsets=None,
-                   block_groups=None,
-                   attn_bias=attn_bias,
-                   num_decode_tokens=0,
-                   context_lens_tensor=None,
-                   multi_modal_placeholder_index_maps=None,
-                   seq_lens_tensor=seq_lens_tensor,
-                   num_prefills=num_prefills,
-                   input_positions=input_positions,
-                   num_prefill_tokens=num_prefill_tokens,
-                   slot_mapping=slot_mapping,
-                   enable_kv_scales_calculation=False)
-
-    @classmethod
-    def make_cached_prefill_metadata(cls, seq_lens_tensor, context_lens_tensor,
-                                     num_prefills, num_prefill_tokens,
-                                     input_positions, slot_mapping, block_list,
-                                     attn_bias):
+    def make_prefill_metadata(cls, seq_lens_tensor, context_lens_tensor,
+                              num_prefills, num_prefill_tokens,
+                              input_positions, slot_mapping, block_list,
+                              attn_bias):
         return cls(is_prompt=True,
                    block_list=block_list,
                    block_mapping=None,
