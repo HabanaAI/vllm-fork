@@ -1,12 +1,14 @@
-from vllm import LLM, SamplingParams
-
+# SPDX-License-Identifier: Apache-2.0
 import argparse
 import os
-from typing import List, Tuple
-from transformers import (PreTrainedTokenizerBase, AutoTokenizer)
 import random
-import datasets
 import time
+from typing import List, Tuple
+
+import datasets
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
+
+from vllm import LLM, SamplingParams
 
 # get file location
 file_path = os.path.abspath(__file__)
@@ -223,9 +225,10 @@ if __name__ == "__main__":
     elif args.dataset == "pile":
 
         def reset_seed(seed=42):
-            import torch
             import random
+
             import numpy as np
+            import torch
 
             torch.manual_seed(seed)
             np.random.seed(seed)
@@ -250,9 +253,9 @@ if __name__ == "__main__":
             return prompt_token_ids
 
         def get_pile_prompts(model_name, num_samples=512):
+            import transformers
             from datasets import load_dataset
             from tqdm import tqdm
-            import transformers
 
             least_tokens = 1024
             seed = 42

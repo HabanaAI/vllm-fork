@@ -138,7 +138,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                     use_prepack=envs.VLLM_CPU_MOE_PREPACK,
                 )
             else:
-                raise NotImplementedError("CPU MOE only supports x86 arch.")        
+                raise NotImplementedError("CPU MOE only supports x86 arch.")
 
     def apply(
         self,
@@ -294,10 +294,10 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         topk_ids = topk_ids.view(*x.shape[:-1], -1)
         topk_weights = topk_weights.view(*x.shape[:-1], -1)
         if layer.quant_config is None:  #BF16
-            if hasattr(layer.moe_op, "w13_weight"):                
+            if hasattr(layer.moe_op, "w13_weight"):
                 layer.moe_op.w13_weight = layer.w13_weight
 
-            if hasattr(layer.moe_op, "w2_weight"):                
+            if hasattr(layer.moe_op, "w2_weight"):
                 layer.moe_op.w2_weight = layer.w2_weight
         return layer.moe_op(
             x,
@@ -611,8 +611,10 @@ class FusedMoE(torch.nn.Module):
                            tp_rank=tp_rank,
                            expert_id=expert_id)
 
-    def _load_per_channel_weight_scale(self, expert_data: torch.Tensor,
-                                       shard_dim: int, shard_id: str,
+    def _load_per_channel_weight_scale(self,
+                                       expert_data: torch.Tensor,
+                                       shard_dim: int,
+                                       shard_id: str,
                                        loaded_weight: torch.Tensor,
                                        tp_rank: int,
                                        expert_id: Optional[int] = None):
@@ -649,7 +651,7 @@ class FusedMoE(torch.nn.Module):
             assert shard_id == "w3"
             expert_data = expert_data.narrow(shard_dim, shard_size, shard_size)
         expert_data.copy_(loaded_weight)
-        
+
         if is_hpu and isinstance(self.quant_method, UnquantizedFusedMoEMethod):
             self.moe_op.w13_list[expert_id].set_weight(orig_exp_data)
 
@@ -790,7 +792,7 @@ class FusedMoE(torch.nn.Module):
             # specific to each case
             quant_method = getattr(param, "quant_method", None)
             if (quant_method == FusedMoeWeightScaleSupported.CHANNEL.value
-                or current_platform.is_hpu()):
+                    or current_platform.is_hpu()):
                 self._load_per_channel_weight_scale(
                     shard_id=shard_id,
                     shard_dim=shard_dim,

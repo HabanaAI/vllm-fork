@@ -29,7 +29,7 @@ pip install -e .
 ## 2. FP8
 
 
-- Calibration 
+- Calibration
 
 ```bash
 cd vllm-fork/scripts/qwen3
@@ -58,12 +58,12 @@ set EP size:
 export VLLM_EP_SIZE=<number of cards>
 ex. VLLM_EP_SIZE=8
 ```
-if num_tokens exceed the VLLM_DYNAMIC_MOE_MIN_TOKENS,dynamic MoE is used since its performance is 
+if num_tokens exceed the VLLM_DYNAMIC_MOE_MIN_TOKENS,dynamic MoE is used since its performance is
 better than static MoE in this case.
 ```
 export VLLM_DYNAMIC_MOE_MIN_TOKENS=<int value>
 ```
-default value is 256 
+default value is 256
 
 if the number of expert on a single card is smaller than VLLM_DYNAMIC_MOE_MIN_EXPERTS_SINGLEHPU, dynamic MoE
 is used since its performance is better than static MoE in this case.

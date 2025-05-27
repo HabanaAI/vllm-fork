@@ -237,7 +237,7 @@ def run_vllm(
                 ignore_eos=True,
             ))
         end = time.perf_counter()
-    
+
     save_prompt_response(save_results, outputs)
     return end - start, outputs
 
