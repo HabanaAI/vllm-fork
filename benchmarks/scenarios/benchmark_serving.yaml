@@ -1,0 +1,54 @@
+deepseek-r1-distill-llama-70b-bf16:
+  docker: docker run -it --rm \
+    -e http_proxy=$http_proxy -e https_proxy=$https_proxy -e no_proxy=$no_proxy \
+    -e HF_HOME=/mnt/hf_cache \    
+    -v /mnt/hf_cache:/mnt/hf_cache \
+    --cap-add=sys_nice \
+    --ipc=host \
+    --runtime=habana \
+    -e HF_TOKEN=${HF_TOKEN} \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -p 8000:8000 \
+    -e model=deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
+    --name vllm-server \
+    ${CPREFIX}${CNAME}
+  test: 
+  eval: python evaluation.py
+
+
+# input_tok=2048
+# output_tok=2048
+# con_req=64
+# numprompt_mult=10
+# num_prompts=$(( con_req*numprompt_mult ))
+
+python3 vllm-fork/benchmarks/benchmark_serving.py \
+llama-3.3-70b-instruct-bf16:
+  docker: docker run -it --rm \
+    -e http_proxy=$http_proxy -e https_proxy=$https_proxy -e no_proxy=$no_proxy \
+    -e HF_HOME=/mnt/hf_cache \    
+    -v /mnt/hf_cache:/mnt/hf_cache \
+    --cap-add=sys_nice \
+    --ipc=host \
+    --runtime=habana \
+    -e HF_TOKEN=${HF_TOKEN} \
+    -e HABANA_VISIBLE_DEVICES=all \
+    -p 8000:8000 \
+    -e model=meta-llama/Llama-3.3-70B-Instruct\
+    --name vllm-server \
+    ${CPREFIX}${CNAME}
+  test: python3 vllm-fork/benchmarks/benchmark_serving.py \
+                 --model model=meta-llama/Llama-3.3-70B-Instruct \
+                 --base-url http://localhost:8000 \
+                 --backend vllm \
+                 --dataset-name sonnet \
+                 --dataset-path vllm-fork/benchmarks/sonnet.txt \
+                 --sonnet-prefix-len 100 \
+                 --sonnet-input-len 2048 \
+                 --sonnet-output-len 2048 \
+                 --ignore-eos \
+                 --trust-remote-code \
+                 --num-prompts 640 \
+                 --max-concurrency 64 \
+                 --metric-percentiles 90
+  eval: python evaluation.py
