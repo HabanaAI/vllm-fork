@@ -652,6 +652,12 @@ class CachedStepOutput:
     token_ids: torch.Tensor
     logprobs: Optional[List[SampleLogprobs]] = None
 
+    def __init__(self,
+                 token_ids: torch.Tensor,
+                 logprobs: Optional[List[SampleLogprobs]] = None):
+        self.token_ids = token_ids
+        self.logprobs = logprobs
+
 
 class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     """
