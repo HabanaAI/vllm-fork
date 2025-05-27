@@ -456,6 +456,34 @@ class HpuModelAdapter(torch.nn.Module):
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
+            #breakpoint()
+            '''
+            (Pdb) type(kwargs['pixel_values'])
+<class 'list'>
+(Pdb) len(kwargs['pixel_values'])
+2
+(Pdb) kwargs['pixel_values'][0].device
+device(type='cpu')
+(Pdb) kwargs['pixel_values'][1].device
+device(type='cpu')
+(Pdb) kwargs['pixel_values'][0].shape
+torch.Size([5, 3, 896, 896])
+(Pdb) kwargs['pixel_values'][1].shape
+torch.Size([1, 3, 896, 896])
+
+
+for bs=1, its not a list
+(Pdb)  type(kwargs['pixel_values'])
+<class 'torch.Tensor'>
+(Pdb) kwargs['pixel_values'].device
+device(type='hpu', index=0)
+(Pdb) kwargs['pixel_values'].shape
+torch.Size([1, 5, 3, 896, 896])
+(Pdb)
+
+
+
+            '''
             hidden_states = self.model(*args, **kwargs)
             if not get_pp_group().is_last_rank:
                 return hidden_states
@@ -1521,7 +1549,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     sliding_window_blocks = (self.sliding_window //
                                              self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
+
                 block_tables.append(block_table)
+
 
         if output is None:
             input_tokens = torch.tensor(input_tokens,
@@ -2748,6 +2778,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 "virtual_engine": model_input.virtual_engine,
                 **(model_input.multi_modal_kwargs or {}),
             }
+            #breakpoint()
+            ###  model_input.multi_modal_kwargs['pixel_values']
             if previous_hidden_states is not None:
                 # HPU will pad up to block_size,
                 # pad previous_hidden_states as well
