@@ -5,10 +5,11 @@ ARG BASE_NAME=ubuntu22.04
 ARG PT_VERSION=2.6.0
 ARG REVISION=latest
 ARG REPO_TYPE=habanalabs
-# Parameterize commit/branch for vllm-fork checkout
-ARG VLLM_FORK_COMMIT=v0.7.2+Gaudi-1.21.0
 
 FROM ${DOCKER_URL}/${VERSION}/${BASE_NAME}/${REPO_TYPE}/pytorch-installer-${PT_VERSION}:${REVISION}
+
+# Parameterize commit/branch for vllm-fork checkout
+ARG VLLM_FORK_COMMIT=v0.7.2+Gaudi-1.21.0
 
 ENV OMPI_MCA_btl_vader_single_copy_mechanism=none
 
@@ -17,11 +18,15 @@ RUN apt update && \
     ln -sf /usr/bin/python3 /usr/bin/python
 WORKDIR /root
 
-# Install vllm-fork inside the container
-ENV VLLM_TARGET_DEVICE=hpu
+# Clone the vllm-fork repository
 RUN git clone https://github.com/HabanaAI/vllm-fork.git && \
     cd vllm-fork && \
-    git checkout ${VLLM_FORK_COMMIT} && \
+    git fetch -t && \
+    git checkout ${VLLM_FORK_COMMIT}
+
+# Install vllm-fork inside the container
+ENV VLLM_TARGET_DEVICE=hpu
+RUN cd vllm-fork && \
     pip install -v -e .
 
 # Install additional Python packages
@@ -29,8 +34,9 @@ RUN pip install datasets && \
     pip install pandas
 
 # Copy utility scripts and configuration
-RUN mkdir -p /root/scripts
-COPY entrypoint.sh vllm_autocalc.py settings_vllm.csv template_vllm_server.sh varlist* perftest* /root/scripts
+RUN mkdir -p /root/scripts/settings/
+COPY entrypoint.sh vllm_autocalc.py vllm_autocalc_rules.py template_vllm_server.sh varlist* /root/scripts/
+COPY settings/settings_vllm.csv settings/defaults.yaml settings/varlist_conf.yaml /root/scripts/settings/
 RUN chmod +x /root/scripts/*.sh
 WORKDIR /root/scripts
 
