@@ -24,15 +24,19 @@ class ModelRequestData(NamedTuple):
 image_urls = []
 if num_imgs == 1:
     image_urls = [Image.open('jr.png').convert("RGB")]
-elif num_imgs == 2:
-    image_urls = [Image.open('jr.png').convert("RGB") for _ in range(2)]
+elif num_imgs == 5:
+    image_urls = [Image.open(f'popeye{i}.png').convert("RGB") for i in range(5)] # split this into 5 images: https://en.wikipedia.org/wiki/Popeye#/media/File:First_Popeye_Strip,_East_Liverpool_Review,_1929-01-17,_p12.jpg
 #question = "What is the name of the person in the form?"
-if num_imgs > 0:
+if num_imgs == 1:
     question = xxx
-else:
+elif num_imgs == 5:
+    question = "Explain what is happening in these images. Explain the characters you see in great detail, what they are doing. What is the overall story, and why is it funny. Do you identify the people in the image. Explain in such great details so that someone could recreate the images by reading your answer."
+elif num_imgs == 0:
     question = "You are an AI designed to generate extremely long, detailed worldbuilding content. Your goal is to write a fictional encyclopedia with at least 4000 words of content. Do not stop early. Start by describing a fictional planet in detail. Include: \n1. Geography and climate zones (with rich, varied description).\n2. The history of all civilizations, from ancient to modern times.\n3. Cultures, belief systems, and mythologies along with rich detail about where such beliefs came from.\n4. Political structures and conflicts along with their history.\n5. Technology and magic systems (if any) spanning the last 1000 years, highlighting significant discoveries and figures.\n6. Major historical events and characters along with their geneology.\n\n Be descriptive, verbose, and never summarize. Write in a factual tone like an academic encyclopedia. Begin your entry below:"
     question00 = "Generate a list by repeating this 10000 times: hello, world, cat, dog"
     question2 = "Generate all numbers from 1 to 6000, separate them with commas"
+else:
+    assert False
 
 model_name = "google/gemma-3-4b-it"
 #model_name = 'google/gemma-2-2b-it'
