@@ -501,6 +501,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         )
 
         model_execute_time = time.perf_counter() - start_time
+        res = None
         if not get_pp_group().is_last_rank:
             # output is IntermediateTensors
             assert isinstance(output, IntermediateTensors)
@@ -510,20 +511,23 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     model_execute_time + orig_model_execute_time)
             get_pp_group().send_tensor_dict(output.tensors,
                                             all_gather_group=get_tp_group())
-            return [None]
-        if (self.observability_config is not None
-                and self.observability_config.collect_model_execute_time
-                and output is not None):
-            for o in output:
-                o.model_execute_time = (orig_model_execute_time +
-                                        model_execute_time)
-
-        # output is List[SamplerOutput]
+            # return [None]
+            res = [None]
+        else:
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_execute_time
+                    and output is not None):
+                for o in output:
+                    o.model_execute_time = (orig_model_execute_time +
+                                            model_execute_time)
+            # output is List[SamplerOutput]
+            # return output
+            res = output
         import habana_frameworks.torch as htorch  # noqa:F401
         htorch.core.mark_step()
         torch.hpu.synchronize()
         update_mem(_input_shape)
-        return output
+        return res
 
     def _execute_model_spmd(
         self,
