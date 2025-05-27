@@ -501,7 +501,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 _input_tokens = model_input.input_tokens
                 _input_shape = _input_tokens.shape
             else:
-                _hidden_states = intermediate_tensors.get("hidden_states", None)
+                _hidden_states = intermediate_tensors.tensors.get("hidden_states", None)
                 if _hidden_states is not None:
                     _input_shape = _hidden_states.shape
         except:
