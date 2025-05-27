@@ -295,7 +295,21 @@ def update_mem(shape=None):
             msg += f"{key}: {str(memory_stats[key])}, "
         logger.warning(msg)
 
+import sys
+import pdb
 
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that may be used
+    from a forked multiprocessing child
+
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
 class LocalOrDistributedWorkerBase(WorkerBase):
     """
     Partial implementation of WorkerBase that has a default `execute_model`
@@ -483,11 +497,13 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     "model_execute_time", torch.tensor(0)).item()
         _input_shape = None
         try:
-            _input_tokens = model_input.input_tokens
-            _input_shape = _input_tokens.shape
-            _hidden_states = intermediate_tensors.get("hidden_states", None)
-            if _hidden_states is not None:
-                _input_shape = _hidden_states.shape
+            if not get_pp_group().is_last_rank:
+                _input_tokens = model_input.input_tokens
+                _input_shape = _input_tokens.shape
+            else:
+                _hidden_states = intermediate_tensors.get("hidden_states", None)
+                if _hidden_states is not None:
+                    _input_shape = _hidden_states.shape
         except:
             _input_shape = "unknown"
         
