@@ -504,6 +504,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 _hidden_states = intermediate_tensors.tensors.get("hidden_states", None)
                 if _hidden_states is not None:
                     _input_shape = _hidden_states.shape
+            _input_shape = [x for x in _input_shape]
         except:
             _input_shape = "unknown"
         
