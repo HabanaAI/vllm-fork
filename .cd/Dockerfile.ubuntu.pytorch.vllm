@@ -1,12 +1,13 @@
 # Parameterize base image components
-ARG VERSION=1.22.0
-ARG BASE_NAME=ubuntu24.04
-ARG PT_VERSION=2.7.0
-ARG REVISION=270
+ARG DOCKER_URL=vault.habana.ai/gaudi-docker
+ARG VERSION=1.21.0
+ARG BASE_NAME=ubuntu22.04
+ARG PT_VERSION=latest
+ARG REVISION
 # Parameterize commit/branch for vllm-fork checkout
-ARG VLLM_FORK_COMMIT=master
+ARG VLLM_FORK_COMMIT=v0.7.2+Gaudi-1.21.0
 
-FROM artifactory-kfs.habana-labs.com/docker-local/${VERSION}/${BASE_NAME}/habanalabs/pytorch-installer-${PT_VERSION}:${VERSION}-${REVISION}
+FROM ${DOCKER_URL}/${VERSION}/${BASE_NAME}/habanalabs/pytorch-installer-${PT_VERSION}:${REVISION}
 
 ENV OMPI_MCA_btl_vader_single_copy_mechanism=none
 
@@ -23,7 +24,7 @@ RUN git clone https://github.com/HabanaAI/vllm-fork.git && \
 
 # Install additional Python packages
 RUN pip install datasets && \
-    pip install pandas
+    pip install pandasi
 
 # Copy utility scripts and configuration
 RUN mkdir -p /root/scripts
