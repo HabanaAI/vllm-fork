@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-
 # Copyright 2024 The Qwen team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
@@ -117,6 +116,7 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
                                 reduce_results=False,
                                 renormalize=config.norm_topk_prob,
                                 quant_config=quant_config,
+                                tp_size=self.tp_size,
                                 prefix=f"{prefix}.experts")
 
         self.gate = ReplicatedLinear(config.hidden_size,
@@ -135,7 +135,6 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
         router_logits, _ = self.gate(hidden_states)
         final_hidden_states = self.experts(hidden_states=hidden_states,
                                            router_logits=router_logits)
-        final_hidden_states = final_hidden_states
         if self.tp_size > 1:
             final_hidden_states = tensor_model_parallel_all_reduce(
                 final_hidden_states)
@@ -225,12 +224,12 @@ class Qwen3MoeAttention(nn.Module):
         # Add qk-norm
         q_by_head = q.view(*q.shape[:-1], q.shape[-1] // self.head_dim,
                            self.head_dim)
-        q_by_head = self.q_norm.forward_native(q_by_head)
+        q_by_head = self.q_norm(q_by_head)
         q = q_by_head.view(q.shape)
 
         k_by_head = k.view(*k.shape[:-1], k.shape[-1] // self.head_dim,
                            self.head_dim)
-        k_by_head = self.k_norm.forward_native(k_by_head)
+        k_by_head = self.k_norm(k_by_head)
         k = k_by_head.view(k.shape)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v)

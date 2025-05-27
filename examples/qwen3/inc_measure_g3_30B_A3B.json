@@ -1,0 +1,16 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "whitelist": {
+        "types": [],
+        "names": []
+    },
+    "blocklist": {
+        "types": [],
+        "names": ["lm_head"]
+    },
+    "quantize_weight": false,
+    "dump_stats_path": "./scripts/nc_workspace_measure_kvache_g3_30B_A3B/inc_measure_output"
+
+}
