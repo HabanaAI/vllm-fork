@@ -562,6 +562,79 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         pixel_values = image_input["pixel_values"]
         num_patches = image_input["num_patches"]
 
+        '''
+        For 5 images:
+
+         pixel_values.shape
+torch.Size([5, 3, 896, 896])
+
+        So we just have to warmup on batchsize.
+
+        Call stack:
+
+        -> outputs = llm.generate(
+  /root/sasarkar/vllm-fork/vllm/utils.py(1298)inner()
+-> return fn(*args, **kwargs)
+  /root/sasarkar/vllm-fork/vllm/entrypoints/llm.py(475)generate()
+-> outputs = self._run_engine(use_tqdm=use_tqdm)
+  /root/sasarkar/vllm-fork/vllm/entrypoints/llm.py(1460)_run_engine()
+-> step_outputs = self.llm_engine.step()
+  /root/sasarkar/vllm-fork/vllm/engine/llm_engine.py(1394)step()
+-> outputs = self.model_executor.execute_model(
+  /root/sasarkar/vllm-fork/vllm/executor/executor_base.py(140)execute_model()
+-> output = self.collective_rpc("execute_model",
+  /root/sasarkar/vllm-fork/vllm/executor/uniproc_executor.py(58)collective_rpc()
+-> answer = run_method(self.driver_worker, method, args, kwargs)
+  /root/sasarkar/vllm-fork/vllm/utils.py(2601)run_method()
+-> return func(*args, **kwargs)
+  /root/sasarkar/vllm-fork/vllm/worker/hpu_worker.py(293)execute_model()
+-> output = LocalOrDistributedWorkerBase.execute_model(
+  /root/sasarkar/vllm-fork/vllm/worker/worker_base.py(420)execute_model()
+-> output = self.model_runner.execute_model(
+  /usr/local/lib/python3.10/dist-packages/torch/utils/_contextlib.py(116)decorate_context()
+-> return func(*args, **kwargs)
+  /root/sasarkar/vllm-fork/vllm/worker/hpu_model_runner.py(2823)execute_model() <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+-> hidden_states = self.model.forward(
+  /usr/local/lib/python3.10/dist-packages/habana_frameworks/torch/hpu/graphs.py(763)forward()
+-> return wrapped_hpugraph_forward(
+  /usr/local/lib/python3.10/dist-packages/habana_frameworks/torch/hpu/graphs.py(604)wrapped_hpugraph_forward()
+-> return orig_fwd(*args, **kwargs)
+  /root/sasarkar/vllm-fork/vllm/worker/hpu_model_runner.py(459)forward()
+-> hidden_states = self.model(*args, **kwargs) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+  /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py(1742)_wrapped_call_impl()
+-> return self._call_impl(*args, **kwargs)
+  /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py(1848)_call_impl()
+-> return inner()
+  /usr/local/lib/python3.10/dist-packages/torch/nn/modules/module.py(1796)inner()
+-> result = forward_call(*args, **kwargs)
+  /root/sasarkar/vllm-fork/vllm/model_executor/models/gemma3_mm.py(737)forward()
+-> vision_embeddings = self.get_multimodal_embeddings(**kwargs)<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+  /root/sasarkar/vllm-fork/vllm/model_executor/models/gemma3_mm.py(706)get_multimodal_embeddings()
+-> return self._process_image_input(image_input)<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+
+        '''
+        '''
+        1 prompt case:
+        (Pdb) pixel_values.device
+device(type='hpu', index=0)
+(Pdb) pixel_values.dtype
+torch.float32
+(Pdb) pixel_values.shape
+torch.Size([5, 3, 896, 896])
+
+
+        2 prompt case
+         pixel_values.device
+device(type='cpu')   <<<<<<<<<<<<<< error
+(Pdb) pixel_values.dtype
+torch.float32
+(Pdb)  pixel_values.shape
+torch.Size([6, 3, 896, 896])
+
+        '''
+        # for a batch of size 2... with 1st having 5 img, 2nd having 1 img: we get: torch.Size([6, 3, 896, 896])
         image_features = self._image_pixels_to_features(
             self.vision_tower,
             pixel_values,
@@ -731,7 +804,19 @@ HPU vs GPU is about the same.... kind of sort of
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
-            #breakpoint()
+            # on hpu, called from here
+            '''
+            kwargs.keys()
+dict_keys(['num_crops', 'pixel_values'])
+kwargs['num_crops']
+tensor([[0, 0, 0, 0, 0]], device='hpu:0')
+
+
+kwargs['pixel_values'].shape
+torch.Size([1, 5, 3, 896, 896])
+
+
+            '''
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
             inputs_embeds = self.get_input_embeddings(input_ids,
