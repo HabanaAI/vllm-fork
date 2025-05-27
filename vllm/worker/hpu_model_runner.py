@@ -81,6 +81,9 @@ _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
+VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
+                                       'true').lower() == 'true'
+
 VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
@@ -245,7 +248,9 @@ def get_target_layer_suffix_list(model_type) -> list[str]:
     # model's decoder layer name differs from the default, it will need to
     # be specified here.
     decoder_layer_table = {
+        "chatglm": "GLMBlock",
         "gpt_bigcode": "BigCodeBlock",
+        "qwen": "QWenBlock",
     }
 
     return [
@@ -2272,6 +2277,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_patches=UNSET_NUM_PATCHES,
             is_lora_profile_run=True,
         )
+
+        logger.info(f"profiling run with {max_batch_size=}, {max_seq_len=}")
+        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
+                             False, True)
         return
 
     def warmup_scenario(self,
@@ -3003,6 +3012,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             tensor = torch.cat([tensor, padding])
         return tensor
 
+    def has_logits_processors(self, sampling_metadata):
+        return any(seq_group.sampling_params.logits_processors
+                   for seq_group in sampling_metadata.seq_groups)
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -3014,6 +3027,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
@@ -3252,6 +3266,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                    and self.is_driver_worker:
                     self._patch_prev_output()
 
+                if (use_delayed_sampling and self.is_driver_worker
+                        and self.has_logits_processors(sampling_metadata)):
+                    # when use_delayed_sampling if the computation
+                    # of logits depends on the sampled results
+                    # we obtain the actual sampled results in advance
+                    self._patch_prev_output()
                 # Compute the logits.
                 with self.profiler.record_event(
                         'internal',
@@ -3485,6 +3505,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         self.shutdown_inc()
 
     def _patch_prev_output(self):
+        if self.has_patched_prev_output:
+            return
         assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
             f'''Inputs and outputs are out of sync!
             {len(self.cached_step_inputs)} vs {len(self.cached_step_outputs)}'''
@@ -3512,3 +3534,4 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             # a cache recomputation and we only need to update the last token
             seq_data.output_token_ids_array[-1] = real_out
             seq_data._cached_all_token_ids[-1] = real_out
+        self.has_patched_prev_output = True

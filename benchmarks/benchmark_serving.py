@@ -726,6 +726,7 @@ def main(args: argparse.Namespace):
         result_json["model_id"] = model_id
         result_json["tokenizer_id"] = tokenizer_id
         result_json["num_prompts"] = args.num_prompts
+        result_json["prompts"] = [input_request.prompt for input_request in input_requests]
 
         # Metadata
         if args.metadata:

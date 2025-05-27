@@ -3,10 +3,12 @@
 import itertools
 import warnings
 from collections.abc import Sequence
+import os
 from contextlib import contextmanager
 from typing import Any, Callable, ClassVar, Optional, Union, cast, overload
 
 import cloudpickle
+import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
 from typing_extensions import TypeVar, deprecated
@@ -37,6 +39,7 @@ from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.outputs import (ClassificationRequestOutput, EmbeddingRequestOutput,
                           PoolingRequestOutput, RequestOutput,
                           ScoringRequestOutput)
+from vllm.platforms import current_platform
 from vllm.pooling_params import PoolingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import (BeamSearchParams, GuidedDecodingParams,
@@ -249,6 +252,7 @@ class LLM:
 
         self.request_counter = Counter()
         self.default_sampling_params: Union[dict[str, Any], None] = None
+        self.profiler = self._setup_profiler()
 
     def get_tokenizer(
         self,
@@ -256,6 +260,37 @@ class LLM:
     ) -> AnyTokenizer:
         return self.llm_engine.get_tokenizer_group().get_lora_tokenizer(
             lora_request)
+    
+    def _setup_profiler(self):
+        enable_profile = os.getenv("VLLM_ENGINE_PROFILER_ENABLED",
+                                   "false").lower() in ["true", "1"]
+        if not enable_profile:
+            return None
+        warmup = int(os.getenv("VLLM_ENGINE_PROFILER_WARMUP_STEPS", "0"))
+        steps = int(os.getenv("VLLM_ENGINE_PROFILER_STEPS", "1"))
+        repeat = int(os.getenv("VLLM_ENGINE_PROFILER_REPEAT", "1"))
+        schedule = torch.profiler.schedule(wait=0,
+                                           warmup=warmup,
+                                           active=steps,
+                                           repeat=repeat)
+        activities = [ torch.profiler.ProfilerActivity.CPU ]
+        if current_platform.is_cuda():
+            activities.append(torch.profiler.ProfilerActivity.CUDA)
+        elif current_platform.is_hpu():
+            activities.append(torch.profiler.ProfilerActivity.HPU)
+            # from habana_frameworks.torch.activity_profiler import DebugActivity
+            # debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
+        profiler = torch.profiler.profile(
+            schedule=schedule,
+            activities=activities,
+            # debug_activities=debug_activities,
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                '.', use_gzip=True),
+            record_shapes=False,
+            with_modules=False,
+            profile_memory=False,
+            with_stack=True)
+        return profiler
 
     def set_tokenizer(self, tokenizer: AnyTokenizer) -> None:
         tokenizer_group = self.llm_engine.get_tokenizer_group()
@@ -1456,6 +1491,8 @@ class LLM:
         outputs: list[Union[RequestOutput, PoolingRequestOutput]] = []
         total_in_toks = 0
         total_out_toks = 0
+        if self.profiler:
+            self.profiler.start()
         while self.llm_engine.has_unfinished_requests():
             step_outputs = self.llm_engine.step()
             for output in step_outputs:
@@ -1478,9 +1515,15 @@ class LLM:
                             pbar.update(n)
                         else:
                             pbar.update(1)
+            if self.profiler:
+                self.profiler.step()
 
         if use_tqdm:
             pbar.close()
+
+        if self.profiler:
+            torch.hpu.synchronize()
+            self.profiler.stop()
 
         # Make sure that all workers are finished
         # NOTE(kzawora): this crashes on v1, why?

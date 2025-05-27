@@ -23,6 +23,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Qwen2 model compatible with HuggingFace weights."""
+import os
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -54,12 +55,13 @@ from vllm.sequence import IntermediateTensors, PoolerOutput
 
 from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, WeightsMapper,
-                    is_pp_missing_parameter,
+                    get_input_mask, is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 
 logger = init_logger(__name__)
 
+is_hpu = current_platform.is_hpu()
 
 class Qwen2MLP(nn.Module):
 
@@ -112,6 +114,8 @@ class Qwen2Attention(nn.Module):
                  prefix: str = "",
                  attn_type: str = AttentionType.DECODER) -> None:
         super().__init__()
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
         self.total_num_heads = num_heads

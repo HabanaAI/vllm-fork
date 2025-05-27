@@ -8,7 +8,7 @@ import random
 import time
 import warnings
 from functools import cache
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 import torch
 import uvloop
@@ -22,6 +22,7 @@ from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 
+from vllm import RequestOutput
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.entrypoints.openai.api_server import (
     build_async_engine_client_from_engine_args)
@@ -33,6 +34,23 @@ from vllm.outputs import RequestOutput
 from vllm.sampling_params import BeamSearchParams
 from vllm.transformers_utils.tokenizer import AnyTokenizer, get_lora_tokenizer
 from vllm.utils import FlexibleArgumentParser, merge_async_iterators
+
+
+def save_prompt_response(json_path: str, outputs: List[RequestOutput]):
+    if not json_path:
+        return
+    print("saving results ...")
+    records = []
+    for output in outputs:
+        record = {
+            "Prompt": output.prompt,
+            "Generated text": output.outputs[0].text
+        }
+        records.append(record)
+    with open(json_path, "w", encoding='utf-8') as file:
+        for record in records:
+            json_record = json.dumps(record)
+            file.write(json_record + "\n")
 
 
 def _get_prompt_for_image_model(question: str, *, model: str) -> str:
@@ -160,6 +178,7 @@ def run_vllm(
     n: int,
     engine_args: EngineArgs,
     disable_detokenize: bool = False,
+    save_results: Optional[str] = None,
 ) -> tuple[float, Optional[list[RequestOutput]]]:
     from vllm import LLM, SamplingParams
     llm = LLM(**dataclasses.asdict(engine_args))
@@ -218,6 +237,8 @@ def run_vllm(
                 ignore_eos=True,
             ))
         end = time.perf_counter()
+    
+    save_prompt_response(save_results, outputs)
     return end - start, outputs
 
 
@@ -494,7 +515,7 @@ def main(args: argparse.Namespace):
         else:
             elapsed_time, request_outputs = run_vllm(
                 requests, args.n, EngineArgs.from_cli_args(args),
-                args.disable_detokenize)
+                args.disable_detokenize, args.save_results)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -704,6 +725,10 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help='Path to save the throughput results in JSON format.')
+    parser.add_argument('--save-results',
+                        type=str,
+                        default=None,
+                        help="Save inference results into file for checking")
     parser.add_argument("--async-engine",
                         action='store_true',
                         default=False,
