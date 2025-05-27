@@ -12,7 +12,6 @@ import torch
 import torch.nn as nn
 
 import vllm.envs as envs
-import vllm.hpu_utils as hpu_utils
 from vllm.model_executor.layers.utils import apply_penalties
 from vllm.model_executor.sampling_metadata import (SamplingMetadata,
                                                    SamplingTensors,
@@ -32,8 +31,6 @@ if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
     # yapf: enable
 else:
     flashinfer_top_k_top_p_sampling = None
-
-htc_config = hpu_utils.HPUCompileConfig()
 
 
 def get_sampler() -> torch.nn.Module:
@@ -221,13 +218,6 @@ class Sampler(nn.Module):
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
 
-    @torch.compile(**htc_config.get_compile_args())
-    def compute_probs_and_logprobs(
-            self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
-        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
-        return probs, logprobs
-
     def forward(
         self,
         logits: torch.Tensor,
@@ -294,7 +284,9 @@ class Sampler(nn.Module):
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
-        (probs, logprobs) = self.compute_probs_and_logprobs(logits)
+        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        # Compute the log probabilities.
+        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
         # Sample the next tokens.
         maybe_deferred_sample_results, maybe_sampled_tokens_tensor = _sample(
@@ -567,7 +559,6 @@ def _random_sample(
 # Note that we always sample with replacement.
 # probs will be modified in place, but this is fine, as we pass
 # in a copy already.
-@torch.compile(**htc_config.get_compile_args())
 def _multinomial(
     probs: torch.Tensor,
     num_samples: int,
