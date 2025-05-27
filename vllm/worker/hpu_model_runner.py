@@ -22,6 +22,7 @@ import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 import vllm_hpu_extension.environment as environment
+from attr import dataclass
 from vllm_hpu_extension.bucketing.common import get_bucketing_context
 from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.ops import LoraMask as LoraMask
@@ -57,8 +58,8 @@ from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalRegistry)
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
-                           Logprob, SequenceData, SequenceGroupMetadata,
-                           SequenceOutput)
+                           Logprob, SampleLogprobs, SequenceData,
+                           SequenceGroupMetadata, SequenceOutput)
 from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
                         make_mrope_positions_tensor_with_pad,
@@ -637,6 +638,12 @@ class ModelInputForHPUWithSamplingMetadata(ModelInputForHPU):
         return cls(**tensor_dict)
 
 
+@dataclass
+class CachedStepOutput:
+    token_ids: torch.Tensor
+    logprobs: Optional[List[SampleLogprobs]] = None
+
+
 class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     """
     Helper class for shared methods between GPU model runners.
@@ -743,7 +750,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # For both multi-step scheduling and delayed sampling
         self.is_single_step = \
             self.vllm_config.scheduler_config.num_scheduler_steps == 1
-        self.cached_step_outputs: List[Tuple[torch.Tensor, torch.Tensor]] = []
+        self.cached_step_outputs: List[CachedStepOutput] = []
         self.is_pooler = False
         self.is_causal = is_causal
         # For delayed sampling
@@ -2664,7 +2671,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 target_indices = [
                     cur_seq_id_pos.get(psi, -1) for psi in prev_seq_ids
                 ]
-                padding = self.cached_step_outputs[i][0].size(0) - len(
+                padding = self.cached_step_outputs[i].token_ids.size(0) - len(
                     target_indices)
                 target_indices.extend([-1] * padding)
                 target_indices = torch.tensor(
@@ -2672,7 +2679,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     device=model_input.input_tokens.device,
                     dtype=model_input.input_tokens.dtype)
                 model_input.input_tokens.index_copy_(
-                    0, target_indices, self.cached_step_outputs[i][0])
+                    0, target_indices, self.cached_step_outputs[i].token_ids)
                 htorch.core.mark_step()
 
         if not model_input.is_first_multi_step:
@@ -2894,7 +2901,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     )
                     if num_steps > 1:
                         output = output.sampled_token_ids
-                        self.cached_step_outputs.append((output, None))
+                        self.cached_step_outputs.append(
+                            CachedStepOutput(output))
                     if use_delayed_sampling and self.is_driver_worker:
                         token_ids = self._pad_to_max_num_seqs(
                             output.sampled_token_ids, DUMMY_TOKEN_ID)
@@ -2903,7 +2911,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         _, logprobs = get_logprobs(output.logprobs,
                                                    sampling_metadata,
                                                    sampling_results)
-                        self.cached_step_outputs.append((token_ids, logprobs))
+                        self.cached_step_outputs.append(
+                            CachedStepOutput(token_ids, logprobs))
                         self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
                 if use_delayed_sampling \
@@ -3035,10 +3044,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         sampler_outputs = []
         num_outputs = len(self.cached_step_outputs)
         for i in range(num_outputs):
-            next_token_ids, logprobs = self.cached_step_outputs.pop(0)
-            next_token_ids = next_token_ids.cpu().tolist()
+            step_output = self.cached_step_outputs.pop(0)
+            next_token_ids = step_output.token_ids.cpu().tolist()
             sampler_output = self._make_decode_output(
-                next_token_ids, logprobs,
+                next_token_ids, step_output.logprobs,
                 model_input.sampling_metadata.seq_groups)
             sampler_outputs.append(sampler_output)
 
@@ -3109,8 +3118,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             return
         model_input = self.cached_step_inputs.pop(0)
         delayed_output = self.cached_step_outputs.pop(0)
-        delayed_tokens = delayed_output[0].cpu().squeeze(-1).tolist()
-        delayed_logprobs = delayed_output[1][0]
+        delayed_tokens = delayed_output.token_ids.cpu().squeeze(-1).tolist()
+        delayed_logprobs = delayed_output.logprobs
         ctx = model_input.async_callback.keywords["ctx"]  # type: ignore
         # If there's no output to patch with, which is usually the case when
         # we're starting a new request after all requests are completed.
@@ -3134,4 +3143,5 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         for sg, real_logprobs in zip(
                 output_data.scheduler_outputs.scheduled_seq_groups,
                 delayed_logprobs):
-            sg.seq_group.first_seq.output_logprobs[-1] = real_logprobs
+            assert len(real_logprobs) == 1
+            sg.seq_group.first_seq.output_logprobs[-1] = real_logprobs[0]
