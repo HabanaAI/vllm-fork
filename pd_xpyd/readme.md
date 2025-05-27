@@ -32,25 +32,48 @@ make -j
 make install
 ```
 
+### Setting up RDMA (Optional)
+
+To enable RDMA for high-speed data transfer, follow these steps:
+
+```bash
+apt remove ibutils libpmix-aws
+wget https://www.mellanox.com/downloads/DOCA/DOCA_v2.10.0/host/doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
+dpkg -i doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
+apt-get update
+apt-get -y install doca-ofed
+
+# Check RDMA devices and network interfaces
+ibdev2netdev
+# Example output:
+# mlx5_0 port 1 ==> ens108np0 (Up)
+# mlx5_1 port 1 ==> ens9f0np0 (Up)
+# ...
+```
+
 ## PD Disaggregation Usage
 
 ### 1. Prepare and Modify `mooncake.json`
 
-Create and configure the `mooncake.json` file:
+Create and configure the `mooncake.json` file. Example configuration:
 
 ```json
 {
-    "local_hostname": "192.168.0.137",
-    "metadata_server": "etcd://192.168.0.137:2379",
-    "protocol": "tcp",
-    "device_name": "",
-    "master_server_address": "192.168.0.137:50001"
+     "local_hostname": "192.168.0.137",
+     "metadata_server": "etcd://192.168.0.137:2379",
+     "protocol": "tcp",
+     "device_name": "",
+     "master_server_address": "192.168.0.137:50001"
 }
 ```
 
-- Update `metadata_server` with the etcd address.
-- Update `master_server_address` with the Mooncake store master address. Use a high-speed network for optimal KV cache data transfer performance.
-- Update `local_hostname` with the node's IP address.
+- Set `metadata_server` to the etcd server address.
+- Set `master_server_address` to the Mooncake master node address.
+- Set `local_hostname` to the node's IP address.
+
+To use RDMA:
+- Change `protocol` to `rdma`.
+- Set `device_name` to the RDMA device name (e.g., `mlx5_0` or the interface name from `ibdev2netdev`).
 
 > **Note**: The `mooncake.json` configuration differs for prefill and decode instances. Update the IP addresses accordingly based on the specific setup.
 
