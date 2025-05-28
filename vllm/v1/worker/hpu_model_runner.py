@@ -1288,9 +1288,6 @@ class HPUModelRunner:
         attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
             seq_lens_tensor=query_lens,
             context_lens_tensor=context_lens,
-            num_prefills=len(req_ids),
-            num_prefill_tokens=total_tokens,
-            input_positions=token_positions,
             slot_mapping=token_slots,
             block_list=context_blocks,
             attn_bias=attn_bias)
