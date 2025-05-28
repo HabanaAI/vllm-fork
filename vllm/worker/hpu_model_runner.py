@@ -976,7 +976,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _compile(self, module):
         if not hasattr(self, '_compile_config'):
-            self._compile_config = hpu_utils.HPUCompileConfig()
+            self._compile_config = hpu_utils.HPUCompileConfig(self.parallel_config)
         return torch.compile(module, **self._compile_config.get_compile_args())
 
     def get_model(self) -> torch.nn.Module:
@@ -2281,7 +2281,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  is_pt_profiler_run=True)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
-            self._compile_config.set_dynamo_cache_limits(self.model_config.get_num_layers(),prompt_buckets, decode_buckets)
+            self._compile_config.set_dynamo_cache_limits(self.model_config.get_num_layers(self.parallel_config),prompt_buckets, decode_buckets)
         if self.skip_warmup:
             logger.info("Skipping warmup...")
             return

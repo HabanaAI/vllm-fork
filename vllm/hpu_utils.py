@@ -5,7 +5,7 @@ import torch._dynamo as dynamo
 # Get Intel HPU arguments to be passed to torch compile
 class HPUCompileConfig:
 
-    def __init__(self):
+    def __init__(self, num_layers):
         self.fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
                                    'false').strip().lower() in ("1", "true")
         self.dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
@@ -13,10 +13,16 @@ class HPUCompileConfig:
 
         # Check if FP8  is enabled and then set float specialization
         dynamo.config.specialize_float = True
+        if dynamo.config.specialize_float:
+            dynamo.config.cache_size_limit *= num_layers
 
         # modify size of dynamo cache
 
     def get_compile_args(self):
+
+        print("===> DYNAMO CONFIG CACHE SIZE LIMIT: {}",dynamo.config.cache_size_limit)                                       │
+        print("===> DYNAMO CONFIG ACCUMULATED CACHE SIZE LIMIT: {}",dynamo.config.accumulated_cache_size_limit)  
+
         if self.dynamic:
             return {
                 'backend': 'hpu_backend',
