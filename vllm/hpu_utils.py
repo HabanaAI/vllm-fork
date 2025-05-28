@@ -14,7 +14,7 @@ class HPUCompileConfig:
         # Check if FP8  is enabled and then set float specialization
         dynamo.config.specialize_float = True
         if dynamo.config.specialize_float:
-            dynamo.config.cache_size_limit *= num_layers
+            dynamo.config.cache_size_limit = num_layers * dynamo.config.cache_size_limit
 
         # modify size of dynamo cache
 
