@@ -133,7 +133,6 @@ def bool_helper(value):
 
 @dataclass
 class HpuEnvFlags:
-    skip_warmup: bool
     enable_bucketing: bool
     use_contiguous_pa: bool
     __env_var_cfg_type = collections.namedtuple('__env_var_cfg_type',
@@ -142,9 +141,6 @@ class HpuEnvFlags:
     @classmethod
     def get_env_var_cfg_map(cls):
         return {
-            "skip_warmup":
-            cls.__env_var_cfg_type('VLLM_SKIP_WARMUP', 'true',
-                                   cls.handle_boolean_env_var),
             "enable_bucketing":
             cls.__env_var_cfg_type('VLLM_ENABLE_BUCKETING', 'true',
                                    cls.handle_boolean_env_var),
@@ -165,13 +161,6 @@ class HpuEnvFlags:
     @staticmethod
     def env_var_post_init(env_var, val, vllm_config):
         match env_var:
-            case 'VLLM_SKIP_WARMUP':
-                val = True
-                if not val:
-                    logger.warning(
-                        "HPU warmup is currently not supported in V1. "
-                        "Forcing warmup off.")
-                    #val = True
             case 'VLLM_CONTIGUOUS_PA':
                 can_use_contiguous_pa = not vllm_config.cache_config.\
                     enable_prefix_caching
@@ -592,7 +581,8 @@ class HPUModelRunner:
         self.env_flags = HpuEnvFlags.build(vllm_config, update_env=True)
         self.enable_bucketing = self.env_flags.enable_bucketing
         self.use_contiguous_pa = self.env_flags.use_contiguous_pa
-        self.skip_warmup = self.env_flags.skip_warmup
+        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
+                                          'false').lower() == 'true'
 
         model_config = self.model_config
         cache_config = self.cache_config
@@ -2409,7 +2399,6 @@ class HPUModelRunner:
         if prompt_profile_cfg or decode_profile_cfg:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
-
         if self.skip_warmup:
             logger.info("Skipping warmup...")
             return
