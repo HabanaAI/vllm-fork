@@ -48,5 +48,6 @@ class HPUCompileConfig:
         dynamo.config.accumulated_cache_size_limit = max(
             cache_size_limit * 8,
             dynamo.config.accumulated_cache_size_limit)
+        print(f"Setting dynamo cache size limits to {dynamo.config.cache_size_limit} and accumulated cache size limits to {dynamo.config.accumulated_cache_size_limit}")
 
 
