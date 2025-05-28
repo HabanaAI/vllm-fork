@@ -358,11 +358,14 @@ class RandomDataset(BenchmarkDataset):
                 prompt, add_special_tokens=False)[:input_lens[i]]
             prompt = tokenizer.decode(re_encoded_sequence)
             total_input_len = prefix_len + int(input_lens[i])
+            output_len_expected = int(output_lens[i])
+            logger.info("prompt_len: %s, expected_output_len: %s", total_input_len, output_len_expected)
+            logger.info("total_input_len: %s, prompt: %s", total_input_len, prompt)
             requests.append(
                 SampleRequest(
                     prompt=prompt,
                     prompt_len=total_input_len,
-                    expected_output_len=int(output_lens[i]),
+                    expected_output_len=output_len_expected,
                 ))
         return requests
 
