@@ -7,6 +7,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
+import math
 import torch
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
@@ -503,6 +504,17 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
+            print(f"HPUAttentionImpl : sliding_window {self.sliding_window} q{query.shape},kv{key.shape}, attn_bias:{'True' if attn_metadata.attn_bias is not None else 'False'}, seq_len:{attn_metadata.seq_lens_tensor}")
+            if self.sliding_window:
+                attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor,
+                       self.sliding_window, query.dtype)
+
+                #TODO: Ideally we want to create this sliding_window_bias mask only
+                #once in the model_runner then only retrieve here.
+                #however query_len(attn_metadata.seq_lens_tensor) was incorrect value.
+                #Need to be further debugged.
+                #attn_bias = attn_metadata.sliding_window_att
+
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
@@ -516,12 +528,44 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
+            logger.info(f"HPUAttentionImpl DECODE : sliding_window {self.sliding_window}")
+            attn_bias = None
+            if self.sliding_window:
+                window_block = (self.sliding_window//len(attn_metadata.block_groups))
+                valid_block = (attn_metadata.block_groups == 0).sum().item()
+
+                if valid_block > window_block:
+                    #print(f"valid_block : {valid_block}, window_block{window_block}")
+                    attn_bias = attn_metadata.attn_bias
+                    block_usage = attn_metadata.block_usage
+
+                    block_usage[0:valid_block-window_block+1]=1
+                    mask = torch.arange(0,
+                                len(attn_metadata.block_groups),
+                                device='hpu',
+                                dtype=torch.int32).unsqueeze(0)
+                    mask = mask >= attn_metadata.block_usage.unsqueeze(-1)
+                    attn_bias = (torch.zeros_like(mask, dtype=torch.bfloat16).masked_fill_(
+                        mask, -math.inf))
+
+                    block_groups = attn_metadata.block_groups
+                    block_mapping = attn_metadata.block_mapping
+                    block_list = attn_metadata.block_list
+
+                    block_groups[1:valid_block-window_block+1]= -1
+                    block_mapping[1:valid_block-window_block+1] = 0
+                    block_list[1:valid_block-window_block+1]= 0
+                    #print(f"block_groups:{block_groups}")
+                    #print(f"block_mapping:{block_mapping}")
+                    #print(f"block_list:{block_list}")
+
+                   # Decoding run.
             output = HPUPagedAttention.forward_decode(
                 query=query,
                 block_mapping=attn_metadata.block_mapping,
-                block_bias=attn_metadata.attn_bias,
-                block_groups=attn_metadata.block_groups,
-                **self.common_attention_args(attn_metadata.block_list,
+                block_bias=attn_metadata.attn_bias if attn_bias is None else attn_bias,
+                block_groups=attn_metadata.block_groups if attn_bias is None else block_groups,
+                **self.common_attention_args(attn_metadata.block_list if attn_bias is None else block_list,
                                              key_cache, value_cache))
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
@@ -663,3 +707,40 @@ def _make_alibi_bias(
     if num_heads != num_kv_heads:
         bias = bias.unflatten(1, (num_kv_heads, num_heads // num_kv_heads))
     return bias
+
+
+
+def _make_sliding_window_bias(
+    batch_size: int,
+    seq_len: int,
+    query_lens_t: torch.tensor,
+    window_size:int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+
+    shift = 0
+    device = query_lens_t.device
+    # TODO: Currently both paddings are left padding.
+    # Validated with native sdpa. if need to use with FusedSDPA,
+    # the padding setting needs to be changed to Left or mask need to be changed to right padding.
+
+    # causal + sliding window (LEFT PADDING)
+    tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,dtype=dtype, fill_value=1)
+    mask = torch.tril(tensor, diagonal=shift)
+    mask = torch.triu(mask, diagonal=shift - window_size + 1)
+    attn_bias = torch.log(mask)
+
+
+    '''
+    # causal + sliding window + query_len (LEFT PADDING : Need kernel supports)
+    tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,fill_value=1)
+    mask = torch.tril(tensor, diagonal=shift)
+    len_mask = torch.arange(0, seq_len, device=device, dtype=torch.int32).view(seq_len,1)
+    len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size, 1, seq_len, 1)
+    len_mask = torch.where(len_mask == False, 1, 0)
+    mask = mask.logical_and(len_mask)
+    mask = torch.triu(mask, diagonal=shift - window_size + 1)
+    attn_bias =torch.where(mask,0, -math.inf)
+    '''
+
+    return attn_bias

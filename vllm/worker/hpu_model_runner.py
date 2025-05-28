@@ -339,6 +339,7 @@ class HpuModelAdapter(torch.nn.Module):
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
+
         mask = torch.arange(0,
                             self.block_size,
                             device=device,
@@ -1177,6 +1178,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_lens.append(seq_len)
 
             # NOTE: This only works for oooooooxxx style attention.
+            #import pdb;pdb.set_trace()
             if computed_block_nums is not None and len(
                     computed_block_nums) > 0 and self.sliding_window is None:
                 # Prefix is not supported with sliding_window
@@ -1263,11 +1265,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # block size is 4, the first two tokens are masked and the slot
             # mapping will be [-1, -1, 2, 3, 4, 5, 6, 7, 0, 1].
             start_idx = 0
+            '''
             if self.sliding_window is not None:
                 assert context_len == 0, (
                     "Prefix caching is currently not supported with "
                     "sliding window attention")
                 start_idx = max(0, seq_len - self.sliding_window)
+            '''
             for i in range(context_len, seq_len):
                 if i < start_idx:
                     slot_mapping[-1].append(_PAD_SLOT_ID)
@@ -1496,6 +1500,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(3):
                         input_mrope_positions[idx].extend(pos_for_mrope[idx])
 
+                #logger.info(f"Decode: seq_len:{seq_len}, sliding_window{self.sliding_window}")
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
                 seq_lens.append(seq_len)
@@ -1517,6 +1522,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
 
+                #logger.info(f"Decode: sliding_window:{self.sliding_window}, blocksize:{self.block_size}, block_table:{block_table}")
                 if self.sliding_window is not None:
                     sliding_window_blocks = (self.sliding_window //
                                              self.block_size)
@@ -1674,6 +1680,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
             encoder_seq_lens_tensor = encoder_seq_lens_tensor.to(  # type: ignore
                 self.device, non_blocking=True)
+
+        #print(f"block_list: :{block_list}")
+        #print(f"block_groups: :{block_groups}")
+        #print(f"block_usage: :{block_usage}")
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
