@@ -145,10 +145,6 @@ The following configurations have been validated to function with Gaudi 2 or Gau
 
 | **Model**   | **Tensor Parallelism [x HPU]**   | **Datatype**    | **Validated on**    |
 |:---    |:---:    |:---:    |:---:  |
-| [meta-llama/Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b)     | 1, 2, 8    | BF16   | Gaudi 2, Gaudi 3|
-| [meta-llama/Llama-2-7b-chat-hf](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)     | 1, 2, 8    | BF16    | Gaudi 2, Gaudi 3|
-| [meta-llama/Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b)     | 8    | BF16    | Gaudi 2, Gaudi 3|
-| [meta-llama/Llama-2-70b-chat-hf](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf)    | 8    | BF16    | Gaudi 2, Gaudi 3|
 | [meta-llama/Meta-Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B)     | 1, 2, 8    | BF16   | Gaudi 2, Gaudi 3|
 | [meta-llama/Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)     | 1, 2, 8    | BF16    | Gaudi 2, Gaudi 3|
 | [meta-llama/Meta-Llama-3-70B](https://huggingface.co/meta-llama/Meta-Llama-3-70B)     | 8    | BF16    |Gaudi 2, Gaudi 3|
