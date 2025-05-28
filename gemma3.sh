@@ -28,4 +28,4 @@ export VLLM_PROMPT_USE_FUSEDSDPA=False
 #export VLLM_DECODE_BLOCK_BUCKET_MAX=2048
 
 
-python gemma3.py 0
+python gemma3.py 5,1
