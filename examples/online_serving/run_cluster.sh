@@ -4,7 +4,7 @@
 Help() {
     # Display Help
     echo "Usage: $0 docker_image head_node_address --head|--worker path_to_hf_home"
-    echo "       [-h] [-d hpu|gpu] [-c true|false] [-- additional_args..."]
+    echo "       [-h] [-d hpu|gpu] [-c true|false]  [-n CONTAINER_NAME] [-- additional_args..."]
 }
 
 if [ $# -lt 4 ]; then
@@ -21,9 +21,10 @@ shift 4
 
 PLATFORM="gpu"
 CLEANUP_ON_EXIT="true"
+CONTAINER_NAME="node"
 
 # Get the options
-while getopts hd:c: flag; do
+while getopts hd:c:n: flag; do
     case $flag in
     h) # display Help
         Help
@@ -31,8 +32,10 @@ while getopts hd:c: flag; do
         ;;
     d) # get the device type
         PLATFORM=$OPTARG ;;
-    c) # get TP value
+    c) # get exit cleanup option
         CLEANUP_ON_EXIT=$OPTARG ;;
+    n) # get container name
+        CONTAINER_NAME=$OPTARG ;;
     \?) # Invalid option
         echo "Error: Invalid option"
         Help
@@ -55,8 +58,8 @@ fi
 
 # Define a function to cleanup on EXIT signal
 cleanup() {
-    docker stop node
-    docker rm node
+    docker stop $CONTAINER_NAME
+    docker rm $CONTAINER_NAME
 }
 if [[ "$CLEANUP_ON_EXIT" == "true" ]]; then
     trap cleanup EXIT
@@ -77,7 +80,7 @@ if [[ "$PLATFORM" == "hpu" ]]; then
         --entrypoint /bin/bash \
         --network host \
         --ipc=host \
-        --name node \
+        --name $CONTAINER_NAME \
         --runtime=habana \
         -e HABANA_VISIBLE_DEVICES=all \
         -e GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME} \
@@ -89,7 +92,7 @@ else
     docker run \
         --entrypoint /bin/bash \
         --network host \
-        --name node \
+        --name $CONTAINER_NAME \
         --shm-size 10.24g \
         --gpus all \
         -v "${PATH_TO_HF_HOME}:/root/.cache/huggingface" \
