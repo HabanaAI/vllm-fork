@@ -1492,6 +1492,9 @@ class HPUModelRunner:
             use_graphs = self._use_graphs(batch_size, seq_len, num_blocks,
                                           is_prompt)
             additional_kwargs.update({"bypass_hpu_graphs": not use_graphs})
+        else:
+            # no hpu graphs for t.compile?
+            use_graphs = False
         trimmed_attn_metadata = trim_attn_metadata(attn_metadata)
         if self.is_driver_worker:
             model_event_name = ("model_"
@@ -1997,10 +2000,6 @@ class HPUModelRunner:
                         kv_caches,
                         is_pt_profiler_run=True) -> None:
         """Dummy warmup run for memory usage and graph compilation."""
-        #if not is_prompt:
-        #    num_blocks = seq_or_block
-        #    seq_or_block = 1
-        print("warmup_scenario", batch_size, seq_or_block, num_blocks)
         query_seq_len = seq_or_block if is_prompt else 1
         input_ids = torch.zeros((batch_size, query_seq_len),
                                 dtype=torch.int32,
@@ -2039,7 +2038,7 @@ class HPUModelRunner:
         position_ids_device = _async_h2d_tensor_copy(position_ids, self.device)
         slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
         self.profiler.start('internal', scenario_name)
-        times = 1#3 if use_graphs or is_pt_profiler_run else 1
+        times = 3 if use_graphs or is_pt_profiler_run else 1
         for time_index in range(times):
             if is_prompt:
                 seq_lens = torch.zeros((batch_size),
@@ -2094,7 +2093,6 @@ class HPUModelRunner:
                     block_tables=block_tables,
                     slot_mapping=slot_mapping,
                     bucketing=True)
-                print(len(block_list))
                 block_list_device = _async_h2d_tensor_copy(block_list, self.device)
                 block_usage_device = _async_h2d_tensor_copy(
                     block_usage, self.device)
@@ -2192,13 +2190,10 @@ class HPUModelRunner:
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
-        print("buckets", buckets)
         for i, (batch_size, seq_len,
                 num_blocks) in enumerate(reversed(buckets)):
             phase = self._phase_warmup(is_prompt, num_blocks)
             self.log_warmup(phase, i, len(buckets), batch_size, seq_len,
-                            num_blocks)
-            print("warmup_all_buckets", phase, batch_size, seq_len,
                             num_blocks)
             self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt,
                                  kv_caches)
@@ -2447,10 +2442,8 @@ class HPUModelRunner:
         ) if can_use_compile_only_mode else contextlib.nullcontext():
             self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
                                     kv_caches)
-            print(self.bucketing_ctx.prompt_buckets)
             self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets,
                                     True, kv_caches)
-            print(self.bucketing_ctx.prefix_prefill_buckets)
             self.warmup_all_buckets(self.bucketing_ctx.decode_buckets, False,
                                     kv_caches)
 
