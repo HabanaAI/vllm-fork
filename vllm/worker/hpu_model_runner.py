@@ -995,14 +995,28 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _use_graphs(self, batch_size, seq_len, is_prompt, is_profile_run=False):
         if is_prompt and batch_size * seq_len > self.max_seq_len_to_capture:
+            logger.info(f"skip use graph as  is_prompt and batch_size * seq_len > self.max_seq_len_to_capture")
             return False
         if self.enforce_eager:
+            logger.info(f"skip use graph as enforce_eager is set to True")
             return False
         if is_profile_run:
+            logger.info(f"skip use graph as is_profile_run is set to True")
             return False
         if self.skip_warmup:
+            logger.info(f"using graph as skip_warmup is set to True")
             return True
-        return (batch_size, seq_len, is_prompt) in self.graphed_buckets
+        res = (batch_size, seq_len, is_prompt) in self.graphed_buckets
+        if res:
+            logger.info(
+                f"using graph as ({batch_size}, {seq_len}, {is_prompt}) "
+                "is in graphed buckets")
+        else:
+            logger.info(
+                f"not using graph as ({batch_size}, {seq_len}, {is_prompt}) "
+                "is not in graphed buckets")
+        return res
+
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -2076,6 +2090,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
+        VLLM_SKIP_WARMUP_ALL_BUCKETS = os.environ.get(
+            'VLLM_SKIP_WARMUP_ALL_BUCKETS', 'false').lower() == 'true'
+        if VLLM_SKIP_WARMUP_ALL_BUCKETS:
+            logger.info("Skipping warmup for all buckets...")
+            return
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
