@@ -33,12 +33,12 @@ class HPUCompileConfig:
             }
 
 
-    def set_dynamo_cache_limits(self, prompt_buckets, decode_buckets):
+    def set_dynamo_cache_limits(self, num_layers, prompt_buckets, decode_buckets):
         multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                     'true').lower() == 'true' else 1
         # If we have specialized float, we need to increase the cache size limit
         if dynamo.config.specialize_float:
-            multiplier *= 10
+            multiplier *= num_layers
         cache_size_limit = 1 + multiplier * (prompt_buckets +
                                              decode_buckets)
         dynamo.config.cache_size_limit = max(
