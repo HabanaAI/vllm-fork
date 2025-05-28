@@ -51,6 +51,8 @@ ibdev2netdev
 # ...
 ```
 
+> **Note**: If you are running RDMA inside a Docker container, add the `--privileged` flag to the `docker run` command to ensure proper hardware and network access.
+
 ## PD Disaggregation Usage
 
 ### 1. Prepare and Modify `mooncake.json`
