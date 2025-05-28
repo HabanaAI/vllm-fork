@@ -3130,6 +3130,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         delayed_tokens = delayed_tokens.cpu().squeeze(-1).tolist()
 
         delayed_logprobs = None
+        assert model_output.sampling_metadata is not None, \
+            'Sampling metadata is required to patch the output!'
         logprobs_required = any(
             seq_group.sampling_params.logprobs is not None
             for seq_group in model_output.sampling_metadata.seq_groups)
