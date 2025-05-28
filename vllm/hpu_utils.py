@@ -11,6 +11,11 @@ class HPUCompileConfig:
         self.dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
                                  'false').strip().lower() in ("1", "true")
 
+        # Check if FP8  is enabled and then set float specialization
+        dynamo.config.specialize_float = True
+
+        # modify size of dynamo cache
+
     def get_compile_args(self):
         if self.dynamic:
             return {
