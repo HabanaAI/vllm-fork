@@ -2497,20 +2497,29 @@ class HPUModelRunner:
                 # Not all prompt buckets were captured, but all decode buckets
                 # were captured and we have some free graph-allocated space
                 # left. Let's try to use it for capturing more prompt buckets.
-                if (mem_post_decode + mem_post_prompt < graph_free_mem
-                        and not prompt_captured_all and decode_captured_all):
-                    mem_post_prompt, _, prompt_captured_all = (
-                        self.warmup_graphs(
-                            prompt_strategy, self.bucketing_ctx.prompt_buckets,
-                            True, kv_caches,
-                            graph_free_mem - mem_post_prompt - mem_post_decode,
-                            mem_post_prompt, prompt_batch_seq))
+                if (mem_post_decode + mem_post_prompt + mem_post_prefix_prefill < graph_free_mem
+                        and not prompt_captured_all or not prefix_prefill_captured_all and decode_captured_all):
+                    if not prompt_captured_all:
+                        mem_post_prompt, _, prompt_captured_all = (
+                            self.warmup_graphs(
+                                prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                                True, kv_caches,
+                                graph_free_mem - mem_post_prompt - mem_post_prefix_prefill - mem_post_decode,
+                                mem_post_prompt, prompt_batch_seq))
+                        
+                    if not prefix_prefill_captured_all:
+                        mem_post_prefix_prefill, _, prefix_prefill_captured_all = (
+                            self.warmup_graphs(
+                                prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
+                                True, kv_caches,
+                                graph_free_mem - mem_post_prompt - mem_post_prefix_prefill - mem_post_decode,
+                                mem_post_prompt, prompt_batch_seq))
 
                 # Not all decode buckets were captured, but all prompt buckets
                 # were captured and we have some free graph-allocated space
                 # left. Let's try to use it for capturing more decode buckets.
-                if mem_post_decode + mem_post_prompt < graph_free_mem \
-                    and not decode_captured_all \
+                if mem_post_decode + mem_post_prefix_prefill + mem_post_prompt < graph_free_mem \
+                    and not decode_captured_all and prefix_prefill_captured_all \
                         and prompt_captured_all:
                     mem_post_decode, _, _ = self.warmup_graphs(
                         decode_strategy, self.bucketing_ctx.decode_buckets,
@@ -2520,6 +2529,9 @@ class HPUModelRunner:
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
+                self.log_graph_warmup_summary(
+                        self.bucketing_ctx.prefix_prefill_buckets, True,
+                        mem_post_prefix_prefill)
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.decode_buckets, False, mem_post_decode)
 
