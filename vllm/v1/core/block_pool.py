@@ -51,7 +51,7 @@ class BlockPool:
         if current_platform.is_hpu():
             self.free_block_queue = FreeKVCacheBlockQueueHPU(self.blocks)
         else:
-            self.free_block_queue = FreeKVCacheBlockQueue(self.blocks)
+            self.free_block_queue = FreeKVCacheBlockQueue(self.blocks)  # type: ignore
 
         # {block_hash: {block ID: block}}. A cached block is
         # a full block with a block hash that can be used for prefix caching.
