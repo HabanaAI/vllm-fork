@@ -134,7 +134,8 @@ export VLLM_PROMPT_BS_BUCKET_STEP=2
 export VLLM_GPU_MEMORY_UTILIZATION=0.8
 export VLLM_GRAPH_RESERVED_MEM=0.6
 # skip warmup no hpu graph buckets
-export VLLM_SKIP_WARMUP_ALL_BUCKETS="true"
+# export VLLM_SKIP_WARMUP_ALL_BUCKETS="true"
+export RAY_DEDUP_LOGS=0
 
 echo "Environments set for ${NUM_NODES}-node server: MAX_MODEL_LEN=${MAX_MODEL_LEN}, MAX_NUM_SEQS=${MAX_NUM_SEQS}, TP_SIZE=${TP_SIZE}, PP_SIZE=${PP_SIZE}, COMM_BACKEND=${COMM_BACKEND}"
 env | grep VLLM
