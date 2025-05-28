@@ -166,7 +166,7 @@ class HpuEnvFlags:
     def env_var_post_init(env_var, val, vllm_config):
         match env_var:
             case 'VLLM_SKIP_WARMUP':
-                val = False
+                val = True
                 if not val:
                     logger.warning(
                         "HPU warmup is currently not supported in V1. "
@@ -1483,12 +1483,19 @@ class HPUModelRunner:
         batch_size = token_ids.size(0)
         seq_len = self._seq_len(attn_metadata)
         num_blocks = self._num_blocks(attn_metadata)
-
+        #print("before", seq_len, num_blocks)
         is_prompt = attn_metadata.is_prompt
         phase = "prompt" if is_prompt else "decode"
-
+        '''if phase == 'decode':
+            if not warmup_mode:
+                num_blocks = seq_len
+            seq_len = 1'''
+        #print("after", seq_len, num_blocks)
+ 
         self._check_config(batch_size, seq_len, num_blocks, attn_metadata,
                            warmup_mode)
+        #print("check_config", batch_size, seq_len, num_blocks, phase)
+
         additional_kwargs = {}
         if htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
@@ -2000,8 +2007,25 @@ class HPUModelRunner:
                         kv_caches,
                         is_pt_profiler_run=True) -> None:
         """Dummy warmup run for memory usage and graph compilation."""
-
+        #if not is_prompt:
+        #    num_blocks = seq_or_block
+        #    seq_or_block = 1
+        print("warmup_scenario", batch_size, seq_or_block, num_blocks)
         query_seq_len = seq_or_block if is_prompt else 1
+        input_ids = torch.zeros((batch_size, query_seq_len),
+                                dtype=torch.int32,
+                                device='cpu')
+        position_ids = torch.zeros((batch_size, query_seq_len),
+                                   dtype=torch.int32,
+                                   device='cpu')
+        slot_mapping = torch.zeros((batch_size, query_seq_len),
+                                   dtype=torch.int64,
+                                   device='cpu')
+
+        input_ids_device = _async_h2d_tensor_copy(input_ids, self.device)
+        position_ids_device = _async_h2d_tensor_copy(position_ids, self.device)
+        slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
+
         phase = "prompt" if is_prompt else "decode"
         use_graphs = self._use_graphs(batch_size, query_seq_len, num_blocks,
                                       is_prompt)
@@ -2025,7 +2049,7 @@ class HPUModelRunner:
         position_ids_device = _async_h2d_tensor_copy(position_ids, self.device)
         slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
         self.profiler.start('internal', scenario_name)
-        times = 3 if use_graphs or is_pt_profiler_run else 1
+        times = 1#3 if use_graphs or is_pt_profiler_run else 1
         for time_index in range(times):
             if is_prompt:
                 seq_lens = torch.zeros((batch_size),
@@ -2072,16 +2096,16 @@ class HPUModelRunner:
                         block_size=self.block_size)
             else:
                 block_tables = [
-                    x.tolist() for x in np.array_split(np.arange(seq_or_block),
-                                                       batch_size)
+                    x.tolist()
+                    for x in np.array_split(np.arange(num_blocks), batch_size)
                 ]
                 block_list, block_groups, block_usage = \
                     self.get_habana_paged_attn_buffers(
                     block_tables=block_tables,
                     slot_mapping=slot_mapping,
                     bucketing=True)
-                block_list_device = _async_h2d_tensor_copy(
-                    block_list, self.device)
+                print(len(block_list))
+                block_list_device = _async_h2d_tensor_copy(block_list, self.device)
                 block_usage_device = _async_h2d_tensor_copy(
                     block_usage, self.device)
                 block_groups_device = _async_h2d_tensor_copy(
@@ -2095,16 +2119,16 @@ class HPUModelRunner:
                     slot_mapping=slot_mapping_device,
                     block_size=self.block_size)
 
-            logits_indices = torch.arange(0, batch_size, device='cpu')
-            logits_indices_device = _async_h2d_tensor_copy(
-                logits_indices, self.device)
-            # Dummy run.
-            htorch.core.mark_step()
-            logits = self._execute_model_generic(input_ids_device,
-                                                 position_ids_device,
-                                                 attn_metadata,
-                                                 logits_indices_device,
-                                                 kv_caches, True)
+        logits_indices = torch.arange(0, batch_size, device='cpu')
+        logits_indices_device = _async_h2d_tensor_copy(
+            logits_indices, self.device)
+        # Dummy run.
+        htorch.core.mark_step()
+        logits = self._execute_model_generic(input_ids_device,
+                                                position_ids_device,
+                                                attn_metadata,
+                                                logits_indices_device,
+                                                kv_caches, True)
 
         # TODO: do sampling on logits, warmup sampler and prefill joiner
         htorch.core.mark_step()
@@ -2178,10 +2202,13 @@ class HPUModelRunner:
         logger.info(msg)
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
+        print("buckets", buckets)
         for i, (batch_size, seq_len,
                 num_blocks) in enumerate(reversed(buckets)):
             phase = self._phase_warmup(is_prompt, num_blocks)
             self.log_warmup(phase, i, len(buckets), batch_size, seq_len,
+                            num_blocks)
+            print("warmup_all_buckets", phase, batch_size, seq_len,
                             num_blocks)
             self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt,
                                  kv_caches)
