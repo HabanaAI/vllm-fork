@@ -976,7 +976,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _compile(self, module):
         if not hasattr(self, '_compile_config'):
-            self._compile_config = hpu_utils.HPUCompileConfig(self.model_config.get_num_layers(self.parallel_config))
+            self._compile_config = hpu_utils.HPUCompileConfig(self.model_config.get_num_layers(self.parallel_config), self._is_quant_with_inc())
         return torch.compile(module, **self._compile_config.get_compile_args())
 
     def get_model(self) -> torch.nn.Module:
