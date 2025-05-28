@@ -882,13 +882,12 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         if padding_len <= 0:
             return pixel_values, image_grid_thw
 
-        logger_msg = "[Multimodal] Padding current number pixel " \
+        logger_msg = "Padding current number pixel " \
             + str(pixel_values.shape[0]) \
             + " to " \
             + str(desired_number_of_pixels)
         logger.info(logger_msg)
 
-        # needs to make sure padding_len is even
         assert padding_len % 64 == 0, 'padding needs to be multiple of 64'
 
         constant_value = -100
@@ -952,13 +951,9 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
     def forward(self, x: torch.Tensor, fullattn_mask: Optional[torch.Tensor],
                 rotary_pos_emb: torch.Tensor) -> torch.Tensor:
-        assert_msg = (
-            "Expect inputs to be 112x112 aligned. "
-            "Please align before sending image or use this version "
-            "of transformer that does the resizing/alignment automatically: "
-            "pip install "
-            "git+https://github.com/malkomes/transformers.git"
-            "@ac372cd18f836c41f57cdce46094db00019d4280")
+        assert_msg = ("Expect inputs to be 112x112 aligned. "
+                      "Please align before sending image and "
+                      "check PR #1163 description for more details")
         assert x.shape[0] % 64 == 0, assert_msg
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
@@ -985,17 +980,42 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         vision_buckets,
     ) -> torch.Tensor:
 
-        assert pixel_values.shape[0] % 64 == 0, (
-            f"We need image h/w to be aligned to 112 for now. "
-            f"Which will make pixel_values be a multiple of "
-            f"(112/14)*(112/14)=64"
-            f"(14 is patch size for ViT). "
-            f"Got pixel_values shape {pixel_values.shape[0]}"
-            f"Please install this version of transformer"
-            f"which automatically does the 112 alignment "
-            f"pip install git+https://github.com/malkomes/transformers.git"
-            f"@ac372cd18f836c41f57cdce46094db00019d4280 "
-            f"or pass in images that are 112 aligned")
+        num_patches = pixel_values.shape[0]
+        if num_patches % 64 != 0:
+            assert num_patches > 64, "Image needs to be at least 112 x 112"
+            logger_msg = (
+                f"QWEN 2.5VL for HPU is under development. "
+                f"Image height and width need to be multiples of 112 pixels. "
+                f"We are prunning the last visual tokens to comply with this "
+                f"requirement but this leads to accuracy degradation. "
+                f"See PR #1163 description.")
+            logger.warning_once(logger_msg)
+
+            # reshape grid_thw with multiples of 8
+            old_img_sizes = []
+            new_img_sizes = []
+            for img_idx in range(grid_thw.shape[0]):
+                img_shape = grid_thw[img_idx, :].tolist()
+                tt, hh, ww = img_shape
+                hh_new = (hh // 8) * 8
+                ww_new = (ww // 8) * 8
+                old_img_sizes.append(tt * hh * ww)
+                new_img_sizes.append(tt * hh_new * ww_new)
+                grid_thw[img_idx, 1] = hh_new
+                grid_thw[img_idx, 2] = ww_new
+
+            # truncate pixel_values to new shapes
+            copy_pointer = 0
+            paste_pointer = 0
+            for old_img_size, new_img_size in zip(old_img_sizes,
+                                                  new_img_sizes):
+                pixel_values[:, paste_pointer:paste_pointer + new_img_size] = \
+                    pixel_values[:, copy_pointer:copy_pointer + new_img_size]
+                copy_pointer += old_img_size
+                paste_pointer += new_img_size
+
+            pixel_values = pixel_values[:paste_pointer, :]
+
         offset = 0
         results = []
         # process each image one by one
@@ -1056,6 +1076,9 @@ class Qwen2_5_VLProcessingInfo(Qwen2VLProcessingInfo):
     ) -> Qwen2_5_VLProcessor:
         if fps is not None:
             kwargs["fps"] = fps
+
+        if current_platform.is_hpu():
+            min_pixels = 112 * 112
 
         return self.ctx.get_hf_processor(
             Qwen2_5_VLProcessor,
