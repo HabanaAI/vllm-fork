@@ -347,7 +347,7 @@ class HpuModelAdapter(torch.nn.Module):
                 self.model.visual, disable_tensor_cache=True)
             if hasattr(self.model, 'audio_tower'):
                 self.model.audio_tower = htorch.hpu.wrap_in_hpu_graph(
-                    self.model.audio_tower, disable_tensor_cache=True)
+                    self.model.audio_tower)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
