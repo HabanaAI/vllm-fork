@@ -20,8 +20,8 @@ class HPUCompileConfig:
 
     def get_compile_args(self):
 
-        print("===> DYNAMO CONFIG CACHE SIZE LIMIT: {}",dynamo.config.cache_size_limit)                                       │
-        print("===> DYNAMO CONFIG ACCUMULATED CACHE SIZE LIMIT: {}",dynamo.config.accumulated_cache_size_limit)  
+        print("===> DYNAMO CONFIG CACHE SIZE LIMIT: {}",dynamo.config.cache_size_limit)
+        print("===> DYNAMO CONFIG ACCUMULATED CACHE SIZE LIMIT: {}",dynamo.config.accumulated_cache_size_limit)
 
         if self.dynamic:
             return {
