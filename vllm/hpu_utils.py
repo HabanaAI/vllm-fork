@@ -41,12 +41,12 @@ class HPUCompileConfig:
             multiplier *= 10
         cache_size_limit = 1 + multiplier * (prompt_buckets +
                                              decode_buckets)
-        torch._dynamo.config.cache_size_limit = max(
-            cache_size_limit, torch._dynamo.config.cache_size_limit)
+        dynamo.config.cache_size_limit = max(
+            cache_size_limit, dynamo.config.cache_size_limit)
         # Multiply by 8 to follow the original default ratio between
         # the cache_size_limit and accumulated_cache_size_limit
-        torch._dynamo.config.accumulated_cache_size_limit = max(
+        dynamo.config.accumulated_cache_size_limit = max(
             cache_size_limit * 8,
-            torch._dynamo.config.accumulated_cache_size_limit)
+            dynamo.config.accumulated_cache_size_limit)
 
 
