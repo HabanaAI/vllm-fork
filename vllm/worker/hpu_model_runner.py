@@ -1576,9 +1576,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                        for bt, lbu in zip(block_tables, last_block_usage)
                        if bt]
 
-        block_list = flatten(block_tables)
-        block_groups = flatten(block_groups)
-        block_usage = flatten(block_usage)
+
+        if False:
+            block_list = flatten(block_tables)
+            block_groups = flatten(block_groups)
+            block_usage = flatten(block_usage)
+        else:
+            #breakpoint()
+            if self.sliding_window is not None:
+                max_blocks = self.sliding_window // self.block_size
+                block_tables = [bt[-max_blocks:] for bt in block_tables]
+            else:
+                max_blocks = 1024 // self.block_size
+                block_tables = [bt[-max_blocks:] for bt in block_tables]
+            block_list = flatten(block_tables)
+            block_groups = flatten([[i]*len(bt) for i,bt in enumerate(block_tables)])
+            block_usage = flatten([[self.block_size] * (len(bt)-1) + [last_block_usage[i]] for i, bt in enumerate(block_tables)])
 
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
