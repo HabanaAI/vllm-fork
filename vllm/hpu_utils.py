@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-
+import torch._dynamo as dynamo
 
 # Get Intel HPU arguments to be passed to torch compile
 class HPUCompileConfig:
