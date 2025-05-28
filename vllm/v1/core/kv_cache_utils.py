@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """KV-Cache Utilities."""
+import heapq
 import os
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-import heapq
 from typing import Any, Callable, NamedTuple, Optional
 
 from vllm.config import VllmConfig
@@ -263,6 +263,7 @@ class FreeKVCacheBlockQueue:
             curr_block = curr_block.next_free_block
         return ret
 
+
 class FreeKVCacheBlockQueueHPU:
     """This class is a HPU implementation for block queue. In some cases 
     (Contiguous PA) we need our blocks to be ordered by their block_id, 
@@ -274,7 +275,7 @@ class FreeKVCacheBlockQueueHPU:
     """
 
     def __init__(self, blocks: list[KVCacheBlock]) -> None:
-        self.free_blocks_ids_queue = [block.block_id for block in blocks]     
+        self.free_blocks_ids_queue = [block.block_id for block in blocks]
         self.block_list = blocks
         heapq.heapify(self.free_blocks_ids_queue)
 
@@ -284,7 +285,7 @@ class FreeKVCacheBlockQueueHPU:
         Returns:
             The first free block.
         """
-        
+
         if len(self.free_blocks_ids_queue) == 0:
             raise ValueError("No free blocks available")
 
@@ -305,7 +306,7 @@ class FreeKVCacheBlockQueueHPU:
             block: The block to append.
         """
         heapq.heappush(self.free_blocks_ids_queue, block.block_id)
-    
+
     def remove(self, block: KVCacheBlock) -> None:
         """Remove a block's id from the free list.
 
