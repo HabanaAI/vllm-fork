@@ -45,7 +45,8 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
-from vllm.model_executor.layers.sampler import (SamplerOutput, get_logprobs,
+from vllm.model_executor.layers.sampler import (SampleResultArgsType,
+                                                SamplerOutput, get_logprobs,
                                                 get_pythonized_sample_results,
                                                 get_sampler)
 from vllm.model_executor.layers.vocab_parallel_embedding import (
@@ -649,13 +650,20 @@ class ModelInputForHPUWithSamplingMetadata(ModelInputForHPU):
 
 @dataclass
 class CachedStepOutput:
-    sampler_output: SamplerOutput
+    token_ids: torch.Tensor
+    logprobs: Optional[torch.Tensor] = None
+    deffered_sample_results: Optional[SampleResultArgsType] = None
     sampling_metadata: Optional[SamplingMetadata] = None
 
-    def __init__(self,
-                 sampler_output: SamplerOutput,
-                 sampling_metadata: Optional[SamplingMetadata] = None):
-        self.sampler_output = sampler_output
+    def __init__(
+            self,
+            token_ids: torch.Tensor,
+            logprobs: Optional[torch.Tensor] = None,
+            deffered_sample_results: Optional[SampleResultArgsType] = None,
+            sampling_metadata: Optional[SamplingMetadata] = None):
+        self.token_ids = token_ids
+        self.logprobs = logprobs
+        self.deffered_sample_results = deffered_sample_results
         self.sampling_metadata = sampling_metadata
 
 
@@ -2686,17 +2694,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 target_indices = [
                     cur_seq_id_pos.get(psi, -1) for psi in prev_seq_ids
                 ]
-                padding = self.cached_step_outputs[
-                    i].sampler_output.sampled_token_ids.size(0) - len(
-                        target_indices)
+                padding = self.cached_step_outputs[i].token_ids.size(0) - len(
+                    target_indices)
                 target_indices.extend([-1] * padding)
                 target_indices = torch.tensor(
                     target_indices,
                     device=model_input.input_tokens.device,
                     dtype=model_input.input_tokens.dtype)
                 model_input.input_tokens.index_copy_(
-                    0, target_indices, self.cached_step_outputs[i].
-                    sampler_output.sampled_token_ids)
+                    0, target_indices, self.cached_step_outputs[i].token_ids)
                 htorch.core.mark_step()
 
         if not model_input.is_first_multi_step:
@@ -2917,12 +2923,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sampling_metadata=sampling_metadata,
                     )
                     if num_steps > 1:
+                        output = output.sampled_token_ids
                         self.cached_step_outputs.append(
                             CachedStepOutput(output))
-                        output = output.sampled_token_ids
                     if use_delayed_sampling and self.is_driver_worker:
+                        token_ids = self._pad_to_max_num_seqs(
+                            output.sampled_token_ids, DUMMY_TOKEN_ID)
                         self.cached_step_outputs.append(
-                            CachedStepOutput(output, sampling_metadata))
+                            CachedStepOutput(
+                                token_ids, output.logprobs,
+                                output.deferred_sample_results_args,
+                                sampling_metadata))
                         self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
                 if use_delayed_sampling \
@@ -3054,8 +3065,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         sampler_outputs = []
         num_outputs = len(self.cached_step_outputs)
         for i in range(num_outputs):
-            next_token_ids = self.cached_step_outputs.pop(
-                0).sampler_output.sampled_token_ids
+            next_token_ids = self.cached_step_outputs.pop(0).token_ids
             next_token_ids = next_token_ids.cpu().tolist()
             sampler_output = self._make_decode_output(
                 next_token_ids, model_input.sampling_metadata.seq_groups)
@@ -3125,22 +3135,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             return
         model_input = self.cached_step_inputs.pop(0)
         model_output = self.cached_step_outputs.pop(0)
-        delayed_tokens = self._pad_to_max_num_seqs(
-            model_output.sampler_output.sampled_token_ids, DUMMY_TOKEN_ID)
-        delayed_tokens = delayed_tokens.cpu().squeeze(-1).tolist()
-
-        delayed_logprobs = None
-        assert model_output.sampling_metadata is not None, \
-            'Sampling metadata is required to patch the output!'
-        logprobs_required = any(
-            seq_group.sampling_params.logprobs is not None
-            for seq_group in model_output.sampling_metadata.seq_groups)
-        if logprobs_required:
-            sampling_results = get_pythonized_sample_results(
-                model_output.sampler_output.deferred_sample_results_args)
-            _, delayed_logprobs = get_logprobs(
-                model_output.sampler_output.logprobs,
-                model_output.sampling_metadata, sampling_results)
+        delayed_tokens = model_output.token_ids.cpu().squeeze(-1).tolist()
 
         ctx = model_input.async_callback.keywords["ctx"]  # type: ignore
         # If there's no output to patch with, which is usually the case when
@@ -3161,6 +3156,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             # a cache recomputation and we only need to update the last token
             seq_data.output_token_ids_array[-1] = real_out
             seq_data._cached_all_token_ids[-1] = real_out
+
+        delayed_logprobs = None
+        assert model_output.sampling_metadata is not None, \
+            'Sampling metadata is required to patch the output!'
+        logprobs_required = any(
+            seq_group.sampling_params.logprobs is not None
+            for seq_group in model_output.sampling_metadata.seq_groups)
+        if logprobs_required:
+            sampling_results = get_pythonized_sample_results(
+                model_output.deffered_sample_results)
+            _, delayed_logprobs = get_logprobs(model_output.logprobs,
+                                               model_output.sampling_metadata,
+                                               sampling_results)
 
         # Another hack. We need to pass the logprobs to the output data,
         # which are part of scheduler output.
