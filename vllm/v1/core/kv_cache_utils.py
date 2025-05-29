@@ -268,7 +268,7 @@ class FreeKVCacheBlockQueueHPU:
     """This class is a HPU implementation for block queue. In some cases 
     (Contiguous PA) we need our blocks to be ordered by their block_id, 
     so we use a heapq to maintain the order of free blocks. 
-    In the begginging the blocks are also ordered by their block_id.
+    In the beginning the blocks are also ordered by their block_id.
     
     Args:
         blocks: A list of KVCacheBlock objects.
