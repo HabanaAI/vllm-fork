@@ -127,10 +127,25 @@ def subtuple(obj: object,
         values = {f: to_override.get(f, getattr(obj, f)) for f in fields}
     if typename not in _TYPE_CACHE:
         _TYPE_CACHE[typename] = {
-            'object': collections.namedtuple(typename, ' '.join(fields)),
+            'type': collections.namedtuple(typename, ' '.join(fields)),
             'fields': fields
         }
-    return _TYPE_CACHE[typename]['object'](**values)  # type: ignore
+    return _TYPE_CACHE[typename]['type'](**values)  # type: ignore
+
+
+def custom_tuple_replace(obj: object, typename: str, **to_override):
+    # Torch compile dynamo doesn't support calling any named tuple
+    # dynamic methods other than len and get_attr. This function is
+    # a torch.compile friendly version of tuple._replace
+
+    cached_type = _TYPE_CACHE[typename]['type']
+    fields = _TYPE_CACHE[typename]['fields']
+    values = {
+        field: getattr(obj, field)
+        for field in fields  # type: ignore
+    }
+    values.update(to_override)
+    return cached_type(**values)  # type: ignore
 
 
 def align_workers(value, op):
@@ -333,7 +348,9 @@ class HpuModelAdapter(torch.nn.Module):
         mask = torch.concat((past_mask, mask), dim=-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, off_value))
-        attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
+        attn_metadata = custom_tuple_replace(prefill_metadata,
+                                             "TrimmedAttentionMetadata",
+                                             attn_bias=attn_bias)
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
@@ -359,34 +376,14 @@ class HpuModelAdapter(torch.nn.Module):
             oob_values = block_groups.lt(0)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
             block_groups.masked_fill_(oob_values, batch_size)
-            metadata = metadata._replace(block_groups=block_groups)
+            metadata = custom_tuple_replace(metadata,
+                                            "TrimmedAttentionMetadata",
+                                            block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
-
-        # Torch compile dynamo doesn't support calling any named tuple
-        # dynamic methods other than len and get_attr so we need to
-        # mimic behaviour of tuple._replace manually
-        TrimmedAttentionMetadata = _TYPE_CACHE['TrimmedAttentionMetadata'][
-            'object']
-        fields = _TYPE_CACHE['TrimmedAttentionMetadata']['fields']
-        metadata_dict = {
-            field: getattr(metadata, field)
-            for field in fields  # type: ignore
-        }  # type: ignore
-        metadata_dict['attn_bias'] = attn_bias
-        metadata_dict['block_mapping'] = block_mapping
-        metadata = TrimmedAttentionMetadata(**metadata_dict)  # type: ignore
-        return metadata
-
-    def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
-        slot_mapping = metadata.slot_mapping.flatten()
-        indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt and not self.use_merged_prefill:
-            indices = indices.unflatten(0, (-1, block_size))[:, 0]
-            offsets = None
-        else:
-            offsets = torch.fmod(slot_mapping, block_size)
-        metadata = metadata._replace(block_offsets=offsets,
-                                     block_indices=indices)
+        metadata = custom_tuple_replace(metadata,
+                                        "TrimmedAttentionMetadata",
+                                        block_mapping=block_mapping,
+                                        attn_bias=attn_bias)
         return metadata
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
@@ -398,9 +395,6 @@ class HpuModelAdapter(torch.nn.Module):
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-        attn_metadata = self._set_indices_and_offsets(attn_metadata,
-                                                      self.block_size,
-                                                      attn_metadata.is_prompt)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -952,7 +946,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) and not self.vllm_config.model_config.enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
-                compiled_methods = ['_set_block_mapping']
+                compiled_methods = ['_update_metadata']
                 for method_name in compiled_methods:
                     method = getattr(self.model, method_name)
                     self._compile_region(self.model, method_name, method)
@@ -1396,11 +1390,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
+            block_size=self.block_size,
             block_list=prefix_block_list_tensor,
             block_mapping=None,
             block_usage=None,
-            block_indices=None,
-            block_offsets=None,
             block_groups=None,
             attn_bias=attn_bias,
             seq_lens=seq_lens,
@@ -1678,16 +1671,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
+            block_size=self.block_size,
             block_list=block_list,
             block_mapping=None,
             block_usage=block_usage,
-            block_indices=None,
-            block_offsets=None,
             block_groups=block_groups,
             attn_bias=None,
             seq_lens_tensor=None,
             encoder_seq_lens=encoder_seq_lens,
             encoder_seq_lens_tensor=encoder_seq_lens_tensor,
+            max_encoder_seq_len=max(encoder_seq_lens, default=0),
             cross_block_list=cross_block_list,
             cross_block_groups=cross_block_groups,
             cross_block_usage=cross_block_usage,
@@ -2008,8 +2001,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_usage',
             'slot_mapping',
             'is_prompt',
-            'block_indices',
-            'block_offsets',
+            'block_size',
             'block_groups',
             'input_positions',
         ])
@@ -2292,7 +2284,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
         prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
         if not self.is_pooler:
-            max_blocks = kv_caches[0][0].size(0)
+            max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
             decode_buckets = len(self.bucketing_ctx.decode_buckets)
         else:
@@ -2451,6 +2443,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
+        if os.getenv('VLLM_FULL_WARMUP',
+                     'false').strip().lower() in ("1", "true"):
+            # Since the model is warmed up for all possible tensor sizes,
+            # Dynamo can skip checking the guards
+            torch.compiler.set_stance(skip_guard_eval_unsafe=True)
         elapsed_time = end_time - start_time
         msg = (
             f"Warmup finished in {elapsed_time:.0f} secs, "
