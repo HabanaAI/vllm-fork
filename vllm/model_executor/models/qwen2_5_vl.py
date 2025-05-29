@@ -1014,8 +1014,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             paste_pointer = 0
             for old_img_size, new_img_size in zip(old_img_sizes,
                                                   new_img_sizes):
-                pixel_values[:, paste_pointer:paste_pointer + new_img_size] = \
-                    pixel_values[:, copy_pointer:copy_pointer + new_img_size]
+                pixel_values[paste_pointer:paste_pointer + new_img_size, :] = \
+                    pixel_values[copy_pointer:copy_pointer + new_img_size, :]
                 copy_pointer += old_img_size
                 paste_pointer += new_img_size
 
