@@ -984,11 +984,16 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         if num_patches % 64 != 0:
             assert num_patches > 64, "Image needs to be at least 112 x 112"
             logger_msg = (
-                f"QWEN 2.5VL for HPU is under development. "
-                f"Image height and width need to be multiples of 112 pixels. "
-                f"We are prunning the last visual tokens to comply with this "
-                f"requirement but this leads to accuracy degradation. "
-                f"See PR #1163 description.")
+                "QWEN 2.5VL for HPU is under development. "
+                "Image height and width need to be multiples of 112 pixels. "
+                "We are prunning the last visual tokens to comply with this "
+                "requirement but this leads to accuracy degradation. "
+                "Please, reshape the images or use this custom transformer "
+                "that does the resizing/alignment automatically: "
+                "pip install "
+                "git+https://github.com/malkomes/transformers.git"
+                "@ac372cd18f836c41f57cdce46094db00019d4280"
+                "See PR #1163 description, for more details")
             logger.warning_once(logger_msg)
 
             # reshape grid_thw with multiples of 8
@@ -1036,7 +1041,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
             pixel_values_curr_img_padded, rot_pos_emb, \
                 cu_seqlens, _, window_index = self.pre_attn(
-                pixel_values_curr_img_padded, img_shape_padded)
+                    pixel_values_curr_img_padded, img_shape_padded)
 
             # Create full attention block mask before VisionTransformer
             # to save memory/time
