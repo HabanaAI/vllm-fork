@@ -1,6 +1,6 @@
 # Guide to Setting Up PD Disaggregation with Mooncake
 
-> **Note**: This document does not cover MLA data parallel setup.
+> **Note**: This document does not cover MLA data parallel setup. Currently, PD disaggregation is only supported with vllm-hpu v0.
 
 ## Mooncake Installation
 
@@ -96,6 +96,7 @@ mooncake_master --enable_gc true --port 50001
 ```bash
 export MOONCAKE_CONFIG_PATH=./mooncake.json
 export PT_HPU_LAZY_MODE=1
+export VLLM_USE_V1=0
 export VLLM_MLA_DISABLE_REQUANTIZATION=1
 export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
 
@@ -112,6 +113,7 @@ python3 -m vllm.entrypoints.openai.api_server \
 ```bash
 export MOONCAKE_CONFIG_PATH=./mooncake.json
 export PT_HPU_LAZY_MODE=1
+export VLLM_USE_V1=0
 export VLLM_MLA_DISABLE_REQUANTIZATION=1
 export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
 
