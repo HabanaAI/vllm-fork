@@ -708,26 +708,9 @@ class HPUModelRunner:
         self.mem_margin = None
 
         self.use_hpu_graph = not self.model_config.enforce_eager
-        # TODO(woosuk): Provide an option to tune the max cudagraph batch size.
         self.max_batch_size = self.scheduler_config.max_num_seqs
-
-        #self.input_ids = torch.zeros(
-        #    (self.max_batch_size, self.max_num_tokens),
-        #    dtype=torch.int32,
-        #    device=self.device)
-        #self.positions = torch.zeros(
-        #    (self.max_batch_size, self.max_num_tokens),
-        #    dtype=torch.int64,
-        #    device=self.device)
-        #self.prefill_positions = torch.tensor(
-        #    range(self.max_model_len),
-        #    device="cpu",
-        #).to(torch.int32).reshape(1, -1)
-
         self.max_num_seqs = self.scheduler_config.max_num_seqs
-        self.max_prefill_batch_size = 1 if not self.use_merged_prefill else self.scheduler_config.max_num_seqs  # TODO(kzawora): add knob for that
-        self.padding_aware_scheduling = True  # TODO(kzawora): add knob for that
-        self.padding_ratio_threshold = 0.9  # TODO(kzawora): add knob for that
+        self.max_prefill_batch_size = 1 # TODO(kzawora): add knob for that
         self.seen_configs: set = set()
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
@@ -1064,36 +1047,6 @@ class HPUModelRunner:
                                    device='cpu')
         return block_list, block_groups, block_usage
 
-    def _get_padded_prefill_dims(self, num_prefills, max_prompt_len):
-        if self.enable_bucketing:
-            padded_batch_size = self.bucketing_ctx.get_padded_batch_size(
-                num_prefills, True)
-            padded_prompt_len = self.bucketing_ctx.get_padded_prompt_seq_len(
-                max_prompt_len)
-        else:
-            #NOTE(kzawora): On HPU prompt length needs to be block_size
-            # aligned, so we're padding to that, even if bucketing
-            # is disabled.
-            padded_batch_size = num_prefills
-            padded_prompt_len = math.ceil(
-                max_prompt_len / self.block_size) * self.block_size
-        assert padded_prompt_len <= self.max_model_len
-        return padded_batch_size, padded_prompt_len
-
-    def _get_padded_merged_prefill_dims(self, num_prefills, total_prompt_len):
-        bucketing = False
-        if bucketing:
-            assert False, 'Bucketing not yet supported with merged prefill!'
-        else:
-            #NOTE(kzawora): On HPU prompt length needs to be block_size
-            # aligned, so we're padding to that, even if bucketing
-            # is disabled.
-            padded_batch_size = 1
-            padded_prompt_len = math.ceil(
-                total_prompt_len / self.block_size) * self.block_size
-        assert padded_prompt_len <= self.max_model_len
-        return padded_batch_size, padded_prompt_len
-
     def _align_and_pad(self, data, bucketing, padding_gen):
         bs = len(data)
         target_bs, target_len = bucketing
@@ -1103,48 +1056,6 @@ class HPUModelRunner:
         padding = itertools.islice(padding_gen, target_len)
         data = pad_list(data, target_bs, itertools.repeat(padding))
         return data
-
-    def _prefill_find_batch_size(self, num_scheduled_tokens, batch_idx,
-                                 num_reqs):
-        num_prefills: int
-        padded_batch_size: int
-        padded_prompt_len: int
-        padded_num_tokens: int
-        padding_ratio: float
-        max_prefill_batch_size = min(self.max_prefill_batch_size, num_reqs)
-        for possible_batch_size in reversed(
-                range(1, max_prefill_batch_size + 1)):
-            num_prefills = possible_batch_size
-            batch_req_ids = self.input_batch.req_ids[batch_idx:batch_idx +
-                                                     num_prefills]
-
-            prompt_lens = num_scheduled_tokens[batch_idx:batch_idx +
-                                               num_prefills]
-
-            max_prompt_len = max(prompt_lens)
-            num_tokens = sum(prompt_lens)
-            if not self.use_merged_prefill:
-                padded_batch_size, padded_prompt_len = \
-                    self._get_padded_prefill_dims(num_prefills,
-                                                  max_prompt_len)
-            else:
-                padded_batch_size, padded_prompt_len = \
-                    self._get_padded_merged_prefill_dims(num_prefills,
-                                                         num_tokens)
-            padded_num_tokens = padded_batch_size * padded_prompt_len
-            padding_ratio = 1 - (num_tokens / padded_num_tokens)
-            is_within_token_budget = padded_batch_size * padded_prompt_len \
-                < self.scheduler_config.max_num_batched_tokens
-            is_within_padding_ratio_threshold = padding_ratio < \
-                self.padding_ratio_threshold
-            can_schedule = is_within_token_budget and \
-                is_within_padding_ratio_threshold
-            # If padding aware scheduling is off, we'll break on the first
-            # loop iteration (==max_prefill_batch_size).
-            # Else, we'll break on first batch size that fits token budget.
-            if not self.padding_aware_scheduling or can_schedule:
-                break
-        return batch_req_ids, padded_batch_size, padded_prompt_len
 
     def _bucketize_merged_prompt(self, seq_lens, num_blocks):
         seq = sum(seq_lens)
@@ -1218,8 +1129,8 @@ class HPUModelRunner:
         return all_batch_contents
 
     def _make_attn_bias(self, context_groups, token_groups):
-        dtype = torch.bfloat16
-        is_causal = True
+        dtype = torch.bfloat16  # FIXME
+        is_causal = True  # FIXME
         context_groups = torch.tensor(context_groups, device='cpu', dtype=torch.int16)
         context_groups = context_groups.repeat_interleave(self.block_size, dim=-1)
         context_len = context_groups.size(-1)
@@ -1247,7 +1158,6 @@ class HPUModelRunner:
         query_lens = [len(tids) for tids in contents.token_ids]
         context_lens = contents.context_lens
 
-        real_bs = len(token_ids)
         token_positions = [
             list(range(cl, cl + ql))
             for cl, ql in zip(context_lens, query_lens)
@@ -1303,7 +1213,6 @@ class HPUModelRunner:
 
         attn_bias = None
         if USE_MERGED_PREFILL:
-            #print('context_groups:', context_groups, 'token_groups', token_groups)
             attn_bias = self._make_attn_bias(context_groups, token_groups)
             attn_bias = attn_bias.to('hpu', non_blocking=True)
         else:
@@ -1321,16 +1230,12 @@ class HPUModelRunner:
         else:
             context_blocks = None
 
-        #print('aligned context_blocks', context_blocks)
-
         attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
             seq_lens_tensor=query_lens,
             context_lens_tensor=context_lens,
             slot_mapping=token_slots,
             block_list=context_blocks,
             attn_bias=attn_bias)
-
-        # print('PROMPT', real_bs, token_ids.shape, context_blocks.shape if has_context else 'none', attn_bias.shape if attn_bias is not None else 'none')
 
         return PrefillInputData(request_ids=[req_ids],
                                 prompt_lens=[query_lens],
