@@ -1061,6 +1061,62 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     experts_max=(num_experts - 1),
                 )
             return final_hidden_states.view(-1, x.shape[1])
+        
+        def do_static_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8):
+            x_scale = layer.w13_input_scale.data
+            if layer.dp_size == 1:
+                x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
+            else:
+                x_fp8 = x
+            batched_tokens = x.shape[0]
+            padded_weights = torch.zeros((batched_tokens, total_num_experts), dtype=x.dtype, device=x.device)
+            padded_weights.scatter_(-1, topk_ids, topk_weights)
+            padded_weights = padded_weights[:batched_tokens, :total_num_experts]
+            padded_weights = padded_weights.transpose(0, 1)
+
+            for idx in range(num_experts):
+                w13_weight = layer.w13_weight[idx, ...]
+                w2_weight = layer.w2_weight[idx, ...]
+                w13_scale = layer.w13_weight_scale_inv[idx, ...]
+                w2_scale = layer.w2_weight_scale_inv[idx, ...]
+
+                up_gate_states = torch.ops.hpu.fp8_gemm_v2(
+                    x_fp8,
+                    False,
+                    w13_weight,
+                    True,
+                    None,
+                    torch.bfloat16,
+                    x_scale,
+                    w13_scale,
+                    None,
+                    False,
+                )
+                d = up_gate_states.shape[-1] // 2
+                current_hidden_states = F.silu(
+                    up_gate_states[..., :d]) * up_gate_states[..., d:]
+
+                current_hidden_states, current_hidden_states_scale = dynamic_quant(
+                    current_hidden_states)
+                current_hidden_states = torch.ops.hpu.fp8_gemm_v2(
+                    current_hidden_states,
+                    False,
+                    w2_weight,
+                    True,
+                    None,
+                    torch.bfloat16,
+                    current_hidden_states_scale,
+                    w2_scale,
+                    None,
+                    False,
+                )
+                padded_weight = padded_weights[idx + ep_shift].unsqueeze(1)
+                if idx == 0:
+                    final_hidden_states = current_hidden_states * padded_weight
+                else:
+                    final_hidden_states.add_(current_hidden_states * padded_weight)
+
+            return final_hidden_states.view(-1, x.shape[1])
 
         def do_dynamic_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8=None, w2_weight_scale_inv_fp8=None):
             x_fp8, x_scale = dynamic_quant(x, single_scale=True)
@@ -1163,7 +1219,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             else:
                 final_hidden_states = do_static_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, actual_total_experts, actual_num_experts, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8)
         elif self.quant_config.activation_scheme == "static":
-            final_hidden_states = do_dynamic_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8)
+            if use_static_moe and seq_len == 1:
+                final_hidden_states = do_static_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8)
+            else:
+                final_hidden_states = do_dynamic_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8)
         else:
             raise ValueError("Unknown activation scheme")
 
