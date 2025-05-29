@@ -21,19 +21,19 @@
 # limitations under the License.
 """Inference-only Qwen2.5-Omni model (thinker part)."""
 
+import math
 from copy import copy
 from functools import partial
 from typing import (Any, Dict, Iterable, List, Mapping, Optional, Sequence,
                     Set, Tuple, Union)
 
-import math
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
-    Qwen2_5OmniConfig, Qwen2_5OmniThinkerConfig, Qwen2_5OmniAudioEncoderConfig)
+    Qwen2_5OmniAudioEncoderConfig, Qwen2_5OmniConfig, Qwen2_5OmniThinkerConfig)
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
     Qwen2_5OmniAudioEncoder)
 from transformers.models.qwen2_5_omni.processing_qwen2_5_omni import (
@@ -45,11 +45,11 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.activation import _ACTIVATION_REGISTRY
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.models.qwen2_5_vl import (
-    Qwen2_5_VisionTransformer, Qwen2_5_VLImageEmbeddingInputs,
-    Qwen2_5_VisionTransformerStaticShape,
-    Qwen2_5_VLImageInputs, Qwen2_5_VLImagePixelInputs,
-    Qwen2_5_VLProcessingInfo, Qwen2_5_VLVideoEmbeddingInputs,
-    Qwen2_5_VLVideoInputs, Qwen2_5_VLVideoPixelInputs)
+    Qwen2_5_VisionTransformer, Qwen2_5_VisionTransformerStaticShape,
+    Qwen2_5_VLImageEmbeddingInputs, Qwen2_5_VLImageInputs,
+    Qwen2_5_VLImagePixelInputs, Qwen2_5_VLProcessingInfo,
+    Qwen2_5_VLVideoEmbeddingInputs, Qwen2_5_VLVideoInputs,
+    Qwen2_5_VLVideoPixelInputs)
 from vllm.model_executor.models.qwen2_audio import (
     Qwen2AudioInputs, Qwen2AudioProcessingInfo,
     _get_feat_extract_output_lengths)
@@ -83,6 +83,7 @@ except (ImportError, ModuleNotFoundError):
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
+
 
 def _qwen2_5_omni_thinker_field_config(hf_inputs: Mapping[str, torch.Tensor]):
     audio_feature_lengths = hf_inputs.get("audio_feature_lengths",
@@ -131,6 +132,7 @@ class Qwen2_5OmniThinkerMultiModalDataParser(Qwen2VLMultiModalDataParser):
 
         return super()._parse_audio_data(data)
 
+
 class Qwen2_5OmniAudioAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
@@ -146,11 +148,9 @@ class Qwen2_5OmniAudioAttention(nn.Module):
         self.config = config
 
         if (self.head_dim * self.num_heads) != self.embed_dim:
-            raise ValueError(
-                f"embed_dim must be divisible by num_heads "
-                f"(got `embed_dim`: {self.embed_dim}"
-                f" and `num_heads`: {self.num_heads})."
-            )
+            raise ValueError(f"embed_dim must be divisible by num_heads "
+                             f"(got `embed_dim`: {self.embed_dim}"
+                             f" and `num_heads`: {self.num_heads}).")
         self.scaling = self.head_dim**-0.5
         self.is_decoder = False
         self.is_causal = False
@@ -162,9 +162,7 @@ class Qwen2_5OmniAudioAttention(nn.Module):
 
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
-        if self.attn_backend not in {
-                _Backend.FLASH_ATTN, _Backend.TORCH_SDPA
-        }:
+        if self.attn_backend not in {_Backend.FLASH_ATTN, _Backend.TORCH_SDPA}:
             raise RuntimeError(
                 f"Qwen2.5-VL does not support {self.attn_backend} backend now."
             )
@@ -202,12 +200,10 @@ class Qwen2_5OmniAudioAttention(nn.Module):
                 attention_mask = torch.zeros(
                     [1, seq_length, key_states.shape[0]],
                     device=query_states.device,
-                    dtype=torch.bool
-                )
+                    dtype=torch.bool)
                 for i in range(1, len(cu_seqlens)):
-                    attention_mask[...,
-                                   cu_seqlens[i - 1] : cu_seqlens[i],
-                                   cu_seqlens[i - 1] : cu_seqlens[i]] = True
+                    attention_mask[..., cu_seqlens[i - 1]:cu_seqlens[i],
+                                   cu_seqlens[i - 1]:cu_seqlens[i]] = True
 
             query_states = query_states.transpose(0, 1)
             key_states = key_states.transpose(0, 1)
@@ -215,26 +211,30 @@ class Qwen2_5OmniAudioAttention(nn.Module):
 
             if is_hpu:
                 from habana_frameworks.torch.hpex.kernels import FusedSDPA
-                attn_output = FusedSDPA.apply(query_states,
-                                              key_states,
-                                              value_states,
-                                              attention_mask,
-                                              0.0,)
+                attn_output = FusedSDPA.apply(
+                    query_states,
+                    key_states,
+                    value_states,
+                    attention_mask,
+                    0.0,
+                )
             else:
                 attn_output = torch.nn.functional.scaled_dot_product_attention(
-                                  query_states,
-                                  key_states,
-                                  value_states,
-                                  attn_mask=attention_mask,
-                                  dropout_p=0.0,
-                              )
+                    query_states,
+                    key_states,
+                    value_states,
+                    attn_mask=attention_mask,
+                    dropout_p=0.0,
+                )
             attn_output = attn_output.transpose(0, 1)
             attn_output = attn_output.reshape(seq_length, self.embed_dim)
 
         attn_output = self.out_proj(attn_output)
         return attn_output
 
+
 class Qwen2_5OmniAudioEncoderLayer(nn.Module):
+
     def __init__(self, config: Qwen2_5OmniAudioEncoderConfig):
         super().__init__()
         self.embed_dim = config.d_model
@@ -289,15 +289,18 @@ class Qwen2_5OmniAudioEncoderLayer(nn.Module):
                                         min=-clamp_value,
                                         max=clamp_value)
 
-        outputs = (hidden_states,)
+        outputs = (hidden_states, )
 
         return outputs
 
+
 class SinusoidsPositionEmbedding(nn.Module):
+
     def __init__(self, length, channels, max_timescale=10000):
         super().__init__()
         if channels % 2 != 0:
-            raise ValueError("SinusoidsPositionEmbedding needs even channels input")
+            raise ValueError(
+                "SinusoidsPositionEmbedding needs even channels input")
         log_timescale_increment = np.log(max_timescale) / (channels // 2 - 1)
         inv_timescales = \
           torch.exp(-log_timescale_increment * torch.arange(channels // 2))
@@ -305,12 +308,14 @@ class SinusoidsPositionEmbedding(nn.Module):
           torch.arange(length)[:, np.newaxis] * inv_timescales[np.newaxis, :]
         self.register_buffer(
             "positional_embedding",
-            torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1),
+            torch.cat([torch.sin(scaled_time),
+                       torch.cos(scaled_time)], dim=1),
             persistent=False,
         )
 
     def forward(self, seqlen: int):
         return self.positional_embedding[:seqlen, :]
+
 
 class Qwen2_5OmniAudioEncoder(nn.Module):
 
@@ -355,10 +360,11 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
         return self.conv1.weight.device
 
     def postprocess_hpu(
-            self,
-            padded_token_audio,
-            padded_aftercnn_lens,
-            aftercnn_lens,):
+        self,
+        padded_token_audio,
+        padded_aftercnn_lens,
+        aftercnn_lens,
+    ):
         # avgpool.stride is 2
         padded_aftercnn_lens = padded_aftercnn_lens // 2
         aftercnn_lens = aftercnn_lens // 2
@@ -366,7 +372,7 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
           padded_token_audio.split(padded_aftercnn_lens.tolist(), dim=0)
         token_audio_list = []
         for i, each_audio_states in enumerate(padded_token_audio_list):
-            token_audio_list.append(each_audio_states[:aftercnn_lens[i],:])
+            token_audio_list.append(each_audio_states[:aftercnn_lens[i], :])
         token_audio = torch.cat(token_audio_list, dim=0)
 
         return token_audio
@@ -386,8 +392,7 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
         )
         tail_chunk_index = F.pad(chunk_num, (1, 0), value=-1).cumsum(0)[1:]
         chunk_lengths[tail_chunk_index] = feature_lens % (self.n_window * 2)
-        chunk_lengths = torch.where(chunk_lengths == 0,
-                                    self.n_window * 2,
+        chunk_lengths = torch.where(chunk_lengths == 0, self.n_window * 2,
                                     chunk_lengths)
 
         chunk_list = input_features.split(chunk_lengths.tolist(), dim=1)
@@ -395,14 +400,12 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
           self.padded_and_mask_function(
             chunk_list, chunk_lengths, padding_value=0, padding_side="right"
         )
-        cu_seqlens = torch.cat(
-            (
-                torch.zeros(1,
-                            device=padded_mask_after_cnn.device,
-                            dtype=torch.int32),
-                padded_mask_after_cnn.sum(1).cumsum(0),
-            )
-        ).to(torch.int32)
+        cu_seqlens = torch.cat((
+            torch.zeros(1,
+                        device=padded_mask_after_cnn.device,
+                        dtype=torch.int32),
+            padded_mask_after_cnn.sum(1).cumsum(0),
+        )).to(torch.int32)
 
         padded_embed = \
           nn.functional.gelu(self.conv1(padded_feature)) * padded_mask
@@ -414,14 +417,12 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
                 : padded_embed.shape[1], :
             ].unsqueeze(0).to(padded_embed.dtype)
         hidden_states = padded_embed[padded_mask_after_cnn]
-        cu_seqlens = torch.cat(
-            (
-                torch.zeros(1,
-                            device=padded_mask_after_cnn.device,
-                            dtype=torch.int32),
-                padded_mask_after_cnn.sum(1).cumsum(0),
-            )
-        ).to(torch.int32)
+        cu_seqlens = torch.cat((
+            torch.zeros(1,
+                        device=padded_mask_after_cnn.device,
+                        dtype=torch.int32),
+            padded_mask_after_cnn.sum(1).cumsum(0),
+        )).to(torch.int32)
 
         for _, encoder_layer in enumerate(self.layers):
             layer_outputs = encoder_layer(
@@ -435,14 +436,18 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
         token_audio_list = []
         for each_audio_states in hidden_states_list:
             each_audio_states = self.avg_pooler(
-                  each_audio_states.transpose(0, 1)).transpose_(0, 1)
+                each_audio_states.transpose(0, 1)).transpose_(0, 1)
             each_audio_states = self.ln_post(each_audio_states)
             each_audio_states = self.proj(each_audio_states)
             token_audio_list.append(each_audio_states)
         token_audio = torch.cat(token_audio_list, dim=0)
         return token_audio
 
-    def padded_and_mask_function(self, tensor_list, tensor_len, padding_value=0, padding_side="right"):
+    def padded_and_mask_function(self,
+                                 tensor_list,
+                                 tensor_len,
+                                 padding_value=0,
+                                 padding_side="right"):
         """
         Pads a sequence of tensors to their maximum length on indicated `padding_side`.
         Then prepares a mask so that pad tokens are not attended to.
@@ -480,9 +485,9 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
             batch_mask_after_cnn.bool(),
         )
 
-
     # Ignore copy
-    def _get_feat_extract_output_lengths(self, input_lengths: torch.LongTensor):
+    def _get_feat_extract_output_lengths(self,
+                                         input_lengths: torch.LongTensor):
         """
         Computes the output length of the convolutional layers and the output
         length of the audio encoder
@@ -491,7 +496,9 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
         output_lengths = (input_lengths - 2) // 2 + 1
         return input_lengths, output_lengths
 
+
 class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
+
     def pre_attn(
         self,
         input_features,
@@ -507,8 +514,8 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
         )
         tail_chunk_index = F.pad(chunk_num, (1, 0), value=-1).cumsum(0)[1:]
         chunk_lengths[tail_chunk_index] = feature_lens % (self.n_window * 2)
-        chunk_lengths = torch.where(
-            chunk_lengths == 0, self.n_window * 2, chunk_lengths)
+        chunk_lengths = torch.where(chunk_lengths == 0, self.n_window * 2,
+                                    chunk_lengths)
 
         chunk_list = input_features.split(chunk_lengths.tolist(), dim=1)
         padded_feature, padded_mask, padded_mask_after_cnn = \
@@ -516,26 +523,22 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
               chunk_list, chunk_lengths, padding_value=0, audio_buckets=audio_buckets,
           )
 
-        cu_seqlens = torch.cat(
-            (
-                torch.zeros(1,
-                            device=padded_mask_after_cnn.device,
-                            dtype=torch.int32),
-                padded_mask_after_cnn.sum(1).cumsum(0),
-            )
-        ).to(torch.int32)
+        cu_seqlens = torch.cat((
+            torch.zeros(1,
+                        device=padded_mask_after_cnn.device,
+                        dtype=torch.int32),
+            padded_mask_after_cnn.sum(1).cumsum(0),
+        )).to(torch.int32)
 
         padded_mask_after_cnn = torch.fill(padded_mask_after_cnn, True)
         attention_mask = torch.zeros(
-            [1, padded_mask_after_cnn.sum(), padded_mask_after_cnn.sum()],
+            [1, padded_mask_after_cnn.sum(),
+             padded_mask_after_cnn.sum()],
             device=input_features.device,
-            dtype=torch.bool
-        )
+            dtype=torch.bool)
         for i in range(1, len(cu_seqlens)):
-            attention_mask[
-                ...,
-                cu_seqlens[i - 1] : cu_seqlens[i],
-                cu_seqlens[i - 1] : cu_seqlens[i]] = True
+            attention_mask[..., cu_seqlens[i - 1]:cu_seqlens[i],
+                           cu_seqlens[i - 1]:cu_seqlens[i]] = True
 
         return padded_feature, padded_mask, padded_mask_after_cnn, \
                 padded_mask_after_cnn.sum().unsqueeze(0), attention_mask
@@ -560,22 +563,16 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
                                     ].unsqueeze(0).to(padded_embed.dtype)
         hidden_states = padded_embed[padded_mask_after_cnn]
 
-
         for _, encoder_layer in enumerate(self.layers):
-            layer_outputs = encoder_layer(
-                hidden_states,
-                None,
-                attention_mask
-            )
+            layer_outputs = encoder_layer(hidden_states, None, attention_mask)
 
             hidden_states = layer_outputs[0]
 
-        hidden_states_list = hidden_states.split(
-            aftercnn_lens.tolist(), dim=0)
+        hidden_states_list = hidden_states.split(aftercnn_lens.tolist(), dim=0)
         token_audio_list = []
         for each_audio_states in hidden_states_list:
-            each_audio_states = self.avg_pooler(
-                each_audio_states.permute(1, 0)).permute(1, 0)
+            each_audio_states = self.avg_pooler(each_audio_states.permute(
+                1, 0)).permute(1, 0)
             each_audio_states = self.ln_post(each_audio_states)
             each_audio_states = self.proj(each_audio_states)
             token_audio_list.append(each_audio_states)
@@ -595,18 +592,16 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
             padded_aftercnn_lens.tolist(), dim=0)
         token_audio_list = []
         for i, each_audio_states in enumerate(padded_token_audio_list):
-            token_audio_list.append(each_audio_states[:aftercnn_lens[i],:])
+            token_audio_list.append(each_audio_states[:aftercnn_lens[i], :])
         token_audio = torch.cat(token_audio_list, dim=0)
 
         return token_audio
 
-    def padded_and_mask_function(
-        self,
-        tensor_list,
-        tensor_len,
-        padding_value=0,
-        audio_buckets=None
-    ):
+    def padded_and_mask_function(self,
+                                 tensor_list,
+                                 tensor_len,
+                                 padding_value=0,
+                                 audio_buckets=None):
         padded_len = audio_buckets.get_multimodal_bucket(tensor_len.sum())
         padded_chunk_num = math.ceil(padded_len / (self.n_window * 2))
         max_len = tensor_len.max()
@@ -659,16 +654,15 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
                   self.pre_attn(input_feature,
                                 feature_len.unsqueeze(0),
                                 audio_buckets)
-            audio_features = self.forward(padded_feature,
-                                          padded_aftercnn_lens,
-                                          padded_mask,
-                                          padded_mask_after_cnn,
+            audio_features = self.forward(padded_feature, padded_aftercnn_lens,
+                                          padded_mask, padded_mask_after_cnn,
                                           attention_mask)
             audio_features = self.post_attn(audio_features,
                                             padded_aftercnn_lens,
                                             audio_feat_lengths)
             audio_outputs.append(audio_features)
         return torch.cat(audio_outputs, dim=0)
+
 
 class Qwen2_5OmniThinkerProcessingInfo(Qwen2AudioProcessingInfo,
                                        Qwen2_5_VLProcessingInfo):
@@ -1198,8 +1192,7 @@ class Qwen2_5OmniConditionalGenerationMixin:
                 input_features.to(self.audio_tower.dtype),
                 audio_feature_lengths=audio_feature_lengths,
                 audio_feat_lengths=audio_feat_lengths,
-                audio_buckets=self.audio_buckets
-            )
+                audio_buckets=self.audio_buckets)
         else:
             audio_outputs = self.audio_tower(
                 input_features.to(self.audio_tower.dtype),
@@ -1221,7 +1214,8 @@ class Qwen2_5OmniConditionalGenerationMixin:
 
         pixel_values = image_input["pixel_values"].type(self.visual.dtype)
         if is_hpu:
-            assert isinstance(self.visual, Qwen2_5_VisionTransformerStaticShape)
+            assert isinstance(self.visual,
+                              Qwen2_5_VisionTransformerStaticShape)
             image_embeds = self.visual.get_image_embeds(
                 pixel_values,
                 grid_thw=grid_thw,
@@ -1249,7 +1243,8 @@ class Qwen2_5OmniConditionalGenerationMixin:
         pixel_values_videos = video_input["pixel_values_videos"].type(
             self.visual.dtype)
         if is_hpu:
-            assert isinstance(self.visual, Qwen2_5_VisionTransformerStaticShape)
+            assert isinstance(self.visual,
+                              Qwen2_5_VisionTransformerStaticShape)
             video_embeds = self.visual.get_image_embeds(
                 pixel_values_videos,
                 grid_thw=grid_thw,
