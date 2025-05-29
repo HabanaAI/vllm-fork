@@ -710,7 +710,7 @@ class HPUModelRunner:
         self.use_hpu_graph = not self.model_config.enforce_eager
         self.max_batch_size = self.scheduler_config.max_num_seqs
         self.max_num_seqs = self.scheduler_config.max_num_seqs
-        self.max_prefill_batch_size = 1 # TODO(kzawora): add knob for that
+        self.max_prefill_batch_size = 1  # TODO(kzawora): add knob for that
         self.seen_configs: set = set()
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
@@ -1084,7 +1084,8 @@ class HPUModelRunner:
     def _can_merge_prefill_contents(self, lhs, rhs):
         combined_num_tokens = lhs.get_num_tokens() + rhs.get_num_tokens()
         bucketing_fn = self._get_prompt_bucketing_fn()
-        target_bs, target_seq, target_blocks = bucketing_fn(combined_num_tokens, [])
+        target_bs, target_seq, target_blocks = bucketing_fn(
+            combined_num_tokens, [])
         return target_bs <= self.max_prefill_batch_size and\
             target_bs * target_seq <= self.max_num_tokens
 
@@ -1106,8 +1107,7 @@ class HPUModelRunner:
 
             num_blocks = round_up(context_len + query_len,
                                   self.block_size) // self.block_size
-            blocks = block_table_cpu_tensor[
-                batch_idx, :num_blocks].tolist()
+            blocks = block_table_cpu_tensor[batch_idx, :num_blocks].tolist()
 
             prompt_tokens = self.input_batch.num_prompt_tokens[batch_idx]
             num_output_logits = context_len + query_len - prompt_tokens + 1  #TODO: Fix non-prompt case
@@ -1131,13 +1131,20 @@ class HPUModelRunner:
     def _make_attn_bias(self, context_groups, token_groups):
         dtype = torch.bfloat16  # FIXME
         is_causal = True  # FIXME
-        context_groups = torch.tensor(context_groups, device='cpu', dtype=torch.int16)
-        context_groups = context_groups.repeat_interleave(self.block_size, dim=-1)
+        context_groups = torch.tensor(context_groups,
+                                      device='cpu',
+                                      dtype=torch.int16)
+        context_groups = context_groups.repeat_interleave(self.block_size,
+                                                          dim=-1)
         context_len = context_groups.size(-1)
-        token_groups = torch.tensor(token_groups, device='cpu', dtype=torch.int16)
+        token_groups = torch.tensor(token_groups,
+                                    device='cpu',
+                                    dtype=torch.int16)
         num_queries = token_groups.size(-1)
         seq_groups = torch.cat([context_groups, token_groups], dim=-1)
-        attn_mask = seq_groups.unflatten(-1, (1, -1)) != token_groups.unflatten(-1, (-1, 1))
+        attn_mask = seq_groups.unflatten(-1,
+                                         (1, -1)) != token_groups.unflatten(
+                                             -1, (-1, 1))
         if is_causal:
             causal_mask = torch.ones(num_queries,
                                      num_queries,
@@ -1168,9 +1175,7 @@ class HPUModelRunner:
         token_slots = [[
             blocks[bi] * self.block_size + bo for bi, bo in assignment
         ] for blocks, assignment in zip(contents.blocks, block_assignment)]
-        token_groups = [
-            [i] * len(tid) for i, tid in enumerate(token_ids)
-        ]
+        token_groups = [[i] * len(tid) for i, tid in enumerate(token_ids)]
         num_context_blocks = [
             round_up(ctx_len, self.block_size) // self.block_size
             for ctx_len in context_lens
@@ -1180,18 +1185,28 @@ class HPUModelRunner:
             for blocks, num in zip(contents.blocks, num_context_blocks)
         ]
         num_context_blocks = [len(b) for b in context_blocks]
-        context_groups = [
-            [i] * b for i, b in enumerate(num_context_blocks)
-        ]
+        context_groups = [[i] * b for i, b in enumerate(num_context_blocks)]
         has_context = sum(context_lens) > 0
 
-        target_bs, target_seq, target_blocks = self._get_prompt_bucketing_fn()(query_lens, num_context_blocks)
-        token_ids = self._align_and_pad(contents.token_ids, (target_bs, target_seq), itertools.repeat(-1))
-        token_positions = self._align_and_pad(token_positions, (target_bs, target_seq), itertools.repeat(-1))
-        token_slots = self._align_and_pad(token_slots, (target_bs, target_seq), itertools.repeat(-1))
-        token_groups = self._align_and_pad(token_groups, (target_bs, target_seq), itertools.repeat(-1))
-        context_blocks = self._align_and_pad(context_blocks, (target_bs, target_blocks), itertools.repeat(-1))
-        context_groups = self._align_and_pad(context_groups, (target_bs, target_blocks), itertools.repeat(-1))
+        target_bs, target_seq, target_blocks = self._get_prompt_bucketing_fn()(
+            query_lens, num_context_blocks)
+        token_ids = self._align_and_pad(contents.token_ids,
+                                        (target_bs, target_seq),
+                                        itertools.repeat(-1))
+        token_positions = self._align_and_pad(token_positions,
+                                              (target_bs, target_seq),
+                                              itertools.repeat(-1))
+        token_slots = self._align_and_pad(token_slots, (target_bs, target_seq),
+                                          itertools.repeat(-1))
+        token_groups = self._align_and_pad(token_groups,
+                                           (target_bs, target_seq),
+                                           itertools.repeat(-1))
+        context_blocks = self._align_and_pad(context_blocks,
+                                             (target_bs, target_blocks),
+                                             itertools.repeat(-1))
+        context_groups = self._align_and_pad(context_groups,
+                                             (target_bs, target_blocks),
+                                             itertools.repeat(-1))
 
         # TODO: cycle through dummy slots and blocks
         #dummy_slots = itertools.cycle(
