@@ -967,7 +967,6 @@ def main(args: argparse.Namespace):
         result_json["tokenizer_id"] = tokenizer_id
         result_json["best_of"] = args.best_of
         result_json["num_prompts"] = args.num_prompts
-        result_json["prompts"] = [prompt for prompt, _, _, _ in input_requests]
 
         # Metadata
         if args.metadata:

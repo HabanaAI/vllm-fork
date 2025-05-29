@@ -8,7 +8,6 @@ import time
 from functools import cache
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import torch
 import uvloop
 from PIL import Image
@@ -16,7 +15,6 @@ from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 
-from vllm import RequestOutput
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.entrypoints.openai.api_server import (
     build_async_engine_client_from_engine_args)
@@ -27,23 +25,6 @@ from vllm.multimodal import MultiModalDataDict
 from vllm.sampling_params import BeamSearchParams
 from vllm.transformers_utils.tokenizer import AnyTokenizer, get_lora_tokenizer
 from vllm.utils import FlexibleArgumentParser, merge_async_iterators
-
-
-def save_prompt_response(json_path: str, outputs: List[RequestOutput]):
-    if not json_path:
-        return
-    print("saving results ...")
-    records = []
-    for output in outputs:
-        record = {
-            "Prompt": output.prompt,
-            "Generated text": output.outputs[0].text
-        }
-        records.append(record)
-    with open(json_path, "w", encoding='utf-8') as file:
-        for record in records:
-            json_record = json.dumps(record)
-            file.write(json_record + "\n")
 
 
 @dataclasses.dataclass
@@ -185,49 +166,10 @@ def sample_requests(tokenizer: PreTrainedTokenizerBase,
     return filtered_dataset
 
 
-def sample_random_requests(
-    prefix_len: int,
-    input_len: int,
-    output_len: int,
-    num_prompts: int,
-    range_ratio: float,
-    tokenizer: PreTrainedTokenizerBase,
-) -> List[SampleRequest]:
-    prefix_token_ids = np.random.randint(0,
-                                         tokenizer.vocab_size,
-                                         size=prefix_len).tolist()
-
-    input_lens = np.random.randint(
-        int(input_len * range_ratio),
-        input_len + 1,
-        size=num_prompts,
-    )
-    output_tokens = np.random.randint(
-        int(output_len * range_ratio),
-        output_len + 1,
-        size=num_prompts,
-    )
-    offsets = np.random.randint(0, tokenizer.vocab_size, size=num_prompts)
-    input_requests = []
-    for i in range(num_prompts):
-        prompt = tokenizer.decode(prefix_token_ids +
-                                  [(offsets[i] + i + j) % tokenizer.vocab_size
-                                   for j in range(input_lens[i])])
-
-        input_requests.append(
-            SampleRequest(prompt=prompt,
-                          prompt_len=int(prefix_len + input_lens[i]),
-                          expected_output_len=int(output_tokens[i]),
-                          multi_modal_data=None))
-
-    return input_requests
-
-
 def run_vllm(
     requests: List[SampleRequest],
     n: int,
     engine_args: EngineArgs,
-    save_results: Optional[str] = None,
 ) -> float:
     from vllm import LLM, SamplingParams
     llm = LLM(**dataclasses.asdict(engine_args))
@@ -255,10 +197,10 @@ def run_vllm(
 
     if not use_beam_search:
         start = time.perf_counter()
-        outputs = llm.generate(prompts,
-                               sampling_params,
-                               lora_request=lora_requests,
-                               use_tqdm=True)
+        llm.generate(prompts,
+                     sampling_params,
+                     lora_request=lora_requests,
+                     use_tqdm=True)
         end = time.perf_counter()
     else:
         assert lora_requests is None, "BeamSearch API does not support LoRA"
@@ -268,7 +210,7 @@ def run_vllm(
         for request in requests:
             assert request.expected_output_len == output_len
         start = time.perf_counter()
-        outputs = llm.beam_search(
+        llm.beam_search(
             prompts,
             BeamSearchParams(
                 beam_width=n,
@@ -276,8 +218,6 @@ def run_vllm(
                 ignore_eos=True,
             ))
         end = time.perf_counter()
-
-    save_prompt_response(save_results, outputs)
     return end - start
 
 
@@ -306,7 +246,9 @@ async def run_vllm_async(
                            multi_modal_data=request.multi_modal_data))
             sampling_params.append(
                 SamplingParams(
-                    temperature=0.0,
+                    n=n,
+                    temperature=1.0,
+                    top_p=1.0,
                     ignore_eos=True,
                     max_tokens=request.expected_output_len,
                 ))
@@ -451,13 +393,6 @@ def main(args: argparse.Namespace):
                               prompt_len=args.input_len,
                               expected_output_len=args.output_len,
                               lora_request=lora_request))
-    elif args.dataset == 'random':
-        requests = sample_random_requests(prefix_len=args.random_prefix_len,
-                                          input_len=args.random_input_len,
-                                          output_len=args.random_output_len,
-                                          num_prompts=args.num_prompts,
-                                          range_ratio=args.random_range_ratio,
-                                          tokenizer=tokenizer)
     else:
         requests = sample_requests(tokenizer, args)
 
@@ -474,8 +409,7 @@ def main(args: argparse.Namespace):
                 ))
         else:
             elapsed_time = run_vllm(requests, args.n,
-                                    EngineArgs.from_cli_args(args),
-                                    args.save_results)
+                                    EngineArgs.from_cli_args(args))
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -485,24 +419,18 @@ def main(args: argparse.Namespace):
                                args.output_len)
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
-
+    total_num_tokens = sum(request.prompt_len + request.expected_output_len
+                           for request in requests)
+    total_output_tokens = sum(request.expected_output_len
+                              for request in requests)
     if is_multi_modal:
         print("\033[91mWARNING\033[0m: Multi-modal request detected. The "
               "following metrics are not accurate because image tokens are not"
               " counted. See vllm-project/vllm/issues/9778 for details.")
         # TODO(vllm-project/vllm/issues/9778): Count molti-modal token length.
-
-    prompt_tokens = [request.prompt_len for request in requests]
-    output_tokens = [request.expected_output_len for request in requests]
-    total_num_tokens = sum(prompt_tokens) + sum(output_tokens)
-    total_gen_tokens = sum(output_tokens)
-    total_tps = total_num_tokens / elapsed_time
-    output_tps = total_gen_tokens / elapsed_time
-    print(f"input range: {min(prompt_tokens)}, {max(prompt_tokens)}")
-    print(f"output range: {min(output_tokens)}, {max(output_tokens)}")
-    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s")
-    print(f"TPS(w/ prompts, {total_num_tokens}): {total_tps:.2f} tokens/s")
-    print(f"TPS(w/o prompts, {total_gen_tokens}): {output_tps:.2f} tokens/s")
+    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
+          f"{total_num_tokens / elapsed_time:.2f} total tokens/s, "
+          f"{total_output_tokens / elapsed_time:.2f} output tokens/s")
 
     # Output JSON results if specified
     if args.output_json:
@@ -538,31 +466,6 @@ if __name__ == "__main__":
                         default=None,
                         help="Output length for each request. Overrides the "
                         "output length from the dataset.")
-    parser.add_argument(
-        "--random-input-len",
-        type=int,
-        default=1024,
-        help=
-        "Number of input tokens per request, used only for random sampling.")
-    parser.add_argument(
-        "--random-output-len",
-        type=int,
-        default=128,
-        help=
-        "Number of output tokens per request, used only for random sampling.")
-    parser.add_argument("--random-range-ratio",
-                        type=float,
-                        default=1.0,
-                        help="Range of sampled ratio of input/output length, "
-                        "used only for random sampling.")
-    parser.add_argument(
-        "--random-prefix-len",
-        type=int,
-        default=0,
-        help="Number of fixed prefix tokens before random "
-        " context. The length range of context in a random "
-        " request is [random-prefix-len, "
-        " random-prefix-len + random-prefix-len * random-range-ratio).")
     parser.add_argument("--n",
                         type=int,
                         default=1,
@@ -580,10 +483,6 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help='Path to save the throughput results in JSON format.')
-    parser.add_argument('--save-results',
-                        type=str,
-                        default=None,
-                        help="Save inference results into file for checking")
     parser.add_argument("--async-engine",
                         action='store_true',
                         default=False,
