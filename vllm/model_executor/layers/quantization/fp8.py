@@ -1069,7 +1069,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             else:
                 x_fp8 = x
             batched_tokens = x.shape[0]
-            padded_weights = torch.zeros((batched_tokens, total_num_experts), dtype=x.dtype, device=x.device)
+            padded_weights = torch.zeros((batched_tokens, total_num_experts), dtype=torch.bfloat16, device=x.device)
             padded_weights.scatter_(-1, topk_ids, topk_weights)
             padded_weights = padded_weights[:batched_tokens, :total_num_experts]
             padded_weights = padded_weights.transpose(0, 1)
