@@ -759,6 +759,8 @@ class HPUModelRunner:
             req_index = self.input_batch.remove_request(req_id)
             if req_index is not None:
                 removed_req_indices.append(req_index)
+            if req_id in self.input_batch.req_type:
+                del self.input_batch.req_type[req_id]
 
         # Remove the unscheduled requests from the persistent batch.
         # NOTE(woosuk): The unscheduled requests are either preempted requests
@@ -899,23 +901,35 @@ class HPUModelRunner:
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
 
+        if scheduler_output.kv_connector_metadata.requests:
+            requests = scheduler_output.kv_connector_metadata.requests
+        else:
+            requests = None
+
         # Traverse decodes first
         decode_req_ids = []
         for i in range(num_reqs):
             req_id = self.input_batch.req_ids[i]
             assert req_id is not None
+            if requests is not None and req_id not in self.input_batch.req_type:
+                for request in requests:
+                    if request.req_id == req_id:
+                        self.input_batch.req_type[req_id] = "prefill" if request.load_spec is None else "decode"
+                        break
 
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
             num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
                 req_id]
 
-            if num_computed_tokens < num_prompt_tokens:
+            if (num_computed_tokens < num_prompt_tokens) or \
+                (req_id in self.input_batch.req_type and self.input_batch.req_type[req_id] == "prefill"):
                 # This is prompt
                 break
 
             # This is decode
-            assert num_scheduled_tokens == 1
+            assert (num_scheduled_tokens == 1 or \
+                    (req_id in self.input_batch.req_type and self.input_batch.req_type[req_id] == "decode"))
             decode_req_ids.append(req_id)
 
         # Traverse prompts
@@ -1420,7 +1434,7 @@ class HPUModelRunner:
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
             if idx < num_decodes:
-                assert seq_num_scheduled_tokens == 1
+                assert (seq_num_scheduled_tokens == 1 or self.input_batch.req_type[req_id] == "decode")
         return (
             self._prepare_prefill_inputs(num_prefills, num_decodes,
                                          num_scheduled_tokens, bucketing),
