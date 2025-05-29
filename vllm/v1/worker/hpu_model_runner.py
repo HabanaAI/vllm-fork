@@ -901,21 +901,20 @@ class HPUModelRunner:
 
         # Traverse decodes first
         decode_req_ids = []
+        #logger.info(f"rank {os.getenv('RANK')}, {scheduler_output}")
         for i in range(num_reqs):
             req_id = self.input_batch.req_ids[i]
             assert req_id is not None
 
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
-            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
-                req_id]
-
-            if num_computed_tokens < num_prompt_tokens:
+            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
+            if num_computed_tokens < num_prompt_tokens and (os.getenv('DECODE_RANK', '0') == os.getenv('RANK', '0')):
                 # This is prompt
                 break
 
             # This is decode
-            assert num_scheduled_tokens == 1
+            #assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
 
         # Traverse prompts
@@ -1419,8 +1418,8 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            if idx < num_decodes:
-                assert seq_num_scheduled_tokens == 1
+            #if idx < num_decodes:
+             #   assert seq_num_scheduled_tokens == 1
         return (
             self._prepare_prefill_inputs(num_prefills, num_decodes,
                                          num_scheduled_tokens, bucketing),
@@ -1458,9 +1457,10 @@ class HPUModelRunner:
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
+        #if not warmup_mode:
             phase = phase.value
             logger.warning(
-                "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
+                "Configuration: rank (%s, %s, %s, %s, %s) was not warmed-up!", os.getenv('RANK'), phase,
                 batch_size, seq_len, num_blocks)
 
     def _execute_model_generic(self,

@@ -23,7 +23,7 @@ os.environ["LMCACHE_CHUNK_SIZE"] = "256"
 os.environ["LMCACHE_LOCAL_CPU"] = "True"
 # Set local CPU memory limit to 5.0 GB
 os.environ["LMCACHE_MAX_LOCAL_CPU_SIZE"] = "5.0"
-os.environ["LMCACHE_REMOTE_URL"] = f"lm://localhost::65432"
+os.environ["LMCACHE_REMOTE_URL"] = f"lm://localhost:65432"
 # Set the serializer/deserializer between vllm and LMCache server
 # `naive` indicates using raw bytes of the tensor without any compression
 os.environ["LMCACHE_REMOTE_SERDE"] = "naive"
