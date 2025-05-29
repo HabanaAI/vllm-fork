@@ -890,6 +890,14 @@ class HPUModelRunner:
         assert self.model is not None
         return self.model
 
+    def is_decoder_only(self) -> bool:
+        decoder_rank = os.getenv('DECODER_RANK', None)
+        if decoder_rank:
+            rank = os.getenv('RANK', '0')
+            return True if decoder_rank == rank else False
+        else:
+            return False
+
     def _get_prompts_and_decodes(
         self,
         scheduler_output: "SchedulerOutput",
@@ -898,6 +906,7 @@ class HPUModelRunner:
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
+        is_decoder_only = self.is_decoder_only()
 
         # Traverse decodes first
         decode_req_ids = []
@@ -909,12 +918,13 @@ class HPUModelRunner:
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
             num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
-            if num_computed_tokens < num_prompt_tokens and (os.getenv('DECODE_RANK', '0') == os.getenv('RANK', '0')):
+            if num_computed_tokens < num_prompt_tokens and not is_decoder_only:
                 # This is prompt
                 break
 
             # This is decode
-            #assert num_scheduled_tokens == 1
+            if not is_decoder_only:
+                assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
 
         # Traverse prompts
@@ -1405,6 +1415,7 @@ class HPUModelRunner:
         assert total_num_scheduled_tokens > 0
 
         num_reqs = num_prefills + num_decodes
+        is_decoder_only = self.is_decoder_only()
 
         # Get the number of scheduled tokens for each request.
         # TODO: The Python loop can be slow. Optimize.
@@ -1418,8 +1429,8 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            #if idx < num_decodes:
-             #   assert seq_num_scheduled_tokens == 1
+            if idx < num_decodes and not is_decoder_only:
+               assert seq_num_scheduled_tokens == 1
         return (
             self._prepare_prefill_inputs(num_prefills, num_decodes,
                                          num_scheduled_tokens, bucketing),
