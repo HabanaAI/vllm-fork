@@ -74,7 +74,7 @@ engine_args = EngineArgs(
     max_num_seqs=2,
     tensor_parallel_size=1,
     gpu_memory_utilization=0.9,
-    enforce_eager=False,    
+    enforce_eager=True,
     limit_mm_per_prompt={"image": max_num_imgs},  # remove for gemma2
     #dtype="float32"  ## remove
 )
