@@ -25,6 +25,7 @@ import torch.nn as nn
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing import HPUBucketingContext
 from vllm_hpu_extension.flags import enabled_flags
+from vllm_hpu_extension.ops import is_hpu_gaudi2
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.ops import batch2block, block2batch
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
@@ -769,7 +770,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.dp_awared_padding = self.dp_size > 1
 
         self._set_gc_threshold()
-        if is_gaudi2():
+        if is_hpu_gaudi2():
             self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
                                                 'false').lower() == 'true'
         else:
