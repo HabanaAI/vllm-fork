@@ -47,6 +47,7 @@ elif [[ $1 == "decoder" ]]; then
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         RANK=1 \
+        DECODER_RANK=1 \
         WORLD_SIZE=2 \
         vllm serve $MODEL \
         --port 1200 \
