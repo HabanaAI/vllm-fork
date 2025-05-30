@@ -9,6 +9,7 @@
 #===========================================================
 # CONFIGURATION PARAMETERS
 #===========================================================
+export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
 export QUANT_CONFIG="inc_quant_g3_30B_A3B.json"
 
 if [ $# -gt 0 ] && [ "$1" == "--model_path" ]; then
