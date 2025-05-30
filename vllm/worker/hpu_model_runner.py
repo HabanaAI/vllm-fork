@@ -1265,13 +1265,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # block size is 4, the first two tokens are masked and the slot
             # mapping will be [-1, -1, 2, 3, 4, 5, 6, 7, 0, 1].
             start_idx = 0
-            '''
             if self.sliding_window is not None:
                 assert context_len == 0, (
                     "Prefix caching is currently not supported with "
                     "sliding window attention")
                 start_idx = max(0, seq_len - self.sliding_window)
-            '''
             for i in range(context_len, seq_len):
                 if i < start_idx:
                     slot_mapping[-1].append(_PAD_SLOT_ID)

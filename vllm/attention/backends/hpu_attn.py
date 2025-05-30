@@ -504,16 +504,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
-            print(f"HPUAttentionImpl : sliding_window {self.sliding_window} q{query.shape},kv{key.shape}, attn_bias:{'True' if attn_metadata.attn_bias is not None else 'False'}, seq_len:{attn_metadata.seq_lens_tensor}")
-            if self.sliding_window:
-                attn_bias = _make_sliding_window_bias(batch_size, seq_len, attn_metadata.seq_lens_tensor,
-                       self.sliding_window, query.dtype)
+            common_args = self.common_attention_args(block_list, key_cache,
+                                             value_cache)
 
-                #TODO: Ideally we want to create this sliding_window_bias mask only
-                #once in the model_runner then only retrieve here.
-                #however query_len(attn_metadata.seq_lens_tensor) was incorrect value.
-                #Need to be further debugged.
-                #attn_bias = attn_metadata.sliding_window_att
+            #TODO: Ideally we want to create this sliding_window_bias mask only
+            #once in the model_runner or gemma model file then only retrieve here.
+            if self.sliding_window:
+                attn_bias = _make_sliding_window_bias(batch_size, seq_len,
+                       attn_metadata.seq_lens_tensor,
+                       self.sliding_window, query.dtype)
+                common_args['pad'] = 'left'
 
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
@@ -523,17 +523,21 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 is_causal=True,
                 attn_bias=attn_bias,
                 valid_seq_lengths=attn_metadata.seq_lens_tensor,
-                **self.common_attention_args(block_list, key_cache,
-                                             value_cache))
+                **common_args)
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
+            block_groups = attn_metadata.block_groups
+            block_mapping = attn_metadata.block_mapping
+            block_list = attn_metadata.block_list
+            attn_bias= attn_metadata.attn_bias
+
             if self.sliding_window:
                 block_size = len(attn_metadata.block_groups)
                 window_block = (self.sliding_window // block_size)
                 valid_block = (attn_metadata.block_groups == 0).sum()
 
-                #create_mask
+                # Create a mask to retain elements within the sliding window and exclude others.
                 rng = torch.arange(block_size, device='hpu')
                 mask = torch.logical_and(rng > 0, rng < valid_block-window_block+1)
 
@@ -543,10 +547,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             output = HPUPagedAttention.forward_decode(
                 query=query,
-                block_mapping=attn_metadata.block_mapping if self.sliding_window is None else block_mapping,
-                block_bias=attn_metadata.attn_bias,
-                block_groups=attn_metadata.block_groups if self.sliding_window is None else block_groups,
-                **self.common_attention_args(attn_metadata.block_list if self.sliding_window is None else block_list,
+                block_mapping=block_mapping,
+                block_bias=attn_bias,
+                block_groups=block_groups,
+                **self.common_attention_args(block_list,
                                              key_cache, value_cache))
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
@@ -701,9 +705,9 @@ def _make_sliding_window_bias(
 
     shift = 0
     device = query_lens_t.device
-    # TODO: Currently both paddings are left padding.
-    # Validated with native sdpa. if need to use with FusedSDPA,
-    # the padding setting needs to be changed to Left or mask need to be changed to right padding.
+
+    # TODO: this is not performant as of now. Need to investigate further
+    # once FusedSDPA kernel with sliding causal mask support is available.
 
     # causal + sliding window (LEFT PADDING)
     tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,dtype=dtype, fill_value=1)
@@ -711,11 +715,11 @@ def _make_sliding_window_bias(
     mask = torch.triu(mask, diagonal=shift - window_size + 1)
     attn_bias = torch.log(mask)
 
-
     '''
+    # TODO Accuracy issue need to be debugged.
     # causal + sliding window + query_len (LEFT PADDING : Need kernel supports)
-    tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,fill_value=1)
-    mask = torch.tril(tensor, diagonal=shift){}
+    tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,dtype=dtype,fill_value=1)
+    mask = torch.tril(tensor, diagonal=shift)
     len_mask = torch.arange(0, seq_len, device=device, dtype=torch.int32).view(seq_len,1)
     len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size, 1, seq_len, 1)
     len_mask = torch.where(len_mask == False, 1, 0)
