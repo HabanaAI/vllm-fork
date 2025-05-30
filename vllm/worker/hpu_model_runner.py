@@ -245,6 +245,8 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
+def is_gaudi2() -> bool:
+    return htorch.hpu.get_device_name() == "GAUDI2"
 
 class HpuModelAdapter:
 
@@ -767,7 +769,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.dp_awared_padding = self.dp_size > 1
 
         self._set_gc_threshold()
-        self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
+        if is_gaudi2():
+            self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
+                                                'false').lower() == 'true'
+        else:
+            self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
                                                 'true').lower() == 'true'
         if vllm_config.speculative_config is not None \
             and self.use_contiguous_pa:
