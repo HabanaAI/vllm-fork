@@ -566,126 +566,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             self.vision_tower,
             pixel_values,
         )
-        #breakpoint()
-        '''
-        pixel_values: 1x3x896x896 for HPU, 2x3x896x896 for GPU, ...its a warmup thing
-        In second step, both HPU and GPU have same values
 
-        however image_features is diff in hpu vs gpu (shape [1, 4096, 1152]))
-
-        printing values b4 each layer in siglip:
-        GPU
-        0 -> 4718592.0
-1 -> 5275648.0
-2 -> 5505024.0
-3 -> 5505024.0
-4 -> 5537792.0
-5 -> 5537792.0
-6 -> 5570560.0
-7 -> 5603328.0
-8 -> 5603328.0
-9 -> 5603328.0
-10 -> 5570560.0
-11 -> 5505024.0
-12 -> 5439488.0
-13 -> 5373952.0
-14 -> 5275648.0
-15 -> 5210112.0
-16 -> 5111808.0
-17 -> 5046272.0
-18 -> 5013504.0
-19 -> 4980736.0
-20 -> 4980736.0
-21 -> 5013504.0
-22 -> 5046272.0
-23 -> 5013504.0
-24 -> 5013504.0
-25 -> 5013504.0
-26 -> 5079040.0
-
-HPU:
-0 -> 4718592.0
-1 -> 5275648.0
-2 -> 5505024.0
-3 -> 5505024.0
-4 -> 5537792.0
-5 -> 5537792.0
-6 -> 5570560.0
-7 -> 5603328.0
-8 -> 5603328.0
-9 -> 5603328.0
-10 -> 5570560.0
-11 -> 5505024.0
-12 -> 5439488.0
-13 -> 5373952.0
-14 -> 5308416.0
-15 -> 5210112.0
-16 -> 5111808.0
-17 -> 5046272.0
-18 -> 5013504.0
-19 -> 5013504.0
-20 -> 5013504.0
-21 -> 5013504.0
-22 -> 5046272.0
-23 -> 5046272.0
-24 -> 5013504.0
-25 -> 5013504.0
-26 -> 5079040.0
-
-however final sum is diff:
- image_features.sum()
-tensor(18432., device='hpu:0', dtype=torch.bfloat16)
-        image_features.sum()
-tensor(18304., device='cuda:0', dtype=torch.bfloat16)
-
-
-GPU:
-25 -> 5013504.0 ... tensor([[ 2.8125,  0.7070,  3.8594, -5.2188],
-        [-0.9336,  0.4375,  1.2812, -0.1250],
-        [-1.1250,  0.5859,  1.7422,  0.9141],
-        [ 3.2188,  1.4609,  1.6250,  0.9844]], device='cuda:0',
-       dtype=torch.bfloat16)
-26 -> 5079040.0 ... tensor([[ 3.8125,  1.6406,  5.1250, -5.7500],
-        [-2.2812,  0.1641,  0.6094, -0.8711],
-        [-3.0000,  0.6172,  1.2031,  0.1328],
-        [ 3.3594,  1.3281,  2.3281,  0.6172]], device='cuda:0',
-       dtype=torch.bfloat16)
-BEFORE resolve_visual_encoder_outputs tensor(7274496., device='cuda:0', dtype=torch.bfloat16) tensor([[ -44.2500,  -39.0000,  -17.7500, -124.5000],
-        [  -2.1250,    0.4512,   -0.7734,   -2.6406],
-        [  -2.2812,    1.5781,    0.1875,    0.5000],
-        [ -49.2500,  -40.5000,  -20.1250, -127.0000]], device='cuda:0',
-       dtype=torch.bfloat16)
-AFTER resolve_visual_encoder_outputs tensor(18304., device='cuda:0', dtype=torch.bfloat16) tensor([[-0.0119,  0.0135,  0.0248,  0.0549],
-        [-1.1094, -0.0742, -0.7266, -0.6953],
-        [-3.0000,  0.3496, -0.9766,  0.1963],
-        [-0.0295,  0.0193,  0.0148,  0.1006]], device='cuda:0',
-
-
-HPU:
-25 -> 5013504.0... tensor([[ 2.9531,  1.2188,  4.1250, -5.0625],
-        [-1.0625,  0.4258,  1.3281, -0.1250],
-        [-1.1562,  0.5703,  1.6484,  0.8438],
-        [ 3.2188,  1.4375,  1.7188,  0.8906]], device='hpu:0',
-       dtype=torch.bfloat16)
-26 -> 5079040.0... tensor([[ 3.5938,  2.1406,  4.7812, -5.3125],
-        [-2.5000,  0.1211,  0.6367, -0.7578],
-        [-3.0000,  0.5781,  1.0938,  0.0938],
-        [ 3.4844,  1.3125,  2.4844,  0.4922]], device='hpu:0',
-       dtype=torch.bfloat16)
-BEFORE resolve_visual_encoder_outputs tensor(7241728., device='hpu:0', dtype=torch.bfloat16) tensor([[-2.2500e+01, -2.4000e+01, -1.0562e+01, -7.8500e+01],
-        [-2.0938e+00,  5.3125e-01, -5.8984e-01, -2.0000e+00],
-        [-2.3125e+00,  1.5000e+00,  5.4688e-02,  4.1406e-01],
-        [-4.9250e+01, -4.0500e+01, -2.0125e+01, -1.2700e+02]], device='hpu:0',
-       dtype=torch.bfloat16)
-AFTER resolve_visual_encoder_outputs tensor(18432., device='hpu:0', dtype=torch.bfloat16) tensor([[ 3.4180e-02, -1.2207e-03,  1.7944e-02, -1.6602e-02],
-        [-1.4062e+00, -1.1914e-01, -8.3203e-01, -7.4219e-01],
-        [-3.0156e+00,  2.8906e-01, -1.0859e+00,  1.1572e-01],
-        [-2.6978e-02,  2.1118e-02,  1.5747e-02,  1.0791e-01]], device='hpu:0',
-       dtype=torch.bfloat16)
-
-HPU vs GPU is about the same.... kind of sort of
-
-        '''
         image_embeds = self.multi_modal_projector(image_features)
 
         return [
@@ -724,14 +605,12 @@ HPU vs GPU is about the same.... kind of sort of
                 intermediate_tensors: Optional[IntermediateTensors] = None,
                 inputs_embeds: Optional[torch.Tensor] = None,
                 **kwargs: object) -> IntermediateTensors:
-        #breakpoint()
         if intermediate_tensors is not None:
             inputs_embeds = None
 
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
-            #breakpoint()
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
             inputs_embeds = self.get_input_embeddings(input_ids,
@@ -745,8 +624,6 @@ HPU vs GPU is about the same.... kind of sort of
                 )
             input_ids = None
 
-
-        #breakpoint()
         hidden_states = self.language_model.model(input_ids,
                                                   positions,
                                                   intermediate_tensors,
