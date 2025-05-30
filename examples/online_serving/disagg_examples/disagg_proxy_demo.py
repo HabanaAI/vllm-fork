@@ -390,6 +390,7 @@ class Proxy:
 class RoundRobinSchedulingPolicy(SchedulingPolicy):
 
     def __init__(self):
+        print("RoundRobinSchedulingPolicy")
         super().__init__()
 
     def safe_next(self, cycler: itertools.cycle):
@@ -567,6 +568,15 @@ if __name__ == "__main__":
         action="store_true",
         help="generate first token on P node or D node",
     )
+
+    parser.add_argument(
+        "--roundrobin",
+        action="store_true",
+        help="Use Round Robin scheduling for load balancing",
+    )
     args = parser.parse_args()
-    proxy_server = ProxyServer(args=args, scheduling_policy=LoadBalancedScheduler)
+    if args.roundrobin:
+        proxy_server = ProxyServer(args=args)
+    else:
+        proxy_server = ProxyServer(args=args, scheduling_policy=LoadBalancedScheduler)
     proxy_server.run_server()
