@@ -486,7 +486,7 @@ class LlamaDecoderLayer(nn.Module):
         do_split = self.do_split and attn_metadata.is_prompt
 
         # GC issue
-        htorch.core.mark_step()
+        #htorch.core.mark_step()
 
         # self_attn output a list of tensors to be processed sequential at layernorm and mlp
         if do_split and (seq_len*batch_size)//split_size>=2 and self.output_slice:
@@ -513,7 +513,7 @@ class LlamaDecoderLayer(nn.Module):
             hidden_states = self.mlp(hidden_states)
 
         # GC issue
-        htorch.core.mark_step()
+        #htorch.core.mark_step()
         
         return hidden_states, residual
 
