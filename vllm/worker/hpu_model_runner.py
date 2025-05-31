@@ -30,6 +30,7 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 
 import vllm.envs as envs
+import vllm.hpu_utils as hpu_utils
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
@@ -1007,23 +1008,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _compile(self, module):
         if not hasattr(self, '_compile_config'):
-            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
-                                  'false').strip().lower() in ("1", "true")
-            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
-                                'false').strip().lower() in ("1", "true")
-            self._compile_config = {'fullgraph': fullgraph, 'dynamic': dynamic}
-        fullgraph = self._compile_config['fullgraph']
-        dynamic = self._compile_config['dynamic']
-        if dynamic:
-            return torch.compile(module,
-                                 backend='hpu_backend',
-                                 fullgraph=fullgraph,
-                                 options={"force_static_compile": True})
-        else:
-            return torch.compile(module,
-                                 backend='hpu_backend',
-                                 fullgraph=fullgraph,
-                                 dynamic=False)
+            self._compile_config = hpu_utils.HPUCompileConfig(self.model_config.get_num_layers(self.parallel_config), self._is_quant_with_inc())
+        return torch.compile(module, **self._compile_config.get_compile_args())
 
     def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
@@ -2327,17 +2313,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  is_pt_profiler_run=True)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
-            multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
-                                        'true').lower() == 'true' else 1
-            cache_size_limit = 1 + multiplier * (prompt_buckets +
-                                                 decode_buckets)
-            torch._dynamo.config.cache_size_limit = max(
-                cache_size_limit, torch._dynamo.config.cache_size_limit)
-            # Multiply by 8 to follow the original default ratio between
-            # the cache_size_limit and accumulated_cache_size_limit
-            torch._dynamo.config.accumulated_cache_size_limit = max(
-                cache_size_limit * 8,
-                torch._dynamo.config.accumulated_cache_size_limit)
+            self._compile_config.set_dynamo_cache_limits(self.model_config.get_num_layers(self.parallel_config),prompt_buckets, decode_buckets)
         if self.skip_warmup:
             logger.info("Skipping warmup...")
             return
