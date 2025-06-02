@@ -1481,7 +1481,7 @@ class HPUModelRunner:
                 num_blocks = seq_len
             seq_len = 1'''
         #print("after", seq_len, num_blocks)
- 
+
         self._check_config(batch_size, seq_len, num_blocks, attn_metadata,
                            warmup_mode)
         #print("check_config", batch_size, seq_len, num_blocks, phase)
@@ -2093,7 +2093,8 @@ class HPUModelRunner:
                     block_tables=block_tables,
                     slot_mapping=slot_mapping,
                     bucketing=True)
-                block_list_device = _async_h2d_tensor_copy(block_list, self.device)
+                block_list_device = _async_h2d_tensor_copy(
+                    block_list, self.device)
                 block_usage_device = _async_h2d_tensor_copy(
                     block_usage, self.device)
                 block_groups_device = _async_h2d_tensor_copy(
@@ -2108,15 +2109,15 @@ class HPUModelRunner:
                     block_size=self.block_size)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
-        logits_indices_device = _async_h2d_tensor_copy(
-            logits_indices, self.device)
+        logits_indices_device = _async_h2d_tensor_copy(logits_indices,
+                                                       self.device)
         # Dummy run.
         htorch.core.mark_step()
         logits = self._execute_model_generic(input_ids_device,
-                                                position_ids_device,
-                                                attn_metadata,
-                                                logits_indices_device,
-                                                kv_caches, True)
+                                             position_ids_device,
+                                             attn_metadata,
+                                             logits_indices_device, kv_caches,
+                                             True)
 
         # TODO: do sampling on logits, warmup sampler and prefill joiner
         htorch.core.mark_step()
@@ -2399,7 +2400,6 @@ class HPUModelRunner:
             return
         kv_caches = self.kv_caches
         max_blocks = kv_caches[0][0].size(0) - 1
-        self.bucketing_ctx.generate_prefix_prefill_buckets()
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
@@ -2442,8 +2442,6 @@ class HPUModelRunner:
         ) if can_use_compile_only_mode else contextlib.nullcontext():
             self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
                                     kv_caches)
-            self.warmup_all_buckets(self.bucketing_ctx.prefix_prefill_buckets,
-                                    True, kv_caches)
             self.warmup_all_buckets(self.bucketing_ctx.decode_buckets, False,
                                     kv_caches)
 
@@ -2459,16 +2457,9 @@ class HPUModelRunner:
                 prompt_graph_mem_ratio = float(
                     os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
 
-                prompt_available_memory = graph_free_mem / 2
-                prefix_prefill_available_memory = graph_free_mem / 2
-                print("self.bucketing_ctx.prefix_prefill_buckets",
-                      self.bucketing_ctx.prefix_prefill_buckets)
-                print("prefix_prefill_available_memory",
-                      prefix_prefill_available_memory)
-                #exit()
+                prompt_available_memory = graph_free_mem
                 decode_available_memory = (graph_free_mem -
-                                           prompt_available_memory -
-                                           prefix_prefill_available_memory)
+                                           prompt_available_memory)
                 msg = (
                     f"Using {format_bytes(graph_free_mem)}"
                     f"/{format_bytes(free_mem)} "
@@ -2485,10 +2476,6 @@ class HPUModelRunner:
                     self.warmup_graphs(
                     prompt_strategy, self.bucketing_ctx.prompt_buckets,
                     True, kv_caches, prompt_available_memory)
-                mem_post_prefix_prefill, prefix_prefill_batch_seq, prefix_prefill_captured_all = \
-                            self.warmup_graphs(
-                            prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
-                            True, kv_caches, prefix_prefill_available_memory)
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
                     decode_strategy, self.bucketing_ctx.decode_buckets,
@@ -2497,29 +2484,20 @@ class HPUModelRunner:
                 # Not all prompt buckets were captured, but all decode buckets
                 # were captured and we have some free graph-allocated space
                 # left. Let's try to use it for capturing more prompt buckets.
-                if (mem_post_decode + mem_post_prompt + mem_post_prefix_prefill < graph_free_mem
-                        and not prompt_captured_all or not prefix_prefill_captured_all and decode_captured_all):
-                    if not prompt_captured_all:
-                        mem_post_prompt, _, prompt_captured_all = (
-                            self.warmup_graphs(
-                                prompt_strategy, self.bucketing_ctx.prompt_buckets,
-                                True, kv_caches,
-                                graph_free_mem - mem_post_prompt - mem_post_prefix_prefill - mem_post_decode,
-                                mem_post_prompt, prompt_batch_seq))
-                        
-                    if not prefix_prefill_captured_all:
-                        mem_post_prefix_prefill, _, prefix_prefill_captured_all = (
-                            self.warmup_graphs(
-                                prompt_strategy, self.bucketing_ctx.prefix_prefill_buckets,
-                                True, kv_caches,
-                                graph_free_mem - mem_post_prompt - mem_post_prefix_prefill - mem_post_decode,
-                                mem_post_prompt, prompt_batch_seq))
+                if (mem_post_decode + mem_post_prompt < graph_free_mem
+                        and not prompt_captured_all and decode_captured_all):
+                    mem_post_prompt, _, prompt_captured_all = (
+                        self.warmup_graphs(
+                            prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                            True, kv_caches,
+                            graph_free_mem - mem_post_prompt - mem_post_decode,
+                            mem_post_prompt, prompt_batch_seq))
 
                 # Not all decode buckets were captured, but all prompt buckets
                 # were captured and we have some free graph-allocated space
                 # left. Let's try to use it for capturing more decode buckets.
-                if mem_post_decode + mem_post_prefix_prefill + mem_post_prompt < graph_free_mem \
-                    and not decode_captured_all and prefix_prefill_captured_all \
+                if mem_post_decode + mem_post_prompt < graph_free_mem \
+                    and not decode_captured_all \
                         and prompt_captured_all:
                     mem_post_decode, _, _ = self.warmup_graphs(
                         decode_strategy, self.bucketing_ctx.decode_buckets,
@@ -2529,9 +2507,6 @@ class HPUModelRunner:
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
-                self.log_graph_warmup_summary(
-                        self.bucketing_ctx.prefix_prefill_buckets, True,
-                        mem_post_prefix_prefill)
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.decode_buckets, False, mem_post_decode)
 
