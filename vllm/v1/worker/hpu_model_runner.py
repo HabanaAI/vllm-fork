@@ -130,13 +130,13 @@ class BatchContents:
 #TODO(kzawora): remove this
 @dataclass
 class PrefillInputData:
-    request_ids: list = empty_list
-    prompt_lens: list = empty_list
-    token_ids: list = empty_list
-    position_ids: list = empty_list
-    attn_metadata: list = empty_list
-    logits_indices: list = empty_list
-    logits_requests: list = empty_list
+    request_ids: list = empty_list()
+    prompt_lens: list = empty_list()
+    token_ids: list = empty_list()
+    position_ids: list = empty_list()
+    attn_metadata: list = empty_list()
+    logits_indices: list = empty_list()
+    logits_requests: list = empty_list()
 
     def _data(self):
         return (self.request_ids, self.prompt_lens, self.token_ids,
@@ -1230,7 +1230,7 @@ class HPUModelRunner:
         query_lens = _async_h2d_tensor(query_lens, torch.int32)
         token_ids = _async_h2d_tensor(token_ids, torch.int32)
         token_positions = _async_h2d_tensor(token_positions, torch.int32)
-        token_slots = _async_h2d_tensor(token_slots, torch.int32)
+        token_slots = _async_h2d_tensor(token_slots, torch.int64)
         logits_indices = _async_h2d_tensor(logits_indices, torch.int32)
         context_lens = _async_h2d_tensor(context_lens, torch.int32)
         if has_context:
