@@ -2953,7 +2953,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         ])
 
     def _get_num_patches_from_model_input(self, model_input):
-        if not model_input.multi_modal_kwargs or \
+        if not self.model_is_mrope or \
+            not model_input.multi_modal_kwargs or \
             'pixel_values' not in model_input.multi_modal_kwargs:
             return None
         pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
