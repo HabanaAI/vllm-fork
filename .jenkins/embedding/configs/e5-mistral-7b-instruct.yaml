@@ -1,2 +1,2 @@
-model_name: "/mnt/weka/data/pytorch/intfloat/e5-mistral-7b-instruct"
+model_name: "/mnt/weka/data/huggingface-model/intfloat/e5-mistral-7b-instruct"
 dtype: "bfloat16"
