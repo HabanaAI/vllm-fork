@@ -93,14 +93,15 @@ main() {
     echo "Launching prefiller, decoder and proxy..."
     echo "Please check prefiller.log, decoder.log and proxy.log for logs."
 
-    python -m lmcache.experimental.server localhost 2000 2>&1 &
-
-    bash disagg_vllm_launcher_gaudi.sh prefiller \
+    echo "starting lmcache "
+    python -m lmcache.experimental.server localhost 8100 2>&1 &
+    echo "start prefiller "
+    bash disagg_vllm_launcher_gaudi_lm.sh prefiller \
         > >(tee prefiller.log) 2>&1 &
     prefiller_pid=$!
     PIDS+=($prefiller_pid)
-
-    bash disagg_vllm_launcher_gaudi.sh decoder  \
+    echo "start decoder "
+    bash disagg_vllm_launcher_gaudi_lm.sh decoder  \
         > >(tee decoder.log)  2>&1 &
     decoder_pid=$!
     PIDS+=($decoder_pid)
@@ -127,7 +128,7 @@ main() {
     python benchmark_serving.py --port 1000 --seed $(date +%s) \
         --model /root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/ \
         --dataset-name random --random-input-len 8000 --random-output-len 200 \
-        --num-prompts 50 --burstiness 100 --request-rate 3.6 | tee benchmark.log
+        --num-prompts 100 --burstiness 100 --request-rate 3.6 | tee benchmark.log
 
     echo "Benchmarking done. Cleaning up..."
 

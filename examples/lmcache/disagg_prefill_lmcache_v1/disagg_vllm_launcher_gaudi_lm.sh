@@ -18,15 +18,15 @@ fi
 
 if [[ $1 == "prefiller" ]]; then
     # Prefiller listens on port 8100
-    prefill_config_file=$SCRIPT_DIR/configs/lmcache-prefiller-config.yaml
+    prefill_config_file=$SCRIPT_DIR/configs/lmcache-config-lm.yaml
 
-    UCX_TLS=tcp \
-        LMCACHE_CONFIG_FILE=$prefill_config_file \
+    #UCX_TLS=tcp \
+    LMCACHE_CONFIG_FILE=$prefill_config_file \
         LMCACHE_USE_EXPERIMENTAL=True \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
+        LMCACHE_REMOTE_SERDE=naive \
         RANK=0 \
-        WORLD_SIZE=2 \
         DECODER_RANK=1 \
         vllm serve $MODEL \
         --port 1100 \
@@ -38,17 +38,16 @@ if [[ $1 == "prefiller" ]]; then
 
 elif [[ $1 == "decoder" ]]; then
     # Decoder listens on port 8200
-    decode_config_file=$SCRIPT_DIR/configs/lmcache-decoder-config.yaml
+    decode_config_file=$SCRIPT_DIR/configs/lmcache-config-lm.yaml
 
-    UCX_TLS=tcp \
-        LMCACHE_CONFIG_FILE=$decode_config_file \
-        LMCACHE_LOCAL_CPU=False \
+    #UCX_TLS=tcp \
+    LMCACHE_CONFIG_FILE=$decode_config_file \
         LMCACHE_USE_EXPERIMENTAL=True \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
+        LMCACHE_CHUNK_SIZE=256 \
         RANK=1 \
         DECODER_RANK=1 \
-        WORLD_SIZE=2 \
         vllm serve $MODEL \
         --port 1200 \
         --gpu_memory_utilization 0.5 \
