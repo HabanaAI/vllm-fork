@@ -39,9 +39,9 @@ This guide explains how to quickly run vLLM with multi-model support on Gaudi us
 
    > [!Tip]
    > - Model files can be large. For best performance, use an external disk for the Huggingface cache and set `HF_HOME` accordingly.  
-   Example: `-e HF_HOME=/mnt/huggingface -v /mnt/huggingface:/mnt`
+   > Example: `-e HF_HOME=/mnt/huggingface -v /mnt/huggingface:/mnt`
    > - For a quick startup and to skip the initial model warmup (useful for development testing), you can add:  
-   `-e VLLM_SKIP_WARMUP=true`
+   > `-e VLLM_SKIP_WARMUP=true`
 
 3. **Run the vLLM server**
 
