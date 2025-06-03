@@ -784,17 +784,20 @@ class CachedStepOutput:
     logprobs: Optional[torch.Tensor] = None
     deffered_sample_results: Optional[SampleResultArgsType] = None
     sampling_metadata: Optional[SamplingMetadata] = None
+    is_prompt: Optional[bool] = False
 
     def __init__(
             self,
             token_ids: torch.Tensor,
             logprobs: Optional[torch.Tensor] = None,
             deffered_sample_results: Optional[SampleResultArgsType] = None,
-            sampling_metadata: Optional[SamplingMetadata] = None):
+            sampling_metadata: Optional[SamplingMetadata] = None,
+            is_prompt: Optional[bool] = False):
         self.token_ids = token_ids
         self.logprobs = logprobs
         self.deffered_sample_results = deffered_sample_results
         self.sampling_metadata = sampling_metadata
+        self.is_prompt = is_prompt
 
 
 class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
@@ -3377,7 +3380,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             CachedStepOutput(
                                 token_ids, output.logprobs,
                                 output.deferred_sample_results_args,
-                                sampling_metadata))
+                                sampling_metadata, is_prompt))
                         self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
                 if use_delayed_sampling \
