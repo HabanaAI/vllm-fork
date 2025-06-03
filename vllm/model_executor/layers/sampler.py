@@ -32,6 +32,7 @@ if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
 else:
     flashinfer_top_k_top_p_sampling = None
 
+FORCE_GREEDY = os.environ.get('VLLM_FORCE_GREEDY_SAMPLE', '0').lower() in ['1', 'true']
 
 def get_sampler() -> torch.nn.Module:
     if envs.VLLM_USE_V1:
@@ -191,6 +192,7 @@ class Sampler(nn.Module):
         # speculative decoding and when prompt embeddings are specified.
         self.include_gpu_probs_tensor = False
         self.should_modify_greedy_probs_inplace = False
+        self.force_greedy_sample = FORCE_GREEDY
 
     def _init_sampling_tensors(
         self,
@@ -272,8 +274,9 @@ class Sampler(nn.Module):
 
         # Use float32 to apply temperature scaling.
         # Use in-place division to avoid creating a new tensor.
-        logits = logits.to(torch.float)
-        logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
+        if not self.force_greedy_sample:
+            logits = logits.to(torch.float)
+            logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k and flashinfer_top_k_top_p_sampling is None:
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
@@ -284,14 +287,14 @@ class Sampler(nn.Module):
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
-        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        probs = None if self.force_greedy_sample else torch.softmax(logits, dim=-1, dtype=torch.float)
         # Compute the log probabilities.
-        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+        logprobs = None if self.force_greedy_sample else torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
         # Sample the next tokens.
         maybe_deferred_sample_results, maybe_sampled_tokens_tensor = _sample(
-            probs,
-            logprobs,
+            logits if self.force_greedy_sample else probs,
+            logits if self.force_greedy_sample else logprobs,
             sampling_metadata,
             sampling_tensors,
             include_gpu_probs_tensor=self.include_gpu_probs_tensor,
@@ -303,7 +306,7 @@ class Sampler(nn.Module):
             # preserve GPU-side tensors in support of later
             # deferred pythonization of logprobs
             assert maybe_sampled_tokens_tensor is not None
-            on_device_tensors = (probs, logprobs, maybe_sampled_tokens_tensor)
+            on_device_tensors = (logits if self.force_greedy_sample else probs, logits if self.force_greedy_sample else logprobs, maybe_sampled_tokens_tensor)
         else:
             # Since Pythonization has already happened, don't preserve
             # GPU-side tensors.
@@ -317,7 +320,7 @@ class Sampler(nn.Module):
             assert not isinstance(maybe_deferred_sample_results,
                                   SampleResultArgsType)
             prompt_logprobs, sample_logprobs = get_logprobs(
-                logprobs, sampling_metadata, maybe_deferred_sample_results)
+                logits if self.force_greedy_sample else logprobs, sampling_metadata, maybe_deferred_sample_results)
 
         return _build_sampler_output(
             maybe_deferred_sample_results,
@@ -667,7 +670,6 @@ def get_pythonized_sample_results(
         for i in range(len(sampling_metadata.seq_groups))
     ]
 
-
 def _sample_with_torch(
     probs: torch.Tensor,
     logprobs: torch.Tensor,
@@ -796,7 +798,6 @@ def _sample_with_torch(
             sampled_token_ids_tensor,
         )
 
-
 def _sample(
     probs: torch.Tensor,
     logprobs: torch.Tensor,
@@ -887,7 +888,7 @@ def get_logprobs(
     # The largest requested number of logprobs. We find logprobs as many as the
     # largest num logprobs in this API. If every logprobs is None, it will be
     # set to -1.
-    largest_num_logprobs = -1
+    largest_num_logprobs = -float("inf") if FORCE_GREEDY else -1 # If we skipped the logsoftmax (i.e logprobs is just the logits), then the starting min should be -inf)
 
     # Select indices to compute logprob from, ranks of token ids, and the top
     # k token ids from logprobs.
