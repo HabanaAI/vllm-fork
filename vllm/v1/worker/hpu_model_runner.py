@@ -75,8 +75,7 @@ def setup_profiler(warmup, active):
 
 
 class PhaseType(Enum):
-    PREFILL = 'prefill'
-    PREFIX_PREFILL = 'prefix_prefill'
+    PROMPT = 'prompt'
     DECODE = 'decode'
 
 
@@ -1424,29 +1423,22 @@ class HPUModelRunner:
             return 0
         return attn_metadata.block_list.numel()
 
-    def _phase_warmup(self, is_prompt, ctx):
-        if is_prompt:
-            if ctx == 0:
-                phase = PhaseType.PREFILL
-            else:
-                phase = PhaseType.PREFIX_PREFILL
-        else:
-            phase = PhaseType.DECODE
-        return phase
-
     def _phase(self, attn_metadata):
         phase_type: PhaseType
         is_prompt = attn_metadata.is_prompt
-        is_prefix_cached = is_prompt and attn_metadata.block_list is not None
+        '''is_prefix_cached = is_prompt and attn_metadata.block_list is not None
         if is_prompt and is_prefix_cached:
             phase_type = PhaseType.PREFIX_PREFILL
         elif is_prompt and not is_prefix_cached:
             phase_type = PhaseType.PREFILL
         elif not is_prompt:
-            phase_type = PhaseType.DECODE
+            phase_type = PhaseType.DECODE'''
+        if is_prompt:
+            phase_type = PhaseType.PROMPT
         else:
-            raise ValueError("Unrecognized pass type, likely due to malformed "
-                             "attention metadata")
+            phase_type = PhaseType.DECODE
+        #raise ValueError("Unrecognized pass type, likely due to malformed "
+        #                     "attention metadata")
         return phase_type
 
     def _check_config(self, batch_size, seq_len, num_blocks, attn_metadata,
@@ -1484,7 +1476,6 @@ class HPUModelRunner:
 
         self._check_config(batch_size, seq_len, num_blocks, attn_metadata,
                            warmup_mode)
-        #print("check_config", batch_size, seq_len, num_blocks, phase)
 
         additional_kwargs = {}
         if htorch.utils.internal.is_lazy(
@@ -2190,16 +2181,6 @@ class HPUModelRunner:
                f"free_mem:{free_mem}")
         logger.info(msg)
 
-    def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
-        for i, (batch_size, seq_len,
-                num_blocks) in enumerate(reversed(buckets)):
-            phase = self._phase_warmup(is_prompt, num_blocks)
-            self.log_warmup(phase, i, len(buckets), batch_size, seq_len,
-                            num_blocks)
-            self.warmup_scenario(batch_size, seq_len, num_blocks, is_prompt,
-                                 kv_caches)
-            torch.hpu.synchronize()
-
     def warmup_graphs(self,
                       buckets,
                       is_prompt,
@@ -2214,7 +2195,7 @@ class HPUModelRunner:
         for idx, (batch_size, seq_len,
                   num_blocks) in enumerate(reversed(buckets)):
             # Graph memory usage is proportional to seq dimension in a batch
-            phase = f'Graph/{self._phase_warmup(is_prompt, num_blocks)}'
+            phase = f"Graph/{'prompt' if is_prompt else 'decode'}"
             #batch_seq = batch_size * seq_len if is_prompt else batch_size
             if is_prompt:
                 if num_blocks:
