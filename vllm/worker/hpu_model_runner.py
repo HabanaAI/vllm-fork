@@ -235,6 +235,8 @@ def get_path_to_rope(model: torch.nn.Module):
     of names.
     If no such layer is found, it returns None.
     """
+    found_modules = set()
+    paths_to_rope = []
 
     def find_rope_layer(parent, path):
         # Base case: check if this parent is None
@@ -244,21 +246,24 @@ def get_path_to_rope(model: torch.nn.Module):
         # Check if the current layer is a RotaryEmbedding
         if hasattr(parent, 'named_children'):
             for child_name, child_module in parent.named_children():
+                # Continue if module already seen
+                if child_module.__class__.__name__ in found_modules:
+                    continue
                 # If the current child is of type RotaryEmbedding,
-                # return the full path
+                # append the full path
                 if child_module.__class__.__name__.endswith("RotaryEmbedding"):
-                    return path + [child_name]
+                    found_modules.add(child_module.__class__.__name__)
+                    paths_to_rope.append(path + [child_name])
                 # Otherwise, recurse into this child to check its children
-                result = find_rope_layer(child_module, path + [child_name])
-                if result is not None:
-                    return result
-        return None
+                find_rope_layer(child_module, path + [child_name])
 
     # Start the search from the top level model
-    path_to_rope = find_rope_layer(model, [])
+    find_rope_layer(model, [])
 
     # Return the result if found, otherwise None
-    return path_to_rope
+    return paths_to_rope
+
+
 
 
 class HpuModelAdapter(torch.nn.Module):
@@ -404,36 +409,35 @@ class HpuModelAdapter(torch.nn.Module):
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
-        """Navigate through the model using the provided path and call
-        the prepare_cos_sin method on the 'RotaryEmbedding' layer."""
+        """Prepare cos/sin buffers for each unique RotaryEmbedding type only once."""
 
-        current_module = self.model  # Start from the top level of the model
+        for path in self.layer_names:
+            current_module = self.model  # Start from the top level of the model
+            for layer in path:
+                if layer.isdigit():  # Check if the layer is an index
+                    layer = int(layer)
 
-        for layer in self.layer_names:
-            if layer.isdigit():  # Check if the layer is an index
-                layer = int(layer)
+                # Check if the current layer is a name in a module
+                if isinstance(
+                        layer,
+                        str) and not isinstance(layer, int):  # Name-based access
+                    current_module = getattr(current_module, layer)
+                elif isinstance(layer,
+                                int):  # Indexed-based access (like ModuleList)
+                    module_list = list(current_module._modules.values())
+                    if layer >= len(module_list):
+                        # for MTP models, last layer is MTP layer
+                        layer = -1
+                    current_module = module_list[layer]
 
-            # Check if the current layer is a name in a module
-            if isinstance(
-                    layer,
-                    str) and not isinstance(layer, int):  # Name-based access
-                current_module = getattr(current_module, layer)
-            elif isinstance(layer,
-                            int):  # Indexed-based access (like ModuleList)
-                module_list = list(current_module._modules.values())
-                if layer >= len(module_list):
-                    # for MTP models, last layer is MTP layer
-                    layer = -1
-                current_module = module_list[layer]
-
-        # At the end, we should be at the RotaryEmbedding layer.
-        if hasattr(current_module, 'prepare_cos_sin'):
-            current_module.prepare_cos_sin(
-                positions, recompute_cos_sin=self.recompute_cos_sin)
-        else:
-            raise AttributeError(
-                "The module at the end of the path does not have \
-               a 'prepare_cos_sin' method.")
+            # At the end, we should be at the RotaryEmbedding layer.
+            if hasattr(current_module, 'prepare_cos_sin'):
+                current_module.prepare_cos_sin(
+                    positions, recompute_cos_sin=self.recompute_cos_sin)
+            else:
+                raise AttributeError(
+                    "The module at the end of the path does not have \
+                a 'prepare_cos_sin' method.")
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
