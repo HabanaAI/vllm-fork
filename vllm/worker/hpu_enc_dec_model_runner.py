@@ -3,6 +3,7 @@ import dataclasses
 import gc
 import itertools
 import math
+from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union, cast
 
 import habana_frameworks.torch as htorch
@@ -196,8 +197,8 @@ class HPUEncoderDecoderModelRunner(
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapterEncoderDecoder(*args, **kwargs),
             disable_tensor_cache=True,
-        ) if htorch.utils.internal.is_lazy(
-        ) else HpuModelAdapterEncoderDecoder(*args, **kwargs)
+        ) if htorch.utils.internal.is_lazy() else HpuModelAdapterEncoderDecoder(
+            *args, **kwargs)
 
     def prepare_model_input(
         self,
