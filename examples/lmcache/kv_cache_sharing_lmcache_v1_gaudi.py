@@ -15,7 +15,7 @@ import subprocess
 import time
 from multiprocessing import Event, Process
 
-from lmcache.experimental.cache_engine import LMCacheEngineBuilder
+from lmcache.v1.cache_engine import LMCacheEngineBuilder
 from lmcache.integration.vllm.utils import ENGINE_NAME
 
 from vllm import LLM, SamplingParams
@@ -25,7 +25,7 @@ from vllm.config import KVTransferConfig
 # The port to start LMCache server
 port = 8100
 # Use experimental features in LMCache
-os.environ["LMCACHE_USE_EXPERIMENTAL"] = "True"
+#os.environ["LMCACHE_USE_EXPERIMENTAL"] = "True"
 # LMCache is set to use 256 tokens per chunk
 os.environ["LMCACHE_CHUNK_SIZE"] = "256"
 # Disable local CPU backend in LMCache
@@ -44,7 +44,7 @@ os.environ["WORLD_SIZE"] = "2"
 #os.environ["LMCACHE_NIXL_RECEIVER_PORT"] = "66666"
 #os.environ["LMCACHE_NIXL_BUFFER_DEVICE"] = "hpu"
 #os.environ["LMCACHE_NIXL_ENABLE_GC"] = "True"
-MODEL="/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/"
+MODEL="/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/"
 #prompts = [
 #    "Hello, how are you?" * 1000,
 #]
@@ -112,7 +112,7 @@ def run_retrieve(store_done, prompts, timeout=1):
 
 def run_lmcache_server(port):
     server_proc = subprocess.Popen([
-        "python", "-m", "lmcache.experimental.server", "localhost",
+        "python", "-m", "lmcache.v1.server", "localhost",
         str(port)
     ])
     return server_proc
