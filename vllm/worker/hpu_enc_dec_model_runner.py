@@ -3,6 +3,7 @@ import dataclasses
 import gc
 import itertools
 import math
+from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union, cast
 
@@ -36,6 +37,50 @@ logger = init_logger(__name__)
 # Use caution when updating them!
 _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
+
+
+def trim_attn_metadata(metadata: AttentionMetadata) -> object:
+    # NOTE(kzawora): To anyone working on this in the future:
+    # Trimming metadata is required when using HPUGraphs.
+    # Attention metadata is going to be hashed by PT bridge, and
+    # appropriate HPUGraphs will be matched based on all inputs' hash.
+
+    # Before you put more keys in here, make sure you know their
+    # value type and make sure you know how it's going to be hashed.
+    # You can find that information in input_hash function
+    # in habana_frameworks/torch/hpu/graphs.py. You can also hash
+    # it manually with torch.hpu.graphs.input_hash(attention_metadata)
+
+    # If you use primitive types here - they will get hashed based
+    # on their value. You *will* get lots of excessive graph captures
+    # (and an OOM eventually) if you decide to put something like
+    # seq_len int here.
+    # If you absolutely need a scalar, put it in a tensor. Tensors
+    # get hashed using their metadata, not their values:
+    # input_hash(torch.tensor(123)) == input_hash(torch.tensor(321))
+    # input_hash(123) != input_hash(321)
+    # input_hash("abc") != input_hash("cba")
+    attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
+        'attn_bias',
+        'seq_lens_tensor',
+        'context_lens_tensor',
+        'block_list',
+        'block_mapping',
+        'block_usage',
+        'slot_mapping',
+        'is_prompt',
+        'block_size',
+        'block_groups',
+        'seq_lens',
+        'encoder_seq_lens_tensor',
+        'max_encoder_seq_len',
+        'cross_slot_mapping',
+        'cross_block_mapping',
+        'cross_block_groups',
+        'cross_block_usage',
+        'cross_attn_bias',
+    ])
+    return attention_metadata
 
 
 class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
@@ -92,7 +137,7 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
 
     def _update_cross_metadata(self, attn_metadata, batch_size, seq_len,
                                device, dtype):
-        if max(attn_metadata.encoder_seq_lens) == 0:
+        if attn_metadata.max_encoder_seq_len == 0:
             return attn_metadata
         if attn_metadata.is_prompt:
             attn_metadata = self._update_seq_lens(attn_metadata, batch_size,
@@ -109,6 +154,8 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
         input_ids = kwargs['input_ids']
+        attn_metadata = kwargs.pop('attn_metadata')
+        kwargs['attn_metadata'] = trim_attn_metadata(attn_metadata)
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
@@ -129,7 +176,9 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
             virtual_engine = kwargs.pop('virtual_engine')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
-        with set_forward_context(kwargs['attn_metadata'], self.vllm_config,
+        attn_metadata = replace(attn_metadata,
+                                **kwargs['attn_metadata']._asdict())
+        with set_forward_context(attn_metadata, self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
             hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
@@ -471,54 +520,6 @@ class HPUEncoderDecoderModelRunner(
             multi_modal_placeholders,
             cross_block_table=cross_block_table)
 
-    def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:
-        # NOTE(kzawora): To anyone working on this in the future:
-        # Trimming metadata is required when using HPUGraphs.
-        # Attention metadata is going to be hashed by PT bridge, and
-        # appropriate HPUGraphs will be matched based on all inputs' hash.
-
-        # Before you put more keys in here, make sure you know their
-        # value type and make sure you know how it's going to be hashed.
-        # You can find that information in input_hash function
-        # in habana_frameworks/torch/hpu/graphs.py. You can also hash
-        # it manually with torch.hpu.graphs.input_hash(attention_metadata)
-
-        # If you use primitive types here - they will get hashed based
-        # on their value. You *will* get lots of excessive graph captures
-        # (and an OOM eventually) if you decide to put something like
-        # seq_len int here.
-        # If you absolutely need a scalar, put it in a tensor. Tensors
-        # get hashed using their metadata, not their values:
-        # input_hash(torch.tensor(123)) == input_hash(torch.tensor(321))
-        # input_hash(123) != input_hash(321)
-        # input_hash("abc") != input_hash("cba")
-        attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'attn_bias',
-            'seq_lens_tensor',
-            'context_lens_tensor',
-            'block_list',
-            'block_mapping',
-            'block_usage',
-            'slot_mapping',
-            'is_prompt',
-            'block_size',
-            'block_groups',
-            'num_prefill_tokens',
-            'num_decode_tokens',
-            'num_prefills',
-            'seq_lens',
-            'encoder_seq_lens',
-            'encoder_seq_lens_tensor',
-            'max_encoder_seq_len',
-            'cross_block_list',
-            'cross_slot_mapping',
-            'cross_block_mapping',
-            'cross_block_groups',
-            'cross_block_usage',
-            'cross_attn_bias',
-        ])
-        return attention_metadata
-
     def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
         cfg = (batch_size, seq_len, is_prompt)
         seen = cfg in self.seen_configs
@@ -583,7 +584,7 @@ class HPUEncoderDecoderModelRunner(
                 "input_ids": input_tokens,
                 "positions": input_positions,
                 "kv_caches": kv_caches,
-                "attn_metadata": self.trim_attn_metadata(attn_metadata),
+                "attn_metadata": attn_metadata,
                 "intermediate_tensors": intermediate_tensors,
                 **(model_input.multi_modal_kwargs or {}),
             }
@@ -633,8 +634,7 @@ class HPUEncoderDecoderModelRunner(
                         "positions":
                         broadcast_data["positions"],
                         "attn_metadata":
-                        self.trim_attn_metadata(
-                            broadcast_data["attn_metadata"])
+                        broadcast_data["attn_metadata"]
                     })
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
@@ -725,7 +725,7 @@ class HPUEncoderDecoderModelRunner(
                         "positions":
                         result.input_positions,
                         "attn_metadata":
-                        self.trim_attn_metadata(result.attn_metadata)
+                        result.attn_metadata
                     })
                     model_kwargs_broadcast_data = {
                         "input_ids": result.input_tokens,
