@@ -51,6 +51,15 @@ ibdev2netdev
 # ...
 ```
 
+RDMA requires a large amount of registered memory. It is recommended to enable Transparent Huge Pages (THP). For more details, see the [Transparent Hugepage documentation](https://docs.kernel.org/admin-guide/mm/transhuge.html).
+
+```bash
+# enable Transparent Huge Pages (THP)
+echo always > /sys/kernel/mm/transparent_hugepage/enabled
+```
+
+
+
 > **Note**: If you are running RDMA inside a Docker container, add the `--privileged` flag to the `docker run` command to ensure proper hardware and network access.
 
 ## PD Disaggregation Usage
