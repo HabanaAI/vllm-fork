@@ -4,6 +4,7 @@
 # Copyright (C) 2024-2025 Habana Labs, Ltd. an Intel Company
 ###############################################################################
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
@@ -11,10 +12,9 @@ import torch
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.flags import enabled_flags
-from vllm_hpu_extension.utils import (Matmul, ModuleFusedSDPA, Softmax,
-                                      VLLMKVCache)
+from vllm_hpu_extension.utils import (FP8Matmul, Matmul, ModuleFusedSDPA,
+                                      Softmax, VLLMFP8KVCache, VLLMKVCache)
 
-import vllm.envs as envs
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
                                               AttentionMetadata, AttentionType)
@@ -96,7 +96,7 @@ class HPUMLAAttentionBackend(AttentionBackend):
         num_kv_heads: int,
         head_size: int,
     ) -> Tuple[int, ...]:
-        return (num_blocks, block_size, head_size)
+        return (num_blocks * block_size, head_size)
 
     @staticmethod
     def swap_blocks(
@@ -120,6 +120,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     # Currently, input sequences can only contain all prompts
     # or all decoding. True if all sequences are prompts.
     is_prompt: bool
+    block_size: int
     attn_bias: Optional[torch.Tensor]
     seq_lens_tensor: Optional[torch.Tensor]
     context_lens_tensor: Optional[torch.Tensor]
@@ -127,8 +128,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     seq_lens: Optional[List[int]] = None
     encoder_seq_lens: Optional[List[int]] = None
     encoder_seq_lens_tensor: Optional[torch.Tensor] = None
-    cross_block_indices: Optional[torch.Tensor] = None
-    cross_block_offsets: Optional[torch.Tensor] = None
+    max_encoder_seq_len: Optional[int] = None
     cross_block_list: Optional[torch.Tensor] = None
     cross_slot_mapping: Optional[torch.Tensor] = None
     cross_block_mapping: Optional[torch.Tensor] = None
@@ -163,13 +163,19 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
                                alibi_slopes, sliding_window, kv_cache_dtype,
                                blocksparse_params, logits_soft_cap, attn_type,
                                **kwargs)
-
-        self.matmul_qk = Matmul()
+        self.enable_fp8_attn = kv_cache_dtype == 'fp8_inc' and os.environ.get(
+            'QUANT_CONFIG', None) is None
+        self.matmul_qk = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
         self.softmax = Softmax()
-        self.matmul_av = Matmul()
-        self.batch2block_matmul = Matmul()
-        self.block2batch_matmul = Matmul()
-        self.latent_cache_k = VLLMKVCache()
+        self.matmul_av = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
+        self.batch2block_matmul = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
+        self.block2batch_matmul = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
+        self.latent_cache_k = VLLMKVCache() if not self.enable_fp8_attn \
+            else VLLMFP8KVCache()
         self.fused_scaled_dot_product_attention = kernels.fsdpa()
 
         if "fsdpa" in enabled_flags():
@@ -236,22 +242,18 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             q[..., self.qk_nope_head_dim:], k_pe = \
                 self.rotary_emb(input_positions, q_pe, k_pe)
 
-        block_indices = attn_metadata.block_indices
-        block_offsets = attn_metadata.block_offsets
+        slot_mapping = attn_metadata.slot_mapping.flatten(
+        ) if attn_metadata.slot_mapping is not None else None
 
         latent_vec_k = torch.concat(
             (k_c_normed, k_pe.view(batch_size, -1, self.qk_rope_head_dim)),
             dim=-1)
         latent_vec_k = latent_vec_k.view(
             -1, self.qk_rope_head_dim + self.kv_lora_rank)
-        if is_prefill:
-            latent_vec_k = latent_vec_k.unflatten(0,
-                                                  (block_indices.size(0), -1))
 
         # write the latent and rope to kv cache
         if kv_cache is not None and len(kv_cache) == 2:
-            self.latent_cache_k(latent_vec_k, kv_cache[0], block_indices,
-                                block_offsets)
+            self.latent_cache_k(latent_vec_k, kv_cache[0], slot_mapping)
             k_cache = kv_cache[0]
             v_cache = None
 
@@ -313,8 +315,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             kv_cache: torch.Tensor, attn_metadata: HPUAttentionMetadata,
             batch_size: int) -> torch.Tensor:
         query = torch.cat([q_nope, q_pe], dim=-1)
-
-        key_cache = kv_cache[0].unsqueeze(2)
+        key_cache = kv_cache[0].unsqueeze(1)
         value_cache = kv_cache[1]  # value_cache is None
         output = HPUPagedAttention.forward_decode(
             query=query,
@@ -324,6 +325,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             block_mapping=attn_metadata.block_mapping,
             block_bias=attn_metadata.attn_bias,
             block_groups=attn_metadata.block_groups,
+            block_size=attn_metadata.block_size,
             scale=self.scale,
             matmul_qk_op=self.matmul_qk,
             matmul_av_op=self.matmul_av,
@@ -374,17 +376,25 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             logger.warning_once(
                 "Using irope in HPU is not supported yet, it will fall back "
                 "to global attention for long context.")
+        self.enable_fp8_attn = kv_cache_dtype == 'fp8_inc' and os.environ.get(
+            'QUANT_CONFIG', None) is None
         self.kv_cache_dtype = kv_cache_dtype
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
-        self.matmul_qk = Matmul()
+        self.matmul_qk = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
         self.softmax = Softmax()
-        self.matmul_av = Matmul()
-        self.batch2block_matmul = Matmul()
-        self.block2batch_matmul = Matmul()
-        self.k_cache = VLLMKVCache()
-        self.v_cache = VLLMKVCache()
+        self.matmul_av = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
+        self.batch2block_matmul = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
+        self.block2batch_matmul = Matmul() if not self.enable_fp8_attn \
+            else FP8Matmul()
+        self.k_cache = VLLMKVCache() if not self.enable_fp8_attn \
+            else VLLMFP8KVCache()
+        self.v_cache = VLLMKVCache() if not self.enable_fp8_attn \
+            else VLLMFP8KVCache()
         HPUFusedSDPA = kernels.fsdpa()
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
@@ -463,16 +473,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
-        block_indices = attn_metadata.block_indices
-        block_offsets = attn_metadata.block_offsets
+        slot_mapping = attn_metadata.slot_mapping.flatten(
+        ) if attn_metadata.slot_mapping is not None else None
         key_cache = None
         value_cache = None
-        if attn_metadata.is_prompt and self.attn_type \
-                is not AttentionType.ENCODER_ONLY \
-            and (attn_metadata.block_list is None if envs.VLLM_USE_V1
-                 else True):
-            key = key.unflatten(0, (block_indices.size(0), -1))
-            value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -480,10 +484,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices,
-                                     block_offsets)
-            value_cache = self.v_cache(value, value_cache, block_indices,
-                                       block_offsets)
+            key_cache = self.k_cache(key, key_cache, slot_mapping)
+            value_cache = self.v_cache(value, value_cache, slot_mapping)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -512,7 +514,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 attn_bias=attn_bias,
                 valid_seq_lengths=attn_metadata.seq_lens_tensor,
                 **self.common_attention_args(block_list, key_cache,
-                                             value_cache))
+                                             value_cache,
+                                             attn_metadata.block_size))
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
@@ -522,14 +525,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_bias=attn_metadata.attn_bias,
                 block_groups=attn_metadata.block_groups,
                 **self.common_attention_args(attn_metadata.block_list,
-                                             key_cache, value_cache))
+                                             key_cache, value_cache,
+                                             attn_metadata.block_size))
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
     def common_attention_args(self,
                               block_list=None,
                               key_cache=None,
-                              value_cache=None):
+                              value_cache=None,
+                              block_size=None):
         return {
             'scale': self.scale,
             'matmul_qk_op': self.matmul_qk,
@@ -543,6 +548,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             'block_list': block_list,
             'key_cache': key_cache,
             'value_cache': value_cache,
+            'block_size': block_size,
         }
 
     def forward_encoder_decoder(
@@ -586,8 +592,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         else:
             assert value is None
 
-        block_indices = attn_metadata.cross_block_indices
-        block_offsets = attn_metadata.cross_block_offsets
+        cross_slot_mapping = attn_metadata.cross_slot_mapping.flatten(
+        ) if attn_metadata.cross_slot_mapping is not None else None
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -595,10 +601,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices,
-                                     block_offsets)
-            value_cache = self.v_cache(value, value_cache, block_indices,
-                                       block_offsets)
+            key_cache = self.k_cache(key, key_cache, cross_slot_mapping)
+            value_cache = self.v_cache(value, value_cache, cross_slot_mapping)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -628,7 +632,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_bias=attn_bias,
                 block_groups=block_groups,
                 **self.common_attention_args(block_list, key_cache,
-                                             value_cache))
+                                             value_cache,
+                                             attn_metadata.block_size))
         # Reshape the output tensor.
         return output.view(batch_size, -1, hidden_size)
 
