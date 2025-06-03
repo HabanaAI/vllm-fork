@@ -9,7 +9,7 @@ fi
 
 if [[ $# -eq 1 ]]; then
     echo "Using default model: meta-llama/Llama-3.1-8B-Instruct"
-    MODEL="/root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
+    MODEL="/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
 else
     echo "Using model: $2"
     MODEL=$2
@@ -22,18 +22,17 @@ if [[ $1 == "prefiller" ]]; then
 
     #UCX_TLS=tcp \
     LMCACHE_CONFIG_FILE=$prefill_config_file \
-        LMCACHE_USE_EXPERIMENTAL=True \
-        VLLM_ENABLE_V1_MULTIPROCESSING=1 \
-        VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        LMCACHE_REMOTE_SERDE=naive \
-        RANK=0 \
-        DECODER_RANK=1 \
-        vllm serve $MODEL \
-        --port 1100 \
-        --disable-log-requests \
-        --enforce-eager \
-        --kv-transfer-config \
-        '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_producer","kv_connector_extra_config": {"discard_partial_chunks": false, "lmcache_rpc_port": "producer1"}}'
+    VLLM_ENABLE_V1_MULTIPROCESSING=1 \
+    VLLM_WORKER_MULTIPROC_METHOD=spawn \
+    LMCACHE_REMOTE_SERDE=naive \
+    RANK=0 \
+    DECODER_RANK=1 \
+    vllm serve $MODEL \
+    --port 1100 \
+    --disable-log-requests \
+    --enforce-eager \
+    --kv-transfer-config \
+    '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_producer","kv_connector_extra_config": {"discard_partial_chunks": false, "lmcache_rpc_port": "producer1"}}'
 
 
 elif [[ $1 == "decoder" ]]; then
@@ -42,19 +41,18 @@ elif [[ $1 == "decoder" ]]; then
 
     #UCX_TLS=tcp \
     LMCACHE_CONFIG_FILE=$decode_config_file \
-        LMCACHE_USE_EXPERIMENTAL=True \
-        VLLM_ENABLE_V1_MULTIPROCESSING=1 \
-        VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        LMCACHE_CHUNK_SIZE=256 \
-        RANK=1 \
-        DECODER_RANK=1 \
-        vllm serve $MODEL \
-        --port 1200 \
-        --gpu_memory_utilization 0.5 \
-        --disable-log-requests \
-        --enforce-eager \
-        --kv-transfer-config \
-        '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_consumer","kv_connector_extra_config": {"discard_partial_chunks": false, "lmcache_rpc_port": "consumer1"}}'
+    VLLM_ENABLE_V1_MULTIPROCESSING=1 \
+    VLLM_WORKER_MULTIPROC_METHOD=spawn \
+    LMCACHE_CHUNK_SIZE=256 \
+    RANK=1 \
+    DECODER_RANK=1 \
+    vllm serve $MODEL \
+    --port 1200 \
+    --gpu_memory_utilization 0.5 \
+    --disable-log-requests \
+    --enforce-eager \
+    --kv-transfer-config \
+    '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_consumer","kv_connector_extra_config": {"discard_partial_chunks": false, "lmcache_rpc_port": "consumer1"}}'
 
 
 else

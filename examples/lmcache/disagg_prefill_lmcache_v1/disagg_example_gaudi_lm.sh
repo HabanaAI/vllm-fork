@@ -94,7 +94,7 @@ main() {
     echo "Please check prefiller.log, decoder.log and proxy.log for logs."
 
     echo "starting lmcache "
-    python -m lmcache.experimental.server localhost 8100 2>&1 &
+    python -m lmcache.v1.server localhost 8100 2>&1 &
     echo "start prefiller "
     bash disagg_vllm_launcher_gaudi_lm.sh prefiller \
         > >(tee prefiller.log) 2>&1 &
@@ -126,7 +126,7 @@ main() {
     # begin benchmark
     cd ../../../benchmarks/
     python benchmark_serving.py --port 1000 --seed $(date +%s) \
-        --model /root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/ \
+        --model /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/ \
         --dataset-name random --random-input-len 8000 --random-output-len 200 \
         --num-prompts 100 --burstiness 100 --request-rate 3.6 | tee benchmark.log
 
