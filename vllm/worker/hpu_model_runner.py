@@ -1997,28 +1997,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
         computed_block_nums = None
-        attn_metadata = {
-            'attn_bias': None,
-            'seq_lens_tensor': None,
-            'context_lens_tensor': None,
-            'block_list': None,
-            'block_mapping': None,
-            'block_usage': None,
-            'slot_mapping': None,
-            'is_prompt': is_prompt,
-            'block_size': None,
-            'block_groups': None,
-            'input_positions': None,
-        }
         if is_prompt:
             input_len = seq_len
             output_len = 0
             block_tables = None
             if ctx:
-                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * 128}
+                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * self.block_size}
                 computed_block_nums = ([1] * ctx)
-                block_list = list(range(1, ctx + 1))
-                attn_metadata["block_list"] = block_list
         else:
             input_len = seq_len - 1
             output_len = 1

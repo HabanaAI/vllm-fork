@@ -351,7 +351,7 @@ class HPUEncoderDecoderModelRunner(
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
                         temperature=0) -> None:
-        phase = self._phase(is_prompt, ctx)
+        phase = 'prompt' if is_prompt else 'decode'
         use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
         scenario_name = ("warmup_"
                          f"{phase}_"
@@ -442,7 +442,7 @@ class HPUEncoderDecoderModelRunner(
             block_tables = None
             cross_block_table = None
             if ctx:
-                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * 128}
+                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * self.block_size}
                 computed_block_nums = ([1] * ctx)
         else:
             output_len = 1
@@ -523,35 +523,14 @@ class HPUEncoderDecoderModelRunner(
         ])
         return attention_metadata
 
-    def _phase(self, is_prompt, ctx):
-        if self.use_prefix_caching:
-            is_prefix = ctx is not None and (
-                isinstance(ctx, torch.Tensor) or
-                (not isinstance(ctx, torch.Tensor) and ctx != 0))
-            if is_prompt and is_prefix:
-                phase_type = PhaseType.PREFIX_PREFILL
-            elif is_prompt:
-                phase_type = PhaseType.PREFILL
-            elif not is_prompt:
-                phase_type = PhaseType.DECODE
-            else:
-                raise ValueError(
-                    "Unrecognized pass type, likely due to malformed "
-                    "attention metadata")
-        else:
-            return 'prompt' if is_prompt else 'decode'
-        return phase_type.value
-
     def _check_config(self, batch_size, seq_len, ctx, attn_metadata,
                       warmup_mode):
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
+        phase = 'prompt' if attn_metadata.is_prompt else 'decode'
         if warmup_mode:
-            phase = self._phase(attn_metadata.is_prompt, ctx)
             num_blocks = ctx
         else:
-            phase = self._phase(attn_metadata.is_prompt,
-                                attn_metadata.block_list)
             num_blocks = self._num_blocks(attn_metadata)
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
@@ -609,11 +588,7 @@ class HPUEncoderDecoderModelRunner(
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            if warmup_mode:
-                phase = self._phase(attn_metadata.is_prompt, ctx_blocks)
-            else:
-                phase = self._phase(attn_metadata.is_prompt,
-                                    attn_metadata.block_list)
+            phase = 'prompt' if is_prompt else 'decode'
             if phase == 'decode':
                 if not warmup_mode:
                     ctx_blocks = seq_len
