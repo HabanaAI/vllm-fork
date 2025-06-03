@@ -885,7 +885,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         "false") in ("1", "true")
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", ""))
-                    self._inc_preprocess_(self.model, config)
+                    self._inc_preprocess()
                     if config.measure:
                         self.model = prepare(self.model, config)
                     elif config.quantize:
@@ -2076,19 +2076,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              False, True)
         return
 
-    def _remove_duplicate_submodules_(self, model, inc_config):
-        if not hasattr(model, "model"):
-            return
-        for layer in model.model.layers:
-            self_attn = layer.self_attn
-            # delete attr kv_b_proj in self_attn,
-            # as they have been transferred to the MLAImpl.
-            if hasattr(self_attn, "mla_attn") and hasattr(
-                    self_attn, "kv_b_proj"):
-                delattr(self_attn, "kv_b_proj")
+    def _remove_duplicate_submodules(self):
+        model = self.get_model()
+        if hasattr(model, "model"):
+            for layer in self.get_model().model.layers:
+                self_attn = layer.self_attn
+                # delete attr kv_b_proj in self_attn,
+                # as they have been transferred to the MLAImpl.
+                if hasattr(self_attn, "mla_attn") and hasattr(
+                        self_attn, "kv_b_proj"):
+                    delattr(self_attn, "kv_b_proj")
 
-    def _inc_preprocess_(self, model: torch.nn.Module, inc_config):
-        self._remove_duplicate_submodules_(model, inc_config)
+    def _inc_preprocess(self):
+        self._remove_duplicate_submodules()
 
     def warmup_scenario(self,
                         batch_size,
