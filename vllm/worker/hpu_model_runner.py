@@ -2077,6 +2077,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return
 
     def _remove_duplicate_submodules_(self, model, inc_config):
+        if not hasattr(model, "model"):
+            return
         for layer in model.model.layers:
             self_attn = layer.self_attn
             # delete attr kv_b_proj in self_attn,
