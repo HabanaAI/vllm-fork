@@ -4,9 +4,9 @@ This guide explains how to quickly run vLLM with multi-model support on Gaudi us
 
 ## Supported Models
 
-| Model Name | Recommended TP Size |
+| Model Name | Validated TP Size |
 |--|--|
-| deepseek-ai/DeepSeek-R1-Distill-Llama-70B | 4 |
+| deepseek-ai/DeepSeek-R1-Distill-Llama-70B | 8 |
 | meta-llama/Llama-3.1-70B-Instruct         | 4 |
 | meta-llama/Llama-3.1-405B-Instruct        | 8 |
 | meta-llama/Llama-3.1-8B-Instruct          | 1 |
@@ -41,7 +41,7 @@ This guide explains how to quickly run vLLM with multi-model support on Gaudi us
 
    - Model files can be large. For best performance, use an external disk for the Huggingface cache and set `HF_HOME` accordingly.  
    Example: `-e HF_HOME=/mnt/huggingface -v /mnt/huggingface:/mnt`
-   - For a quick startup and to skip the initial model warmup (useful for fast testing), you can add:  
+   - For a quick startup and to skip the initial model warmup (useful for development testing), you can add:  
    `-e VLLM_SKIP_WARMUP=true`
 
 3. **Run the vLLM server**
