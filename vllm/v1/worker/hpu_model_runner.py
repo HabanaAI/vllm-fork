@@ -103,7 +103,7 @@ class DecodeData:
     attn_metadata: Optional[HPUAttentionMetadataV1] = None
 
 
-empty_list = lambda: field(default_factory=list)
+empty_list: Callable[[], list] = lambda: field(default_factory=list)
 
 
 @dataclass
@@ -958,9 +958,9 @@ class HPUModelRunner:
 
             # Must be prompt
             assert num_computed_tokens < num_prompt_tokens
-            assert len(
-                self.requests[req_id].output_token_ids
-            ) == 0, f'req_id: {req_id}, {len(self.requests[req_id].output_token_ids)}'
+            num_output_tokens = len(self.requests[req_id].output_token_ids)
+            assert num_output_tokens == 0, \
+                f'req_id: {req_id}, {num_output_tokens}'
 
             prompt_req_ids.append(req_id)
             prompt_scheduled_tokens.append(num_scheduled_tokens)
@@ -1104,7 +1104,8 @@ class HPUModelRunner:
             blocks = block_table_cpu_tensor[batch_idx, :num_blocks].tolist()
 
             prompt_tokens = self.input_batch.num_prompt_tokens[batch_idx]
-            num_output_logits = context_len + query_len - prompt_tokens + 1  #TODO: Fix non-prompt case
+            #TODO: Fix non-prompt case
+            num_output_logits = context_len + query_len - prompt_tokens + 1
             logits_positions = list(
                 range(query_len - num_output_logits, query_len))
 
@@ -1174,7 +1175,7 @@ class HPUModelRunner:
             round_up(ctx_len, self.block_size) // self.block_size
             for ctx_len in context_lens
         ]
-        context_blocks = [
+        context_blocks: list = [
             blocks[:num]
             for blocks, num in zip(contents.blocks, num_context_blocks)
         ]
@@ -1233,17 +1234,18 @@ class HPUModelRunner:
         token_slots = _async_h2d_tensor(token_slots, torch.int64)
         logits_indices = _async_h2d_tensor(logits_indices, torch.int32)
         context_lens = _async_h2d_tensor(context_lens, torch.int32)
+        context_blocks_t: Optional[torch.tensor]
         if has_context:
-            context_blocks = _async_h2d_tensor(context_blocks,
-                                               torch.int32).flatten()
+            context_blocks_t = _async_h2d_tensor(context_blocks,
+                                                 torch.int32).flatten()
         else:
-            context_blocks = None
+            context_blocks_t = None
 
         attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
             seq_lens_tensor=query_lens,
             context_lens_tensor=context_lens,
             slot_mapping=token_slots,
-            block_list=context_blocks,
+            block_list=context_blocks_t,
             attn_bias=attn_bias,
             block_size=self.block_size)
 
@@ -1693,8 +1695,10 @@ class HPUModelRunner:
         ]
         sampled_token_ids_list = torch.cat(decode_sampled_token_ids +
                                            prefill_sampled_token_ids).tolist()
-        sampled_token_requests = decode_sampled_requests + prefill_sampled_requests
+        sampled_token_requests = \
+            decode_sampled_requests + prefill_sampled_requests
         max_req_index = max(self.input_batch.req_id_to_index.values())
+        postprocessed_sampled_token_ids: list[list]
         postprocessed_sampled_token_ids = [[]
                                            for _ in range(max_req_index + 1)]
         for tok_id, req_id in zip(sampled_token_ids_list,
@@ -1903,12 +1907,13 @@ class HPUModelRunner:
                                    device='cpu')
             seq_lens.fill_(seq_or_block)
             seq_lens_device = _async_h2d_tensor_copy(seq_lens, self.device)
+
             attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
+                context_lens_tensor=None,
                 seq_lens_tensor=seq_lens_device,
-                num_prefills=batch_size,
-                num_prefill_tokens=batch_size * seq_or_block,
-                input_positions=None,
                 slot_mapping=slot_mapping_device,
+                block_list=None,
+                attn_bias=None,
                 block_size=self.block_size)
         else:
             block_tables = [
@@ -1917,8 +1922,8 @@ class HPUModelRunner:
             ]
             block_list, block_groups, block_usage = \
                 self.get_habana_paged_attn_buffers(
-                block_tables=block_tables,
-                slot_mapping=slot_mapping)
+                    block_tables=block_tables,
+                    slot_mapping=slot_mapping)
             block_list_device = _async_h2d_tensor_copy(block_list, self.device)
             block_usage_device = _async_h2d_tensor_copy(
                 block_usage, self.device)
