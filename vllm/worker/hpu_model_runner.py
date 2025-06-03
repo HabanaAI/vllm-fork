@@ -716,13 +716,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.use_prefix_caching = (
             self.vllm_config.cache_config.enable_prefix_caching)
         HPUBucketingContext = get_bucketing_context()
-        self.bucketing_ctx = HPUBucketingContext(self.max_num_seqs,
-                                                 self.max_num_prefill_seqs,
-                                                 self.block_size,
-                                                 self.max_num_batched_tokens,
-                                                 self.use_merged_prefill,
-                                                 self.max_model_len,
-                                                 prefix_caching=self.use_prefix_caching)
+        self.bucketing_ctx = HPUBucketingContext(
+            self.max_num_seqs,
+            self.max_num_prefill_seqs,
+            self.block_size,
+            self.max_num_batched_tokens,
+            self.use_merged_prefill,
+            self.max_model_len,
+            prefix_caching=self.use_prefix_caching)
         self.graphed_buckets: Set[Any] = set()
         self.use_contiguous_pa = envs.VLLM_USE_HPU_CONTIGUOUS_CACHE_FETCH
 
@@ -2014,13 +2015,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             output_len = 0
             block_tables = None
             if ctx:
-                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx *128}
+                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * 128}
                 computed_block_nums = ([1] * ctx)
                 block_list = list(range(1, ctx + 1))
-                print("block_list", block_list)
                 attn_metadata["block_list"] = block_list
-                #attention_metadata = self.trim_attn_metadata({"block_list": block_list})
-                #print("attention_metadata", attention_metadata)
         else:
             input_len = seq_len - 1
             output_len = 1
@@ -2030,7 +2028,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
         seq_data.output_token_ids = output_token_ids
-        print("attnmet", attn_metadata)
         return SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
                                      seq_data={group_id: seq_data},
@@ -2052,7 +2049,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              False, True)
         return
 
-    
     def warmup_scenario(self,
                         batch_size,
                         seq_len,
@@ -2217,7 +2213,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def warmup_graphs(self,
-                      strategy,
                       buckets,
                       is_prompt,
                       kv_caches,
@@ -2226,19 +2221,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         total_mem = starting_mem
         idx = 0
         num_candidates = len(buckets)
-        ordering : Union[Callable[[Any], Tuple[Any, Any]], \
-            Callable[[Any], Tuple[Any, Any, Any]]]
-        if strategy == 'min_tokens':
-            ordering = lambda b: (b[0] * b[1], b[1], b[0])
-        elif strategy == 'max_bs':
-            ordering = lambda b: (-b[0], b[1])
-        else:
-            raise NotImplementedError(
-                f'Unsupported graph allocation strategy: {strategy}')
-        buckets = list(sorted(buckets, key=ordering))
         captured_all = True
         warmed_random_sampler_bs: Set[int] = set()
-        for idx, (batch_size, query_len, ctx) in enumerate(buckets):
+        for idx, (batch_size, query_len, ctx) in enumerate(reversed(buckets)):
             # Graph memory usage is proportional to seq dimension in a batch
             phase = f"Graph/{'prompt' if is_prompt else 'decode'}"
             if is_prompt:
@@ -2277,7 +2262,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         graphed = buckets
         if num_candidates == 0:
             num_candidates = 1
-        msg = (f'{phase} captured:{len(graphed)} UwU onii-chan baaakaaaa~'
+        msg = (f'{phase} captured:{len(graphed)} '
                f'({100 * len(graphed) / num_candidates:.1f}%) '
                f'used_mem:{format_bytes(total_mem)} '
                f'buckets:{sorted(list(graphed))}')
@@ -2342,7 +2327,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                            'Please update Gaudi Software Suite.')
         with compile_only_mode_context(
         ) if can_use_compile_only_mode else contextlib.nullcontext():
-            if not self.enforce_eager and htorch.utils.internal.is_lazy():
+            if not self.enforce_eager:
                 if not self.is_pooler:
                     assert self.mem_margin is not None, \
                         ("HabanaWorker.determine_num_available_blocks needs "
@@ -2352,19 +2337,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 graph_free_mem = free_mem - self.mem_margin
                 graph_free_mem = align_workers(graph_free_mem,
                                                torch.distributed.ReduceOp.MIN)
-                prompt_strategy = os.environ.get('VLLM_GRAPH_PROMPT_STRATEGY',
-                                                 'min_tokens')
+
                 if not self.is_pooler:
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
-                        prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                        self.bucketing_ctx.prompt_buckets,
                         True, kv_caches)
 
-                    decode_strategy = os.environ.get(
-                        'VLLM_GRAPH_DECODE_STRATEGY', 'max_bs')
                     mem_post_decode, decode_batch_seq, decode_captured_all = \
                         self.warmup_graphs(
-                        decode_strategy, self.bucketing_ctx.decode_buckets,
+                        self.bucketing_ctx.decode_buckets,
                         False, kv_caches)
                 else:
                     prompt_available_memory = graph_free_mem
@@ -2374,22 +2356,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         "of free device memory for HPUGraphs, "
                         f"{format_bytes(prompt_available_memory)} for prompt")
                     logger.info(msg)
-                    prompt_strategy = os.environ.get(
-                        'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
-
-                    logger.info(msg)
-                    prompt_strategy = os.environ.get(
-                        'VLLM_GRAPH_PROMPT_STRATEGY', 'min_tokens')
 
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
-                        prompt_strategy, self.bucketing_ctx.prompt_buckets,
+                        self.bucketing_ctx.prompt_buckets,
                         True, kv_caches, prompt_available_memory)
                     if mem_post_prompt < graph_free_mem \
                         and not prompt_captured_all:
                         mem_post_prompt, _, prompt_captured_all = (
                             self.warmup_graphs(
-                                prompt_strategy,
                                 self.bucketing_ctx.prompt_buckets, True,
                                 kv_caches, graph_free_mem - mem_post_prompt,
                                 mem_post_prompt, prompt_batch_seq))
