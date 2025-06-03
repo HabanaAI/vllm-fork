@@ -79,7 +79,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             or (speculative_config.draft_model_config.hf_config.model_type \
                 == model_config.hf_config.model_type) \
             or (speculative_config.draft_model_config.hf_config.model_type
-                not in ["medusa", "mlp_speculator", "eagle"]) \
+                not in ["medusa", "mlp_speculator", "eagle", "deepseek_mtp"]) \
                     else {"return_hidden_states": True}
 
         is_encoder_decoder_model = self._is_encoder_decoder_model()
@@ -356,9 +356,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                              cache_block_size)
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
-
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
@@ -379,6 +376,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+            num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
