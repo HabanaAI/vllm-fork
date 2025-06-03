@@ -8,7 +8,7 @@ import os
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
@@ -2201,29 +2201,18 @@ class HPUModelRunner:
             torch.hpu.synchronize()
 
     def warmup_graphs(self,
-                      strategy,
                       buckets,
                       is_prompt,
                       kv_caches,
-                      available_mem,
                       starting_mem=0,
                       total_batch_seq=0.001):
         total_mem = starting_mem
         idx = 0
         #phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
         num_candidates = len(buckets)
-        ordering : Union[Callable[[Any], tuple[Any, Any]], \
-            Callable[[Any], tuple[Any, Any, Any]]]
-        if strategy == 'min_tokens':
-            ordering = lambda b: (b[0] * b[1], b[1], b[0])
-        elif strategy == 'max_bs':
-            ordering = lambda b: (-b[0], b[1])
-        else:
-            raise NotImplementedError(
-                f'Unsupported graph allocation strategy: {strategy}')
-        buckets = list(sorted(buckets, key=ordering))
         captured_all = True
-        for idx, (batch_size, seq_len, num_blocks) in enumerate(buckets):
+        for idx, (batch_size, seq_len,
+                  num_blocks) in enumerate(reversed(buckets)):
             # Graph memory usage is proportional to seq dimension in a batch
             phase = f'Graph/{self._phase_warmup(is_prompt, num_blocks)}'
             #batch_seq = batch_size * seq_len if is_prompt else batch_size
@@ -2234,10 +2223,7 @@ class HPUModelRunner:
                     batch_seq = batch_size * seq_len
             else:
                 batch_seq = batch_size
-            mem_estimate = batch_seq / total_batch_seq * total_mem
-            if mem_estimate >= available_mem:
-                captured_all = False
-                continue
+
             graphed_bucket = (batch_size, seq_len, num_blocks, is_prompt)
             if graphed_bucket in self.graphed_buckets:
                 continue
@@ -2249,7 +2235,6 @@ class HPUModelRunner:
                                      is_prompt, kv_caches)
             #TODO(kzawora): align_workers
             used_mem = mem_prof.consumed_device_memory
-            available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
 
@@ -2440,20 +2425,15 @@ class HPUModelRunner:
                            'Please update Gaudi Software Suite.')
         with compile_only_mode_context(
         ) if can_use_compile_only_mode else contextlib.nullcontext():
-            self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
-                                    kv_caches)
-            self.warmup_all_buckets(self.bucketing_ctx.decode_buckets, False,
-                                    kv_caches)
 
-            if (not self.model_config.enforce_eager
-                    and htorch.utils.internal.is_lazy()):
+            if not self.model_config.enforce_eager:
                 assert self.mem_margin is not None, \
                     ("HabanaWorker.determine_num_available_blocks needs "
                     "to be called before warming up the model.")
                 free_mem = HabanaMemoryProfiler.current_free_device_memory()
                 graph_free_mem = free_mem - self.mem_margin
                 #TODO(kzawora): align_workers
-                graph_free_mem = graph_free_mem
+                '''graph_free_mem = graph_free_mem
                 prompt_graph_mem_ratio = float(
                     os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
 
@@ -2472,38 +2452,15 @@ class HPUModelRunner:
                                                  'min_tokens')
                 decode_strategy = os.environ.get('VLLM_GRAPH_DECODE_STRATEGY',
                                                  'max_bs')
+                '''
                 mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                     self.warmup_graphs(
-                    prompt_strategy, self.bucketing_ctx.prompt_buckets,
-                    True, kv_caches, prompt_available_memory)
+                    self.bucketing_ctx.prompt_buckets,
+                    True, kv_caches)
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
-                    decode_strategy, self.bucketing_ctx.decode_buckets,
-                    False, kv_caches, decode_available_memory)
-
-                # Not all prompt buckets were captured, but all decode buckets
-                # were captured and we have some free graph-allocated space
-                # left. Let's try to use it for capturing more prompt buckets.
-                if (mem_post_decode + mem_post_prompt < graph_free_mem
-                        and not prompt_captured_all and decode_captured_all):
-                    mem_post_prompt, _, prompt_captured_all = (
-                        self.warmup_graphs(
-                            prompt_strategy, self.bucketing_ctx.prompt_buckets,
-                            True, kv_caches,
-                            graph_free_mem - mem_post_prompt - mem_post_decode,
-                            mem_post_prompt, prompt_batch_seq))
-
-                # Not all decode buckets were captured, but all prompt buckets
-                # were captured and we have some free graph-allocated space
-                # left. Let's try to use it for capturing more decode buckets.
-                if mem_post_decode + mem_post_prompt < graph_free_mem \
-                    and not decode_captured_all \
-                        and prompt_captured_all:
-                    mem_post_decode, _, _ = self.warmup_graphs(
-                        decode_strategy, self.bucketing_ctx.decode_buckets,
-                        False, kv_caches,
-                        graph_free_mem - mem_post_prompt - mem_post_decode,
-                        mem_post_decode, decode_batch_seq)
+                    self.bucketing_ctx.decode_buckets,
+                    False, kv_caches)
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
