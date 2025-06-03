@@ -39,47 +39,48 @@ _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 
 
-def trim_attn_metadata(metadata: AttentionMetadata) -> object:
-    # NOTE(kzawora): To anyone working on this in the future:
-    # Trimming metadata is required when using HPUGraphs.
-    # Attention metadata is going to be hashed by PT bridge, and
-    # appropriate HPUGraphs will be matched based on all inputs' hash.
-
-    # Before you put more keys in here, make sure you know their
-    # value type and make sure you know how it's going to be hashed.
-    # You can find that information in input_hash function
-    # in habana_frameworks/torch/hpu/graphs.py. You can also hash
-    # it manually with torch.hpu.graphs.input_hash(attention_metadata)
-
-    # If you use primitive types here - they will get hashed based
-    # on their value. You *will* get lots of excessive graph captures
-    # (and an OOM eventually) if you decide to put something like
-    # seq_len int here.
-    # If you absolutely need a scalar, put it in a tensor. Tensors
-    # get hashed using their metadata, not their values:
-    # input_hash(torch.tensor(123)) == input_hash(torch.tensor(321))
-    # input_hash(123) != input_hash(321)
-    # input_hash("abc") != input_hash("cba")
-    attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-        'attn_bias',
-        'seq_lens_tensor',
-        'context_lens_tensor',
-        'block_list',
-        'block_mapping',
-        'block_usage',
-        'slot_mapping',
-        'is_prompt',
-        'block_size',
-        'block_groups',
-        'seq_lens',
-        'encoder_seq_lens_tensor',
-        'max_encoder_seq_len',
-        'cross_slot_mapping',
-        'cross_block_mapping',
-        'cross_block_groups',
-        'cross_block_usage',
-        'cross_attn_bias',
-    ])
+def trim_attn_metadata(metadata: AttentionMetadata, keep_all=False) -> object:
+    if keep_all:
+        keys = [
+            'attn_bias',
+            'seq_lens_tensor',
+            'context_lens_tensor',
+            'block_list',
+            'block_mapping',
+            'block_usage',
+            'slot_mapping',
+            'is_prompt',
+            'block_size',
+            'block_groups',
+            'seq_lens',
+            'encoder_seq_lens_tensor',
+            'max_encoder_seq_len',
+            'cross_slot_mapping',
+            'cross_block_mapping',
+            'cross_block_groups',
+            'cross_block_usage',
+            'cross_attn_bias',
+        ]
+        attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata',
+                                      keys)
+    else:
+        keys = [
+            'attn_bias',
+            'seq_lens_tensor',
+            'block_mapping',
+            'block_usage',
+            'slot_mapping',
+            'block_size',
+            'block_groups',
+            'encoder_seq_lens_tensor',
+            'cross_slot_mapping',
+            'cross_block_mapping',
+            'cross_block_groups',
+            'cross_block_usage',
+            'cross_attn_bias',
+        ]
+        attention_metadata = subtuple(
+            metadata, 'EncoderDecoderTrimmedAttentionMetadata', keys)
     return attention_metadata
 
 
@@ -155,7 +156,8 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
             kwargs.pop('warmup_mode')
         input_ids = kwargs['input_ids']
         attn_metadata = kwargs.pop('attn_metadata')
-        kwargs['attn_metadata'] = trim_attn_metadata(attn_metadata)
+        kwargs['attn_metadata'] = trim_attn_metadata(attn_metadata,
+                                                     keep_all=True)
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
@@ -178,6 +180,7 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
             kwargs.pop('kv_caches')
         attn_metadata = replace(attn_metadata,
                                 **kwargs['attn_metadata']._asdict())
+        kwargs['attn_metadata'] = trim_attn_metadata(kwargs['attn_metadata'])
         with set_forward_context(attn_metadata, self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
