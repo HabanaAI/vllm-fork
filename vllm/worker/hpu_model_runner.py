@@ -264,8 +264,6 @@ def get_path_to_rope(model: torch.nn.Module):
     return paths_to_rope
 
 
-
-
 class HpuModelAdapter(torch.nn.Module):
 
     def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
@@ -418,9 +416,8 @@ class HpuModelAdapter(torch.nn.Module):
                     layer = int(layer)
 
                 # Check if the current layer is a name in a module
-                if isinstance(
-                        layer,
-                        str) and not isinstance(layer, int):  # Name-based access
+                if isinstance(layer, str) and not isinstance(
+                            layer, int):  # Name-based access
                     current_module = getattr(current_module, layer)
                 elif isinstance(layer,
                                 int):  # Indexed-based access (like ModuleList)
