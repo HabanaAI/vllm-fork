@@ -26,6 +26,7 @@ class HpuPlatform(Platform):
     dispatch_key: str = "HPU"
     ray_device_key: str = "HPU"
     device_control_env_var: str = "HABANA_VISIBLE_MODULES"
+    simple_compile_backend: str = "hpu_backend"
     supported_quantization: list[str] = [
         "compressed-tensors", "fp8", "inc", "awq_hpu", "gptq_hpu"
     ]
