@@ -58,8 +58,6 @@ RDMA requires a large amount of registered memory. It is recommended to enable T
 echo always > /sys/kernel/mm/transparent_hugepage/enabled
 ```
 
-
-
 > **Note**: If you are running RDMA inside a Docker container, add the `--privileged` flag to the `docker run` command to ensure proper hardware and network access.
 
 ## PD Disaggregation Usage
