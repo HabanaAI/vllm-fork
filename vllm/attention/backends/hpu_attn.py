@@ -136,6 +136,12 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     cross_block_groups: Optional[torch.Tensor] = None
     cross_block_usage: Optional[torch.Tensor] = None
     cross_attn_bias: Optional[torch.Tensor] = None
+    window_block_list: Optional[torch.Tensor] = None
+    window_slot_mapping: Optional[torch.Tensor] = None
+    window_block_mapping: Optional[torch.Tensor] = None
+    window_block_groups: Optional[torch.Tensor] = None
+    window_block_usage: Optional[torch.Tensor] = None
+    window_attn_bias: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -530,10 +536,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
-            block_groups = attn_metadata.block_groups
-            block_mapping = attn_metadata.block_mapping
-            block_list = attn_metadata.block_list
-            attn_bias= attn_metadata.attn_bias
+            block_list = attn_metadata.block_list if not self.sliding_window else attn_metadata.window_block_list
+            block_groups = attn_metadata.block_groups if not self.sliding_window else attn_metadata.window_block_groups
+            block_mapping = attn_metadata.block_mapping if not self.sliding_window else attn_metadata.window_block_mapping
+            attn_bias = attn_metadata.attn_bias if not self.sliding_window else attn_metadata.window_attn_bias
 
             if self.sliding_window:
                 block_size = len(attn_metadata.block_groups)

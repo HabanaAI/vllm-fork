@@ -250,7 +250,7 @@ class Gemma3Attention(nn.Module):
 
         seq_lens = kwargs["seq_lens"]
         start_idx = 0
-        for seq_len, attn_mask in zip(seq_lens, attn_masks):
+        for cnt, (seq_len, attn_mask) in enumerate(zip(seq_lens, attn_masks)):
             end_idx = start_idx + seq_len
             query = q[start_idx:end_idx].unsqueeze(0)
             key = k[start_idx:end_idx].unsqueeze(0)
@@ -269,7 +269,8 @@ class Gemma3Attention(nn.Module):
                 self.scaling,
             )
             output = output.transpose(1, 2).flatten(-2, -1)
-            out[start_idx:end_idx] = output
+            #out[start_idx:end_idx] = output
+            out[cnt:cnt+1, start_idx:end_idx, :] = output
             start_idx = end_idx
         return out
 
