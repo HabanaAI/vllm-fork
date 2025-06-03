@@ -1986,15 +1986,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     broadcast_tensor_dict(src=0)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
+            intermediate_tensors = None
+            if not get_pp_group().is_first_rank:
+                intermediate_tensors = \
+                    self.model.make_empty_intermediate_tensors(
+                        batch_size=batch_size,
+                        context_size=seq_len if is_prompt else 1,
+                        dtype=self.model_config.dtype,
+                        device=self.device)
             if is_prompt or is_single_step:
-                intermediate_tensors = None
-                if not get_pp_group().is_first_rank:
-                    intermediate_tensors = \
-                        self.model.make_empty_intermediate_tensors(
-                            batch_size=batch_size,
-                            context_size=seq_len if is_prompt else 1,
-                            dtype=self.model_config.dtype,
-                            device=self.device)
                 self.execute_model(inputs,
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
@@ -2008,6 +2008,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                              is_last_step=False)
                 self.execute_model(inputs,
                                    kv_caches,
+                                   intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
                                    profile_run_mode=is_profile_run,
                                    num_steps=2,
@@ -2018,6 +2019,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                              is_last_step=True)
                 self.execute_model(inputs,
                                    kv_caches,
+                                   intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
                                    profile_run_mode=is_profile_run,
                                    num_steps=2,
@@ -2916,7 +2918,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
-                    return []
+                    # We cannot return early here. Should continue instead, otherwise MSS breaks.
+                    continue #return []
 
                 is_prev_output_patched = False
                 if use_delayed_sampling:
