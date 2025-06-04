@@ -35,6 +35,7 @@ from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
 from vllm.config import DeviceConfig, VllmConfig
 from vllm.distributed import broadcast_tensor_dict, get_pp_group
+from vllm.distributed.kv_transfer import get_kv_transfer_group
 from vllm.distributed.parallel_state import get_world_group
 from vllm.forward_context import set_forward_context
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
@@ -390,6 +391,18 @@ class HpuModelAdapter(torch.nn.Module):
                                         attn_bias=attn_bias)
         return metadata
 
+    def forward_update_meta_only(self, *args, **kwargs):
+        kwargs = kwargs.copy()
+        if 'warmup_mode' in kwargs:
+            kwargs.pop('warmup_mode')
+        input_ids = kwargs['input_ids']
+        attn_metadata = self._update_metadata(kwargs['attn_metadata'],
+                                              input_ids.size(0),
+                                              input_ids.size(1),
+                                              input_ids.device, self.dtype)
+        kwargs['attn_metadata'] = attn_metadata
+        return attn_metadata
+
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
 
@@ -654,17 +667,20 @@ class CachedStepOutput:
     logprobs: Optional[torch.Tensor] = None
     deffered_sample_results: Optional[SampleResultArgsType] = None
     sampling_metadata: Optional[SamplingMetadata] = None
+    is_prompt: Optional[bool] = False
 
     def __init__(
             self,
             token_ids: torch.Tensor,
             logprobs: Optional[torch.Tensor] = None,
             deffered_sample_results: Optional[SampleResultArgsType] = None,
-            sampling_metadata: Optional[SamplingMetadata] = None):
+            sampling_metadata: Optional[SamplingMetadata] = None,
+            is_prompt: Optional[bool] = False):
         self.token_ids = token_ids
         self.logprobs = logprobs
         self.deffered_sample_results = deffered_sample_results
         self.sampling_metadata = sampling_metadata
+        self.is_prompt = is_prompt
 
 
 class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
@@ -2612,6 +2628,57 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 attn_backend=self.attn_backend,
             ))
 
+    def need_recv_kv(self, model_input, kv_caches, warmup_mode) -> bool:
+        """Check if we need to receive kv-cache from the other worker.
+        We need to receive KV when
+            1. current vLLM instance is KV cache consumer/decode vLLM instance
+            2. this batch is not a profiling run
+            3. this batch is a prefill run
+        Args:
+            model_input: input to the model executable
+            kv_caches: vLLM's paged memory
+        """
+        if warmup_mode:
+            return False
+
+        if self.vllm_config.kv_transfer_config is None:
+            return False
+
+        is_prefill_run = model_input.attn_metadata.is_prompt
+
+        # check if the current run is profiling
+        is_profile_run = kv_caches is None or kv_caches[0] is None or (
+            kv_caches[0][0].numel() == 0)
+        # check if the current run is prefill
+        return self.vllm_config.kv_transfer_config.is_kv_consumer and (
+            not is_profile_run) and is_prefill_run
+
+    def need_send_kv(self, model_input, kv_caches, warmup_mode) -> bool:
+        """Check if we need to send kv-cache to the other worker.
+        We need to send KV when
+            1. current vLLM instance is KV cache producer/prefill vLLM instance
+            2. this batch is not a profiling run or a warmup run.
+            3. this batch is a prefill run
+        Args:
+            model_input: input to the model executable
+            kv_caches: vLLM's paged memory
+        """
+        if warmup_mode:
+            return False
+
+        if self.vllm_config.kv_transfer_config is None:
+            return False
+
+        is_prefill_run = model_input.attn_metadata.is_prompt
+
+        # check if the current run is profiling
+        is_profile_run = kv_caches is None or kv_caches[0] is None or (
+            kv_caches[0][0].numel() == 0)
+        # check if the current run is prefill
+
+        return self.vllm_config.kv_transfer_config.is_kv_producer and (
+            not is_profile_run) and is_prefill_run
+
     @torch.inference_mode()
     def prepare_model_input(
         self,
@@ -2864,18 +2931,62 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.trim_attn_metadata(
                             broadcast_data["attn_metadata"])
                     })
+                # Receive KV cache in distributed KV cache transfer setting
+                # In disagg prefill setting, it will also recv hidden states
+                # and bypass model forwarding. In KV cache database setting,
+                # it will change the model input so that we can skip prefilling
+                # on tokens that successfully received KV caches
+                # NOTE: The receive operation is blocking
+                bypass_model_exec = False
+                if self.need_recv_kv(model_input, kv_caches, warmup_mode):
+                    attn_metadata = self.model.forward_update_meta_only(
+                        **execute_model_kwargs,
+                        selected_token_indices=sampling_metadata.
+                        selected_token_indices)
+                    hidden_states, bypass_model_exec, model_input = \
+                    get_kv_transfer_group().recv_kv_caches_and_hidden_states_hpu(
+                        # model is used to know which layer the current worker
+                        # is working on, so that we can receive KV for
+                        # only those layers.
+                        self.get_model(),
+                        model_input,
+                        attn_metadata,
+                        kv_caches=kv_caches
+                    )
+
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
+                if not bypass_model_exec:
+                    with self.profiler.record_event('internal',
+                                                    model_event_name,
+                                                    args=profiler_args):
+                        hidden_states = self.model.forward(
+                            **execute_model_kwargs,
+                            selected_token_indices=sampling_metadata.
+                            selected_token_indices)
+                        if warmup_mode:
+                            torch.hpu.synchronize()
+                            import torch.distributed as dist
+                            if dist.is_initialized():
+                                dist.barrier()
+                else:
+                    logger.debug("Bypassing model execution")
 
-                with self.profiler.record_event('internal',
-                                                model_event_name,
-                                                args=profiler_args):
-                    hidden_states = self.model.forward(
-                        **execute_model_kwargs,
-                        selected_token_indices=sampling_metadata.
-                        selected_token_indices)
+                # Sending KV cache in distributed KV cache transfer setting
+                # TODO: update send operation to blocking one.
+                if self.need_send_kv(model_input, kv_caches, warmup_mode):
+                    get_kv_transfer_group(
+                    ).send_kv_caches_and_hidden_states_hpu(
+                        # model_executable is used to know which layer the
+                        # current worker is working on, so that we can send KV
+                        # for only those layers.
+                        self.get_model(),
+                        model_input,
+                        kv_caches,
+                        hidden_states,
+                    )
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
@@ -2933,7 +3044,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             CachedStepOutput(
                                 token_ids, output.logprobs,
                                 output.deferred_sample_results_args,
-                                sampling_metadata))
+                                sampling_metadata, is_prompt))
                         self.cached_step_inputs.append(model_input)
                 htorch.core.mark_step()
                 if use_delayed_sampling \
@@ -3158,17 +3269,39 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_data._cached_all_token_ids[-1] = real_out
 
         delayed_logprobs = None
+        delayed_prompt_logprobs = None
         assert model_output.sampling_metadata is not None, \
             'Sampling metadata is required to patch the output!'
         logprobs_required = any(
             seq_group.sampling_params.logprobs is not None
             for seq_group in model_output.sampling_metadata.seq_groups)
-        if logprobs_required:
+        prompt_logprobs_required = any(
+            seq_group.sampling_params.prompt_logprobs is not None
+            for seq_group in model_output.sampling_metadata.seq_groups)
+        if logprobs_required or prompt_logprobs_required:
+            # We are one step ahead, so prompt is already marked as a computed.
+            # We need to reset the computed tokens count to 0,
+            # so that we can recompute the prompt logprobs.
+            computed_tokens = []
+            if model_output.is_prompt:
+                for seq_group in model_output.sampling_metadata.seq_groups:
+                    seq_ids = seq_group.seq_ids
+                    assert len(seq_ids) == 1  # prompt has only 1 seq id.
+                    seq_data = seq_group.seq_data[seq_ids[0]]
+                    computed_tokens.append(seq_data.get_num_computed_tokens())
+                    seq_data._num_computed_tokens = 0
             sampling_results = get_pythonized_sample_results(
                 model_output.deffered_sample_results)
-            _, delayed_logprobs = get_logprobs(model_output.logprobs,
-                                               model_output.sampling_metadata,
-                                               sampling_results)
+            delayed_prompt_logprobs, delayed_logprobs = get_logprobs(
+                model_output.logprobs, model_output.sampling_metadata,
+                sampling_results)
+
+            # Reset the computed tokens count to the original value.
+            if model_output.is_prompt:
+                for seq_group in model_output.sampling_metadata.seq_groups:
+                    seq_ids = seq_group.seq_ids
+                    seq_data = seq_group.seq_data[seq_ids[0]]
+                    seq_data.update_num_computed_tokens(computed_tokens.pop(0))
 
         # Another hack. We need to pass the logprobs to the output data,
         # which are part of scheduler output.
@@ -3179,3 +3312,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 assert len(sg.seq_group.seqs) == 1
                 assert len(real_logprobs) == 1
                 sg.seq_group.first_seq.output_logprobs[-1] = real_logprobs[0]
+
+        # If prompt logprobs are available, we need to patch them
+        # as well.
+        if prompt_logprobs_required and delayed_prompt_logprobs is not None:
+            seq_groups = output_data.scheduler_outputs.scheduled_seq_groups
+            assert len(seq_groups) == len(delayed_prompt_logprobs), \
+                f'''Output data has {len(seq_groups)} seq groups, but prompt
+                logprobs has {len(delayed_prompt_logprobs)} entries!'''
+            for sg, real_logprobs in zip(seq_groups, delayed_prompt_logprobs):
+                if real_logprobs is not None:
+                    sg.seq_group.prompt_logprobs = real_logprobs
