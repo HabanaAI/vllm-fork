@@ -291,6 +291,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 
         topk_ids = topk_ids.view(*x.shape[:-1], -1)
         topk_weights = topk_weights.view(*x.shape[:-1], -1)
+        #set w13_weight and w2_weight for static MoE
+        if layer.quant_config is None:
+            if hasattr(layer.moe_op, "w13_weight"):
+                layer.moe_op.w13_weight = layer.w13_weight
+            if hasattr(layer.moe_op, "w2_weight"):
+                layer.moe_op.w2_weight = layer.w2_weight
         return layer.moe_op(
             x,
             topk_ids.to(torch.int64),
@@ -503,7 +509,7 @@ class FusedMoE(torch.nn.Module):
         if self.scoring_func != "softmax" and not self.use_grouped_topk:
             raise ValueError("Only softmax scoring function is supported for "
                              "non-grouped topk.")
-
+        self.quant_config = quant_config
         # Note: get_quant_method will look at the layer's local_num_experts
         # for heuristic purposes, so it must be initialized first.
         if quant_config is None:
