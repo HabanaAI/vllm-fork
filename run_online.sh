@@ -153,6 +153,14 @@ else
     export VLLM_USE_V1=0
 fi
 
+if $HPU; then
+    DriverVer=$(hl-smi -Q driver_version -f csv | tail -n 1 | cut -d"-" -f1)
+    if (($(echo "$(echo $DriverVer | cut -d"." -f1-2 | bc) >= 1.21" | bc -l))); then
+        echo "INFO: DriverVer $DriverVer appears on/ahead  1.21. Setting lazy mode via PT_HPU_LAZY_MODE=1."
+        export PT_HPU_LAZY_MODE=1
+    fi
+fi
+
 if [[ -n "$SkipWarmup" ]]; then
     export VLLM_SKIP_WARMUP=true
 else
@@ -194,15 +202,16 @@ if [[ -n "$FP8" ]]; then
         echo "INFO: check under ./calibration/ folder for more info"
         exit 1
     fi
-
-    echo "INFO: running in FP8 mode requires OH installation and quantizaiton files...installing dependecies now"
-    git clone https://github.com/huggingface/optimum-habana.git /root/optimum-habana
-    cd /root/optimum-habana
-    git checkout v1.17.0
-    pip install . -q
-    # need to reinstall the transformers for vllm
-    cd $VLLM_DIR
-    pip install git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280
+    if [[ -z $(pip list | grep optimum-habana) ]]; then
+        echo "INFO: running in FP8 mode requires OH installation and quantizaiton files...installing dependecies now"
+        git clone https://github.com/huggingface/optimum-habana.git /root/optimum-habana
+        cd /root/optimum-habana
+        git checkout v1.17.0
+        pip install . -q
+        # need to reinstall the transformers for vllm
+        cd $VLLM_DIR/
+        pip install git+https://github.com/malkomes/transformers.git@ac372cd18f836c41f57cdce46094db00019d4280
+    fi
     ServerFP8Args=" --quantization inc --kv-cache-dtype fp8_inc --weights-load-device cpu"
 fi
 

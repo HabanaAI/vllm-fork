@@ -1,5 +1,4 @@
 # set -ex
-
 usage() {
     echo "Usage: $0"
     echo "Options:"
@@ -159,6 +158,12 @@ if [[ -n $InstallVLLM ]]; then
         pip install git+https://github.com/huggingface/transformers.git@6b550462139655d488d4c663086a63e98713c6b9
     fi
     cd ..
+fi
+
+DriverVer=$(hl-smi -Q driver_version -f csv | tail -n 1 | cut -d"-" -f1)
+if (($(echo "$(echo $DriverVer | cut -d"." -f1-2 | bc) >= 1.21" | bc -l))); then
+    echo "INFO: DriverVer $DriverVer appears on/ahead  1.21. Setting lazy mode via PT_HPU_LAZY_MODE=1."
+    export PT_HPU_LAZY_MODE=1
 fi
 
 if [[ -n "$SKIPWARMUP" ]]; then
