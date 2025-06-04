@@ -335,7 +335,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         return model_input, worker_input, kwargs
 
     def _get_driver_input_and_broadcast(
-        self, execute_model_req: ExecuteModelRequest
+        self, execute_model_req: ExecuteModelRequest,
+        accepted_token_id: Optional[torch.Tensor] = None
     ) -> Tuple[BroadcastableModelInput, WorkerInput, Dict[str, torch.Tensor]]:
         """ Get the driver input and broadcast it to other workers.  """
         assert self.is_driver_worker
@@ -346,7 +347,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             self.model_runner.prepare_model_input(
                 execute_model_req.seq_group_metadata_list,
                 execute_model_req.virtual_engine,
-                execute_model_req.finished_requests_ids))
+                execute_model_req.finished_requests_ids,
+                accepted_token_id))
 
         kwargs = extract_previous_hidden_states(execute_model_req)
 
@@ -365,7 +367,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
     def prepare_input(
         self,
-        execute_model_req: Optional[ExecuteModelRequest] = None
+        execute_model_req: Optional[ExecuteModelRequest] = None,
+        accepted_token_id: Optional[torch.Tensor] = None
     ) -> Optional[Tuple[BroadcastableModelInput, WorkerInput, Dict[
             str, torch.Tensor]]]:
         """
@@ -386,7 +389,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     broadcast_tensor_dict({"is_dummy_batch": True}, src=0)
                 self.model_runner._dummy_run(1)
                 return None
-            return self._get_driver_input_and_broadcast(execute_model_req)
+            return self._get_driver_input_and_broadcast(execute_model_req, accepted_token_id)
         else:
             return self._get_worker_input_from_broadcast()
 
@@ -396,12 +399,13 @@ class LocalOrDistributedWorkerBase(WorkerBase):
     def execute_model(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> Optional[List[SamplerOutput]]:
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         start_time = time.perf_counter()
 
-        inputs = self.prepare_input(execute_model_req)
+        inputs = self.prepare_input(execute_model_req, accepted_token_id)
 
         # Need to keep worker running when executing dummy batch under DP
         # scenario
@@ -448,6 +452,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             if self.kv_cache is not None else None,
             intermediate_tensors=intermediate_tensors,
             num_steps=num_steps,
+            accepted_token_id=accepted_token_id,
             **kwargs,
         )
 

@@ -2,7 +2,7 @@
 
 import copy
 import weakref
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Optional
 
 import torch
 
@@ -61,6 +61,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         execute_model_req: ExecuteModelRequest,
         sample_len: int,
         seq_ids_with_bonus_token_in_last_step: Set[int],
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> Tuple[List[SamplerOutput], bool]:
         """Run the model forward pass sample_len times. Returns the list of
         sampler output, one per model forward pass, along with indicator of
@@ -99,7 +100,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                 self.worker.model_runner.return_hidden_states = True
             for _ in range(sample_len):
                 model_output: List[SamplerOutput] = self.worker.execute_model(
-                    execute_model_req=expanded_request)
+                    execute_model_req=expanded_request, accepted_token_id=accepted_token_id)
                 assert (len(model_output) == 1
                         ), "composing multistep workers not supported"
                 model_output = model_output[0]
@@ -238,12 +239,13 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         self,
         execute_model_req: ExecuteModelRequest,
         seq_ids_with_bonus_token_in_last_step: set,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> SpeculativeProposals:
         """Produce speculations given an input batch of sequences. The number of
         speculative tokens per sequence is determined by max_proposal_len.
         """
         return self._proposer.get_spec_proposals(
-            execute_model_req, seq_ids_with_bonus_token_in_last_step)
+            execute_model_req, seq_ids_with_bonus_token_in_last_step, accepted_token_id)
 
     @staticmethod
     def _append_new_tokens(

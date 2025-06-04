@@ -6,7 +6,7 @@ from vllm.sequence import SequenceGroupMetadata
 from vllm.worker.model_runner_base import (ModelRunnerBase,
                                            ModelRunnerInputBase,
                                            ModelRunnerWrapperBase)
-
+import torch
 
 class TargetModelRunner(ModelRunnerWrapperBase):
     """Specialized model runner for speculative decoding target model.
@@ -31,6 +31,7 @@ class TargetModelRunner(ModelRunnerWrapperBase):
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> ModelRunnerInputBase:
         model_input: ModelRunnerInputBase =\
             self.model_runner.prepare_model_input(

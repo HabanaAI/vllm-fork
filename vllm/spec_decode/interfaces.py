@@ -75,6 +75,7 @@ class SpeculativeProposer(ABC):
         # If set, this contains all sequence IDs that were assigned
         # bonus tokens in their last forward pass.
         seq_ids_with_bonus_token_in_last_step: Set[int],
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> SpeculativeProposals:
         raise NotImplementedError
 
@@ -94,5 +95,7 @@ class SpeculativeScorer(ABC):
         self,
         execute_model_req: ExecuteModelRequest,
         proposals: SpeculativeProposals,
+        accepted_token_id: Optional[torch.Tensor] = None,
+
     ) -> SpeculativeScores:
         raise NotImplementedError

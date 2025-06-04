@@ -70,6 +70,7 @@ from vllm.worker.model_runner_base import (
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
 
+
 logger = init_logger(__name__)
 
 _TYPE_CACHE = {}
@@ -1594,6 +1595,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
         finished_requests_ids: Optional[List[str]] = None,
         align_worker=False,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
@@ -1762,6 +1764,28 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata
+
+        rank = torch.distributed.get_rank()
+        if accepted_token_id is not None:
+            #print(f"============prepare_input_tensors====={accepted_token_id=}==============")
+            #print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
+            # 过滤掉-1的非法token
+            valid_tokens = accepted_token_id[accepted_token_id != -1]
+
+            # 创建目标索引 [0, 1, ..., n-1]
+            indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
+
+            # 使用index_copy_更新input_tokens
+            input_tokens.index_copy_(
+                0,
+                indices,
+                valid_tokens.unsqueeze(1)
+                )
+
+            # 只保留有效token部分
+            #print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
+            input_tokens=input_tokens[:2]
+            #print(f"==============222prepare_input_tensors after {input_tokens=}, {rank=}")
 
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
@@ -2479,7 +2503,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2493,7 +2518,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return self.prepare_model_input_align_worker(seq_group_metadata_list,
                                                      virtual_engine,
                                                      finished_requests_ids,
-                                                     False)
+                                                     False,
+                                                     accepted_token_id)
 
     @torch.inference_mode()
     def prepare_model_input_align_worker(
@@ -2502,6 +2528,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         align_worker: bool = False,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2518,7 +2545,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
             model_input, sampling_metadata = self.prepare_input_tensors(
-                seq_group_metadata_list, finished_requests_ids, align_worker)
+                seq_group_metadata_list, finished_requests_ids, align_worker, accepted_token_id)
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
@@ -2621,10 +2648,18 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         num_steps: int = 1,
         profile_run_mode=False,
         seqs=None,
+        accepted_token_id: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         warmup_mode = kwargs.get('warmup_mode', False)
         previous_hidden_states = kwargs.get('previous_hidden_states')
+        accepted_token_id_=None
+        if accepted_token_id is not None:
+            accepted_token_id_=accepted_token_id.cpu()
+        #accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
+
+        rank = torch.distributed.get_rank()
+        #print(f"================================{accepted_token_id_=}, {rank=}, {self.is_driver_worker=}=========================")
 
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
@@ -2656,6 +2691,60 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     0, target_indices, self.cached_step_outputs[i])
                 htorch.core.mark_step()
 
+        """
+        if accepted_token_id is not None:
+            if 0:#model_input.input_tokens.size(0) > 1:
+            #if model_input.input_tokens[1][0] != 12:
+                print(f"============ score {model_input.input_tokens}, {rank=}")
+                '''
+                print(f"============ > 1   before {model_input.input_tokens}, {rank=}")
+                accepted_token_id_temp = accepted_token_id[0,0].view(1, 1)
+                orig_len = model_input.input_tokens.size(0)
+                dest_indices = torch.arange(orig_len-1, orig_len-1+1)#accepted_token_id.size(0))
+                model_input.input_tokens.index_copy_(
+                    0,  # 沿第0维操作
+                    dest_indices,
+                    accepted_token_id_temp
+                )
+                print(f"==============> 1 after {model_input.input_tokens}, {rank=}")
+                '''
+            else:
+                #'''
+                print(f"============else before {model_input.input_tokens}, {rank=}")
+                # 过滤掉-1的非法token
+                valid_tokens = accepted_token_id[accepted_token_id != -1]
+
+                # 创建目标索引 [0, 1, ..., n-1]
+                indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
+
+                # 使用index_copy_更新input_tokens
+                model_input.input_tokens.index_copy_(
+                    0, 
+                    indices, 
+                    valid_tokens.unsqueeze(1)
+                )
+
+                # 只保留有效token部分
+                #model_input.input_tokens = model_input.input_tokens[:valid_tokens.size(0)]
+                #model_input = dataclasses.replace(model_input, input_tokens=model_input.input_tokens[:valid_tokens.size(0)])
+                model_input = dataclasses.replace(model_input, input_tokens=model_input.input_tokens[:2])
+                print(f"==============else after {model_input.input_tokens}, {rank=}")
+                #'''
+            """
+
+
+        if self.is_driver_worker:
+            model_kwargs_broadcast_data = {
+                "input_tokens": model_input.input_tokens
+            }
+            broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+            input_tokens = model_input.input_tokens
+
+        else:
+            model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
+            input_tokens = model_kwargs_broadcast_data["input_tokens"]
+
+       
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step

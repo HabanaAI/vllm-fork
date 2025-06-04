@@ -43,6 +43,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
         self,
         execute_model_req: ExecuteModelRequest,
         proposals: SpeculativeProposals,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> SpeculativeScores:
         """Score the proposed tokens via the scorer model.
 
@@ -80,7 +81,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
 
         target_sampler_output = self._scorer_worker.execute_model(
             execute_model_req=execute_model_req.clone(
-                seq_group_metadata_list=target_seq_group_metadata_list))
+                seq_group_metadata_list=target_seq_group_metadata_list), accepted_token_id=accepted_token_id)
         assert len(target_sampler_output) == 1, "expected single-step output"
         target_sampler_output = target_sampler_output[0]
 

@@ -234,6 +234,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def execute_model(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> Optional[List[SamplerOutput]]:
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION     - will log graph compilations per engine step, only when there was any - highly recommended to use alongside PT_HPU_METRICS_GC_DETAILS! # noqa:E501
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL - will log graph compilations per engine step, always, even if there were none # noqa:E501
@@ -292,7 +293,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             return output
 
         output = LocalOrDistributedWorkerBase.execute_model(
-            self, execute_model_req)
+            self, execute_model_req, accepted_token_id=accepted_token_id)
         return output
 
     @torch.inference_mode()
