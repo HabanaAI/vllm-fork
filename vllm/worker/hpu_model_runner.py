@@ -246,9 +246,6 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
-def is_gaudi2() -> bool:
-    return htorch.hpu.get_device_name() == "GAUDI2"
-
 class HpuModelAdapter:
 
     def __init__(self, model, vllm_config, layer_names):
