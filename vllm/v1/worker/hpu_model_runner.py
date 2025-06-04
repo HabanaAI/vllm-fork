@@ -130,74 +130,6 @@ def bool_helper(value):
     return value in ("y", "yes", "t", "true", "on", "1")
 
 
-@dataclass
-class HpuEnvFlags:
-    skip_warmup: bool
-    enable_bucketing: bool
-    use_contiguous_pa: bool
-    __env_var_cfg_type = collections.namedtuple('__env_var_cfg_type',
-                                                ['name', 'default', 'handler'])
-
-    @classmethod
-    def get_env_var_cfg_map(cls):
-        return {
-            "skip_warmup":
-            cls.__env_var_cfg_type('VLLM_SKIP_WARMUP', 'true',
-                                   cls.handle_boolean_env_var),
-            "enable_bucketing":
-            cls.__env_var_cfg_type('VLLM_ENABLE_BUCKETING', 'true',
-                                   cls.handle_boolean_env_var),
-            "use_contiguous_pa":
-            cls.__env_var_cfg_type('VLLM_CONTIGUOUS_PA', 'false',
-                                   cls.handle_boolean_env_var),
-        }
-
-    @classmethod
-    def build(cls, vllm_config: VllmConfig, update_env=True):
-        cfg_map = cls.get_env_var_cfg_map()
-        env_vars = {
-            key: handler(env_var, default, vllm_config, update_env)
-            for key, (env_var, default, handler) in cfg_map.items()
-        }
-        return cls(**env_vars)
-
-    @staticmethod
-    def env_var_post_init(env_var, val, vllm_config):
-        match env_var:
-            case 'VLLM_SKIP_WARMUP':
-                if not val:
-                    logger.warning(
-                        "HPU warmup is currently not supported in V1. "
-                        "Forcing warmup off.")
-                    val = True
-            case 'VLLM_CONTIGUOUS_PA':
-                can_use_contiguous_pa = not vllm_config.cache_config.\
-                    enable_prefix_caching
-                if val and not can_use_contiguous_pa:
-                    logger.warning(
-                        "Contiguous PA is not supported with prefix caching. "
-                        "Forcing contiguous PA off.")
-                    val = False
-                if val:
-                    logger.warning("Contiguous PA is not recommended in V1.")
-            case _:
-                pass
-        return val
-
-    @classmethod
-    def handle_boolean_env_var(cls,
-                               env_var,
-                               default,
-                               vllm_config,
-                               update_env=True):
-        x = bool_helper(os.environ.get(env_var, default))
-        x = cls.env_var_post_init(env_var, x, vllm_config)
-        if update_env:
-            os.environ[env_var] = str(x).lower()
-        logger.info('HpuEnvFlags %s: %s', env_var, x)
-        return x
-
-
 def flatten(in_list):
     return list(itertools.chain(*in_list))
 
@@ -578,7 +510,7 @@ class HPUModelRunner:
         device: torch.device = 'hpu',
     ):
         # TODO: use ModelRunnerBase.__init__(self, vllm_config=vllm_config)
-        environment.set_model_config(vllm_config.model_config)
+        environment.set_vllm_config(vllm_config)
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -595,10 +527,9 @@ class HPUModelRunner:
         # NOTE(kzawora) update_env is a hack to work around VLLMKVCache in
         # hpu-extension which selects fetch_from_cache implementation based
         # on env vars... this should be fixed in the future
-        self.env_flags = HpuEnvFlags.build(vllm_config, update_env=True)
-        self.enable_bucketing = self.env_flags.enable_bucketing
-        self.use_contiguous_pa = self.env_flags.use_contiguous_pa
-        self.skip_warmup = self.env_flags.skip_warmup
+        self.enable_bucketing = get_config().use_bucketing
+        self.use_contiguous_pa = get_config().use_contiguous_pa
+        self.skip_warmup = get_config().skip_warmup
 
         model_config = self.model_config
         cache_config = self.cache_config
