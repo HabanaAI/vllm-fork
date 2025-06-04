@@ -2733,16 +2733,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             """
 
 
-        if self.is_driver_worker:
-            model_kwargs_broadcast_data = {
-                "input_tokens": model_input.input_tokens
-            }
-            broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
-            input_tokens = model_input.input_tokens
+        if False: # !self.hpu_opt
+            if self.is_driver_worker:
+                model_kwargs_broadcast_data = {
+                    "input_tokens": model_input.input_tokens
+                }
+                broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+                input_tokens = model_input.input_tokens
 
-        else:
-            model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
-            input_tokens = model_kwargs_broadcast_data["input_tokens"]
+            else:
+                model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
+                input_tokens = model_kwargs_broadcast_data["input_tokens"]
 
        
         if not model_input.is_first_multi_step:

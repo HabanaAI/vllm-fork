@@ -350,6 +350,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.accepted_token_ids_ = None
         self.target_logprobs_ = None
         self.prompt_logprobs_ = None
+        self.hpu_opt=False
+
 
 
     def init_device(self) -> None:
@@ -773,20 +775,25 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # Pass last hidden states from target model to proposer
         execute_model_req.previous_hidden_states = self.previous_hidden_states
         self.previous_hidden_states = None
-
-        if 1:#self.rank == self._driver_rank:
-            self._pending_step = self._pending_step + 1
-            if self._pending_step > 1:
-                #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
-                self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
-                #self.accepted_token_ids_=self.cached_step_accepted_tokens[0]
-                #print(f"====={self.rank=},{self._driver_rank=}====")
+        if self.hpu_opt:
+            if 1:#self.rank == self._driver_rank:
+                self._pending_step = self._pending_step + 1
+                if self._pending_step > 1:
+                    #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
+                    self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
+                    #self.accepted_token_ids_=self.cached_step_accepted_tokens[0]
+                    #print(f"====={self.rank=},{self._driver_rank=}====")
 
         with Timer() as proposal_timer:
             print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
-            proposals = self.proposer_worker.get_spec_proposals(
-                execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
+            if self.hpu_opt:
+                proposals = self.proposer_worker.get_spec_proposals(
+                    execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
+            else:
+                proposals = self.proposer_worker.get_spec_proposals(
+                    execute_model_req, self._seq_with_bonus_token_in_last_step)
+                
 
         if not self._allow_zero_draft_token_step and proposals.no_proposals:
             #TODO: Fix it #5814
@@ -797,11 +804,19 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
         with Timer() as scoring_timer:
             print(f"==============put to score {self.accepted_token_ids_=}===")
-            proposal_scores = self.scorer.score_proposals(
-                execute_model_req,
-                proposals,
-                self.accepted_token_ids_,
-            )
+            
+            if self.hpu_opt:
+                proposal_scores = self.scorer.score_proposals(
+                    execute_model_req,
+                    proposals,
+                    self.accepted_token_ids_,
+                )
+            else:
+                proposal_scores = self.scorer.score_proposals(
+                    execute_model_req,
+                    proposals,
+                )
+            
 
         _, (non_spec_seqs, non_spec_indices) = split_batch_by_proposal_len(
             execute_model_req.seq_group_metadata_list, proposals.proposal_lens)
@@ -879,6 +894,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             return dummy_output
 
         '''
+        print(f"!!!{accepted_token_ids}")
         return self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
@@ -970,10 +986,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_index = accepted_token_ids + 1  # Convert -1 to 0
             accepted_index = accepted_index.count_nonzero(dim=1).add_(-1)  # b
             # Drop non-terminal prefill chunks hidden states.
-            #hidden_states = hidden_states[accepted_index !=
-            #                              VLLM_INVALID_TOKEN_ID]
-            #accepted_index = accepted_index[accepted_index !=
-            #                                VLLM_INVALID_TOKEN_ID]
+            if not self.hpu_opt:   
+                hidden_states = hidden_states[accepted_index !=
+                                            VLLM_INVALID_TOKEN_ID]
+                accepted_index = accepted_index[accepted_index !=
+                                            VLLM_INVALID_TOKEN_ID]
             assert len(accepted_index) == hidden_states.shape[0] == len(
                 terminal_metadata)
             index = accepted_index[:, None, None].expand(-1, 1,
@@ -1032,8 +1049,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         num_logprobs_per_seq = get_all_num_logprobs(seq_group_metadata_list)
 
         # Serialize tensor to CPU Python list.
-        #accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
-        accepted_token_ids_by_step = [[10], [12]]
+        if not self.hpu_opt:
+            accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
+        else:
+            #hpu_opt
+            accepted_token_ids_by_step = [[10], [12]]
 
         # Construct the output on a per-step, per-sequence basis.
         # Non-terminal prefill chunks will end up here as rows with just -1s
