@@ -280,8 +280,4 @@ class MsgpackDecoder:
                 return cloudpickle.loads(data)
 
         raise NotImplementedError(
-<<<<<<< HEAD
             f"Extension type code {code} is not supported")
-=======
-            f"Extension type code {code} is not supported")
->>>>>>> 77710b186 (Added PR17427, 16866, 16432, 16492,13790)

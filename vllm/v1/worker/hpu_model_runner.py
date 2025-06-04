@@ -462,7 +462,6 @@ class HpuModelAdapter(torch.nn.Module):
         attn_meta = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
-        #import remote_pdb;remote_pdb.set_trace()
         with set_forward_context(attn_meta, self.vllm_config):
             hidden_states = self.model(*args, **kwargs)
         return hidden_states
@@ -909,7 +908,6 @@ class HPUModelRunner:
 
         # Traverse decodes first
         decode_req_ids = []
-        #logger.info(f"rank {os.getenv('RANK')}, {scheduler_output}")
         for i in range(num_reqs):
             req_id = self.input_batch.req_ids[i]
             assert req_id is not None
@@ -1107,7 +1105,6 @@ class HPUModelRunner:
         prefill_logits_indices = []
         block_table_cpu_tensor = self.input_batch.block_table.get_cpu_tensor()
         fake_prefix_prefill = False
-        #import remote_pdb;remote_pdb.set_trace()
         # DECODES are the first num_decodes REQUESTS.
         # PREFILLS are the next num_reqs - num_decodes REQUESTS.
         num_reqs = total_num_prefills + num_decodes
