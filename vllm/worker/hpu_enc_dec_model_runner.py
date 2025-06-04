@@ -123,6 +123,7 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
             bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
             self.model.language_model.forward = partial(
                 self.model.language_model.forward,
+                attn_metadata=kwargs['attn_metadata'],
                 bypass_hpu_graphs=bypass_hpu_graphs)
         # TODO: Change the input_ids to 1D to match the public vllm
         # implementation and avoid shape mismatch issues with some
