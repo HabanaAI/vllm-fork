@@ -27,7 +27,8 @@ class HpuPlatform(Platform):
     dispatch_key: str = "HPU"
     ray_device_key: str = "HPU"
     device_control_env_var: str = "HABANA_VISIBLE_MODULES"
-    simple_compile_backend: str = "hpu_backend" if not is_fake_hpu() else "inductor"
+    simple_compile_backend: str = "hpu_backend" if not is_fake_hpu(
+    ) else "inductor"
     supported_quantization: list[str] = [
         "compressed-tensors", "fp8", "inc", "awq_hpu", "gptq_hpu"
     ]
