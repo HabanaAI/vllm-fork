@@ -1199,7 +1199,8 @@ class MRotaryEmbedding(RotaryEmbedding):
         use_audio_in_video: bool = False,
     ) -> Tuple[torch.Tensor, int]:
         from vllm.transformers_utils.config import thinker_uses_mrope
-        if thinker_uses_mrope(hf_config):
+        if thinker_uses_mrope(hf_config) and \
+            hf_config.model_type == "qwen2_5_omni":
             return cls._omni_get_input_positions_tensor(
                 input_tokens=input_tokens,
                 hf_config=hf_config,
