@@ -52,7 +52,6 @@ prompts = [
     "San Francisco is a",
 ]
 decoder_rank = '1'
-os.environ["DECODER_RANK"] = decoder_rank
 def run_store(store_done, prompts):
     # We use GPU 0 for KV cache store process.
     os.environ["RANK"] = "0"
