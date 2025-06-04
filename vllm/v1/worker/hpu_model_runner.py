@@ -51,7 +51,7 @@ from vllm_hpu_extension.bucketing.common import get_bucketing_context
 
 logger = init_logger(__name__)
 
-_TYPE_CACHE = {}
+_TYPE_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def setup_profiler(warmup, active):
@@ -319,9 +319,10 @@ def get_path_to_rope(model: torch.nn.Module):
     return path_to_rope
 
 
-class HpuModelAdapter:
+class HpuModelAdapter(torch.nn.Module):
 
     def __init__(self, model, vllm_config, layer_names):
+        super().__init__()
         self.model = model
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
@@ -330,40 +331,6 @@ class HpuModelAdapter:
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
         self.layer_names = layer_names
-
-        enforce_eager = vllm_config.model_config.enforce_eager
-        if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
-        ) and not enforce_eager:
-            if os.getenv('VLLM_REGIONAL_COMPILATION',
-                         'true').lower() == 'true':
-                self.regional_compilation_layers_list = [
-                    RMSNorm, VocabParallelEmbedding
-                ]
-                self._regional_compilation(self.model)
-            else:
-                self.model = torch.compile(self.model,
-                                           backend='hpu_backend',
-                                           dynamic=False)
-
-    def _regional_compilation(self,
-                              module,
-                              parent_module=None,
-                              module_name=None):
-        if isinstance(module, torch.nn.ModuleList):
-            for children_name, children_module in module.named_children():
-                self._compile_region(module, children_name, children_module)
-        elif any(
-                isinstance(module, layer)
-                for layer in self.regional_compilation_layers_list):
-            self._compile_region(parent_module, module_name, module)
-        else:
-            for children_name, children_module in module.named_children():
-                self._regional_compilation(children_module, module,
-                                           children_name)
-
-    def _compile_region(self, model, name, module):
-        module = torch.compile(module, backend='hpu_backend', dynamic=False)
-        setattr(model, name, module)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -401,7 +368,9 @@ class HpuModelAdapter:
         mask = torch.concat((past_mask, mask), dim=-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
-        attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
+        attn_metadata = custom_tuple_replace(prefill_metadata,
+                                             "TrimmedAttentionMetadata",
+                                             attn_bias=attn_bias)
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
@@ -427,22 +396,14 @@ class HpuModelAdapter:
             oob_values = block_groups.lt(0)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
             block_groups.masked_fill_(oob_values, batch_size)
-            metadata = metadata._replace(block_groups=block_groups)
+            metadata = custom_tuple_replace(metadata,
+                                            "TrimmedAttentionMetadata",
+                                            block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
-        metadata = metadata._replace(block_mapping=block_mapping,
-                                     attn_bias=attn_bias)
-        return metadata
-
-    def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
-        slot_mapping = metadata.slot_mapping.flatten()
-        indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt and metadata.block_list is None:
-            indices = indices.unflatten(0, (-1, block_size))[:, 0]
-            offsets = None
-        else:
-            offsets = torch.fmod(slot_mapping, block_size)
-        metadata = metadata._replace(block_offsets=offsets,
-                                     block_indices=indices)
+        metadata = custom_tuple_replace(metadata,
+                                        "TrimmedAttentionMetadata",
+                                        block_mapping=block_mapping,
+                                        attn_bias=attn_bias)
         return metadata
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
@@ -453,9 +414,6 @@ class HpuModelAdapter:
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-        attn_metadata = self._set_indices_and_offsets(attn_metadata,
-                                                      self.block_size,
-                                                      attn_metadata.is_prompt)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -542,9 +500,26 @@ def subtuple(obj: object,
     else:
         values = {f: to_override.get(f, getattr(obj, f)) for f in fields}
     if typename not in _TYPE_CACHE:
-        _TYPE_CACHE[typename] = collections.namedtuple(typename,
-                                                       ' '.join(fields))
-    return _TYPE_CACHE[typename](**values)
+        _TYPE_CACHE[typename] = {
+            'type': collections.namedtuple(typename, ' '.join(fields)),
+            'fields': fields
+        }
+    return _TYPE_CACHE[typename]['type'](**values)  # type: ignore
+
+
+def custom_tuple_replace(obj: object, typename: str, **to_override):
+    # Torch compile dynamo doesn't support calling any named tuple
+    # dynamic methods other than len and get_attr. This function is
+    # a torch.compile friendly version of tuple._replace
+
+    cached_type = _TYPE_CACHE[typename]['type']
+    fields = _TYPE_CACHE[typename]['fields']
+    values = {
+        field: getattr(obj, field)
+        for field in fields  # type: ignore
+    }
+    values.update(to_override)
+    return cached_type(**values)  # type: ignore
 
 
 def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
@@ -571,7 +546,7 @@ def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
     attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
         'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
         'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt',
-        'block_indices', 'block_offsets', 'block_groups'
+        'block_size', 'block_groups'
     ])
     return attention_metadata
 
@@ -664,6 +639,8 @@ class HPUModelRunner:
         # Lazy initialization
         # self.model: nn.Module  # set after load_model
         self.kv_caches: list[torch.Tensor] = []
+        self.inc_initialized_successfully = False
+        self._is_inc_finalized = False
 
         # Request states.
         self.requests: dict[str, CachedRequestState] = {}
@@ -1279,7 +1256,9 @@ class HPUModelRunner:
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
                     input_positions=None,
                     slot_mapping=slot_mapping_device,
-                    block_list=block_list_device)
+                    block_list=block_list_device,
+                    block_size=self.block_size,
+                )
             else:
                 attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
                     seq_lens_tensor=seq_lens_tensor_device,
@@ -1287,6 +1266,7 @@ class HPUModelRunner:
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
                     input_positions=None,
                     slot_mapping=slot_mapping_device,
+                    block_size=self.block_size,
                 )
             # ATTN_METADATA.
             prefill_attn_metadata.append(attn_metadata)
@@ -1414,6 +1394,7 @@ class HPUModelRunner:
                 input_positions=None,
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
+                block_size=self.block_size,
             ))
 
     def _prepare_inputs(
@@ -1590,6 +1571,10 @@ class HPUModelRunner:
         torch.hpu.synchronize()
 
         return prompt_logprobs_dict
+
+    def _is_quant_with_inc(self):
+        quant_config = os.getenv("QUANT_CONFIG", None) is not None
+        return (self.model_config.quantization == "inc" or quant_config)
 
     @torch.inference_mode()
     def execute_model(
@@ -1825,12 +1810,39 @@ class HPUModelRunner:
         return model_runner_output
 
     def load_model(self) -> None:
+        import habana_frameworks.torch.core as htcore
+        if self.model_config.quantization == 'inc' or \
+            self.model_config.quantization == 'fp8':
+            htcore.hpu_set_env()
         logger.info("Starting to load model %s...", self.model_config.model)
         with HabanaMemoryProfiler() as m:  # noqa: SIM117
             self.model = get_model(vllm_config=self.vllm_config)
         self.model_memory_usage = m.consumed_device_memory
         logger.info("Loading model weights took %.4f GB",
                     self.model_memory_usage / float(2**30))
+
+        if self._is_quant_with_inc():
+            logger.info("Preparing model with INC..")
+            with HabanaMemoryProfiler() as m_inc:
+                from neural_compressor.torch.quantization import (FP8Config,
+                                                                  convert,
+                                                                  prepare)
+                config = FP8Config.from_json_file(os.getenv(
+                    "QUANT_CONFIG", ""))
+                if config.measure:
+                    self.model = prepare(self.model, config)
+                elif config.quantize:
+                    self.model = convert(self.model, config)
+                htcore.hpu_initialize(self.model,
+                                      mark_only_scales_as_const=True)
+            self.inc_initialized_successfully = True
+            self.model_memory_usage = m_inc.consumed_device_memory
+            logger.info("Preparing model with INC took %.4f GB",
+                        self.model_memory_usage / float(2**30))
+        elif not is_fake_hpu():
+            self.model = self.model.to("hpu")
+            htcore.mark_step()
+
         hidden_layer_markstep_interval = int(
             os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
         model_config = getattr(self.model, "config", None)
@@ -1841,6 +1853,7 @@ class HPUModelRunner:
             hidden_layer_markstep_interval)
         path_to_rope = get_path_to_rope(self.model)
         torch.hpu.synchronize()
+
         with HabanaMemoryProfiler() as m:  # noqa: SIM117
             self.model = _maybe_wrap_in_hpu_graph(self.model,
                                                   vllm_config=self.vllm_config,
@@ -1848,6 +1861,74 @@ class HPUModelRunner:
         self.model_memory_usage = m.consumed_device_memory
         logger.info("Wrapping in HPUGraph took %.4f GB",
                     self.model_memory_usage / float(2**30))
+
+        with HabanaMemoryProfiler() as m:
+            self._maybe_compile(self.model,
+                                vllm_config=self.vllm_config,
+                                layer_names=path_to_rope)
+        self.model_memory_usage = m.consumed_device_memory
+        logger.info("Compilation took %.4f GB",
+                    self.model_memory_usage / float(2**30))
+
+    def _maybe_compile(self, *args, **kwargs):
+        if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
+        ) and not self.vllm_config.model_config.enforce_eager:
+            if os.getenv('VLLM_REGIONAL_COMPILATION',
+                         'true').strip().lower() in ("1", "true"):
+                compiled_methods = ['_update_metadata']
+                for method_name in compiled_methods:
+                    method = getattr(self.model, method_name)
+                    self._compile_region(self.model, method_name, method)
+                self.regional_compilation_layers_list = [
+                    RMSNorm, VocabParallelEmbedding
+                ]
+                self._regional_compilation(self.model)
+            else:
+                self.model = self._compile(self.model)
+
+    def _regional_compilation(self,
+                              module,
+                              parent_module=None,
+                              module_name=None):
+        if isinstance(module, torch.nn.ModuleList):
+            for children_name, children_module in module.named_children():
+                self._compile_region(module, children_name, children_module)
+        elif any(
+                isinstance(module, layer)
+                for layer in self.regional_compilation_layers_list):
+            self._compile_region(
+                parent_module,
+                module_name,
+                module,
+            )
+        else:
+            for children_name, children_module in module.named_children():
+                self._regional_compilation(children_module, module,
+                                           children_name)
+
+    def _compile_region(self, model, name, module):
+        module = self._compile(module)
+        setattr(model, name, module)
+
+    def _compile(self, module):
+        if not hasattr(self, '_compile_config'):
+            fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
+                                  'false').strip().lower() in ("1", "true")
+            dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
+                                'false').strip().lower() in ("1", "true")
+            self._compile_config = {'fullgraph': fullgraph, 'dynamic': dynamic}
+        fullgraph = self._compile_config['fullgraph']
+        dynamic = self._compile_config['dynamic']
+        if dynamic:
+            return torch.compile(module,
+                                 backend='hpu_backend',
+                                 fullgraph=fullgraph,
+                                 options={"force_static_compile": True})
+        else:
+            return torch.compile(module,
+                                 backend='hpu_backend',
+                                 fullgraph=fullgraph,
+                                 dynamic=False)
 
     def _use_graphs(self, batch_size, seq_len, num_blocks, phase):
         if self.model_config.enforce_eager:
@@ -1899,7 +1980,8 @@ class HPUModelRunner:
                 num_prefills=batch_size,
                 num_prefill_tokens=batch_size * seq_or_block,
                 input_positions=None,
-                slot_mapping=slot_mapping_device)
+                slot_mapping=slot_mapping_device,
+                block_size=self.block_size)
         else:
             block_tables = [
                 x.tolist()
@@ -1921,7 +2003,8 @@ class HPUModelRunner:
                 block_groups=block_groups_device,
                 num_decode_tokens=batch_size,
                 input_positions=None,
-                slot_mapping=slot_mapping_device)
+                slot_mapping=slot_mapping_device,
+                block_size=self.block_size)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
         logits_indices_device = _async_h2d_tensor_copy(logits_indices,
@@ -2195,7 +2278,7 @@ class HPUModelRunner:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
         kv_caches = self.kv_caches
-        max_blocks = kv_caches[0][0].size(0)
+        max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
@@ -2307,11 +2390,30 @@ class HPUModelRunner:
 
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
+        if os.getenv('VLLM_FULL_WARMUP',
+                     'false').strip().lower() in ("1", "true"):
+            # Since the model is warmed up for all possible tensor sizes,
+            # Dynamo can skip checking the guards
+            torch.compiler.set_stance(skip_guard_eval_unsafe=True)
         elapsed_time = end_time - start_time
         msg = (
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
+
+    def shutdown_inc(self):
+        can_finalize_inc = self._is_quant_with_inc() and \
+            (self.model.model is not None) and \
+            self.inc_initialized_successfully and \
+            not self._is_inc_finalized
+        if can_finalize_inc:
+            from neural_compressor.torch.quantization import (
+                finalize_calibration)
+            finalize_calibration(self.model.model)
+            self._is_inc_finalized = True
+
+    def __del__(self):
+        self.shutdown_inc()
 
     @torch.inference_mode()
     def profile_run(self) -> None:

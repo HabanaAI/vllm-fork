@@ -19,6 +19,9 @@ class model_aware_kv_ops_helper:
         self.use_mla_opt = not envs.VLLM_MLA_DISABLE
         self.tp_size = config.parallel_config.tensor_parallel_size
 
+    def use_mla(self):
+        return self.is_deepseek_mla and self.use_mla_opt
+
     def get_model_args(self, model_executable: torch.nn.Module):
 
         model_config = model_executable.model.config
@@ -44,8 +47,9 @@ class model_aware_kv_ops_helper:
             head_size = model_config.qk_nope_head_dim + \
                 model_config.qk_rope_head_dim
         else:
-            head_size = getattr(model_config, "head_dim",
-                                int(hidden_size // num_attention_heads))
+            head_size = getattr(model_config, "head_dim", None)
+            if head_size is None:
+                head_size = int(hidden_size // num_attention_heads)
 
         return num_heads, head_size
 
