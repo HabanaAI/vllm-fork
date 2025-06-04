@@ -19,9 +19,10 @@ import torch.distributed
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
-from vllm.config import ParallelConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
                               init_distributed_environment)
+from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -214,7 +215,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         # Initialize the distributed environment.
         if self.model_config.quantization == 'inc':
             self._set_env_vars()
-        init_worker_distributed_environment(self.parallel_config, self.rank,
+        init_worker_distributed_environment(self.vllm_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
         # Set random seed.
@@ -354,9 +355,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                              cache_block_size)
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
-
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
@@ -377,6 +375,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+            num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
@@ -513,12 +513,13 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
 
 def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
+    vllm_config: VllmConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    parallel_config = vllm_config.parallel_config
     backend = hpu_backend_string()
     init_distributed_environment(parallel_config.world_size,
                                  rank,
@@ -564,6 +565,7 @@ def init_worker_distributed_environment(
     ) == parallel_config.world_size * parallel_config.data_parallel_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
+    ensure_kv_transfer_initialized(vllm_config)
 
 
 def raise_if_cache_size_invalid(num_gpu_blocks, block_size, max_model_len,
