@@ -233,45 +233,37 @@ class Gemma3Attention(nn.Module):
         out: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        # NOTE(woosuk): As described in the comment above, this code is not
-        # meant to be performant. It is only meant to be correct.
-        q = q.view(-1, self.num_heads, self.head_dim)
-        # Expand the key and value to handle GQA.
+
+
+        s = q.shape[1]
         num_queries_per_kv = self.num_heads // self.num_kv_heads
-        k = k.view(-1, self.num_kv_heads, self.head_dim)
-        k = k.repeat_interleave(num_queries_per_kv, dim=-2)
-        v = v.view(-1, self.num_kv_heads, self.head_dim)
-        v = v.repeat_interleave(num_queries_per_kv, dim=-2)
+        query = q.view(-1, s, self.num_heads, self.head_dim)
+        key = k.view(-1, s, self.num_kv_heads, self.head_dim)
+        key = key.repeat_interleave(num_queries_per_kv, dim=-2)
+        value = v.view(-1, s, self.num_kv_heads, self.head_dim)
+        value = value.repeat_interleave(num_queries_per_kv, dim=-2)
 
         if self.is_sliding:
             attn_masks = kwargs["local_attn_masks"]
         else:
             attn_masks = kwargs["global_attn_masks"]
 
-        seq_lens = kwargs["seq_lens"]
-        start_idx = 0
-        for cnt, (seq_len, attn_mask) in enumerate(zip(seq_lens, attn_masks)):
-            end_idx = start_idx + seq_len
-            query = q[start_idx:end_idx].unsqueeze(0)
-            key = k[start_idx:end_idx].unsqueeze(0)
-            value = v[start_idx:end_idx].unsqueeze(0)
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
 
-            # Transpose.
-            query = query.transpose(1, 2)
-            key = key.transpose(1, 2)
-            value = value.transpose(1, 2)
+        attn_mask = torch.vstack(attn_masks)
 
-            output = F.scaled_dot_product_attention(
+        output = F.scaled_dot_product_attention(
                 query,
                 key,
                 value,
                 attn_mask,
                 self.scaling,
             )
-            output = output.transpose(1, 2).flatten(-2, -1)
-            #out[start_idx:end_idx] = output
-            out[cnt:cnt+1, start_idx:end_idx, :] = output
-            start_idx = end_idx
+        
+        out = output.transpose(1, 2).flatten(-2, -1)
+
         return out
 
 
