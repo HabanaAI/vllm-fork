@@ -703,13 +703,16 @@ class HPUModelRunner:
         self.padding_aware_scheduling = True  # TODO(kzawora): add knob for that
         self.padding_ratio_threshold = 0.9  # TODO(kzawora): add knob for that
         self.seen_configs: set = set()
+        self.max_num_batched_tokens = \
+        self.scheduler_config.max_num_batched_tokens
+        self.use_merged_prefill = False
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
             HPUBucketingContext = get_bucketing_context()
             self.bucketing_ctx = HPUBucketingContext(
                 self.max_num_seqs, self.max_prefill_batch_size,
-                self.block_size, self.scheduler_config.max_num_batched_tokens,
-                False)
+                self.block_size, self.max_num_batched_tokens,
+                self.use_merged_prefill, self.max_model_len)
             self.graphed_buckets: Set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
@@ -1919,11 +1922,13 @@ class HPUModelRunner:
             #self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
             #                     True)
             raise AssertionError("Finished profiling")
+
+        max_blocks = kv_caches[0][0].size(0)
+        self.bucketing_ctx.generate_decode_buckets(max_blocks)
+
         if self.skip_warmup:
             logger.info("Skipping warmup...")
             return
-        max_blocks = kv_caches[0][0].size(0)
-        self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
