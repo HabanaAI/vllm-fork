@@ -27,7 +27,6 @@ if [[ $1 == "prefiller" ]]; then
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         RANK=0 \
         WORLD_SIZE=2 \
-        DECODER_RANK=1 \
         vllm serve $MODEL \
         --port 1100 \
         --disable-log-requests \
@@ -47,7 +46,6 @@ elif [[ $1 == "decoder" ]]; then
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         RANK=1 \
-        DECODER_RANK=1 \
         WORLD_SIZE=2 \
         vllm serve $MODEL \
         --port 1200 \
