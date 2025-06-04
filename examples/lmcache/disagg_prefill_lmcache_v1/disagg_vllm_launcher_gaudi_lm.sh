@@ -27,7 +27,6 @@ if [[ $1 == "prefiller" ]]; then
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         LMCACHE_REMOTE_SERDE=naive \
         RANK=0 \
-        DECODER_RANK=1 \
         vllm serve $MODEL \
         --port 1100 \
         --disable-log-requests \
@@ -47,7 +46,6 @@ elif [[ $1 == "decoder" ]]; then
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         LMCACHE_CHUNK_SIZE=256 \
         RANK=1 \
-        DECODER_RANK=1 \
         vllm serve $MODEL \
         --port 1200 \
         --gpu_memory_utilization 0.5 \
