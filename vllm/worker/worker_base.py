@@ -454,13 +454,16 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         model_execute_time = time.perf_counter() - start_time
         if not get_pp_group().is_last_rank:
             # output is IntermediateTensors
-            assert isinstance(output, IntermediateTensors)
-            if (self.observability_config is not None
-                    and self.observability_config.collect_model_execute_time):
-                output.tensors["model_execute_time"] = torch.tensor(
-                    model_execute_time + orig_model_execute_time)
-            get_pp_group().send_tensor_dict(output.tensors,
-                                            all_gather_group=get_tp_group())
+            if isinstance(output, IntermediateTensors):
+                if (self.observability_config is not None
+                        and self.observability_config.collect_model_execute_time):
+                    output.tensors["model_execute_time"] = torch.tensor(
+                        model_execute_time + orig_model_execute_time)
+                get_pp_group().send_tensor_dict(output.tensors,
+                                                all_gather_group=get_tp_group())
+            else:
+                get_pp_group().send_tensor_dict({},
+                                                all_gather_group=get_tp_group())
             return [None]
         if (self.observability_config is not None
                 and self.observability_config.collect_model_execute_time
