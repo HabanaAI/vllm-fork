@@ -1922,11 +1922,13 @@ class HPUModelRunner:
             #self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
             #                     True)
             raise AssertionError("Finished profiling")
+
+        max_blocks = kv_caches[0][0].size(0)
+        self.bucketing_ctx.generate_decode_buckets(max_blocks)
+
         if self.skip_warmup:
             logger.info("Skipping warmup...")
             return
-        max_blocks = kv_caches[0][0].size(0)
-        self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
