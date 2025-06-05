@@ -18,9 +18,10 @@ logger.propagate = False
 is_hpu = True
 
 
-def pad_x(x, cu_seqlens):
-    padded_x = torch.rand((len(cu_seqlens) - 1) * 64, 1, 1280,
-                          device=x.device).bfloat16()
+def pad_input_with_block_of_64(x, cu_seqlens):
+    new_shape = [i for i in x.shape]
+    new_shape[0] = (len(cu_seqlens) - 1) * 64
+    padded_x = torch.zeros(*new_shape, device=x.device).bfloat16()
     seq_lens_deltas = cu_seqlens[1:] - cu_seqlens[:-1]
     padded_pointer = 0
     x_pointer = 0
@@ -62,7 +63,7 @@ class FSDPAWindownAttnMask(nn.Module):
 
             print("qi,ki,vi shapes:", q_i.shape, k_i.shape, v_i.shape)
             if attn_mask is not None:
-                attn_mask_i = attn_mask[None, None, i - 1, :, :]
+                attn_mask_i = attn_mask[None, None, :, :]
                 print("attn_mask", attn_mask_i.shape)
 
             if self.use_FusedSDPA:
@@ -85,14 +86,38 @@ class FSDPAWindownAttnMask(nn.Module):
         return output
 
 
-def test_pad():
+def test_pad_input_with_block_of_64(device="cpu"):
+    # cu_seqlens has blocks of 64, nothing to change
+    dim = 256
+    x = torch.randn([dim, 1, 1280], device=device).bfloat16()
+    cu_seqlens = [i for i in range(0, dim + 1, 64)]
+    cu_seqlens = torch.tensor(cu_seqlens)
+    padded_x = pad_input_with_block_of_64(x=x, cu_seqlens=cu_seqlens)
+    assert x.shape == padded_x.shape
+    assert torch.allclose(x, padded_x)
+
+    # cu_seqlens needs to be padded to 256
+    dim = 240
+    x = torch.randn([dim, 1, 1280], device=device).bfloat16()    
+    cu_seqlens = [0, 64, 128, 192, 240]
+    cu_seqlens = torch.tensor(cu_seqlens)
+    padded_x = pad_input_with_block_of_64(x=x, cu_seqlens=cu_seqlens)
+    assert padded_x.shape[0] == 256
+    assert torch.allclose(padded_x[:240, :], x[:240, :])
+    assert torch.allclose(
+        padded_x[241:, :],
+        torch.zeros_like(padded_x[241:, :])
+    )
+
+
+def test_pad_input_with_block_of_64_with_example():
     dim = 484
     device = "cpu"
     x = torch.randn([dim, 1, 1280], device=device).bfloat16()
     cu_seqlens = [0, 64, 128, 176, 240, 304, 352, 400, 448, 484]
     cu_seqlens = torch.tensor(cu_seqlens)
 
-    padded_x = pad_x(x=x, cu_seqlens=cu_seqlens)
+    padded_x = pad_input_with_block_of_64(x=x, cu_seqlens=cu_seqlens)
 
     # same parts
     assert torch.allclose(x[0:176, :, :], padded_x[0:176])
@@ -102,24 +127,23 @@ def test_pad():
     assert torch.allclose(x[400:448, :, :], padded_x[448:(448 + 48)])
     assert torch.allclose(x[448:484, :, :], padded_x[512:(512 + 36)])
 
-    # # expected zero sections
-    # padded_section = padded_x[176:176 + (64 - 48)]
-    # assert torch.allclose(padded_section, torch.zeros_like(padded_section))
-    # padded_section = padded_x[(320 + 48):(320 + 48) + (64 - 48)]
-    # assert torch.allclose(padded_section, torch.zeros_like(padded_section))
-    # padded_section = padded_x[(384 + 48):(384 + 48) + (64 - 48)]
-    # assert torch.allclose(padded_section, torch.zeros_like(padded_section))
-    # padded_section = padded_x[(448 + 48):(448 + 48) + (64 - 48)]
-    # assert torch.allclose(padded_section, torch.zeros_like(padded_section))
-    # padded_section = padded_x[(512 + 36):(512 + 48) + (64 - 36)]
-    # assert torch.allclose(padded_section, torch.zeros_like(padded_section))
+    # expected zero sections
+    padded_section = padded_x[176:176 + (64 - 48)]
+    assert torch.allclose(padded_section, torch.zeros_like(padded_section))
+    padded_section = padded_x[(320 + 48):(320 + 48) + (64 - 48)]
+    assert torch.allclose(padded_section, torch.zeros_like(padded_section))
+    padded_section = padded_x[(384 + 48):(384 + 48) + (64 - 48)]
+    assert torch.allclose(padded_section, torch.zeros_like(padded_section))
+    padded_section = padded_x[(448 + 48):(448 + 48) + (64 - 48)]
+    assert torch.allclose(padded_section, torch.zeros_like(padded_section))
+    padded_section = padded_x[(512 + 36):(512 + 48) + (64 - 36)]
+    assert torch.allclose(padded_section, torch.zeros_like(padded_section))
 
 
-def test_window_attention_cpu_basic_masks():
+def test_window_attention_mask_of_ones(use_fused=False):
     set_random_seed(0)
     dim = 192
     device = 'cpu'
-    use_fused = False
     atol = 0.001
     cu_seqlens = [0, 64, 128, 192]
     n = 64
@@ -139,7 +163,7 @@ def test_window_attention_cpu_basic_masks():
     model.load_state_dict(weights)
     model = model.bfloat16().to(device)
 
-    attn_mask = torch.ones(len(cu_seqlens) - 1, n, n)
+    attn_mask = torch.ones(len(cu_seqlens), n, n)
     if use_fused:
         attn_mask.to(torch.bfloat16)
     attn_mask = None
@@ -149,7 +173,40 @@ def test_window_attention_cpu_basic_masks():
     assert torch.allclose(y, y_with_mask, atol=atol)
 
 
-def test_window_attention_cpu_not_implemented():
+def test_window_attention_mask_with_gaps(use_fused=False):
+    set_random_seed(0)
+    dim = 192
+    device = 'cpu'
+    atol = 0.001
+    cu_seqlens = [0, 64, 128, 192]
+    n = 64
+    cu_seqlens = torch.tensor(cu_seqlens)
+
+    assert cu_seqlens[-1].item() == dim
+    x = torch.randn([dim, 1, 1280], device=device).bfloat16()
+    # no mask
+    model = FSDPAWindownAttnMask(use_fused=use_fused).to(
+        torch.bfloat16).to(device)
+    weights = model.state_dict()
+    y = model(x, cu_seqlens).to('cpu')
+
+    # with mask and pad
+    model = FSDPAWindownAttnMask(use_fused=use_fused).to(
+        torch.bfloat16).to(device)
+    model.load_state_dict(weights)
+    model = model.bfloat16().to(device)
+
+    attn_mask = torch.ones(len(cu_seqlens), n, n)
+    if use_fused:
+        attn_mask.to(torch.bfloat16)
+    attn_mask = None
+    y_with_mask = model(x, cu_seqlens, attn_mask=attn_mask).to('cpu')
+
+    # expect to pass
+    assert torch.allclose(y, y_with_mask, atol=atol)
+
+
+def test_window_attention_not_implemented():
     set_random_seed(0)
     dim = 484
     device = 'cpu'
@@ -165,7 +222,7 @@ def test_window_attention_cpu_not_implemented():
     y = model(x, cu_seqlens).to('cpu')
 
     # with mask and pad
-    padded_x = pad_x(x, cu_seqlens=cu_seqlens)
+    padded_x = pad_input_with_block_of_64(x, cu_seqlens=cu_seqlens)
     full_cu_seqlens = torch.arange(0, padded_x.shape[0] + 1, 64)
     model = FSDPAWindownAttnMask(use_fused=False).to(torch.bfloat16).to(device)
     model.load_state_dict(weights)
@@ -181,9 +238,10 @@ def test_window_attention_cpu_not_implemented():
                               atol=atol)
 
 
-test_pad()
-test_window_attention_cpu_basic_masks()
-test_window_attention_cpu_not_implemented()
+test_pad_input_with_block_of_64(device="cpu")
+test_window_attention_mask_of_ones(use_fused=False)
+# test_window_attention_mask_of_ones(use_fused=True)
+# test_window_attention_cpu_not_implemented()
 
 # [h, w]: (308, 308)
 # pixel_values : {torch.Size([484, 1176])}
