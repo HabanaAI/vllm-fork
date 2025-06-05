@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
+from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
 from vllm.model_executor.utils import set_weight_attrs
@@ -25,6 +26,7 @@ class DeepSpeedFPConfig(QuantizationConfig):
         weight_bits: int = 8,
         group_size: int = 512,
     ) -> None:
+        super().__init__()
         self.weight_bits = weight_bits
         self.group_size = group_size
         self.valid_types = [torch.bfloat16, torch.float16]
@@ -40,8 +42,8 @@ class DeepSpeedFPConfig(QuantizationConfig):
                 f"group_size={self.group_size}")
 
     @classmethod
-    def get_name(cls) -> str:
-        return "DeepSpeedFP"
+    def get_name(cls) -> QuantizationMethods:
+        return "deepspeedfp"
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "DeepSpeedFPConfig":
