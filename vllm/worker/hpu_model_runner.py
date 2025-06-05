@@ -1768,7 +1768,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         rank = torch.distributed.get_rank()
         if accepted_token_id is not None:
             #print(f"============prepare_input_tensors====={accepted_token_id=}==============")
-            #print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
+            print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
             # 过滤掉-1的非法token
             valid_tokens = accepted_token_id[accepted_token_id != -1]
 
@@ -1783,7 +1783,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 )
 
             # 只保留有效token部分
-            #print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
+            print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
             input_tokens=input_tokens[:2]
             #print(f"==============222prepare_input_tensors after {input_tokens=}, {rank=}")
 
@@ -2660,7 +2660,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         rank = torch.distributed.get_rank()
         #print(f"================================{accepted_token_id_=}, {rank=}, {self.is_driver_worker=}=========================")
-
+        if rank==0:
+            print("!!model_input.input_tokens",model_input.input_tokens)
+            print("!!!end model_input")
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
@@ -2733,17 +2735,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             """
 
 
-        if False: # !self.hpu_opt
-            if self.is_driver_worker:
-                model_kwargs_broadcast_data = {
-                    "input_tokens": model_input.input_tokens
-                }
-                broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
-                input_tokens = model_input.input_tokens
+        # if False: # !self.hpu_opt
+        if self.is_driver_worker:
+            model_kwargs_broadcast_data = {
+                "input_tokens": model_input.input_tokens
+            }
+            broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+            input_tokens = model_input.input_tokens
 
-            else:
-                model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
-                input_tokens = model_kwargs_broadcast_data["input_tokens"]
+        else:
+            model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
+            input_tokens = model_kwargs_broadcast_data["input_tokens"]
 
        
         if not model_input.is_first_multi_step:

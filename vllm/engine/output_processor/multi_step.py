@@ -139,7 +139,10 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
 
             # When both spec-decode and pre-fill chunking are enabled, we
             # don't have guaranteed samples here (e.g. all -1s).
+            if  valid_samples and valid_samples[0].output_token==10 and len(valid_samples)>1 :
+                q=0
             if valid_samples:
+            # if valid_samples and not ( valid_samples[0].output_token==10 and len(valid_samples)>1 and valid_samples[1].output_token==12):
                 self._process_seq_outputs(seq, valid_samples,
                                           sequence_group.sampling_params)
 

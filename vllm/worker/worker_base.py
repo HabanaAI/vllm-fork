@@ -404,9 +404,18 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         start_time = time.perf_counter()
-
+        rank =torch.distributed.get_rank()
+        if rank==0:
+            c=0
+            # print(f"!!!{execute_model_req=}")
+        
         inputs = self.prepare_input(execute_model_req, accepted_token_id)
+        if rank==0:
+            tmp=inputs[0]
+            # print(f"!!!{tmp=}")
 
+        if rank==0:
+            c=0
         # Need to keep worker running when executing dummy batch under DP
         # scenario
         if self.is_driver_worker:

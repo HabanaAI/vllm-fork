@@ -350,7 +350,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.accepted_token_ids_ = None
         self.target_logprobs_ = None
         self.prompt_logprobs_ = None
-        self.hpu_opt=False
+        self.hpu_opt=True
 
 
 
@@ -817,7 +817,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     proposals,
                 )
             
-
+        print("!!!proposal",proposals,proposal_scores)
+        print("!!!self.accept token id",self.accepted_token_ids_)
+        
         _, (non_spec_seqs, non_spec_indices) = split_batch_by_proposal_len(
             execute_model_req.seq_group_metadata_list, proposals.proposal_lens)
         # With prefill chunking enabled, `non_spec_seqs` contains prefills too:
@@ -841,10 +843,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids, target_logprobs = self._verify_tokens(
                 execute_model_req.seq_group_metadata_list, proposal_scores,
                 proposals, execute_model_req.num_lookahead_slots)
-
+            #这里从 2578，-1 变成了2578，294
         stage_times = (proposal_timer.elapsed_time_ms / num_lookahead_slots,
                        scoring_timer.elapsed_time_ms,
                        verification_timer.elapsed_time_ms)
+        print("!!!accept token id",accepted_token_ids)
 
         '''
         real_output = None
@@ -894,7 +897,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             return dummy_output
 
         '''
-        print(f"!!!{accepted_token_ids}")
+        #2578 -1
+        #294 2501
+        #305 -1 
+        print(f"!!!_create_output_sampler_list {accepted_token_ids}")
         return self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
