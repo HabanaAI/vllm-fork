@@ -315,6 +315,15 @@ class FreeKVCacheBlockQueueHPU:
         """
         self.free_blocks_ids_queue.remove(block.block_id)
 
+  def get_all_free_blocks(self) -> list[KVCacheBlock]:
+        """Get all free blocks in the free list. Mainly used for testing.
+
+        Returns:
+            A list of free blocks.
+        """
+        return [block for block in self.block_list
+                if block.block_id in self.free_blocks_ids_queue]
+
     @property
     def num_free_blocks(self):
         return len(self.free_blocks_ids_queue)
