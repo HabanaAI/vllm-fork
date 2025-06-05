@@ -7,6 +7,7 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
+from vllm.model_executor.layers.quantization import QuantizationMethods
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
 from vllm.model_executor.parameter import ModelWeightParameter
@@ -21,12 +22,13 @@ class Int8TpuConfig(QuantizationConfig):
         self,
         activation_scheme: str = "none",
     ) -> None:
+        super().__init__()
         if activation_scheme not in ACTIVATION_SCHEMES:
             raise ValueError(
                 f"Unsupported activation scheme {activation_scheme}")
         self.activation_scheme = activation_scheme
 
-    def get_name(self) -> str:
+    def get_name(self) -> QuantizationMethods:
         return "tpu_int8"
 
     def get_supported_act_dtypes(self) -> List[torch.dtype]:

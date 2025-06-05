@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-from multiprocessing import Process
-from typing import List
 
 import vllm
 from vllm.distributed import cleanup_dist_env_and_memory
@@ -9,7 +7,7 @@ from vllm.lora.request import LoRARequest
 MODEL_PATH = "/mnt/weka/data/pytorch/llama2/Llama-2-7b-hf"
 
 
-def do_sample(llm: vllm.LLM, lora_path: str, lora_id: int) -> List[str]:
+def do_sample(llm: vllm.LLM, lora_path: str, lora_id: int) -> list[str]:
     prompts = [
         "[user] Write a SQL query to answer the question based on the table schema.\n\n context: CREATE TABLE table_name_74 (icao VARCHAR, airport VARCHAR)\n\n question: Name the ICAO for lilongwe international airport [/user] [assistant]",  # noqa: E501
         "[user] Write a SQL query to answer the question based on the table schema.\n\n context: CREATE TABLE table_name_11 (nationality VARCHAR, elector VARCHAR)\n\n question: When Anchero Pantaleone was the elector what is under nationality? [/user] [assistant]",  # noqa: E501
@@ -27,7 +25,7 @@ def do_sample(llm: vllm.LLM, lora_path: str, lora_id: int) -> List[str]:
         lora_request=LoRARequest(str(lora_id), lora_id, lora_path)
         if lora_id else None)
     # Print the outputs.
-    generated_texts: List[str] = []
+    generated_texts: list[str] = []
     for output in outputs:
         prompt = output.prompt
         generated_text = output.outputs[0].text
@@ -78,23 +76,12 @@ def _test_llama_lora(sql_lora_files, tp_size):
 
 
 def test_llama_lora_1x(sql_lora_files):
-    p = Process(target=_test_llama_lora, args=(sql_lora_files, 1))
-    p.start()
-    p.join()
-    assert p.exitcode == 0
+    _test_llama_lora(sql_lora_files, 1)
 
 
 def test_llama_lora_2x(sql_lora_files):
-    # Work-around to resolve stalling issue in multi-card scenario
-    p = Process(target=_test_llama_lora, args=(sql_lora_files, 2))
-    p.start()
-    p.join()
-    assert p.exitcode == 0
+    _test_llama_lora(sql_lora_files, 2)
 
 
 def test_llama_lora_4x(sql_lora_files):
-    # Work-around to resolve stalling issue in multi-card scenario
-    p = Process(target=_test_llama_lora, args=(sql_lora_files, 4))
-    p.start()
-    p.join()
-    assert p.exitcode == 0
+    _test_llama_lora(sql_lora_files, 4)

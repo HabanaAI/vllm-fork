@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """A layer that samples the next tokens from the model's outputs."""
 import itertools
-import math
-import os
 import warnings
 from dataclasses import dataclass
 from importlib.util import find_spec
@@ -70,7 +68,6 @@ class SampleResultArgsType:
     sample_results_dict: SampleResultsDictType
     sampling_metadata: SamplingMetadata
     greedy_samples: Optional[torch.Tensor]
-    beam_search_logprobs: Optional[torch.Tensor]
 
 
 # Union of non-deferred (single-step scheduling)
@@ -112,6 +109,11 @@ class SamplerOutput(
     # return the sampled token ids from last rank to AsyncLLMEngine to be
     # 'broadcasted' to all other PP ranks for next step.
     sampled_token_ids_cpu: Optional[torch.Tensor] = None
+
+    # On-device tensor containing the sampled token embeddings (embeddings
+    # corresponding to the sampled token ids). Used when prompt embeddings are
+    # specified in lieu of prompt token ids or text.
+    sampled_token_embeds: Optional[torch.Tensor] = None
 
     # Spec decode metrics populated by workers.
     spec_decode_worker_metrics: Optional[SpecDecodeWorkerMetrics] = None
@@ -186,7 +188,7 @@ class Sampler(nn.Module):
 
         # Whether or not the SamplerOutput should have on-device tensors
         # containing the sampled token ids and probabilities. This is used by
-        # speculative decoding.
+        # speculative decoding and when prompt embeddings are specified.
         self.include_gpu_probs_tensor = False
         self.should_modify_greedy_probs_inplace = False
 
@@ -215,10 +217,6 @@ class Sampler(nn.Module):
         self._do_penalties = do_penalties
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
-        self._top_k_scalar = top_k_scalar
-        self._top_p_scalar = top_p_scalar
-
-        self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
 
     def forward(
         self,
@@ -237,7 +235,7 @@ class Sampler(nn.Module):
         * Defer Pythonization of sampling result & logprobs
           tensor
         * Encapsulate arguments required for deferred Pythonization
-          in the :class:`SamplerOutput` structure
+          in the {class}`SamplerOutput` structure
 
         Args:
             logits: (num_tokens, vocab_size).
@@ -278,14 +276,8 @@ class Sampler(nn.Module):
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k and flashinfer_top_k_top_p_sampling is None:
-            # If we have a scalar p and k, we can use the optimized version.
-            if self._top_k_scalar and self._top_p_scalar:
-                logits = self._apply_top_k_top_p_opt(logits,
-                                                     self._top_p_scalar,
-                                                     self._top_k_scalar)
-            else:
-                logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
-                                            sampling_tensors.top_ks)
+            logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
+                                        sampling_tensors.top_ks)
 
         if do_min_p:
             logits = _apply_min_p(logits, sampling_tensors.min_ps)
@@ -365,118 +357,6 @@ def _get_bin_counts_and_mask(
     mask = bin_counts > 0
 
     return bin_counts, mask
-
-
-class ApplyToppTopkScalar:
-    """
-    The original implementation of _apply_top_k_top_p is more general
-    as it uses vector topp, topk
-    However in a lot of cases, topp and topk is same for all batch elements
-    For such "scalar" topp, topk cases, we can use this class
-
-    The main optimizations in this class is:
-    Use topk instead of sort, which is much faster especially for small k.
-    However just using topk might not suffice in cases as shown below
-    Consider a tensor: 9 9 8 8 8 8 7 7 7
-    Topk, with k=5, on this yields 9 9 8 8 8
-    The value "8" is on the boundary, hence the last "8" gets snipped off
-    However the original implementation accepts all the "8"s,
-    so it should output:
-    9 9 8 8 8 8 (6 values, even though k=5)
-    To ensure these semantics, we perform topk with _padded_k elements
-    If we find more boundary elements left over,
-    then we keep incrementing _padded_k
-    and in future calls use the expanded value of __padded_k
-
-    The increments to _padded_k should be done
-    with value > 1 to prevent excessive recompilations
-    due to dynamic shapes (the output shape of the topk)
-
-    The main logic of this is in __call__
-    This is a class instead of a function, just to keep track of
-    the monotonic non-decreasing state _padded_k
-
-    To enable the duplicates that are outside of kth border,
-    set VLLM_HANDLE_TOPK_DUPLICATES to 1 or true.
-    """
-    _padded_k = 0
-    _handle_duplicates = os.getenv('VLLM_HANDLE_TOPK_DUPLICATES',
-                                   '0').lower() in ['1', 'true']
-
-    def __init__(self, increment: int):
-        self._increment = increment
-
-    def __call__(self, logits: torch.Tensor, p: float, k: int):
-        if k == 1 and not ApplyToppTopkScalar._handle_duplicates:
-            new_logits = torch.full(logits.shape,
-                                    -float("inf"),
-                                    device=logits.device)
-            vals, idx = torch.max(logits, keepdim=True, dim=1)
-            new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
-            return new_logits
-
-        if k > ApplyToppTopkScalar._padded_k:
-            ApplyToppTopkScalar._padded_k = min(k + self._increment,
-                                                logits.shape[1])
-
-        vals, idx = torch.topk(logits,
-                               k=ApplyToppTopkScalar._padded_k,
-                               dim=1,
-                               sorted=True)
-
-        # this "if" checks if we have bucketed so much that
-        # we have padded k upto shape of logits
-        if self._handle_duplicates and \
-            ApplyToppTopkScalar._padded_k != logits.shape[1]:
-            smallest_of_top_k = vals[:, k - 1]
-            num_duplicates_of_smallest_of_topk = torch.sum(
-                logits == smallest_of_top_k.unsqueeze(1), 1)
-            max_num_duplicates_of_smallest_of_topk = torch.max(
-                num_duplicates_of_smallest_of_topk).item()
-
-            # there are n repeats for a border
-            # (border meaning the smallest value of the top k).
-            # we do not know if only 1 or 2 or (n-1)
-            # of them lie outside the kth border,
-            # so we choose to conservatively increase by n-1
-            # when num_duplicates > _padded_k - k
-            if max_num_duplicates_of_smallest_of_topk - 1 > (
-                    ApplyToppTopkScalar._padded_k - k):
-                incr = int(
-                    math.ceil((max_num_duplicates_of_smallest_of_topk - 1) /
-                              self._increment) * self._increment)
-                # this while loop should be traversed at most twice,
-                # because we dont increment by self._increment and retry
-                # instead we compute incr in one go
-                ApplyToppTopkScalar._padded_k = min(
-                    ApplyToppTopkScalar._padded_k + incr, logits.shape[1])
-
-                # recompute topk with expanded padded_k
-                vals, idx = torch.topk(logits,
-                                       k=ApplyToppTopkScalar._padded_k,
-                                       dim=1,
-                                       sorted=True)
-
-        idx = torch.fliplr(idx)
-        vals = torch.fliplr(vals)
-
-        top_k_smallest_val_idx = vals.size(1) - k
-        top_k_mask = vals[:, top_k_smallest_val_idx].unsqueeze(1)
-        top_k_mask = vals < top_k_mask
-        vals.masked_fill_(top_k_mask, -float("inf"))
-
-        probs_sort = vals.softmax(dim=-1)
-        probs_sum = probs_sort.cumsum(dim=-1)
-        top_p_mask = probs_sum <= (1 - p)
-        top_p_mask[:, -1] = False
-        vals.masked_fill_(top_p_mask, -float("inf"))
-
-        new_logits = torch.full(logits.shape,
-                                -float("inf"),
-                                device=logits.device)
-        new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
-
-        return new_logits
 
 
 def _apply_min_tokens_penalty(
@@ -674,74 +554,6 @@ def _random_sample(
     return results
 
 
-def _beam_search_sample(
-    selected_seq_groups: List[SequenceGroupToSample],
-    logprobs: torch.Tensor,
-) -> SampleResultType:
-    """Run beam sampling on a given samples.
-
-    Args:
-        selected_seq_groups: A list of sequence groups batched.
-        logprobs: (num_selected_samples, vocab_size,) A tensor of logprob
-        on selected sample indices.
-    Returns:
-        Tuple of (next_token_ids, parent_ids). The length of returned list is
-        same as the length of selected_seq_groups. If the corresponding
-        seq_group has do_sample=False, tuple contains ([], [])
-    """
-    # We sample 2 * beam_width candidates to make sure that with high
-    # probability we can get `beam_width` candidates in addition to
-    # the finished sequences for the next iteration. See
-    # https://github.com/tensorflow/tensor2tensor/blob/bafdc1b67730430d38d6ab802cbd51f9d053ba2e/tensor2tensor/utils/beam_search.py#L557-L563
-    # for details. See also HF reference:
-    # https://github.com/huggingface/transformers/blob/a4dd53d88e4852f023332d284ff07a01afcd5681/src/transformers/generation/utils.py#L3063-L3065
-    #
-    # NOTE: Beam search is not vectorized, so its speed can be slower than
-    # other sampling methods.
-    sample_idx = 0
-    results: SampleResultType = []
-    for seq_group in selected_seq_groups:
-        if not seq_group.do_sample:
-            results.append(([], []))
-            continue
-
-        is_prompt = seq_group.is_prompt
-        seq_ids, sampling_params = seq_group.seq_ids, seq_group.sampling_params
-        num_parent_seqs = len(seq_ids)
-        beam_width = sampling_params.n
-        seq_group_logprobs = logprobs[sample_idx:sample_idx + num_parent_seqs]
-        if is_prompt:
-            # Prompt phase.
-            assert num_parent_seqs == 1, (
-                "Prompt input should have only one seq.")
-            parent_ids = [0] * (2 * beam_width)
-            _, next_token_ids = torch.topk(seq_group_logprobs[0],
-                                           2 * beam_width)
-            next_token_ids = next_token_ids.tolist()
-        else:
-            # Generation phase.
-            cumulative_logprobs: List[float] = [
-                seq_group.seq_data[seq_id].cumulative_logprob
-                for seq_id in seq_ids
-            ]
-            cumulative_logprobs_tensor = torch.tensor(
-                cumulative_logprobs,
-                dtype=torch.float,
-                device=seq_group_logprobs.device)
-            seq_group_logprobs = (seq_group_logprobs +
-                                  cumulative_logprobs_tensor.unsqueeze(dim=1))
-            _, topk_ids = torch.topk(seq_group_logprobs.flatten(),
-                                     2 * beam_width)
-            topk_ids = topk_ids.tolist()
-            vocab_size = seq_group_logprobs.size(-1)
-            parent_ids = [i // vocab_size for i in topk_ids]
-            next_token_ids = [i % vocab_size for i in topk_ids]
-        results.append((next_token_ids, parent_ids))
-        sample_idx += num_parent_seqs
-    assert sample_idx == logprobs.size(0)
-    return results
-
-
 # torch.multinomial forces a GPU<->CPU sync.
 # Therefore, we use an optimized implementation instead.
 # Note that we always sample with replacement.
@@ -830,14 +642,12 @@ def get_pythonized_sample_results(
         sampling_metadata,
         greedy_samples,
         multinomial_samples,
-        beam_search_logprobs,
         sample_results_dict,
     ) = (
         sample_result_args.sample_metadata,
         sample_result_args.sampling_metadata,
         sample_result_args.greedy_samples,
         sample_result_args.multinomial_samples,
-        sample_result_args.beam_search_logprobs,
         sample_result_args.sample_results_dict,
     )
 
@@ -850,9 +660,6 @@ def get_pythonized_sample_results(
         elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
             sample_results = _random_sample(seq_groups,
                                             multinomial_samples[sampling_type])
-        elif sampling_type == SamplingType.BEAM:
-            sample_results = _beam_search_sample(seq_groups,
-                                                 beam_search_logprobs)
         sample_results_dict.update(zip(seq_group_id, sample_results))
 
     return [
@@ -895,7 +702,6 @@ def _sample_with_torch(
     sample_metadata: SampleMetadataType = {}
     multinomial_samples: MultinomialSamplesType = {}
     greedy_samples: Optional[torch.Tensor] = None
-    beam_search_logprobs: Optional[torch.Tensor] = None
 
     # Create output tensor for sampled token ids.
     if include_gpu_probs_tensor:
@@ -964,8 +770,6 @@ def _sample_with_torch(
                 sampled_token_ids_tensor[long_sample_indices] = \
                     multinomial_samples[sampling_type].to(torch.long)
 
-        elif sampling_type == SamplingType.BEAM:
-            beam_search_logprobs = logprobs[sample_indices]
         else:
             raise ValueError(f"Unsupported sampling type: {sampling_type}")
 
@@ -976,7 +780,6 @@ def _sample_with_torch(
         sample_metadata=sample_metadata,
         multinomial_samples=multinomial_samples,
         greedy_samples=greedy_samples,
-        beam_search_logprobs=beam_search_logprobs,
         sample_results_dict=sample_results_dict)
 
     if not sampling_metadata.skip_sampler_cpu_output:
@@ -1122,7 +925,9 @@ def get_logprobs(
     if len(query_indices) == 0:
         empty_sampled_logprob: SampleLogprobs = []
         empty_prompt_logprob: Optional[PromptLogprobs] = None
-        return [empty_prompt_logprob], [empty_sampled_logprob]
+        num_seq_groups = len(sampling_metadata.seq_groups)
+        return [empty_prompt_logprob
+                ] * num_seq_groups, [empty_sampled_logprob] * num_seq_groups
 
     selected_logprobs, ranks = None, None
     top_logprobs, top_token_ids = None, None
@@ -1389,6 +1194,10 @@ def _build_sampler_output(
         assert sample_logprobs is not None
         assert not isinstance(maybe_deferred_sample_results,
                               SampleResultArgsType)
+        assert len(sampling_metadata.seq_groups) \
+            == len(maybe_deferred_sample_results) \
+            == len(prompt_logprobs) \
+            == len(sample_logprobs)
         deferred_sample_results_args = None
 
         for (seq_group, sample_result, group_prompt_logprobs,
@@ -1423,7 +1232,8 @@ def _build_sampler_output(
         deferred_sample_results_args=deferred_sample_results_args)
 
 
-def _get_next_prompt_tokens(seq_group: SequenceGroupToSample) -> List[int]:
+def _get_next_prompt_tokens(
+        seq_group: SequenceGroupToSample) -> tuple[int, ...]:
     """Get a list of next prompt tokens to compute logprob from a
         given sequence group.
 

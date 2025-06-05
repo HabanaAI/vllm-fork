@@ -16,14 +16,13 @@ from typing import List, Optional, Set, Tuple, Type
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
 import torch.distributed
-from habana_frameworks.torch.utils.debug.logger import (
-    refresh_logging_folder_path)
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
-from vllm.config import ParallelConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
                               init_distributed_environment)
+from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -65,9 +64,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.rank = rank
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
-        if self.parallel_config and self.is_driver_worker:
-            assert self.rank % self.parallel_config.tensor_parallel_size == 0, \
-            "The driver worker must have rank 0."
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -79,10 +75,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         speculative_config = self.speculative_config
         model_config = self.model_config
         speculative_args = {} if speculative_config is None \
-            or (speculative_config.draft_model_config.model ==
-                model_config.model) \
+            or (speculative_config.draft_model_config.hf_config.model_type \
+                == model_config.hf_config.model_type) \
             or (speculative_config.draft_model_config.hf_config.model_type
-                not in ["medusa", "mlp_speculator", "eagle"]) \
+                not in ["medusa", "mlp_speculator", "eagle", "deepseek_mtp"]) \
                     else {"return_hidden_states": True}
 
         is_encoder_decoder_model = self._is_encoder_decoder_model()
@@ -217,9 +213,9 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
-        self._set_env_vars()
-        refresh_logging_folder_path()
-        init_worker_distributed_environment(self.parallel_config, self.rank,
+        if self.model_config.quantization == 'inc':
+            self._set_env_vars()
+        init_worker_distributed_environment(self.vllm_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
         # Set random seed.
@@ -308,9 +304,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         Then, it calculate the maximum possible number of GPU and CPU blocks
         that can be allocated with the remaining free memory.
 
-        .. tip::
-            You may limit the usage of GPU memory
-            by adjusting the `gpu_memory_utilization` parameter.
+        :::{tip}
+        You may limit the usage of GPU memory
+        by adjusting the `gpu_memory_utilization` parameter.
+        :::
         """
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
@@ -359,8 +356,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
-
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
 
@@ -373,12 +368,15 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         This also warms up the model, which may record CUDA graphs.
         """
-        raise_if_cache_size_invalid(num_gpu_blocks,
-                                    self.cache_config.block_size,
-                                    self.model_config.max_model_len)
+        raise_if_cache_size_invalid(
+            num_gpu_blocks, self.cache_config.block_size,
+            self.model_config.max_model_len,
+            self.parallel_config.pipeline_parallel_size)
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+            num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
@@ -515,12 +513,13 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
 
 def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
+    vllm_config: VllmConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    parallel_config = vllm_config.parallel_config
     backend = hpu_backend_string()
     init_distributed_environment(parallel_config.world_size,
                                  rank,
@@ -562,15 +561,16 @@ def init_worker_distributed_environment(
     assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
+    ensure_kv_transfer_initialized(vllm_config)
 
 
-def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
-                                max_model_len) -> None:
+def raise_if_cache_size_invalid(num_gpu_blocks, block_size, max_model_len,
+                                pipeline_parallel_size) -> None:
     if num_gpu_blocks <= 0:
         raise ValueError("No available memory for the cache blocks. "
                          "Try increasing `gpu_memory_utilization` when "
                          "initializing the engine.")
-    max_seq_len = block_size * num_gpu_blocks
+    max_seq_len = block_size * (num_gpu_blocks // pipeline_parallel_size)
     if max_model_len > max_seq_len:
         raise ValueError(
             f"The model's max seq len ({max_model_len}) "
