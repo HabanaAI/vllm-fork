@@ -86,8 +86,6 @@ _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
-VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
-                                     'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
 
 
@@ -297,7 +295,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.layer_names = layer_names
         self.is_pooler = hasattr(self.model, "_pooler")
         self.is_causal = is_causal
-        self.use_merged_prefill = VLLM_MERGED_PREFILL
+        self.use_merged_prefill = get_config().merged_prefill
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -723,7 +721,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.max_num_batched_tokens = \
             self.scheduler_config.max_num_batched_tokens
         self.block_size = self.cache_config.block_size
-        self.use_merged_prefill = VLLM_MERGED_PREFILL
+        self.use_merged_prefill = get_config().merged_prefill
         assert not (self.scheduler_config.use_padding_aware_scheduling
                     and self.use_merged_prefill), \
             'Merged prefill is not compatible with padding aware scheduling!'
