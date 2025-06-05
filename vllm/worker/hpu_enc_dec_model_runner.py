@@ -90,7 +90,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         if max(attn_metadata.encoder_seq_lens) == 0:
             return attn_metadata
         if attn_metadata.is_prompt:
-            attn_metadata = 
             attn_metadata = self._update_seq_lens(attn_metadata, batch_size,
                                                   seq_len, device)
         else:
