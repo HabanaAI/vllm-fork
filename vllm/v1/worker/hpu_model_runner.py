@@ -53,28 +53,6 @@ logger = init_logger(__name__)
 
 _TYPE_CACHE: dict[str, dict[str, Any]] = {}
 
-USE_MERGED_PREFILL = (os.environ.get('VLLM_MERGED_PREFILL', 'f').lower()[0]
-                      in ['1', 't'])
-
-
-def setup_profiler(warmup, active):
-    schedule = torch.profiler.schedule(wait=0,
-                                       warmup=warmup,
-                                       active=active,
-                                       repeat=1)
-    activities = [
-        torch.profiler.ProfilerActivity.CPU,
-        torch.profiler.ProfilerActivity.HPU
-    ]
-    profiler = torch.profiler.profile(
-        schedule=schedule,
-        activities=activities,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('.',
-                                                                use_gzip=True),
-        record_shapes=False,
-        with_stack=True)
-    return profiler
-
 
 def setup_profiler(warmup, active):
     schedule = torch.profiler.schedule(wait=0,
@@ -658,7 +636,7 @@ class HPUModelRunner:
         self.seen_configs: set = set()
         self.max_num_batched_tokens = \
             self.scheduler_config.max_num_batched_tokens
-        self.use_merged_prefill = False
+        self.use_merged_prefill = get_config().merged_prefill
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
             HPUBucketingContext = get_bucketing_context()
@@ -1017,7 +995,8 @@ class HPUModelRunner:
         seq = max(seq_lens)
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
         if self.enable_bucketing:
-            bs = self.bucketing_ctx.get_padded_batch_size(bs, True)
+            if bs <= self.max_prefill_batch_size:
+                bs = self.bucketing_ctx.get_padded_batch_size(bs, True)
             seq = self.bucketing_ctx.get_padded_prompt_seq_len(seq)
             num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
@@ -1175,7 +1154,7 @@ class HPUModelRunner:
                 cur_offset += len(token_ids[0])
 
         attn_bias = None
-        if USE_MERGED_PREFILL:
+        if self.use_merged_prefill:
             attn_bias = self._make_attn_bias(context_groups, token_groups)
             attn_bias = attn_bias.to('hpu', non_blocking=True)
         else:
