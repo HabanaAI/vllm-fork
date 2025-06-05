@@ -3286,7 +3286,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         kv_caches=kv_caches
                     )
 
-
                 if self.model_is_mrope:
                     # run multimodal encoder for mrope before forward
                     inputs_embeds = \
