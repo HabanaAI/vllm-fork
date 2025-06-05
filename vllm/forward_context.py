@@ -106,7 +106,6 @@ def set_forward_context(attn_metadata: Any,
     trigger_kv_transfer = (attn_metadata is not None
                            and has_kv_transfer_group()
                            and is_v1_kv_transfer_group())
-    #import remote_pdb;remote_pdb.set_trace()
     if trigger_kv_transfer:
         kv_connector = get_kv_transfer_group()
         assert isinstance(kv_connector, KVConnectorBase_V1)

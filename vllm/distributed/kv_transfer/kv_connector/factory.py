@@ -60,16 +60,6 @@ class KVConnectorFactory:
             "PyNcclConnector", "MooncakeConnector", "LMCacheConnector",
             "MooncakeStoreConnector", "SharedStorageConnector", "LMCacheConnectorV1"]
 
-    @classmethod
-    def create_connector_v1(
-        cls,
-        config: "VllmConfig",
-        role: KVConnectorRole,
-    ) -> KVConnectorBase_V1:
-        if not envs.VLLM_USE_V1:
-            raise ValueError("Attempting to initialize a V1 Connector, "
-                             f"but found {envs.VLLM_USE_V1=}")
-
         connector_name = config.kv_transfer_config.kv_connector
         if connector_name in supported_kv_connector:
             logger.info(f"Creating v1 connector with name: {connector_name}")
