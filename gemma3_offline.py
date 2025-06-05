@@ -65,7 +65,7 @@ class ModelRequestData(NamedTuple):
 # Unless specified, these settings have been tested to work on a single L4.
 
 def load_model(model_name: str, tp_size: int, max_model_len:int, question: str, batch_size:int, image_urls: list[str]) -> ModelRequestData:
-
+    assert len(image_urls) % batch_size == 0
     engine_args = EngineArgs(
     model=model_name,
     max_model_len=max_model_len,
@@ -73,9 +73,10 @@ def load_model(model_name: str, tp_size: int, max_model_len:int, question: str, 
     max_num_seqs=len(image_urls),
     tensor_parallel_size=tp_size,
     #gpu_memory_utilization=0.9,
-    enforce_eager=False,   
-        limit_mm_per_prompt={"image": len(image_urls)},
+    enforce_eager=True,   
+        limit_mm_per_prompt={"image": int(len(image_urls)/batch_size)},
     )
+
     processor = AutoProcessor.from_pretrained(model_name)
     if batch_size==1:
         placeholders = [{"type": "image", "image": (url)} for url in image_urls]
@@ -99,6 +100,7 @@ def load_model(model_name: str, tp_size: int, max_model_len:int, question: str, 
         chunks = np.array_split(image_urls, batch_size)
         requests = []
         for chunk in chunks:
+            print("chunk....", chunk)
             placeholders = [{"type": "image", "image": (url)} for url in chunk]
             messages = [{
                 "role":
@@ -137,7 +139,7 @@ def run_generate(model_name: str, tp_size: int, max_model_len: int, question: st
         generated_text = o.outputs[0].text
         print(len(o.outputs[0].token_ids))
         print(generated_text)
-        print("-" * 50)
+        print("-*." * 50)
 
 def parse_args():
     parser = FlexibleArgumentParser(
@@ -160,7 +162,7 @@ def parse_args():
         "-n",
         type=int,
         choices=list(range(0,
-                           len(IMAGE_URLS) + 1)),  # the max number of images
+                           len(IMAGE_URLS))),  # the max number of images
         default=2,
         help="Number of images to use for the demo.")
     parser.add_argument(
@@ -182,16 +184,24 @@ def main(args: Namespace):
     tp_size = args.tensor_parallel_size
     max_model_len = args.max_model_len
 
-    image_urls = IMAGE_URLS[:args.num_images]
+
+    image_urls = [IMAGE_URLS[idx % len(IMAGE_URLS)] for idx, i in enumerate(range(args.num_images * args.batch_size))]
+
+    '''
     if args.num_images==1:
         QUESTION = "Extract all information from the provided image and provide it in a json format:"
-        batch_size=1
+        #batch_size=1
     elif args.num_images==0:
         QUESTION = "You are an AI designed to generate extremely long, detailed worldbuilding content. Your goal is to write a fictional encyclopedia with at least 4000 words of content. Do not stop early. Start by describing a fictional planet in detail. Include: \n1. Geography and climate zones (with rich, varied description).\n2. The history of all civilizations, from ancient to modern times.\n3. Cultures, belief systems, and mythologies along with rich detail about where such beliefs came from.\n4. Political structures and conflicts along with their history.\n5. Technology and magic systems (if any) spanning the last 1000 years, highlighting significant discoveries and figures.\n6. Major historical events and characters along with their geneology.\n\n Be descriptive, verbose, and never summarize. Write in a factual tone like an academic encyclopedia. Begin your entry below:"
-        batch_size=1
+        #batch_size=1
     else:
         QUESTION = "What is the content of each image? Once done, write a story that combines them all."
-        batch_size = args.batch_size
+    '''
+    if args.num_images==0:
+        QUESTION = "You are an AI designed to generate extremely long, detailed worldbuilding content. Your goal is to write a fictional encyclopedia with at least 4000 words of content. Do not stop early. Start by describing a fictional planet in detail. Include: \n1. Geography and climate zones (with rich, varied description).\n2. The history of all civilizations, from ancient to modern times.\n3. Cultures, belief systems, and mythologies along with rich detail about where such beliefs came from.\n4. Political structures and conflicts along with their history.\n5. Technology and magic systems (if any) spanning the last 1000 years, highlighting significant discoveries and figures.\n6. Major historical events and characters along with their geneology.\n\n Be descriptive, verbose, and never summarize. Write in a factual tone like an academic encyclopedia. Begin your entry below:"
+    else:
+        QUESTION = "What is the content of each image? Once done, write a story that combines them all."
+    batch_size = args.batch_size
 
     run_generate(model, tp_size, max_model_len, QUESTION, batch_size, image_urls)
 
