@@ -321,8 +321,10 @@ class FreeKVCacheBlockQueueHPU:
         Returns:
             A list of free blocks.
         """
-        return [block for block in self.block_list
-                if block.block_id in self.free_blocks_ids_queue]
+        return [
+            block for block in self.block_list
+            if block.block_id in self.free_blocks_ids_queue
+        ]
 
     @property
     def num_free_blocks(self):
