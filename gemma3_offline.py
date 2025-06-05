@@ -73,7 +73,7 @@ def load_model(model_name: str, tp_size: int, max_model_len:int, question: str, 
     max_num_seqs=len(image_urls),
     tensor_parallel_size=tp_size,
     #gpu_memory_utilization=0.9,
-    enforce_eager=True,
+    enforce_eager=False,
         limit_mm_per_prompt={"image": int(len(image_urls)/batch_size)},
     )
 
