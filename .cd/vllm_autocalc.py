@@ -10,155 +10,162 @@ import pandas as pd
 def get_device_model():
     import habana_frameworks.torch.hpu as hthpu
     os.environ["LOG_LEVEL_ALL"] = "6"
-    HPU_determined = hthpu.get_device_name()
-    return HPU_determined
+    hpu_determined = hthpu.get_device_name()
+    return hpu_determined
 
 
 def vllm_auto_calc(fd):
-    tensor_parallel_size_new = max(1, min(8, fd['tensor_parallel_size']))
-    if tensor_parallel_size_new != fd['tensor_parallel_size']:
-        print(f"Clamping tensor_parallel_size to {tensor_parallel_size_new}")
-    fd['tensor_parallel_size'] = tensor_parallel_size_new
+    tensor_parallel_size_new = max(1, min(8, fd['TENSOR_PARALLEL_SIZE']))
+    if tensor_parallel_size_new != fd['TENSOR_PARALLEL_SIZE']:
+        print(f"Clamping TENSOR_PARALLEL_SIZE to {tensor_parallel_size_new}")
+    fd['TENSOR_PARALLEL_SIZE'] = tensor_parallel_size_new
 
-    fd['max_model_len'] = max(1, fd['max_model_len'])
+    fd['MAX_MODEL_LEN'] = max(1, fd['MAX_MODEL_LEN'])
 
-    if fd['tensor_parallel_size'] > 1:
+    if fd['TENSOR_PARALLEL_SIZE'] > 1:
         fd['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = True
     else:
         fd['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = False
 
-    fd['model_mem_from_config'] = float(fd.get('model_mem_from_config'))
-    fd['dtype'] = dtype
-    fd['device_hpu_mem'] = hpu_mem[HPU_determined]
+    fd['MODEL_MEM_FROM_CONFIG'] = float(fd.get('MODEL_MEM_FROM_CONFIG'))
+    fd['DTYPE'] = DTYPE
+    fd['DEVICE_HPU_MEM'] = hpu_mem[hpu_determined]
 
-    print(f"{HPU_determined} Device detected with "
-          f"{fd['device_hpu_mem']} GB memory.")
+    print(f"{hpu_determined} Device detected with "
+          f"{fd['DEVICE_HPU_MEM']} GB memory.")
 
-    fd['total_gpu_mem'] = fd['device_hpu_mem'] * fd['tensor_parallel_size']
-    fd['model_mem_in_gb'] = (fd['model_mem_from_config'] * fd['quant_dtype'] /
-                             fd['model_dtype']) / (1024 * 1024 * 1024)
-    fd['usable_mem'] = ((fd['total_gpu_mem'] / fd['tensor_parallel_size']) -
-                        fd['unavailable_mem_abs'] -
-                        (fd['model_mem_in_gb'] / fd['tensor_parallel_size']) -
-                        fd['profiler_mem_overhead'])
-    if fd['usable_mem'] < 0:
+    fd['TOTAL_GPU_MEM'] = fd['DEVICE_HPU_MEM'] * fd['TENSOR_PARALLEL_SIZE']
+    fd['MODEL_MEM_IN_GB'] = (fd['MODEL_MEM_FROM_CONFIG'] * fd['QUANT_DTYPE'] /
+                             fd['MODEL_DTYPE']) / (1024 * 1024 * 1024)
+    fd['USABLE_MEM'] = ((fd['TOTAL_GPU_MEM'] / fd['TENSOR_PARALLEL_SIZE']) -
+                        fd['UNAVAILABLE_MEM_ABS'] -
+                        (fd['MODEL_MEM_IN_GB'] / fd['TENSOR_PARALLEL_SIZE']) -
+                        fd['PROFILER_MEM_OVERHEAD'])
+    if fd['USABLE_MEM'] < 0:
         raise ValueError(
-            f"Not enough memory for model '{os.environ['MODEL']}', "
-            "increase tensor_parallel_size.")
+            f"Not enough memory for MODEL '{os.environ['MODEL']}', "
+            "increase TENSOR_PARALLEL_SIZE.")
     else:
-        print(f"Usable graph+kvcache memory {fd['usable_mem']:.2f} GB")
+        print(f"Usable graph+kvcache memory {fd['USABLE_MEM']:.2f} GB")
 
-    fd['gpu_memory_util_temp'] = (1 -
-                                  fd['gpu_free_mem_target'] / fd['usable_mem'])
-    fd['gpu_memory_utilization'] = math.floor(
-        fd['gpu_memory_util_temp'] * 100) / 100
-    fd['kv_cache_per_seq'] = (
-        (2 * fd['max_model_len'] * fd['num_hidden_layers'] * fd['hidden_size']
-         * fd['num_key_value_heads'] * fd['cache_dtype_bytes']) /
-        fd['num_attention_heads']) / (1024 * 1024 * 1024)
-    fd['est_max_num_seqs'] = (fd['tensor_parallel_size'] * fd['usable_mem'] *
-                              fd['gpu_memory_utilization'] /
-                              fd['kv_cache_per_seq'])
-    if fd['est_max_num_seqs'] < 1:
+    fd['GPU_MEMORY_UTIL_TEMP'] = (1 -
+                                  fd['GPU_FREE_MEM_TARGET'] / fd['USABLE_MEM'])
+    fd['GPU_MEM_UTILIZATION'] = math.floor(
+        fd['GPU_MEMORY_UTIL_TEMP'] * 100) / 100
+    fd['KV_CACHE_PER_SEQ'] = (
+        (2 * fd['MAX_MODEL_LEN'] * fd['NUM_HIDDEN_LAYERS'] * fd['HIDDEN_SIZE']
+         * fd['NUM_KEY_VALUE_HEADS'] * fd['CACHE_DTYPE_BYTES']) /
+        fd['NUM_ATTENTION_HEADS']) / (1024 * 1024 * 1024)
+    fd['EST_MAX_NUM_SEQS'] = (fd['TENSOR_PARALLEL_SIZE'] * fd['USABLE_MEM'] *
+                              fd['GPU_MEM_UTILIZATION'] /
+                              fd['KV_CACHE_PER_SEQ'])
+    if fd['EST_MAX_NUM_SEQS'] < 1:
         raise ValueError(
             "Not enough memory for kv cache. "
-            "Increase tensor_parallel_size or reduce max_model_len")
+            "Increase TENSOR_PARALLEL_SIZE or reduce MAX_MODEL_LEN")
     print(f"Estimating graph memory for "
-          f"{fd['est_max_num_seqs']:.0f} max_num_seqs")
+          f"{fd['EST_MAX_NUM_SEQS']:.0f} MAX_NUM_SEQS")
 
-    fd['est_hpu_blocks'] = (fd['max_model_len'] * fd['est_max_num_seqs'] /
-                            fd['block_size'])
-    fd['decode_bs_ramp_graphs'] = 1 + int(
+    fd['EST_HPU_BLOCKS'] = (fd['MAX_MODEL_LEN'] * fd['EST_MAX_NUM_SEQS'] /
+                            fd['BLOCK_SIZE'])
+    fd['DECODE_BS_RAMP_GRAPHS'] = 1 + int(
         math.log(
             fd['VLLM_DECODE_BS_BUCKET_STEP'] / fd['VLLM_DECODE_BS_BUCKET_MIN'],
             2,
         ))
-    fd['decode_bs_step_graphs'] = max(
+    fd['DECODE_BS_STEP_GRAPHS'] = max(
         0,
-        int(1 + (fd['est_max_num_seqs'] - fd['VLLM_DECODE_BS_BUCKET_STEP']) /
+        int(1 + (fd['EST_MAX_NUM_SEQS'] - fd['VLLM_DECODE_BS_BUCKET_STEP']) /
             fd['VLLM_DECODE_BS_BUCKET_STEP']),
     )
-    fd['decode_block_ramp_graphs'] = 1 + int(
+    fd['DECODE_BLOCK_RAMP_GRAPHS'] = 1 + int(
         math.log(
             fd['VLLM_DECODE_BLOCK_BUCKET_STEP'] /
             fd['VLLM_DECODE_BLOCK_BUCKET_MIN'],
             2,
         ))
-    fd['decode_block_step_graphs'] = max(
+    fd['DECODE_BLOCK_STEP_GRAPHS'] = max(
         0,
-        int(1 + (fd['est_hpu_blocks'] - fd['VLLM_DECODE_BLOCK_BUCKET_STEP']) /
+        int(1 + (fd['EST_HPU_BLOCKS'] - fd['VLLM_DECODE_BLOCK_BUCKET_STEP']) /
             fd['VLLM_DECODE_BLOCK_BUCKET_STEP']),
     )
-    fd['num_decode_graphs'] = (
-        (fd['decode_bs_ramp_graphs'] + fd['decode_bs_step_graphs']) *
-        (fd['decode_block_ramp_graphs'] + fd['decode_block_step_graphs']))
-    fd['prompt_bs_ramp_graphs'] = 1 + int(
+    fd['NUM_DECODE_GRAPHS'] = (
+        (fd['DECODE_BS_RAMP_GRAPHS'] + fd['DECODE_BS_STEP_GRAPHS']) *
+        (fd['DECODE_BLOCK_RAMP_GRAPHS'] + fd['DECODE_BLOCK_STEP_GRAPHS']))
+    fd['PROMPT_BS_RAMP_GRAPHS'] = 1 + int(
         math.log(
-            min(fd['max_num_prefill_seqs'], fd['VLLM_PROMPT_BS_BUCKET_STEP']) /
+            min(fd['MAX_NUM_PREFILL_SEQS'], fd['VLLM_PROMPT_BS_BUCKET_STEP']) /
             fd['VLLM_PROMPT_BS_BUCKET_MIN'],
             2,
         ))
-    fd['prompt_bs_step_graphs'] = max(
+    fd['PROMPT_BS_STEP_GRAPHS'] = max(
         0,
         int(1 +
-            (fd['max_num_prefill_seqs'] - fd['VLLM_PROMPT_BS_BUCKET_STEP']) /
+            (fd['MAX_NUM_PREFILL_SEQS'] - fd['VLLM_PROMPT_BS_BUCKET_STEP']) /
             fd['VLLM_PROMPT_BS_BUCKET_STEP']),
     )
-    fd['prompt_seq_ramp_graphs'] = 1 + int(
+    fd['PROMPT_SEQ_RAMP_GRAPHS'] = 1 + int(
         math.log(
             fd['VLLM_PROMPT_SEQ_BUCKET_STEP'] /
             fd['VLLM_PROMPT_SEQ_BUCKET_MIN'],
             2,
         ))
-    fd['prompt_seq_step_graphs'] = int(
-        1 + (fd['max_model_len'] - fd['VLLM_PROMPT_SEQ_BUCKET_STEP']) /
+    fd['PROMPT_SEQ_STEP_GRAPHS'] = int(
+        1 + (fd['MAX_MODEL_LEN'] - fd['VLLM_PROMPT_SEQ_BUCKET_STEP']) /
         fd['VLLM_PROMPT_SEQ_BUCKET_STEP'])
-    fd['est_num_prompt_graphs'] = (
-        (fd['prompt_bs_ramp_graphs'] + fd['prompt_bs_step_graphs']) *
-        (fd['prompt_seq_ramp_graphs'] + fd['prompt_seq_step_graphs']) / 2)
-    fd['est_graph_prompt_ratio'] = math.ceil(
-        fd['est_num_prompt_graphs'] /
-        (fd['est_num_prompt_graphs'] + fd['num_decode_graphs']) * 100) / 100
-    print(f"Estimated Prompt graphs {fd['est_num_prompt_graphs']:.0f} and "
-          f"Decode graphs {fd['num_decode_graphs']}")
+    fd['EST_NUM_PROMPT_GRAPHS'] = (
+        (fd['PROMPT_BS_RAMP_GRAPHS'] + fd['PROMPT_BS_STEP_GRAPHS']) *
+        (fd['PROMPT_SEQ_RAMP_GRAPHS'] + fd['PROMPT_SEQ_STEP_GRAPHS']) / 2)
+    fd['EST_GRAPH_PROMPT_RATIO'] = math.ceil(
+        fd['EST_NUM_PROMPT_GRAPHS'] /
+        (fd['EST_NUM_PROMPT_GRAPHS'] + fd['NUM_DECODE_GRAPHS']) * 100) / 100
+    print(f"Estimated Prompt graphs {fd['EST_NUM_PROMPT_GRAPHS']:.0f} and "
+          f"Decode graphs {fd['NUM_DECODE_GRAPHS']}")
     fd['VLLM_GRAPH_PROMPT_RATIO'] = math.ceil(
-        min(max(fd['est_graph_prompt_ratio'], 0.1), 0.9) * 10) / 10
-    fd['decode_graph_target_GB'] = math.ceil(
-        fd['num_decode_graphs'] * fd['approx_mem_per_graph_MB'] / 1024 *
+        min(max(fd['EST_GRAPH_PROMPT_RATIO'], 0.1), 0.9) * 10) / 10
+    fd['DECODE_GRAPH_TARGET_GB'] = math.ceil(
+        fd['NUM_DECODE_GRAPHS'] * fd['APPROX_MEM_PER_GRAPH_MB'] / 1024 *
         10) / 10
-    fd['est_graph_reserve_mem'] = math.ceil(
-        fd['decode_graph_target_GB'] /
-        (fd['usable_mem'] * fd['gpu_memory_utilization'] *
+    fd['EST_GRAPH_RESERVE_MEM'] = math.ceil(
+        fd['DECODE_GRAPH_TARGET_GB'] /
+        (fd['USABLE_MEM'] * fd['GPU_MEM_UTILIZATION'] *
          (1 - fd['VLLM_GRAPH_PROMPT_RATIO'])) * 100) / 100
-    fd['VLLM_GRAPH_RESERVED_MEM'] = min(max(fd['est_graph_reserve_mem'], 0.01),
+    fd['VLLM_GRAPH_RESERVED_MEM'] = min(max(fd['EST_GRAPH_RESERVE_MEM'], 0.01),
                                         0.5)
-    fd['kv_cache_mem'] = (fd['usable_mem'] * fd['gpu_memory_utilization'] *
+    fd['KV_CACHE_MEM'] = (fd['USABLE_MEM'] * fd['GPU_MEM_UTILIZATION'] *
                           (1 - fd['VLLM_GRAPH_RESERVED_MEM']))
 
-    if fd.get('max_num_seqs') is None:
-        fd['max_num_seqs'] = (fd['tensor_parallel_size'] * fd['kv_cache_mem'] /
-                              fd['kv_cache_per_seq'])
-        if dtype == 'fp8':
-            fd['max_num_seqs'] = (max(
+    if fd.get('MAX_NUM_SEQS') is None:
+        fd['MAX_NUM_SEQS'] = (fd['TENSOR_PARALLEL_SIZE'] * fd['KV_CACHE_MEM'] /
+                              fd['KV_CACHE_PER_SEQ'])
+        print("max num seq",fd['MAX_NUM_SEQS'] )
+        if DTYPE == 'fp8':
+            fd['MAX_NUM_SEQS'] = (max(
                 1,
                 math.floor(
-                    fd['max_num_seqs'] / fd['VLLM_DECODE_BS_BUCKET_STEP']),
+                    fd['MAX_NUM_SEQS'] / fd['VLLM_DECODE_BS_BUCKET_STEP']),
             ) * fd['VLLM_DECODE_BS_BUCKET_STEP'])
         else:
-            fd['max_num_seqs'] = (math.ceil(
-                fd['max_num_seqs'] / fd['VLLM_DECODE_BS_BUCKET_STEP']) *
+            fd['MAX_NUM_SEQS'] = (math.ceil(
+                fd['MAX_NUM_SEQS'] / fd['VLLM_DECODE_BS_BUCKET_STEP']) *
                                   fd['VLLM_DECODE_BS_BUCKET_STEP'])
 
-        if fd['max_num_seqs'] < 1:
+        if fd['MAX_NUM_SEQS'] < 1:
             raise ValueError(
-                "Not enough memory for kv cache increase tensor_parallel_size "
-                "or reduce max_model_len or increase bucket step")
+                "Not enough memory for kv cache increase TENSOR_PARALLEL_SIZE "
+                "or reduce MAX_MODEL_LEN or increase bucket step")
+
+        if fd['MODEL'] in ['meta-llama/Llama-3.2-11B-Vision-Instruct', 'meta-llama/Llama-3.2-90B-Vision-Instruct']:
+            if fd['MAX_NUM_SEQS'] > 128:
+                fd['MAX_NUM_SEQS'] = 128
+                print(f"{fd['MODEL']} currently does not support max-num-seqs > 128, hence limiting the max-num-seqs to 128")
     else:
-        fd['max_num_seqs'] = max(1, fd['max_num_seqs'])
+        fd['MAX_NUM_SEQS'] = max(1, fd['MAX_NUM_SEQS'])
+
 
     fd['VLLM_DECODE_BLOCK_BUCKET_MAX'] = max(
-        128, math.ceil((fd['max_num_seqs'] * fd['max_model_len']) / 128))
-    fd['VLLM_PROMPT_SEQ_BUCKET_MAX'] = fd['max_model_len']
+        128, math.ceil((fd['MAX_NUM_SEQS'] * fd['MAX_MODEL_LEN']) / 128))
+    fd['VLLM_PROMPT_SEQ_BUCKET_MAX'] = fd['MAX_MODEL_LEN']
 
     # Create our output list
     with open('varlist_output.txt') as ovp_file:
@@ -179,21 +186,21 @@ def vllm_auto_calc(fd):
 def get_model_from_csv(file_path):
     # Read settings CSV and return dict
     dataframe_csv = pd.read_csv(file_path)
-    filtered_row = dataframe_csv.loc[dataframe_csv['model'] ==
+    filtered_row = dataframe_csv.loc[dataframe_csv['MODEL'] ==
                                      os.environ['MODEL']]
 
     if filtered_row.empty:
         raise ValueError(
-            f"No matching rows found for model '{os.environ['MODEL']}' "
+            f"No matching rows found for MODEL '{os.environ['MODEL']}' "
             f"in {file_path}")
 
-    # CSV should not have more than 1 row for each model.
+    # CSV should not have more than 1 row for each MODEL.
     # But just in case, return the first
     try:
         filtered_dict = filtered_row.to_dict(orient='records')[0]
     except Exception as err:
         raise ValueError(
-            "Unsupported model or model not defined! Exiting.") from err
+            "Unsupported MODEL or MODEL not defined! Exiting.") from err
 
     return filtered_dict
 
@@ -222,16 +229,16 @@ def write_dict_to_file(fd, file):
 
 
 def main():
-    global hpu_mem, HPU_determined, dtype, output_dict
+    global hpu_mem, hpu_determined, DTYPE, output_dict
 
     # CONSTANTS
     hpu_mem = {'GAUDI2': 96, 'GAUDI3': 128}
     # TODO: Remove this hardcoded value in the future
-    dtype = "bfloat16"
+    DTYPE = "bfloat16"
 
     # PRECHECKS
     if os.getenv('MODEL') is None:
-        print('Error no model. Provide model name in env var "MODEL"')
+        print('Could not determine which model to use. Provide a model name in env-var "MODEL"')
         exit(-1)
 
     # Output vars
@@ -240,7 +247,7 @@ def main():
     output_dict = {}
 
     # Get HPU model and filter row by HPU again
-    HPU_determined = get_device_model()
+    hpu_determined = get_device_model()
 
     # Read settings csv into a dataframe
     try:
@@ -251,10 +258,10 @@ def main():
 
     # Use a single if statement for MAX_MODEL_LEN
     if (os.getenv('MAX_MODEL_LEN') is not None
-            and int(os.environ['MAX_MODEL_LEN']) > fd['limit_model_length']):
-        print(f"Supplied max_model_length {os.environ['MAX_MODEL_LEN']} "
+            and int(os.environ['MAX_MODEL_LEN']) > fd['LIMIT_MODEL_LEN']):
+        print(f"Supplied MAX_MODEL_LEN {os.environ['MAX_MODEL_LEN']} "
               "cannot be higher than the permissible value "
-              f"{str(fd['limit_model_length'])} for this model.")
+              f"{str(fd['LIMIT_MODEL_LEN'])} for this MODEL.")
         exit(-1)
 
     # Overwrite params then perform autocalc
