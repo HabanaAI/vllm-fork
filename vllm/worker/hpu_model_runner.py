@@ -407,10 +407,6 @@ class HpuModelAdapter(torch.nn.Module):
                          dtype):
 
         if attn_metadata.is_prompt:
-            'seq_lens',
-            'encoder_seq_lens',
-            attn_metadata
-            attn_metadata
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
         else:
