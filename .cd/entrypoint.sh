@@ -19,7 +19,7 @@ if [[ $? -ne 0 ]]; then
 	echo "Settings Error. Exiting!"
 	exit -1
 fi
-## If vars file did not get generated, then we canot proceed
+## If vars file did not get generated, then we cannot proceed
 if [ ! -f $VARS_FILE ]; then
 	echo "Failure creating env. Exiting!"
 	exit -1
