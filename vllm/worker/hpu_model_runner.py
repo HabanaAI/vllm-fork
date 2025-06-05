@@ -1622,6 +1622,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         prefill_reqs = []
         decode_reqs = []
+        
+        if accepted_token_id is not None:
+            valid_tokens = accepted_token_id[accepted_token_id != -1]
+            
+            if accepted_token_id.numel()-valid_tokens.numel()==1:
+                # c=decode_reqs
+                token1=accepted_token_id[0][0].cpu().item()
+                seq_group_metadata_list[0].seq_data[0].output_token_ids=seq_group_metadata_list[0].seq_data[0].output_token_ids[:-1] +(token1,)
+                seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[accepted_token_id]
+                seq_group_metadata_list[0].seq_data[0].output_token_ids_array[-1]=token1
+                seq_group_metadata_list=seq_group_metadata_list[:1]
+                
+                
         for seq_group_meta in seq_group_metadata_list:
             if seq_group_meta.is_prompt:
                 prefill_reqs.append(seq_group_meta)
@@ -1642,6 +1655,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             slot_mapping,
             lora_ids,
         ) = self._prepare_prompt(prefill_reqs, align_worker=align_worker)
+        
+        
+
+                
         (
             decode_input_tokens,
             decode_input_positions,
@@ -1652,7 +1669,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs, align_worker=align_worker)
-
+        
+        
         if not self.is_pooler:
             generators = self.get_generators(finished_requests_ids)
             sampling_metadata = SamplingMetadata.prepare(
@@ -1770,23 +1788,56 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             #print(f"============prepare_input_tensors====={accepted_token_id=}==============")
             print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
             # 过滤掉-1的非法token
-            valid_tokens = accepted_token_id[accepted_token_id != -1]
+            # valid_tokens = accepted_token_id[accepted_token_id != -1]
 
-            # 创建目标索引 [0, 1, ..., n-1]
-            indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
+            # # 创建目标索引 [0, 1, ..., n-1]
+            # indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
 
-            # 使用index_copy_更新input_tokens
-            input_tokens.index_copy_(
-                0,
-                indices,
-                valid_tokens.unsqueeze(1)
-                )
+            # # 使用index_copy_更新input_tokens
+            # input_tokens.index_copy_(
+            #     0,
+            #     indices,
+            #     valid_tokens.unsqueeze(1)
+            #     )
+            
+            if accepted_token_id.numel()-valid_tokens.numel()==1:
+            #     print(f"!!!!mingzhi truncate before{input_tokens}")
 
+            #     input_tokens=input_tokens[:1,:].contiguous()
+            #     input_positions=input_positions[:1,:].contiguous()
+            #     attn_metadata.num_decode_tokens-=1
+                real_batch_size-=1
+                batch_size_padded-=1
+            #     attn_metadata.slot_mapping=attn_metadata.slot_mapping[:1,:].contiguous()
+            #     attn_metadata.input_positions=attn_metadata.input_positions[:1,:].contiguous()
+            #     t=0
+            #     print(f"!!!!mingzhi truncate after{input_tokens}")
+            #     print("dump all")
+               
+                    
             # 只保留有效token部分
             print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
             input_tokens=input_tokens[:2]
             #print(f"==============222prepare_input_tensors after {input_tokens=}, {rank=}")
 
+        
+        if rank==0 and input_tokens[0][0]==2578:
+            print(f"{input_tokens=}")
+            print(f"{query_lens=}")
+            print(f"{input_positions=}")
+            print(f"{lora_requests=}")
+            print(f"{sampling_metadata=}")
+            print(f"{lora_ids=}")
+            print(f"{lora_mapping=}")
+            print(f"{real_batch_size=}")
+            print(f"{batch_size_padded=}")
+            print(f"{seq_lens=}")
+            print(f"{attn_metadata.num_decode_tokens=}")
+            print(f"{attn_metadata.slot_mapping=}")
+            print(f"{attn_metadata.input_positions=}")
+            print(f"{attn_metadata.block_usage.shape=}")
+            print(f"{attn_metadata.block_groups.shape=}")
+            c=0
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
