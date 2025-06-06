@@ -1628,6 +1628,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             
             if accepted_token_id.numel()-valid_tokens.numel()==1:
                 # c=decode_reqs
+                # 
                 token1=accepted_token_id[0][0].cpu().item()
                 seq_group_metadata_list[0].seq_data[0].output_token_ids=seq_group_metadata_list[0].seq_data[0].output_token_ids[:-1] +(token1,)
                 seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[accepted_token_id]

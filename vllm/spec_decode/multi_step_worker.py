@@ -214,11 +214,13 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
             List[SamplerOutput]: A list containing the filtered model 
             outputs for the specified indices.
         """
+        # if output_indices_to_retain> len(expanded_batch_outputs.outputs):
+        #     output_indices_to_retain-=1
         return [
             SamplerOutput(
                 outputs=[
                     expanded_batch_output.outputs[i]
-                    for i in output_indices_to_retain
+                    for i in range(len(expanded_batch_output.outputs))
                 ] if len(expanded_batch_output.outputs) > 0 else [],
                 sampled_token_probs=(
                     expanded_batch_output.
@@ -234,6 +236,28 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                                    is not None else None))
             for expanded_batch_output in expanded_batch_outputs
         ]
+
+        
+        # return [
+        #     SamplerOutput(
+        #         outputs=[
+        #             expanded_batch_output.outputs[i]
+        #             for i in output_indices_to_retain
+        #         ] if len(expanded_batch_output.outputs) > 0 else [],
+        #         sampled_token_probs=(
+        #             expanded_batch_output.
+        #             sampled_token_probs[output_indices_to_retain]
+        #             if expanded_batch_output.sampled_token_probs is not None
+        #             else None),
+        #         logprobs=(
+        #             expanded_batch_output.logprobs[output_indices_to_retain]
+        #             if expanded_batch_output.logprobs is not None else None),
+        #         sampled_token_ids=(expanded_batch_output.
+        #                            sampled_token_ids[output_indices_to_retain]
+        #                            if expanded_batch_output.sampled_token_ids
+        #                            is not None else None))
+        #     for expanded_batch_output in expanded_batch_outputs
+        # ]
 
     def get_spec_proposals(
         self,
