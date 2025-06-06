@@ -21,7 +21,7 @@ from vllm.utils import bind_kv_cache, is_fake_hpu
 from vllm.worker.hpu_model_runner import (CachedStepOutput, HpuModelAdapter,
                                           HPUModelRunnerBase,
                                           ModelInputForHPUWithSamplingMetadata,
-                                          PhaseType, setup_profiler, subtuple)
+                                          setup_profiler, subtuple)
 from vllm.worker.model_runner_base import (
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict)
@@ -444,7 +444,9 @@ class HPUEncoderDecoderModelRunner(
             block_tables = None
             cross_block_table = None
             if ctx:
-                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * self.block_size}
+                block_tables = {
+                    group_id: [_PAD_BLOCK_ID] * ctx * self.block_size
+                }
                 computed_block_nums = ([1] * ctx)
         else:
             output_len = 1

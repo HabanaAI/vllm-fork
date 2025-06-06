@@ -29,7 +29,6 @@ from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 from vllm_hpu_extension.runtime import get_config
 
-import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
@@ -2034,7 +2033,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             output_len = 0
             block_tables = None
             if ctx:
-                block_tables = {group_id: [_PAD_BLOCK_ID] * ctx * self.block_size}
+                block_tables = {
+                    group_id: [_PAD_BLOCK_ID] * ctx * self.block_size
+                }
                 computed_block_nums = ([1] * ctx)
         else:
             input_len = seq_len - 1
