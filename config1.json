@@ -1,0 +1,5 @@
+[
+[{"prompt": 1}, {"prompt": 0, "images": [0,1,2]}],
+[{"prompt": 0, "images" : [0,2]}],
+[{"prompt": 2, "images" : [1]}]
+]
