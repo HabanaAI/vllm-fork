@@ -80,8 +80,8 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # Expand the batch for sequences with a bonus token.
         # Perform a forward pass on the expanded batch and filter the
         # response to retain only the original sequences' responses.
-        if execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==2578 or execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==12 :
-            c=0
+        # if execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==2578 or execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==12 :
+        #     c=0
         if accepted_token_id is not None:
             seq_ids_with_bonus_token_in_last_step={}
             valid_tokens =  accepted_token_id[accepted_token_id != -1]

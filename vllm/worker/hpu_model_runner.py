@@ -1803,13 +1803,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             #     )
             
             if accepted_token_id.numel()-valid_tokens.numel()==1:
+                pass
             #     print(f"!!!!mingzhi truncate before{input_tokens}")
 
             #     input_tokens=input_tokens[:1,:].contiguous()
             #     input_positions=input_positions[:1,:].contiguous()
             #     attn_metadata.num_decode_tokens-=1
-                real_batch_size-=1
-                batch_size_padded-=1
+                # real_batch_size-=1
+                # batch_size_padded-=1
             #     attn_metadata.slot_mapping=attn_metadata.slot_mapping[:1,:].contiguous()
             #     attn_metadata.input_positions=attn_metadata.input_positions[:1,:].contiguous()
             #     t=0
@@ -2718,7 +2719,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if rank==0:
                     b=0
                 previous_hidden_states=kwargs.get("previous_hidden_states")
-                kwargs["previous_hidden_states"] = kwargs.get("previous_hidden_states")[:1]
+                if previous_hidden_states is not None:
+                    kwargs["previous_hidden_states"] = kwargs.get("previous_hidden_states")[:1]
               
             
         #accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
