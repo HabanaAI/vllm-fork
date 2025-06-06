@@ -320,6 +320,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         if not broadcast_data:
             return None
 
+        hidden_states = broadcast_data.pop("hidden_states", None)
+        self.model_runner.set_intermediate_tensors(IntermediateTensors({"hidden_states": hidden_states}))
+
         if "is_dummy_batch" in broadcast_data and broadcast_data[
                 "is_dummy_batch"]:
             self.model_runner._dummy_run(1)
@@ -354,6 +357,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             broadcast_data = worker_input.as_broadcastable_tensor_dict()
             broadcast_data.update(model_input.as_broadcastable_tensor_dict())
             broadcast_data.update(kwargs)
+            broadcast_data.update(self.model_runner.get_intermediate_tensors().tensors)
             broadcast_tensor_dict(broadcast_data, src=0)
 
         if execute_model_req.async_callback:
@@ -431,12 +435,12 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         if worker_input.num_seq_groups == 0:
             return []
 
-        intermediate_tensors = None
+        intermediate_tensors = self.model_runner.get_intermediate_tensors()
         orig_model_execute_time = 0.0
         if not get_pp_group().is_first_rank:
-            intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict(
-                    all_gather_group=get_tp_group()))
+            get_pp_group().recv_tensor_dict(
+                    all_gather_group=get_tp_group(),
+                    tensor_dict=intermediate_tensors.tensors)
             if (self.observability_config is not None
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(

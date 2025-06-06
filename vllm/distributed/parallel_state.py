@@ -735,6 +735,7 @@ class GroupCoordinator:
         self,
         src: Optional[int] = None,
         all_gather_group: Optional["GroupCoordinator"] = None,
+        tensor_dict: Optional[Dict[str, Union[torch.Tensor, Any]]] = None,
     ) -> Optional[Dict[str, Union[torch.Tensor, Any]]]:
         """Recv the input tensor dictionary.
         NOTE: `src` is the local rank of the source rank.
@@ -756,14 +757,21 @@ class GroupCoordinator:
         assert src < self.world_size, f"Invalid src rank ({src})"
 
         recv_metadata_list = self.recv_object(src=src)
-        tensor_dict: Dict[str, Any] = {}
+        if tensor_dict is None:
+            tensor_dict: Dict[str, Any] = {}
         for key, value in recv_metadata_list:
             if isinstance(value, TensorMetadata):
-                tensor = torch.empty(value.size,
-                                     dtype=value.dtype,
-                                     device=value.device)
+                if key in tensor_dict:
+                    tensor = tensor_dict[key]
+                else:
+                    tensor = torch.empty(value.size,
+                                         dtype=value.dtype,
+                                         device=value.device)
                 if tensor.numel() == 0:
                     # Skip broadcasting empty tensors.
+                    if key in tensor_dict:
+                        # If the key already exists, we don't need to receive it.
+                        continue
                     tensor_dict[key] = tensor
                     continue
 
@@ -800,6 +808,9 @@ class GroupCoordinator:
                         tensor, dim=0)
                     tensor = tensor.reshape(orig_shape)
 
+                # If the key already exists, we don't need to receive it.
+                if key in tensor_dict:
+                    continue            
                 tensor_dict[key] = tensor
             else:
                 tensor_dict[key] = value
