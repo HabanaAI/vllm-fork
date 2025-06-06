@@ -100,12 +100,6 @@ class Singleton(type):
         return cls._instances[cls]
 
 
-class PhaseType(Enum):
-    PREFILL = 'prefill'
-    PREFIX_PREFILL = 'prefix_prefill'
-    DECODE = 'decode'
-
-
 def pad_flat_tensor(tensor, desired_size):
     assert tensor.dim() == 1, 'Only flat tensors are supported'
     padding_needed = desired_size - tensor.size(0)
@@ -2319,7 +2313,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
             cfg = (int(bs), int(seq_len), 0, is_prompt)
-            is_prompt = phase != 'decode'
+            is_prompt = phase == 'prompt'
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
@@ -2386,7 +2380,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.bucketing_ctx.decode_buckets,
                         False, kv_caches)
                 else:
-                    prompt_available_memory = graph_free_mem
                     msg = (
                         f"Using {format_bytes(graph_free_mem)}"
                         f"/{format_bytes(free_mem)} "
@@ -2397,14 +2390,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
                         self.bucketing_ctx.prompt_buckets,
-                        True, kv_caches, prompt_available_memory)
+                        True, kv_caches)
                     if mem_post_prompt < graph_free_mem \
                         and not prompt_captured_all:
                         mem_post_prompt, _, prompt_captured_all = (
                             self.warmup_graphs(
                                 self.bucketing_ctx.prompt_buckets, True,
-                                kv_caches, graph_free_mem - mem_post_prompt,
-                                mem_post_prompt, prompt_batch_seq))
+                                kv_caches))
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
