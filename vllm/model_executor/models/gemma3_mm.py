@@ -680,10 +680,16 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             # Consider the bidirectional attention between image tokens.
             img_mask = torch.zeros_like(global_attn_mask)
-            img_pos = (input_token_ids == self.config.image_token_index)
-            img_mask[:, :, :, img_pos] += 1
-            img_mask[:, :, img_pos, :] += 1
+            img_pos = (input_token_ids == self.config.image_token_index) # this is doing bidirectional attn between 2 images.. why
+            img_tokens_cumsum = torch.cumsum(img_pos, 0)
+            num_imgs = img_tokens_cumsum[-1] // 256
+            img_start_pos = torch.arange(0, img_tokens_cumsum[-1], 256)+1
+            for i in img_start_pos:
+                img_mask[:,:,i:i+256, i:i+256] = 2
+            #img_mask[:, :, :, img_pos] += 1
+            #img_mask[:, :, img_pos, :] += 1
             global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
+            #breakpoint()
             global_attn_masks.append(global_attn_mask)
 
             if self.sliding_window is not None:
