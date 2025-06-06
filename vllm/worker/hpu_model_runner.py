@@ -1786,22 +1786,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             prefill_attn_metadata is not None else decode_attn_metadata
 
         rank = torch.distributed.get_rank()
-        if accepted_token_id is not None:
+        if accepted_token_id is not None :
             #print(f"============prepare_input_tensors====={accepted_token_id=}==============")
             print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
             # 过滤掉-1的非法token
-            # valid_tokens = accepted_token_id[accepted_token_id != -1]
+            valid_tokens = accepted_token_id[accepted_token_id != -1]
 
-            # # 创建目标索引 [0, 1, ..., n-1]
-            # indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
-
-            # # 使用index_copy_更新input_tokens
-            # input_tokens.index_copy_(
-            #     0,
-            #     indices,
-            #     valid_tokens.unsqueeze(1)
-            #     )
             
+            if accepted_token_id.numel()==valid_tokens.numel():
+                # 创建目标索引 [0, 1, ..., n-1]
+                indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
+
+                # 使用index_copy_更新input_tokens
+                input_tokens.index_copy_(
+                    0,
+                    indices,
+                    valid_tokens.unsqueeze(1)
+                    )
+                
             if accepted_token_id.numel()-valid_tokens.numel()==1:
                 pass
             #     print(f"!!!!mingzhi truncate before{input_tokens}")

@@ -83,16 +83,37 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # if execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==2578 or execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==12 :
         #     c=0
         if accepted_token_id is not None:
-            seq_ids_with_bonus_token_in_last_step={}
             valid_tokens =  accepted_token_id[accepted_token_id != -1]
             if  accepted_token_id.numel()-valid_tokens.numel()==1:
+                seq_ids_with_bonus_token_in_last_step={}
+
                 execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
                 execute_model_req.previous_hidden_states.second_last_token_hidden_states=execute_model_req.previous_hidden_states.second_last_token_hidden_states[:1]
                 
                 token1=accepted_token_id[0][0].cpu().item()
-                execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids=execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[:-2] +(token1,)
-                execute_model_req.seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=execute_model_req.seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[token1]
-                execute_model_req.seq_group_metadata_list[0].seq_data[0]._num_computed_tokens-=1
+                
+                seq_data_container=execute_model_req.seq_group_metadata_list[0].seq_data
+                if isinstance(seq_data_container, dict):
+                    seq_data_iter = seq_data_container.values()
+                else:
+                    seq_data_iter = seq_data_container  # 假设是 list-like
+                    
+                for seq in seq_data_iter:
+                                        # output_token_ids 是 tuple，拼接新 tuple
+                    seq.output_token_ids = seq.output_token_ids[:-2] + (token1,)
+                    
+                    # _new_appended_tokens 是 list，拼接新 list
+                    seq._new_appended_tokens = seq._new_appended_tokens[:-2] + [token1]
+
+                    # 计数减 1
+                    seq._num_computed_tokens -= 1
+
+                # execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids=execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[:-2] +(token1,)
+                # execute_model_req.seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=execute_model_req.seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[token1]
+                # execute_model_req.seq_group_metadata_list[0].seq_data[0]._num_computed_tokens-=1
+                
+                
+                
                 import array
                 # arr = execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids_array
                 # new_arr = array.array(arr.typecode, arr[:-2] + array.array(arr.typecode, [token1]))
@@ -155,7 +176,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # move indices to device to avoid stream sync
         indices_of_seq_with_bonus_tokens = torch.tensor(
             indices_of_seq_with_bonus_tokens, device=self.device)
-        if model_outputs[0].sampled_token_ids[0][0].item()==294:
+        if model_outputs[0].sampled_token_ids[0][0].item()==2501:
             b=0
             print("xxxx139",rank,":",execute_model_req.previous_hidden_states.hidden_states.shape)
             c=0
