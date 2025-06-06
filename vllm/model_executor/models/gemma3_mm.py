@@ -624,6 +624,9 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 )
             input_ids = None
 
+        #if 'pixel_values' in kwargs:
+        #    breakpoint()
+        #    print()
         hidden_states = self.language_model.model(input_ids,
                                                   positions,
                                                   intermediate_tensors,
@@ -647,21 +650,25 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         # NOTE(woosuk): Here, we distinguish the sequences by the position id 0.
         # This is a HACK. Fix this.
         start_idices = (positions == 0).cpu().nonzero()
+        padding = (positions == -1).cpu()
         num_seqs = len(start_idices)
         seq_lens = []
+        seq_lens_wo_padding = []
         for i in range(num_seqs):
             start_idx = start_idices[i].item()
             if i < num_seqs - 1:
                 end_idx = start_idices[i + 1].item()
             else:
                 end_idx = len(input_ids)
+            pad_amount = padding[start_idx: end_idx].sum()
             seq_lens.append(end_idx - start_idx)
+            seq_lens_wo_padding.append(end_idx - start_idx - pad_amount)
         kwargs["seq_lens"] = seq_lens
 
         global_attn_masks = []
         local_attn_masks = []
         start_idx = 0
-        for seq_len in seq_lens:
+        for seq_len, seq_len_wo_padding in zip(seq_lens, seq_lens_wo_padding):
             end_idx = start_idx + seq_len
             input_token_ids = input_ids[start_idx:end_idx]
             start_idx = end_idx
@@ -684,6 +691,9 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             img_mask[:, :, :, img_pos] += 1
             img_mask[:, :, img_pos, :] += 1
             global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
+            global_attn_mask[:,:,seq_len_wo_padding:, :] = float("-inf")
+            global_attn_mask[:,:,:,seq_len_wo_padding:] = float("-inf")
+            #breakpoint()
             global_attn_masks.append(global_attn_mask)
 
             if self.sliding_window is not None:
@@ -693,9 +703,12 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                              diagonal=-self.sliding_window)
                 local_attn_mask = torch.where(local_attn_mask == 0,
                                               global_attn_mask, float("-inf"))
+                local_attn_mask[:,:,seq_len_wo_padding:, :] = float("-inf")
+                local_attn_mask[:,:, :, seq_len_wo_padding:] = float("-inf")
                 local_attn_masks.append(local_attn_mask)
         kwargs["global_attn_masks"] = global_attn_masks
         kwargs["local_attn_masks"] = local_attn_masks
+        #breakpoint()
         return kwargs
 
     def compute_logits(

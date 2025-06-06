@@ -200,9 +200,9 @@ def main(args: Namespace):
     if args.num_images==0:
         QUESTION = "You are an AI designed to generate extremely long, detailed worldbuilding content. Your goal is to write a fictional encyclopedia with at least 4000 words of content. Do not stop early. Start by describing a fictional planet in detail. Include: \n1. Geography and climate zones (with rich, varied description).\n2. The history of all civilizations, from ancient to modern times.\n3. Cultures, belief systems, and mythologies along with rich detail about where such beliefs came from.\n4. Political structures and conflicts along with their history.\n5. Technology and magic systems (if any) spanning the last 1000 years, highlighting significant discoveries and figures.\n6. Major historical events and characters along with their geneology.\n\n Be descriptive, verbose, and never summarize. Write in a factual tone like an academic encyclopedia. Begin your entry below:"
     else:
-        QUESTION = "What is the content of each image? Once done, write a story that combines them all."
+        #QUESTION = "What is the content of each image? Once done, write a story that combines them all."
+        QUESTION = "What is the content of each image? Describe very briefly in 2-5 words"
     batch_size = args.batch_size
-
     run_generate(model, tp_size, max_model_len, QUESTION, batch_size, image_urls)
 
 

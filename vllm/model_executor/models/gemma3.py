@@ -234,7 +234,7 @@ class Gemma3Attention(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
 
-
+        #breakpoint()
         s = q.shape[1]
         num_queries_per_kv = self.num_heads // self.num_kv_heads
         query = q.view(-1, s, self.num_heads, self.head_dim)
@@ -254,6 +254,8 @@ class Gemma3Attention(nn.Module):
 
         attn_mask = torch.vstack(attn_masks)
 
+        #breakpoint()
+
         output = F.scaled_dot_product_attention(
                 query,
                 key,
@@ -262,6 +264,7 @@ class Gemma3Attention(nn.Module):
                 self.scaling,
             )
         
+        #breakpoint()
         out = output.transpose(1, 2).flatten(-2, -1)
 
         return out
