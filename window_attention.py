@@ -40,7 +40,7 @@ class FSDPAWindownAttnMask(nn.Module):
         self.qkv = nn.Linear(1280, 1280 * 3)
         self.use_FusedSDPA = use_fused
         self.softmax_mode = 'None'
-        self.proj = nn.Linear(4 * 1280, 1280)
+        self.proj = nn.Linear(1280, 4 * 1280)
 
     def forward(self, x, cu_seqlens, attn_mask=None):
         new_shape = (x.shape[0], x.shape[1], 16, 80)
@@ -52,7 +52,6 @@ class FSDPAWindownAttnMask(nn.Module):
 
         # Window Attention computation
         outputs = []
-        cu_seqlens = list(range(0, x.shape[0] + 1, 64))
         attn_mask_i = None
         for i in range(1, len(cu_seqlens)):
             start_idx = cu_seqlens[i - 1]
@@ -61,9 +60,12 @@ class FSDPAWindownAttnMask(nn.Module):
             k_i = k[:, start_idx:end_idx]
             v_i = v[:, start_idx:end_idx]
 
-            print("qi,ki,vi shapes:", q_i.shape, k_i.shape, v_i.shape)
+            q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d") for x in [q_i, k_i, v_i])
+            print(f"index: {start_idx.item()} : {end_idx.item()} delta {end_idx.item() - start_idx.item()}")
+            print("qi, ki, vi shapes:", q_i.shape, k_i.shape, v_i.shape)
+
             if attn_mask is not None:
-                attn_mask_i = attn_mask[None, None, :, :]
+                attn_mask_i = attn_mask[i-1, :, :]
                 print("attn_mask", attn_mask_i.shape)
 
             if self.use_FusedSDPA:
@@ -79,9 +81,8 @@ class FSDPAWindownAttnMask(nn.Module):
             outputs.append(output_i)
 
         context_layer = torch.cat(outputs, dim=1)
-        context_layer = rearrange(context_layer,
-                                  "b s h d -> s b (h d)").contiguous()
 
+        context_layer = rearrange(context_layer, "b s h d -> s b (h d)").contiguous()
         output = self.proj(context_layer)
         return output
 
@@ -166,19 +167,17 @@ def test_window_attention_mask_of_ones(use_fused=False):
     attn_mask = torch.ones(len(cu_seqlens), n, n)
     if use_fused:
         attn_mask.to(torch.bfloat16)
-    attn_mask = None
     y_with_mask = model(x, cu_seqlens, attn_mask=attn_mask).to('cpu')
 
-    # expect to pass
     assert torch.allclose(y, y_with_mask, atol=atol)
 
 
 def test_window_attention_mask_with_gaps(use_fused=False):
     set_random_seed(0)
-    dim = 192
+    dim = 240
     device = 'cpu'
     atol = 0.001
-    cu_seqlens = [0, 64, 128, 192]
+    cu_seqlens = [0, 64, 128, 192, 240]
     n = 64
     cu_seqlens = torch.tensor(cu_seqlens)
 
@@ -194,16 +193,25 @@ def test_window_attention_mask_with_gaps(use_fused=False):
     model = FSDPAWindownAttnMask(use_fused=use_fused).to(
         torch.bfloat16).to(device)
     model.load_state_dict(weights)
-    model = model.bfloat16().to(device)
+    model = model.to(device)
 
-    attn_mask = torch.ones(len(cu_seqlens), n, n)
+    padded_x = pad_input_with_block_of_64(x, cu_seqlens)
+    new_cu_seqlens = [i for i in range(0, len(cu_seqlens) * 64, 64)]
+    new_cu_seqlens = torch.tensor(new_cu_seqlens)
+    assert len(new_cu_seqlens) == len(cu_seqlens)
+    assert padded_x.shape[0] == new_cu_seqlens[-1]
+
+    attn_mask = torch.ones(len(new_cu_seqlens), n, n)
+    vector_mask = torch.ones(64)
+    vector_mask[48:] = 0
+    attn_mask[-1, :, :] = torch.outer(vector_mask, vector_mask)
+
     if use_fused:
         attn_mask.to(torch.bfloat16)
-    attn_mask = None
-    y_with_mask = model(x, cu_seqlens, attn_mask=attn_mask).to('cpu')
+    y_with_mask = model(padded_x, new_cu_seqlens, attn_mask=attn_mask).to('cpu')
 
-    # expect to pass
-    assert torch.allclose(y, y_with_mask, atol=atol)
+    assert torch.allclose(y[:192], y_with_mask[:192], atol=atol)
+    assert torch.allclose(y[192:], y_with_mask[192:192+48], atol=atol)
 
 
 def test_window_attention_not_implemented():
@@ -238,8 +246,9 @@ def test_window_attention_not_implemented():
                               atol=atol)
 
 
-test_pad_input_with_block_of_64(device="cpu")
-test_window_attention_mask_of_ones(use_fused=False)
+# test_pad_input_with_block_of_64(device="cpu")
+# test_window_attention_mask_of_ones(use_fused=False)
+test_window_attention_mask_with_gaps(use_fused=False)
 # test_window_attention_mask_of_ones(use_fused=True)
 # test_window_attention_cpu_not_implemented()
 
