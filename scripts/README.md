@@ -335,3 +335,25 @@ The following 4 ENVs are used to control the device profiling:
 > Please use the `-f` flag or `export VLLM_PROFILER_ENABLED=True` to enable the high-level vLLM profile and to choose the preferred steps to profile.
 
 
+# Releases
+## aice/v1.21.0
+vllm-fork:
+https://github.com/HabanaAI/vllm-fork/tree/aice/v1.21.0
+vllm-hpu-extension:
+https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.21.0
+### Additional features
+* Benchmark scripts that configure the optimal bucketing parameters automatically
+    - Offline benchmark script
+    - Online benchmark scripts, both server side and client side
+* New models' support
+    - Qwen3 and Qwen3-MoE
+    - Qwen2.5 Omni
+* Local specific optimization
+    - Zero Padding
+    - Delayed Sampling
+    - Add torch profiler for the LLM engine
+    - Enable torchrun with DP support on Gaudi
+* Bug fixing
+    - Fix NoneType error when exit vllm
+    - Fix structed output conflict with delayed sampling
+
