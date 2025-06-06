@@ -659,6 +659,7 @@ def is_rocm_cdna():
 
 
 def get_autotune_configs():
+    raise
     if is_rocm_cdna():
         return get_cdna_autotune_configs()
     elif current_platform.is_rocm():
