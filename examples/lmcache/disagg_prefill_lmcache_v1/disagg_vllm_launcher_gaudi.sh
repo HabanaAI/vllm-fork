@@ -9,7 +9,7 @@ fi
 
 if [[ $# -eq 1 ]]; then
     echo "Using default model: meta-llama/Llama-3.1-8B-Instruct"
-    MODEL="/root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
+    MODEL="/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
 else
     echo "Using model: $2"
     MODEL=$2
@@ -22,7 +22,6 @@ if [[ $1 == "prefiller" ]]; then
 
     UCX_TLS=tcp \
         LMCACHE_CONFIG_FILE=$prefill_config_file \
-        LMCACHE_USE_EXPERIMENTAL=True \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         RANK=0 \
@@ -43,7 +42,6 @@ elif [[ $1 == "decoder" ]]; then
     UCX_TLS=tcp \
         LMCACHE_CONFIG_FILE=$decode_config_file \
         LMCACHE_LOCAL_CPU=False \
-        LMCACHE_USE_EXPERIMENTAL=True \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
         RANK=1 \
