@@ -9,7 +9,7 @@ fi
 
 if [[ $# -eq 1 ]]; then
     echo "Using default model: meta-llama/Llama-3.1-8B-Instruct"
-    MODEL="/root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
+    MODEL="/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
 else
     echo "Using model: $2"
     MODEL=$2
@@ -18,19 +18,17 @@ fi
 
 if [[ $1 == "prefiller" ]]; then
     # Prefiller listens on port 8100
-    prefill_config_file=$SCRIPT_DIR/configs/lmcache-prefiller-config.yaml
+    prefill_config_file=$SCRIPT_DIR/configs/lmcache-config-lm.yaml
 
-    UCX_TLS=tcp \
-        #LMCACHE_CONFIG_FILE=$prefill_config_file \
-        LMCACHE_USE_EXPERIMENTAL=True \
-        LMCACHE_LOCAL_CPU=False \
-        LMCACHE_REMOTE_SERDE="naive" \
+    #UCX_TLS=tcp \
+    LMCACHE_CONFIG_FILE=$prefill_config_file \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        HABANA_VISIBLE_DEVICES=0 \
-        LMCACHE_REMOTE_URL="lm://localhost:4000" \
+        LMCACHE_REMOTE_SERDE=naive \
+        RANK=0 \
+        DECODER_RANK=1 \
         vllm serve $MODEL \
-        --port 3100 \
+        --port 1100 \
         --disable-log-requests \
         --enforce-eager \
         --kv-transfer-config \
@@ -39,19 +37,18 @@ if [[ $1 == "prefiller" ]]; then
 
 elif [[ $1 == "decoder" ]]; then
     # Decoder listens on port 8200
-    decode_config_file=$SCRIPT_DIR/configs/lmcache-decoder-config.yaml
+    decode_config_file=$SCRIPT_DIR/configs/lmcache-config-lm.yaml
 
-    UCX_TLS=tcp \
-        #LMCACHE_CONFIG_FILE=$decode_config_file \
-        LMCACHE_LOCAL_CPU=False \
-        LMCACHE_REMOTE_SERDE="naive" \
-        LMCACHE_USE_EXPERIMENTAL=True \
+    #UCX_TLS=tcp \
+    LMCACHE_CONFIG_FILE=$decode_config_file \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        LMCACHE_REMOTE_URL="lm://localhost:4000" \
-        HABANA_VISIBLE_DEVICES=1 \
+        LMCACHE_CHUNK_SIZE=256 \
+        RANK=1 \
+        DECODER_RANK=1 \
         vllm serve $MODEL \
-        --port 3200 \
+        --port 1200 \
+        --gpu_memory_utilization 0.5 \
         --disable-log-requests \
         --enforce-eager \
         --kv-transfer-config \

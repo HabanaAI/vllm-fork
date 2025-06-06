@@ -15,7 +15,7 @@ import subprocess
 import time
 from multiprocessing import Event, Process
 
-from lmcache.experimental.cache_engine import LMCacheEngineBuilder
+from lmcache.v1.cache_engine import LMCacheEngineBuilder
 from lmcache.integration.vllm.utils import ENGINE_NAME
 
 from vllm import LLM, SamplingParams
@@ -25,7 +25,7 @@ from vllm.config import KVTransferConfig
 # The port to start LMCache server
 port = 8100
 # Use experimental features in LMCache
-os.environ["LMCACHE_USE_EXPERIMENTAL"] = "True"
+#os.environ["LMCACHE_USE_EXPERIMENTAL"] = "True"
 # LMCache is set to use 256 tokens per chunk
 os.environ["LMCACHE_CHUNK_SIZE"] = "256"
 # Disable local CPU backend in LMCache
@@ -33,19 +33,18 @@ os.environ["LMCACHE_LOCAL_CPU"] = "False"
 # Set local CPU memory buffer limit to 5.0 GB
 os.environ["LMCACHE_MAX_LOCAL_CPU_SIZE"] = "5.0"
 # Set the remote URL for LMCache server
-#os.environ["LMCACHE_REMOTE_URL"] = f"lm://localhost:{port}"
+os.environ["LMCACHE_REMOTE_URL"] = f"lm://localhost:{port}"
 # Set the serializer/deserializer between vllm and LMCache server
 # `naive` indicates using raw bytes of the tensor without any compression
-#os.environ["LMCACHE_REMOTE_SERDE"] = "naive"
+os.environ["LMCACHE_REMOTE_SERDE"] = "naive"
 os.environ["WORLD_SIZE"] = "2"
-os.environ["LMCACHE_NIXL_BUFFER_SIZE"] = "1073741824"
-
-
-os.environ["LMCACHE_NIXL_RECEIVER_HOST"] = "localhost"
-os.environ["LMCACHE_NIXL_RECEIVER_PORT"] = "66666"
-os.environ["LMCACHE_NIXL_BUFFER_DEVICE"] = "hpu"
-os.environ["LMCACHE_NIXL_ENABLE_GC"] = "True"
-MODEL="/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/"
+#GAUDI-NIC
+#os.environ["LMCACHE_NIXL_BUFFER_SIZE"] = "1073741824"
+#os.environ["LMCACHE_NIXL_RECEIVER_HOST"] = "localhost"
+#os.environ["LMCACHE_NIXL_RECEIVER_PORT"] = "66666"
+#os.environ["LMCACHE_NIXL_BUFFER_DEVICE"] = "hpu"
+#os.environ["LMCACHE_NIXL_ENABLE_GC"] = "True"
+MODEL="/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/"
 #prompts = [
 #    "Hello, how are you?" * 1000,
 #]
@@ -56,7 +55,6 @@ decoder_rank = '1'
 os.environ["DECODER_RANK"] = decoder_rank
 def run_store(store_done, prompts):
     # We use GPU 0 for KV cache store process.
-    #os.environ["HABANA_VISIBLE_DEVICES"] = "0"
     os.environ["RANK"] = "0"
     os.environ["LMCACHE_NIXL_ROLE"] = "SENDER"
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=10)
@@ -84,7 +82,6 @@ def run_store(store_done, prompts):
 
 def run_retrieve(store_done, prompts, timeout=1):
     # We use GPU 1 for KV cache retrieve process.
-    #os.environ["HABANA_VISIBLE_DEVICES"] = "1"
     decoder_rank = '1'
     os.environ["RANK"] = decoder_rank
     os.environ["LMCACHE_NIXL_ROLE"] = "RECEIVER"
@@ -115,7 +112,7 @@ def run_retrieve(store_done, prompts, timeout=1):
 
 def run_lmcache_server(port):
     server_proc = subprocess.Popen([
-        "python", "-m", "lmcache.experimental.server", "localhost",
+        "python", "-m", "lmcache.v1.server", "localhost",
         str(port)
     ])
     return server_proc
@@ -125,13 +122,19 @@ def main():
     store_done = Event()
     store_process = Process(target=run_store, args=(store_done, prompts))
     retrieve_process = Process(target=run_retrieve, args=(store_done, prompts))
+
     lmcache_server_process = run_lmcache_server(port)
+    print("libin kvshare store start")
     # Start KV cache store process
     store_process.start()
+
+    print("libin kvshare retrieve start")
     # Start KV cache retrieve process
     retrieve_process.start()
-    # Clean up the processes
+    print("libin kvshare retrieve done")
     store_process.join()
+    retrieve_process.join()
+    # Clean up the processes
     retrieve_process.terminate()
     lmcache_server_process.terminate()
     lmcache_server_process.wait()
