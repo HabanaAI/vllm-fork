@@ -73,11 +73,6 @@ def setup_profiler(warmup, active):
     return profiler
 
 
-class PhaseType(Enum):
-    PROMPT = 'prompt'
-    DECODE = 'decode'
-
-
 @dataclass
 class PromptDecodeInfo:
     prompt_req_ids: list[str]
@@ -1373,32 +1368,13 @@ class HPUModelRunner:
             return 0
         return attn_metadata.block_list.numel()
 
-    def _phase(self, attn_metadata):
-        phase_type: PhaseType
-        is_prompt = attn_metadata.is_prompt
-        '''is_prefix_cached = is_prompt and attn_metadata.block_list is not None
-        if is_prompt and is_prefix_cached:
-            phase_type = PhaseType.PREFIX_PREFILL
-        elif is_prompt and not is_prefix_cached:
-            phase_type = PhaseType.PREFILL
-        elif not is_prompt:
-            phase_type = PhaseType.DECODE'''
-        if is_prompt:
-            phase_type = PhaseType.PROMPT
-        else:
-            phase_type = PhaseType.DECODE
-        #raise ValueError("Unrecognized pass type, likely due to malformed "
-        #                     "attention metadata")
-        return phase_type
-
     def _check_config(self, batch_size, seq_len, num_blocks, attn_metadata,
                       warmup_mode):
-        phase = self._phase(attn_metadata)
+        phase = "prompt" if attn_metadata.is_prompt else "decode"
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            phase = phase.value
             logger.warning(
                 "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
                 batch_size, seq_len, num_blocks)
@@ -1918,12 +1894,6 @@ class HPUModelRunner:
         phase = "prompt" if is_prompt else "decode"
         use_graphs = self._use_graphs(batch_size, query_seq_len, num_blocks,
                                       is_prompt)
-        scenario_name = ("warmup_"
-                         f"{phase}_"
-                         f"bs{batch_size}_"
-                         f"seq{query_seq_len}_"
-                         f"ctx{num_blocks}_"
-                         f"graphs{'T' if use_graphs else 'F'}")
         input_ids = torch.zeros((batch_size, query_seq_len),
                                 dtype=torch.int32,
                                 device='cpu')
@@ -2316,7 +2286,6 @@ class HPUModelRunner:
                     ("HabanaWorker.determine_num_available_blocks needs "
                     "to be called before warming up the model.")
                 free_mem = HabanaMemoryProfiler.current_free_device_memory()
-                graph_free_mem = free_mem - self.mem_margin
                 #TODO(kzawora): align_workers
                 mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                     self.warmup_graphs(
