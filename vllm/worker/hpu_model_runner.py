@@ -1629,11 +1629,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if accepted_token_id.numel()-valid_tokens.numel()==1:
                 # c=decode_reqs
                 # 
-                token1=accepted_token_id[0][0].cpu().item()
-                seq_group_metadata_list[0].seq_data[0].output_token_ids=seq_group_metadata_list[0].seq_data[0].output_token_ids[:-1] +(token1,)
-                seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[accepted_token_id]
-                seq_group_metadata_list[0].seq_data[0].output_token_ids_array[-1]=token1
-                seq_group_metadata_list=seq_group_metadata_list[:1]
+                tmp=0
+                # token1=accepted_token_id[0][0].cpu().item()
+                # seq_group_metadata_list[0].seq_data[0].output_token_ids=seq_group_metadata_list[0].seq_data[0].output_token_ids[:-1] +(token1,)
+                # seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[token1]
+                # seq_group_metadata_list[0].seq_data[0].output_token_ids_array[-1]=token1
+                # seq_group_metadata_list=seq_group_metadata_list[:1]
                 
                 
         for seq_group_meta in seq_group_metadata_list:
@@ -2706,11 +2707,22 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         warmup_mode = kwargs.get('warmup_mode', False)
         previous_hidden_states = kwargs.get('previous_hidden_states')
         accepted_token_id_=None
+        rank = torch.distributed.get_rank()
+
         if accepted_token_id is not None:
             accepted_token_id_=accepted_token_id.cpu()
+            
+            valid_tokens = accepted_token_id[accepted_token_id != -1]
+            
+            if accepted_token_id.numel()-valid_tokens.numel()==1:
+                if rank==0:
+                    b=0
+                previous_hidden_states=kwargs.get("previous_hidden_states")
+                kwargs["previous_hidden_states"] = kwargs.get("previous_hidden_states")[:1]
+              
+            
         #accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
 
-        rank = torch.distributed.get_rank()
         #print(f"================================{accepted_token_id_=}, {rank=}, {self.is_driver_worker=}=========================")
         if rank==0:
             print("!!model_input.input_tokens",model_input.input_tokens)

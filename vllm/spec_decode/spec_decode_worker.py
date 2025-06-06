@@ -788,6 +788,13 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
             if self.hpu_opt:
+                if self.accepted_token_ids_ is not None:
+                    valid_tokens =  self.accepted_token_ids_[ self.accepted_token_ids_ != -1]
+                
+                    if  self.accepted_token_ids_.numel()-valid_tokens.numel()==1:
+                        execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
+                        b=0
+                        print("!!!!!!gaidiaogaidiaogaidiaogaidiao")
                 proposals = self.proposer_worker.get_spec_proposals(
                     execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
             else:

@@ -70,13 +70,48 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
 
         For multi step worker, this indicator shall be True.
         """
+        rank=torch.distributed.get_rank()
+        if accepted_token_id is not None:
+            valid_tokens =  accepted_token_id[accepted_token_id != -1]
+            if  accepted_token_id.numel()-valid_tokens.numel()==1:
+                execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
+                b=0
         self._raise_if_unsupported(execute_model_req)
         # Expand the batch for sequences with a bonus token.
         # Perform a forward pass on the expanded batch and filter the
         # response to retain only the original sequences' responses.
+        if execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==2578 or execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==12 :
+            c=0
+        if accepted_token_id is not None:
+            seq_ids_with_bonus_token_in_last_step={}
+            valid_tokens =  accepted_token_id[accepted_token_id != -1]
+            if  accepted_token_id.numel()-valid_tokens.numel()==1:
+                execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
+                execute_model_req.previous_hidden_states.second_last_token_hidden_states=execute_model_req.previous_hidden_states.second_last_token_hidden_states[:1]
+                
+                token1=accepted_token_id[0][0].cpu().item()
+                execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids=execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[:-2] +(token1,)
+                execute_model_req.seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=execute_model_req.seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[token1]
+                execute_model_req.seq_group_metadata_list[0].seq_data[0]._num_computed_tokens-=1
+                import array
+                # arr = execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids_array
+                # new_arr = array.array(arr.typecode, arr[:-2] + array.array(arr.typecode, [token1]))
+                # execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids_array = new_arr
+
+                # execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids_array[-1]=execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids_array[:-2]+(token1,)
+                # seq_group_metadata_list=seq_group_metadata_list[:1]
+                b=0
+            print(execute_model_req.previous_hidden_states.hidden_states.shape)
         expanded_request, indices_of_seq_with_bonus_tokens =\
             self._expand_execute_model_request(
                 execute_model_req, seq_ids_with_bonus_token_in_last_step)
+
+        if accepted_token_id is not None:
+            valid_tokens =  accepted_token_id[accepted_token_id != -1]
+            if  accepted_token_id.numel()-valid_tokens.numel()==1:
+                execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
+                b=0
+                print("xxxx100x",rank,":",execute_model_req.previous_hidden_states.hidden_states.shape)
 
         # Run model sample_len times.
         model_outputs: List[SamplerOutput] = []
@@ -111,10 +146,19 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                     model_output, expanded_request.seq_group_metadata_list,
                     indices_of_seq_with_bonus_tokens)
                 model_outputs.append(model_output)
+                
+        if accepted_token_id is not None:
+            valid_tokens =  accepted_token_id[accepted_token_id != -1]
+            if  accepted_token_id.numel()-valid_tokens.numel()==1:
+                print("xxxx135zz","rank",execute_model_req.previous_hidden_states.hidden_states.shape)
 
         # move indices to device to avoid stream sync
         indices_of_seq_with_bonus_tokens = torch.tensor(
             indices_of_seq_with_bonus_tokens, device=self.device)
+        if model_outputs[0].sampled_token_ids[0][0].item()==294:
+            b=0
+            print("xxxx139",rank,":",execute_model_req.previous_hidden_states.hidden_states.shape)
+            c=0
         filtered_model_outputs = self._filter_model_output(
             model_outputs, indices_of_seq_with_bonus_tokens)
         return filtered_model_outputs, True
@@ -137,7 +181,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         execute_model_req: ExecuteModelRequest,
         seq_with_bonus_token_in_last_step: set,
     ) -> Tuple[ExecuteModelRequest, List[int]]:
-        """
+        """`
         Expands the execute model request based on sequences with bonus
         tokens.
 
@@ -216,11 +260,14 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         """
         # if output_indices_to_retain> len(expanded_batch_outputs.outputs):
         #     output_indices_to_retain-=1
+      
+
+        
         return [
             SamplerOutput(
                 outputs=[
                     expanded_batch_output.outputs[i]
-                    for i in range(len(expanded_batch_output.outputs))
+                    for i in output_indices_to_retain
                 ] if len(expanded_batch_output.outputs) > 0 else [],
                 sampled_token_probs=(
                     expanded_batch_output.
@@ -236,28 +283,6 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                                    is not None else None))
             for expanded_batch_output in expanded_batch_outputs
         ]
-
-        
-        # return [
-        #     SamplerOutput(
-        #         outputs=[
-        #             expanded_batch_output.outputs[i]
-        #             for i in output_indices_to_retain
-        #         ] if len(expanded_batch_output.outputs) > 0 else [],
-        #         sampled_token_probs=(
-        #             expanded_batch_output.
-        #             sampled_token_probs[output_indices_to_retain]
-        #             if expanded_batch_output.sampled_token_probs is not None
-        #             else None),
-        #         logprobs=(
-        #             expanded_batch_output.logprobs[output_indices_to_retain]
-        #             if expanded_batch_output.logprobs is not None else None),
-        #         sampled_token_ids=(expanded_batch_output.
-        #                            sampled_token_ids[output_indices_to_retain]
-        #                            if expanded_batch_output.sampled_token_ids
-        #                            is not None else None))
-        #     for expanded_batch_output in expanded_batch_outputs
-        # ]
 
     def get_spec_proposals(
         self,
