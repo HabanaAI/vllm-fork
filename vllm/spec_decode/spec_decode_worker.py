@@ -780,9 +780,17 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 self._pending_step = self._pending_step + 1
                 if self._pending_step > 1:
                     #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
+                    print(f" cache before pop{self.cached_step_accepted_tokens=}")
                     self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
+                    
+                    self.target_logprobs_=self.cached_step_target_logprobs[0]
+                    self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
+
+                    print(f"a-1-1!!!{self.accepted_token_ids_=}")
+
                     #self.accepted_token_ids_=self.cached_step_accepted_tokens[0]
                     #print(f"====={self.rank=},{self._driver_rank=}====")
+        print(f"a00!!!{self.accepted_token_ids_=}")
 
         with Timer() as proposal_timer:
             print(f"==============put to spec {self.accepted_token_ids_=}===")
@@ -795,6 +803,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                         execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
                         b=0
                         print("!!!!!!gaidiaogaidiaogaidiaogaidiao")
+                print(f"a11!!!{self.accepted_token_ids_=}")
                 proposals = self.proposer_worker.get_spec_proposals(
                     execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
             else:
@@ -873,7 +882,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             "k": execute_model_req.num_lookahead_slots,
             "stage_times": stage_times,
         }
+        if accepted_token_ids is not None and accepted_token_ids[0][0]==12:
+            c=0
         self.cached_step_accepted_tokens.append(accepted_token_ids)
+        print(f" cache after append{self.cached_step_accepted_tokens=}")
         self.cached_step_target_logprobs.append(target_logprobs)
         self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
@@ -908,7 +920,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         #294 2501
         #305 -1 
         print(f"!!!_create_output_sampler_list {accepted_token_ids}")
-        return self._create_output_sampler_list(
+        tmp = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
             target_logprobs=target_logprobs,
@@ -916,6 +928,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if not self._disable_logprobs else None,
             k=execute_model_req.num_lookahead_slots,
             stage_times=stage_times)
+        p=0
+        return tmp
         
 
     @nvtx_range("spec_decode_worker._verify_tokens")

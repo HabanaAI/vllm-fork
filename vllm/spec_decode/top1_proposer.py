@@ -77,6 +77,8 @@ class Top1Proposer(SpeculativeProposer):
                 num_lookahead_slots=proposal_len,
                 previous_hidden_states=hidden_states,
             )
+            print(f"a22!!!{accepted_token_id=}")
+
             maybe_sampler_output, transposed = self._worker.sampler_output(
                 execute_model_req=nonzero_execute_model_req,
                 sample_len=proposal_len,

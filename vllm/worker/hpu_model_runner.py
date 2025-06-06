@@ -1821,6 +1821,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                
                     
             # 只保留有效token部分
+            print(f"a88!!!{accepted_token_id=}")
+
+            if input_tokens is not None and input_tokens[0][0]==12:
+                b=0
             print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
             input_tokens=input_tokens[:2]
             #print(f"==============222prepare_input_tensors after {input_tokens=}, {rank=}")
@@ -2600,6 +2604,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
+            print(f"a77!!!{accepted_token_id=}")
+
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list, finished_requests_ids, align_worker, accepted_token_id)
             assert model_input.attn_metadata is not None

@@ -291,6 +291,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 logger.warning(msg)
 
             return output
+        print(f"a33!!!{accepted_token_id=}")
 
         output = LocalOrDistributedWorkerBase.execute_model(
             self, execute_model_req, accepted_token_id=accepted_token_id)
