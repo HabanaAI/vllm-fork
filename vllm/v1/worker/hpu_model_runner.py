@@ -693,7 +693,7 @@ class HPUModelRunner:
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
             lora_config=vllm_config.lora_config).tokenizer
-        
+
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
         Generates the KVCacheSpec by parsing the kv cache format from each
@@ -722,17 +722,16 @@ class HPUModelRunner:
                     dtype=self.kv_cache_dtype,
                     use_mla=use_mla)
             elif attn_module.attn_type in (AttentionType.ENCODER,
-                                        AttentionType.ENCODER_ONLY):
+                                           AttentionType.ENCODER_ONLY):
                 # encoder-only attention does not need KV cache.
                 continue
             elif attn_module.attn_type == AttentionType.ENCODER_DECODER:
                 raise NotImplementedError
             else:
                 raise ValueError(
-                f"Unknown attention type: {attn_module.attn_type}")
+                    f"Unknown attention type: {attn_module.attn_type}")
 
         return kv_cache_spec
-
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> bool:
         """Update the cached states and the persistent batch with the scheduler
@@ -1105,6 +1104,7 @@ class HPUModelRunner:
         prefill_logits_indices = []
         block_table_cpu_tensor = self.input_batch.block_table.get_cpu_tensor()
         fake_prefix_prefill = False
+
         # DECODES are the first num_decodes REQUESTS.
         # PREFILLS are the next num_reqs - num_decodes REQUESTS.
         num_reqs = total_num_prefills + num_decodes
@@ -1137,6 +1137,7 @@ class HPUModelRunner:
             padded_prompt_lens = [
                 padded_prompt_len for _ in range(padded_batch_size)
             ]
+
             # TOKEN_IDS.
             token_ids = torch.zeros((padded_batch_size, padded_prompt_len),
                                     dtype=torch.int32,
@@ -1474,8 +1475,8 @@ class HPUModelRunner:
         #if not warmup_mode:
             phase = phase.value
             logger.warning(
-                "Configuration: rank (%s, %s, %s, %s, %s) was not warmed-up!", os.getenv('RANK'), phase,
-                batch_size, seq_len, num_blocks)
+                "Configuration: rank (%s, %s, %s, %s, %s) was not warmed-up!",
+                 os.getenv('RANK'), phase, batch_size, seq_len, num_blocks)
 
     def _execute_model_generic(self,
                                token_ids,
@@ -1647,6 +1648,7 @@ class HPUModelRunner:
         # Transfer [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] to CPU
         # On CPU, sanitize [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] -> [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2] # noqa
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
+
         # Update KVConnector with the KVConnector metadata forward().
         if has_kv_transfer_group():
             get_kv_transfer_group().bind_connector_metadata(
@@ -1821,6 +1823,7 @@ class HPUModelRunner:
             spec_token_ids=None,
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
         )
+
         # Clear KVConnector state after all KVs are generated.
         if has_kv_transfer_group():
             get_kv_transfer_group().clear_connector_metadata()

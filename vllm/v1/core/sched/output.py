@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     import numpy as np
     import numpy.typing as npt
-    from vllm.distributed.kv_transfer.kv_connector.v1.base import (
-        KVConnectorMetadata)
 
     from vllm.distributed.kv_transfer.kv_connector.v1.base import (
         KVConnectorMetadata)

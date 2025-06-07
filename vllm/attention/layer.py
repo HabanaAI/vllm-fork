@@ -362,6 +362,7 @@ class MultiHeadAttention(nn.Module):
 
         return out.reshape(bsz, q_len, -1)
 
+
 def wait_for_kv_layer_from_connector(layer_name: str):
     if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
         return
