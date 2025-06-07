@@ -147,6 +147,19 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
         """
         return self.driver_worker.execute_model(execute_model_req)
 
+    def run_only_on_driver(self,
+                           method: Union[str, Callable],
+                           *args,
+                            **kwargs,)-> List[Any]:
+        if isinstance(method, str):
+            sent_method = method
+        else:
+            sent_method = cloudpickle.dumps(method)
+        del method
+        driver_worker_output = run_method(self.driver_worker, sent_method,
+                                          args, kwargs)
+        return [driver_worker_output]
+
     def _run_workers(
         self,
         method: Union[str, Callable],
