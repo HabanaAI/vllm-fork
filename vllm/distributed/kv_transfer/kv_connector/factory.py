@@ -62,22 +62,22 @@ class KVConnectorFactory:
 
         connector_name = config.kv_transfer_config.kv_connector
         if connector_name in supported_kv_connector:
-            logger.info(f"Creating v1 connector with name: {connector_name}")
+            logger.info("Creating v1 connector with name: %s",connector_name)
             if connector_name in ["LMCacheConnector", "LMCacheConnectorV1"]:
                 from .v1.lmcache_connector import LMCacheConnectorV1
                 return LMCacheConnectorV1(config, role)
             else:
                 connector_cls = cls._registry[connector_name]()
                 assert issubclass(connector_cls, KVConnectorBase_V1)
-                print("Creating v1 connector with name: %s", connector_name)
-                    # NOTE(Kuntai): v1 connector is explicitly separated into two roles.
-                    # Scheduler connector:
-                    # - Co-locate with scheduler process
-                    # - Should only be used inside the Scheduler class
-                    # Worker connector:
-                    # - Co-locate with worker process
-                    # - Should only be used inside the forward context & attention layer
-                    # We build separately to enforce strict separation
+                logger.info("Creating v1 connector with name: %s", connector_name)
+                # NOTE(Kuntai): v1 connector is explicitly separated into two roles.
+                # Scheduler connector:
+                # - Co-locate with scheduler process
+                # - Should only be used inside the Scheduler class
+                # Worker connector:
+                # - Co-locate with worker process
+                # - Should only be used inside the forward context & attention layer
+                # We build separately to enforce strict separation
                 return connector_cls(config, role)
         else:
             raise ValueError(f"Unsupported connector type: "

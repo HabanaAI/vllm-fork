@@ -14,7 +14,7 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 import vllm.envs as envs
 from vllm.config import ParallelConfig, VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized,
-                              get_pp_group, init_distributed_environment)
+                      get_pp_group, init_distributed_environment)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.model_executor import set_random_seed
