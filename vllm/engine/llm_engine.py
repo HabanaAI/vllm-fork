@@ -1147,6 +1147,14 @@ class LLMEngine:
                 self.seq_id_to_seq_group,
                 use_cache=self.use_cached_outputs)
             if request_output:
+                #wa for MTP opt
+                #todo , sync the final text.
+                token_ids=request_output.outputs[0].token_ids
+                if token_ids[-2:] == [10, 12]:
+                    token_ids = token_ids[:-2]
+                elif token_ids[-1] == 10:
+                    token_ids = token_ids[:-1]
+                request_output.outputs[0].text=self.tokenizer.tokenizer.decode(token_ids, skip_special_tokens=True)
                 ctx.request_outputs.append(request_output)
 
         # When we process a single request, we skip it for the next time,
@@ -1500,7 +1508,7 @@ class LLMEngine:
             # queued control plane messages, such as add/remove lora adapters.
             logger.debug("Stopping remote worker execution loop.")
             self.model_executor.stop_remote_worker_execution_loop()
-
+     
         return ctx.request_outputs
 
     def _has_remaining_steps(
