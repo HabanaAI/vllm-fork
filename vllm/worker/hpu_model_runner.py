@@ -2329,7 +2329,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_blocks = int(kv_caches[0][0].size(0) // self.block_size)        
         self.bucketing_ctx.generate_prompt_buckets()      
         prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
-        if not self.is_pooloer:
+        if not self.is_pooler:
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
             decode_buckets = len(self.bucketing_ctx.decode_buckets)
         else:
