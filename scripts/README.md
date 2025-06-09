@@ -341,19 +341,27 @@ vllm-fork:
 https://github.com/HabanaAI/vllm-fork/tree/aice/v1.21.0
 vllm-hpu-extension:
 https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.21.0
-### Additional features
-* Benchmark scripts that configure the optimal bucketing parameters automatically
-    - Offline benchmark script
-    - Online benchmark scripts, both server side and client side
-* New models' support
-    - Qwen3 and Qwen3-MoE
+## Valided models
+- DeepSeek-R1-Distill-Llama-70B (bf16 and fp8)
+- DeepSeek-R1-Distill-Qwen-32B (bf16 and fp8)
+- DeepSeek-R1-Distill-Qwen-14B (bf16 and fp8)
+- DeepSeek-R1-Distill-Qwen-7B (bf16 and fp8)
+- DeepSeek-R1-Distill-Llama-8B (bf16 and fp8)
+- Qwen3-32B (bf16 and fp8)
+- Qwen3-14B (bf16 and fp8)
+- Qwen3-235B-A22B (bf16)
+- Qwen3-30B-A3B (bf16 and fp8)
+- Meta-Llama-3-70B-Instruct (bf16)
+- Meta-Llama-3-8B-Instruct (bf16)
+- Llama-3.1-70B-Instruct (bf16)
+- Qwen2.5-72B-Instruct (bf16)
+- Qwen2.5-32B-Instruct (bf16)
+- Qwen2.5-14B-Instruct (bf16)
+- Qwen2.5-7B-Instruct (bf16)
+- Qwen2.5-3B-Instruct (bf16)
+- Qwen2.5-1.5B-Instruct (bf16)
+- QwQ-32B (bf16)
+- Llama4 (bf16 and fp8)
+* multimodal models:
     - Qwen2.5 Omni
-* Local specific optimization
-    - Zero Padding
-    - Delayed Sampling
-    - Add torch profiler for the LLM engine
-    - Enable torchrun with DP support on Gaudi
-* Bug fixing
-    - Fix NoneType error when exit vllm
-    - Fix structed output conflict with delayed sampling
-
+    - Qwen2-VL-7B-Instruct
