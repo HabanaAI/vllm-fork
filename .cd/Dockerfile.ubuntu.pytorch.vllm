@@ -18,16 +18,20 @@ RUN apt update && \
     ln -sf /usr/bin/python3 /usr/bin/python
 WORKDIR /root
 
+ENV VLLM_PATH=/root/workspace/vllm
+
 # Clone the vllm-fork repository
-RUN git clone https://github.com/HabanaAI/vllm-fork.git && \
-    cd vllm-fork && \
-    git fetch -t && \
+RUN mkdir -p $VLLM_PATH && \
+    git clone https://github.com/HabanaAI/vllm-fork.git $VLLM_PATH && \
+    cd $VLLM_PATH && \
+    git remote add upstream https://github.com/vllm-project/vllm.git && \
+    git fetch upstream --tags || true && \
     git checkout ${VLLM_FORK_COMMIT}
 
 # Install vllm-fork inside the container
 ENV VLLM_TARGET_DEVICE=hpu
-RUN cd vllm-fork && \
-    pip install -v -e .
+RUN pip install -v -e $VLLM_PATH
+RUN pip install -v -e $VLLM_PATH/tests/vllm_test_utils
 
 # Install additional Python packages
 RUN pip install datasets && \
