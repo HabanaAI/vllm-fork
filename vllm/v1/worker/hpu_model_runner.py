@@ -23,6 +23,8 @@ from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import get_attn_backend
 from vllm.config import VllmConfig
+from vllm.distributed.kv_transfer import (get_kv_transfer_group,
+                                          has_kv_transfer_group)
 from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
@@ -820,6 +822,14 @@ class HPUModelRunner:
         assert self.model is not None
         return self.model
 
+    def is_decoder_only(self) -> bool:
+        decoder_rank = os.getenv('DECODER_RANK', None)
+        if decoder_rank:
+            rank = os.getenv('RANK', '0')
+            return True if decoder_rank == rank else False
+        else:
+            return False
+
     def _get_prompts_and_decodes(
         self,
         scheduler_output: "SchedulerOutput",
@@ -828,6 +838,7 @@ class HPUModelRunner:
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
+        is_decoder_only = self.is_decoder_only()
 
         # Traverse decodes first
         decode_req_ids = []
@@ -837,15 +848,14 @@ class HPUModelRunner:
 
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
-            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
-                req_id]
-
-            if num_computed_tokens < num_prompt_tokens:
+            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
+            if num_computed_tokens < num_prompt_tokens and not is_decoder_only:
                 # This is prompt
                 break
 
             # This is decode
-            assert num_scheduled_tokens == 1
+            if not is_decoder_only:
+                assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
 
         # Traverse prompts
@@ -1344,6 +1354,7 @@ class HPUModelRunner:
         assert total_num_scheduled_tokens > 0
 
         num_reqs = num_prefills + num_decodes
+        is_decoder_only = self.is_decoder_only()
 
         # Get the number of scheduled tokens for each request.
         # TODO: The Python loop can be slow. Optimize.
@@ -1357,8 +1368,8 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            if idx < num_decodes:
-                assert seq_num_scheduled_tokens == 1
+            if idx < num_decodes and not is_decoder_only:
+               assert seq_num_scheduled_tokens == 1
         return (
             self._prepare_prefill_inputs(num_prefills, num_decodes,
                                          num_scheduled_tokens, bucketing),
@@ -1396,10 +1407,11 @@ class HPUModelRunner:
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
+        #if not warmup_mode:
             phase = phase.value
             logger.warning(
-                "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
-                batch_size, seq_len, num_blocks)
+                "Configuration: rank (%s, %s, %s, %s, %s) was not warmed-up!",
+                 os.getenv('RANK'), phase, batch_size, seq_len, num_blocks)
 
     def _execute_model_generic(self,
                                token_ids,
@@ -1428,6 +1440,7 @@ class HPUModelRunner:
                                            positions=position_ids,
                                            attn_metadata=trimmed_attn_metadata,
                                            kv_caches=kv_caches)
+
         #hidden_states = hidden_states[:num_scheduled_tokens]
         # NOTE(kzawora): returning hidden_states is required in prompt logprobs
         # scenarios, as they will do logit processing on their own
@@ -1571,6 +1584,10 @@ class HPUModelRunner:
         # On CPU, sanitize [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] -> [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2] # noqa
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
 
+        # Update KVConnector with the KVConnector metadata forward().
+        if has_kv_transfer_group():
+            get_kv_transfer_group().bind_connector_metadata(
+                scheduler_output.kv_connector_metadata)
         batch_changed = self._update_states(scheduler_output)
         if not scheduler_output.total_num_scheduled_tokens:
             # Return empty ModelRunnerOuptut if there's no work to do.
@@ -1742,6 +1759,9 @@ class HPUModelRunner:
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
         )
 
+        # Clear KVConnector state after all KVs are generated.
+        if has_kv_transfer_group():
+            get_kv_transfer_group().clear_connector_metadata()
         return model_runner_output
 
     def load_model(self) -> None:
