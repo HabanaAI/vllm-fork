@@ -372,7 +372,7 @@ stages:
           cd .jenkins/lm-eval-harness && 
           PT_HPU_LAZY_MODE=0 VLLM_HPU_FORCE_CHANNEL_FP8=0 
           bash run-tests.sh -c configs/models-fp8-blockfp8.txt -t 1
-- name: eager_test_gsm8k_mss
+  - name: eager_test_gsm8k_mss
     steps:
       - name: eager_gsm8k_small_g3_tp1_mss
         flavor: g3
