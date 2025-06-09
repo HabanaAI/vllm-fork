@@ -801,9 +801,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 
                     if  self.accepted_token_ids_.numel()-valid_tokens.numel()==1:
                         execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
-                        b=0
-                        print("!!!!!!gaidiaogaidiaogaidiaogaidiao")
-                print(f"a11!!!{self.accepted_token_ids_=}")
+         
                 proposals = self.proposer_worker.get_spec_proposals(
                     execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
             else:
@@ -859,23 +857,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids, target_logprobs = self._verify_tokens(
                 execute_model_req.seq_group_metadata_list, proposal_scores,
                 proposals, execute_model_req.num_lookahead_slots)
-            #这里从 2578，-1 变成了2578，294
+            #from 2578，-1 to 2578，294
         stage_times = (proposal_timer.elapsed_time_ms / num_lookahead_slots,
                        scoring_timer.elapsed_time_ms,
                        verification_timer.elapsed_time_ms)
         print("!!!accept token id",accepted_token_ids)
-
-        '''
-        real_output = None
-        self._pending_step = self._pending_step + 1
-        if self._pending_step > 1:
-            self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
-            self.target_logprobs_=self.cached_step_target_logprobs[0]
-            self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
-
-            real_output = self._create_output_sampler_list(accepted_token_ids=self.accepted_token_ids_, target_logprobs=self.target_logprobs_, prompt_logprobs=self.prompt_logprobs_, **self._pending_data)
-            self._pending_data = None
-        '''
 
         self._pending_data = {
             "seq_group_metadata_list": execute_model_req.seq_group_metadata_list,
@@ -889,33 +875,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.cached_step_target_logprobs.append(target_logprobs)
         self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
-        '''
-        if False:#real_output is not None:
-            return real_output
-        else :
-            dummy_output = []
-            for j in range(2):
-                step_output_token_ids_: List[CompletionSequenceGroupOutput] = []
-                for i, sg in enumerate(execute_model_req.seq_group_metadata_list):
-                    #step_output_token_ids_: List[CompletionSequenceGroupOutput] = []
-                    step_output_token_ids_.append(
-                        create_sequence_group_output(
-                                #token_id=-1,#2578,
-                                token_id=10+j,
-                                token_id_logprob_rank=-1,
-                                token_id_logprob=0.0,
-                                #topk_token_ids=[2578],
-                                topk_token_ids=[10+j,10+j],#,-1],
-                                topk_logprobs=[0.0],#[-float('inf')],
-                                seq_id=0,#sg.seq_data[i],
-                                prompt_logprobs=None
-                            ))               
-                dummy_output.append(
-                    SamplerOutput(outputs=step_output_token_ids_)
-                )
-            return dummy_output
-
-        '''
+ 
         #2578 -1
         #294 2501
         #305 -1 
@@ -928,7 +888,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if not self._disable_logprobs else None,
             k=execute_model_req.num_lookahead_slots,
             stage_times=stage_times)
-        p=0
         return tmp
         
 

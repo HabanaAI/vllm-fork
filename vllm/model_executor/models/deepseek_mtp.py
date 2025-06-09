@@ -76,25 +76,17 @@ class DeepSeekMultiTokenPredictorLayer(nn.Module):
         inputs_embeds: Optional[torch.Tensor] = None,
         spec_step_index: int = 0,
     ) -> torch.Tensor:
-        htorch.core.mark_step()
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
-            htorch.core.mark_step()
         assert inputs_embeds is not None
         # masking inputs at position 0, as not needed by MTP
-        htorch.core.mark_step()
         inputs_embeds[positions == 0] = 0
         inputs_embeds = self.enorm(inputs_embeds)
-        htorch.core.mark_step()
         previous_hidden_states = self.hnorm(previous_hidden_states)
 
-        htorch.core.mark_step()
-        print(f"!!!!jiankang{inputs_embeds.shape=}, {previous_hidden_states.shape=}")
-        if inputs_embeds.shape[0]!=previous_hidden_states.shape[0]:
-            previous_hidden_states=previous_hidden_states[:inputs_embeds.shape[0],:,:]
+ 
         hidden_states = self.eh_proj(
             torch.cat([inputs_embeds, previous_hidden_states], dim=-1))
-        htorch.core.mark_step()
         
         hidden_states, residual = self.mtp_block(positions=positions,
                                                  hidden_states=hidden_states,

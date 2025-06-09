@@ -1627,15 +1627,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             valid_tokens = accepted_token_id[accepted_token_id != -1]
             
             if accepted_token_id.numel()-valid_tokens.numel()==1:
-                # c=decode_reqs
-                # 
-                tmp=0
-                # token1=accepted_token_id[0][0].cpu().item()
-                # seq_group_metadata_list[0].seq_data[0].output_token_ids=seq_group_metadata_list[0].seq_data[0].output_token_ids[:-1] +(token1,)
-                # seq_group_metadata_list[0].seq_data[0]._new_appended_tokens=seq_group_metadata_list[0].seq_data[0]._new_appended_tokens[:-2]+[token1]
-                # seq_group_metadata_list[0].seq_data[0].output_token_ids_array[-1]=token1
-                # seq_group_metadata_list=seq_group_metadata_list[:1]
-                
+                pass
                 
         for seq_group_meta in seq_group_metadata_list:
             if seq_group_meta.is_prompt:
@@ -1806,25 +1798,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 
             if accepted_token_id.numel()-valid_tokens.numel()==1:
                 pass
-            #     print(f"!!!!mingzhi truncate before{input_tokens}")
-
-            #     input_tokens=input_tokens[:1,:].contiguous()
-            #     input_positions=input_positions[:1,:].contiguous()
-            #     attn_metadata.num_decode_tokens-=1
-                # real_batch_size-=1
-                # batch_size_padded-=1
-            #     attn_metadata.slot_mapping=attn_metadata.slot_mapping[:1,:].contiguous()
-            #     attn_metadata.input_positions=attn_metadata.input_positions[:1,:].contiguous()
-            #     t=0
-            #     print(f"!!!!mingzhi truncate after{input_tokens}")
-            #     print("dump all")
-               
                     
             # 只保留有效token部分
-            print(f"a88!!!{accepted_token_id=}")
 
             if input_tokens is not None and input_tokens[0][0]==12:
-                b=0
+                pass
             print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
             input_tokens=input_tokens[:2]
             #print(f"==============222prepare_input_tensors after {input_tokens=}, {rank=}")
@@ -1846,7 +1824,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             print(f"{attn_metadata.input_positions=}")
             print(f"{attn_metadata.block_usage.shape=}")
             print(f"{attn_metadata.block_groups.shape=}")
-            c=0
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
@@ -2767,46 +2744,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     0, target_indices, self.cached_step_outputs[i])
                 htorch.core.mark_step()
 
-        """
-        if accepted_token_id is not None:
-            if 0:#model_input.input_tokens.size(0) > 1:
-            #if model_input.input_tokens[1][0] != 12:
-                print(f"============ score {model_input.input_tokens}, {rank=}")
-                '''
-                print(f"============ > 1   before {model_input.input_tokens}, {rank=}")
-                accepted_token_id_temp = accepted_token_id[0,0].view(1, 1)
-                orig_len = model_input.input_tokens.size(0)
-                dest_indices = torch.arange(orig_len-1, orig_len-1+1)#accepted_token_id.size(0))
-                model_input.input_tokens.index_copy_(
-                    0,  # 沿第0维操作
-                    dest_indices,
-                    accepted_token_id_temp
-                )
-                print(f"==============> 1 after {model_input.input_tokens}, {rank=}")
-                '''
-            else:
-                #'''
-                print(f"============else before {model_input.input_tokens}, {rank=}")
-                # 过滤掉-1的非法token
-                valid_tokens = accepted_token_id[accepted_token_id != -1]
-
-                # 创建目标索引 [0, 1, ..., n-1]
-                indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
-
-                # 使用index_copy_更新input_tokens
-                model_input.input_tokens.index_copy_(
-                    0, 
-                    indices, 
-                    valid_tokens.unsqueeze(1)
-                )
-
-                # 只保留有效token部分
-                #model_input.input_tokens = model_input.input_tokens[:valid_tokens.size(0)]
-                #model_input = dataclasses.replace(model_input, input_tokens=model_input.input_tokens[:valid_tokens.size(0)])
-                model_input = dataclasses.replace(model_input, input_tokens=model_input.input_tokens[:2])
-                print(f"==============else after {model_input.input_tokens}, {rank=}")
-                #'''
-            """
 
 
         # if False: # !self.hpu_opt

@@ -302,7 +302,6 @@ class DeepseekV2Attention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        htorch.core.mark_step()
 
         if is_hpu:
             # need reshape from tensor(x0, y0) to tensor(x1) for hpu
@@ -327,8 +326,6 @@ class DeepseekV2Attention(nn.Module):
                                                    self.qk_head_dim)
         q_nope, q_pe = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim],
                                dim=-1)
-        htorch.core.mark_step()
-
         latent_cache = self.kv_a_proj_with_mqa(hidden_states)[0]
         kv_a, _ = latent_cache.split(
             [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
@@ -345,7 +342,6 @@ class DeepseekV2Attention(nn.Module):
         k_pe = latent_cache[:, :, self.kv_lora_rank:]
 
         q_pe, k_pe = self.rotary_emb(positions, q_pe, k_pe)
-        htorch.core.mark_step()
 
         q[..., self.qk_nope_head_dim:] = q_pe
         k = torch.empty_like(q)
@@ -370,7 +366,6 @@ class DeepseekV2Attention(nn.Module):
             -1, self.num_local_heads,
             self.qk_head_dim)[..., :self.v_head_dim].reshape(
                 -1, self.num_local_heads * self.v_head_dim)
-        htorch.core.mark_step()
         output, _ = self.o_proj(attn_output)
         if is_hpu:
             output = output.reshape(_batch_size,
@@ -405,13 +400,11 @@ class DeepseekV2MLAAttention(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        htorch.core.mark_step()
         self.hidden_size = hidden_size
         self.qk_nope_head_dim = qk_nope_head_dim
         self.qk_rope_head_dim = qk_rope_head_dim
         self.qk_head_dim = qk_nope_head_dim + qk_rope_head_dim
         self.v_head_dim = v_head_dim
-        htorch.core.mark_step()
         self.q_lora_rank = q_lora_rank
         self.kv_lora_rank = kv_lora_rank
 
@@ -419,11 +412,9 @@ class DeepseekV2MLAAttention(nn.Module):
         tp_size = get_tensor_model_parallel_world_size()
         assert num_heads % tp_size == 0
         self.num_local_heads = num_heads // tp_size
-        htorch.core.mark_step()
         self.scaling = self.qk_head_dim**-0.5
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
-        htorch.core.mark_step()
         if self.q_lora_rank is not None:
             self.q_a_proj = ReplicatedLinear(self.hidden_size,
                                              self.q_lora_rank,
@@ -460,7 +451,6 @@ class DeepseekV2MLAAttention(nn.Module):
             bias=False,
             quant_config=quant_config,
             prefix=f"{prefix}.kv_b_proj")
-        htorch.core.mark_step()
         self.o_proj = RowParallelLinear(self.num_heads * self.v_head_dim,
                                         self.hidden_size,
                                         bias=False,
@@ -513,7 +503,6 @@ class DeepseekV2MLAAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        htorch.core.mark_step()
 
         if self.q_lora_rank is not None:
             ckq = self.q_a_proj(hidden_states)[0]
@@ -523,7 +512,6 @@ class DeepseekV2MLAAttention(nn.Module):
         kv_c, k_pe = self.kv_a_proj_with_mqa(hidden_states)[0].split(
             [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
-        htorch.core.mark_step() # crash here
         return self.mla_attn(hidden_states_or_q_c, kv_c_normed, k_pe, kv_cache,
                              attn_metadata)
 
@@ -539,13 +527,11 @@ class DeepseekV2DecoderLayer(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
     ) -> None:
         super().__init__()
-        htorch.core.mark_step()
         self.hidden_size = config.hidden_size
         rope_theta = getattr(config, "rope_theta", 10000)
         rope_scaling = getattr(config, "rope_scaling", None)
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
-        htorch.core.mark_step()
         # DecoderLayers are created with `make_layers` which passes the prefix
         # with the layer's index.
         layer_idx = int(prefix.split(sep='.')[-1])
@@ -601,7 +587,6 @@ class DeepseekV2DecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> torch.Tensor:
         # Self Attention
-        htorch.core.mark_step()
         if residual is None:
             residual = hidden_states
             hidden_states = self.input_layernorm(hidden_states)
@@ -647,7 +632,6 @@ class DeepseekV2Model(nn.Module):
                 prefix=f"{prefix}.embed_tokens")
         else:
             self.embed_tokens = PPMissingLayer()
-        htorch.core.mark_step()
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
             lambda prefix: DeepseekV2DecoderLayer(
@@ -679,27 +663,20 @@ class DeepseekV2Model(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        htorch.core.mark_step()
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
             else:
-                htorch.core.mark_step()
                 hidden_states = self.get_input_embeddings(input_ids)
-                htorch.core.mark_step()
 
             residual = None
         else:
-            htorch.core.mark_step()
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
-        htorch.core.mark_step()
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
-            htorch.core.mark_step()
             kvcaches = None if kv_caches is None else kv_caches[i - self.start_layer]
-            htorch.core.mark_step()
 
             hidden_states, residual = layer(positions, hidden_states,
                                             kvcaches,
