@@ -16,8 +16,8 @@ import numpy as np
 import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
-from vllm_hpu_extension.flags import enabled_flags
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
+from vllm_hpu_extension.runtime import get_config
 
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
@@ -128,74 +128,6 @@ class DecodeInputData:
 def bool_helper(value):
     value = value.lower()
     return value in ("y", "yes", "t", "true", "on", "1")
-
-
-@dataclass
-class HpuEnvFlags:
-    skip_warmup: bool
-    enable_bucketing: bool
-    use_contiguous_pa: bool
-    __env_var_cfg_type = collections.namedtuple('__env_var_cfg_type',
-                                                ['name', 'default', 'handler'])
-
-    @classmethod
-    def get_env_var_cfg_map(cls):
-        return {
-            "skip_warmup":
-            cls.__env_var_cfg_type('VLLM_SKIP_WARMUP', 'true',
-                                   cls.handle_boolean_env_var),
-            "enable_bucketing":
-            cls.__env_var_cfg_type('VLLM_ENABLE_BUCKETING', 'true',
-                                   cls.handle_boolean_env_var),
-            "use_contiguous_pa":
-            cls.__env_var_cfg_type('VLLM_CONTIGUOUS_PA', 'false',
-                                   cls.handle_boolean_env_var),
-        }
-
-    @classmethod
-    def build(cls, vllm_config: VllmConfig, update_env=True):
-        cfg_map = cls.get_env_var_cfg_map()
-        env_vars = {
-            key: handler(env_var, default, vllm_config, update_env)
-            for key, (env_var, default, handler) in cfg_map.items()
-        }
-        return cls(**env_vars)
-
-    @staticmethod
-    def env_var_post_init(env_var, val, vllm_config):
-        match env_var:
-            case 'VLLM_SKIP_WARMUP':
-                if not val:
-                    logger.warning(
-                        "HPU warmup is currently not supported in V1. "
-                        "Forcing warmup off.")
-                    val = True
-            case 'VLLM_CONTIGUOUS_PA':
-                can_use_contiguous_pa = not vllm_config.cache_config.\
-                    enable_prefix_caching
-                if val and not can_use_contiguous_pa:
-                    logger.warning(
-                        "Contiguous PA is not supported with prefix caching. "
-                        "Forcing contiguous PA off.")
-                    val = False
-                if val:
-                    logger.warning("Contiguous PA is not recommended in V1.")
-            case _:
-                pass
-        return val
-
-    @classmethod
-    def handle_boolean_env_var(cls,
-                               env_var,
-                               default,
-                               vllm_config,
-                               update_env=True):
-        x = bool_helper(os.environ.get(env_var, default))
-        x = cls.env_var_post_init(env_var, x, vllm_config)
-        if update_env:
-            os.environ[env_var] = str(x).lower()
-        logger.info('HpuEnvFlags %s: %s', env_var, x)
-        return x
 
 
 def flatten(in_list):
@@ -324,7 +256,8 @@ class HpuModelAdapter(torch.nn.Module):
     def __init__(self, model, vllm_config, layer_names):
         super().__init__()
         self.model = model
-        self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
+        self.prefill_use_fusedsdpa = get_config(
+        ).prompt_attn_impl == 'fsdpa_impl'
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
         self.vllm_config = vllm_config
@@ -368,7 +301,9 @@ class HpuModelAdapter(torch.nn.Module):
         mask = torch.concat((past_mask, mask), dim=-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
-        attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
+        attn_metadata = custom_tuple_replace(prefill_metadata,
+                                             "TrimmedAttentionMetadata",
+                                             attn_bias=attn_bias)
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
@@ -394,34 +329,14 @@ class HpuModelAdapter(torch.nn.Module):
             oob_values = block_groups.lt(0)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
             block_groups.masked_fill_(oob_values, batch_size)
-            metadata = metadata._replace(block_groups=block_groups)
+            metadata = custom_tuple_replace(metadata,
+                                            "TrimmedAttentionMetadata",
+                                            block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
-
-        # Torch compile dynamo doesn't support calling any named tuple
-        # dynamic methods other than len and get_attr so we need to
-        # mimic behaviour of tuple._replace manually
-        TrimmedAttentionMetadata = _TYPE_CACHE['TrimmedAttentionMetadata'][
-            'object']
-        fields = _TYPE_CACHE['TrimmedAttentionMetadata']['fields']
-        metadata_dict = {
-            field: getattr(metadata, field)
-            for field in fields  # type: ignore
-        }  # type: ignore
-        metadata_dict['attn_bias'] = attn_bias
-        metadata_dict['block_mapping'] = block_mapping
-        metadata = TrimmedAttentionMetadata(**metadata_dict)  # type: ignore
-        return metadata
-
-    def _set_indices_and_offsets(self, metadata, block_size, is_prompt):
-        slot_mapping = metadata.slot_mapping.flatten()
-        indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
-        if is_prompt and metadata.block_list is None:
-            indices = indices.unflatten(0, (-1, block_size))[:, 0]
-            offsets = None
-        else:
-            offsets = torch.fmod(slot_mapping, block_size)
-        metadata = metadata._replace(block_offsets=offsets,
-                                     block_indices=indices)
+        metadata = custom_tuple_replace(metadata,
+                                        "TrimmedAttentionMetadata",
+                                        block_mapping=block_mapping,
+                                        attn_bias=attn_bias)
         return metadata
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
@@ -432,9 +347,6 @@ class HpuModelAdapter(torch.nn.Module):
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
-        attn_metadata = self._set_indices_and_offsets(attn_metadata,
-                                                      self.block_size,
-                                                      attn_metadata.is_prompt)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -522,10 +434,25 @@ def subtuple(obj: object,
         values = {f: to_override.get(f, getattr(obj, f)) for f in fields}
     if typename not in _TYPE_CACHE:
         _TYPE_CACHE[typename] = {
-            'object': collections.namedtuple(typename, ' '.join(fields)),
+            'type': collections.namedtuple(typename, ' '.join(fields)),
             'fields': fields
         }
-    return _TYPE_CACHE[typename]['object'](**values)  # type: ignore
+    return _TYPE_CACHE[typename]['type'](**values)  # type: ignore
+
+
+def custom_tuple_replace(obj: object, typename: str, **to_override):
+    # Torch compile dynamo doesn't support calling any named tuple
+    # dynamic methods other than len and get_attr. This function is
+    # a torch.compile friendly version of tuple._replace
+
+    cached_type = _TYPE_CACHE[typename]['type']
+    fields = _TYPE_CACHE[typename]['fields']
+    values = {
+        field: getattr(obj, field)
+        for field in fields  # type: ignore
+    }
+    values.update(to_override)
+    return cached_type(**values)  # type: ignore
 
 
 def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
@@ -552,7 +479,7 @@ def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
     attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
         'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
         'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt',
-        'block_indices', 'block_offsets', 'block_groups'
+        'block_size', 'block_groups'
     ])
     return attention_metadata
 
@@ -583,7 +510,7 @@ class HPUModelRunner:
         device: torch.device = 'hpu',
     ):
         # TODO: use ModelRunnerBase.__init__(self, vllm_config=vllm_config)
-        environment.set_model_config(vllm_config.model_config)
+        environment.set_vllm_config(vllm_config)
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -600,10 +527,9 @@ class HPUModelRunner:
         # NOTE(kzawora) update_env is a hack to work around VLLMKVCache in
         # hpu-extension which selects fetch_from_cache implementation based
         # on env vars... this should be fixed in the future
-        self.env_flags = HpuEnvFlags.build(vllm_config, update_env=True)
-        self.enable_bucketing = self.env_flags.enable_bucketing
-        self.use_contiguous_pa = self.env_flags.use_contiguous_pa
-        self.skip_warmup = self.env_flags.skip_warmup
+        self.enable_bucketing = get_config().use_bucketing
+        self.use_contiguous_pa = get_config().use_contiguous_pa
+        self.skip_warmup = get_config().skip_warmup
 
         model_config = self.model_config
         cache_config = self.cache_config
@@ -681,13 +607,16 @@ class HPUModelRunner:
         self.padding_aware_scheduling = True  # TODO(kzawora): add knob for that
         self.padding_ratio_threshold = 0.9  # TODO(kzawora): add knob for that
         self.seen_configs: set = set()
+        self.max_num_batched_tokens = \
+            self.scheduler_config.max_num_batched_tokens
+        self.use_merged_prefill = False
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
             HPUBucketingContext = get_bucketing_context()
             self.bucketing_ctx = HPUBucketingContext(
                 self.max_num_seqs, self.max_prefill_batch_size,
-                self.block_size, self.scheduler_config.max_num_batched_tokens,
-                False)
+                self.block_size, self.max_num_batched_tokens,
+                self.use_merged_prefill, self.max_model_len)
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
@@ -1262,7 +1191,9 @@ class HPUModelRunner:
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
                     input_positions=None,
                     slot_mapping=slot_mapping_device,
-                    block_list=block_list_device)
+                    block_list=block_list_device,
+                    block_size=self.block_size,
+                )
             else:
                 attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
                     seq_lens_tensor=seq_lens_tensor_device,
@@ -1270,6 +1201,7 @@ class HPUModelRunner:
                     num_prefill_tokens=sum(batch_num_scheduled_tokens),
                     input_positions=None,
                     slot_mapping=slot_mapping_device,
+                    block_size=self.block_size,
                 )
             # ATTN_METADATA.
             prefill_attn_metadata.append(attn_metadata)
@@ -1397,6 +1329,7 @@ class HPUModelRunner:
                 input_positions=None,
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
+                block_size=self.block_size,
             ))
 
     def _prepare_inputs(
@@ -1877,7 +1810,7 @@ class HPUModelRunner:
         ) and not self.vllm_config.model_config.enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
-                compiled_methods = ['_set_block_mapping']
+                compiled_methods = ['_update_metadata']
                 for method_name in compiled_methods:
                     method = getattr(self.model, method_name)
                     self._compile_region(self.model, method_name, method)
@@ -1982,7 +1915,8 @@ class HPUModelRunner:
                 num_prefills=batch_size,
                 num_prefill_tokens=batch_size * seq_or_block,
                 input_positions=None,
-                slot_mapping=slot_mapping_device)
+                slot_mapping=slot_mapping_device,
+                block_size=self.block_size)
         else:
             block_tables = [
                 x.tolist()
@@ -2004,7 +1938,8 @@ class HPUModelRunner:
                 block_groups=block_groups_device,
                 num_decode_tokens=batch_size,
                 input_positions=None,
-                slot_mapping=slot_mapping_device)
+                slot_mapping=slot_mapping_device,
+                block_size=self.block_size)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
         logits_indices_device = _async_h2d_tensor_copy(logits_indices,
@@ -2278,7 +2213,7 @@ class HPUModelRunner:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
         kv_caches = self.kv_caches
-        max_blocks = kv_caches[0][0].size(0)
+        max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
@@ -2391,7 +2326,7 @@ class HPUModelRunner:
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
         if os.getenv('VLLM_FULL_WARMUP',
-                     'true').strip().lower() in ("1", "true"):
+                     'false').strip().lower() in ("1", "true"):
             # Since the model is warmed up for all possible tensor sizes,
             # Dynamo can skip checking the guards
             torch.compiler.set_stance(skip_guard_eval_unsafe=True)
