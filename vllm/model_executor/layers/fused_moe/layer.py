@@ -436,7 +436,7 @@ class FusedMoE(torch.nn.Module):
                   and self.tp_size * self.dp_size > 1)
 
         # For smuggling this layer into the fused moe custom op
-        self.use_direct_call = self.dp_size == 1
+        self.use_direct_call = not is_hpu
         if self.use_direct_call:
             compilation_config = vllm_config.compilation_config
             if prefix in compilation_config.static_forward_context:
