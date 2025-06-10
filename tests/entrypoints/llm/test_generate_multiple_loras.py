@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import weakref
 
@@ -30,17 +31,10 @@ def monkeypatch_module():
     mpatch.undo()
 
 
-@pytest.fixture(scope="module",
-                params=[{
-                    "enforce_eager": False,
-                    "use_v1": False
-                }, {
-                    "enforce_eager": True,
-                    "use_v1": False
-                }])
+@pytest.fixture(scope="module", params=[False, True])
 def llm(request, monkeypatch_module):
 
-    use_v1 = request.param["use_v1"]
+    use_v1 = request.param
     monkeypatch_module.setenv('VLLM_USE_V1', '1' if use_v1 else '0')
 
     # pytest caches the fixture so we use weakref.proxy to
@@ -52,7 +46,7 @@ def llm(request, monkeypatch_module):
               max_loras=4,
               max_lora_rank=64,
               max_num_seqs=128,
-              enforce_eager=request.param["enforce_eager"])
+              enforce_eager=True)
 
     with llm.deprecate_legacy_api():
         yield weakref.proxy(llm)

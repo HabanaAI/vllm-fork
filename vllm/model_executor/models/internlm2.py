@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from collections.abc import Iterable
 from functools import partial
-from typing import Any, Dict, Iterable, Optional, Set, Tuple, Type, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch import nn
@@ -81,7 +83,7 @@ class InternLM2Attention(nn.Module):
         num_heads: int,
         num_kv_heads: int,
         rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
+        rope_scaling: Optional[dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
@@ -147,9 +149,7 @@ class InternLM2Attention(nn.Module):
         )
 
     def split_qkv(self, qkv: torch.Tensor):
-        # Unpack all dimensions except the last one
-        *batch_dims, _ = qkv.shape
-
+        seq_len = qkv.shape[0]
         if self.tp_size > 1:
             qkv_map = [self.q_size, self.kv_size, self.kv_size] * self.tp_size
             qkv = tensor_model_parallel_all_gather(qkv)
@@ -157,15 +157,12 @@ class InternLM2Attention(nn.Module):
             qkv = qkv[::3] + qkv[1::3] + qkv[2::3]
             qkv = torch.cat(qkv, dim=-1)
 
-        qkv = qkv.contiguous()
-
-        # Dynamically reshape based on the number of batch dimensions
-        qkv = qkv.view(*batch_dims, self.total_num_kv_heads,
+        qkv = qkv.view(seq_len, self.total_num_kv_heads,
                        self.key_value_groups + 2, self.head_dim)
         q, k, v = torch.split(qkv, [self.key_value_groups, 1, 1], dim=-2)
-        q = q.view(*batch_dims, self.q_size * self.tp_size)
-        k = k.view(*batch_dims, self.kv_size * self.tp_size)
-        v = v.view(*batch_dims, self.kv_size * self.tp_size)
+        q = q.reshape(seq_len, self.q_size * self.tp_size)
+        k = k.reshape(seq_len, self.kv_size * self.tp_size)
+        v = v.reshape(seq_len, self.kv_size * self.tp_size)
 
         if self.tp_size > 1:
             splitter = partial(split_tensor_along_last_dim,
@@ -173,7 +170,6 @@ class InternLM2Attention(nn.Module):
             q = splitter(q)[self.tp_rank]
             k = splitter(k)[self.tp_rank]
             v = splitter(v)[self.tp_rank]
-
         return q, k, v
 
     def forward(
@@ -231,7 +227,7 @@ class InternLMDecoderLayer(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
         if residual is None:
             residual = hidden_states
@@ -258,7 +254,7 @@ class InternLM2Model(nn.Module):
             *,
             vllm_config: VllmConfig,
             prefix: str = "",
-            layer_type: Type[InternLMDecoderLayer] = InternLMDecoderLayer):
+            layer_type: type[InternLMDecoderLayer] = InternLMDecoderLayer):
         super().__init__()
 
         config = vllm_config.model_config.hf_config
@@ -322,7 +318,7 @@ class InternLM2ForCausalLM(nn.Module, SupportsPP, SupportsLoRA):
                  *,
                  vllm_config: VllmConfig,
                  prefix: str = "",
-                 model_type: Type[InternLM2Model] = InternLM2Model):
+                 model_type: type[InternLM2Model] = InternLM2Model):
         super().__init__()
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
@@ -367,15 +363,15 @@ class InternLM2ForCausalLM(nn.Module, SupportsPP, SupportsLoRA):
                                        sampling_metadata)
         return logits
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("gate_up_proj", "w1", 0),
             ("gate_up_proj", "w3", 1),
         ]
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
@@ -413,7 +409,7 @@ class InternLM2ForRewardModel(InternLM2ForCausalLM):
         *,
         vllm_config: VllmConfig,
         prefix: str = "",
-        model_type: Type[InternLM2Model] = InternLM2Model,
+        model_type: type[InternLM2Model] = InternLM2Model,
     ):
         super().__init__(vllm_config=vllm_config,
                          prefix=prefix,

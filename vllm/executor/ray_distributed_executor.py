@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
 import json
@@ -123,21 +124,11 @@ class RayDistributedExecutor(DistributedExecutorBase):
             self.driver_exec_method = make_async(
                 self.driver_worker.execute_method)
 
-        self.shutdown_workers = True
-        self.terminate_ray = True
-
     def shutdown(self) -> None:
         logger.info(
             "Shutting down Ray distributed executor. If you see error log "
             "from logging.cc regarding SIGTERM received, please ignore because "
             "this is the expected termination process in Ray.")
-        if getattr(self, 'shutdown_workers', False):
-            self._run_workers("shutdown")
-            self.shutdown_workers = False
-        if getattr(self, 'terminate_ray', False):
-            for worker in self.workers:
-                worker.__ray_terminate__.remote()
-            self.terminate_ray = False
         if hasattr(self, "forward_dag") and self.forward_dag is not None:
             self.forward_dag.teardown()
             import ray
@@ -167,14 +158,6 @@ class RayDistributedExecutor(DistributedExecutorBase):
     def _init_workers_ray(self, placement_group: "PlacementGroup",
                           **ray_remote_kwargs):
         num_gpus = envs.VLLM_RAY_PER_WORKER_GPUS
-
-        def retain_envs(var_name):
-            retain_var_list = [
-                'GLOO_SOCKET_IFNAME', 'HCCL_SOCKET_IFNAME',
-                'NCCL_SOCKET_IFNAME'
-            ]
-            return ('HPU' in var_name or 'RAY' in var_name
-                    or 'VLLM' in var_name or var_name in retain_var_list)
 
         # The driver dummy worker does not actually use any resources.
         # It holds the resource for the driver worker.
@@ -233,16 +216,11 @@ class RayDistributedExecutor(DistributedExecutorBase):
                 )(RayWorkerWrapper).remote(vllm_config=self.vllm_config,
                                            rpc_rank=rank)
             else:
-                runtime_env_vars = {
-                    k: v
-                    for k, v in os.environ.items() if retain_envs(k)
-                }
                 worker = ray.remote(
                     num_cpus=0,
                     num_gpus=0,
                     resources={current_platform.ray_device_key: num_gpus},
                     scheduling_strategy=scheduling_strategy,
-                    runtime_env={"env_vars": runtime_env_vars},
                     **ray_remote_kwargs,
                 )(RayWorkerWrapper).remote(vllm_config=self.vllm_config,
                                            rpc_rank=rank)
@@ -551,12 +529,12 @@ class RayDistributedExecutor(DistributedExecutorBase):
         ray.get(parallel_worker_tasks)
 
     def _check_ray_cgraph_installation(self):
-        import pkg_resources  # type: ignore
+        import importlib.metadata
+
         from packaging import version
 
         required_version = version.parse("2.43.0")
-        current_version = version.parse(
-            pkg_resources.get_distribution("ray").version)
+        current_version = version.parse(importlib.metadata.version("ray"))
         if current_version < required_version:
             raise ValueError(f"Ray version {required_version} is "
                              f"required, but found {current_version}")

@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import re
 from typing import Optional
 
 import openai  # use the official client for correctness check
 import pytest
 import pytest_asyncio
+import regex as re
 from openai import BadRequestError
 
 from tests.utils import RemoteOpenAIServer
-from vllm.platforms import current_platform
 from vllm.transformers_utils.tokenizer import get_tokenizer
 
 # any model with a chat template should work here
-MODEL_NAME = "/mnt/weka/data/pytorch/llama3.2/Meta-Llama-3.2-1B"
+MODEL_NAME = "facebook/opt-125m"
 
 
 @pytest.fixture(scope="module")
@@ -251,8 +251,6 @@ async def test_completion_streaming(client: openai.AsyncOpenAI,
     assert "".join(chunks) == single_output
 
 
-@pytest.mark.skipif(current_platform.is_hpu(),
-                    reason="Flaky test on HPU, to be investigated")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "model_name",
@@ -307,8 +305,6 @@ async def test_parallel_no_streaming(client: openai.AsyncOpenAI,
             f" repeats: {repeats}.")
 
 
-@pytest.mark.skipif(current_platform.is_hpu(),
-                    reason="Flaky test on HPU, to be investigated")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "model_name",
@@ -557,8 +553,6 @@ async def test_batch_completions(client: openai.AsyncOpenAI, model_name: str):
         assert texts[0] == texts[1]
 
 
-@pytest.mark.skipif(current_platform.is_hpu(),
-                    reason="Flaky test on HPU, to be investigated")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "model_name",
@@ -591,3 +585,97 @@ async def test_echo_logprob_completion(client: openai.AsyncOpenAI,
             assert max(logprobs_arg,
                        1) <= len(top_logprobs) <= logprobs_arg + 1
         assert len(logprobs.tokens) > 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model_name",
+    [MODEL_NAME],
+)
+async def test_invalid_json_schema(client: openai.AsyncOpenAI,
+                                   model_name: str) -> None:
+    invalid_json_schema = {
+        "$defs": {
+            "CarType": {
+                "enum": ["sedan", "SUV", "Truck", "Coupe"],
+                "title": "CarType",
+                "type": "string",
+            }
+        },
+        "properties": {
+            "brand": {
+                "title": "Brand",
+                "type": "string"
+            },
+            "model": {
+                "title": "Model",
+                "type": "string"
+            },
+            "car_type": {
+                "$ref": "#/$defs/CarType"
+            },
+            "foo": "bar",
+        },
+        "required": ["brand", "model", "car_type"],
+        "title": "CarDescription",
+        "type": "object",
+    }
+    prompt = ("Generate a JSON with the brand, model and car_type of"
+              "the most iconic car from the 90's")
+    with pytest.raises((openai.BadRequestError, openai.APIError)):
+        await client.completions.create(
+            model=model_name,
+            prompt=prompt,
+            extra_body={"guided_json": invalid_json_schema},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model_name",
+    [MODEL_NAME],
+)
+async def test_invalid_regex(client: openai.AsyncOpenAI, model_name: str):
+    prompt = ("Generate an email address for Alan Turing, who works in Enigma."
+              "End in .com and new line. Example result:"
+              "alan.turing@enigma.com\n")
+
+    with pytest.raises((openai.BadRequestError, openai.APIError)):
+        await client.completions.create(
+            model=model_name,
+            prompt=prompt,
+            extra_body={
+                "guided_regex": r"[.*",
+                "stop": ["\n"]
+            },
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model_name",
+    [MODEL_NAME],
+)
+async def test_invalid_grammar(client: openai.AsyncOpenAI, model_name: str):
+    invalid_simplified_sql_grammar = """
+        root ::= select_statementinvalidsyntax
+
+        select_statement ::= "SELECT " column " from " table " where " condition
+
+        column ::= "col_1 " | "col_2 "
+
+        table ::= "table_1 " | "table_2 "
+
+        condition ::= column "= " number
+
+        number ::= "1 " | "2 "
+    """
+
+    prompt = ("Generate an SQL query to show the 'username' and 'email'"
+              "from the 'users' table.")
+    with pytest.raises((openai.BadRequestError, openai.APIError)):
+        await client.completions.create(
+            model=model_name,
+            prompt=prompt,
+            extra_body={"guided_grammar": invalid_simplified_sql_grammar},
+        )

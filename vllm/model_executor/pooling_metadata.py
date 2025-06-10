@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import torch
 
@@ -19,28 +20,23 @@ class PoolingMetadata:
         seq_groups: List of (seq_ids, pooling_params).
         seq_data: A mapping of sequence ID to additional sequence data.
         prompt_lens: List of the lengths of each prompt.
-        prompt_offsets: List of prompt start offsets for each prompt
-        when flat out with padding
     """
 
     def __init__(
         self,
-        seq_groups: List[Tuple[List[int], PoolingParams]],
-        seq_data: Dict[int, Any],  # Specific data related to sequences
-        prompt_lens: List[int],
-        prompt_offsets: Optional[List[int]] = None,
+        seq_groups: list[tuple[list[int], PoolingParams]],
+        seq_data: dict[int, Any],  # Specific data related to sequences
+        prompt_lens: list[int],
     ) -> None:
         self.seq_groups = seq_groups
         self.seq_data = seq_data
         self.prompt_lens = prompt_lens
-        self.prompt_offsets = prompt_offsets
 
     def __repr__(self) -> str:
         return ("PoolingMetadata("
                 f"seq_groups={self.seq_groups}, "
                 f"seq_data={self.seq_data}, "
-                f"prompt_lens={self.prompt_lens}, "
-                f"prompt_offsets={self.prompt_offsets})")
+                f"prompt_lens={self.prompt_lens})")
 
 
 @dataclass
@@ -48,7 +44,6 @@ class PoolingTensors:
     """Tensors for pooling."""
 
     prompt_lens: torch.Tensor
-    prompt_offsets: torch.Tensor
 
     @classmethod
     def from_pooling_metadata(
@@ -72,15 +67,6 @@ class PoolingTensors:
             dtype=torch.long,
             pin_memory=pin_memory,
         )
-        if pooling_metadata.prompt_offsets is not None:
-            prompt_offsets_t = torch.tensor(
-                pooling_metadata.prompt_offsets,
-                device="cpu",
-                dtype=torch.long,
-                pin_memory=pin_memory,
-            ).to(device=device, non_blocking=True)
-        else:
-            prompt_offsets_t = None
+
         return cls(prompt_lens=prompt_lens_t.to(device=device,
-                                                non_blocking=True),
-                   prompt_offsets=prompt_offsets_t)
+                                                non_blocking=True), )
