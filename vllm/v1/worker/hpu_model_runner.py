@@ -304,8 +304,8 @@ class HpuModelAdapter(torch.nn.Module):
     def _get_rotary_embedding_module(self, model: torch.nn.Module):
         """
         Dynamically get the RotaryEmbedding layer in the model.
-        This function will recursively search through the module hierarchy to find
-        and return a RotaryEmbedding layer.
+        This function will recursively search through the module 
+        hierarchy to find and return a RotaryEmbedding layer.
         If no such layer is found, it returns None.
         """
         if model is None:
