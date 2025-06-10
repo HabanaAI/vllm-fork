@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
 import os
@@ -41,7 +42,7 @@ class MockEngine:
         self.abort_request_calls = 0
         self.request_id = None
         # Ugly, remove dependency when possible
-        self.parallel_config = ParallelConfig(1, 1, False)
+        self.parallel_config = ParallelConfig()
         self.model_config = MockModelConfig()
 
     async def step_async(self, virtual_engine):
@@ -129,7 +130,7 @@ async def test_new_requests_event():
     assert engine.get_decoding_config() is not None
 
 
-def start_engine(enforce_eager: bool):
+def start_engine():
     wait_for_gpu_memory_to_clear(
         devices=list(range(torch.cuda.device_count())),
         threshold_bytes=2 * 2**30,
@@ -141,7 +142,7 @@ def start_engine(enforce_eager: bool):
 
     return AsyncLLMEngine.from_engine_args(
         AsyncEngineArgs(model="facebook/opt-125m",
-                        enforce_eager=enforce_eager,
+                        enforce_eager=True,
                         num_scheduler_steps=num_scheduler_steps))
 
 
@@ -149,20 +150,14 @@ def uid() -> str:
     return str(uuid.uuid4())
 
 
-@pytest_asyncio.fixture(scope="module",
-                        params=[{
-                            "enforce_eager": False
-                        }, {
-                            "enforce_eager": True
-                        }])
-async def async_engine(request):
+@pytest_asyncio.fixture(scope="module")
+async def async_engine():
     # We cannot use monkeypatch since this is a module
     # scoped fixture and monkeypatch is function scoped.
     previous_value = os.getenv("VLLM_USE_V1", None)
     os.environ["VLLM_USE_V1"] = "0"
-    engine = await asyncio.get_event_loop().run_in_executor(
-        executor=None,
-        func=lambda: start_engine(request.param["enforce_eager"]))
+    engine = await asyncio.get_event_loop().run_in_executor(executor=None,
+                                                            func=start_engine)
     try:
         yield engine
     finally:
@@ -389,3 +384,25 @@ async def test_delayed_generator(async_engine, stop):
     assert final_output is not None
     assert len(final_output.outputs[0].token_ids) == 10
     assert final_output.finished
+
+
+@pytest.mark.asyncio(scope="module")
+async def test_invalid_argument(async_engine):
+    scheduler_config = await async_engine.get_scheduler_config()
+
+    if scheduler_config.num_scheduler_steps != 1:
+        pytest.skip("no need to test this one with multistep")
+
+    sampling_params = SamplingParams(
+        temperature=0,
+        min_tokens=10,
+        max_tokens=10,
+    )
+
+    # Targeting specific DP rank only supported in v1 multi-instance DP
+    with pytest.raises(ValueError):
+        async for _ in async_engine.generate("test",
+                                             sampling_params,
+                                             request_id=uid(),
+                                             data_parallel_rank=0):
+            pass

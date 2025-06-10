@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import itertools
 from abc import abstractmethod
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import torch
 import torch.nn as nn
-from habana_frameworks.torch.core.weight_sharing import HabanaParameterWrapper
 from torch.nn.parameter import Parameter, UninitializedParameter
 
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
@@ -27,9 +27,7 @@ from vllm.model_executor.parameter import (BasevLLMParameter,
                                            RowvLLMParameter)
 # yapf: enable
 from vllm.model_executor.utils import set_weight_attrs
-from vllm.platforms import current_platform
 
-is_hpu = current_platform.is_hpu()
 logger = init_logger(__name__)
 
 WEIGHT_LOADER_V2_SUPPORTED = [
@@ -52,8 +50,6 @@ WEIGHT_LOADER_V2_SUPPORTED = [
     "HQQMarlinMethod",
     "QuarkLinearMethod",
     "ModelOptNvFp4LinearMethod",
-    "AWQHPULinearMethod",
-    "GPTQHPULinearMethod",
 ]
 
 
@@ -253,15 +249,6 @@ class LinearBase(torch.nn.Module):
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
         raise NotImplementedError
 
-    # Chendi: Necessary base func added by INC team
-    def get_dequant_weights_func(
-        self, ) -> Optional[Callable[[torch.nn.Module], torch.Tensor]]:
-        if self.quant_method is not None:
-            quant_method = self.quant_method
-            if hasattr(quant_method, "dequant_block_fp8_weight"):
-                return quant_method.dequant_block_fp8_weight
-        return None
-
 
 class ReplicatedLinear(LinearBase):
     """Replicated linear layer.
@@ -275,6 +262,7 @@ class ReplicatedLinear(LinearBase):
         quant_config: Quantization configure.
         prefix: The name of the layer in the state dict, including all parents
                         (e.g. model.layers.0.qkv_proj)
+        return_bias: If true, return bias together with outputs in forward pass.
     """
 
     def __init__(
@@ -415,7 +403,6 @@ class ColumnParallelLinear(LinearBase):
                          return_bias=return_bias)
 
         self.gather_output = gather_output
-        self.collective_func = tensor_model_parallel_all_gather
 
         if output_sizes is None:
             output_sizes = [output_size]
@@ -500,7 +487,7 @@ class ColumnParallelLinear(LinearBase):
         output_parallel = self.quant_method.apply(self, input_, bias)
         if self.gather_output:
             # All-gather across the partitions.
-            output = self.collective_func(output_parallel)
+            output = tensor_model_parallel_all_gather(output_parallel)
         else:
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
@@ -538,6 +525,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         quant_config: Quantization configure.
         prefix: The name of the layer in the state dict, including all parents
                         (e.g. model.layers.0.qkv_proj)
+        return_bias: If true, return bias together with outputs in forward pass.
     """
 
     def __init__(
@@ -600,8 +588,6 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 param.shard_id.append(loaded_shard_id)
                 param.shard_id_map[loaded_shard_id] = len(param.data_container)
                 param.data_container.append(loaded_weight)
-                if len(param.data_container) == 2:
-                    self.qweight = param.materialize_nested()
                 return
 
         param_data = param.data
@@ -820,6 +806,7 @@ class QKVParallelLinear(ColumnParallelLinear):
         quant_config: Quantization configure.
         prefix: The name of the layer in the state dict, including all parents
                         (e.g. model.layers.0.qkv_proj)
+        return_bias: If true, return bias together with outputs in forward pass.
     """
 
     def __init__(
@@ -994,8 +981,6 @@ class QKVParallelLinear(ColumnParallelLinear):
                 param.shard_id.append(loaded_shard_id)
                 param.shard_id_map[loaded_shard_id] = len(param.data_container)
                 param.data_container.append(loaded_weight)
-                if len(param.data_container) == 3:
-                    self.qweight = param.materialize_nested()
                 return
 
         param_data = param.data
@@ -1147,73 +1132,6 @@ class QKVParallelLinear(ColumnParallelLinear):
         param_data.copy_(loaded_weight)
 
 
-class SplitQKVParallelLinear(torch.nn.Module):
-
-    def __init__(self,
-                 hidden_size: int,
-                 head_size: int,
-                 total_num_heads: int,
-                 total_num_kv_heads: Optional[int] = None,
-                 bias: bool = True,
-                 skip_bias_add: bool = False,
-                 params_dtype: Optional[torch.dtype] = None,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
-        super().__init__()
-
-        self.hidden_size = hidden_size
-        self.head_size = head_size
-        self.total_num_heads = total_num_heads
-        if total_num_kv_heads is None:
-            total_num_kv_heads = total_num_heads
-        self.total_num_kv_heads = total_num_kv_heads
-        # Divide the weight matrix along the last dimension.
-        tp_size = get_tensor_model_parallel_world_size()
-        self.num_heads = divide(self.total_num_heads, tp_size)
-        if tp_size >= self.total_num_kv_heads:
-            self.num_kv_heads = 1
-            self.num_kv_head_replicas = divide(tp_size,
-                                               self.total_num_kv_heads)
-        else:
-            self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
-            self.num_kv_head_replicas = 1
-
-        input_size = self.hidden_size
-        q_size = self.num_heads * self.head_size * tp_size
-        kv_size = self.num_kv_heads * self.head_size * tp_size
-
-        self.q_proj = ColumnParallelLinear(input_size=input_size,
-                                           output_size=q_size,
-                                           bias=bias,
-                                           gather_output=False,
-                                           skip_bias_add=skip_bias_add,
-                                           params_dtype=params_dtype,
-                                           quant_config=quant_config,
-                                           prefix=prefix)
-        self.k_proj = ColumnParallelLinear(input_size=input_size,
-                                           output_size=kv_size,
-                                           bias=bias,
-                                           gather_output=False,
-                                           skip_bias_add=skip_bias_add,
-                                           params_dtype=params_dtype,
-                                           quant_config=quant_config,
-                                           prefix=prefix)
-        self.v_proj = ColumnParallelLinear(input_size=input_size,
-                                           output_size=kv_size,
-                                           bias=bias,
-                                           gather_output=False,
-                                           skip_bias_add=skip_bias_add,
-                                           params_dtype=params_dtype,
-                                           quant_config=quant_config,
-                                           prefix=prefix)
-
-    def forward(self, input_):
-        q, output_bias = self.q_proj(input_)
-        k, _ = self.k_proj(input_)
-        v, _ = self.v_proj(input_)
-        return q, k, v, output_bias
-
-
 class RowParallelLinear(LinearBase):
     """Linear layer with row parallelism.
 
@@ -1237,7 +1155,13 @@ class RowParallelLinear(LinearBase):
                        bias can be fused with other element-wise operations.
                        We skip adding bias but instead return it.
         params_dtype: Data type for the parameters.
+        reduce_results: If true, call all-reduce on output and make Y available
+                       to all GPUs, otherwise, every GPU will have its output
+                       which is Y = X_iA_i
         quant_config: Quantization configure.
+        prefix: The name of the layer in the state dict, including all parents
+                        (e.g. model.layers.0.down_proj)
+        return_bias: If true, return bias together with outputs in forward pass.
     """
 
     def __init__(
@@ -1271,7 +1195,6 @@ class RowParallelLinear(LinearBase):
 
         self.input_is_parallel = input_is_parallel
         self.reduce_results = reduce_results
-        self.collective_func = tensor_model_parallel_all_reduce
 
         assert self.quant_method is not None
         self.quant_method.create_weights(
@@ -1347,7 +1270,9 @@ class RowParallelLinear(LinearBase):
 
         param.load_row_parallel_weight(loaded_weight=loaded_weight)
 
-    def resolve_input(self, input_):
+    def forward(
+        self, input_
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
         if self.input_is_parallel:
             input_parallel = input_
         else:
@@ -1355,12 +1280,6 @@ class RowParallelLinear(LinearBase):
             splitted_input = split_tensor_along_last_dim(
                 input_, num_partitions=self.tp_size)
             input_parallel = splitted_input[tp_rank].contiguous()
-        return input_parallel
-
-    def forward(
-        self, input_
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
-        input_parallel = self.resolve_input(input_)
 
         # Matrix multiply.
         assert self.quant_method is not None
@@ -1536,11 +1455,7 @@ class QKVCrossParallelLinear(LinearBase):
         """Check if two parameters are exactly pointing to same things."""
         # ignore weight_loader because it's always different
         key_to_ignore = ["weight_loader", "_weight_loader"]
-        if is_hpu and type(map_param) is HabanaParameterWrapper and type(
-                src_param) is torch.nn.parameter.Parameter:
-            has_same_type_name = True
-        else:
-            has_same_type_name = type(src_param) is type(map_param)
+        has_same_type_name = type(src_param) is type(map_param)
         src_param_attrs = {
             k: v
             for k, v in src_param.__dict__.items() if k not in key_to_ignore
