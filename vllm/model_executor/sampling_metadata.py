@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from array import array
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import torch
 
-from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (PyObjectCache, async_tensor_h2d,
-                        is_pin_memory_available, make_tensor_with_pad,
-                        make_tensor_with_pad_align)
+                        is_pin_memory_available, make_tensor_with_pad)
 
 _SAMPLING_EPS = 1e-5
 
@@ -27,10 +26,10 @@ class SequenceGroupToSample:
     #                                   |-- query_len ---|
 
     # Sequence ids for the sequence group in a previous step.
-    seq_ids: List[int]
+    seq_ids: list[int]
     sampling_params: SamplingParams
     # seq_id -> sequence data.
-    seq_data: Dict[int, SequenceData]
+    seq_data: dict[int, SequenceData]
     # The length of the sequence (all tokens seen in the past + new token to
     # compute attention) of the sequence group. None if it is in a decode
     # stage.
@@ -46,9 +45,9 @@ class SequenceGroupToSample:
     is_prompt: bool
     # Query token indices from logits. to compute prompt logprob. Empty if
     # prompt logprob is not required.
-    prompt_logprob_indices: List[int]
+    prompt_logprob_indices: list[int]
     # Sample token indices from logits. Empty if sampling is not required.
-    sample_indices: List[int]
+    sample_indices: list[int]
 
     @property
     def do_sample(self):
@@ -80,7 +79,7 @@ class SamplingMetadataCache:
     """Used to cache SamplingMetadata objects between scheduler iterations"""
 
     def __init__(self):
-        self._seq_group_to_sample_cache: Dict[int, PyObjectCache] = {}
+        self._seq_group_to_sample_cache: dict[int, PyObjectCache] = {}
 
     def get_cached_seq_group_to_sample(self, num_seqs):
         if num_seqs not in self._seq_group_to_sample_cache:
@@ -132,9 +131,9 @@ class SamplingMetadata:
 
     def __init__(
         self,
-        seq_groups: List[SequenceGroupToSample],
+        seq_groups: list[SequenceGroupToSample],
         selected_token_indices: torch.Tensor,
-        categorized_sample_indices: Dict[SamplingType, torch.Tensor],
+        categorized_sample_indices: dict[SamplingType, torch.Tensor],
         num_prompts: int,
         skip_sampler_cpu_output: bool = False,
         reuse_sampling_tensors: bool = False,
@@ -148,12 +147,12 @@ class SamplingMetadata:
 
     @staticmethod
     def prepare(
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-        seq_lens: List[int],
-        query_lens: List[int],
+        seq_group_metadata_list: list[SequenceGroupMetadata],
+        seq_lens: list[int],
+        query_lens: list[int],
         device: str,
         pin_memory: bool,
-        generators: Optional[Dict[str, torch.Generator]] = None,
+        generators: Optional[dict[str, torch.Generator]] = None,
         cache: Optional[SamplingMetadataCache] = None,
     ) -> "SamplingMetadata":
         (
@@ -197,16 +196,16 @@ class SamplingMetadata:
 
 
 def _prepare_seq_groups(
-    seq_group_metadata_list: List[SequenceGroupMetadata],
-    seq_lens: List[int],
-    query_lens: List[int],
+    seq_group_metadata_list: list[SequenceGroupMetadata],
+    seq_lens: list[int],
+    query_lens: list[int],
     device: str,
-    generators: Optional[Dict[str, torch.Generator]] = None,
+    generators: Optional[dict[str, torch.Generator]] = None,
     cache: Optional[SamplingMetadataCache] = None,
-) -> Tuple[
-        List[SequenceGroupToSample],
-        List[int],
-        Dict[SamplingType, List[int]],
+) -> tuple[
+        list[SequenceGroupToSample],
+        list[int],
+        dict[SamplingType, list[int]],
         int,
 ]:
     """Prepare sequence groups and indices for sampling.
@@ -229,17 +228,17 @@ def _prepare_seq_groups(
         num_prompts: Total number of prompts from `seq_group_metadata_list`.
     """
     # Batched sequence groups for the current model forward stsep.
-    seq_groups: List[SequenceGroupToSample] = []
+    seq_groups: list[SequenceGroupToSample] = []
     # A list of token indices to sample/compute logprob. It is used to
     # prune the outcome logits from the model for the performance.
-    selected_token_indices: List[int] = []
+    selected_token_indices: list[int] = []
     # Used for selected_token_indices.
     model_output_idx = 0
 
     # Sampling type -> (
     # indices to sample/prompt logprob within pruned output logits,
     # indices to sample within pruned logits)
-    categorized_sample_indices: Dict[SamplingType, List[int]] = {
+    categorized_sample_indices: dict[SamplingType, list[int]] = {
         t: []
         for t in SamplingType
     }
@@ -267,22 +266,16 @@ def _prepare_seq_groups(
         # If the current seq group is in decode stage, it is None.
         seq_len: Optional[int] = None
         query_len: Optional[int] = None
-        prompt_logprob_indices: List[int] = (sample_obj.prompt_logprob_indices
+        prompt_logprob_indices: list[int] = (sample_obj.prompt_logprob_indices
                                              if cache is not None else [])
-        sample_indices: List[int] = (sample_obj.sample_indices
+        sample_indices: list[int] = (sample_obj.sample_indices
                                      if cache is not None else [])
         do_sample = seq_group_metadata.do_sample
 
         if seq_group_metadata.is_prompt:
             if sampling_params.seed is not None:
-                if current_platform.is_hpu():
-                    import habana_frameworks.torch.hpu.random as htrandom
-                    generator = \
-                        htrandom.default_generators[
-                        0].manual_seed(sampling_params.seed)
-                else:
-                    generator = torch.Generator(device=device).manual_seed(
-                        sampling_params.seed)
+                generator = torch.Generator(device=device).manual_seed(
+                    sampling_params.seed)
                 if generators is not None:
                     generators[seq_group_metadata.request_id] = generator
 
@@ -397,17 +390,16 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
-    ) -> Tuple["SamplingTensors", bool, bool, bool, Optional[int],
-               Optional[float]]:
-        prompt_tokens: List[array] = []
-        output_tokens: List[array] = []
-        top_ks: List[int] = []
-        temperatures: List[float] = []
-        top_ps: List[float] = []
-        min_ps: List[float] = []
-        presence_penalties: List[float] = []
-        frequency_penalties: List[float] = []
-        repetition_penalties: List[float] = []
+    ) -> tuple["SamplingTensors", bool, bool, bool]:
+        prompt_tokens: list[array] = []
+        output_tokens: list[array] = []
+        top_ks: list[int] = []
+        temperatures: list[float] = []
+        top_ps: list[float] = []
+        min_ps: list[float] = []
+        presence_penalties: list[float] = []
+        frequency_penalties: list[float] = []
+        repetition_penalties: list[float] = []
         do_penalties = False
         do_top_p_top_k = False
         do_min_p = False
@@ -425,7 +417,7 @@ class SamplingTensors:
 
             # k should not be greater than the vocab size.
             top_k = min(sampling_params.top_k, vocab_size)
-            top_k = vocab_size if top_k == -1 else top_k
+            top_k = vocab_size if top_k < 1 else top_k
             if temperature < _SAMPLING_EPS:
                 # NOTE: Zero temperature means deterministic sampling
                 # (i.e., greedy sampling or beam search).
@@ -486,11 +478,6 @@ class SamplingTensors:
                         prompt_tokens.append(seq_data.prompt_token_ids_array)
                         output_tokens.append(seq_data.output_token_ids_array)
 
-        top_k_scalar = top_ks[0] if do_top_p_top_k and all(
-            k == top_ks[0] for k in top_ks) else None
-        top_p_scalar = top_ps[0] if do_top_p_top_k and all(
-            p == top_ps[0] for p in top_ps) else None
-
         sampling_tensors = SamplingTensors.from_lists(
             temperatures,
             top_ps,
@@ -505,21 +492,20 @@ class SamplingTensors:
             device,
             dtype,
         )
-        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
-                top_k_scalar, top_p_scalar)
+        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p)
 
     @classmethod
     def from_lists(
         cls,
-        temperatures: List[float],
-        top_ps: List[float],
-        top_ks: List[int],
-        min_ps: List[float],
-        presence_penalties: List[float],
-        frequency_penalties: List[float],
-        repetition_penalties: List[float],
-        prompt_tokens: List[array],
-        output_tokens: List[array],
+        temperatures: list[float],
+        top_ps: list[float],
+        top_ks: list[int],
+        min_ps: list[float],
+        presence_penalties: list[float],
+        frequency_penalties: list[float],
+        repetition_penalties: list[float],
+        prompt_tokens: list[array],
+        output_tokens: list[array],
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
@@ -531,38 +517,20 @@ class SamplingTensors:
         do_penalties = prompt_tokens or output_tokens
 
         if do_penalties:
-            if current_platform.is_hpu():
-                prompt_t = make_tensor_with_pad_align(
-                    prompt_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                    max_len_align=1024,
-                )
-                output_t = make_tensor_with_pad_align(
-                    output_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                    max_len_align=1024,
-                )
-            else:
-                prompt_t = make_tensor_with_pad(
-                    prompt_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                )
-                output_t = make_tensor_with_pad(
-                    output_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                )
+            prompt_t = make_tensor_with_pad(
+                prompt_tokens,
+                vocab_size,
+                device="cpu",
+                dtype=torch.int64,
+                pin_memory=pin_memory,
+            )
+            output_t = make_tensor_with_pad(
+                output_tokens,
+                vocab_size,
+                device="cpu",
+                dtype=torch.int64,
+                pin_memory=pin_memory,
+            )
         else:
             empty_tensor = torch.empty(0, device=device, dtype=torch.long)
             prompt_t = empty_tensor

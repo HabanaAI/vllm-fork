@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import json
 import os
 import tempfile
@@ -31,10 +32,8 @@ from vllm.inputs import (ExplicitEncoderDecoderPrompt, TextPrompt,
                          to_enc_dec_tuple_list, zip_enc_dec_prompts)
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
-from vllm.platforms import current_platform
 from vllm.sampling_params import BeamSearchParams
-from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, cuda_device_count_stateless,
-                        identity)
+from vllm.utils import cuda_device_count_stateless
 
 logger = init_logger(__name__)
 
@@ -288,11 +287,9 @@ class HfRunner:
 
     def get_default_device(self):
         from vllm.platforms import current_platform
-        if current_platform.is_hpu():
-            return "hpu"
-        elif current_platform.is_cpu():
-            return "cpu"
-        return "cuda"
+
+        return ("cpu"
+                if current_platform.is_cpu() else current_platform.device_type)
 
     def wrap_device(self, x: _T, device: Optional[str] = None) -> _T:
         if x is None or isinstance(x, (bool, )):
@@ -315,6 +312,7 @@ class HfRunner:
         dtype: str = "auto",
         *,
         model_kwargs: Optional[dict[str, Any]] = None,
+        trust_remote_code: bool = True,
         is_sentence_transformer: bool = False,
         is_cross_encoder: bool = False,
         skip_tokenizer_init: bool = False,
@@ -324,10 +322,15 @@ class HfRunner:
 
         self.config = AutoConfig.from_pretrained(
             model_name,
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
         )
         self.device = self.get_default_device()
-        self.dtype = torch_dtype = _get_and_verify_dtype(self.config, dtype)
+        self.dtype = torch_dtype = _get_and_verify_dtype(
+            self.model_name,
+            self.config,
+            dtype=dtype,
+            is_pooling_model=is_sentence_transformer or is_cross_encoder,
+        )
 
         model_kwargs = model_kwargs if model_kwargs is not None else {}
         model_kwargs.setdefault("torch_dtype", torch_dtype)
@@ -340,7 +343,7 @@ class HfRunner:
                 model_name,
                 device=self.device,
                 model_kwargs=model_kwargs,
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
             )
         elif is_cross_encoder:
             # Lazy init required for AMD CI
@@ -350,19 +353,25 @@ class HfRunner:
                 model_name,
                 device=self.device,
                 automodel_args=model_kwargs,
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
             )
         else:
             model = auto_cls.from_pretrained(
                 model_name,
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
                 **model_kwargs,
             )
+
+            # in case some unquantized custom models are not in same dtype
+            if (getattr(model, "quantization_method", None) is None
+                    and any(p.dtype != self.dtype
+                            for p in model.parameters())):
+                model = model.to(dtype=self.dtype)
 
             if (getattr(model, "quantization_method", None) != "bitsandbytes"
                     and len({p.device
                              for p in model.parameters()}) < 2):
-                model = model.to(self.device)
+                model = model.to(device=self.device)
 
             self.model = model
 
@@ -370,7 +379,7 @@ class HfRunner:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
                 torch_dtype=torch_dtype,
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
             )
 
         # don't put this import at the top level
@@ -379,7 +388,7 @@ class HfRunner:
         self.processor = AutoProcessor.from_pretrained(
             model_name,
             torch_dtype=torch_dtype,
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
         )
         if skip_tokenizer_init:
             self.tokenizer = self.processor.tokenizer
@@ -427,6 +436,15 @@ class HfRunner:
             all_inputs.append(inputs)
 
         return all_inputs
+
+    def get_prompt_embeddings(self, prompts: list[str]) -> list[torch.Tensor]:
+        all_inputs = self.get_inputs(prompts)
+        embeddings = []
+        for inputs in all_inputs:
+            input_ids = self.wrap_device(inputs)["input_ids"]
+            embedding = self.model.get_input_embeddings()(input_ids).squeeze(0)
+            embeddings.append(embedding)
+        return embeddings
 
     def classify(self, prompts: list[str]) -> list[str]:
         # output is final logits
@@ -725,80 +743,6 @@ def hf_runner():
     return HfRunner
 
 
-class HfHPURunner(HfRunner):
-
-    def wrap_device(self, x: _T, device: Optional[str] = None) -> _T:
-        if device is None:
-            device = "cpu" if current_platform.is_cpu() else "hpu"
-
-        if isinstance(x, dict):
-            return {k: self.wrap_device(v, device) for k, v in x.items()}
-
-        if hasattr(x, "device") and x.device.type == device:
-            return x
-
-        return x.to(device)
-
-    def __init__(
-        self,
-        model_name: str,
-        dtype: str = "half",
-        *,
-        model_kwargs: Optional[dict[str, Any]] = None,
-        is_embedding_model: bool = False,
-        auto_cls: type[_BaseAutoModelClass] = AutoModelForCausalLM,
-        postprocess_inputs: Callable[[BatchEncoding],
-                                     BatchEncoding] = identity,
-    ) -> None:
-        torch_dtype = STR_DTYPE_TO_TORCH_DTYPE[dtype]
-
-        self.model_name = model_name
-
-        model_kwargs = model_kwargs if model_kwargs is not None else {}
-        self.model = self.wrap_device(
-            auto_cls.from_pretrained(
-                model_name,
-                torch_dtype=torch_dtype,
-                trust_remote_code=True,
-                **model_kwargs,
-            ).eval())
-
-        from habana_frameworks.torch.hpu import wrap_in_hpu_graph
-        wrap_done = False
-        if hasattr(self.model, "language_model"):
-            self.model.language_model = wrap_in_hpu_graph(
-                self.model.language_model)
-            wrap_done = True
-        if hasattr(self.model, "vision_model"):
-            self.model.vision_model = wrap_in_hpu_graph(
-                self.model.vision_model)
-            wrap_done = True
-        if not wrap_done:
-            self.model = wrap_in_hpu_graph(self.model)
-
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
-            torch_dtype=torch_dtype,
-            trust_remote_code=True,
-        )
-
-        # don't put this import at the top level
-        # it will call torch.cuda.device_count()
-        from transformers import AutoProcessor  # noqa: F401
-        self.processor = AutoProcessor.from_pretrained(
-            model_name,
-            torch_dtype=torch_dtype,
-            trust_remote_code=True,
-        )
-        self.dtype = dtype
-        self.postprocess_inputs = postprocess_inputs
-
-
-@pytest.fixture(scope="session")
-def hf_hpu_runner():
-    return HfHPURunner
-
-
 class VllmRunner:
     """
     The default value of some arguments have been modified from
@@ -825,7 +769,7 @@ class VllmRunner:
         dtype: str = "auto",
         disable_log_stats: bool = True,
         tensor_parallel_size: int = 1,
-        block_size: int = 16 if not current_platform.is_hpu() else 128,
+        block_size: int = 16,
         enable_chunked_prefill: Optional[bool] = False,
         swap_space: int = 4,
         enforce_eager: Optional[bool] = False,
@@ -1130,18 +1074,10 @@ def caplog_vllm(temporary_enable_log_propagate, caplog):
     yield caplog
 
 
-def is_hpu():
-    from importlib import util
-    return util.find_spec('habana_frameworks') is not None
-
-
 @pytest.fixture(scope="session")
 def num_gpus_available():
     """Get number of GPUs without initializing the CUDA context
     in current process."""
-
-    if is_hpu():
-        return torch.hpu.device_count()
 
     return cuda_device_count_stateless()
 

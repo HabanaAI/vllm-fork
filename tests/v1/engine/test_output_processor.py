@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import math
 import time
@@ -58,6 +59,7 @@ def test_incremental_detokenization(request_output_kind: RequestOutputKind,
                           eos_token_id=None,
                           lora_request=None,
                           cache_salt=None,
+                          data_parallel_rank=None,
                           sampling_params=SamplingParams(
                               skip_special_tokens=False,
                               spaces_between_special_tokens=False,
@@ -405,6 +407,7 @@ def test_logprobs_processor(request_output_kind: RequestOutputKind,
                           eos_token_id=None,
                           lora_request=None,
                           cache_salt=None,
+                          data_parallel_rank=None,
                           sampling_params=SamplingParams(
                               skip_special_tokens=False,
                               spaces_between_special_tokens=False,
@@ -521,10 +524,7 @@ def test_stop_token(include_stop_str_in_output: bool,
         dummy_test_vectors: dummy engine core outputs and other data structures
     """
     model_id = dummy_test_vectors.tokenizer.name_or_path
-    if model_id not in [
-            'meta-llama/Llama-3.2-1B',
-            '/mnt/weka/data/pytorch/llama3.2/Meta-Llama-3.2-1B'
-    ]:
+    if model_id != 'meta-llama/Llama-3.2-1B':
         raise AssertionError("Test requires meta-llama/Llama-3.2-1B but "
                              f"{model_id} is in use.")
     do_logprobs = num_sample_logprobs is not None
@@ -571,6 +571,7 @@ def test_stop_token(include_stop_str_in_output: bool,
         eos_token_id=eos_token_id,
         lora_request=None,
         cache_salt=None,
+        data_parallel_rank=None,
         sampling_params=SamplingParams(
             skip_special_tokens=False,
             spaces_between_special_tokens=False,
@@ -668,6 +669,7 @@ def test_stop_string(include_stop_str_in_output: bool,
             eos_token_id=None,
             lora_request=None,
             cache_salt=None,
+            data_parallel_rank=None,
             sampling_params=SamplingParams(
                 skip_special_tokens=False,
                 spaces_between_special_tokens=False,
@@ -782,6 +784,7 @@ def test_iteration_stats(dummy_test_vectors):
             eos_token_id=None,
             lora_request=None,
             cache_salt=None,
+            data_parallel_rank=None,
             sampling_params=SamplingParams(),
         ) for idx, prompt_tokens in enumerate(dummy_test_vectors.prompt_tokens)
     ]

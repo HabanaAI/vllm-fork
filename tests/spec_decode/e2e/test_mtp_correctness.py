@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """This docstring details important information on the testing methodology.
 
 Most of the tests rely on "greedy equality", where we expect the output of
@@ -51,7 +52,7 @@ PRECISION = "bfloat16"
         "model_name": MAIN_MODEL,
 
         # GPU memory utilization
-        "gpu_memory_utilization": 0.85,
+        "gpu_memory_utilization": 0.85
     }])
 @pytest.mark.parametrize("per_test_common_llm_kwargs", [{}])
 @pytest.mark.parametrize("baseline_llm_kwargs", [{}])

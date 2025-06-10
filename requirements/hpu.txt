@@ -3,10 +3,10 @@
 
 # Dependencies for HPU code
 ray
-triton==3.1.0
-pandas==2.2.3
+pandas
 numpy==1.26.4
 tabulate
 setuptools>=77.0.3,<80.0.0
 setuptools-scm>=8
-vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@2bcd7f8
+vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@f1f6624
+vllm-hpu @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@bb4dd0bcf7ba7d0476ab6c4931b6c8caedacb024
