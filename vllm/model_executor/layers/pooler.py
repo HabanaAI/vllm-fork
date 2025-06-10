@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from enum import IntEnum
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import PretrainedConfig
 from typing_extensions import assert_never
 
-from vllm.config import PoolerConfig
+from vllm.config import ModelConfig, PoolerConfig
 from vllm.model_executor.pooling_metadata import (PoolingMetadata,
                                                   PoolingTensors)
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
@@ -46,7 +46,7 @@ class SimplePooler(nn.Module):
         normalize: bool,
         softmax: bool,
         step_tag_id: Optional[int] = None,
-        returned_token_ids: Optional[List[int]] = None,
+        returned_token_ids: Optional[list[int]] = None,
     ) -> "SimplePooler":
         if pooling_type == PoolingType.LAST:
             assert step_tag_id is None and returned_token_ids is None
@@ -79,9 +79,7 @@ class SimplePooler(nn.Module):
         pooling_metadata: PoolingMetadata,
     ) -> torch.Tensor:
         return PoolingTensors.from_pooling_metadata(
-            pooling_metadata, hidden_states.device
-        ).prompt_lens, PoolingTensors.from_pooling_metadata(
-            pooling_metadata, hidden_states.device).prompt_offsets
+            pooling_metadata, hidden_states.device).prompt_lens
 
     def extract_states(
         self,
@@ -111,14 +109,10 @@ class CLSPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens, prompt_offsets = self.get_prompt_lens(
-            hidden_states, pooling_metadata)
-        if prompt_offsets is not None:
-            first_token_flat_indices = prompt_offsets
-        else:
-            first_token_flat_indices = torch.zeros_like(prompt_lens)
-            first_token_flat_indices[1:] += torch.cumsum(prompt_lens,
-                                                         dim=0)[:-1]
+        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
+
+        first_token_flat_indices = torch.zeros_like(prompt_lens)
+        first_token_flat_indices[1:] += torch.cumsum(prompt_lens, dim=0)[:-1]
         return hidden_states[first_token_flat_indices]
 
 
@@ -129,15 +123,9 @@ class LastPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens, prompt_offsets = self.get_prompt_lens(
-            hidden_states, pooling_metadata)
-        if prompt_offsets is not None:
-            last_token_flat_indices = (torch.sum(torch.cat(
-                (prompt_lens.unsqueeze(0), prompt_offsets.unsqueeze(0)), 0),
-                                                 dim=0,
-                                                 keepdim=True) - 1).squeeze(0)
-        else:
-            last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
+        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
+
+        last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
         return hidden_states[last_token_flat_indices]
 
 
@@ -148,8 +136,7 @@ class AllPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens, prompt_offsets = self.get_prompt_lens(
-            hidden_states, pooling_metadata)
+        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
 
         offset = 0
         pooled_data = list[torch.Tensor]()
@@ -167,18 +154,14 @@ class MeanPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens, prompt_offsets = self.get_prompt_lens(
-            hidden_states, pooling_metadata)
+        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
+
         cumsum = torch.cumsum(hidden_states, dim=0)
-        if prompt_offsets is not None:
-            end_indices = prompt_offsets + prompt_lens
-            start_indices = prompt_offsets
-        else:
-            start_indices = torch.cat([
-                torch.tensor([0], device=hidden_states.device),
-                torch.cumsum(prompt_lens[:-1], dim=0)
-            ])
-            end_indices = torch.cumsum(prompt_lens, dim=0)
+        start_indices = torch.cat([
+            torch.tensor([0], device=hidden_states.device),
+            torch.cumsum(prompt_lens[:-1], dim=0)
+        ])
+        end_indices = torch.cumsum(prompt_lens, dim=0)
         return (cumsum[end_indices - 1] - cumsum[start_indices] +
                 hidden_states[start_indices]) / prompt_lens.unsqueeze(1)
 
@@ -191,7 +174,7 @@ class StepPool(SimplePooler):
         normalize: bool,
         softmax: bool,
         step_tag_id: Optional[int] = None,
-        returned_token_ids: Optional[List[int]] = None,
+        returned_token_ids: Optional[list[int]] = None,
     ):
         super().__init__(normalize=normalize, softmax=softmax)
 
@@ -203,8 +186,7 @@ class StepPool(SimplePooler):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Union[list[torch.Tensor], torch.Tensor]:
-        prompt_lens, prompt_offsets = self.get_prompt_lens(
-            hidden_states, pooling_metadata)
+        prompt_lens = self.get_prompt_lens(hidden_states, pooling_metadata)
 
         returned_token_ids = self.returned_token_ids
         if returned_token_ids is not None and len(returned_token_ids) > 0:
@@ -260,9 +242,16 @@ class PoolerHead(nn.Module):
 
         if self.softmax:
             if isinstance(pooled_data, list):
-                pooled_data = [F.softmax(data, dim=-1) for data in pooled_data]
+                pooled_data = [
+                    F.softmax(data, dim=-1)
+                    if data.shape[-1] >= 2 else F.sigmoid(data)
+                    for data in pooled_data
+                ]
             else:
-                pooled_data = F.softmax(pooled_data, dim=-1)
+                if pooled_data.shape[-1] >= 2:
+                    pooled_data = F.softmax(pooled_data, dim=-1)
+                else:
+                    pooled_data = F.sigmoid(pooled_data)
 
         return pooled_data
 
@@ -277,7 +266,7 @@ class Pooler(nn.Module):
         normalize: bool,
         softmax: bool,
         step_tag_id: Optional[int] = None,
-        returned_token_ids: Optional[List[int]] = None,
+        returned_token_ids: Optional[list[int]] = None,
     ) -> SimplePooler:
         return SimplePooler.from_pooling_type(
             pooling_type=PoolingType[pooler_config.pooling_type]
@@ -294,30 +283,37 @@ class Pooler(nn.Module):
         )
 
 
-class CrossEncodingPooler(nn.Module):
-    """A layer that pools specific information from hidden states.
+class ClassifierPooler(nn.Module):
+    """A pooling layer for classification tasks.
 
     This layer does the following:
-    1. Extracts specific tokens or aggregates data based on pooling method.
-    2. Normalizes output if specified.
-    3. Returns structured results as `PoolerOutput`.
-
-    Attributes:
-        pooling_type: The type of pooling to use.
-        normalize: Whether to normalize the pooled data.
+    1. Applies a classification layer to the hidden states.
+    2. Optionally applies a pooler layer.
+    3. Applies an activation function to the output. In the case of
+       classification models it is either sigmoid or softmax. In the
+       case of scoring models, the same behavior is configuration
+       dependent, as in the sentence-transformers library.
     """
 
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: ModelConfig,
         classifier: nn.Module,
         pooler: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.classifier = classifier
         self.pooler = pooler
-        self.default_activation_function = \
-            get_cross_encoder_activation_function(config)
+
+        if config.task == "score":
+            self.default_activation_function = \
+                get_cross_encoder_activation_function(config.hf_config)
+        elif config.task == "classify":
+            self.default_activation_function = nn.Sigmoid() \
+                if config.hf_config.num_labels == 1 else nn.Softmax()
+        else:
+            raise NotImplementedError(f"task={config.task!r} is not supported"
+                                      " with the classification pooler")
 
     def forward(
         self,

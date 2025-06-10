@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """A layer that compute logits from hidden_stats."""
 import inspect
 from concurrent.futures import ThreadPoolExecutor
@@ -119,7 +120,7 @@ class LogitsProcessor(nn.Module):
 
     def extra_repr(self) -> str:
         s = f"vocab_size={self.vocab_size}"
-        s += f", forg_vocab_size={self.org_vocab_size}"
+        s += f", org_vocab_size={self.org_vocab_size}"
         s += f", scale={self.scale}, logits_as_input={self.logits_as_input}"
         return s
 
@@ -138,28 +139,12 @@ def _prune_hidden_states(
         return hidden_states
 
 
-def get_num_parameters(logits_processor):
-    """Extracts the number of parameters from the
-    signature and stores it for further use"""
-    if hasattr(logits_processor, 'num_parameters'):
-        return logits_processor.num_parameters
-    logits_processor.num_parameters = len(
-        inspect.signature(logits_processor).parameters)
-    return logits_processor.num_parameters
-
-
 def _apply_logits_processors(
     logits: torch.Tensor,
     sampling_metadata: SamplingMetadata,
 ) -> torch.Tensor:
+    found_logits_processors = False
     logits_processed = 0
-    found_logits_processors = any(
-        seq_group.sampling_params.logits_processors
-        for seq_group in sampling_metadata.seq_groups)
-    offload_to_cpu = current_platform.is_hpu() and found_logits_processors
-    if offload_to_cpu:
-        logits_device = logits.device
-        logits = logits.cpu()
     logits_row_ids_and_logits_row_futures = []
     for seq_group in sampling_metadata.seq_groups:
         seq_ids = seq_group.seq_ids
@@ -196,8 +181,6 @@ def _apply_logits_processors(
     if found_logits_processors:
         # verifies that no rows in logits were missed unexpectedly
         assert logits_processed == logits.shape[0]
-    if offload_to_cpu:
-        logits = logits.to(logits_device)
     return logits
 
 

@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Tests for rejection sampling."""
 
 import pytest
@@ -94,7 +95,7 @@ def test_correct_output_format(which_tokens_accepted: str, seed: int,
                                     dtype=torch.int64)
 
     rejection_sampler = RejectionSampler(use_flashinfer=use_flashinfer)
-    rejection_sampler.init_tensors(device=device)
+    rejection_sampler.init_gpu_tensors(device=device)
     output_token_ids = rejection_sampler._create_output(  # pylint: disable=protected-access
         accepted,
         recovered_token_ids,
@@ -143,7 +144,7 @@ def test_no_crash_with_varying_dims(k: int, vocab_size: int, batch_size: int,
                                     device: str, use_flashinfer: bool):
     torch.set_default_device(device)
     rejection_sampler = RejectionSampler(use_flashinfer=use_flashinfer)
-    rejection_sampler.init_tensors(device=device)
+    rejection_sampler.init_gpu_tensors(device=device)
 
     draft_probs = torch.rand(batch_size, k, vocab_size, dtype=torch.float32)
     target_probs = torch.rand(batch_size,
@@ -169,14 +170,17 @@ def test_no_crash_with_varying_dims(k: int, vocab_size: int, batch_size: int,
 @pytest.mark.parametrize("batch_size", [1, 8, 32, 128])
 @pytest.mark.parametrize("n_rep", [100])
 @pytest.mark.parametrize("device", CUDA_DEVICES)
-@pytest.mark.parametrize("use_flashinfer", [True, False])
+# @pytest.mark.parametrize("use_flashinfer", [True, False])
+# Not testing FlashInfer now, since 0.2.3 API removed the ability
+# to pass in uniform samples.
+@pytest.mark.parametrize("use_flashinfer", [False])
 @torch.inference_mode()
 def test_deterministic_when_seeded(k: int, vocab_size: int, batch_size: int,
                                    frac_seeded: float, n_rep: int, device: str,
                                    use_flashinfer: bool):
     torch.set_default_device(device)
     rejection_sampler = RejectionSampler(use_flashinfer=use_flashinfer)
-    rejection_sampler.init_tensors(device=device)
+    rejection_sampler.init_gpu_tensors(device=device)
 
     draft_probs = torch.rand(batch_size, k, vocab_size, dtype=torch.float32)
     target_probs = torch.rand(batch_size,
@@ -214,7 +218,10 @@ def test_deterministic_when_seeded(k: int, vocab_size: int, batch_size: int,
 @pytest.mark.parametrize("vocab_size", [30_000, 50_000])
 @pytest.mark.parametrize("batch_size", [3, 8, 32, 128])
 @pytest.mark.parametrize("device", CUDA_DEVICES)
-@pytest.mark.parametrize("use_flashinfer", [True, False])
+# @pytest.mark.parametrize("use_flashinfer", [True, False])
+# Not testing FlashInfer now, since 0.2.3 API removed the ability
+# to pass in uniform samples.
+@pytest.mark.parametrize("use_flashinfer", [False])
 @torch.inference_mode()
 def test_mixed_seeded_batch(k: int, vocab_size: int, batch_size: int,
                             device: str, use_flashinfer: bool):
@@ -284,6 +291,10 @@ def test_compare_nonflashinfer_backend(k: int, vocab_size: int,
     Test the flashinfer and nonflashinfer backend generate 
     the same output metrics.
     """
+
+    pytest.skip("Not testing FlashInfer now, since 0.2.3 API removed "
+                "the ability to pass in uniform samples.")
+
     torch.set_default_device(device)
     torch.manual_seed(0)
     draft_probs = torch.rand(batch_size, k, vocab_size, dtype=torch.float32)
@@ -312,7 +323,7 @@ def test_compare_nonflashinfer_backend(k: int, vocab_size: int,
 
     for use_flashinfer in [True, False]:
         rejection_sampler = RejectionSampler(use_flashinfer=use_flashinfer)
-        rejection_sampler.init_tensors(device=device)
+        rejection_sampler.init_gpu_tensors(device=device)
         # We use seeded sequences to ensure the same tokens are accepted
         # for both flashinfer and nonflashinfer backends.
         seeded_seqs = get_seeded_seqs()
@@ -343,7 +354,7 @@ def test_raises_when_vocab_oob(above_or_below_vocab_range: str,
 
     rejection_sampler = RejectionSampler(use_flashinfer=use_flashinfer,
                                          strict_mode=True)
-    rejection_sampler.init_tensors(device=device)
+    rejection_sampler.init_gpu_tensors(device=device)
 
     draft_probs = torch.rand(batch_size, k, vocab_size, dtype=torch.float32)
     target_probs = torch.rand(batch_size,
@@ -474,7 +485,7 @@ class _CorrectnessTestHelper:
         self.vocab_size = vocab_size
         self.vocab_range = (0, vocab_size)
 
-        self.rejection_sampler.init_tensors(device=0)
+        self.rejection_sampler.init_gpu_tensors(device=0)
 
         # Keep test simple, use k=1
         self.k = 1

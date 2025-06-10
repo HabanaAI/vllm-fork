@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import time
 from typing import Callable, Optional, Union
@@ -80,28 +81,24 @@ class AsyncMetricsCollector:
         self._rejsample_metrics_collect_interval_s = collect_interval_s
         self._last_metrics_collect_time = self._timer()
 
+    def init_gpu_tensors(self, rank: int) -> None:
+        self._rank = rank
+        self._copy_stream = torch.cuda.Stream()
+
     def init_tensors(self,
                      rank: int,
                      device_type: Union[torch.device, str] = 'cuda') -> None:
         self._rank = rank
         if isinstance(device_type, torch.device):
             device_type = device_type.type
-
         stream = current_platform.Stream
         if stream is not None:
             self._copy_stream = stream()
-
-        if device_type == 'hpu':
-            import habana_frameworks.torch as htorch
-            self._copy_stream = htorch.hpu.Stream()
 
     def maybe_collect_rejsample_metrics(
             self, k: int) -> Optional[SpecDecodeWorkerMetrics]:
         # Skip for any platform that doesn't have device Event
         if current_platform.Event is None:
-            return None
-
-        if not current_platform.is_cuda_alike():
             return None
 
         # If a copy was initiated in the previous call, collect and return.
@@ -130,12 +127,12 @@ class AsyncMetricsCollector:
         """Copy rejection/typical-acceptance sampling metrics
         (number of accepted tokens, etc) to CPU asynchronously.
 
-        Returns a CUDA event recording when the copy is complete.
+        Returns a device event recording when the copy is complete.
         """
         assert self._copy_stream is not None
-        self._copy_stream.wait_stream(torch.cuda.current_stream())
+        self._copy_stream.wait_stream(current_platform.current_stream())
 
-        with torch.cuda.stream(self._copy_stream):
+        with current_platform.stream(self._copy_stream):
             self._aggregate_num_accepted_tokens.copy_(
                 self.spec_decode_sampler.num_accepted_tokens,
                 non_blocking=True)
@@ -146,7 +143,7 @@ class AsyncMetricsCollector:
             self._aggregate_num_draft_tokens = (
                 self.spec_decode_sampler.num_draft_tokens)
 
-        aggregate_metrics_ready = torch.cuda.Event()
+        aggregate_metrics_ready = current_platform.Event()
         aggregate_metrics_ready.record(self._copy_stream)
 
         return aggregate_metrics_ready

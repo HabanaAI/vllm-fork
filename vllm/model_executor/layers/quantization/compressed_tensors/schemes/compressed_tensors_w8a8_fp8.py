@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from compressed_tensors.quantization import QuantizationStrategy
 from torch.nn import Parameter
-from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
@@ -85,15 +85,13 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
 
         # INPUT SCALE
         if self.is_static_input_scheme and hasattr(layer, 'input_scale'):
-            input_scale = layer.input_scale.max()
-            if current_platform.is_hpu():
-                input_scale = ConvertScaleToHwAligned().calc(input_scale)
-            layer.input_scale = Parameter(input_scale, requires_grad=False)
+            layer.input_scale = Parameter(layer.input_scale.max(),
+                                          requires_grad=False)
         else:
             layer.input_scale = None
 
     def create_weights(self, layer: torch.nn.Module,
-                       output_partition_sizes: List[int],
+                       output_partition_sizes: list[int],
                        input_size_per_partition: int,
                        params_dtype: torch.dtype, weight_loader: Callable,
                        **kwargs):
