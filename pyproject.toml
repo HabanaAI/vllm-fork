@@ -51,6 +51,7 @@ include = ["vllm*"]
 [tool.yapfignore]
 ignore_patterns = [
     "build/**",
+    "vlmm_hpu_extension/**",
 ]
 
 [tool.ruff]
@@ -59,11 +60,11 @@ line-length = 80
 exclude = [
     # External file, leaving license intact
     "examples/other/fp8/quantizer/quantize.py",
-    "vllm/vllm_flash_attn/flash_attn_interface.pyi",
-    "vllm-hpu-extension/**/*.py"
+    "vllm/vllm_flash_attn/flash_attn_interface.pyi"
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"vllm_hpu_extension/**" = ["ALL"]
 "vllm/third_party/**" = ["ALL"]
 "vllm/version.py" = ["F401"]
 "vllm/_version.py" = ["ALL"]
@@ -143,7 +144,8 @@ files = [
 exclude = [
     "vllm/model_executor/parallel_utils/|vllm/model_executor/models/",
     # Ignore triton kernels in ops.
-    'vllm/attention/ops/.*\.py$'
+    'vllm/attention/ops/.*\.py$',
+    'vllm_hpu_extension/'
 ]
 
 [tool.codespell]
