@@ -37,7 +37,7 @@ os.environ["LMCACHE_REMOTE_URL"] = f"lm://localhost:{port}"
 # Set the serializer/deserializer between vllm and LMCache server
 # `naive` indicates using raw bytes of the tensor without any compression
 os.environ["LMCACHE_REMOTE_SERDE"] = "naive"
-os.environ["WORLD_SIZE"] = "2"
+# os.environ["WORLD_SIZE"] = "2"
 #GAUDI-NIC
 #os.environ["LMCACHE_NIXL_BUFFER_SIZE"] = "1073741824"
 #os.environ["LMCACHE_NIXL_RECEIVER_HOST"] = "localhost"
@@ -51,12 +51,8 @@ MODEL="/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.2
 prompts = [
     "San Francisco is a",
 ]
-decoder_rank = '1'
-os.environ["DECODER_RANK"] = decoder_rank
 def run_store(store_done, prompts):
     # We use GPU 0 for KV cache store process.
-    os.environ["RANK"] = "0"
-    os.environ["LMCACHE_NIXL_ROLE"] = "SENDER"
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=10)
 
     ktc = KVTransferConfig.from_cli(
@@ -82,9 +78,6 @@ def run_store(store_done, prompts):
 
 def run_retrieve(store_done, prompts, timeout=1):
     # We use GPU 1 for KV cache retrieve process.
-    decoder_rank = '1'
-    os.environ["RANK"] = decoder_rank
-    os.environ["LMCACHE_NIXL_ROLE"] = "RECEIVER"
     #sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=10)
     sampling_params = SamplingParams(temperature=0, max_tokens=100)
     ktc = KVTransferConfig.from_cli(
