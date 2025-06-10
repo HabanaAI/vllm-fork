@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import sys
 from contextlib import nullcontext
@@ -18,7 +19,7 @@ def use_v0_only(monkeypatch):
     monkeypatch.setenv('VLLM_USE_V1', '0')
 
 
-def run_normal_opt125m(enforce_eager):
+def run_normal_opt125m():
     prompts = [
         "Hello, my name is",
         "The president of the United States is",
@@ -28,9 +29,8 @@ def run_normal_opt125m(enforce_eager):
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 
     # Create an LLM without guided decoding as a baseline.
-    llm = LLM(model="/mnt/weka/data/pytorch/llama3.2/Meta-Llama-3.2-1B",
-              dtype="bfloat16",
-              enforce_eager=enforce_eager,
+    llm = LLM(model="facebook/opt-125m",
+              enforce_eager=True,
               gpu_memory_utilization=0.3)
     outputs = llm.generate(prompts, sampling_params)
     for output in outputs:
@@ -43,7 +43,7 @@ def run_normal_opt125m(enforce_eager):
     cleanup_dist_env_and_memory()
 
 
-def run_normal(enforce_eager):
+def run_normal():
     prompts = [
         "Hello, my name is",
         "The president of the United States is",
@@ -54,8 +54,7 @@ def run_normal(enforce_eager):
 
     # Create an LLM without guided decoding as a baseline.
     llm = LLM(model="distilbert/distilgpt2",
-              dtype="bfloat16",
-              enforce_eager=enforce_eager,
+              enforce_eager=True,
               gpu_memory_utilization=0.3)
     outputs = llm.generate(prompts, sampling_params)
     for output in outputs:
@@ -68,11 +67,10 @@ def run_normal(enforce_eager):
     cleanup_dist_env_and_memory()
 
 
-def run_lmfe(sample_regex, enforce_eager):
+def run_lmfe(sample_regex):
     # Create an LLM with guided decoding enabled.
     llm = LLM(model="distilbert/distilgpt2",
-              enforce_eager=enforce_eager,
-              dtype="bfloat16",
+              enforce_eager=True,
               guided_decoding_backend="lm-format-enforcer",
               gpu_memory_utilization=0.3)
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
@@ -90,8 +88,7 @@ def run_lmfe(sample_regex, enforce_eager):
         print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
 
-@pytest.mark.parametrize("enforce_eager", [False, True])
-def test_lazy_outlines(sample_regex, enforce_eager):
+def test_lazy_outlines(sample_regex):
     """If users don't use guided decoding, outlines should not be imported.
     """
     # make sure outlines is not imported
@@ -105,8 +102,8 @@ def test_lazy_outlines(sample_regex, enforce_eager):
     context = blame(
         lambda: module_name in sys.modules) if use_blame else nullcontext()
     with context as result:
-        run_normal(enforce_eager)
-        run_lmfe(sample_regex, enforce_eager)
+        run_normal()
+        run_lmfe(sample_regex)
     if use_blame:
         assert isinstance(result, BlameResult)
         print(f"the first import location is:\n{result.trace_stack}")

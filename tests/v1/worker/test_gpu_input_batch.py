@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import inspect
 from typing import Optional
@@ -7,23 +8,18 @@ import numpy as np
 import pytest
 import torch
 
-from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.utils import is_pin_memory_available, make_tensor_with_pad
 from vllm.v1.sample.metadata import SamplingMetadata
-from vllm.v1.worker.gpu_input_batch import (BlockTable, CachedRequestState,
-                                            InputBatch)
+from vllm.v1.worker.block_table import BlockTable, MultiGroupBlockTable
+from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 
 VOCAB_SIZE = 1024
 NUM_OUTPUT_TOKENS = 20
 MAX_PROMPT_SIZE = 100
-if current_platform.is_hpu():
-    CUDA_DEVICES = ["hpu"]
-    import habana_frameworks.torch  # noqa: F401
-else:
-    CUDA_DEVICES = [
-        f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
-    ]
+CUDA_DEVICES = [
+    f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
+]
 MAX_NUM_PROMPT_TOKENS = 64
 
 
@@ -41,11 +37,15 @@ def _compare_objs(obj1, obj2):
         if isinstance(a, torch.Tensor):
             if (a.numel() == 0 or b.numel() == 0):
                 is_same = (a.numel() == 0 and b.numel() == 0)
-            elif torch.allclose(a.cpu(), b.cpu()):
+            elif torch.allclose(a, b):
                 is_same = True
         elif isinstance(a, np.ndarray):
             if np.allclose(a, b):
                 is_same = True
+        elif isinstance(a, MultiGroupBlockTable):
+            for a_i, b_i in zip(a.block_tables, b.block_tables):
+                _compare_objs(a_i, b_i)
+            is_same = True
         elif isinstance(a, (BlockTable, SamplingMetadata)):
             _compare_objs(a, b)
             is_same = True  # if we make it here must be same
@@ -203,7 +203,7 @@ def _construct_cached_request_state(req_id_suffix: int):
         sampling_params=_create_sampling_params(),
         mm_inputs=[],
         mm_positions=[],
-        block_ids=[],
+        block_ids=([], ),
         generator=None,
         num_computed_tokens=len(output_token_ids),
         output_token_ids=output_token_ids,
@@ -225,10 +225,11 @@ def test_sampling_metadata_in_input_batch(device: str, batch_size: int):
     input_batch: InputBatch = InputBatch(
         max_num_reqs=batch_size,
         max_model_len=1024,
-        max_num_blocks_per_req=10,
+        max_num_batched_tokens=1024,
         device=torch.device(device),
         pin_memory=is_pin_memory_available(),
         vocab_size=1024,
+        block_sizes=[1],
     )
     reqs: list[CachedRequestState] = []
     req_id_reqs = {}
@@ -297,8 +298,6 @@ def test_sampling_metadata_in_input_batch(device: str, batch_size: int):
         sampling_metadata.bad_words_token_ids
 
 
-@pytest.mark.skipif(current_platform.is_hpu(),
-                    reason="Flaky test on HPU SynapseAI 1.20.x")
 @pytest.mark.parametrize("device", CUDA_DEVICES)
 @pytest.mark.parametrize("batch_size", [32])
 @pytest.mark.parametrize("swap_list", [((0, 1), )])
@@ -316,18 +315,20 @@ def test_swap_states_in_input_batch(device: str, batch_size: int,
     input_batch: InputBatch = InputBatch(
         max_num_reqs=batch_size,
         max_model_len=1024,
-        max_num_blocks_per_req=10,
+        max_num_batched_tokens=1024,
         device=torch.device(device),
         pin_memory=is_pin_memory_available(),
         vocab_size=1024,
+        block_sizes=[1],
     )
     ref_input_batch: InputBatch = InputBatch(
         max_num_reqs=batch_size,
         max_model_len=1024,
-        max_num_blocks_per_req=10,
+        max_num_batched_tokens=1024,
         device=torch.device(device),
         pin_memory=is_pin_memory_available(),
         vocab_size=1024,
+        block_sizes=[1],
     )
 
     reqs: list[CachedRequestState] = []
