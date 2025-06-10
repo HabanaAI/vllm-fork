@@ -90,6 +90,10 @@ VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
 DUMMY_TOKEN_ID = -1
 
 
+
+def is_gemma3(model):
+    return 'Gemma3ForConditionalGeneration' in str(type(model))
+
 class Singleton(type):
     _instances: Dict[type, object] = {}
 
@@ -296,6 +300,14 @@ class HpuModelAdapter(torch.nn.Module):
         self.is_pooler = hasattr(self.model, "_pooler")
         self.is_causal = is_causal
         self.use_merged_prefill = VLLM_MERGED_PREFILL
+
+        # TODO : right now just enabling it keeping gemma3 in mind
+        if htorch.utils.internal.is_lazy() and is_gemma3(self.model):
+            logger.info("[Multimodal] Wrapping Visual Model")
+            self.model.vision_tower = htorch.hpu.wrap_in_hpu_graph(
+                self.model.vision_tower, disable_tensor_cache=True)
+            self.model.multi_modal_projector = htorch.hpu.wrap_in_hpu_graph(
+                self.model.multi_modal_projector, disable_tensor_cache=True)
 
     # copying from PR 1163
     # needs cleanup/unified approach later
@@ -2984,7 +2996,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_batch_size': real_batch_size
                 }
 
-                if 'Gemma3ForConditionalGeneration' in str(type(self.model.model)):
+                if is_gemma3(self.model.model):
                     inputs_embeds = \
                         self.model.compute_input_embeddings_for_gemma(
                             **execute_model_kwargs
