@@ -417,7 +417,7 @@ class HpuModelAdapter(torch.nn.Module):
 
                 # Check if the current layer is a name in a module
                 if isinstance(layer, str) and not isinstance(
-                            layer, int):  # Name-based access
+                        layer, int):  # Name-based access
                     current_module = getattr(current_module, layer)
                 elif isinstance(layer,
                                 int):  # Indexed-based access (like ModuleList)
