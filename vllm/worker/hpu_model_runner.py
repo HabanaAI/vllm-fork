@@ -262,7 +262,8 @@ class HpuModelAdapter(torch.nn.Module):
         self.is_pooler = hasattr(self.model, "_pooler")
         self.is_causal = is_causal
         self.use_merged_prefill = VLLM_MERGED_PREFILL
-        self._rotary_embed_module = self._get_rotary_embedding_module(self.model)
+        self._rotary_embed_module = self._get_rotary_embedding_module(
+            self.model)
         self._rotary_prepare_cos_sin = self._get_prepare_cos_sin()
 
     def _get_rotary_embedding_module(self, model: torch.nn.Module):
@@ -284,7 +285,7 @@ class HpuModelAdapter(torch.nn.Module):
                 if result is not None:
                     return result
         return None
-    
+
     def _get_prepare_cos_sin(self):
         if self._rotary_embed_module is not None:
             return self._rotary_embed_module.prepare_cos_sin
@@ -398,7 +399,6 @@ class HpuModelAdapter(torch.nn.Module):
                                                     device, dtype)
         return attn_metadata
 
-
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
@@ -417,7 +417,8 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
         model_is_mrope = uses_mrope(model_config)
         if self._rotary_prepare_cos_sin is not None and not model_is_mrope:
-            self._rotary_prepare_cos_sin(kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
+            self._rotary_prepare_cos_sin(
+                kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
         attn_meta = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
@@ -933,7 +934,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ) and not self.vllm_config.model_config.enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
-                compiled_methods = ['_update_metadata', '_rotary_prepare_cos_sin']
+                compiled_methods = [
+                    '_update_metadata', '_rotary_prepare_cos_sin'
+                ]
                 for method_name in compiled_methods:
                     method = getattr(self.model, method_name)
                     if method is not None:
