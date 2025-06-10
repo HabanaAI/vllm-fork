@@ -1174,6 +1174,7 @@ class HPUModelRunner:
             context_blocks_t = None
 
         attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
+            alibi_blocks=None,
             seq_lens_tensor=query_lens,
             context_lens_tensor=context_lens,
             slot_mapping=token_slots,
@@ -1841,6 +1842,7 @@ class HPUModelRunner:
             seq_lens_device = _async_h2d_tensor_copy(seq_lens, self.device)
 
             attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
+                alibi_blocks=None,
                 context_lens_tensor=None,
                 seq_lens_tensor=seq_lens_device,
                 slot_mapping=slot_mapping_device,
