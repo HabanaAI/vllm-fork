@@ -780,28 +780,22 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 self._pending_step = self._pending_step + 1
                 if self._pending_step > 1:
                     #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
-                    print(f" cache before pop{self.cached_step_accepted_tokens=}")
+                    #print(f" cache before pop{self.cached_step_accepted_tokens=}")
                     self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
                     
                     self.target_logprobs_=self.cached_step_target_logprobs[0]
                     self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
 
-                    print(f"a-1-1!!!{self.accepted_token_ids_=}")
+                    #print(f"a-1-1!!!{self.accepted_token_ids_=}")
 
                     #self.accepted_token_ids_=self.cached_step_accepted_tokens[0]
                     #print(f"====={self.rank=},{self._driver_rank=}====")
-        print(f"a00!!!{self.accepted_token_ids_=}")
+        #print(f"a00!!!{self.accepted_token_ids_=}")
 
         with Timer() as proposal_timer:
             print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
-            if self.hpu_opt:
-                if self.accepted_token_ids_ is not None:
-                    valid_tokens =  self.accepted_token_ids_[ self.accepted_token_ids_ != -1]
-                
-                    if  self.accepted_token_ids_.numel()-valid_tokens.numel()==1:
-                        execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
-         
+            if self.hpu_opt:      
                 proposals = self.proposer_worker.get_spec_proposals(
                     execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
             else:
@@ -831,8 +825,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     proposals,
                 )
             
-        print("!!!proposal",proposals,proposal_scores)
-        print("!!!self.accept token id",self.accepted_token_ids_)
+        #print("!!!proposal",proposals,proposal_scores)
+        #print("!!!self.accept token id",self.accepted_token_ids_)
         
         _, (non_spec_seqs, non_spec_indices) = split_batch_by_proposal_len(
             execute_model_req.seq_group_metadata_list, proposals.proposal_lens)
@@ -861,7 +855,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         stage_times = (proposal_timer.elapsed_time_ms / num_lookahead_slots,
                        scoring_timer.elapsed_time_ms,
                        verification_timer.elapsed_time_ms)
-        print("!!!accept token id",accepted_token_ids)
+        #print("!!!accept token id",accepted_token_ids)
 
         self._pending_data = {
             "seq_group_metadata_list": execute_model_req.seq_group_metadata_list,
@@ -871,7 +865,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         if accepted_token_ids is not None and accepted_token_ids[0][0]==12:
             c=0
         self.cached_step_accepted_tokens.append(accepted_token_ids)
-        print(f" cache after append{self.cached_step_accepted_tokens=}")
+        #print(f" cache after append{self.cached_step_accepted_tokens=}")
         self.cached_step_target_logprobs.append(target_logprobs)
         self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
@@ -879,7 +873,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         #2578 -1
         #294 2501
         #305 -1 
-        print(f"!!!_create_output_sampler_list {accepted_token_ids}")
+        #print(f"!!!_create_output_sampler_list {accepted_token_ids}")
         tmp = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
@@ -1039,7 +1033,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
         else:
             #hpu_opt
-            accepted_token_ids_by_step = [[10], [12]]
+            pading_tokens = [[10], [12]]
+            accepted_token_ids_by_step=[[item[0] for _ in range(batch_size)] for item in pading_tokens]           
 
         # Construct the output on a per-step, per-sequence basis.
         # Non-terminal prefill chunks will end up here as rows with just -1s
