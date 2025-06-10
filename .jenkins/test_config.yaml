@@ -282,4 +282,10 @@ stages:
         pytest -v -s -vvv --log-cli-level=INFO tests/v1/core -k "not kv_connector" && 
         pytest -v -s -vvv --log-cli-level=INFO tests/v1/engine && 
         pytest -v -s -vvv --log-cli-level=INFO tests/v1/worker 
+  - name: test_hpu_extension
+    steps:
+      - name: test_hpu_extension
+        flavor: g2
+        command: >-
+          pytest -v -s -vvv --log-cli-level=INFO vllm_hpu_extension
     
