@@ -71,16 +71,16 @@ stages:
           cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
   - name: test_gsm8k_small_models_merged_prefill
     steps:
-      - name: v0_gsm8k_small_g2_tp1_merged_prefill
-        flavor: g2
+      - name: v0_gsm8k_small_g2_tp2_merged_prefill
+        flavor: g2.s
         command: >-
           export VLLM_USE_V1=0 export VLLM_MERGED_PREFILL=true &&
-          cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
-      - name: v1_gsm8k_small_g2_tp1_merged_prefill
-        flavor: g2
+          cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2 -a
+      - name: v1_gsm8k_small_g2_tp2_merged_prefill
+        flavor: g2.s
         command: >-
           export VLLM_USE_V1=1 export VLLM_MERGED_PREFILL=true &&
-          cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1 -a
+          cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2 -a
   - name: test_gsm8k_large_models
     steps:
       - name: v0_gsm8k_large_g3_tp2_part1
