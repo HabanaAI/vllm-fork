@@ -39,8 +39,8 @@ _PAD_BLOCK_ID = 0
 
 class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
 
-    def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
-        super().__init__(model, vllm_config, layer_names, is_causal, sampler)
+    def __init__(self, model, vllm_config, is_causal, sampler):
+        super().__init__(model, vllm_config, is_causal, sampler)
 
     def _set_cross_block_mapping(self, metadata, batch_size, device, dtype):
         mask = torch.arange(0,
