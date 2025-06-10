@@ -764,8 +764,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.block_size,
             self.max_num_batched_tokens,
             self.use_merged_prefill,
-            self.max_model_len,
-            prefix_caching=self.use_prefix_caching)
+            self.use_prefix_caching,
+            self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -1032,12 +1032,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, batch_size, seq_len, ctx, is_prompt):
-        if self.enforce_eager:
-            return False
-        if self.skip_warmup:
-            return True
-        return (batch_size, seq_len, ctx, is_prompt) in self.graphed_buckets
+    def _use_graphs(self):
+        return not self.enforce_eager
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -2091,7 +2087,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_lora_profile_run=False,
                         temperature=0) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
+        use_graphs = self._use_graphs()
         scenario_name = ("warmup_"
                          f"{phase}_"
                          f"bs{batch_size}_"
@@ -2747,8 +2743,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks,
-                                          is_prompt)
+            use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None

@@ -605,12 +605,15 @@ class HPUModelRunner:
             self.scheduler_config.max_num_batched_tokens
         self.use_merged_prefill = False
         if self.enable_bucketing:
+            self.use_prefix_caching = (
+                self.vllm_config.cache_config.enable_prefix_caching)
             logger.info("Bucketing is ON.")
             HPUBucketingContext = get_bucketing_context()
             self.bucketing_ctx = HPUBucketingContext(
                 self.max_num_seqs, self.max_prefill_batch_size,
                 self.block_size, self.max_num_batched_tokens,
-                self.use_merged_prefill, self.max_model_len, prefix_caching=False)
+                self.use_merged_prefill, self.use_prefix_caching,
+                self.max_model_len)
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
@@ -1398,8 +1401,7 @@ class HPUModelRunner:
         additional_kwargs = {}
         if htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
-            use_graphs = self._use_graphs(batch_size, seq_len, num_blocks,
-                                          is_prompt)
+            use_graphs = self._use_graphs()
             additional_kwargs.update({"bypass_hpu_graphs": not use_graphs})
         else:
             # no hpu graphs for t.compile?
@@ -1847,12 +1849,8 @@ class HPUModelRunner:
                                  fullgraph=fullgraph,
                                  dynamic=False)
 
-    def _use_graphs(self, batch_size, seq_len, num_blocks, phase):
-        if self.model_config.enforce_eager:
-            return False
-        if self.skip_warmup:
-            return True
-        return (batch_size, seq_len, num_blocks, phase) in self.graphed_buckets
+    def _use_graphs(self):
+        return not self.model_config.enforce_eager
 
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
         num_candidates = len(buckets)
@@ -1892,8 +1890,7 @@ class HPUModelRunner:
         slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
 
         phase = "prompt" if is_prompt else "decode"
-        use_graphs = self._use_graphs(batch_size, query_seq_len, num_blocks,
-                                      is_prompt)
+        use_graphs = self._use_graphs()
         input_ids = torch.zeros((batch_size, query_seq_len),
                                 dtype=torch.int32,
                                 device='cpu')
@@ -2047,13 +2044,10 @@ class HPUModelRunner:
     def log_warmup(self, phase, i, max_i, batch_size, seq_len, num_blocks):
         free_mem = format_bytes(
             HabanaMemoryProfiler.current_free_device_memory())
-        dim = "num_blocks"
-        if phase == "Prompt":
-            dim = "seq_len"
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
-               f"{dim}:{seq_len} "
-               f"ctx:{num_blocks} "
+               f"query_len:{seq_len} "
+               f"num_ctx_blocks:{num_blocks} "
                f"free_mem:{free_mem}")
         logger.info(msg)
 
@@ -2071,7 +2065,6 @@ class HPUModelRunner:
                   num_blocks) in enumerate(reversed(buckets)):
             # Graph memory usage is proportional to seq dimension in a batch
             phase = f"Graph/{'prompt' if is_prompt else 'decode'}"
-            #batch_seq = batch_size * seq_len if is_prompt else batch_size
             if is_prompt:
                 if num_blocks:
                     batch_seq = batch_size * seq_len * num_blocks

@@ -63,7 +63,7 @@ class HPUPoolingModelRunner(
         assert is_prompt is True
         batch_size = input_tokens.size(0)
         seq_len = self._seq_len(attn_metadata)
-        use_graphs = self._use_graphs(batch_size, seq_len, 0, is_prompt)
+        use_graphs = self._use_graphs()
         super()._check_config(batch_size, seq_len, 0, attn_metadata,
                               warmup_mode)
 

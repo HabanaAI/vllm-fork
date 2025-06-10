@@ -354,7 +354,7 @@ class HPUEncoderDecoderModelRunner(
                         is_lora_profile_run=False,
                         temperature=0) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = self._use_graphs(batch_size, seq_len, ctx, is_prompt)
+        use_graphs = self._use_graphs()
         scenario_name = ("warmup_"
                          f"{phase}_"
                          f"bs{batch_size}_"
@@ -598,8 +598,7 @@ class HPUEncoderDecoderModelRunner(
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            use_graphs = self._use_graphs(batch_size, seq_len, ctx_blocks,
-                                          is_prompt)
+            use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
 
