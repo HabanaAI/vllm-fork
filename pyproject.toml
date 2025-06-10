@@ -60,7 +60,7 @@ exclude = [
     # External file, leaving license intact
     "examples/other/fp8/quantizer/quantize.py",
     "vllm/vllm_flash_attn/flash_attn_interface.pyi",
-    "vllm-hpu-extension"
+    "vllm-hpu-extension/**/*.py"
 ]
 
 [tool.ruff.lint.per-file-ignores]
