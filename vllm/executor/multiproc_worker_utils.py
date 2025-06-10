@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
 import os
@@ -14,10 +15,8 @@ from typing import (Any, Callable, Dict, Generic, List, Optional, TextIO,
 
 import torch
 
-from vllm import envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.platforms import current_platform
 from vllm.utils import _maybe_force_spawn, get_mp_context, run_method
 
 logger = init_logger(__name__)
@@ -294,22 +293,6 @@ def set_multiprocessing_worker_envs(parallel_config):
     process before worker processes are created"""
 
     _maybe_force_spawn()
-
-    if (current_platform.is_hpu()
-            and parallel_config.distributed_executor_backend == 'mp'
-            and envs.VLLM_WORKER_MULTIPROC_METHOD == 'fork'):
-        if os.environ.get("VLLM_WORKER_MULTIPROC_METHOD", None) is not None:
-            logger.warning("On HPU, VLLM_WORKER_MULTIPROC_METHOD=fork might "
-                           "cause application hangs on exit. Using "
-                           "VLLM_WORKER_MULTIPROC_METHOD=fork anyway, "
-                           "as it was explicitly requested.")
-        else:
-            logger.warning("On HPU, VLLM_WORKER_MULTIPROC_METHOD=fork might "
-                           "cause application hangs on exit. Setting "
-                           "VLLM_WORKER_MULTIPROC_METHOD to 'spawn'. "
-                           "To override that behavior, please set "
-                           "VLLM_WORKER_MULTIPROC_METHOD=fork explicitly.")
-            os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
     # Configure thread parallelism if OMP_NUM_THREADS isn't set
     #
