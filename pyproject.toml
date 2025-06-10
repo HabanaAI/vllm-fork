@@ -59,7 +59,7 @@ line-length = 80
 exclude = [
     # External file, leaving license intact
     "examples/other/fp8/quantizer/quantize.py",
-    "vllm/vllm_flash_attn/flash_attn_interface.pyi"
+    "vllm/vllm_flash_attn/flash_attn_interface.pyi",
     "vllm-hpu-extension"
 ]
 
