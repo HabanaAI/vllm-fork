@@ -1,15 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from abc import abstractmethod
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.jit
 import torch.nn as nn
 
 from vllm.platforms import current_platform
-
-is_hpu = current_platform.is_hpu()
 
 
 class SpecDecodeBaseSampler(nn.Module):
@@ -100,11 +99,7 @@ class SpecDecodeBaseSampler(nn.Module):
         batch_size, k = substitute_token_ids.shape
         bonus_token_ids = bonus_token_ids.squeeze(-1)
         # Determine the index of the first False value for each row.
-        if is_hpu:
-            # WA on HPU to bypass the cpu_fallback
-            limits = (accepted == 0).to(torch.int32).max(1).indices
-        else:
-            limits = (accepted == 0).max(1).indices
+        limits = (accepted == 0).max(1).indices
         limits[~(accepted == 0).any(1)] = k
 
         # Create masks using the indices.
@@ -259,6 +254,6 @@ class SpecDecodeStochasticBaseSampler(SpecDecodeBaseSampler):
         bonus_token_ids: torch.Tensor,
         draft_probs: torch.Tensor,
         draft_token_ids: torch.Tensor,
-        seeded_seqs: Optional[Dict[int, torch.Generator]] = None,
+        seeded_seqs: Optional[dict[int, torch.Generator]] = None,
     ) -> torch.Tensor:
         raise NotImplementedError

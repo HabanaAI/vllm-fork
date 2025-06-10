@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 # Copyright 2024- the Outlines developers
 # This file is adapted from
@@ -17,11 +18,9 @@
 # limitations under the License.
 import copy
 import json
-import math
 from collections import defaultdict
-from collections.abc import Hashable, Iterable
 from functools import lru_cache
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
@@ -49,75 +48,22 @@ else:
     disable_cache()
 
 
-# Unfortunately we cannot use lru_cache as it breaks pickling
-# so we use a simpler implementation
-def _cached(fn):
-    cache: dict[Any, Any] = {}
-
-    def hash_args(obj):
-        match obj:
-            case Iterable():
-                # NOTE(kzawora): be careful not to hash genexpr directly
-                # (e.g hash(hash_args(item) for item in obj))
-                # hashing different generator expressions can yield the
-                # same hash (and vice versa)
-                # see https://stackoverflow.com/q/38174211
-                # this is why we hash the tuple, not genexpr here
-                return hash(tuple(hash_args(item) for item in obj))
-            case Hashable():
-                return hash(obj)
-            case _:
-                return hash(id(obj))
-
-    def cached_fn(*args):
-        cache_key = hash_args(args)
-        if cache_key in cache:
-            result = cache[cache_key]
-        else:
-            result = fn(*args)
-            cache[cache_key] = result
-        return result
-
-    return cached_fn
-
-
 class BaseLogitsProcessor:
 
     def __init__(self, guide: Guide, reasoner: Optional[ReasoningParser]):
         self._guide: Guide = guide
         self._reasoner: Optional[ReasoningParser] = reasoner
         # CFGState is used for the FSM state for CFGGuide
-        self._fsm_state: DefaultDict[int, Union[int,
+        self._fsm_state: defaultdict[int, Union[int,
                                                 CFGState]] = defaultdict(int)
-        self._cached_get_mask_tensor = _cached(self._get_mask_tensor)
 
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def _create_mask_tensor(allowed_tokens, vocab_size, device):
-        mask = torch.full((vocab_size, ), -math.inf, device=device)
-        # The tokenizer may support more token ids than the model can generate,
-        # eg. Llama 3.2 Vision models have an `<|image|>` token with id 128256
-        # but scores.shape == torch.Size([128256])
-        allowed_tokens = torch.tensor(allowed_tokens, device=device)
-        allowed_tokens = allowed_tokens.masked_select(
-            allowed_tokens < vocab_size)
-        mask.index_fill_(0, allowed_tokens, 0)
-        return mask
+    def clone(self) -> "BaseLogitsProcessor":
+        cloned = copy.copy(self)
+        cloned._guide = self._guide.copy()
+        cloned._fsm_state = copy.deepcopy(self._fsm_state)
+        return cloned
 
-    def _get_mask_tensor(self, state_id, vocab_size, device):
-        instruction = self._guide.get_next_instruction(state=state_id)
-        if type(instruction) == Generate:  # noqa: E721
-            allowed_tokens = instruction.tokens
-        elif type(instruction) == Write:  # noqa: E721
-            # TODO: support fast forward tokens
-            allowed_tokens = [instruction.tokens[0]]
-        else:
-            raise TypeError(
-                f"Unsupported instruction type {type(instruction)}")
-        return BaseLogitsProcessor._create_mask_tensor(tuple(allowed_tokens),
-                                                       vocab_size, device)
-
-    def __call__(self, input_ids: List[int],
+    def __call__(self, input_ids: list[int],
                  scores: torch.Tensor) -> torch.Tensor:
         """Use the FSM to bias the logits before sampling the next token."""
 
@@ -221,7 +167,7 @@ class RegexLogitsProcessor(BaseLogitsProcessor):
 
 class JSONLogitsProcessor(RegexLogitsProcessor):
 
-    def __init__(self, schema: Union[str, Dict, BaseModel],
+    def __init__(self, schema: Union[str, dict, BaseModel],
                  tokenizer: PreTrainedTokenizerBase,
                  whitespace_pattern: Union[str, None],
                  reasoner: Optional[ReasoningParser]):
@@ -242,7 +188,7 @@ class JSONLogitsProcessor(RegexLogitsProcessor):
         """
         if isinstance(schema, type(BaseModel)):
             schema_str = json.dumps(schema.model_json_schema())
-        elif isinstance(schema, Dict):
+        elif isinstance(schema, dict):
             schema_str = json.dumps(schema)
         elif isinstance(schema, str):
             schema_str = schema
@@ -279,6 +225,12 @@ class CFGLogitsProcessor(BaseLogitsProcessor):
                          reasoner)
         self._guide = self._guide.copy()
 
+    def clone(self) -> "CFGLogitsProcessor":
+        cloned = copy.copy(self)
+        cloned._fsm_state = copy.deepcopy(self._fsm_state)
+        cloned._guide = self._guide.copy()
+        return cloned
+
 
 @lru_cache(maxsize=32)
 def _adapt_tokenizer(tokenizer: PreTrainedTokenizerBase):
@@ -313,11 +265,11 @@ def _adapt_tokenizer(tokenizer: PreTrainedTokenizerBase):
         return string
 
     def change_decoder(
-        decoder: Callable[[List[int]],
-                          str]) -> Callable[[List[int]], List[str]]:
+        decoder: Callable[[list[int]],
+                          str]) -> Callable[[list[int]], list[str]]:
         """Sync vLLM's decoder with the outlines by returning list."""
 
-        def new_decoder(inp_tokens: List[int]) -> List[str]:
+        def new_decoder(inp_tokens: list[int]) -> list[str]:
             if (isinstance(inp_tokens, list) and len(inp_tokens) == 1
                     and isinstance(inp_tokens[0], list)):
                 inp_tokens = inp_tokens[0]

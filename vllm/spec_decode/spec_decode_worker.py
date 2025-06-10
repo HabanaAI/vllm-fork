@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import copy
 from collections import defaultdict
@@ -29,8 +30,6 @@ from vllm.spec_decode.batch_expansion import BatchExpansionTop1Scorer
 
 if current_platform.is_cuda_alike():
     from vllm.spec_decode.draft_model_runner import TP1DraftModelRunner
-else:
-    from vllm.spec_decode.draft_model_runner import GeneralTP1DraftModelRunner
 
 from vllm.spec_decode.interfaces import (SpeculativeProposals,
                                          SpeculativeScorer, SpeculativeScores)
@@ -116,7 +115,7 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
     return spec_decode_worker
 
 
-# Reminder: Please update docs/source/features/compatibility_matrix.md
+# Reminder: Please update docs/features/compatibility_matrix.md
 # If the feature combo become valid
 class SpecDecodeWorker(LoRANotSupportedWorkerBase):
     """Worker which implements speculative decoding.
@@ -188,9 +187,6 @@ class SpecDecodeWorker(LoRANotSupportedWorkerBase):
                     if current_platform.is_cuda_alike():
                         draft_worker_kwargs[
                             "model_runner_cls"] = TP1DraftModelRunner
-                    elif current_platform.is_hpu():
-                        draft_worker_kwargs[
-                            "model_runner_cls"] = GeneralTP1DraftModelRunner
                 else:
                     if draft_model_config.hf_config.model_type == "eagle":
                         raise NotImplementedError(
