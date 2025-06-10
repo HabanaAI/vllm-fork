@@ -407,7 +407,8 @@ class HpuModelAdapter(torch.nn.Module):
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
-        """Prepare cos/sin buffers for each unique RotaryEmbedding type only once."""
+        """Prepare cos/sin buffers for each unique RotaryEmbedding type
+        only once."""
 
         for path in self.layer_names:
             current_module = self.model  # Start from the top level of the model
@@ -419,7 +420,8 @@ class HpuModelAdapter(torch.nn.Module):
                 if isinstance(layer, str) and not isinstance(
                         layer, int):  # Name-based access
                     current_module = getattr(current_module, layer)
-                elif isinstance(layer, int):  # Indexed-based access
+                elif isinstance(layer,
+                                int):  # Indexed-based access (like ModuleList)
                     module_list = list(current_module._modules.values())
                     if layer >= len(module_list):
                         # for MTP models, last layer is MTP layer
