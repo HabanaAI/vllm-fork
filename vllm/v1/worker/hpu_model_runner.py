@@ -928,12 +928,13 @@ class HPUModelRunner:
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
             num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
-            # This is prompt
+
             if num_computed_tokens < num_prompt_tokens and not self.is_decoder_only(req_id):
+                # This is prompt
                 break
 
             # This is decode
-            if not self.is_decoder_only:
+            if not self.is_decoder_only(req_id):
                 assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
 
