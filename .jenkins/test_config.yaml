@@ -4,7 +4,7 @@ stages:
       - name: v1_gsm8k_small_g3_tp1
         flavor: g3
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export PT_HPU_LAZY_MODE=1 &&
           export VLLM_USE_V1=1 &&
           export VLLM_CONTIGUOUS_PA=false &&
@@ -13,7 +13,7 @@ stages:
       - name: v1_gsm8k_small_g2_tp1
         flavor: g2
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export PT_HPU_LAZY_MODE=1 &&
           export VLLM_USE_V1=1 &&
           export VLLM_CONTIGUOUS_PA=false &&
@@ -25,7 +25,7 @@ stages:
       - name: v1_gsm8k_small_g3_tp1_apc
         flavor: g3
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export VLLM_CONTIGUOUS_PA=false &&
           export VLLM_USE_V1=1 &&
           cd .jenkins/lm-eval-harness &&
@@ -33,7 +33,7 @@ stages:
       - name: v1_gsm8k_small_g2_tp1_apc
         flavor: g2
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export VLLM_CONTIGUOUS_PA=false &&
           export VLLM_USE_V1=1 &&
           cd .jenkins/lm-eval-harness &&
@@ -44,7 +44,7 @@ stages:
       - name: v1_gsm8k_large_g3_tp2_part2
         flavor: g3.s
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export PT_HPU_LAZY_MODE=1 &&
           export VLLM_USE_V1=1 &&
           export VLLM_CONTIGUOUS_PA=false &&
@@ -53,7 +53,7 @@ stages:
       - name: v1_gsm8k_large_g2_tp4
         flavor: g2.m
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export PT_HPU_LAZY_MODE=1 &&
           export VLLM_USE_V1=1 &&
           export VLLM_CONTIGUOUS_PA=false &&
@@ -65,7 +65,7 @@ stages:
       - name: test_v1_core_engine_worker_g2
         flavor: g3
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export PT_HPU_LAZY_MODE=1 &&
           export VLLM_USE_V1=1 &&
           export VLLM_SKIP_WARMUP=true &&
@@ -75,7 +75,7 @@ stages:
       - name: test_v1_core_engine_worker_g3
         flavor: g3
         command: >-
-          pip uninstall -y triton --root-user-action &&
+          pip uninstall triton -y --root-user-action=ignore &&
           export PT_HPU_LAZY_MODE=1 &&
           export VLLM_USE_V1=1 &&
           export VLLM_SKIP_WARMUP=true &&
