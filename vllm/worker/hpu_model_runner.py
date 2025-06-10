@@ -1780,7 +1780,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         rank = torch.distributed.get_rank()
         if accepted_token_id is not None :
             #print(f"============prepare_input_tensors====={accepted_token_id=}==============")
-            print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
+            #print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
             # 过滤掉-1的非法token
             valid_tokens = accepted_token_id[accepted_token_id != -1]
 
@@ -1803,7 +1803,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if input_tokens is not None and input_tokens[0][0]==12:
                 pass
-            print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
+            #print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
             input_tokens=input_tokens[:2]
             #print(f"==============222prepare_input_tensors after {input_tokens=}, {rank=}")
 
@@ -2581,7 +2581,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
-            print(f"a77!!!{accepted_token_id=}")
+            #print(f"a77!!!{accepted_token_id=}")
 
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list, finished_requests_ids, align_worker, accepted_token_id)
@@ -2694,26 +2694,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states = kwargs.get('previous_hidden_states')
         accepted_token_id_=None
         rank = torch.distributed.get_rank()
-
-        if accepted_token_id is not None:
-            accepted_token_id_=accepted_token_id.cpu()
-            
-            valid_tokens = accepted_token_id[accepted_token_id != -1]
-            
-            if accepted_token_id.numel()-valid_tokens.numel()==1:
-                if rank==0:
-                    b=0
-                previous_hidden_states=kwargs.get("previous_hidden_states")
-                if previous_hidden_states is not None:
-                    kwargs["previous_hidden_states"] = kwargs.get("previous_hidden_states")[:1]
-              
-            
         #accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
-
         #print(f"================================{accepted_token_id_=}, {rank=}, {self.is_driver_worker=}=========================")
-        if rank==0:
-            print("!!model_input.input_tokens",model_input.input_tokens)
-            print("!!!end model_input")
+        #if rank==0:
+        #    print("!!model_input.input_tokens",model_input.input_tokens)
+        #    print("!!!end model_input")
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'

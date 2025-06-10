@@ -71,11 +71,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         For multi step worker, this indicator shall be True.
         """
         rank=torch.distributed.get_rank()
-        if accepted_token_id is not None:
-            valid_tokens =  accepted_token_id[accepted_token_id != -1]
-            if  accepted_token_id.numel()-valid_tokens.numel()==1:
-                execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
-                b=0
+        
         self._raise_if_unsupported(execute_model_req)
         # Expand the batch for sequences with a bonus token.
         # Perform a forward pass on the expanded batch and filter the
@@ -122,11 +118,6 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         expanded_request, indices_of_seq_with_bonus_tokens =\
             self._expand_execute_model_request(
                 execute_model_req, seq_ids_with_bonus_token_in_last_step)
-
-        if accepted_token_id is not None:
-            valid_tokens =  accepted_token_id[accepted_token_id != -1]
-            if  accepted_token_id.numel()-valid_tokens.numel()==1:
-                execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
 
         # Run model sample_len times.
         model_outputs: List[SamplerOutput] = []

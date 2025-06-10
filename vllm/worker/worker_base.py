@@ -389,7 +389,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     broadcast_tensor_dict({"is_dummy_batch": True}, src=0)
                 self.model_runner._dummy_run(1)
                 return None
-            print(f"a66!!!{accepted_token_id=}")
+            #print(f"a66!!!{accepted_token_id=}")
 
             return self._get_driver_input_and_broadcast(execute_model_req, accepted_token_id)
         else:
