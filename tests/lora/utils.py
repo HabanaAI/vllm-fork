@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from dataclasses import dataclass
 from typing import Optional, Union
@@ -63,8 +64,8 @@ class DummyLoRAManager:
             module_name,
             rank=rank,
             lora_alpha=1,
-            lora_a=torch.rand([input_dim, rank], device=self._device),
-            lora_b=torch.rand([rank, output_dim], device=self._device),
+            lora_a=torch.rand([input_dim, rank], device="cuda"),
+            lora_b=torch.rand([rank, output_dim], device="cuda"),
             embeddings_tensor=embeddings_tensor,
         )
         self.set_module_lora(module_name, lora)

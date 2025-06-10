@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # Datastructures defining an input batch
 
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from vllm.utils import swap_dict_values
 from vllm.v1.outputs import LogprobsTensors
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.utils import copy_slice
-from vllm.v1.worker.block_table import BlockTable
+from vllm.v1.worker.block_table import MultiGroupBlockTable
 
 _SAMPLING_EPS = 1e-5
 
@@ -29,7 +30,7 @@ class CachedRequestState:
     sampling_params: SamplingParams
     generator: Optional[torch.Generator]
 
-    block_ids: list[int]
+    block_ids: tuple[list[int], ...]
     num_computed_tokens: int
     output_token_ids: list[int]
 
@@ -55,17 +56,18 @@ class CachedRequestState:
 class InputBatch:
 
     def __init__(
-        self,
-        max_num_reqs: int,
-        max_model_len: int,
-        max_num_blocks_per_req: int,
-        device: torch.device,
-        pin_memory: bool,
-        vocab_size: int,
+            self,
+            max_num_reqs: int,
+            max_model_len: int,
+            max_num_batched_tokens: int,
+            device: torch.device,
+            pin_memory: bool,
+            vocab_size: int,
+            block_sizes: list[int],  # The block_size of each kv cache group
     ):
         self.max_num_reqs = max_num_reqs
         self.max_model_len = max_model_len
-        self.max_num_blocks_per_req = max_num_blocks_per_req
+        self.max_num_batched_tokens = max_num_batched_tokens
         self.device = device
         self.pin_memory = pin_memory
         self.vocab_size = vocab_size
@@ -97,11 +99,13 @@ class InputBatch:
             self.num_computed_tokens_cpu_tensor.numpy()
 
         # Block table.
-        self.block_table = BlockTable(
+        self.block_table = MultiGroupBlockTable(
             max_num_reqs=max_num_reqs,
-            max_num_blocks_per_req=max_num_blocks_per_req,
+            max_model_len=max_model_len,
+            max_num_batched_tokens=max_num_batched_tokens,
             pin_memory=pin_memory,
             device=device,
+            block_sizes=block_sizes,
         )
 
         # Sampling-related.
@@ -589,93 +593,6 @@ class InputBatch:
             min_tokens=self.min_tokens,
             no_penalties=self.no_penalties,
             logit_bias=self.logit_bias[:num_reqs],
-            allowed_token_ids_mask=allowed_token_ids_mask,
-            bad_words_token_ids=self.bad_words_token_ids,
-        )
-
-    def make_selective_sampling_metadata(
-        self,
-        req_id_output_token_ids: list[tuple[str, list[int]]],
-        skip_copy: bool = False,
-    ) -> SamplingMetadata:
-        req_indices: list[int] = [
-            self.req_id_to_index[req_id]
-            for req_id, _ in req_id_output_token_ids
-        ]
-        prompt_token_ids = None
-        if not skip_copy:
-            self.temperature[req_indices].copy_(
-                self.temperature_cpu_tensor[req_indices], non_blocking=True)
-            self.top_p[req_indices].copy_(self.top_p_cpu_tensor[req_indices],
-                                          non_blocking=True)
-            self.top_k[req_indices].copy_(self.top_k_cpu_tensor[req_indices],
-                                          non_blocking=True)
-            if not self.no_penalties:
-                # Since syncing these tensors is expensive only copy them
-                # if necessary i.e. if there are requests which require
-                # penalties to be applied during sampling.
-                self.frequency_penalties[req_indices].copy_(
-                    self.frequency_penalties_cpu_tensor[req_indices],
-                    non_blocking=True)
-                self.presence_penalties[req_indices].copy_(
-                    self.presence_penalties_cpu_tensor[req_indices],
-                    non_blocking=True)
-                self.repetition_penalties[req_indices].copy_(
-                    self.repetition_penalties_cpu_tensor[req_indices],
-                    non_blocking=True)
-                # The prompt tokens are used only for applying penalties during
-                # the sampling process. Hence copy these tensors only when
-                # there are requests which need penalties to be applied.
-                prompt_token_ids = self._make_prompt_token_ids_tensor(
-                )[req_indices]
-        else:
-            prompt_token_ids = None
-        output_token_ids: list[list[int]] = []
-
-        for req_id, output_tokens in req_id_output_token_ids:
-            assert req_id is not None
-            # Currently we create a tensor for output_token_ids from scratch
-            # at each step. However, for the penalties computation what we
-            # need is stats about the token ids present in the output. This
-            # stats can be maintained incrementally instead of computing it
-            # from scratch at each step.
-            # TODO - Replace this with incremental update to output token
-            # statistics.
-            output_token_ids.append(output_tokens)
-
-        allowed_token_ids_mask: Optional[torch.Tensor] = None
-        if not self.no_allowed_token_ids:
-            assert self.allowed_token_ids_mask is not None
-            assert self.allowed_token_ids_mask_cpu_tensor is not None
-            self.allowed_token_ids_mask[req_indices].copy_(
-                self.allowed_token_ids_mask_cpu_tensor[req_indices],
-                non_blocking=True)
-            allowed_token_ids_mask = self.allowed_token_ids_mask[req_indices]
-        return SamplingMetadata(
-            temperature=self.temperature[req_indices],
-            all_greedy=self.all_greedy,
-            all_random=self.all_random,
-            top_p=None if self.no_top_p else self.top_p[req_indices],
-            top_k=None if self.no_top_k else self.top_k[req_indices],
-            min_p=None if self.no_min_p else self.min_p[req_indices],
-            generators={
-                i: self.generators[req_idx]
-                for i, req_idx in enumerate(req_indices)
-                if self.generators.get(req_idx, None) is not None
-            },
-            max_num_logprobs=self.max_num_logprobs,
-            prompt_token_ids=prompt_token_ids,
-            frequency_penalties=self.frequency_penalties[req_indices],
-            presence_penalties=self.presence_penalties[req_indices],
-            repetition_penalties=self.repetition_penalties[req_indices],
-            output_token_ids=cast(list[list[int]], output_token_ids),
-            min_tokens={
-                i: self.min_tokens[req_idx]
-                for i, req_idx in enumerate(req_indices)
-                if self.min_tokens.get(req_idx, None) is not None
-            },
-            no_penalties=self.no_penalties,
-            logit_bias=[self.logit_bias[req_idx] for req_idx in req_indices],
             allowed_token_ids_mask=allowed_token_ids_mask,
             bad_words_token_ids=self.bad_words_token_ids,
         )

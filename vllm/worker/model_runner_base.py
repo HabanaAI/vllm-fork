@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import dataclasses
 from abc import ABC, abstractmethod
@@ -261,17 +262,6 @@ class ModelRunnerWrapperBase:
 
     def __getattr__(self, attr):
         return getattr(self.model_runner, attr)
-
-    def __setattr__(self, name, value):
-        """
-         Ensure that setting the 'model_runner' attribute
-         does not delegate to model_runner
-         """
-
-        if name == "model_runner":
-            object.__setattr__(self, name, value)
-        else:
-            setattr(self.model_runner, name, value)
 
 
 class InputProcessingError(Exception):

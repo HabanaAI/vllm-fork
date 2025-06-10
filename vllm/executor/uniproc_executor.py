@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -46,8 +47,6 @@ class UniProcExecutor(ExecutorBase):
         self.collective_rpc("init_device")
         self.collective_rpc("load_model")
 
-        self.shutdown_worker = True
-
     def collective_rpc(self,
                        method: Union[str, Callable],
                        timeout: Optional[float] = None,
@@ -62,11 +61,6 @@ class UniProcExecutor(ExecutorBase):
         # UniProcExecutor will always be healthy as long as
         # it's running.
         return
-
-    def shutdown(self):
-        if getattr(self, 'shutdown_worker', False):
-            self.shutdown_worker = False
-            getattr(self.driver_worker, 'shutdown', lambda: None)()
 
 
 UniProcExecutorAsync = UniProcExecutor
@@ -93,9 +87,6 @@ class ExecutorWithExternalLauncher(UniProcExecutor):
     def _init_executor(self) -> None:
         """Initialize the worker and load the model.
         """
-        assert self.vllm_config.parallel_config.pipeline_parallel_size == 1, \
-            ("ExecutorWithExternalLauncher does not "
-            "support pipeline parallelism.")
         assert self.vllm_config.scheduler_config.delay_factor == 0.0, \
             ("ExecutorWithExternalLauncher needs deterministic "
             "execution, so it"
@@ -127,8 +118,6 @@ class ExecutorWithExternalLauncher(UniProcExecutor):
         self.collective_rpc("init_worker", args=([kwargs], ))
         self.collective_rpc("init_device")
         self.collective_rpc("load_model")
-
-        self.shutdown_worker = True
 
     def determine_num_available_blocks(self) -> Tuple[int, int]:
         """

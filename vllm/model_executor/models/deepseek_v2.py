@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
@@ -22,7 +23,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only DeepseekV2/DeepseekV3 model."""
-from typing import Any, Dict, Iterable, Optional, Set, Tuple, Union
+from collections.abc import Iterable
+from typing import Any, Optional, Union
 
 import torch
 from torch import nn
@@ -31,9 +33,7 @@ from transformers import PretrainedConfig
 from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, VllmConfig
-from vllm.distributed import (get_pp_group,
-                              get_tensor_model_parallel_world_size,
-                              tensor_model_parallel_all_reduce)
+from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -49,15 +49,12 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsPP
 from .utils import (PPMissingLayer, is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
-
-is_hpu = current_platform.is_hpu()
 
 
 class DeepseekV2MLP(nn.Module):
@@ -135,7 +132,6 @@ class DeepseekV2MoE(nn.Module):
             num_expert_group=config.n_group,
             topk_group=config.topk_group,
             prefix=f"{prefix}.experts",
-            tp_size=self.tp_size,
             scoring_func=config.scoring_func,
             e_score_correction_bias=self.gate.e_score_correction_bias)
 
@@ -147,18 +143,19 @@ class DeepseekV2MoE(nn.Module):
                 intermediate_size=intermediate_size,
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
-                reduce_results=False,
+                reduce_results=self.experts.must_reduce_shared_expert_outputs(
+                ),
                 prefix=f"{prefix}.shared_experts",
             )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        input_shape = hidden_states.shape
-        hidden_dim = input_shape[-1]
+        num_tokens, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         if self.n_shared_experts is not None:
             shared_output = self.shared_experts(hidden_states)
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
+
         if hidden_states.dtype != torch.float16:
             final_hidden_states = self.experts(
                 hidden_states=hidden_states,
@@ -176,11 +173,13 @@ class DeepseekV2MoE(nn.Module):
                 # See DeepseekV2DecoderLayer for more details.
                 final_hidden_states = final_hidden_states + shared_output \
                     * (1. / self.routed_scaling_factor)
-        if self.tp_size > 1:
-            final_hidden_states = tensor_model_parallel_all_reduce(
-                final_hidden_states)
 
-        return final_hidden_states.view(*input_shape)
+        if self.tp_size > 1:
+            final_hidden_states = (
+                self.experts.maybe_all_reduce_tensor_model_parallel(
+                    final_hidden_states))
+
+        return final_hidden_states.view(num_tokens, hidden_dim)
 
 
 def yarn_get_mscale(scale: float = 1, mscale: float = 1) -> float:
@@ -203,7 +202,7 @@ class DeepseekV2Attention(nn.Module):
         q_lora_rank: int,
         kv_lora_rank: int,
         rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
+        rope_scaling: Optional[dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
@@ -296,22 +295,9 @@ class DeepseekV2Attention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        if is_hpu:
-            # need reshape from tensor(x0, y0) to tensor(x1) for hpu
-            _batch_size = positions.shape[0]
-            positions = positions.reshape(positions.shape[0] *
-                                          positions.shape[1])
-            hidden_states = hidden_states.reshape(
-                hidden_states.shape[0] * hidden_states.shape[1],
-                hidden_states.shape[2])
         if self.q_lora_rank is not None:
-            if is_hpu:
-                # w/a of SW-208144
-                q = self.q_a_proj(hidden_states)[0].unsqueeze(0)
-                q = self.q_a_layernorm(q).squeeze(0)
-            else:
-                q = self.q_a_proj(hidden_states)[0]
-                q = self.q_a_layernorm(q)
+            q = self.q_a_proj(hidden_states)[0]
+            q = self.q_a_layernorm(q)
             q = self.q_b_proj(q)[0].view(-1, self.num_local_heads,
                                          self.qk_head_dim)
         else:
@@ -323,11 +309,7 @@ class DeepseekV2Attention(nn.Module):
         kv_a, _ = latent_cache.split(
             [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         latent_cache = latent_cache.unsqueeze(1)
-        if is_hpu:
-            kv_a = self.kv_a_layernorm(kv_a.contiguous().unsqueeze(0)).squeeze(
-                0)  # w/a of SW-208144
-        else:
-            kv_a = self.kv_a_layernorm(kv_a.contiguous())
+        kv_a = self.kv_a_layernorm(kv_a.contiguous())
         kv = self.kv_b_proj(kv_a)[0]
         kv = kv.view(-1, self.num_local_heads,
                      self.qk_nope_head_dim + self.v_head_dim)
@@ -344,26 +326,12 @@ class DeepseekV2Attention(nn.Module):
         v = torch.nn.functional.pad(
             v, [0, self.qk_head_dim - self.v_head_dim],
             value=0).view(-1, self.num_local_heads * self.qk_head_dim)
-        if is_hpu:
-            # need restore from tensor(x0, y0) to tensor(x1, y1, z1) for hpu
-            q = q.reshape(_batch_size, q.shape[0] // _batch_size, q.shape[1])
-            k = k.reshape(_batch_size, k.shape[0] // _batch_size, k.shape[1])
-            v = v.reshape(_batch_size, v.shape[0] // _batch_size, v.shape[1])
         attn_output = self.attn(q, k, v)
-        if is_hpu:
-            # need restore from tensor(x0, y0, z0) to tensor(x1, y1) for hpu
-            attn_output = attn_output.reshape(
-                attn_output.shape[0] * attn_output.shape[1],
-                attn_output.shape[2])
         attn_output = attn_output.view(
             -1, self.num_local_heads,
             self.qk_head_dim)[..., :self.v_head_dim].reshape(
                 -1, self.num_local_heads * self.v_head_dim)
         output, _ = self.o_proj(attn_output)
-        if is_hpu:
-            output = output.reshape(_batch_size,
-                                    output.shape[0] // _batch_size,
-                                    output.shape[1])
         return output
 
 
@@ -386,7 +354,7 @@ class DeepseekV2MLAAttention(nn.Module):
         q_lora_rank: Optional[int],
         kv_lora_rank: int,
         rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
+        rope_scaling: Optional[dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
@@ -489,7 +457,6 @@ class DeepseekV2MLAAttention(nn.Module):
             qk_rope_head_dim=self.qk_rope_head_dim,
             qk_head_dim=self.qk_head_dim,
             v_head_dim=self.v_head_dim,
-            rotary_emb=self.rotary_emb,
             kv_b_proj=self.kv_b_proj,
         )
 
@@ -510,6 +477,13 @@ class DeepseekV2MLAAttention(nn.Module):
         kv_c, k_pe = self.kv_a_proj_with_mqa(hidden_states)[0].split(
             [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
+
+        q = q.view(-1, self.num_local_heads, self.qk_head_dim)
+        # Add head dim of 1 to k_pe
+        k_pe = k_pe.unsqueeze(1)
+
+        q[..., self.qk_nope_head_dim:], k_pe = self.rotary_emb(
+            positions, q[..., self.qk_nope_head_dim:], k_pe)
 
         attn_out = self.mla_attn(
             q,
@@ -625,7 +599,6 @@ class DeepseekV2DecoderLayer(nn.Module):
             # The scaling of DeepseekV2MOE output would be done in the forward
             # of DeepseekV2MOE
             hidden_states *= 1. / self.routed_scaling_factor
-            residual *= 1. / self.routed_scaling_factor
 
         return hidden_states, residual
 
@@ -765,8 +738,8 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
                         device=device),
         })
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             ("gate_up_proj", "gate_proj", 0),
@@ -782,7 +755,7 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             num_experts=self.config.n_routed_experts)
 
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
