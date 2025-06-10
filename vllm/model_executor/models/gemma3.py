@@ -252,13 +252,11 @@ class Gemma3Attention(nn.Module):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
 
-        attn_mask = torch.vstack(attn_masks)
-
         output = F.scaled_dot_product_attention(
                 query,
                 key,
                 value,
-                attn_mask,
+                attn_masks,
                 self.scaling,
             )
         
