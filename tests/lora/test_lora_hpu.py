@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 import pytest
 import torch
-from vllm_hpu_extension.ops import LoraMask
 
 from vllm.lora.punica_wrapper.punica_hpu import PunicaWrapperHPU
+from vllm_hpu_extension.ops import LoraMask
 
 from .utils import DummyLoRAManager
 

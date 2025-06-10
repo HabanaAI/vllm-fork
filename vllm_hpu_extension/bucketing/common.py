@@ -21,10 +21,10 @@ class WeakSingleton(type):
             arguments used to create the instance are the same as the ones provided. Raises an assertion error if 
             the arguments differ.
     """
-    # NOTE(kzawora): The instances are stored in a weakref dictionary, 
-    # which allows the instances to be garbage collected when they are 
-    # no longer in use. This is important for tests, where model runner 
-    # can get constructed and destroyed multiple times, and we don't 
+    # NOTE(kzawora): The instances are stored in a weakref dictionary,
+    # which allows the instances to be garbage collected when they are
+    # no longer in use. This is important for tests, where model runner
+    # can get constructed and destroyed multiple times, and we don't
     # want to reuse the bucketing context from the previous instance.
     _instances: WeakValueDictionary[type, object] = WeakValueDictionary()
     _instances_argspec: Dict[type, object] = {}
@@ -37,15 +37,17 @@ class WeakSingleton(type):
             instance = super().__call__(*args, **kwargs)
             cls._instances[cls] = instance
             cls._instances_argspec[cls] = argspec
-        assert cls._instances_argspec[cls] == argspec, "Singleton instance already initialized with different arguments"
+        assert cls._instances_argspec[
+            cls] == argspec, "Singleton instance already initialized with different arguments"
         return cls._instances[cls]
 
+
 def get_bucketing_context():
-    use_exponential_bucketing = os.environ.get(
-        'VLLM_EXPONENTIAL_BUCKETING', 'true').lower() == 'true'
+    use_exponential_bucketing = os.environ.get('VLLM_EXPONENTIAL_BUCKETING',
+                                               'true').lower() == 'true'
     if use_exponential_bucketing:
-        from vllm_hpu_extension.bucketing.exponential import \
-            HPUExponentialBucketingContext as HPUBucketingContext
+        from vllm_hpu_extension.bucketing.exponential import (
+            HPUExponentialBucketingContext as HPUBucketingContext)
     else:
         from vllm_hpu_extension.bucketing.linear import HPUBucketingContext
 

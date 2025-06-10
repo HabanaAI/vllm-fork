@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         ModelInputForHPUWithSamplingMetadata, )
 
 import habana_frameworks.torch as htorch
+
 from vllm_hpu_extension.utils import VLLMKVCache
 
 logger = init_logger(__name__)

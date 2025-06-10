@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Optional
 import torch
 import torch.distributed
 import torch.nn as nn
-from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
 from vllm.config import ParallelConfig, VllmConfig
@@ -23,6 +22,7 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.utils import bind_kv_cache
 from vllm.v1.worker.hpu_model_runner import HPUModelRunner, bool_helper
+from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 logger = init_logger(__name__)
 

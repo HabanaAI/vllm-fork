@@ -20,8 +20,8 @@ import torch
 from vllm import _custom_ops as ops
 from vllm.model_executor.layers.linear import (LinearBase, LinearMethodBase,
                                                UnquantizedLinearMethod)
-from vllm.model_executor.layers.quantization.base_config import \
-    QuantizationConfig
+from vllm.model_executor.layers.quantization.base_config import (
+    QuantizationConfig)
 from vllm.model_executor.parameter import (GroupQuantScaleParameter,
                                            PackedvLLMParameter)
 
@@ -106,8 +106,10 @@ class AWQHPUConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return ["gelu", "gelu_fast", "gelu_new", "gelu_pytorch_tanh"]
 
+
 def is_layer_skipped_awq(prefix: str, modules_to_not_convert: List[str]):
     return any(module_name in prefix for module_name in modules_to_not_convert)
+
 
 class AWQHPULinearMethod(LinearMethodBase):
     """Linear method for AWQ.
@@ -241,10 +243,8 @@ class AWQHPULinearMethod(LinearMethodBase):
         out_shape = (x.shape[:-1] + (qweight.shape[-1] * pack_factor, ))
         reshaped_x = x.reshape(-1, x.shape[-1])
 
-        weight = torch.ops.hpu.convert_from_uint4(qweight,
-                                                scales,
-                                                qzeros,
-                                                x.dtype)
+        weight = torch.ops.hpu.convert_from_uint4(qweight, scales, qzeros,
+                                                  x.dtype)
         out = torch.matmul(reshaped_x, weight)
 
         if bias is not None:

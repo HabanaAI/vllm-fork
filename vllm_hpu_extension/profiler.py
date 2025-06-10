@@ -58,7 +58,7 @@ class HabanaHighLevelProfiler:
     event_tid = {'counter': 1, 'external': 2, 'internal': 3}
     event_cache: List[Any] = []
 
-    def __init__(self, vllm_instance_id = None):
+    def __init__(self, vllm_instance_id=None):
         self.enabled = os.getenv('VLLM_PROFILER_ENABLED',
                                  'false').lower() == 'true' and int(
                                      os.getenv('RANK', '0')) == 0
@@ -76,7 +76,7 @@ class HabanaHighLevelProfiler:
                                      self.profiling_trace_events)
             file_writer.start()
         if os.getenv('VLLM_PROFILER_ENABLED') == 'full':
-            self.enabled = True # don't save separate high-level traces
+            self.enabled = True  # don't save separate high-level traces
 
     def _dump_with_sep(self, entry):
         entry = json.dumps(entry) + ','

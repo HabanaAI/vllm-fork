@@ -5,7 +5,6 @@ from typing import Callable, List, Optional
 import torch
 from compressed_tensors.quantization import QuantizationStrategy
 from torch.nn import Parameter
-from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme)
@@ -16,6 +15,7 @@ from vllm.model_executor.parameter import (ChannelQuantScaleParameter,
                                            ModelWeightParameter,
                                            PerTensorScaleParameter)
 from vllm.platforms import current_platform
+from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
 __all__ = ["CompressedTensorsW8A8Fp8"]
 

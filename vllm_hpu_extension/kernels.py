@@ -10,7 +10,9 @@ from functools import cache
 
 
 def _kernel(name):
+
     def loader(fn):
+
         @cache
         def loader_impl():
             try:
@@ -19,7 +21,9 @@ def _kernel(name):
                 from .utils import logger
                 logger().warning(f"Could not import HPU {name} kernel. "
                                  "vLLM will use native implementation")
+
         return loader_impl
+
     return loader
 
 

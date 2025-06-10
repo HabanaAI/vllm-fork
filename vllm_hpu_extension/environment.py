@@ -42,7 +42,8 @@ def _get_build(_):
     # In cpu-test environment we don't have access to habana-torch-plugin
     from vllm_hpu_extension.utils import is_fake_hpu
     result = '0.0.0.0' if is_fake_hpu() else None
-    logger().warning(f"Unable to detect habana-torch-plugin version! Returning: {result}")
+    logger().warning(
+        f"Unable to detect habana-torch-plugin version! Returning: {result}")
     return result
 
 
@@ -74,15 +75,21 @@ def _get_pt_bridge_mode(_):
 
 def VllmValue(name, env_var_type):
     global _VLLM_VALUES
-    return Value(name, lambda _: _VLLM_VALUES.get(name, None), env_var_type=env_var_type)
+    return Value(name,
+                 lambda _: _VLLM_VALUES.get(name, None),
+                 env_var_type=env_var_type)
 
 
 def get_environment():
     values = [
-        Value('hw', _get_hw, env_var_type=choice('cpu', 'gaudi', 'gaudi2', 'gaudi3')),
+        Value('hw',
+              _get_hw,
+              env_var_type=choice('cpu', 'gaudi', 'gaudi2', 'gaudi3')),
         Value('build', _get_build, env_var_type=str),
         Value('engine_version', _get_vllm_engine_version, env_var_type=str),
-        Value('bridge_mode', _get_pt_bridge_mode, env_var_type=choice('eager', 'lazy')),
+        Value('bridge_mode',
+              _get_pt_bridge_mode,
+              env_var_type=choice('eager', 'lazy')),
         VllmValue('model_type', str),
         VllmValue('prefix_caching', boolean),
     ]

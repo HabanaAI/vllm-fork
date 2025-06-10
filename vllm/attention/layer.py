@@ -332,6 +332,7 @@ class MultiHeadAttention(nn.Module):
 
             if get_config().fsdpa_impl:
                 from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
                 from vllm_hpu_extension.utils import ModuleFusedSDPA
 
                 fsdpa_op = ModuleFusedSDPA(FusedSDPA)

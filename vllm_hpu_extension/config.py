@@ -17,8 +17,10 @@ from packaging.version import Version
 class Config:
     """ Contains pairs of key/value that can be calculated on demand"""
 
-    def __init__(self, *sources: List[Dict[str, Any]], **extra: Dict[str, Any]):
-        self._data = dict(itertools.chain(*[v.items() for v in sources] + [extra.items()]))
+    def __init__(self, *sources: List[Dict[str, Any]], **extra: Dict[str,
+                                                                     Any]):
+        self._data = dict(
+            itertools.chain(*[v.items() for v in sources] + [extra.items()]))
 
     def __getattr__(self, key: str):
         """Allow conveniently querying keys by using dot notation"""
@@ -92,8 +94,10 @@ def Hardware(target_hw: str) -> ValueFn:
 
 def Kernel(loader_fn: Callable) -> ValueFn:
     """Return True if loader_fn result is not None and hardware != 'cpu'"""
+
     def kernel_exists(_):
         return loader_fn() is not None
+
     return All(kernel_exists, Not(Hardware('cpu')))
 
 
@@ -115,9 +119,11 @@ def VersionRange(*specifiers: List[str]) -> ValueFn:
 
 def choice(*options: List[Any]) -> Callable[Any, Any]:
     """Validates if input is one of the available choices and returns it unchanged"""
+
     def choice_impl(x):
         assert x in options, f'{x} is not in allowed options: {options}!'
         return x
+
     return choice_impl
 
 
@@ -145,11 +151,16 @@ class Env:
 
 
 class Value:
-    """A callable that returns the value calculated through its dependencies or overriden by an associated experimental flag"""
+    """A callable that returns the value calculated through its dependencies or overridden by an associated experimental flag"""
 
-    def __init__(self, name: str, dependencies: Any, env_var: str = None, env_var_type: Callable[Any, Any] = boolean):
+    def __init__(self,
+                 name: str,
+                 dependencies: Any,
+                 env_var: str = None,
+                 env_var_type: Callable[Any, Any] = boolean):
         self.name = name
-        self.env_var = env_var if env_var is not None else 'VLLM_' + name.upper()
+        self.env_var = env_var if env_var is not None else 'VLLM_' + name.upper(
+        )
         self.env_var_type = env_var_type
         self.dependencies = dependencies
 
@@ -166,7 +177,8 @@ class Value:
         return self.dependencies
 
 
-def to_dict(collection: List[Union[Value, Env]]) -> Dict[str, Union[Value, Env]]:
+def to_dict(
+        collection: List[Union[Value, Env]]) -> Dict[str, Union[Value, Env]]:
     """Convert a list values/envs to a dict"""
     return {c.name: c for c in collection}
 
@@ -176,6 +188,7 @@ def env_flags(values: List[Value]) -> List[Env]:
     return [v.to_env_flag() for v in values]
 
 
-def split_values_and_flags(values: List[Value]) -> Tuple[Dict[str, Value], Dict[str, Env]]:
+def split_values_and_flags(
+        values: List[Value]) -> Tuple[Dict[str, Value], Dict[str, Env]]:
     """Converts a list of values and returns dicts for both values and envs"""
     return to_dict(values), to_dict(env_flags(values))

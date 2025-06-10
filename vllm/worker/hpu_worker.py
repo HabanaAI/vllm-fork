@@ -16,7 +16,6 @@ from typing import List, Optional, Set, Tuple, Type
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
 import torch.distributed
-from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
 from vllm.config import VllmConfig
@@ -37,6 +36,7 @@ from vllm.worker.hpu_model_runner import HPUModelRunner, HPUModelRunnerBase
 from vllm.worker.hpu_pooling_model_runner import HPUPoolingModelRunner
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
+from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 logger = init_logger(__name__)
 

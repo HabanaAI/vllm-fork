@@ -15,10 +15,8 @@ import habana_frameworks.torch.internal.bridge_config as bc
 import numpy as np
 import torch
 import torch.distributed
-import vllm_hpu_extension.environment as environment
-from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
-from vllm_hpu_extension.runtime import get_config
 
+import vllm_hpu_extension.environment as environment
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import get_attn_backend
@@ -43,6 +41,8 @@ from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsLists,
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.utils import bind_kv_cache
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
+from vllm_hpu_extension.runtime import get_config
 
 if TYPE_CHECKING:
     from vllm.v1.core.scheduler import SchedulerOutput

@@ -21,15 +21,10 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
-import vllm_hpu_extension.environment as environment
 from attr import dataclass
-from vllm_hpu_extension.bucketing.common import get_bucketing_context
-from vllm_hpu_extension.ops import LoraMask as LoraMask
-from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
-                                         HabanaMemoryProfiler, format_bytes)
-from vllm_hpu_extension.runtime import get_config
 
 import vllm.envs as envs
+import vllm_hpu_extension.environment as environment
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.hpu_attn import HPUAttentionImpl
@@ -72,6 +67,11 @@ from vllm.worker.model_runner_base import (
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
     _init_sampling_metadata_from_tensor_dict)
+from vllm_hpu_extension.bucketing.common import get_bucketing_context
+from vllm_hpu_extension.ops import LoraMask as LoraMask
+from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
+                                         HabanaMemoryProfiler, format_bytes)
+from vllm_hpu_extension.runtime import get_config
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
