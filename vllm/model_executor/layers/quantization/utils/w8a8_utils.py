@@ -3,12 +3,12 @@
 from typing import Callable, List, Optional, Tuple, Union
 
 import torch
-from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
 from vllm import _custom_ops as ops
 from vllm import envs
 from vllm.config import CompilationLevel, get_current_vllm_config
 from vllm.platforms import current_platform
+from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
 # Input scaling factors are no longer optional in _scaled_mm starting
 # from pytorch 2.5. Allocating a dummy tensor to pass as input_scale
@@ -16,6 +16,7 @@ TORCH_DEVICE_IDENTITY = None
 
 if current_platform.is_hpu():
     import habana_frameworks.torch.utils.experimental as htexp
+
     from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
 # The condition to determine if it is on a platform that supports

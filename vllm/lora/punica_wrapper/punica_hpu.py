@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union, final
 
 import torch
+
 from vllm_hpu_extension.ops import (dispatch_bgmv_embedding,
                                     dispatch_bgmv_linear)
 
