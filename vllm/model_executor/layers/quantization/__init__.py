@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from typing import Literal, Type, get_args
+from typing import Literal, get_args
 
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
@@ -8,20 +9,18 @@ from vllm.model_executor.layers.quantization.base_config import (
 QuantizationMethods = Literal[
     "aqlm",
     "awq",
-    "awq_hpu",
     "deepspeedfp",
     "tpu_int8",
     "fp8",
     "ptpc_fp8",
     "fbgemm_fp8",
     "modelopt",
-    "nvfp4",
+    "modelopt_fp4",
     "marlin",
     "bitblas",
     "gguf",
     "gptq_marlin_24",
     "gptq_marlin",
-    "gptq_hpu",
     "gptq_bitblas",
     "awq_marlin",
     "gptq",
@@ -32,10 +31,10 @@ QuantizationMethods = Literal[
     "experts_int8",
     "neuron_quant",
     "ipex",
-    "inc",
     "quark",
     "moe_wna16",
     "torchao",
+    "auto-round",
 ]
 QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
@@ -79,17 +78,15 @@ def register_quantization_config(quantization: str):
     return _wrapper
 
 
-def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
+def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
     if quantization not in QUANTIZATION_METHODS:
         raise ValueError(f"Invalid quantization method: {quantization}")
 
     # lazy import to avoid triggering `torch.compile` too early
-    from vllm_hpu_extension.awq_hpu import AWQHPUConfig
-    from vllm_hpu_extension.gptq_hpu import GPTQHPUConfig
-
     from vllm.model_executor.layers.quantization.quark.quark import QuarkConfig
 
     from .aqlm import AQLMConfig
+    from .auto_round import AutoRoundConfig
     from .awq import AWQConfig
     from .awq_marlin import AWQMarlinConfig
     from .bitblas import BitBLASConfig
@@ -106,7 +103,6 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     from .gptq_marlin import GPTQMarlinConfig
     from .gptq_marlin_24 import GPTQMarlin24Config
     from .hqq_marlin import HQQMarlinConfig
-    from .inc import INCConfig
     from .ipex_quant import IPEXConfig
     from .marlin import MarlinConfig
     from .modelopt import ModelOptFp8Config, ModelOptNvFp4Config
@@ -117,22 +113,20 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
     from .torchao import TorchAOConfig
     from .tpu_int8 import Int8TpuConfig
 
-    method_to_config: dict[str, Type[QuantizationConfig]] = {
+    method_to_config: dict[str, type[QuantizationConfig]] = {
         "aqlm": AQLMConfig,
         "awq": AWQConfig,
-        "awq_hpu": AWQHPUConfig,
         "deepspeedfp": DeepSpeedFPConfig,
         "tpu_int8": Int8TpuConfig,
         "fp8": Fp8Config,
         "fbgemm_fp8": FBGEMMFp8Config,
         "modelopt": ModelOptFp8Config,
-        "nvfp4": ModelOptNvFp4Config,
+        "modelopt_fp4": ModelOptNvFp4Config,
         "marlin": MarlinConfig,
         "bitblas": BitBLASConfig,
         "gguf": GGUFConfig,
         "gptq_marlin_24": GPTQMarlin24Config,
         "gptq_marlin": GPTQMarlinConfig,
-        "gptq_hpu": GPTQHPUConfig,
         "gptq_bitblas": GPTQBitBLASConfig,
         "awq_marlin": AWQMarlinConfig,
         "gptq": GPTQConfig,
@@ -144,10 +138,10 @@ def get_quantization_config(quantization: str) -> Type[QuantizationConfig]:
         "experts_int8": ExpertsInt8Config,
         "neuron_quant": NeuronQuantConfig,
         "ipex": IPEXConfig,
-        "inc": INCConfig,
         "quark": QuarkConfig,
         "moe_wna16": MoeWNA16Config,
         "torchao": TorchAOConfig,
+        "auto-round": AutoRoundConfig,
     }
     # Update the `method_to_config` with customized quantization methods.
     method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)

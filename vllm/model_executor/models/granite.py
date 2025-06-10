@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/llama/modeling_llama.py
@@ -22,7 +23,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only IBM Granite model compatible with HuggingFace weights."""
-from typing import Any, Dict, Iterable, Optional, Set, Tuple, Union
+from collections.abc import Iterable
+from typing import Any, Optional, Union
 
 import torch
 from torch import nn
@@ -36,8 +38,7 @@ from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear,
-                                               RowParallelLinear,
-                                               SplitQKVParallelLinear)
+                                               RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
@@ -98,7 +99,7 @@ class GraniteAttention(nn.Module):
         num_heads: int,
         num_kv_heads: int,
         rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
+        rope_scaling: Optional[dict[str, Any]] = None,
         max_position_embeddings: int = 8192,
         quant_config: Optional[QuantizationConfig] = None,
         bias: bool = False,
@@ -130,29 +131,16 @@ class GraniteAttention(nn.Module):
         self.scaling = config.attention_multiplier
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
-        self.split_qkv = cache_config.split_qkv
 
-        if self.split_qkv:
-            self.qkv_proj = SplitQKVParallelLinear(
-                hidden_size=hidden_size,
-                head_size=self.head_dim,
-                total_num_heads=self.total_num_heads,
-                total_num_kv_heads=self.total_num_kv_heads,
-                bias=bias,
-                quant_config=quant_config,
-                prefix=f"{prefix}.qkv_proj",
-            )
-        else:
-            self.qkv_proj = QKVParallelLinear(
-                hidden_size=hidden_size,
-                head_size=self.head_dim,
-                total_num_heads=self.total_num_heads,
-                total_num_kv_heads=self.total_num_kv_heads,
-                bias=bias,
-                quant_config=quant_config,
-                prefix=f"{prefix}.qkv_proj",
-            )
-
+        self.qkv_proj = QKVParallelLinear(
+            hidden_size=hidden_size,
+            head_size=self.head_dim,
+            total_num_heads=self.total_num_heads,
+            total_num_kv_heads=self.total_num_kv_heads,
+            bias=bias,
+            quant_config=quant_config,
+            prefix=f"{prefix}.qkv_proj",
+        )
         self.o_proj = RowParallelLinear(
             input_size=self.total_num_heads * self.head_dim,
             output_size=hidden_size,
@@ -181,12 +169,8 @@ class GraniteAttention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        if self.split_qkv:
-            q, k, v, _ = self.qkv_proj(hidden_states)
-        else:
-            qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v)
         output, _ = self.o_proj(attn_output)
@@ -249,7 +233,7 @@ class GraniteDecoderLayer(nn.Module):
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
@@ -305,8 +289,6 @@ class GraniteModel(nn.Module):
         else:
             self.norm = PPMissingLayer()
 
-        self.split_qkv = cache_config.split_qkv
-
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
@@ -342,28 +324,18 @@ class GraniteModel(nn.Module):
         hidden_states = self.norm(hidden_states)
         return hidden_states
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
-        if not self.split_qkv:
-            stacked_params_mapping = [
-                # (param_name, shard_name, shard_id)
-                (".qkv_proj", ".q_proj", "q"),
-                (".qkv_proj", ".k_proj", "k"),
-                (".qkv_proj", ".v_proj", "v"),
-                (".gate_up_proj", ".gate_proj", 0),
-                (".gate_up_proj", ".up_proj", 1),
-            ]
-        else:
-            stacked_params_mapping = [
-                # (param_name, shard_name, shard_id)
-                (".qkv_proj.q_proj", ".q_proj", "q"),
-                (".qkv_proj.k_proj", ".k_proj", "k"),
-                (".qkv_proj.v_proj", ".v_proj", "v"),
-                (".gate_up_proj", ".gate_proj", 0),
-                (".gate_up_proj", ".up_proj", 1),
-            ]
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
+        stacked_params_mapping = [
+            # (param_name, shard_name, shard_id)
+            (".qkv_proj", ".q_proj", "q"),
+            (".qkv_proj", ".k_proj", "k"),
+            (".qkv_proj", ".v_proj", "v"),
+            (".gate_up_proj", ".gate_proj", 0),
+            (".gate_up_proj", ".up_proj", 1),
+        ]
         params_dict = dict(self.named_parameters())
-        loaded_params: Set[str] = set()
+        loaded_params: set[str] = set()
         for name, loaded_weight in weights:
             if (self.quant_config is not None and
                 (scale_name := self.quant_config.get_cache_scale(name))):
@@ -389,11 +361,8 @@ class GraniteModel(nn.Module):
 
                 param = params_dict[name]
                 weight_loader = param.weight_loader
-                if self.split_qkv and (shard_id == "q" or shard_id == "v"
-                                       or shard_id == "k"):
-                    weight_loader(param, loaded_weight)
-                else:
-                    weight_loader(param, loaded_weight, shard_id)
+                weight_loader(param, loaded_weight, shard_id)
+
                 break
             else:
                 # Skip loading extra bias for GPTQ models.
@@ -509,20 +478,16 @@ class GraniteForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                         device=device),
         })
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
-        skip_prefixes = [
-            "rotary_emb.inv_freq",
-            # Models trained using ColossalAI may include these tensors in
-            # the checkpoint. Skip them.
-            "rotary_emb.cos_cached",
-            "rotary_emb.sin_cached",
-        ]
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         # With tie_word_embeddings, we can skip lm_head.weight
         # The weight might appear unnecessarily in the files if the model is
         # processed with quantization, LoRA, fine-tuning, etc.
-        if self.config.tie_word_embeddings:
-            skip_prefixes.append("lm_head.weight")
+        skip_prefixes = (["lm_head."]
+                         if self.config.tie_word_embeddings else None)
 
-        loader = AutoWeightsLoader(self, skip_prefixes=skip_prefixes)
+        loader = AutoWeightsLoader(
+            self,
+            skip_prefixes=skip_prefixes,
+        )
         return loader.load_weights(weights)
