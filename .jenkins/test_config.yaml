@@ -1,0 +1,77 @@
+stages:
+  - name: test_gsm8k_small_models
+    steps:
+      - name: v1_gsm8k_small_g3_tp1
+        flavor: g3
+        command: >-
+          export PT_HPU_LAZY_MODE=1 &&
+          export VLLM_USE_V1=1 &&
+          export VLLM_CONTIGUOUS_PA=false &&
+          cd .jenkins/lm-eval-harness &&
+          bash run-tests.sh -c configs/models-small.txt -t 1
+      - name: v1_gsm8k_small_g2_tp1
+        flavor: g2
+        command: >-
+          export PT_HPU_LAZY_MODE=1 &&
+          export VLLM_USE_V1=1 &&
+          export VLLM_CONTIGUOUS_PA=false &&
+          cd .jenkins/lm-eval-harness &&
+          bash run-tests.sh -c configs/models-small.txt -t 1
+
+  - name: test_gsm8k_small_models_apc
+    steps:
+      - name: v1_gsm8k_small_g3_tp1_apc
+        flavor: g3
+        command: >-
+          export VLLM_CONTIGUOUS_PA=false &&
+          export VLLM_USE_V1=1 &&
+          cd .jenkins/lm-eval-harness &&
+          bash run-tests.sh -c configs/models-small.txt -t 1 -a
+      - name: v1_gsm8k_small_g2_tp1_apc
+        flavor: g2
+        command: >-
+          export VLLM_CONTIGUOUS_PA=false &&
+          export VLLM_USE_V1=1 &&
+          cd .jenkins/lm-eval-harness &&
+          bash run-tests.sh -c configs/models-small.txt -t 1 -a
+
+  - name: test_gsm8k_large_models
+    steps:
+      - name: v1_gsm8k_large_g3_tp2_part2
+        flavor: g3.s
+        command: >-
+          export PT_HPU_LAZY_MODE=1 &&
+          export VLLM_USE_V1=1 &&
+          export VLLM_CONTIGUOUS_PA=false &&
+          cd .jenkins/lm-eval-harness &&
+          bash run-tests.sh -c configs/models-large-2.txt -t 2
+      - name: v1_gsm8k_large_g2_tp4
+        flavor: g2.m
+        command: >-
+          export PT_HPU_LAZY_MODE=1 &&
+          export VLLM_USE_V1=1 &&
+          export VLLM_CONTIGUOUS_PA=false &&
+          cd .jenkins/lm-eval-harness &&
+          bash run-tests.sh -c configs/models-large.txt -t 4
+
+  - name: test_v1_basic_uts
+    steps:
+      - name: test_v1_core_engine_worker_g2
+        flavor: g3
+        command: >-
+          export PT_HPU_LAZY_MODE=1 &&
+          export VLLM_USE_V1=1 &&
+          export VLLM_SKIP_WARMUP=true &&
+          pytest -v -s -vvv --log-cli-level=INFO tests/v1/core -k "not kv_connector" &&
+          pytest -v -s -vvv --log-cli-level=INFO tests/v1/engine &&
+          pytest -v -s -vvv --log-cli-level=INFO tests/v1/worker
+      - name: test_v1_core_engine_worker_g3
+        flavor: g3
+        command: >-
+          export PT_HPU_LAZY_MODE=1 &&
+          export VLLM_USE_V1=1 &&
+          export VLLM_SKIP_WARMUP=true &&
+          pytest -v -s -vvv --log-cli-level=INFO tests/v1/core -k "not kv_connector" &&
+          pytest -v -s -vvv --log-cli-level=INFO tests/v1/engine &&
+          pytest -v -s -vvv --log-cli-level=INFO tests/v1/worker
+
