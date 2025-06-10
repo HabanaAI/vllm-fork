@@ -419,8 +419,7 @@ class HpuModelAdapter(torch.nn.Module):
                 if isinstance(layer, str) and not isinstance(
                         layer, int):  # Name-based access
                     current_module = getattr(current_module, layer)
-                elif isinstance(layer,
-                                int):  # Indexed-based access
+                elif isinstance(layer, int):  # Indexed-based access
                     module_list = list(current_module._modules.values())
                     if layer >= len(module_list):
                         # for MTP models, last layer is MTP layer
