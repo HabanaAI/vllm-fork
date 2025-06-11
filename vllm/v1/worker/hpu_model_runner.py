@@ -610,9 +610,12 @@ class HPUModelRunner:
             logger.info("Bucketing is ON.")
             HPUBucketingContext = get_bucketing_context()
             self.bucketing_ctx = HPUBucketingContext(
-                self.max_num_seqs, self.max_prefill_batch_size,
-                self.block_size, self.max_num_batched_tokens,
-                self.use_merged_prefill, self.use_prefix_caching,
+                self.max_num_seqs,
+                self.max_num_prefill_seqs,
+                self.block_size,
+                self.max_num_batched_tokens,
+                self.use_merged_prefill,
+                self.use_prefix_caching,
                 self.max_model_len)
             self.graphed_buckets: set[Any] = set()
         else:
