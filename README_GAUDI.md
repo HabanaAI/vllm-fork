@@ -602,6 +602,7 @@ This is an experimental performance optimization implemented for selected models
 
 > [!NOTE]
 > Splitting QKV projection can also degrade the performance for cases with low compute, i.e. low batch size, short sequence lengths or using tensor parallelism. It should always be verified in a particular scenario using a profiling tool such as [perfetto.habana.ai](https://perfetto.habana.ai/#!/viewer) or by analyzing execution traces to ensure optimal performance.
+
 > [!NOTE]
 > This optimization doesn't work with FP8 precision at this moment. Support will be added in future releases.
 
