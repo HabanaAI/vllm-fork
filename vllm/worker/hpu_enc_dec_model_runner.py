@@ -217,15 +217,6 @@ class HPUEncoderDecoderModelRunner(
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None
     ) -> EncoderDecoderModelInputForHPU:
-        """Prepare the model input based on a given sequence group, including
-        metadata for the sampling step.
-        The API assumes seq_group_metadata_list is sorted by prefill -> decode.
-        The result tensors and data structure also batches input in prefill
-        -> decode order. For example,
-        - input_tokens[:num_prefill_tokens] contains prefill tokens.
-        - input_tokens[num_prefill_tokens:] contains decode tokens.
-        If cuda graph is required, this API automatically pads inputs.
-        """
         with self.profiler.record_event('internal', 'prepare_input_tensors'):
             assert seq_group_metadata_list is not None
             if self.profiler.enabled:
