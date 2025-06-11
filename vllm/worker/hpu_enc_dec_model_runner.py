@@ -199,7 +199,6 @@ class HPUEncoderDecoderModelRunner(
         ) if htorch.utils.internal.is_lazy(
         ) else HpuModelAdapterEncoderDecoder(*args, **kwargs)
 
-
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [
