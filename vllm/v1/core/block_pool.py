@@ -13,8 +13,6 @@ from vllm.v1.core.kv_cache_utils import (BlockHashType, FreeKVCacheBlockQueue,
                                          hash_block_tokens)
 from vllm.v1.request import Request
 
-if current_platform.is_hpu():
-    from vllm.v1.core.kv_cache_utils import FreeKVCacheBlockQueueHPU
 
 logger = init_logger(__name__)
 
@@ -48,7 +46,8 @@ class BlockPool:
         # Free block queue that constructs and manipulates a doubly linked
         # list of free blocks (including eviction candidates when caching is
         # enabled).
-        if current_platform.is_hpu():
+        if current_platform.is_hpu() and not enable_caching:
+            from vllm.v1.core.kv_cache_utils import FreeKVCacheBlockQueueHPU
             self.free_block_queue = FreeKVCacheBlockQueueHPU(self.blocks)
         else:
             self.free_block_queue = FreeKVCacheBlockQueue(
