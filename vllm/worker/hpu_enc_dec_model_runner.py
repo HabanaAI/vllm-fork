@@ -19,7 +19,8 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceGroupMetadata, SequenceOutput)
 from vllm.utils import bind_kv_cache, is_fake_hpu
-from vllm.worker.hpu_model_runner import (HpuModelAdapter, HPUModelRunnerBase,
+from vllm.worker.hpu_model_runner import (CachedStepOutput, HpuModelAdapter,
+                                          HPUModelRunnerBase,
                                           ModelInputForHPUWithSamplingMetadata,
                                           setup_profiler, subtuple)
 from vllm.worker.model_runner_base import (
@@ -81,16 +82,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
                                      cross_attn_bias=cross_attn_bias)
         return metadata
 
-    def _set_cross_indices_and_offsets(self, metadata, block_size):
-        cross_slot_mapping = metadata.cross_slot_mapping.flatten()
-        indices = torch.div(cross_slot_mapping,
-                            block_size,
-                            rounding_mode="floor")
-        offsets = torch.fmod(cross_slot_mapping, block_size)
-        metadata = metadata._replace(cross_block_offsets=offsets,
-                                     cross_block_indices=indices)
-        return metadata
-
     def _update_seq_lens(self, attn_metadata, batch_size, seq_len, device):
         # Set the seq_lens to after-padding sequence lengths to prevent
         # graph recapturing.
@@ -107,8 +98,6 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
         if max(attn_metadata.encoder_seq_lens) == 0:
             return attn_metadata
         if attn_metadata.is_prompt:
-            attn_metadata = self._set_cross_indices_and_offsets(
-                attn_metadata, self.block_size)
             attn_metadata = self._update_seq_lens(attn_metadata, batch_size,
                                                   seq_len, device)
         else:
@@ -134,6 +123,7 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
             bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
             self.model.language_model.forward = partial(
                 self.model.language_model.forward,
+                attn_metadata=kwargs['attn_metadata'],
                 bypass_hpu_graphs=bypass_hpu_graphs)
         # TODO: Change the input_ids to 1D to match the public vllm
         # implementation and avoid shape mismatch issues with some
@@ -343,6 +333,7 @@ class HPUEncoderDecoderModelRunner(
         encoder_seq_lens_tensor = self._list_to_int32_tensor(encoder_seq_lens)
         attn_metadata.encoder_seq_lens = encoder_seq_lens
         attn_metadata.encoder_seq_lens_tensor = encoder_seq_lens_tensor
+        attn_metadata.max_encoder_seq_len = max(encoder_seq_lens, default=0)
 
         return attn_metadata
 
@@ -517,8 +508,7 @@ class HPUEncoderDecoderModelRunner(
             'block_usage',
             'slot_mapping',
             'is_prompt',
-            'block_indices',
-            'block_offsets',
+            'block_size',
             'block_groups',
             'num_prefill_tokens',
             'num_decode_tokens',
@@ -526,8 +516,7 @@ class HPUEncoderDecoderModelRunner(
             'seq_lens',
             'encoder_seq_lens',
             'encoder_seq_lens_tensor',
-            'cross_block_indices',
-            'cross_block_offsets',
+            'max_encoder_seq_len',
             'cross_block_list',
             'cross_slot_mapping',
             'cross_block_mapping',
@@ -691,7 +680,7 @@ class HPUEncoderDecoderModelRunner(
                     if num_steps > 1:
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(
-                            output.detach().clone())
+                            CachedStepOutput(output))
                 htorch.core.mark_step()
                 if i < num_steps - 1:
                     if i == 0:
@@ -784,8 +773,8 @@ class HPUEncoderDecoderModelRunner(
         sampler_outputs = []
         num_outputs = len(self.cached_step_outputs)
         for i in range(num_outputs):
-            next_token_ids = self.cached_step_outputs.pop(0)
-            next_token_ids = next_token_ids.cpu().tolist()
+            next_token_ids = self.cached_step_outputs.pop(
+                0).token_ids.cpu().tolist()
             sampler_output = self._make_decode_output(
                 next_token_ids, model_input.sampling_metadata.seq_groups)
             sampler_outputs.append(sampler_output)
