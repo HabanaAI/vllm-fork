@@ -1468,7 +1468,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_bias = self.move_to_device(attn_bias)
         if is_enc_dec_model:
             cross_slot_mapping = self.move_to_device(cross_slot_mapping)
-            encoder_seq_lens_tensor = self.move_to_device(encoder_seq_lens_tensor)
+            encoder_seq_lens_tensor = self.move_to_device(
+                encoder_seq_lens_tensor)
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
@@ -1979,7 +1980,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      batch_size_padded=batch_size_padded,
                                      lora_ids=lora_ids), \
                                      sampling_metadata
-    
+
     @torch.inference_mode()
     def prepare_model_input(
         self,
