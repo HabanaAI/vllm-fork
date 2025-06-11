@@ -5,6 +5,7 @@ export GRAPH_VISUALIZATION=1
 export VLLM_LOGGING_LEVEL=DEBUG
 export VLLM_DISABLE_MARK_SCALES_AS_CONST=1
 
+
 # export ENABLE_EXPERIMENTAL_FLAGS=1 
 # export PRINT_FILE_AND_LINE=1  
 # export LOG_LEVEL_PASS_MANAGER=1  
@@ -17,8 +18,6 @@ export OFFICIAL_MODEL="/mnt/disk5/Qwen3-30B-A3B-250425"
 #############################
 # FIXME: (Yi) Enable the static MoE path 
 export VLLM_DYNAMIC_MOE_MIN_TOKENS=0
-
-
 
 #!/bin/bash
 
@@ -46,6 +45,9 @@ elif [ ${model_name} == "Qwen3-30B-A3B" ]; then
     quant_file_path="inc_measure_g3_30B_A3B.json"
 elif [ ${model_name} == "Qwen3-32B-250426" ]; then
     quant_file_path="inc_measure_g3_32B.json"
+elif [ ${model_name} == "Qwen3-235B-A22B" ]; then
+    COMMON_ARGS="--model $MODEL --tokenizer $TOKENIZER --osl 32 --max_model_len 8192 --max_num_seqs 1 --tp_size 8 --ep_size 8"
+    quant_file_path="inc_measure_g2_235B_A22B.json"
 else
     echo "Unknown model name: ${model_name}"
     exit 1
