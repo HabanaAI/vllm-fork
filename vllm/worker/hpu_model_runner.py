@@ -1525,7 +1525,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             attn_bias=attn_bias,
             seq_lens=seq_lens,
             seq_lens_tensor=seq_lens_tensor,
-            encoder_seq_lens = encoder_seq_lens,
+            encoder_seq_lens=encoder_seq_lens,
             encoder_seq_lens_tensor=encoder_seq_lens_tensor,
             cross_slot_mapping=cross_slot_mapping,
             context_lens_tensor=context_lens_tensor,
