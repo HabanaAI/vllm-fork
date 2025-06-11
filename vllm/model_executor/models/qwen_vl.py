@@ -745,7 +745,25 @@ class QwenVLForConditionalGeneration(QWenBaseModel, SupportsPP, SupportsLoRA,
 
         vision_embeddings = self._process_image_input(image_input)
         return vision_embeddings
-
+    
+    def merge_multimodal_embeddings_1(
+        self,
+        input_ids: torch.Tensor,
+        hidden_states: torch.Tensor,
+        multimodal_embeddings: MultiModalEmbeddings,
+        image_pad_id: int,
+    ) -> torch.Tensor:
+        """
+        Merge multimodal embeddings with the input embeddings.
+        """
+        batch_size, seq_length, hidden_size = hidden_states.shape
+        hidden_states = hidden_states.reshape(-1, hidden_size)
+        multimodal_embeddings = multimodal_embeddings.reshape(-1, hidden_size)
+        hidden_states[input_ids.reshape(-1) == image_pad_id] = multimodal_embeddings
+        hidden_states = hidden_states.reshape(batch_size, seq_length,
+                                                hidden_size)
+        return hidden_states
+    
     def get_input_embeddings(
         self,
         input_ids: torch.Tensor,
@@ -754,7 +772,7 @@ class QwenVLForConditionalGeneration(QWenBaseModel, SupportsPP, SupportsLoRA,
         inputs_embeds = self.transformer.get_input_embeddings(input_ids)
 
         if multimodal_embeddings is not None:
-            inputs_embeds = merge_multimodal_embeddings(
+            inputs_embeds = self.merge_multimodal_embeddings_1(
                 input_ids, inputs_embeds, multimodal_embeddings,
                 self.transformer.visual.image_pad_id)
 
