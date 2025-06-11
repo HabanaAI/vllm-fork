@@ -1467,9 +1467,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               dtype=torch.long,
                                               device='cpu')
         else:
-            encoder_seq_lens = None
+            encoder_seq_lens = []
             encoder_seq_lens_tensor = None
-            cross_slot_mapping = None
+            cross_slot_mapping = []
 
         attn_bias = None
         seq_lens_tensor = None
