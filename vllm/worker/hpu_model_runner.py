@@ -1990,7 +1990,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     intermediate_tensors = \
                         self.model.make_empty_intermediate_tensors(
                             batch_size=batch_size,
-                            context_size=seq_len if is_prompt else 1,
+                            context_size=inputs.input_tokens.shape[1],
                             dtype=self.model_config.dtype,
                             device=self.device)
                 self.execute_model(inputs,
