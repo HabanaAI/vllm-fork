@@ -7,7 +7,6 @@ import math
 import os
 import time
 from dataclasses import dataclass
-from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 import habana_frameworks.torch as htorch
@@ -610,12 +609,9 @@ class HPUModelRunner:
             logger.info("Bucketing is ON.")
             HPUBucketingContext = get_bucketing_context()
             self.bucketing_ctx = HPUBucketingContext(
-                self.max_num_seqs,
-                self.max_num_prefill_seqs,
-                self.block_size,
-                self.max_num_batched_tokens,
-                self.use_merged_prefill,
-                self.use_prefix_caching,
+                self.max_num_seqs, self.max_prefill_batch_size,
+                self.block_size, self.max_num_batched_tokens,
+                self.use_merged_prefill, self.use_prefix_caching,
                 self.max_model_len)
             self.graphed_buckets: set[Any] = set()
         else:
@@ -1397,8 +1393,6 @@ class HPUModelRunner:
         batch_size = token_ids.size(0)
         seq_len = self._seq_len(attn_metadata)
         num_blocks = self._num_blocks(attn_metadata)
-        is_prompt = attn_metadata.is_prompt
-        phase = "prompt" if is_prompt else "decode"
         self._check_config(batch_size, seq_len, num_blocks, attn_metadata,
                            warmup_mode)
         additional_kwargs = {}
@@ -1892,7 +1886,6 @@ class HPUModelRunner:
         position_ids_device = _async_h2d_tensor_copy(position_ids, self.device)
         slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
 
-        phase = "prompt" if is_prompt else "decode"
         use_graphs = self._use_graphs()
         input_ids = torch.zeros((batch_size, query_seq_len),
                                 dtype=torch.int32,
@@ -1920,15 +1913,6 @@ class HPUModelRunner:
                         (batch_size, num_blocks),
                         dtype=torch.int32,
                         device='cpu') * self._PAD_BLOCK_ID
-                    #for i, n in enumerate(num_blocks):
-                    #    prefix_block_tables[i, :n] = block_table_cpu_tensor[
-                    #        batch_idx + i, :n]
-                    '''context_lens_tensor = torch.zeros((batch_size),
-                                                    dtype=torch.int32,
-                                                    device='cpu')
-                    context_lens_tensor[:num_prefills] = torch.tensor(context_lens,
-                                                                    device='cpu')
-                    '''
                     block_list_device = _async_h2d_tensor_copy(
                         prefix_block_tables.flatten(), self.device)
                     #context_lens_tensor_device = _async_h2d_tensor_copy(
@@ -1945,13 +1929,14 @@ class HPUModelRunner:
                         block_size=self.block_size)
                 else:
                     #block_list = None
-                    attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
-                        seq_lens_tensor=seq_lens_device,
-                        num_prefills=batch_size,
-                        num_prefill_tokens=batch_size * seq_or_block,
-                        input_positions=None,
-                        slot_mapping=slot_mapping_device,
-                        block_size=self.block_size)
+                    attn_metadata = (
+                        HPUAttentionMetadataV1.make_prefill_metadata(
+                            seq_lens_tensor=seq_lens_device,
+                            num_prefills=batch_size,
+                            num_prefill_tokens=batch_size * seq_or_block,
+                            input_positions=None,
+                            slot_mapping=slot_mapping_device,
+                            block_size=self.block_size))
             else:
                 block_tables = [
                     x.tolist()
@@ -2281,7 +2266,6 @@ class HPUModelRunner:
                 assert self.mem_margin is not None, \
                     ("HabanaWorker.determine_num_available_blocks needs "
                     "to be called before warming up the model.")
-                free_mem = HabanaMemoryProfiler.current_free_device_memory()
                 #TODO(kzawora): align_workers
                 mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                     self.warmup_graphs(

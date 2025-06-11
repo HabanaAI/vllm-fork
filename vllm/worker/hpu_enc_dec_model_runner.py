@@ -544,10 +544,7 @@ class HPUEncoderDecoderModelRunner(
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
         phase = 'prompt' if attn_metadata.is_prompt else 'decode'
-        if warmup_mode:
-            num_blocks = ctx
-        else:
-            num_blocks = self._num_blocks(attn_metadata)
+        num_blocks = ctx if warmup_mode else self._num_blocks(attn_metadata)
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)

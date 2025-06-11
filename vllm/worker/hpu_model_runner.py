@@ -14,7 +14,7 @@ import math
 import os
 import time
 from array import array
-from enum import Enum, IntEnum
+from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -759,13 +759,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.cache_config.enable_prefix_caching)
         HPUBucketingContext = get_bucketing_context()
         self.bucketing_ctx = HPUBucketingContext(
-            self.max_num_seqs,
-            self.max_num_prefill_seqs,
-            self.block_size,
-            self.max_num_batched_tokens,
-            self.use_merged_prefill,
-            self.use_prefix_caching,
-            self.max_model_len)
+            self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
+            self.max_num_batched_tokens, self.use_merged_prefill,
+            self.use_prefix_caching, self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
 
         self._set_gc_threshold()
@@ -1102,10 +1098,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         cfg: Optional[tuple] = None
         assert cfg is None, "Configs changed between 2D and 3D"
         phase = 'prompt' if attn_metadata.is_prompt else 'decode'
-        if warmup_mode:
-            num_blocks = ctx
-        else:
-            num_blocks = self._num_blocks(attn_metadata)
+        num_blocks = ctx if warmup_mode else self._num_blocks(attn_metadata)
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
@@ -2437,8 +2430,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
-            cfg = (int(bs), int(seq_len), 0, is_prompt)
             is_prompt = phase == 'prompt'
+            cfg = (int(bs), int(seq_len), 0, is_prompt)
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
@@ -2505,11 +2498,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.bucketing_ctx.decode_buckets,
                         False, kv_caches)
                 else:
-                    msg = (
-                        f"Using {format_bytes(graph_free_mem)}"
-                        f"/{format_bytes(free_mem)} "
-                        "of free device memory for HPUGraphs, "
-                        f"{format_bytes(prompt_available_memory)} for prompt")
+                    msg = (f"Using {format_bytes(graph_free_mem)}"
+                           f"/{format_bytes(free_mem)} "
+                           "of free device memory for HPUGraphs")
                     logger.info(msg)
 
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
