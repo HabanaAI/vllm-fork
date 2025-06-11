@@ -297,22 +297,6 @@ class HpuModelAdapter(torch.nn.Module):
         self.is_causal = is_causal
         self.use_merged_prefill = VLLM_MERGED_PREFILL
 
-    # copying from PR 1163
-    # needs cleanup/unified approach later
-    def compute_input_embeddings_for_gemma(self, **kwargs):
-
-        # todo may or may not be needed for gemma3, check
-        compile_only_mode_context_false = functools.partial(
-            bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
-
-        input_ids = kwargs['input_ids']
-        #with compile_only_mode_context_false():
-        vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
-        inputs_embeds = self.model.get_input_embeddings(input_ids,
-                                                      vision_embeddings)
-
-        return inputs_embeds
-
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
@@ -2983,18 +2967,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
-
-                if 'Gemma3ForConditionalGeneration' in str(type(self.model.model)):
-                    inputs_embeds = \
-                        self.model.compute_input_embeddings_for_gemma(
-                            **execute_model_kwargs
-                        )
-                    execute_model_kwargs.update({
-                        'inputs_embeds': inputs_embeds,
-                    })
-                    # done compute the visual tokens
-                    execute_model_kwargs.pop('pixel_values', None)
-
 
                 with self.profiler.record_event('internal',
                                                 model_event_name,
