@@ -18,7 +18,7 @@ RUN apt update && \
     ln -sf /usr/bin/python3 /usr/bin/python
 WORKDIR /root
 
-ENV VLLM_PATH=/root/workspace/vllm
+ENV VLLM_PATH=/workspace/vllm
 
 # Clone the vllm-fork repository
 RUN mkdir -p $VLLM_PATH && \
