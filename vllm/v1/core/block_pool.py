@@ -13,7 +13,6 @@ from vllm.v1.core.kv_cache_utils import (BlockHashType, FreeKVCacheBlockQueue,
                                          hash_block_tokens)
 from vllm.v1.request import Request
 
-
 logger = init_logger(__name__)
 
 
