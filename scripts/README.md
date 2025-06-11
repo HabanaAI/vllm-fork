@@ -335,3 +335,33 @@ The following 4 ENVs are used to control the device profiling:
 > Please use the `-f` flag or `export VLLM_PROFILER_ENABLED=True` to enable the high-level vLLM profile and to choose the preferred steps to profile.
 
 
+# Releases
+## aice/v1.21.0
+vllm-fork:
+https://github.com/HabanaAI/vllm-fork/tree/aice/v1.21.0
+vllm-hpu-extension:
+https://github.com/HabanaAI/vllm-hpu-extension/tree/aice/v1.21.0
+## Valided models
+- DeepSeek-R1-Distill-Llama-70B (bf16 and fp8)
+- DeepSeek-R1-Distill-Qwen-32B (bf16 and fp8)
+- DeepSeek-R1-Distill-Qwen-14B (bf16 and fp8)
+- DeepSeek-R1-Distill-Qwen-7B (bf16 and fp8)
+- DeepSeek-R1-Distill-Llama-8B (bf16 and fp8)
+- Qwen3-32B (bf16 and fp8)
+- Qwen3-14B (bf16 and fp8)
+- Qwen3-235B-A22B (bf16)
+- Qwen3-30B-A3B (bf16 and fp8)
+- Meta-Llama-3-70B-Instruct (bf16)
+- Meta-Llama-3-8B-Instruct (bf16)
+- Llama-3.1-70B-Instruct (bf16)
+- Qwen2.5-72B-Instruct (bf16)
+- Qwen2.5-32B-Instruct (bf16)
+- Qwen2.5-14B-Instruct (bf16)
+- Qwen2.5-7B-Instruct (bf16)
+- Qwen2.5-3B-Instruct (bf16)
+- Qwen2.5-1.5B-Instruct (bf16)
+- QwQ-32B (bf16)
+- Llama4 (bf16 and fp8)
+* multimodal models:
+    - Qwen2.5 Omni
+    - Qwen2-VL-7B-Instruct

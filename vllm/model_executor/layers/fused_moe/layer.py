@@ -140,6 +140,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             else:
                 raise NotImplementedError("CPU MOE only supports x86 arch.")
 
+        if current_platform.is_hpu():
+            for expert_id in range(layer.local_num_experts):
+                layer.moe_op.w13_list[expert_id].set_weight(
+                    layer.w13_weight.data[expert_id])
+                layer.moe_op.w2_list[expert_id].set_weight(
+                    layer.w2_weight.data[expert_id])
+
     def apply(
         self,
         layer: torch.nn.Module,
