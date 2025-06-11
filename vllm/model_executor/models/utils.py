@@ -392,8 +392,6 @@ def _merge_multimodal_embeddings(
     # skip check for HPU, the number of tokens is a cpu fallback during HPU lazy
     if current_platform.is_hpu():
         flattened = _flatten_embeddings(multimodal_embeddings)
-        #TODO dynamic.. maybe torch.where? however multimodal_embeddings is a list of varying length
-        # still.. torch.where migth be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
         return inputs_embeds
 
