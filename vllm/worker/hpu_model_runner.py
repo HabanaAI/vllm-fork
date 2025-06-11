@@ -297,6 +297,45 @@ class HpuModelAdapter(torch.nn.Module):
         self.is_causal = is_causal
         self.use_merged_prefill = VLLM_MERGED_PREFILL
 
+
+    # copying from PR 1163
+    # needs cleanup/unified approach later
+    def compute_input_embeddings_for_gemma(self, **kwargs):
+
+        if 'inputs_embeds' in kwargs:
+            print('do nothing')
+            return kwargs
+
+        # todo may or may not be needed for gemma3, check
+        compile_only_mode_context_false = functools.partial(
+            bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
+
+
+        input_ids = kwargs['input_ids']
+        #
+        #with compile_only_mode_context_false():
+        vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
+        inputs_embeds = self.model.get_input_embeddings(input_ids,
+                                                      vision_embeddings)
+
+        if vision_embeddings is not None:
+            print('vision_embeddings is not None')
+            #breakpoint()
+            input_ids = kwargs['input_ids']
+            positions = kwargs['positions']
+            kwargs = self.model.prepare_attn_masks(
+                mask_dtype=self.dtype,
+                **kwargs,
+            )
+            kwargs['input_ids'] = input_ids
+            kwargs['positions'] = positions
+            #input_ids = None
+
+        kwargs.update({'inputs_embeds': inputs_embeds})
+        # done compute the visual tokens
+        kwargs.pop('pixel_values', None)
+        return kwargs
+
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
@@ -462,6 +501,7 @@ class HpuModelAdapter(torch.nn.Module):
         virtual_engine = 0
         if 'virtual_engine' in kwargs:
             virtual_engine = kwargs.pop('virtual_engine')
+
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
@@ -2968,6 +3008,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_batch_size': real_batch_size
                 }
 
+                if 'Gemma3ForConditionalGeneration' in str(type(self.model.model)):
+                    execute_model_kwargs = \
+                        self.model.compute_input_embeddings_for_gemma(
+                            **execute_model_kwargs
+                        )
                 with self.profiler.record_event('internal',
                                                 model_event_name,
                                                 args=profiler_args):
