@@ -44,10 +44,10 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.utils import bind_kv_cache
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 
+from vllm_hpu_extension.bucketing.common import HPUBucketingManager
+
 if TYPE_CHECKING:
     from vllm.v1.core.scheduler import SchedulerOutput
-
-from vllm_hpu_extension.bucketing.common import get_bucketing_context
 
 logger = init_logger(__name__)
 
@@ -612,11 +612,19 @@ class HPUModelRunner:
         self.use_merged_prefill = False
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
+            '''
             HPUBucketingContext = get_bucketing_context()
             self.bucketing_ctx = HPUBucketingContext(
                 self.max_num_seqs, self.max_prefill_batch_size,
                 self.block_size, self.max_num_batched_tokens,
                 self.use_merged_prefill, self.max_model_len)
+            '''
+            self.bucketing_manager = HPUBucketingManager(
+                self.max_num_seqs, self.max_num_prefill_batch_size, self.block_size,
+                self.max_num_batched_tokens, self.use_merged_prefill,
+                self.use_prefix_caching, self.max_model_len)
+            self.bucketing_manager.generate_prompt_buckets()
+            self.bucketing_manager.hello()
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
