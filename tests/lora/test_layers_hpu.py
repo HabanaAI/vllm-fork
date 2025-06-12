@@ -9,7 +9,6 @@ import habana_frameworks.torch.core as htcore
 import pytest
 import torch
 import torch.nn.functional as F
-from vllm_hpu_extension.ops import LoraMask
 
 from tests.utils import fork_new_process_for_each_test
 from vllm.config import LoRAConfig
@@ -44,6 +43,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding, get_masked_input_and_mask)
 from vllm.model_executor.utils import set_random_seed
 from vllm.platforms import current_platform
+from vllm_hpu_extension.ops import LoraMask
 
 from .utils import DummyLoRAManager
 

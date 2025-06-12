@@ -9,12 +9,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
+
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
-from vllm_hpu_extension.runtime import get_config
-from vllm_hpu_extension.utils import (FP8Matmul, Matmul, ModuleFusedSDPA,
-                                      Softmax, VLLMFP8KVCache, VLLMKVCache)
-
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
                                               AttentionMetadata, AttentionType)
@@ -23,6 +20,9 @@ from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.hpu_paged_attn import (HPUPagedAttention,
                                                HPUPagedAttentionMetadata)
 from vllm.logger import init_logger
+from vllm_hpu_extension.runtime import get_config
+from vllm_hpu_extension.utils import (FP8Matmul, Matmul, ModuleFusedSDPA,
+                                      Softmax, VLLMFP8KVCache, VLLMKVCache)
 
 logger = init_logger(__name__)
 
