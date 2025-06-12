@@ -1056,8 +1056,8 @@ class HPUModelRunner:
         return all_batch_contents
 
     def _make_attn_bias(self, context_groups, token_groups):
-        dtype = torch.bfloat16  # FIXME
-        is_causal = True  # FIXME
+        dtype = self.dtype
+        is_causal = True  # TODO: add support for non-causal tasks
         context_groups = torch.tensor(context_groups,
                                       device='cpu',
                                       dtype=torch.int16)
