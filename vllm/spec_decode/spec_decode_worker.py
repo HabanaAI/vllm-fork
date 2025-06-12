@@ -1027,9 +1027,18 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             seq_group_metadata_list)
 
         num_logprobs_per_seq = get_all_num_logprobs(seq_group_metadata_list)
-
+        self.sync_last=False
         # Serialize tensor to CPU Python list.
-        if not self.hpu_opt:
+        #dummy token=2
+        n=2
+        #todo batch>1 compatible
+        for seq_index, sg in enumerate(seq_group_metadata_list):
+            for seq  in sg.seq_data.values():
+                if seq.get_output_len()+n>= seq_group_metadata_list[seq_index].sampling_params.max_tokens:
+                    self.sync_last=True
+                    break
+
+        if not self.hpu_opt or  self.sync_last:
             accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
         else:
             #hpu_opt
