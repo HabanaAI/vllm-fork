@@ -397,11 +397,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         round_num_gpu_blocks = (num_hpu_blocks *
                                 self.parallel_config.pipeline_parallel_size)
         self.cache_config.num_gpu_blocks = round_num_gpu_blocks
-        local_rank = torch.distributed.get_rank()
-        logger.info(
-            f"[rank: {local_rank}] the number of HPU blocks: {num_hpu_blocks}, "
-            f"self.cache_config.num_gpu_blocks: {self.cache_config.num_gpu_blocks}"
-        )
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
             torch.hpu.synchronize()
