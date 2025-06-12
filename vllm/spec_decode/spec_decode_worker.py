@@ -862,14 +862,14 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             "k": execute_model_req.num_lookahead_slots,
             "stage_times": stage_times,
         }
-        if accepted_token_ids is not None and accepted_token_ids[0][0]==12:
+        if accepted_token_ids is not None and accepted_token_ids[0][0].item()==12:
             c=0
         self.cached_step_accepted_tokens.append(accepted_token_ids)
         #print(f" cache after append{self.cached_step_accepted_tokens=}")
         self.cached_step_target_logprobs.append(target_logprobs)
         self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
- 
+
         #2578 -1
         #294 2501
         #305 -1 

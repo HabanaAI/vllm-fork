@@ -355,6 +355,13 @@ class SequenceData(msgspec.Struct,
             return self._prompt_token_ids[-1]
         return self._output_token_ids[-1]
 
+    def get_last_n_token_id(self,n) -> int:
+        if self.get_output_len()<n:
+            return None
+        if not self._output_token_ids:
+            return self._prompt_token_ids[(-1)*n]
+        return self._output_token_ids[(-1)*n]
+
     def get_prompt_token_ids(self) -> Tuple[int, ...]:
         return self.prompt_token_ids
 
@@ -576,6 +583,8 @@ class Sequence:
     def get_last_token_id(self) -> int:
         return self.data.get_last_token_id()
 
+    def get_last_n_token_id(self,n):
+        return self.data.get_last_n_token_id(n)
     def get_output_token_ids(self) -> Tuple[int, ...]:
         return self.data.get_output_token_ids()
 
