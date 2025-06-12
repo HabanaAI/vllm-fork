@@ -320,6 +320,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         if not broadcast_data:
             return None
 
+        # This is for Data Parallel (DP) workers that run dummy batch
+        # execution.
         if "is_dummy_batch" in broadcast_data and broadcast_data[
                 "is_dummy_batch"]:
             self.model_runner._dummy_run(1)

@@ -237,9 +237,12 @@ class LLMEngine:
         self.observability_config = vllm_config.observability_config or ObservabilityConfig(  # noqa
         )
 
+        # Data Parallel Group
         self.need_to_sync_across_dp = self.parallel_config.data_parallel_size > 1  # noqa
         if self.need_to_sync_across_dp:
             self.dp_group = self.parallel_config.stateless_init_dp_group()
+        # Data Parallel Ranks should execute the dummy batch if no real batch
+        # is scheduled.
         self.should_execute_dummy_batch = False
 
         logger.info(
