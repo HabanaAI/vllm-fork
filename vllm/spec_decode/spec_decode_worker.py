@@ -868,18 +868,21 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             "k": execute_model_req.num_lookahead_slots,
             "stage_times": stage_times,
         }
-        if accepted_token_ids is not None and accepted_token_ids[0][0]==12:
+        if accepted_token_ids is not None and accepted_token_ids[0][0].item()==12:
             c=0
         self.cached_step_accepted_tokens.append(accepted_token_ids)
         print(f" cache after append{self.cached_step_accepted_tokens=}")
         self.cached_step_target_logprobs.append(target_logprobs)
         self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
- 
+
         #2578 -1
         #294 2501
         #305 -1 
         print(f"!!!_create_output_sampler_list {accepted_token_ids}")
+        
+        if accepted_token_ids is not None and accepted_token_ids[0][0].item()== 14646:
+            b=0
         tmp = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
@@ -1039,6 +1042,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
         else:
             #hpu_opt
+            # seq_group_metadata_list[0].seq_data[0].get_len()
             accepted_token_ids_by_step = [[10], [12]]
 
         # Construct the output on a per-step, per-sequence basis.

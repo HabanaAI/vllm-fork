@@ -47,7 +47,7 @@ class StopChecker:
 
         # Check if the sequence has generated the EOS token.
         if ((not sampling_params.ignore_eos)
-                and seq.get_last_token_id() == seq.eos_token_id):
+                and ( seq.get_last_token_id() == seq.eos_token_id or seq.get_last_n_token_id(3)==seq.eos_token_id)) :
             # Remove the last EOS token unless explicitly specified
             # This prevents unintended exposure of the EOS token
             if new_char_count and (
