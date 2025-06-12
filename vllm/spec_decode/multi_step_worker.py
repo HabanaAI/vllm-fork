@@ -76,33 +76,30 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # Expand the batch for sequences with a bonus token.
         # Perform a forward pass on the expanded batch and filter the
         # response to retain only the original sequences' responses.
-        # if execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==2578 or execute_model_req.seq_group_metadata_list[0].seq_data[0].output_token_ids[-1]==12 :
-        #     c=0
         if accepted_token_id is not None:
-            #print(f"sampler_output===={accepted_token_id=}")
-            for sg in execute_model_req.seq_group_metadata_list:
-                for seq_index, seq_id in enumerate(sg.seq_data):
+            for seq_index, sg in enumerate(execute_model_req.seq_group_metadata_list):
+                for seq_id in sg.seq_data:
                     seq_data_iter = sg.seq_data.values()
                     last_token_id = accepted_token_id[seq_index][-1]
                     if last_token_id == -1:
                         seq_ids_with_bonus_token_in_last_step.discard(seq_id)
-                        #print("================discard=======")
-                        execute_model_req.previous_hidden_states.hidden_states=execute_model_req.previous_hidden_states.hidden_states[:1]
-                        token1=accepted_token_id[0][0].cpu().item()
+                        token1=accepted_token_id[seq_index][0].cpu().item()
                     
                         for seq in seq_data_iter:
                             # output_token_ids 是 tuple，拼接新 tuple
                             seq.output_token_ids = seq.output_token_ids[:-2] + (token1,)
+                            seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1]
                             # 计数减 1
                             seq._num_computed_tokens -= 1
                     
                     else:
-                        token1=accepted_token_id[0][0].cpu().item()
-                        token2=accepted_token_id[0][1].cpu().item()
+                        token1=accepted_token_id[seq_index][0].cpu().item()
+                        token2=accepted_token_id[seq_index][1].cpu().item()
 
                         for seq in seq_data_iter:
                             # output_token_ids 是 tuple，拼接新 tuple
                             seq.output_token_ids = seq.output_token_ids[:-2] + (token1,token2,)
+                            seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1,token2]
             print(execute_model_req.previous_hidden_states.hidden_states.shape)
         expanded_request, indices_of_seq_with_bonus_tokens =\
             self._expand_execute_model_request(
@@ -142,11 +139,6 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                     indices_of_seq_with_bonus_tokens)
                 model_outputs.append(model_output)
                 
-        if accepted_token_id is not None:
-            valid_tokens =  accepted_token_id[accepted_token_id != -1]
-            if  accepted_token_id.numel()-valid_tokens.numel()==1:
-                print("xxxx135zz","rank",execute_model_req.previous_hidden_states.hidden_states.shape)
-
         # move indices to device to avoid stream sync
         indices_of_seq_with_bonus_tokens = torch.tensor(
             indices_of_seq_with_bonus_tokens, device=self.device)
