@@ -538,11 +538,15 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         pixel_values = flatten_bn(pixel_values, concat=True)
         num_crops = flatten_bn(num_crops, concat=True)
 
-        return Gemma3ImagePixelInputs(
+
+        x = Gemma3ImagePixelInputs(
             type="pixel_values",
             pixel_values=self._validate_pixel_values(pixel_values),
-            num_patches=num_crops + 1,
+            num_patches= torch.ones(num_crops.shape, dtype=num_crops.dtype).to('hpu') #num_crops + torch.tensor(1, device='hpu', dtype=torch.int32) #1,   # seeing 0 + 1 = 0 here sometimes!! hence wrapping in torch.tensor
         )
+        # TODO.. some bug in adding 1 here to num_crops.. currently assuming no panscan so just passing in torch.ones
+
+        return x
 
     def _image_pixels_to_features(
         self,
