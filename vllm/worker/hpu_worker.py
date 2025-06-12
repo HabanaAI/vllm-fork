@@ -389,8 +389,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
         num_hpu_blocks = num_gpu_blocks // self.parallel_config.pipeline_parallel_size
-        # FIXME: (Yi) Use VLLM_DECODE_BLOCK_BUCKET_STEP
-        num_hpu_blocks = (num_hpu_blocks // 128) * 128
+        decode_block_bucket_step = int(
+            os.getenv("VLLM_DECODE_BLOCK_BUCKET_STEP", 128))
+        num_hpu_blocks = (num_hpu_blocks //
+                          decode_block_bucket_step) * decode_block_bucket_step
         self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
         round_num_gpu_blocks = (num_hpu_blocks *
                                 self.parallel_config.pipeline_parallel_size)
