@@ -60,6 +60,7 @@ def get_forward_context() -> ForwardContext:
 @contextmanager
 def set_forward_context(attn_metadata: Any,
                         vllm_config: VllmConfig,
+                        is_warmup: bool = False,
                         virtual_engine: int = 0,
                         num_tokens: int = 0):
     """A context manager that stores the current forward context,
@@ -106,7 +107,7 @@ def set_forward_context(attn_metadata: Any,
     trigger_kv_transfer = (attn_metadata is not None
                            and has_kv_transfer_group()
                            and is_v1_kv_transfer_group())
-    if trigger_kv_transfer:
+    if trigger_kv_transfer and not is_warmup:
         kv_connector = get_kv_transfer_group()
         assert isinstance(kv_connector, KVConnectorBase_V1)
         kv_connector.start_load_kv(_forward_context)
@@ -149,7 +150,7 @@ def set_forward_context(attn_metadata: Any,
 
         # KVConnector: each attn layer triggers (possibly async) save.
         # Ensure all those operations complete before forward() is done.
-        if trigger_kv_transfer:
+        if trigger_kv_transfer and not is_warmup:
             kv_connector = get_kv_transfer_group()
             assert isinstance(kv_connector, KVConnectorBase_V1)
             kv_connector.wait_for_save()

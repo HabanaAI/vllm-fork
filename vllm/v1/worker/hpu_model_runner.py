@@ -386,6 +386,7 @@ class HpuModelAdapter(torch.nn.Module):
         #        selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
+        is_warmup = kwargs['is_warmup'] if 'is_warmup' in kwargs else False
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
@@ -395,7 +396,9 @@ class HpuModelAdapter(torch.nn.Module):
         attn_meta = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
-        with set_forward_context(attn_meta, self.vllm_config):
+        with set_forward_context(attn_meta, self.vllm_config, is_warmup):
+            if 'is_warmup' in kwargs:
+                kwargs.pop('is_warmup')
             hidden_states = self.model(*args, **kwargs)
         return hidden_states
 
@@ -1439,7 +1442,8 @@ class HPUModelRunner:
         hidden_states = self.model.forward(input_ids=token_ids,
                                            positions=position_ids,
                                            attn_metadata=trimmed_attn_metadata,
-                                           kv_caches=kv_caches)
+                                           kv_caches=kv_caches,
+                                           is_warmup=warmup_mode)
 
         #hidden_states = hidden_states[:num_scheduled_tokens]
         # NOTE(kzawora): returning hidden_states is required in prompt logprobs
