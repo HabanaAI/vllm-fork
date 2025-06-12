@@ -1186,11 +1186,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _check_config(self, batch_size, seq_len, ctx, attn_metadata,
                       warmup_mode):
-        cfg: Optional[tuple] = None
-        assert cfg is None, "Configs changed between 2D and 3D"
         phase = 'prompt' if attn_metadata.is_prompt else 'decode'
         num_blocks = ctx if warmup_mode else self._num_blocks(attn_metadata)
-        cfg = (batch_size, seq_len, num_blocks, phase)
+        cfg: Optional[tuple] = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
@@ -2616,27 +2614,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  is_pt_profiler_run=False,
                                  is_lora_profile_run=True,
                                  num_patches=num_patches)
-            
+
     def warmup_graphs(self,
                       buckets,
                       is_prompt,
                       kv_caches,
                       starting_mem=0,
                       total_batch_seq=0.001):
-
-        if is_prompt and self.model_is_mrope:
-            multimodal_prompt_graph_mem_ratio = float(
-                os.environ.get('VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO', '0.3'))
-            multimodal_avail_mem = (multimodal_prompt_graph_mem_ratio *
-                                    available_mem)
-            available_mem = (available_mem - multimodal_avail_mem)
-            msg = (f"Using {format_bytes(multimodal_avail_mem)} "
-                   f"for multimodal prompt and "
-                   f"{format_bytes(available_mem)} for text prompt "
-                   f"(VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO="
-                   f"{multimodal_prompt_graph_mem_ratio})")
-            logger.info(msg)
-
         total_mem = starting_mem
         idx = 0
         num_candidates = len(buckets)
@@ -2675,7 +2659,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             #attribute for now.
             mm_outputs = self._warmup_multimodal_graph(
                 kv_caches=kv_caches,
-                available_mem=multimodal_avail_mem,
                 starting_mem=0
                 if not hasattr(self, "mm_total_mem") \
                     else self.mm_total_mem, # type: ignore
@@ -2723,6 +2706,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             with HabanaMemoryProfiler() as mem_prof:
                 self.warmup_scenario(batch_size=batch_size,
                                      seq_len=seq_len,
+                                     ctx=0,
                                      is_prompt=True,
                                      kv_caches=kv_caches,
                                      num_patches=num_patches)
@@ -2738,9 +2722,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
         num_candidates = len(buckets)
         phase = 'prompt' if is_prompt else 'decode'
-        # TODO - verify
-        #graphed = list(c[:3] for c in self.graphed_buckets
-        #               if c[3] == is_prompt and c[2] == 0)
         graphed = buckets
         if num_candidates == 0:
             num_candidates = 1
