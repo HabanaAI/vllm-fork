@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import sys
+import asyncio
+
 import threading
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
@@ -76,7 +78,10 @@ class Proxy:
                                                     StreamingResponse]] = None,
         custom_create_chat_completion: Optional[Callable[
             [Request], StreamingResponse]] = None,
-        generator_on_p_node:bool = False
+        generator_on_p_node:bool = False,
+        debug_mode:bool = False,
+        repeat_p_request:int = 1,
+        repeat_d_times:int = 100
     ):
         self.prefill_instances = prefill_instances
         self.decode_instances = decode_instances
@@ -89,6 +94,9 @@ class Proxy:
         self.router = APIRouter()
         self.setup_routes()
         self.generator = P_first_token_generator if generator_on_p_node else D_first_token_generator
+        self.debug_mode = debug_mode
+        self.repeat_p_request = repeat_p_request
+        self.repeat_d_times = repeat_d_times
 
     def on_done(self, prefill_instance:str=None, decode_instance:str=None):
         self.schedule_completion(prefill_instance, decode_instance)
@@ -225,6 +233,44 @@ class Proxy:
             logger.error("Error in add_instance_endpoint: %s", str(e))
             raise HTTPException(status_code=500, detail=str(e)) from e
 
+    async def forward_request_debug_mode(self, url, data, use_chunked=True):
+        async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
+            headers = {
+                "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
+            }
+            try:
+                async with session.post(url=url, json=data, headers=headers) as response:
+                    if 200 <= response.status < 300 or 400 <= response.status < 500:
+                        if use_chunked:
+                            # 收集所有 chunk 并合并为 bytes 返回
+                            chunks = []
+                            async for chunk_bytes in response.content.iter_chunked(1024):
+                                chunks.append(chunk_bytes)
+                            return b"".join(chunks)
+                        else:
+                            content = await response.read()
+                            return content
+                    else:
+                        error_content = await response.text()
+                        try:
+                            error_content = json.loads(error_content)
+                        except json.JSONDecodeError:
+                            pass  # leave error_content as str
+                        logger.error("Request failed with status %s: %s", response.status, error_content)
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=f"Request failed with status {response.status}: {error_content}",
+                        )
+            except aiohttp.ClientError as e:
+                logger.error("ClientError occurred: %s", str(e))
+                raise HTTPException(
+                    status_code=502,
+                    detail="Bad Gateway: Error communicating with upstream server.",
+                ) from e
+            except Exception as e:
+                logger.error("Unexpected error: %s", str(e))
+                raise HTTPException(status_code=500, detail=str(e)) from e
+
     async def forward_request(self, url, data, use_chunked=True):
         async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
             headers = {
@@ -281,6 +327,30 @@ class Proxy:
         }
         return status
 
+    def handle_debug_mode_requests(self, request):
+        if self.debug_mode != 1:
+            return
+
+        if self.repeat_p_request == 0:
+            print(f"Trigger repeating p request, d times={self.repeat_d_times}")
+            for counter in range(self.repeat_d_times):
+                print(f"Repeat time: {counter}")
+                decode_instance = self.schedule(self.decode_cycler)
+                if not decode_instance:
+                    raise HTTPException(status_code=503, detail="No decode instances available")
+                try:
+                    asyncio.create_task(
+                        self.forward_request_debug_mode(
+                            f"http://{decode_instance}/v1/completions",
+                            request
+                        )
+                    )
+                except HTTPException as http_exc:
+                    self.remove_instance_endpoint("decode", decode_instance)
+                    raise http_exc
+        else:
+            self.repeat_p_request -= 1
+
     async def create_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
@@ -302,6 +372,8 @@ class Proxy:
                     raise http_exc
 
             # Perform kv recv and decoding stage
+            self.handle_debug_mode_requests(request)
+
             decode_instance = self.schedule(self.decode_cycler)
             value = value.strip().decode("utf-8").removesuffix("data: [DONE]").encode("utf-8")
             async def streaming_response(value):
@@ -349,6 +421,8 @@ class Proxy:
                 self.remove_instance_endpoint("prefill", prefill_instance)
                 raise http_exc
             # Perform kv recv and decoding stage
+            self.handle_debug_mode_requests(request)
+
             decode_instance = self.schedule(self.decode_cycler)
             value = value.strip().decode("utf-8").removesuffix("data: [DONE]").encode("utf-8")
             async def streaming_response(value):
@@ -478,6 +552,9 @@ class ProxyServer:
             custom_create_completion=create_completion,
             custom_create_chat_completion=create_chat_completion,
             generator_on_p_node=args.generator_on_p_node,
+            debug_mode=args.debug_mode,
+            repeat_p_request=args.repeat_p_request,
+            repeat_d_times=args.repeat_d_times,
         )
 
     def validate_parsed_serve_args(self, args: argparse.Namespace):
@@ -574,6 +651,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Use Round Robin scheduling for load balancing",
     )
+
+    parser.add_argument(
+        "--debug_mode",
+        action="store_true",
+        help="debug mode, single P for multiple D ",
+    )
+
+    parser.add_argument(
+        "--repeat_p_request",
+        type=int,
+        default=1,
+        help="the number of p request to repeat",
+    )
+
+    parser.add_argument(
+        "--repeat_d_times",
+        type=int,
+        default=100,
+        help="the times to repeat on d node",
+    )
+
     args = parser.parse_args()
     if args.roundrobin:
         proxy_server = ProxyServer(args=args)
