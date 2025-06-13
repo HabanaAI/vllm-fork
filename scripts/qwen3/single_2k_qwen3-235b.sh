@@ -31,7 +31,7 @@ export VLLM_GRAPH_RESERVED_MEM=0.4
 export VLLM_GRAPH_PROMPT_RATIO=0
 export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
 # params
-model_path=/workspace/HF_models/Qwen3-235B-A22B/
+model_path=/root/.cache/huggingface/hub/models--Qwen--Qwen3-235B-A22B/snapshots/Qwen3-235B-A22B/
 max_model_len=8192
 max_num_batched_tokens=25536
 max_num_seqs=256
@@ -106,4 +106,4 @@ python3 -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8688 \
     --gpu_memory_utilization 0.9 \
     --quantization=inc \
     --weights-load-device cpu \
-    #--enable-expert-parallel
+    --enable-expert-parallel

@@ -318,8 +318,8 @@ if __name__ == "__main__":
     if args.enforce_eager:
         param["enforce_eager"] = True
     if args.ep_size > 1:
-        # param["enable_expert_parallel"] = True
-        os.environ["VLLM_EP_SIZE"] = str(args.ep_size)
+        param["enable_expert_parallel"] = True
+        # os.environ["VLLM_EP_SIZE"] = str(args.ep_size)
     if args.dummy:
         param["load_format"] = "dummy"
     if args.tp_size == 1:

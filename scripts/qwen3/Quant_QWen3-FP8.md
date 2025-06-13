@@ -49,7 +49,7 @@ Qwen3-30B-A3B:
 bash 01-benchmark-online-30B-fp8.sh --model_path /workspace/HF_models/Qwen3-30B-A3B  --tp_size 8
 
 Qwen3-235B-A22B:
-unzip nc_workspace_measure_kvache_g2_235B_A22B_4cards.zip
+unzip nc_workspace_measure_kvache_g2_235B_A22B_4cards_EP.zip
 bash single_2k_qwen3-235b.sh
 notes: change the model_path in single_2k_qwen3-235b.sh to your local path.
 ```
