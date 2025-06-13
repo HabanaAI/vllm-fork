@@ -1269,6 +1269,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             model = self.get_model()
             model.vision_buckets = VisionBuckets()
 
+    def _get_position_pad(self) -> int:
+        """
+        For gemma3 models,
+        due to the Hack in Gemma3ForConditionalGeneration::prepare_attn_masks,
+        '0' can't be used as pad for input position tensor.
+        In case, it might have '0's for bucketing, those '0' will be counted as
+        new sequence in the prepare_attn_masks() which is wrong.
+        """
+        model_type = getattr(self.model_config.hf_config, 'model_type', '')
+        return -1 if model_type == 'gemma3' else 0
+
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -1506,11 +1517,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
                                                      input_mrope_positions=input_mrope_positions,
                                                      max_prompt_len=max_prompt_len,
-                                                     pad=0)
+                                                     pad=self._get_position_pad())
         else:
             input_positions = make_cpu_tensor(input_positions,
                                               max_len=max_prompt_len,
-                                              pad=0,
+                                              pad=self._get_position_pad(),
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
