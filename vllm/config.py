@@ -905,7 +905,7 @@ class ModelConfig:
 
             self.enforce_eager = True
 
-    def _verify_with_expert_parallelism(self) -> None:
+    def _verify_with_expert_parallelism(self) -> bool:
         num_expert_names = [
             "moe_num_experts",  # Dbrx
             "num_experts",  # Jamba
@@ -918,9 +918,11 @@ class ModelConfig:
             if num_experts > 0:
                 break
         if num_experts < 1:
-            raise ValueError(
+            logger.warning_once(
                 "Number of experts in the model must be greater than 0 "
                 "when expert parallelism is enabled.")
+            return False
+        return True
 
     def verify_async_output_proc(self, parallel_config, speculative_config,
                                  device_config) -> None:
@@ -973,7 +975,9 @@ class ModelConfig:
                 f"({tensor_parallel_size}).")
 
         if parallel_config.enable_expert_parallel:
-            self._verify_with_expert_parallelism()
+            if not self._verify_with_expert_parallelism():
+                logger.warning_once("Disabling expert parallelism.")
+                parallel_config.enable_expert_parallel = False
 
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         if pipeline_parallel_size > 1:

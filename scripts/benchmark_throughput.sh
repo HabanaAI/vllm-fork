@@ -244,6 +244,7 @@ python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --model "${model_path}" \
     --trust-remote-code \
     --tensor-parallel-size "${num_hpu}" \
+    --enable-expert-parallel \
     "${IO_FLAGS[@]}" \
     --device hpu \
     --dtype "${dtype}" \
