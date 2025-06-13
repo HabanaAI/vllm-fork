@@ -2,19 +2,19 @@
 # Adapted from
 # https://github.com/THUDM/ChatGLM2-6B
 """Inference-only ChatGLM model compatible with THUDM weights."""
-import os
 import json
+import os
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
 from torch import nn
 from torch.nn import LayerNorm
 
-from vllm.forward_context import get_forward_context
 from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
@@ -32,11 +32,13 @@ from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import ChatGLMConfig
 
 from .interfaces import SupportsLoRA, SupportsPP, SupportsQuant
-from .utils import (AutoWeightsLoader, WeightsMapper, get_input_mask, is_pp_missing_parameter,
+from .utils import (AutoWeightsLoader, WeightsMapper, get_input_mask,
+                    is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 
 is_hpu = current_platform.is_hpu()
+
 
 class GLMAttention(nn.Module):
 
@@ -117,11 +119,8 @@ class GLMAttention(nn.Module):
         position_ids: torch.Tensor,
     ) -> torch.Tensor:
         attn_metadata = get_forward_context().attn_metadata
-        if (
-            is_hpu
-            and self.enable_zero_padding
-            and attn_metadata.seq_lens_tensor is not None
-        ):
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
             valid_len = attn_metadata.seq_lens_tensor
             mask = get_input_mask(hidden_states, valid_len)
             hidden_states = hidden_states * mask.unsqueeze(-1)
@@ -301,11 +300,8 @@ class GLMTransformer(nn.Module):
         position_ids: torch.Tensor,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         attn_metadata = get_forward_context().attn_metadata
-        if (
-            is_hpu
-            and self.enable_zero_padding
-            and attn_metadata.seq_lens_tensor is not None
-        ):
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
             valid_len = attn_metadata.seq_lens_tensor
             mask = get_input_mask(hidden_states, valid_len)
             hidden_states = hidden_states * mask.unsqueeze(-1)

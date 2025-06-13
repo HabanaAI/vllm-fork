@@ -30,11 +30,11 @@ import torch
 from torch import nn
 from transformers import LlamaConfig
 
-from vllm.forward_context import get_forward_context
 from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
@@ -225,11 +225,11 @@ class LlamaAttention(nn.Module):
     ) -> torch.Tensor:
         attn_metadata = get_forward_context().attn_metadata
         if (is_hpu and self.enable_zero_padding
-            and attn_metadata.seq_lens_tensor is not None):
+                and attn_metadata.seq_lens_tensor is not None):
             valid_len = attn_metadata.seq_lens_tensor
             mask = get_input_mask(hidden_states, valid_len)
             hidden_states = hidden_states * mask.unsqueeze(-1)
-        
+
         if self.split_qkv:
             q, k, v, _ = self.qkv_proj(hidden_states)
         else:
@@ -242,7 +242,7 @@ class LlamaAttention(nn.Module):
         if (is_hpu and self.enable_zero_padding
                 and attn_metadata.seq_lens_tensor is not None):
             attn_output = attn_output * mask.unsqueeze(-1)
-        
+
         output, _ = self.o_proj(attn_output)
         return output
 

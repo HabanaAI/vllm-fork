@@ -27,12 +27,12 @@ import torch
 from torch import nn
 from transformers import PretrainedConfig
 
-from vllm.forward_context import get_forward_context
 from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import (get_pp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
+from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
@@ -326,17 +326,14 @@ class BaiChuanModel(nn.Module):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
-        
+
         attn_metadata = get_forward_context().attn_metadata
-        if (
-            is_hpu
-            and self.enable_zero_padding
-            and attn_metadata.seq_lens_tensor is not None
-        ):
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
             valid_len = attn_metadata.seq_lens_tensor
             mask = get_input_mask(hidden_states, valid_len)
             hidden_states = hidden_states * mask.unsqueeze(-1)
-            
+
         for layer in self.layers[self.start_layer:self.end_layer]:
             hidden_states, residual = layer(
                 positions,
@@ -384,7 +381,8 @@ class BaiChuanModel(nn.Module):
                 if is_pp_missing_parameter(name, self):
                     continue
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader = getattr(param, "weight_loader",
+                                        default_weight_loader)
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params

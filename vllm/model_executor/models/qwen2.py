@@ -30,11 +30,11 @@ import torch
 from torch import nn
 from transformers import Qwen2Config
 
-from vllm.forward_context import get_forward_context
 from vllm.attention import Attention, AttentionType
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -63,6 +63,7 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, WeightsMapper,
 logger = init_logger(__name__)
 
 is_hpu = current_platform.is_hpu()
+
 
 class Qwen2MLP(nn.Module):
 

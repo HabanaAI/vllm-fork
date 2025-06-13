@@ -704,6 +704,7 @@ def extract_layer_index(layer_name: str) -> int:
                                 " only contain one integer")
     return int_vals[0]
 
+
 def get_input_mask(hidden_states: torch.Tensor,
                    valid_len: torch.Tensor) -> torch.Tensor:
     """
@@ -717,6 +718,7 @@ def get_input_mask(hidden_states: torch.Tensor,
     # mask: (B, T)
     mask = mask.to(hidden_states.dtype)
     return mask
+
 
 def cast_overflow_tensors(
     tensors: torch.Tensor,
