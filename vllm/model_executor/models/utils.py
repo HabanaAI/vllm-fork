@@ -26,6 +26,40 @@ WeightsMapping = Mapping[str, Optional[str]]
 """If a key maps to a value of `None`, the corresponding weight is ignored."""
 
 
+'''
+Given a desired batchsize to process in terms of available_batchsizes
+Pick the largest available_batchsizes that can fit batchsize, and reiterate
+Fro example, if batchsize = 9, available batchsize is 4, 2
+then: 4, 4, 2 will be used
+ 
+Note this is not optimal padding wastage wise
+greedy_plan(9, [12,8]) -> [8,8] (pad waste = 7)
+greedy_plan(9, [12]) => [12] (pad waste = 3)
+still picking largest batches greedily, because large batches tend to be more compute bound
+(ideally we'd have the runtime of each batch and use that as a metric to reduce the amount of total time)
+ 
+ 
+Seems similar to a "coin change" problem, where available_batchsizes are available denominations and batchsize is amount to be paid
+but unlike traditional coin change it might not be possible to make "batchsize" exactly, and we arent gunning for least number of "coins"
+'''
+def greedy_plan(batchsize, available_batchsizes):
+    available_batchsizes_sorted = sorted(available_batchsizes, key=lambda x:-x)  # sort descending
+    idx = 0
+    left_to_process = batchsize
+    result = []
+    while(left_to_process > 0 and idx < len(available_batchsizes_sorted)):
+        #print(idx, left_to_process, result)
+        if available_batchsizes_sorted[idx] <= left_to_process:
+            result += [available_batchsizes_sorted[idx]]
+            left_to_process -= available_batchsizes_sorted[idx]
+        else:
+            idx += 1
+    if left_to_process > 0:
+        result += [available_batchsizes_sorted[-1]] # this will be padded
+    return result
+ 
+
+
 @dataclass
 class WeightsMapper:
     """Maps the name of each weight if they match the following patterns."""

@@ -1138,14 +1138,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, batch_size, seq_len, is_prompt, img_args=None):
+    def _use_graphs(self, batch_size, seq_len, is_prompt):
         if self.enforce_eager:
             return False
         if self.skip_warmup:
             return True
-        if not img_args:
-            return (batch_size, seq_len, is_prompt) in self.graphed_buckets
-        return img_args in self.graphed_multimodal_buckets
+        #if not img_args:
+        return (batch_size, seq_len, is_prompt) in self.graphed_buckets
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -2347,7 +2346,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             batch_size,
             seq_len,
             is_prompt,
-            img_args,
         )
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -3143,19 +3141,21 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
+            '''
             if model_input.multi_modal_kwargs is None:
                 img_args = None
             else:
                 if 'pixel_values' in model_input.multi_modal_kwargs:
-                    bs = model_input.multi_modal_kwargs['pixel_values'].shape[0]
+                    try:
+                        bs = model_input.multi_modal_kwargs['pixel_values'].shape[0]
+                    except:
+                        breakpoint()
+                        print()
                     img_args = bs
                 else:
                     img_args = None
-            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt, img_args)
             '''
-            TODO .. there are 2 HPU graphs.. one for text one for vision
-            perhaps we need to track them separately
-            '''
+            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
             self._check_config(batch_size, seq_len, attn_metadata, warmup_mode)
 
             lora_mask: torch.Tensor = None
@@ -3277,6 +3277,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 }
 
                 if is_gemma3(self.model.model):
+                    if 'pixel_values' in execute_model_kwargs:
+                        execute_model_kwargs['graphed_multimodal_buckets'] = list(self.graphed_multimodal_buckets) # set is unhasable and causes friction with hpu graphs, hence turning it to a list
+
                     execute_model_kwargs = \
                         self.model.compute_input_embeddings_for_gemma(
                             **execute_model_kwargs

@@ -35,7 +35,7 @@ from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
 from .siglip import SiglipVisionModel
 from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
-                    maybe_prefix, merge_multimodal_embeddings)
+                    maybe_prefix, merge_multimodal_embeddings, greedy_plan)
 
 logger = init_logger(__name__)
 
@@ -552,14 +552,32 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         self,
         vision_tower: SiglipVisionModel,
         pixel_values: torch.Tensor,
+        graphed_multimodal_buckets = []
     ) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
-        image_features = vision_tower(pixel_values.to(dtype=target_dtype))
+        return vision_tower(pixel_values.to(dtype=target_dtype))
+
+        #breakpoint()
+        batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
+        #batch_breakdown = [4,2,1,1]
+        start_idx = 0
+        # note this for loop is not hpu graph friendly, but vision_tower is
+        image_features_multibatches = []
+        pixel_values = pixel_values.to(dtype=target_dtype)
+        for i in batch_breakdown:
+            end_idx = start_idx + i
+            batch_sliced_pixel_values = pixel_values[start_idx:end_idx, ...]
+            image_features_multibatches += [vision_tower(batch_sliced_pixel_values, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+            start_idx = end_idx
+        #breakpoint()
+        image_features = torch.cat(image_features_multibatches, dim=0)
+        # Note.. this does not produce Exactly the same result as vision_tower(pixel_values.to(dtype=target_dtype)).. why? is it a bug?
         return image_features
 
     def _process_image_input(
         self,
         image_input: Gemma3ImageInputs,
+        graphed_multimodal_buckets = []
     ) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
@@ -569,9 +587,20 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         image_features = self._image_pixels_to_features(
             self.vision_tower,
             pixel_values,
+            graphed_multimodal_buckets
         )
-
-        image_embeds = self.multi_modal_projector(image_features)
+        #breakpoint()
+        batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
+        start_idx = 0
+        image_embeds_multibatches = []
+        # TODO .. same code here and in _image_pixels_to_features. unify...
+        for i in batch_breakdown:
+            end_idx = start_idx + i
+            batch_sliced_image_features = image_features[start_idx:end_idx, ...]
+            image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+            start_idx = end_idx
+        #image_embeds = self.multi_modal_projector(image_features, bypass_hpu_graphs=not use_graph_vision)
+        image_embeds = torch.cat(image_embeds_multibatches, dim=0)
 
         return [
             e.flatten(0, 1) for e in image_embeds.split(num_patches.tolist())
@@ -586,7 +615,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         if image_input is None:
             return None
 
-        return self._process_image_input(image_input)
+        return self._process_image_input(image_input, kwargs.get('graphed_multimodal_buckets', []))
 
     def get_input_embeddings(
         self,
