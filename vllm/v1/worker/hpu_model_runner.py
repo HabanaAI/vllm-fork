@@ -619,10 +619,9 @@ class HPUModelRunner:
                 self.block_size, self.max_num_batched_tokens,
                 self.use_merged_prefill, self.max_model_len)
             '''
-            self.bucketing_manager = HPUBucketingManager(
-                self.max_num_seqs, self.max_num_prefill_batch_size, self.block_size,
+            self.bucketing_manager = HPUBucketingManager( self.max_num_seqs, self.max_prefill_batch_size, self.block_size,
                 self.max_num_batched_tokens, self.use_merged_prefill,
-                self.use_prefix_caching, self.max_model_len)
+                False, self.max_model_len)
             self.bucketing_manager.generate_prompt_buckets()
             self.bucketing_manager.hello()
             self.graphed_buckets: set[Any] = set()
@@ -2222,15 +2221,15 @@ class HPUModelRunner:
             raise AssertionError("Finished profiling")
         kv_caches = self.kv_caches
         max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
-        self.bucketing_ctx.generate_decode_buckets(max_blocks)
+        self.bucketing_manager.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() in ('1', 'true') else 1
             cache_size_limit = 1 + multiplier * (
-                len(self.bucketing_ctx.prompt_buckets) +
-                len(self.bucketing_ctx.decode_buckets))
+                len(self.bucketing_manager.prompt_buckets) +
+                len(self.bucketing_manager.decode_buckets))
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
@@ -2261,9 +2260,9 @@ class HPUModelRunner:
                            'Please update Gaudi Software Suite.')
         with compile_only_mode_context(
         ) if can_use_compile_only_mode else contextlib.nullcontext():
-            self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
+            self.warmup_all_buckets(self.bucketing_manager.prompt_buckets, True,
                                     kv_caches)
-            self.warmup_all_buckets(self.bucketing_ctx.decode_buckets, False,
+            self.warmup_all_buckets(self.bucketing_manager.decode_buckets, False,
                                     kv_caches)
 
             if (not self.model_config.enforce_eager
@@ -2435,7 +2434,7 @@ class HPUModelRunner:
             self.kv_caches)
 
         if self.enable_bucketing:
-            self.bucketing_ctx.num_hpu_blocks = num_blocks
+            self.bucketing_manager.num_hpu_blocks = num_blocks
         self._PAD_BLOCK_ID = num_blocks
         self._PAD_SLOT_ID = num_blocks * self.block_size
 
