@@ -55,8 +55,10 @@ from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
                              MultiModalRegistry)
 from vllm.sampling_params import SamplingParams
+
+
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
-                           Logprob, SequenceData, SequenceGroupMetadata,
+                           Logprob, SequenceData, SequenceGroupMetadata,ExecuteModelRequest,
                            SequenceOutput)
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
                         make_tensor_with_pad)
@@ -1603,7 +1605,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         
         rank = torch.distributed.get_rank()
         if rank==0:
+            if execute_model_req is not None:
+                b=0
+        if execute_model_req is not None and execute_model_req.expand is not None:
+            expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand()
+            seq_group_metadata_list = expanded_request.seq_group_metadata_list
+            finished_requests_ids=expanded_request.finished_requests_ids
+            execute_model_req.hack_indices_of_seq_with_bonus_tokens=indices_of_seq_with_bonus_tokens
+            execute_model_req.expand_req=expanded_request
             c=0
+                #  execute_model_req.seq_group_metadata_list,
+                # execute_model_req.virtual_engine,
+                # execute_model_req.finished_requests_ids,
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -2523,7 +2536,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         accepted_token_id: Optional[torch.Tensor] = None,
-        execute_model_req=None,
+        execute_model_req:Optional[ExecuteModelRequest]=None
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2549,7 +2562,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         finished_requests_ids: Optional[List[str]] = None,
         align_worker: bool = False,
         accepted_token_id: Optional[torch.Tensor] = None,
-        execute_model_req=None,
+        execute_model_req:Optional[ExecuteModelRequest]=None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.

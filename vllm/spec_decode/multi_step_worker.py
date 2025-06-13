@@ -124,7 +124,8 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                                     seq.output_token_ids = seq.output_token_ids[:-2] + (token1, token2)
                                     seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1, token2]
                     return expand_fn(execute_model_req, seq_ids_with_bonus_token_in_last_step)
-    
+
+                
                 execute_model_req.expand = expand
             bind_expand_fn_to_request(
                 execute_model_req,
@@ -132,12 +133,12 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                 seq_ids_with_bonus_token_in_last_step,
                 self._expand_execute_model_request,
             )
+            expanded_request=execute_model_req
                 
-                
-                
-        # expanded_request, indices_of_seq_with_bonus_tokens =\
-        #     self._expand_execute_model_request(
-        #         execute_model_req, seq_ids_with_bonus_token_in_last_step)
+        else:          
+            expanded_request, indices_of_seq_with_bonus_tokens =\
+                self._expand_execute_model_request(
+                    execute_model_req, seq_ids_with_bonus_token_in_last_step)
         
         
         
@@ -164,15 +165,19 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
             #     self.worker.model_runner.return_hidden_states = True
             for _ in range(sample_len):
                 model_output: List[SamplerOutput] = self.worker.execute_model(
-                    execute_model_req=execute_model_req, accepted_token_id=accepted_token_id)
+                    execute_model_req=expanded_request, accepted_token_id=accepted_token_id)
                 assert (len(model_output) == 1
                         ), "composing multistep workers not supported"
                 model_output = model_output[0]
                 self._maybe_update_previous_hidden_states(
-                    model_output, execute_model_req)
-
+                    model_output, expanded_request)
+                if execute_model_req.hack_indices_of_seq_with_bonus_tokens is not None:
+                    indices_of_seq_with_bonus_tokens=execute_model_req.hack_indices_of_seq_with_bonus_tokens
+                    expanded_request=execute_model_req.expand_req   
+                    execute_model_req.hack_indices_of_seq_with_bonus_tokens=None
+                    execute_model_req.expand_req=None
                 self._append_new_tokens(
-                    model_output, execute_model_req.seq_group_metadata_list,
+                    model_output, expanded_request.seq_group_metadata_list,
                     indices_of_seq_with_bonus_tokens)
                 model_outputs.append(model_output)
                 

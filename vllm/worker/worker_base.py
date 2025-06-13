@@ -348,8 +348,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 execute_model_req.seq_group_metadata_list,
                 execute_model_req.virtual_engine,
                 execute_model_req.finished_requests_ids,
-                accepted_token_id,
-                execute_model_req=execute_model_req,
+                accepted_token_id=accepted_token_id,
+                execute_model_req=execute_model_req
                 ))
 
         kwargs = extract_previous_hidden_states(execute_model_req)

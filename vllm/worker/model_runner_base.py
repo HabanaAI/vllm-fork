@@ -11,8 +11,9 @@ import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.sampler import SamplerOutput
-from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
 
+
+from vllm.sequence import IntermediateTensors, SequenceGroupMetadata, ExecuteModelRequest
 if TYPE_CHECKING:
     from vllm.attention import AttentionMetadata
     from vllm.attention.backends.abstract import AttentionBackend
@@ -217,7 +218,7 @@ class ModelRunnerBase(ABC, Generic[T]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         accepted_token_id: Optional[torch.Tensor] = None,
-        execute_model_req=None,
+        execute_model_req:Optional[ExecuteModelRequest]=None,
     ) -> T:
         """
         Prepare the inputs to ModelRunnerBase.execute_model from an execution

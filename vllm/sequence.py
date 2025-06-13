@@ -1329,6 +1329,10 @@ class ExecuteModelRequest(
     # Dummy batch
     is_dummy_batch: bool = False
 
+    
+    expand: Optional[Callable[[], Tuple[Any, Any]]] = None
+    hack_indices_of_seq_with_bonus_tokens: Optional[List[int]] = None
+    expand_req:Optional["ExecuteModelRequest"] =None
     @property
     def is_first_multi_step(self) -> bool:
         # TODO(will) make this be able to handle batches with variable number of
