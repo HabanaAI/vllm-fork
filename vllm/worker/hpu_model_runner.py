@@ -3659,6 +3659,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         model_input = self.cached_step_inputs.pop(0)
         model_output = self.cached_step_outputs.pop(0)
 
+        assert model_output.sampling_metadata is not None, \
+            'Sampling metadata is required to patch the output!'
         seq_groups = model_output.sampling_metadata.seq_groups
         logprobs_required = any(seq_group.sampling_params.logprobs is not None
                                 for seq_group in seq_groups)
@@ -3697,8 +3699,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         delayed_logprobs = None
         delayed_prompt_logprobs = None
-        assert model_output.sampling_metadata is not None, \
-            'Sampling metadata is required to patch the output!'
         if logprobs_required or prompt_logprobs_required:
             # We are one step ahead, so prompt is already marked as a computed.
             # We need to reset the computed tokens count to 0,
