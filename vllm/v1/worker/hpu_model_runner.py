@@ -907,11 +907,10 @@ class HPUModelRunner:
         padding_fn = None
         block_bucket_size: int
         if self.use_contiguous_pa:
-            block_bucket_size = max(max(block_list) + 1, len(block_list))
+            block_bucket_size = max(max(block_list) + 1, len(block_list), False)
             if bucketing:
                 block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                    block_bucket_size)
+                    self.bucketing_manager.find_bucket(1, 1, block_bucket_size)[2]
             indices: list[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -921,8 +920,7 @@ class HPUModelRunner:
         else:
             if bucketing:
                 block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                    len(block_list))
+                    self.bucketing_manager.find_bucket(1, 1, len(block_list), False)[2]
             else:
                 block_bucket_size = len(block_list)
             padding_fn = lambda tensor, pad_value: pad_list(
@@ -1375,6 +1373,7 @@ class HPUModelRunner:
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
+        print(cfg)
         if not seen and not warmup_mode:
             logger.warning(
                 "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
@@ -2264,17 +2263,17 @@ class HPUModelRunner:
                 #TODO(kzawora): align_workers
                 mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                     self.warmup_graphs(
-                    self.bucketing_ctx.prompt_buckets,
+                    self.bucketing_manager.prompt_buckets,
                     True, kv_caches)
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
-                    self.bucketing_ctx.decode_buckets,
+                    self.bucketing_manager.decode_buckets,
                     False, kv_caches)
 
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
+                    self.bucketing_manager.prompt_buckets, True, mem_post_prompt)
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.decode_buckets, False, mem_post_decode)
+                    self.bucketing_manager.decode_buckets, False, mem_post_decode)
 
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
