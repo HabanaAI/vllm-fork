@@ -30,10 +30,10 @@ from ..utils import maybe_enable_chunked_prefill
 from .conftest import run_equality_correctness_test
 
 # main model
-MAIN_MODEL = "JackFram/llama-160m"
+MAIN_MODEL = "/mnt/weka/data/huggingface-models/JackFram/llama-160m"
 
 # speculative model
-SPEC_MODEL = "ibm-ai-platform/llama-160m-accelerator"
+SPEC_MODEL = "/mnt/weka/data/huggingface-models/ibm-ai-platform/llama-160m-accelerator"
 
 # max. number of speculative tokens: this corresponds to
 # n_predict in the config.json of the speculator model.

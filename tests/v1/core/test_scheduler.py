@@ -21,7 +21,7 @@ EOS_TOKEN_ID = 50256
 
 
 def create_scheduler(
-    model: str = "facebook/opt-125m",
+    model: str = "/mnt/weka/data/huggingface-models/facebook/opt-125m",
     max_num_seqs: int = 16,
     max_num_batched_tokens: int = 8192,
     enable_prefix_caching: Optional[bool] = None,

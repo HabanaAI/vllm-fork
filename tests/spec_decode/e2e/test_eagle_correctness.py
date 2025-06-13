@@ -25,10 +25,10 @@ import pytest
 from .conftest import run_equality_correctness_test
 
 # main model
-MAIN_MODEL = "JackFram/llama-68m"
+MAIN_MODEL = "/mnt/weka/data/huggingface-models/JackFram/llama-68m"
 
 # speculative model
-SPEC_MODEL = "abhigoyal/vllm-eagle-llama-68m-random"
+SPEC_MODEL = "/mnt/weka/data/huggingface-models/abhigoyal/vllm-eagle-llama-68m-random"
 
 # max. number of speculative tokens: this corresponds to
 # num_heads in the config.json of the speculator model.
