@@ -223,6 +223,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --model  "${model_path}" \
     --trust-remote-code \
     --tensor-parallel-size "${num_hpu}" \
+    --enable-expert-parallel \
     --dtype "${dtype}" \
     "${QUANT_FLAGS[@]}" \
     --block-size "${block_size}" \
