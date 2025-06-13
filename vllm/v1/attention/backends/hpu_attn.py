@@ -40,9 +40,8 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
     context_lens_tensor: Optional[torch.Tensor]
 
     @classmethod
-    def make_prefill_metadata(cls, alibi_blocks, attn_bias, block_list,
-                              context_lens_tensor, seq_lens_tensor,
-                              slot_mapping, block_size):
+    def make_prefill_metadata(cls, attn_bias, block_list, context_lens_tensor,
+                              seq_lens_tensor, slot_mapping, block_size):
         return cls(is_prompt=True,
                    block_list=block_list,
                    block_mapping=None,
