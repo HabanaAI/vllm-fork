@@ -1781,7 +1781,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         rank = torch.distributed.get_rank()
 
 
-        if rank==0 and input_tokens[1][0]==2578:
+        if rank==0 and input_tokens[-1][0]==2578:
             print(f"{input_tokens=}")
             print(f"{query_lens=}")
             print(f"{input_positions=}")
