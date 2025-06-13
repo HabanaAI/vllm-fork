@@ -12,7 +12,7 @@ import pytest
 from vllm.platforms import current_platform
 
 MODELS = [
-    "TheBloke/Llama-2-7B-Chat-GPTQ",
+    "/mnt/weka/data/huggingface-models/TheBloke/Llama-2-7B-Chat-GPTQ",
 ]
 DTYPE = ["bfloat16"]
 
