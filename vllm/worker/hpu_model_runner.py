@@ -1597,7 +1597,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         finished_requests_ids: Optional[List[str]] = None,
         align_worker=False,
         accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req=None,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
+        
+        
+        rank = torch.distributed.get_rank()
+        if rank==0:
+            c=0
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -1612,6 +1618,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = None
         batch_size_padded = None
 
+        
+        
         self.event_start = self.profiler.get_timestamp_us()
         is_prompt = seq_group_metadata_list[0].is_prompt
         base_event_name = 'prompt' if is_prompt else 'decode'
@@ -2515,6 +2523,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req=None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2529,7 +2538,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                      virtual_engine,
                                                      finished_requests_ids,
                                                      False,
-                                                     accepted_token_id)
+                                                     accepted_token_id,
+                                                    execute_model_req,)
 
     @torch.inference_mode()
     def prepare_model_input_align_worker(
@@ -2539,6 +2549,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         finished_requests_ids: Optional[List[str]] = None,
         align_worker: bool = False,
         accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req=None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2557,7 +2568,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             #print(f"a77!!!{accepted_token_id=}")
 
             model_input, sampling_metadata = self.prepare_input_tensors(
-                seq_group_metadata_list, finished_requests_ids, align_worker, accepted_token_id)
+                seq_group_metadata_list, finished_requests_ids, align_worker, accepted_token_id,execute_model_req)
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 

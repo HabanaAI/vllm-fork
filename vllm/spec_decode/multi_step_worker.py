@@ -76,35 +76,72 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # Expand the batch for sequences with a bonus token.
         # Perform a forward pass on the expanded batch and filter the
         # response to retain only the original sequences' responses.
+        # if accepted_token_id is not None:
+        #     for seq_index, sg in enumerate(execute_model_req.seq_group_metadata_list):
+        #         for seq_id in sg.seq_data:
+        #             seq_data_iter = sg.seq_data.values()
+        #             last_token_id = accepted_token_id[seq_index][-1]
+        #             if last_token_id == -1:
+        #                 seq_ids_with_bonus_token_in_last_step.discard(seq_id)
+        #                 token1=accepted_token_id[seq_index][0].cpu().item()
+                    
+        #                 for seq in seq_data_iter:
+        #                     # output_token_ids 是 tuple，拼接新 tuple
+        #                     seq.output_token_ids = seq.output_token_ids[:-2] + (token1,)
+        #                     seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1]
+        #                     # 计数减 1
+        #                     seq._num_computed_tokens -= 1
+                    
+        #             else:
+        #                 token1=accepted_token_id[seq_index][0].cpu().item()
+        #                 token2=accepted_token_id[seq_index][1].cpu().item()
+
+        #                 for seq in seq_data_iter:
+        #                     # output_token_ids 是 tuple，拼接新 tuple
+        #                     seq.output_token_ids = seq.output_token_ids[:-2] + (token1,token2,)
+        #                     seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1,token2]
+        #     print(execute_model_req.previous_hidden_states.hidden_states.shape)
+        
         if accepted_token_id is not None:
-            for seq_index, sg in enumerate(execute_model_req.seq_group_metadata_list):
-                for seq_id in sg.seq_data:
-                    seq_data_iter = sg.seq_data.values()
-                    last_token_id = accepted_token_id[seq_index][-1]
-                    if last_token_id == -1:
-                        seq_ids_with_bonus_token_in_last_step.discard(seq_id)
-                        token1=accepted_token_id[seq_index][0].cpu().item()
-                    
-                        for seq in seq_data_iter:
-                            # output_token_ids 是 tuple，拼接新 tuple
-                            seq.output_token_ids = seq.output_token_ids[:-2] + (token1,)
-                            seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1]
-                            # 计数减 1
-                            seq._num_computed_tokens -= 1
-                    
-                    else:
-                        token1=accepted_token_id[seq_index][0].cpu().item()
-                        token2=accepted_token_id[seq_index][1].cpu().item()
-
-                        for seq in seq_data_iter:
-                            # output_token_ids 是 tuple，拼接新 tuple
-                            seq.output_token_ids = seq.output_token_ids[:-2] + (token1,token2,)
-                            seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1,token2]
-            print(execute_model_req.previous_hidden_states.hidden_states.shape)
-        expanded_request, indices_of_seq_with_bonus_tokens =\
-            self._expand_execute_model_request(
-                execute_model_req, seq_ids_with_bonus_token_in_last_step)
-
+            def bind_expand_fn_to_request(execute_model_req, accepted_token_id, seq_ids_with_bonus_token_in_last_step, expand_fn):
+                def expand():
+                    if accepted_token_id is not None:
+                        for seq_index, sg in enumerate(execute_model_req.seq_group_metadata_list):
+                            seq_data_iter = sg.seq_data.values()
+                            last_token_id = accepted_token_id[seq_index][-1]
+                            if last_token_id == -1:
+                                for seq_id in sg.seq_data:
+                                    seq_ids_with_bonus_token_in_last_step.discard(seq_id)
+                                token1 = accepted_token_id[seq_index][0].cpu().item()
+                                for seq in seq_data_iter:
+                                    seq.output_token_ids = seq.output_token_ids[:-2] + (token1,)
+                                    seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1]
+                                    seq._num_computed_tokens -= 1
+                            else:
+                                token1 = accepted_token_id[seq_index][0].cpu().item()
+                                token2 = accepted_token_id[seq_index][1].cpu().item()
+                                for seq in seq_data_iter:
+                                    seq.output_token_ids = seq.output_token_ids[:-2] + (token1, token2)
+                                    seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1, token2]
+                    return expand_fn(execute_model_req, seq_ids_with_bonus_token_in_last_step)
+    
+                execute_model_req.expand = expand
+            bind_expand_fn_to_request(
+                execute_model_req,
+                accepted_token_id,
+                seq_ids_with_bonus_token_in_last_step,
+                self._expand_execute_model_request,
+            )
+                
+                
+                
+        # expanded_request, indices_of_seq_with_bonus_tokens =\
+        #     self._expand_execute_model_request(
+        #         execute_model_req, seq_ids_with_bonus_token_in_last_step)
+        
+        
+        
+        
         # Run model sample_len times.
         model_outputs: List[SamplerOutput] = []
         if current_platform.is_cuda_alike() and isinstance(
@@ -123,19 +160,19 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
             # TODO: Remove this branch once DraftModelRunner supports TP>1
             # and other restrictions that are part of DraftModelRunner's
             # supports_gpu_multi_step(..)
-            if expanded_request.previous_hidden_states is not None:
-                self.worker.model_runner.return_hidden_states = True
+            # if expanded_request.previous_hidden_states is not None:
+            #     self.worker.model_runner.return_hidden_states = True
             for _ in range(sample_len):
                 model_output: List[SamplerOutput] = self.worker.execute_model(
-                    execute_model_req=expanded_request, accepted_token_id=accepted_token_id)
+                    execute_model_req=execute_model_req, accepted_token_id=accepted_token_id)
                 assert (len(model_output) == 1
                         ), "composing multistep workers not supported"
                 model_output = model_output[0]
                 self._maybe_update_previous_hidden_states(
-                    model_output, expanded_request)
+                    model_output, execute_model_req)
 
                 self._append_new_tokens(
-                    model_output, expanded_request.seq_group_metadata_list,
+                    model_output, execute_model_req.seq_group_metadata_list,
                     indices_of_seq_with_bonus_tokens)
                 model_outputs.append(model_output)
                 

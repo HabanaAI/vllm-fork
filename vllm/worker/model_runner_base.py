@@ -217,6 +217,7 @@ class ModelRunnerBase(ABC, Generic[T]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req=None,
     ) -> T:
         """
         Prepare the inputs to ModelRunnerBase.execute_model from an execution
