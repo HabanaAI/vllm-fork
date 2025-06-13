@@ -1,7 +1,7 @@
 llama8b_default:
   MODEL: meta-llama/Llama-3.1-8B-Instruct
   MAX_MODEL_LEN: 2048
-  TENSOR_PARALLEL_SIZE: 2
+  TENSOR_PARALLEL_SIZE: 1
   VLLM_SKIP_WARMUP: true
   
 

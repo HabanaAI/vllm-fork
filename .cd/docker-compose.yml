@@ -1,27 +1,13 @@
 services:
-  config-prep:
-    image: python:3.11
-    volumes:
-      - .:/app
-    working_dir: /app
-    environment:
-      - CONFIG_FILE
-      - TEST_NAME
-    entrypoint: ["sh", "-c", "pip install pyyaml && python docker_compose_prepare_env.py"]
-
   vllm-server:
-    image: docker_auto_1
-    depends_on:
-      - config-prep
-    env_file:
-      - .env.generated
+    image: docker_auto_24
     environment:
       - HF_HOME=/mnt/hf_cache
       - HF_TOKEN=${HF_TOKEN}
       - HABANA_VISIBLE_DEVICES=${HABANA_VISIBLE_DEVICES:-all}
+      - PYTHONUNBUFFERED=1
     volumes:
       - /mnt/hf_cache:/mnt/hf_cache
-      - /software/users/tthaddey/:/software/users/tthaddey/
     ports:
       - "8000:8000"
     cap_add:
@@ -29,34 +15,21 @@ services:
     ipc: host
     runtime: habana
     restart: unless-stopped
-    command: []
+    command: ["server", "--config-file", "${SERVER_CONFIG_FILE}", "--config-name", "${SERVER_CONFIG_NAME}"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/metrics"]
-      interval: 5s
-      timeout: 5s
+      test: ["CMD", "sh", "-c", "[ -f logs/vllm_server.log ] && grep -q 'Application startup complete' logs/vllm_server.log"]
+      interval: 10s
+      timeout: 2s
       retries: 500
-      start_period: 5s
+      start_period: 10s
 
   benchmark:
-    image: docker_auto_1
+    image: docker_auto_24
     network_mode: service:vllm-server
     depends_on:
       vllm-server:
         condition: service_healthy
-    env_file:
-      - .env.generated
-    volumes:
-      - .:/app
-    working_dir: /app
-    entrypoint: >
-      sh -c "sleep 10 && HF_TOKEN=xxx python3 /workspace/vllm/benchmarks/benchmark_serving.py \
-      --model meta-llama/Llama-3.1-8B-Instruct \
-      --base-url http://localhost:8000 \
-      --backend openai-chat \
-      --endpoint /v1/chat/completions \
-      --dataset-name hf \
-      --dataset-path openai_human_eval \
-      --hf-split train \
-      --num-prompts 500 \
-      --max-concurrency 64 \
-      --metric-percentiles 90"
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - PYTHONUNBUFFERED=1
+    command: ["benchmark", "--config-file", "${BENCHMARK_CONFIG_FILE}", "--config-name", "${BENCHMARK_CONFIG_NAME}"]
