@@ -351,6 +351,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.target_logprobs_ = None
         self.prompt_logprobs_ = None
         self.hpu_opt=True
+        
 
 
 
@@ -789,7 +790,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
 
         with Timer() as proposal_timer:
-            print(f"==============put to spec {self.accepted_token_ids_=}===")
+            #print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
             if self.hpu_opt:      
                 proposals = self.proposer_worker.get_spec_proposals(
@@ -807,7 +808,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         execute_model_req.previous_hidden_states = None
 
         with Timer() as scoring_timer:
-            print(f"==============put to score {self.accepted_token_ids_=}===")
+            #print(f"==============put to score {self.accepted_token_ids_=}===")
             
             if self.hpu_opt:
                 proposal_scores = self.scorer.score_proposals(
@@ -855,8 +856,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             "k": execute_model_req.num_lookahead_slots,
             "stage_times": stage_times,
         }
-        if accepted_token_ids is not None and accepted_token_ids[0][0].item()==12:
-            c=0
+
         self.cached_step_accepted_tokens.append(accepted_token_ids)
         #print(f" cache after append{self.cached_step_accepted_tokens=}")
         self.cached_step_target_logprobs.append(target_logprobs)

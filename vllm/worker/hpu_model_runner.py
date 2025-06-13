@@ -2740,7 +2740,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 htorch.core.mark_step()
 
 
-
+        '''
         # if False: # !self.hpu_opt
         if self.is_driver_worker:
             model_kwargs_broadcast_data = {
@@ -2753,7 +2753,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
             input_tokens = model_kwargs_broadcast_data["input_tokens"]
 
-       
+        '''       
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
