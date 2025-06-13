@@ -873,7 +873,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         #2578 -1
         #294 2501
         #305 -1 
-        #print(f"!!!_create_output_sampler_list {accepted_token_ids}")
+        print(f"!!!_create_output_sampler_list {accepted_token_ids}")
         tmp = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,

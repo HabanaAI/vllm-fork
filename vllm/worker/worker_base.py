@@ -463,6 +463,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             intermediate_tensors=intermediate_tensors,
             num_steps=num_steps,
             accepted_token_id=accepted_token_id,
+            execute_model_req=execute_model_req,
             **kwargs,
         )
 
