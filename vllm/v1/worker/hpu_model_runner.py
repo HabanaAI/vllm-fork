@@ -600,8 +600,9 @@ class HPUModelRunner:
         self.padding_aware_scheduling = True  # TODO(kzawora): add knob for that
         self.padding_ratio_threshold = 0.9  # TODO(kzawora): add knob for that
         self.seen_configs: set = set()
-        self.max_num_batched_tokens = \
-            self.scheduler_config.max_num_batched_tokens
+        self.max_num_batched_tokens = min(
+            self.scheduler_config.max_num_batched_tokens,
+            self.scheduler_config.max_model_len)
         self.use_merged_prefill = False
         if self.enable_bucketing:
             self.use_prefix_caching = (
