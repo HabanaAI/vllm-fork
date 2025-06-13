@@ -43,10 +43,10 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.utils import bind_kv_cache
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 
+from vllm_hpu_extension.bucketing.common import HPUBucketingManager
+
 if TYPE_CHECKING:
     from vllm.v1.core.scheduler import SchedulerOutput
-
-from vllm_hpu_extension.bucketing.common import get_bucketing_context
 
 logger = init_logger(__name__)
 
@@ -607,12 +607,11 @@ class HPUModelRunner:
             self.use_prefix_caching = (
                 self.vllm_config.cache_config.enable_prefix_caching)
             logger.info("Bucketing is ON.")
-            HPUBucketingContext = get_bucketing_context()
-            self.bucketing_ctx = HPUBucketingContext(
-                self.max_num_seqs, self.max_prefill_batch_size,
-                self.block_size, self.max_num_batched_tokens,
-                self.use_merged_prefill, self.use_prefix_caching,
-                self.max_model_len)
+            self.bucketing_manager = HPUBucketingManager( self.max_num_seqs, self.max_prefill_batch_size, self.block_size,
+                self.max_num_batched_tokens, self.use_merged_prefill,
+                self.use_prefix_caching, self.max_model_len)
+            self.bucketing_manager.generate_prompt_buckets()
+            self.bucketing_manager.hello()
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
@@ -908,11 +907,10 @@ class HPUModelRunner:
         padding_fn = None
         block_bucket_size: int
         if self.use_contiguous_pa:
-            block_bucket_size = max(max(block_list) + 1, len(block_list))
+            block_bucket_size = max(max(block_list) + 1, len(block_list), False)
             if bucketing:
                 block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                    block_bucket_size)
+                    self.bucketing_manager.find_bucket(1, 1, block_bucket_size)[2]
             indices: list[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -922,8 +920,7 @@ class HPUModelRunner:
         else:
             if bucketing:
                 block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                    len(block_list))
+                    self.bucketing_manager.find_bucket(1, 1, len(block_list), False)[2]
             else:
                 block_bucket_size = len(block_list)
             padding_fn = lambda tensor, pad_value: pad_list(
@@ -1376,6 +1373,7 @@ class HPUModelRunner:
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
+        print(cfg)
         if not seen and not warmup_mode:
             logger.warning(
                 "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
@@ -2219,15 +2217,15 @@ class HPUModelRunner:
             raise AssertionError("Finished profiling")
         kv_caches = self.kv_caches
         max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
-        self.bucketing_ctx.generate_decode_buckets(max_blocks)
+        self.bucketing_manager.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() in ('1', 'true') else 1
             cache_size_limit = 1 + multiplier * (
-                len(self.bucketing_ctx.prompt_buckets) +
-                len(self.bucketing_ctx.decode_buckets))
+                len(self.bucketing_manager.prompt_buckets) +
+                len(self.bucketing_manager.decode_buckets))
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
@@ -2258,7 +2256,6 @@ class HPUModelRunner:
                            'Please update Gaudi Software Suite.')
         with compile_only_mode_context(
         ) if can_use_compile_only_mode else contextlib.nullcontext():
-
             if not self.model_config.enforce_eager:
                 assert self.mem_margin is not None, \
                     ("HabanaWorker.determine_num_available_blocks needs "
@@ -2266,17 +2263,17 @@ class HPUModelRunner:
                 #TODO(kzawora): align_workers
                 mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                     self.warmup_graphs(
-                    self.bucketing_ctx.prompt_buckets,
+                    self.bucketing_manager.prompt_buckets,
                     True, kv_caches)
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
-                    self.bucketing_ctx.decode_buckets,
+                    self.bucketing_manager.decode_buckets,
                     False, kv_caches)
 
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
+                    self.bucketing_manager.prompt_buckets, True, mem_post_prompt)
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.decode_buckets, False, mem_post_decode)
+                    self.bucketing_manager.decode_buckets, False, mem_post_decode)
 
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
@@ -2382,7 +2379,7 @@ class HPUModelRunner:
             self.kv_caches)
 
         if self.enable_bucketing:
-            self.bucketing_ctx.num_hpu_blocks = num_blocks
+            self.bucketing_manager.num_hpu_blocks = num_blocks
         self._PAD_BLOCK_ID = num_blocks
         self._PAD_SLOT_ID = num_blocks * self.block_size
 
