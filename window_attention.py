@@ -1,4 +1,5 @@
 import habana_frameworks.torch as htorch
+import math
 import torch
 import torch.nn as nn
 import logging
@@ -16,6 +17,34 @@ logger.setLevel(logging.ERROR)
 logger.propagate = False
 
 is_hpu = True
+
+# Efficient implementation equivalent to the following:
+def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
+        is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+    L, S = query.size(-2), key.size(-2)
+    scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+    attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+    if is_causal:
+        assert attn_mask is None
+        temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+        attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+        attn_bias.to(query.dtype)
+ 
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+        else:
+            attn_bias = attn_mask + attn_bias
+ 
+    if enable_gqa:
+        key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+        value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+ 
+    attn_weight = query @ key.transpose(-2, -1) * scale_factor
+    attn_weight += attn_bias
+    attn_weight = torch.softmax(attn_weight, dim=-1)
+    attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+    return attn_weight @ value
 
 
 def pad_input_with_block_of_64(x, cu_seqlens):
@@ -177,25 +206,25 @@ def test_window_attention_mask_with_gaps(use_fused=False):
     dim = 240
     device = 'cpu'
     atol = 0.001
-    cu_seqlens = [0, 64, 128, 192, 240]
     n = 64
+    cu_seqlens = [0, 64, 128, 192, 240]
     cu_seqlens = torch.tensor(cu_seqlens)
 
     assert cu_seqlens[-1].item() == dim
     x = torch.randn([dim, 1, 1280], device=device).bfloat16()
-    # no mask
+    padded_x = pad_input_with_block_of_64(x, cu_seqlens)
+
+    # no mask being called here
     model = FSDPAWindownAttnMask(use_fused=use_fused).to(
         torch.bfloat16).to(device)
     weights = model.state_dict()
-    y = model(x, cu_seqlens).to('cpu')
+    y = model(padded_x, cu_seqlens).to('cpu')
 
-    # with mask and pad
+    # using mask
     model = FSDPAWindownAttnMask(use_fused=use_fused).to(
         torch.bfloat16).to(device)
     model.load_state_dict(weights)
     model = model.to(device)
-
-    padded_x = pad_input_with_block_of_64(x, cu_seqlens)
     new_cu_seqlens = [i for i in range(0, len(cu_seqlens) * 64, 64)]
     new_cu_seqlens = torch.tensor(new_cu_seqlens)
     assert len(new_cu_seqlens) == len(cu_seqlens)
@@ -205,6 +234,7 @@ def test_window_attention_mask_with_gaps(use_fused=False):
     vector_mask = torch.ones(64)
     vector_mask[48:] = 0
     attn_mask[-1, :, :] = torch.outer(vector_mask, vector_mask)
+    attn_mask = attn_mask.bool()
 
     if use_fused:
         attn_mask.to(torch.bfloat16)
@@ -214,41 +244,60 @@ def test_window_attention_mask_with_gaps(use_fused=False):
     assert torch.allclose(y[192:], y_with_mask[192:192+48], atol=atol)
 
 
-def test_window_attention_not_implemented():
-    set_random_seed(0)
-    dim = 484
-    device = 'cpu'
-    atol = 0.001
-    cu_seqlens = [0, 64, 128, 176, 240, 304, 352, 400, 448, 484]
-    cu_seqlens = torch.tensor(cu_seqlens)
+def test_scaled_dot_product_attention_masks_one():
+    q_i = torch.rand(1, 16, 64, 80)
+    k_i = torch.rand(1, 16, 64, 80)
+    v_i = torch.rand(1, 16, 64, 80)
+    attn_mask_i = torch.ones(64, 64).bool()
+    output_no_mask = F.scaled_dot_product_attention(q_i,
+                                                 k_i,
+                                                 v_i,
+                                                 dropout_p=0.0)
 
-    assert cu_seqlens[-1].item() == dim
-    x = torch.randn([dim, 1, 1280], device=device).bfloat16()
-    # no mask
-    model = FSDPAWindownAttnMask(use_fused=False).to(torch.bfloat16).to(device)
-    weights = model.state_dict()
-    y = model(x, cu_seqlens).to('cpu')
+    output_mask = F.scaled_dot_product_attention(q_i,
+                                                 k_i,
+                                                 v_i,
+                                                 attn_mask_i,
+                                                 dropout_p=0.0)
 
-    # with mask and pad
-    padded_x = pad_input_with_block_of_64(x, cu_seqlens=cu_seqlens)
-    full_cu_seqlens = torch.arange(0, padded_x.shape[0] + 1, 64)
-    model = FSDPAWindownAttnMask(use_fused=False).to(torch.bfloat16).to(device)
-    model.load_state_dict(weights)
-    model = model.bfloat16().to(device)
-    y_with_mask = model(padded_x, full_cu_seqlens).to('cpu')
+    assert torch.allclose(output_no_mask, output_mask, atol = 0.001)
 
-    assert torch.allclose(y[0, 0:128, :], y_with_mask[0, 0:128, :], atol=atol)
+def test_scaled_dot_product_attention_masks_one():
+    n = 8
+    q_i = torch.rand(1, 2, n, 3)
+    k_i = torch.rand(1, 2, n, 3)
+    v_i = torch.rand(1, 2, n, 3)
+    
+    q_i[:, :, -1, :] = 0
+    k_i[:, :, -1, :] = 0
 
-    # expect to fail
-    with pytest.raises(AssertionError):
-        assert torch.allclose(y[0, 0:200, :],
-                              y_with_mask[0, 0:200, :],
-                              atol=atol)
+    attn_mask_i = torch.ones(n, n).bool()
+    attn_mask_i[-1, :] = False
+    attn_mask_i[:, -1] = False
+    output_no_mask = F.scaled_dot_product_attention(q_i,
+                                                 k_i,
+                                                 v_i,
+                                                 dropout_p=0.0)
+
+    output_mask = F.scaled_dot_product_attention(q_i,
+                                                 k_i,
+                                                 v_i,
+                                                 attn_mask_i,
+                                                 dropout_p=0.0)
+
+    output_mask_sdpa = scaled_dot_product_attention(q_i,
+                                                 k_i,
+                                                 v_i,
+                                                 attn_mask_i,
+                                                 dropout_p=0.0)
+
+    assert torch.allclose(output_no_mask, output_mask, atol = 0.001)
+
 
 
 # test_pad_input_with_block_of_64(device="cpu")
 # test_window_attention_mask_of_ones(use_fused=False)
-test_window_attention_mask_with_gaps(use_fused=False)
+# test_window_attention_mask_with_gaps(use_fused=False)
 # test_window_attention_mask_of_ones(use_fused=True)
 # test_window_attention_cpu_not_implemented()
 
