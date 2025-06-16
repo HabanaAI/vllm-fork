@@ -786,11 +786,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     self.target_logprobs_=self.cached_step_target_logprobs[0]
                     self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
 
-                    #print(f"a-1-1!!!{self.accepted_token_ids_=}")
 
-                    #self.accepted_token_ids_=self.cached_step_accepted_tokens[0]
-                    #print(f"====={self.rank=},{self._driver_rank=}====")
-        #print(f"a00!!!{self.accepted_token_ids_=}")
 
         with Timer() as proposal_timer:
             print(f"==============put to spec {self.accepted_token_ids_=}===")
@@ -824,9 +820,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     execute_model_req,
                     proposals,
                 )
-            
-        #print("!!!proposal",proposals,proposal_scores)
-        #print("!!!self.accept token id",self.accepted_token_ids_)
         
         _, (non_spec_seqs, non_spec_indices) = split_batch_by_proposal_len(
             execute_model_req.seq_group_metadata_list, proposals.proposal_lens)
@@ -851,7 +844,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids, target_logprobs = self._verify_tokens(
                 execute_model_req.seq_group_metadata_list, proposal_scores,
                 proposals, execute_model_req.num_lookahead_slots)
-            #from 2578，-1 to 2578，294
+            
         stage_times = (proposal_timer.elapsed_time_ms / num_lookahead_slots,
                        scoring_timer.elapsed_time_ms,
                        verification_timer.elapsed_time_ms)
@@ -869,10 +862,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.cached_step_target_logprobs.append(target_logprobs)
         self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
-
-        #2578 -1
-        #294 2501
-        #305 -1 
         print(f"!!!_create_output_sampler_list {accepted_token_ids}")
         tmp = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
