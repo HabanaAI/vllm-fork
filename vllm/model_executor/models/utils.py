@@ -343,7 +343,6 @@ def _flatten_embeddings(embeddings: NestedTensors) -> torch.Tensor:
     if isinstance(embeddings, torch.Tensor):
         # Flatten all but the last dimension.
         return embeddings.flatten(0, -2)
-
     return torch.cat(tuple(_flatten_embeddings(t) for t in embeddings))
 
 
@@ -391,8 +390,19 @@ def _merge_multimodal_embeddings(
     """
     # skip check for HPU, the number of tokens is a cpu fallback during HPU lazy
     if current_platform.is_hpu():
-        flattened = _flatten_embeddings(multimodal_embeddings)
-        inputs_embeds[is_multimodal] = flattened
+
+        if isinstance(multimodal_embeddings, torch.Tensor):
+            is_multimodal = is_multimodal.reshape(-1)
+            batch_size, seq_length, hidden_size = inputs_embeds.shape
+            inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
+            flattened = multimodal_embeddings.reshape(-1, hidden_size)
+            inputs_embeds[is_multimodal] = flattened
+            inputs_embeds = inputs_embeds.reshape(batch_size, seq_length,
+                                              hidden_size)
+        else:
+            flattened = _flatten_embeddings(multimodal_embeddings)
+            inputs_embeds[is_multimodal] = flattened   
+               
         return inputs_embeds
 
     num_expected_tokens = is_multimodal.sum().item()
@@ -476,14 +486,6 @@ def merge_multimodal_embeddings(
     Note:
         This updates ``inputs_embeds`` in place.
     """
-    if current_platform.is_hpu():
-        return _hpu_merge_multimodal_embeddings(
-            input_ids,
-            inputs_embeds,
-            multimodal_embeddings,
-            placeholder_token_id,
-        )
-        
     if isinstance(placeholder_token_id, list):
         placeholder_token_id = torch.tensor(placeholder_token_id,
                                             device=input_ids.device)
@@ -492,7 +494,6 @@ def merge_multimodal_embeddings(
             torch.isin(input_ids, placeholder_token_id),
             multimodal_embeddings,
         )
-
     return _merge_multimodal_embeddings(
         inputs_embeds,
         (input_ids == placeholder_token_id),
@@ -712,7 +713,6 @@ def extract_layer_index(layer_name: str) -> int:
                                 " only contain one integer")
     return int_vals[0]
 
-
 def get_input_mask(hidden_states: torch.Tensor,
                    valid_len: torch.Tensor) -> torch.Tensor:
     """
@@ -726,7 +726,6 @@ def get_input_mask(hidden_states: torch.Tensor,
     # mask: (B, T)
     mask = mask.to(hidden_states.dtype)
     return mask
-
 
 def cast_overflow_tensors(
     tensors: torch.Tensor,
@@ -745,27 +744,3 @@ def fast_topk(values, topk, dim):
     else:
         # Use topk for efficiency with larger k values
         return torch.topk(values, topk, dim=dim)
-
-def _hpu_merge_multimodal_embeddings(
-    input_ids: torch.Tensor,
-    inputs_embeds: torch.Tensor,
-    multimodal_embeddings: NestedTensors,
-    placeholder_token_id: torch.tensor,
-) -> torch.Tensor:
-    """
-    Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
-    positions in ``inputs_embeds`` corresponding to placeholder tokens in
-    ``input_ids``.
-    merge_multimodal_embeddings on HPU to avoid dynamicity.    
-    Note:
-        This updates ``inputs_embeds`` in place.
-    """
-    batch_size, seq_length, hidden_size = inputs_embeds.shape
-    inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
-    multimodal_embeddings = multimodal_embeddings.reshape(-1, hidden_size)
-    placeholder_token_id = torch.tensor(placeholder_token_id,
-                                        device=input_ids.device)
-    mask = torch.isin(input_ids.reshape(-1), placeholder_token_id)
-    inputs_embeds.index_put_((mask, ), multimodal_embeddings)
-    inputs_embeds = inputs_embeds.reshape(batch_size, seq_length, hidden_size)
-    return inputs_embeds
