@@ -851,7 +851,8 @@ class HPUModelRunner:
 
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
-            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[req_id]
+            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
+                req_id]
             if num_computed_tokens < num_prompt_tokens and not is_decoder_only:
                 # This is prompt
                 break
@@ -1372,7 +1373,7 @@ class HPUModelRunner:
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
             if idx < num_decodes and not is_decoder_only:
-               assert seq_num_scheduled_tokens == 1
+                assert seq_num_scheduled_tokens == 1
         return (
             self._prepare_prefill_inputs(num_prefills, num_decodes,
                                          num_scheduled_tokens, bucketing),
@@ -1410,11 +1411,11 @@ class HPUModelRunner:
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-        #if not warmup_mode:
+            #if not warmup_mode:
             phase = phase.value
             logger.warning(
                 "Configuration: rank (%s, %s, %s, %s, %s) was not warmed-up!",
-                 os.getenv('RANK'), phase, batch_size, seq_len, num_blocks)
+                os.getenv('RANK'), phase, batch_size, seq_len, num_blocks)
 
     def _execute_model_generic(self,
                                token_ids,
