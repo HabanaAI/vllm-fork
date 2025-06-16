@@ -30,7 +30,6 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
 # yapf: enable
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
 from vllm.sequence import IntermediateTensors
-
 from vllm.platforms import current_platform
 
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
