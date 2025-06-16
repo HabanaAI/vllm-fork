@@ -535,8 +535,6 @@ def pad_list(input, target_len, val_generator):
     padding = target_len - len(input)
     if padding > 0:
         input.extend(itertools.islice(val_generator, padding))
-    elif padding < 0:
-        print('PADDING', target_len, len(input), padding)
     return input
 
 
@@ -652,6 +650,10 @@ class HPUModelRunner:
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
             lora_config=vllm_config.lora_config).tokenizer
+
+        # TODO(madamczyk-intel): add a knob for that
+        # TODO(madamczyk-intel): debug why increasing it lowers acc
+        self.logits_rounding = 1
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
@@ -953,8 +955,6 @@ class HPUModelRunner:
                 block_bucket_size = \
                     self.bucketing_ctx.get_padded_decode_num_blocks(
                         len(block_list))
-                print('Get padded decode', len(block_list), '->',
-                      block_bucket_size)
             else:
                 block_bucket_size = len(block_list)
             padding_fn = lambda tensor, pad_value: pad_list(
@@ -1160,6 +1160,11 @@ class HPUModelRunner:
             attn_bias = attn_bias.to('hpu', non_blocking=True)
         else:
             attn_bias = None
+
+        logits_indices = pad_list(
+            logits_indices,
+            round_up(len(logits_indices), self.logits_rounding),
+            itertools.repeat(-1))
 
         query_lens = _async_h2d_tensor(query_lens, torch.int32)
         token_ids = _async_h2d_tensor(token_ids, torch.int32)
@@ -2005,7 +2010,6 @@ class HPUModelRunner:
         idx = 0
         num_candidates = len(buckets)
         captured_all = True
-        print('buckets:', buckets)
         for idx, (batch_size, seq_len,
                   num_blocks) in enumerate(reversed(buckets)):
             # Graph memory usage is proportional to seq dimension in a batch
@@ -2178,7 +2182,6 @@ class HPUModelRunner:
             raise AssertionError("Finished profiling")
         kv_caches = self.kv_caches
         max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
-        print('MAX_BLOCKS', max_blocks, flush=True)
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
@@ -2196,7 +2199,7 @@ class HPUModelRunner:
                 cache_size_limit * 8,
                 torch._dynamo.config.accumulated_cache_size_limit)
 
-        if self.skip_warmup:
+        if self.skip_warmup or self.use_merged_prefill:
             logger.info("Skipping warmup...")
             return
 
