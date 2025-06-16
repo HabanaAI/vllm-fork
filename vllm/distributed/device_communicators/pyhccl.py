@@ -98,8 +98,6 @@ class PyHcclCommunicator:
                                 hcclDataTypeEnum.from_torch(in_tensor.dtype),
                                 hcclRedOpTypeEnum.from_torch(op), self.comm,
                                 hpuStream_t(htutils.experimental._compute_stream()))
-        htorch.core.mark_step()
-        torch.hpu.synchronize()
         return out_tensor
 
     def all_gather(self,
@@ -116,8 +114,6 @@ class PyHcclCommunicator:
             buffer_type(htutils.experimental._data_ptr(output_tensor)), input_tensor.numel(),
             hcclDataTypeEnum.from_torch(input_tensor.dtype), self.comm,
             hpuStream_t(htutils.experimental._compute_stream()))
-        htorch.core.mark_step()
-        torch.hpu.synchronize()
 
     def reduce_scatter(self,
                        output_tensor: torch.Tensor,
@@ -136,8 +132,6 @@ class PyHcclCommunicator:
             hcclDataTypeEnum.from_torch(input_tensor.dtype),
             hcclRedOpTypeEnum.from_torch(op), self.comm,
             hpuStream_t(htutils.experimental._compute_stream()))
-        htorch.core.mark_step()
-        torch.hpu.synchronize()
 
     def send(self, tensor: torch.Tensor, dst: int):
         if self.disabled:
@@ -149,8 +143,6 @@ class PyHcclCommunicator:
         self.hccl.hcclSend(buffer_type(htutils.experimental._data_ptr(tensor)), tensor.numel(),
                            hcclDataTypeEnum.from_torch(tensor.dtype), dst,
                            self.comm, hpuStream_t(htutils.experimental._compute_stream()))
-        htorch.core.mark_step()
-        torch.hpu.synchronize()
 
     def recv(self, tensor: torch.Tensor, src: int):
         if self.disabled:
@@ -162,8 +154,6 @@ class PyHcclCommunicator:
         self.hccl.hcclRecv(buffer_type(htutils.experimental._data_ptr(tensor)), tensor.numel(),
                            hcclDataTypeEnum.from_torch(tensor.dtype), src,
                            self.comm, hpuStream_t(htutils.experimental._compute_stream()))
-        htorch.core.mark_step()
-        torch.hpu.synchronize()
 
     def broadcast(self, tensor: torch.Tensor, src: int):
         if self.disabled:
@@ -177,5 +167,3 @@ class PyHcclCommunicator:
         self.hccl.hcclBroadcast(sendbuff, recvbuff, tensor.numel(),
                                 hcclDataTypeEnum.from_torch(tensor.dtype), src,
                                 self.comm, hpuStream_t(htutils.experimental._compute_stream()))
-        htorch.core.mark_step()
-        torch.hpu.synchronize()
