@@ -1610,25 +1610,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         accepted_token_id: Optional[torch.Tensor] = None,
         execute_model_req=None,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
-        
-        
-        
-        
-   
-        rank = torch.distributed.get_rank()
-        if rank==0:
-            if execute_model_req is not None:
-                b=0
-            if execute_model_req is not None and execute_model_req.expand is not None:
-                expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand()
-                seq_group_metadata_list = expanded_request.seq_group_metadata_list
-                finished_requests_ids=expanded_request.finished_requests_ids
-                execute_model_req.hack_indices_of_seq_with_bonus_tokens=indices_of_seq_with_bonus_tokens
-                execute_model_req.expand_req=expanded_request
-            c=0
-                #  execute_model_req.seq_group_metadata_list,
-                # execute_model_req.virtual_engine,
-                # execute_model_req.finished_requests_ids,
+             
+        if execute_model_req is not None and execute_model_req.expand is not None:
+            expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand()
+            seq_group_metadata_list = expanded_request.seq_group_metadata_list
+            finished_requests_ids=expanded_request.finished_requests_ids
+            execute_model_req.hack_indices_of_seq_with_bonus_tokens=indices_of_seq_with_bonus_tokens
+            execute_model_req.expand_req=expanded_request
+      
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -1682,11 +1671,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_kwargs,
             slot_mapping,
             lora_ids,
-        ) = self._prepare_prompt(prefill_reqs, align_worker=align_worker)
-        
-        
-
-                
+        ) = self._prepare_prompt(prefill_reqs, align_worker=align_worker)      
+          
         (
             decode_input_tokens,
             decode_input_positions,
@@ -1815,22 +1801,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         
    
 
-        if rank==0 and input_tokens[-1][0]==2578:
-            print(f"{input_tokens=}")
-            print(f"{query_lens=}")
-            print(f"{input_positions=}")
-            print(f"{lora_requests=}")
-            print(f"{sampling_metadata=}")
-            print(f"{lora_ids=}")
-            print(f"{lora_mapping=}")
-            print(f"{real_batch_size=}")
-            print(f"{batch_size_padded=}")
-            print(f"{seq_lens=}")
-            print(f"{attn_metadata.num_decode_tokens=}")
-            print(f"{attn_metadata.slot_mapping=}")
-            print(f"{attn_metadata.input_positions=}")
-            print(f"{attn_metadata.block_usage.shape=}")
-            print(f"{attn_metadata.block_groups.shape=}")
+        #     print(f"{input_tokens=}")
+        #     print(f"{query_lens=}")
+        #     print(f"{input_positions=}")
+        #     print(f"{lora_requests=}")
+        #     print(f"{sampling_metadata=}")
+        #     print(f"{lora_ids=}")
+        #     print(f"{lora_mapping=}")
+        #     print(f"{real_batch_size=}")
+        #     print(f"{batch_size_padded=}")
+        #     print(f"{seq_lens=}")
+        #     print(f"{attn_metadata.num_decode_tokens=}")
+        #     print(f"{attn_metadata.slot_mapping=}")
+        #     print(f"{attn_metadata.input_positions=}")
+        #     print(f"{attn_metadata.block_usage.shape=}")
+        #     print(f"{attn_metadata.block_groups.shape=}")
             
      
         return self._model_input_cls(input_tokens=input_tokens,
@@ -2721,44 +2706,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         warmup_mode = kwargs.get('warmup_mode', False)
         previous_hidden_states = kwargs.get('previous_hidden_states')
-        accepted_token_id_=None
-        rank = torch.distributed.get_rank()
-        #accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
-        #print(f"================================{accepted_token_id_=}, {rank=}, {self.is_driver_worker=}=========================")
-        #if rank==0:
-        #    print("!!model_input.input_tokens",model_input.input_tokens)
-        #    print("!!!end model_input")
-        if accepted_token_id is not None:
-            c=0
-        # mingzhidebug
-        # if execute_model_req is not None and execute_model_req.expand is not None:
-        #     expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand()
-        #     seq_group_metadata_list = expanded_request.seq_group_metadata_list
-        #     finished_requests_ids=expanded_request.finished_requests_ids
-        #     execute_model_req.hack_indices_of_seq_with_bonus_tokens=indices_of_seq_with_bonus_tokens
-        #     execute_model_req.expand_req=expanded_request
-        
-        
-        # if accepted_token_id is not None:
-        #     #print(f"============prepare_input_tensors====={accepted_token_id=}==============")
-        #     #print(f"============000prepare_input_tensors {input_tokens}, {rank=}")
-        #     # 过滤掉-1的非法token
-        #     valid_tokens = accepted_token_id[accepted_token_id != -1]
-
-        #     # 创建目标索引 [0, 1, ..., n-1]
-        #     indices = torch.arange(valid_tokens.size(0), device=valid_tokens.device)#.unsqueeze(1)
-
-        #     # 使用index_copy_更新input_tokens
-        #     model_input.input_tokens.index_copy_(
-        #         0,
-        #         indices,
-        #         valid_tokens.unsqueeze(1)
-        #         )
-
-        #     # 只保留有效token部分
-        #     #print(f"==============111prepare_input_tensors after {input_tokens=}, {rank=}")
-        #     # model_input.input_tokens=model_input.input_tokens[:2]
-        #     c=0
         self.has_patched_prev_output = False
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \

@@ -391,7 +391,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     broadcast_tensor_dict({"is_dummy_batch": True}, src=0)
                 self.model_runner._dummy_run(1)
                 return None
-            #print(f"a66!!!{accepted_token_id=}")
 
             return self._get_driver_input_and_broadcast(execute_model_req, accepted_token_id)
         else:
@@ -408,15 +407,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         start_time = time.perf_counter()
-        rank =torch.distributed.get_rank()
-        if rank==0:
-            pass
-
         inputs = self.prepare_input(execute_model_req, accepted_token_id)
-   
-
-        if rank==0:
-            pass
         # Need to keep worker running when executing dummy batch under DP
         # scenario
         if self.is_driver_worker:
