@@ -28,10 +28,10 @@ from .conftest import run_equality_correctness_test
 # main model
 # lmsys/vicuna-7b-v1.3 was to be used but it's causing
 # OOM in CI pipeline, so using a smaller model.
-MAIN_MODEL = "JackFram/llama-68m"
+MAIN_MODEL = "/mnt/weka/data/huggingface-models/JackFram/llama-68m"
 
 # speculative model
-SPEC_MODEL = "abhigoyal/vllm-medusa-llama-68m-random"
+SPEC_MODEL = "/mnt/weka/data/huggingface-models/abhigoyal/vllm-medusa-llama-68m-random"
 
 # max number of speculative tokens: this corresponds to
 # num_heads in the config.json of the speculator model.

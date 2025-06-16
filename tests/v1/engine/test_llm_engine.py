@@ -8,7 +8,7 @@ import pytest
 from vllm import LLM, SamplingParams
 from vllm.platforms import current_platform
 
-MODEL = "facebook/opt-125m"
+MODEL = "/mnt/weka/data/huggingface-models/facebook/opt-125m"
 DTYPE = "half"
 
 
