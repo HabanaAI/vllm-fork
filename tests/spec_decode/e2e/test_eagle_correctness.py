@@ -28,7 +28,8 @@ from .conftest import run_equality_correctness_test
 MAIN_MODEL = "/mnt/weka/data/huggingface-models/JackFram/llama-68m"
 
 # speculative model
-SPEC_MODEL = "/mnt/weka/data/huggingface-models/abhigoyal/vllm-eagle-llama-68m-random"
+SPEC_MODEL = \
+    "/mnt/weka/data/huggingface-models/abhigoyal/vllm-eagle-llama-68m-random"
 
 # max. number of speculative tokens: this corresponds to
 # num_heads in the config.json of the speculator model.
