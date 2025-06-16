@@ -34,6 +34,7 @@ from vllm.attention import Attention, AttentionType
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -62,6 +63,7 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, WeightsMapper,
 logger = init_logger(__name__)
 
 is_hpu = current_platform.is_hpu()
+
 
 class Qwen2MLP(nn.Module):
 
@@ -175,10 +177,19 @@ class Qwen2Attention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
+        attn_metadata = get_forward_context().attn_metadata
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
+            valid_len = attn_metadata.seq_lens_tensor
+            mask = get_input_mask(hidden_states, valid_len)
+            hidden_states = hidden_states * mask.unsqueeze(-1)
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v)
+        if (is_hpu and self.enable_zero_padding
+                and attn_metadata.seq_lens_tensor is not None):
+            attn_output = attn_output * mask.unsqueeze(-1)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -292,6 +303,8 @@ class Qwen2Model(nn.Module):
 
         self.config = config
         self.quant_config = quant_config
+        self.enable_zero_padding = os.environ.get('VLLM_ZERO_PADDING',
+                                                  'false').lower() == 'true'
         self.vocab_size = config.vocab_size
 
         if get_pp_group().is_first_rank or (config.tie_word_embeddings
@@ -345,6 +358,12 @@ class Qwen2Model(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
         if current_platform.is_hpu():
+            attn_metadata = get_forward_context().attn_metadata
+            if (self.enable_zero_padding
+                    and attn_metadata.seq_lens_tensor is not None):
+                valid_len = attn_metadata.seq_lens_tensor
+                mask = get_input_mask(hidden_states, valid_len)
+                hidden_states = hidden_states * mask.unsqueeze(-1)
             import habana_frameworks.torch as htorch
             htorch.core.mark_step()
         for layer in self.layers[self.start_layer:self.end_layer]:
