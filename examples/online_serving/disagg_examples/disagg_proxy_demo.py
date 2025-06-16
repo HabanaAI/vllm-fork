@@ -1,4 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
+"""
+This file provides a disaggregated prefilling proxy demo to demonstrate an
+example usage of XpYd disaggregated prefilling.
+We can launch multiple vllm instances (2 for prefill and 2 for decode), and
+launch this proxy demo through:
+  python3 examples/online_serving/disagg_examples/disagg_proxy_demo.py  \
+       --model $model_name  \
+       --prefill localhost:8100 localhost:8101   \
+       --decode localhost:8200 localhost:8201   \
+       --port 8000
+Note: This demo will be removed once the PDController implemented in PR 15343
+(https://github.com/vllm-project/vllm/pull/15343) supports XpYd.
+"""
 import argparse
 import ipaddress
 import itertools
@@ -31,9 +44,9 @@ async def P_first_token_generator(generator_p,
     first_decode = True
     async for chunk in generator_p:
         yield chunk
-    print(
-        f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-        "prefill completed: ", prefill_instance)
+    logger.debug("P->[{%s}] prefill completed: {%d}",
+                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                 prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(prefill_instance=prefill_instance)
 
@@ -42,9 +55,8 @@ async def P_first_token_generator(generator_p,
             first_decode = False
             continue
         yield chunk
-    print(
-        f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-        "decode completed: ", decode_instance)
+    logger.debug("P->[{%s}] decode completed: {%d}",
+                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'), decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(decode_instance=decode_instance)
 
@@ -56,17 +68,16 @@ async def D_first_token_generator(generator_p,
                                   decode_instance: str = None):
     async for _ in generator_p:
         continue
-    print(
-        f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-        "prefill completed: ", prefill_instance)
+    logger.debug("D->[{%s}] prefill completed: %d",
+                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                 prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(prefill_instance=prefill_instance)
 
     async for chunk in generator_d:
         yield chunk
-    print(
-        f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-        "decode completed: ", decode_instance)
+    logger.debug("D->[{%s}] decode completed: {%d}",
+                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'), decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(decode_instance=decode_instance)
 
@@ -312,8 +323,8 @@ class Proxy:
                 kv_prepare_request = request.copy()
                 kv_prepare_request["max_tokens"] = 1
 
-                print("create_completion, request_len=",
-                      len(kv_prepare_request['prompt']))
+                logger.debug("create_completion, request_len=%d",
+                             len(kv_prepare_request['prompt']))
                 prefill_instance = self.schedule(
                     self.prefill_cycler,
                     request_len=len(kv_prepare_request['prompt']))
@@ -353,8 +364,8 @@ class Proxy:
             import sys
 
             exc_info = sys.exc_info()
-            print("Error occurred in disagg proxy server")
-            print(exc_info)
+            logger.error("Error occurred in disagg proxy server")
+            logger.error(exc_info)
 
     async def create_chat_completion(self, raw_request: Request):
         try:
@@ -367,7 +378,7 @@ class Proxy:
             # prefill stage
             total_length = sum(
                 len(msg['content']) for msg in kv_prepare_request['messages'])
-            print("Total content length:", total_length)
+            logger.debug("Total content length:", total_length)
             prefill_instance = self.schedule(self.prefill_cycler,
                                              request_len=total_length)
 
@@ -406,8 +417,8 @@ class Proxy:
         except Exception:
             exc_info = sys.exc_info()
             error_messages = [str(e) for e in exc_info if e]
-            print("Error occurred in disagg proxy server")
-            print(error_messages)
+            logger.error("Error occurred in disagg proxy server")
+            logger.error(error_messages)
             return StreamingResponse(content=iter(error_messages),
                                      media_type="text/event-stream")
 
@@ -426,7 +437,7 @@ class Proxy:
 class RoundRobinSchedulingPolicy(SchedulingPolicy):
 
     def __init__(self):
-        print("RoundRobinSchedulingPolicy")
+        logger.debug("RoundRobinSchedulingPolicy")
         super().__init__()
 
     def safe_next(self, cycler: itertools.cycle):
@@ -448,12 +459,12 @@ class LoadBalancedScheduler(SchedulingPolicy):
         self.decode_bs_counter = [0] * len(decode_instances)
         self.prefill_instances = prefill_instances
         self.decode_instances = decode_instances
-        print(" LoadBalancedScheduler, prefill/decode instance is = ",
-              len(self.prefill_bs_counter), len(self.decode_bs_counter))
-        print(" LoadBalancedScheduler, self.prefill_instances =",
-              self.prefill_instances)
-        print(" LoadBalancedScheduler, self.decode_instances =",
-              self.decode_instances)
+        logger.debug(" LoadBalancedScheduler, prefill/decode instance is = ",
+                     len(self.prefill_bs_counter), len(self.decode_bs_counter))
+        logger.debug(" LoadBalancedScheduler, self.prefill_instances =",
+                     self.prefill_instances)
+        logger.debug(" LoadBalancedScheduler, self.decode_instances =",
+                     self.decode_instances)
         super().__init__()
 
     def schedule(self,
@@ -465,17 +476,21 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 min_index = self.prefill_utils_counter.index(min_value)
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] \
-                    schedule prefill! scheduling prefill instance... \
-                    min_value={min_value}, min_index={min_index}")
+                logger.debug(
+                    "[{%s}]  schedule prefill! scheduling prefill instance... \
+                    min_value={%d}, min_index={%d}",
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'), min_value,
+                    min_index)
                 return self.prefill_instances[min_index]
             else:
                 min_value = min(self.decode_bs_counter)
                 min_index = self.decode_bs_counter.index(min_value)
                 self.decode_bs_counter[min_index] += 1
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] \
-                    schedule decode! scheduling decode instance... \
-                    min_value={min_value}, min_index={min_index}")
+                logger.debug(
+                    "[{%s}] schedule decode! scheduling decode instance... \
+                    min_value={%d}, min_index={%d}",
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'), min_value,
+                    min_index)
                 return self.decode_instances[min_index]
 
     def schedule_completion(self,
@@ -483,7 +498,7 @@ class LoadBalancedScheduler(SchedulingPolicy):
                             decode_instance: str = None):
         with self.lock:
             if prefill_instance:
-                print(
+                logger.debug(
                     " LoadBalancedScheduler->schedule_completion "
                     "prefill_instance =", prefill_instance)
                 index = self.prefill_instances.index(prefill_instance)
@@ -494,12 +509,12 @@ class LoadBalancedScheduler(SchedulingPolicy):
                         all_zero = False
                         break
                 if all_zero:
-                    print("all bs is 0, clear entire entries")
+                    logger.debug("all bs is 0, clear entire entries")
                     for index, _ in enumerate(self.prefill_instances):
                         self.prefill_utils_counter[index] = 0
 
             if decode_instance:
-                print(
+                logger.debug(
                     " LoadBalancedScheduler->schedule_completion "
                     "decode_instance =", decode_instance)
                 index = self.decode_instances.index(decode_instance)
