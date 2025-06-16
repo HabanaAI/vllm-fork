@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
+import habana_frameworks.torch.core as htcore
 import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.flags import enabled_flags
@@ -251,6 +252,11 @@ def flat_pa_mla(query, key_cache, value_cache, block_list, block_mapping,
         key = key.transpose(2, 3)
 
     attn = matmul_qk_op(query, key)
+
+    if "fp32_softmax" in enabled_flags():
+        attn = attn.float()
+        htcore.mark_step()
+
     attn = attn + block_bias
     if kv_in_fp8:
         # Chendi: This is a workaround for manually
@@ -338,16 +344,12 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
 
         if self.VLLM_USE_FP8_MATMUL:
             self.latent_cache_k_nodeq = VLLMKVCache()
-            self.latent_cache_v_nodeq = VLLMKVCache()
             self.latent_cache_k_nodeq = initialize_fp8_kv_cache(
                 self.latent_cache_k_nodeq)
-            self.latent_cache_v_nodeq = initialize_fp8_kv_cache(
-                self.latent_cache_v_nodeq)
             self.matmul_qk_decode = initialize_fp8_matmul(self.matmul_qk)
             self.matmul_av_decode = initialize_fp8_matmul(self.matmul_av)
         else:
             self.latent_cache_k = VLLMKVCache()
-            self.latent_cache_v = VLLMKVCache()
 
         self.prefill_use_fusedsdpa = "fsdpa" in enabled_flags()
         HPUFusedSDPA = kernels.fsdpa()
@@ -494,7 +496,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         output = flat_pa_mla(
             query=q,
             key_cache=kv_cache[0],
-            value_cache=kv_cache[1],
+            value_cache=None,
             block_list=attn_metadata.block_list,
             block_mapping=attn_metadata.block_mapping,
             block_bias=attn_metadata.attn_bias,
@@ -510,9 +512,7 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             keys_fetch_func=self.latent_cache_k.fetch_from_cache
             if not self.VLLM_USE_FP8_MATMUL else
             self.latent_cache_k_nodeq.fetch_from_cache,
-            values_fetch_func=self.latent_cache_v.fetch_from_cache
-            if not self.VLLM_USE_FP8_MATMUL else
-            self.latent_cache_v_nodeq.fetch_from_cache,
+            values_fetch_func=None,
             kv_lora_rank=self.kv_lora_rank,
             kv_in_fp8=self.VLLM_USE_FP8_MATMUL,
         )

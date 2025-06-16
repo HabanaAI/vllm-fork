@@ -1,24 +1,26 @@
 #set -x
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
-
-source ./pd_xpyd/pd_env.sh
+source "$BASH_DIR"/pd_env.sh
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
-export MOONCAKE_CONFIG_PATH=./pd_xpyd/1p1d_mooncake_d.json
 
 model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.8
-export VLLM_GRAPH_RESERVED_MEM=0.1
+export VLLM_GPU_MEMORY_UTILIZATION=0.9
+export VLLM_GRAPH_RESERVED_MEM=0.2
 export VLLM_GRAPH_PROMPT_RATIO=0
+
+# enable delayed samping on decode
+export VLLM_DELAYED_SAMPLING="true"
+
 # params
-model_len=2048
-max_num_batched_tokens=2048
-max_num_seqs=64
+model_len=32768
+max_num_batched_tokens=32768
+max_num_seqs=32
 input_min=128
-input_max=1024
-output_max=1024
+input_max=32768
+output_max=32768
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
@@ -34,6 +36,10 @@ export VLLM_PROMPT_SEQ_BUCKET_MIN=1
 export VLLM_PROMPT_SEQ_BUCKET_STEP=128
 export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
+#export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
+#export VLLM_DECODE_BS_BUCKET_STEP=512
+#export VLLM_DECODE_BLOCK_BUCKET_STEP=2048
+
 echo " environments are reseted "
 
 env | grep VLLM_PROMPT_BS
@@ -41,11 +47,12 @@ env | grep VLLM_PROMPT_SEQ
 env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 
-export VLLM_HPU_LOG_STEP_GRAPH_COMPILATION=true
-export GRAPH_VISUALIZATION=1
-export PT_HPU_METRICS_GC_DETAILS=1
+export VLLM_SKIP_WARMUP=True
+#unset VLLM_SKIP_WARMUP
 
-export VLLM_SKIP_WARMUP=False
-#export PT_HPU_RECIPE_CACHE_CONFIG=./_decode_cache,false,16384
+export VLLM_DP_SIZE=2
+export VLLM_USE_V1=0
+export VLLM_DP_MASTER_IP=10.239.129.81
+export VLLM_DP_MASTER_PORT=25940
+export VLLM_EP_SIZE=16
 
-python3 -m vllm.entrypoints.openai.api_server --model $model_path --port 8200 --max-model-len $model_len --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION -tp 8 --max-num-seqs $max_num_seqs --trust-remote-code --kv-cache-dtype fp8_inc --disable-log-requests --max-num-batched-tokens $max_num_batched_tokens --use-padding-aware-scheduling --use-v2-block-manager --distributed_executor_backend ray --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'

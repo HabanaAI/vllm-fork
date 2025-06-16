@@ -907,11 +907,6 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
-            router_logits_across_dp = get_forward_context(
-            ).dp_metadata.router_logits_across_dp
-            router_logits = self.multicast_fn(router_logits,
-                                              cu_tokens_across_dp_cpu,
-                                              router_logits_across_dp)
             if self.activation_scheme != "static":
                 hidden_states_across_dp = get_forward_context(
                 ).dp_metadata.hidden_states_across_dp
@@ -919,6 +914,10 @@ class FusedMoE(torch.nn.Module):
                                                   cu_tokens_across_dp_cpu,
                                                   hidden_states_across_dp)
 
+
+        quant_kwargs = {}
+        if (self.quant_method.__class__.__name__ in ("Fp8MoEMethod")):
+            quant_kwargs["ep_rank"] = self.ep_rank
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
             layer=self,
@@ -934,7 +933,7 @@ class FusedMoE(torch.nn.Module):
             custom_routing_function=self.custom_routing_function,
             scoring_func=self.scoring_func,
             e_score_correction_bias=self.e_score_correction_bias,
-            ep_rank=self.ep_rank)
+            **quant_kwargs)
 
         if self.dp_size > 1:
             start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[

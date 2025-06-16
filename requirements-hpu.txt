@@ -8,4 +8,5 @@ pandas
 tabulate
 setuptools>=61
 setuptools-scm>=8
-vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@ecb60e4
+vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@deepseek_r1
+neural_compressor_pt @ git+https://github.com/intel/neural-compressor.git@r1-woq

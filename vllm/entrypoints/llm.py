@@ -247,7 +247,7 @@ class LLM:
         self.request_counter = Counter()
 
         self.profiler = self._setup_profiler()
-
+    
     def _setup_profiler(self):
         enable_profile = os.getenv("VLLM_ENGINE_PROFILER_ENABLED",
                                    "false").lower() in ["true", "1"]
