@@ -46,6 +46,15 @@ def tpu_platform_plugin() -> Optional[str]:
 
     return "vllm.platforms.tpu.TpuPlatform" if is_tpu else None
 
+is_hpu = False
+try:
+    import os
+    from importlib import util
+    is_hpu = util.find_spec('habana_frameworks') is not None or os.environ.get(
+        'VLLM_USE_FAKE_HPU', '0') != '0'
+except Exception:
+    pass
+
 
 def cuda_platform_plugin() -> Optional[str]:
     is_cuda = False
@@ -92,7 +101,7 @@ def cuda_platform_plugin() -> Optional[str]:
         else:
             logger.debug("CUDA platform is not available because: %s", str(e))
 
-    return "vllm.platforms.cuda.CudaPlatform" if is_cuda else None
+    return "vllm.platforms.cuda.CudaPlatform" if is_cuda and not is_hpu else None
 
 
 def rocm_platform_plugin() -> Optional[str]:
@@ -116,14 +125,6 @@ def rocm_platform_plugin() -> Optional[str]:
     return "vllm.platforms.rocm.RocmPlatform" if is_rocm else None
 
 
-is_hpu = False
-try:
-    import os
-    from importlib import util
-    is_hpu = util.find_spec('habana_frameworks') is not None or os.environ.get(
-        'VLLM_USE_FAKE_HPU', '0') != '0'
-except Exception:
-    pass
 
 
 def hpu_platform_plugin() -> Optional[str]:
