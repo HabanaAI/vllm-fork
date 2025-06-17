@@ -204,12 +204,6 @@ class ModelRunnerBase(ABC, Generic[T]):
         """
         raise NotImplementedError
 
-    def _dummy_run(self, max_num_batched_tokens: int) -> None:
-        """
-        Execute the model with dummy data
-        """
-        raise NotImplementedError
-
     @abstractmethod
     def prepare_model_input(
         self,

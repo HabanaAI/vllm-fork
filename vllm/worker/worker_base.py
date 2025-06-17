@@ -324,7 +324,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # execution.
         if "is_dummy_batch" in broadcast_data and broadcast_data[
                 "is_dummy_batch"]:
-            self.model_runner._dummy_run(1)
+            self.model_runner._dummy_run(1)  # type: ignore[attr-defined]
             return None
 
         worker_input = WorkerInput.from_broadcasted_tensor_dict(broadcast_data)
@@ -386,7 +386,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             elif execute_model_req.is_dummy_batch:
                 if self.do_metadata_broadcast:
                     broadcast_tensor_dict({"is_dummy_batch": True}, src=0)
-                self.model_runner._dummy_run(1)
+                self.model_runner._dummy_run(1)  # type: ignore[attr-defined]
                 return None
             return self._get_driver_input_and_broadcast(execute_model_req)
         else:
