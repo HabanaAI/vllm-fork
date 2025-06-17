@@ -15,8 +15,8 @@ import subprocess
 import time
 from multiprocessing import Event, Process
 
-from lmcache.v1.cache_engine import LMCacheEngineBuilder
 from lmcache.integration.vllm.utils import ENGINE_NAME
+from lmcache.v1.cache_engine import LMCacheEngineBuilder
 
 from vllm import LLM, SamplingParams
 from vllm.config import KVTransferConfig
@@ -36,13 +36,15 @@ os.environ["LMCACHE_REMOTE_URL"] = f"lm://localhost:{port}"
 # `naive` indicates using raw bytes of the tensor without any compression
 os.environ["LMCACHE_REMOTE_SERDE"] = "naive"
 
-MODEL="/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/"
+MODEL = "/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/"
 #prompts = [
 #    "Hello, how are you?" * 1000,
 #]
 prompts = [
     "San Francisco is a",
 ]
+
+
 def run_store(store_done, prompts):
     # We use GPU 0 for KV cache store process.
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=10)
@@ -74,7 +76,7 @@ def run_retrieve(store_done, prompts, timeout=1):
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=20)
     # sampling_params = SamplingParams(temperature=0, max_tokens=100)
     ktc = KVTransferConfig.from_cli(
-            '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_consumer"}')
+        '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_consumer"}')
     # Set GPU memory utilization to 0.8 for an A40 GPU with 40GB
     # of memory. Reduce the value if your GPU has less memory.
     llm = LLM(model=MODEL,
@@ -98,10 +100,9 @@ def run_retrieve(store_done, prompts, timeout=1):
 
 
 def run_lmcache_server(port):
-    server_proc = subprocess.Popen([
-        "python", "-m", "lmcache.v1.server", "localhost",
-        str(port)
-    ])
+    server_proc = subprocess.Popen(
+        ["python", "-m", "lmcache.v1.server", "localhost",
+         str(port)])
     return server_proc
 
 
@@ -125,7 +126,6 @@ def main():
     retrieve_process.terminate()
     lmcache_server_process.terminate()
     lmcache_server_process.wait()
-
 
 
 if __name__ == "__main__":
