@@ -397,7 +397,7 @@ class HpuModelAdapter(torch.nn.Module):
             mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
             off_value = -3E38  #small number, avoid nan and overflow
             if dtype == torch.float16:
-                off_value = -63000
+                off_value = -63000    # a small value close to float16.min
         else:
             mask = attn_mask.logical_or(
                 len_mask)  #no need for len_mask_v as decode overwrites it
