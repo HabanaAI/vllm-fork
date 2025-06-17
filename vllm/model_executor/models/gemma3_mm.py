@@ -594,10 +594,15 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         start_idx = 0
         image_embeds_multibatches = []
         # TODO .. same code here and in _image_pixels_to_features. unify...
+        import os
+        is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
         for i in batch_breakdown:
             end_idx = start_idx + i
             batch_sliced_image_features = image_features[start_idx:end_idx, ...]
-            image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+            if is_lazy:
+                image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+            else:
+                image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features)]
             start_idx = end_idx
         #image_embeds = self.multi_modal_projector(image_features, bypass_hpu_graphs=not use_graph_vision)
         image_embeds = torch.cat(image_embeds_multibatches, dim=0)
