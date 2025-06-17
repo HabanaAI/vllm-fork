@@ -507,7 +507,8 @@ class HpuModelAdapter(torch.nn.Module):
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config, virtual_engine):
             hidden_states = self.model(*args, **kwargs)
-            if self._rotary_prepare_cos_sin is not None and not self.model_is_mrope:
+            if self._rotary_prepare_cos_sin is not None and \
+                not self.model_is_mrope:
                 self._reset_rotary_cos_sin()
             if not get_pp_group().is_last_rank:
                 return hidden_states
