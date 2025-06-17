@@ -12,7 +12,7 @@ To achieve the best performance on HPU, please follow the methods outlined in th
 
 - Python 3.10
 - Intel Gaudi 2 and 3 AI accelerators
-- Intel Gaudi software version 1.21.0 and above
+- Intel Gaudi software version 1.21.2 and above
 
 ## Quick Start Using Dockerfile
 Set up the container with the latest Intel Gaudi Software Suite release using the Dockerfile.
@@ -59,8 +59,8 @@ Refer to the [Intel Gaudi documentation](https://docs.habana.ai/en/latest/Instal
 Use the following commands to run a Docker image. Make sure to update the versions below as listed in the [Support Matrix](https://docs.habana.ai/en/latest/Support_Matrix/Support_Matrix.html):
 
 ```{.console}
-$ docker pull vault.habana.ai/gaudi-docker/1.21.0/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
-$ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.21.0/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+$ docker pull vault.habana.ai/gaudi-docker/1.21.2/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+$ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.21.2/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
 ```
 
 ### Build and Install vLLM
@@ -74,7 +74,7 @@ vLLM releases are being performed periodically to align with Intel® Gaudi® sof
 ```{.console}
 $ git clone https://github.com/HabanaAI/vllm-fork.git
 $ cd vllm-fork
-$ git checkout v0.7.2+Gaudi-1.21.0
+$ git checkout v0.7.2+Gaudi-1.21.2
 $ pip install -r requirements-hpu.txt
 $ python setup.py develop
 ```
@@ -442,7 +442,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 # Quantization, FP8 Inference and Model Calibration Process
 
 > [!NOTE]
-> Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described in detail in [docs.habana.ai vLLM Inference Section](https://docs.habana.ai/en/v1.21.0/PyTorch/Inference_on_PyTorch/vLLM_Inference/vLLM_FP8_Inference.html).
+> Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described in detail in [docs.habana.ai vLLM Inference Section](https://docs.habana.ai/en/v1.21.2/PyTorch/Inference_on_PyTorch/vLLM_Inference/vLLM_FP8_Inference.html).
 An end-to-end example tutorial for quantizing a BF16 Llama 3.1 model to FP8 and then inferencing is provided in this [Gaudi-tutorials repository](https://github.com/HabanaAI/Gaudi-tutorials/blob/main/PyTorch/vLLM_Tutorials/FP8_Quantization_using_INC/FP8_Quantization_using_INC.ipynb).
 
 Once you have completed the model calibration process and collected the measurements, you can run FP8 inference with vLLM using the following command:

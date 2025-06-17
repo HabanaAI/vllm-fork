@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=vault.habana.ai/gaudi-docker/1.21.0/rhel9.4/habanalabs/pytorch-installer-2.6.0:latest
+ARG BASE_IMAGE=vault.habana.ai/gaudi-docker/1.21.2/rhel9.4/habanalabs/pytorch-installer-2.6.0:latest
 FROM ${BASE_IMAGE} as habana-base
 
 USER root
