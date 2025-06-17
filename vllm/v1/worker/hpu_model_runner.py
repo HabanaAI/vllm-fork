@@ -6,8 +6,8 @@ import itertools
 import math
 import os
 import time
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from dataclasses import dataclass, field, fields
+from typing import TYPE_CHECKING, Any, Callable, Optional, TypeAlias, Union
 
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
@@ -104,15 +104,6 @@ class BatchContents:
     blocks: list[list[int]] = empty_list()
     logits_positions: list[list[int]] = empty_list()
 
-    def _data(self):
-        return (self.req_ids, self.token_ids, self.context_lens, self.blocks,
-                self.logits_positions)
-
-    def merge(self, *other):
-        for o in other:
-            for lhs, rhs in zip(self._data(), o._data()):
-                lhs.extend(rhs)
-
     def get_num_tokens(self):
         return [len(t) for t in self.token_ids]
 
@@ -127,19 +118,6 @@ class PrefillInputData:
     attn_metadata: list = empty_list()
     logits_indices: list = empty_list()
     logits_requests: list = empty_list()
-
-    def _data(self):
-        return (self.request_ids, self.prompt_lens, self.token_ids,
-                self.position_ids, self.attn_metadata, self.logits_indices,
-                self.logits_requests)
-
-    def merge(self, *other):
-        for o in other:
-            for lhs, rhs in zip(self._data(), o._data()):
-                lhs.extend(rhs)
-
-    def zipped(self):
-        return zip(*self._data())
 
 
 #TODO(kzawora): remove this
@@ -157,11 +135,35 @@ def bool_helper(value):
     return value in ("y", "yes", "t", "true", "on", "1")
 
 
+Mergeable: TypeAlias = Union[BatchContents, PrefillInputData]
+
+
+def shallow_tuple(obj: Mergeable) -> tuple:
+    """Returns a shallow tuple with dataclass field values"""
+    # Unfortunately dataclasses.astuple deepcopies the data
+    # se we can't use it
+    return tuple(getattr(obj, field.name) for field in fields(obj))
+
+
+def merge_contents(lhs: Mergeable, *rhs: Mergeable):
+    """Extends all internal lists of a dataclass with """
+    """values from given objects"""
+    lhs_type = type(lhs)
+    lhs_tuple = shallow_tuple(lhs)
+    for other in rhs:
+        assert lhs_type is type(other),\
+            'Only objects of the same type can be merged'
+        for dst, src in zip(lhs_tuple, shallow_tuple(other)):
+            dst.extend(src)
+
+
 def flatten(in_list):
+    """Return a flattened representation of a list"""
     return list(itertools.chain(*in_list))
 
 
 def gather_list(input, indices, v):
+    """Gather values from input using indices"""
     return [input[i] if i is not None else v for i in indices]
 
 
@@ -1051,7 +1053,7 @@ class HPUModelRunner:
             )
             if self._can_merge_prefill_contents(all_batch_contents[-1],
                                                 new_batch_contents):
-                all_batch_contents[-1].merge(new_batch_contents)
+                merge_contents(all_batch_contents[-1], new_batch_contents)
             else:
                 all_batch_contents.append(new_batch_contents)
         return all_batch_contents
@@ -1204,7 +1206,7 @@ class HPUModelRunner:
         all_batches = [
             self._form_prefill_batch(bc) for bc in all_batch_contents
         ]
-        all_batches[0].merge(*all_batches[1:])
+        merge_contents(all_batches[0], *all_batches[1:])
         return all_batches[0]
 
     def _prepare_decode_inputs(self, num_decodes,
@@ -1567,7 +1569,8 @@ class HPUModelRunner:
             htorch.core.mark_step()
             for idx, (req_id, prompt_len, token_ids, position_ids,
                       attn_metadata, logits_indices,
-                      logits_requests) in enumerate(prefill_data.zipped()):
+                      logits_requests) in enumerate(
+                          zip(*shallow_tuple(prefill_data))):
                 htorch.core.mark_step()
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
@@ -1884,44 +1887,6 @@ class HPUModelRunner:
                     input_positions=None,
                     slot_mapping=slot_mapping_device,
                     block_size=self.block_size)
-
-
-#<<<<<<< HEAD
-#            seq_lens.fill_(seq_or_block)
-#            seq_lens_device = _async_h2d_tensor_copy(seq_lens, self.device)
-#
-#            attn_metadata = HPUAttentionMetadataV1.make_prefill_metadata(
-#                alibi_blocks=None,
-#                context_lens_tensor=None,
-#                seq_lens_tensor=seq_lens_device,
-#                slot_mapping=slot_mapping_device,
-#                block_list=None,
-#                attn_bias=None,
-#                block_size=self.block_size)
-#        else:
-#            block_tables = [
-#                x.tolist()
-#                for x in np.array_split(np.arange(seq_or_block), batch_size)
-#            ]
-#            block_list, block_groups, block_usage = \
-#                self.get_habana_paged_attn_buffers(
-#                    block_tables=block_tables,
-#                    slot_mapping=slot_mapping)
-#            block_list_device = _async_h2d_tensor_copy(block_list, self.device)
-#            block_usage_device = _async_h2d_tensor_copy(
-#                block_usage, self.device)
-#            block_groups_device = _async_h2d_tensor_copy(
-#                block_groups, self.device)
-#            attn_metadata = HPUAttentionMetadataV1.make_decode_metadata(
-#                block_list=block_list_device,
-#                block_usage=block_usage_device,
-#                block_groups=block_groups_device,
-#                num_decode_tokens=batch_size,
-#                input_positions=None,
-#                slot_mapping=slot_mapping_device,
-#                block_size=self.block_size)
-#=======
-#>>>>>>> origin/habana_main
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
         logits_indices_device = _async_h2d_tensor_copy(logits_indices,
