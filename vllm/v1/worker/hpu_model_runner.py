@@ -939,6 +939,7 @@ class HPUModelRunner:
                                    device='cpu')
         return block_list, block_groups, block_usage
 
+    # TODO - out with this
     def _get_padded_prefill_dims(self, num_prefills, max_prompt_len,
                                  bucketing):
         if bucketing:
@@ -988,9 +989,9 @@ class HPUModelRunner:
 
             max_prompt_len = max(prompt_lens)
             num_tokens = sum(prompt_lens)
-            padded_batch_size, padded_prompt_len = \
-                self._get_padded_prefill_dims(num_prefills,
-                    max_prompt_len, bucketing)
+            closest_bucket = self.bucketing_manager.find_bucket(num_prefills, max_prompt_len, 0, True)
+            padded_batch_size = closest_bucket[0]
+            padded_prompt_len = closest_bucket[1]
             padded_num_tokens = padded_batch_size * padded_prompt_len
             padding_ratio = 1 - (num_tokens / padded_num_tokens)
             is_within_token_budget = padded_batch_size * padded_prompt_len \
@@ -1220,12 +1221,19 @@ class HPUModelRunner:
         block_table_cpu_tensor = self.input_batch.block_table.get_cpu_tensor()
         if num_decodes == 0:
             return DecodeInputData(num_decodes=0)
+        # BLOCK_TABLE [batch, max_num_blocks_per_req]
+        context_lens = self.input_batch.num_computed_tokens_cpu[:num_decodes]
+
+        # NOTE(kzawora): the +1 is what causes this entire thing to work,
+        # as in the paged attention, we don't fetch just the context from cache,
+        # but also kvs for the current token
+        num_blocks = np.ceil(
+            (context_lens + 1) / self.block_size).astype(np.int32).tolist()
 
         # PAD FOR STATIC SHAPES.
         padded_batch_size: int
         if bucketing:
-            padded_batch_size = self.bucketing_ctx.get_padded_batch_size(
-                num_decodes, False)
+            padded_batch_size = self.bucketing_manager.find_bucket(num_decodes, 1, sum(num_blocks), False)[0]
         else:
             padded_batch_size = num_decodes
 
@@ -1266,14 +1274,7 @@ class HPUModelRunner:
         dummy_slots = itertools.cycle(
             range(self._PAD_SLOT_ID, self._PAD_SLOT_ID + self.block_size))
         slot_mapping[num_decodes:].apply_(lambda _, ds=dummy_slots: next(ds))
-        # BLOCK_TABLE [batch, max_num_blocks_per_req]
-        context_lens = self.input_batch.num_computed_tokens_cpu[:num_decodes]
-
-        # NOTE(kzawora): the +1 is what causes this entire thing to work,
-        # as in the paged attention, we don't fetch just the context from cache,
-        # but also kvs for the current token
-        num_blocks = np.ceil(
-            (context_lens + 1) / self.block_size).astype(np.int32).tolist()
+        
         block_tables_list = []
         for i, n in enumerate(num_blocks):
             seq_block_table = block_table_cpu_tensor[i, :n].tolist()
