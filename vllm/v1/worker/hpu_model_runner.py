@@ -695,6 +695,8 @@ class HPUModelRunner:
             req_index = self.input_batch.remove_request(req_id)
             if req_index is not None:
                 removed_req_indices.append(req_index)
+            if req_id in self.input_batch.req_type:
+                del self.input_batch.req_type[req_id]
 
         # Remove the unscheduled requests from the persistent batch.
         # NOTE(woosuk): The unscheduled requests are either preempted requests
@@ -825,11 +827,10 @@ class HPUModelRunner:
         assert self.model is not None
         return self.model
 
-    def is_decoder_only(self) -> bool:
-        decoder_rank = os.getenv('DECODER_RANK', None)
-        if decoder_rank:
-            rank = os.getenv('RANK', '0')
-            return True if decoder_rank == rank else False
+    def is_decoder_only(self, req_id) -> bool:
+        if req_id in self.input_batch.req_type and self.input_batch.req_type[
+                req_id] == "decode":
+            return True
         else:
             return False
 
@@ -841,7 +842,11 @@ class HPUModelRunner:
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
-        is_decoder_only = self.is_decoder_only()
+
+        if scheduler_output.kv_connector_metadata:
+            requests = scheduler_output.kv_connector_metadata.requests
+        else:
+            requests = None
 
         # Traverse decodes first
         decode_req_ids = []
@@ -849,16 +854,24 @@ class HPUModelRunner:
             req_id = self.input_batch.req_ids[i]
             assert req_id is not None
 
+            if requests is not None and req_id not in self.input_batch.req_type:
+                for request in requests:
+                    if request.req_id == req_id:
+                        self.input_batch.req_type[
+                            req_id] = "prefill" if request.load_spec is None else "decode"
+                        break
+
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
             num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
                 req_id]
-            if num_computed_tokens < num_prompt_tokens and not is_decoder_only:
+            if num_computed_tokens < num_prompt_tokens and not self.is_decoder_only(
+                    req_id):
                 # This is prompt
                 break
 
             # This is decode
-            if not is_decoder_only:
+            if not self.is_decoder_only(req_id):
                 assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
 
@@ -1358,7 +1371,6 @@ class HPUModelRunner:
         assert total_num_scheduled_tokens > 0
 
         num_reqs = num_prefills + num_decodes
-        is_decoder_only = self.is_decoder_only()
 
         # Get the number of scheduled tokens for each request.
         # TODO: The Python loop can be slow. Optimize.
@@ -1372,7 +1384,7 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            if idx < num_decodes and not is_decoder_only:
+            if idx < num_decodes and not self.is_decoder_only(req_id):
                 assert seq_num_scheduled_tokens == 1
         return (
             self._prepare_prefill_inputs(num_prefills, num_decodes,
