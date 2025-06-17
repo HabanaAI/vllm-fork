@@ -395,7 +395,8 @@ class VocabParallelEmbedding(torch.nn.Module):
                 padded_weight = torch.cat([
                     loaded_weight,
                     torch.zeros(param.shape[0] - loaded_weight.shape[0],
-                                *loaded_weight.shape[1:], device=loaded_weight.device)
+                                *loaded_weight.shape[1:], 
+                                device=loaded_weight.device)
                 ])
             else:
                 padded_weight = loaded_weight
