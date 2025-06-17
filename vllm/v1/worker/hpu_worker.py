@@ -12,9 +12,9 @@ import torch.nn as nn
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
-from vllm.config import ParallelConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized,
-                      get_pp_group, init_distributed_environment)
+                              init_distributed_environment)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.model_executor import set_random_seed
@@ -143,7 +143,6 @@ class HPUWorker:
                 hpu_v_cache = torch.tensor([], dtype=dtype, device='hpu')
 
                 kv_caches[layer_name] = (hpu_k_cache, hpu_v_cache)
-
 
                 single_kv_block_size_bytes += layer_spec.page_size_bytes
 
