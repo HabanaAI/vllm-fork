@@ -3,7 +3,7 @@ set -e
 
 GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 # Trap the SIGINT signal (triggered by Ctrl+C)
-trap 'kill $(jobs -pr)' SIGINT SIGTERM EXIT
+trap 'pids=$(jobs -pr); [ -n "$pids" ] && kill $pids' SIGINT SIGTERM EXIT
 
 # Hosts / ports
 PREFILL_HOST=${PREFILL_HOST:-"localhost"}

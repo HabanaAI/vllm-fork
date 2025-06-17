@@ -58,10 +58,6 @@ def run_simple_prompt(base_url: str, model_name: str,
                                            temperature=0.0,
                                            seed=42)
 
-    # print("-" * 50)
-    # print(f"Completion results for {model_name}:")
-    # print(completion)
-    # print("-" * 50)
     return completion.choices[0].text
 
 
@@ -105,22 +101,7 @@ def main():
     for arg in vars(args):
         print(f"{arg}: {getattr(args, arg)}")
 
-    # if args.mode == "baseline":
-    #     # non-disagg
-    #     health_check_url = f"{args.service_url}/health"
-    # else:
-    #     # disagg proxy
-    #     health_check_url = f"{args.service_url}/healthcheck"
-    #     if not os.path.exists(args.file_name):
-    #         raise ValueError(
-    #             f"In disagg mode, the output file {args.file_name} from "
-    #             "non-disagg. baseline does not exist.")
-
     service_url = f"{args.service_url}/v1"
-
-    #if not check_vllm_server(health_check_url):
-    #    raise RuntimeError(
-    #        f"vllm server: {args.service_url} is not ready yet!")
 
     output_strs = dict()
     for prompt in SAMPLE_PROMPTS:
