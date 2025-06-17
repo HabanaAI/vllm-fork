@@ -273,7 +273,7 @@ class GraniteMoeModel(nn.Module):
             prefix=f"{prefix}.layers")
 
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        
+
         self.split_qkv = cache_config.split_qkv
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:

@@ -2474,8 +2474,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _dummy_run(self, max_num_batched_tokens: int) -> None:
         assert max_num_batched_tokens == 1
-        self.warmup_scenario(max_num_batched_tokens, 1, False, None, False,
-                             True, 0, 1, True)
+        self.warmup_scenario(batch_size=max_num_batched_tokens,
+                             seq_len=1,
+                             ctx=1,
+                             is_prompt=False,
+                             kv_caches=None,
+                             is_pt_profiler_run=False,
+                             num_patches=UNSET_NUM_PATCHES,
+                             is_lora_profile_run=True,
+                             num_iters=1,
+                             align_worker=True)
         return
 
     def _remove_duplicate_submodules(self):
@@ -3481,7 +3489,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             torch.hpu.synchronize()
                             import torch.distributed as dist
                             if dist.is_initialized():
-                                dist.barrier()
+                                get_tp_group().barrier()
                 else:
                     logger.debug("Bypassing model execution")
 
