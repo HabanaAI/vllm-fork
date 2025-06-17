@@ -1,0 +1,16 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "whitelist": {
+        "types": [],
+        "names": []
+    },
+    "blocklist": {
+        "types": [],
+        "names": ["lm_head"]
+    },
+    "quantize_weight": false,
+    "dump_stats_path": "quantization/Qwen3-235B-A22B/g2/inc_measure_output"
+
+}

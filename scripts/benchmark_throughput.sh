@@ -173,9 +173,10 @@ case "$dtype" in
         echo Running with dtype="$dtype"
         export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
         export PT_HPU_WEIGHT_SHARING=0
+        export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
         if [ "${model_name}" == "Qwen3-235B-A22B" ] || [ "${model_name}" == "Qwen3-30B-A3B" ]; then
-	    QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
+	        QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
         fi
         dtype="bfloat16"
         ;;
