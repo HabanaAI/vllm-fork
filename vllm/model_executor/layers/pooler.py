@@ -241,6 +241,7 @@ class PoolerHead(nn.Module):
         dimensions_list = [
             pooling_param.dimensions
             for _, pooling_param in pooling_metadata.seq_groups
+            if pooling_param is not None
         ]
         if any(d is not None for d in dimensions_list):
             # change the output dimension
