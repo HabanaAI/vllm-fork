@@ -288,6 +288,20 @@ class HpuModelAdapter(torch.nn.Module):
         self.is_pooler = hasattr(self.model, "_pooler")
         self.is_causal = is_causal
         self.use_merged_prefill = VLLM_MERGED_PREFILL
+        
+        model_config = getattr(self.model, "config", None)
+        self.model_is_mrope = uses_mrope(model_config)
+
+        # This applies exclusively to Qwen2/2.5-VL models
+        # both use mrope. We wrap the visual and language
+        # models separately with HPU graph.
+        # This is to ensure that we keeps
+        # the static and dynamic parts distinct.
+        if htorch.utils.internal.is_lazy() and self.model_is_mrope:
+            logger.info("[Multimodal] Wrapping Visual Model")
+            self.model.visual = htorch.hpu.wrap_in_hpu_graph(
+                self.model.visual, disable_tensor_cache=True)
+            
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
         self._rotary_prepare_cos_sin = self._get_prepare_cos_sin()
@@ -320,19 +334,6 @@ class HpuModelAdapter(torch.nn.Module):
     def _reset_rotary_cos_sin(self):
         delattr(self._rotary_embed_module, "cos")
         delattr(self._rotary_embed_module, "sin")
-
-        model_config = getattr(self.model, "config", None)
-        self.model_is_mrope = uses_mrope(model_config)
-
-        # This applies exclusively to Qwen2/2.5-VL models
-        # both use mrope. We wrap the visual and language
-        # models separately with HPU graph.
-        # This is to ensure that we keeps
-        # the static and dynamic parts distinct.
-        if htorch.utils.internal.is_lazy() and self.model_is_mrope:
-            logger.info("[Multimodal] Wrapping Visual Model")
-            self.model.visual = htorch.hpu.wrap_in_hpu_graph(
-                self.model.visual, disable_tensor_cache=True)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
