@@ -2826,23 +2826,23 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # NOTE: The receive operation is blocking
                 bypass_model_exec = False
                 if self.need_recv_kv(model_input, kv_caches, warmup_mode):
-                    cur_time = time.time()
-                    attn_metadata = self.model.forward_update_meta_only(
-                        **execute_model_kwargs,
-                        selected_token_indices=sampling_metadata.
-                        selected_token_indices)
-                    hidden_states, bypass_model_exec, model_input = \
-                    get_kv_transfer_group().recv_kv_caches_and_hidden_states_hpu(
-                        # model is used to know which layer the current worker
-                        # is working on, so that we can receive KV for only those
-                        # layers.
-                        self.get_model(),
-                        model_input,
-                        attn_metadata,
-                        kv_caches=kv_caches
-                    )
-                    now = time.time()
-                    logger.info(f"KV transfer recv time: {now - cur_time}")
+                    logger.info("recv_kv start")
+                    with self.profiler.record_event('internal', 'recv_kv'):
+                        attn_metadata = self.model.forward_update_meta_only(
+                            **execute_model_kwargs,
+                            selected_token_indices=sampling_metadata.
+                            selected_token_indices)
+                        hidden_states, bypass_model_exec, model_input = \
+                        get_kv_transfer_group().recv_kv_caches_and_hidden_states_hpu(
+                            # model is used to know which layer the current worker
+                            # is working on, so that we can receive KV for only those
+                            # layers.
+                            self.get_model(),
+                            model_input,
+                            attn_metadata,
+                            kv_caches=kv_caches
+                        )
+                    logger.info("recv_kv done")
 
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
@@ -2867,17 +2867,18 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # NOTE: the send operation is non-blocking
                 cur_time = time.time()
                 if self.need_send_kv(model_input, kv_caches, warmup_mode):
-                    get_kv_transfer_group().send_kv_caches_and_hidden_states_hpu(
-                        # model_executable is used to know which layer the current
-                        # worker is working on, so that we can send KV for only those
-                        # layers.
-                        self.get_model(),
-                        model_input,
-                        kv_caches,
-                        hidden_states,
-                    )
-                    now = time.time()
-                    logger.info(f"KV transfer send time: {now - cur_time}")
+                    logger.info("send_kv start")
+                    with self.profiler.record_event('internal', 'send_kv'):
+                        get_kv_transfer_group().send_kv_caches_and_hidden_states_hpu(
+                            # model_executable is used to know which layer the current
+                            # worker is working on, so that we can send KV for only those
+                            # layers.
+                            self.get_model(),
+                            model_input,
+                            kv_caches,
+                            hidden_states,
+                        )
+                    logger.info("send_kv done")
 
                 if self.lora_config:
                     LoraMask.setLoraMask(

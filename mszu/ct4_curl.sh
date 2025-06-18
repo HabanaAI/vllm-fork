@@ -1,0 +1,1 @@
+curl http://localhost:8868/v1/completions -H "Content-Type: application/json" -d '{"model": "/software/data/disk10/models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/", "prompt": "tell me about Intel", "max_tokens": 20}'
