@@ -2763,7 +2763,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             ctx = 0
             if not is_prompt:
                 ctx = int(seq_len)
-                seq_len = 1
+                seq_len = '1'
             cfg = (int(bs), int(seq_len), ctx, is_prompt)
             graphs = graph == 't'
             if graphs:
