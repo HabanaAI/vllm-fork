@@ -3,7 +3,14 @@
 ###############################################################################
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 ###############################################################################
-
+import pydevd_pycharm
+pydevd_pycharm.settrace(
+    '10.111.62.53',  # Not 'localhost'!
+    port=12345,
+    stdoutToServer=True,
+    stderrToServer=True,
+    suspend=True
+)
 import collections
 import contextlib
 import dataclasses
