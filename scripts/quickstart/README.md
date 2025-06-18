@@ -153,12 +153,12 @@ The command output is like below.
 ```bash
 Start vllm server for a huggingface model on Gaudi.
 
-Syntax: bash  start_vllm.sh <-w> [-u:p:l:b:c:s] [-h]
+Syntax: bash start_vllm.sh <-w> [-u:p:l:b:c:s] [-h]
 options:
 w  Weights of the model, could be model id in huggingface or local path
 u  URL of the server, str, default=0.0.0.0
 p  Port number for the server, int, default=8688
-l  max_model_len for vllm, int, default=16384
+l  max_model_len for vllm, int, default=16384, maximal value for single node: 32768
 b  max_num_seqs for vllm, int, default=128
 c  Cache HPU recipe to the specified path, str, default=None
 s  Skip warmup or not, bool, default=false
@@ -167,7 +167,7 @@ h  Help info
 
 ### Launch vLLM Serving with TP=8
 ```bash
-bash single_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/16k_cache
+bash single_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.

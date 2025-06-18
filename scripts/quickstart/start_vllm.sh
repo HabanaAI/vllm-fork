@@ -14,7 +14,7 @@ Help() {
     echo "w  Weights of the model, could be model id in huggingface or local path"
     echo "u  URL of the server, str, default=0.0.0.0"
     echo "p  Port number for the server, int, default=8688"
-    echo "l  max_model_len for vllm, int, default=16384"
+    echo "l  max_model_len for vllm, int, default=16384, maximal value for single node: 32768"
     echo "b  max_num_seqs for vllm, int, default=128"
     echo "c  Cache HPU recipe to the specified path, str, default=None"
     echo "s  Skip warmup or not, bool, default=false"
@@ -22,10 +22,10 @@ Help() {
     echo
 }
 
-#To be changed
+#Default values for paramters
 model_path=/data/hf_models/DeepSeek-R1-Gaudi
 vllm_port=8688
-cache_path=/data/16k_cache
+warmup_cache_path=/data/warmup_cache
 max_num_seqs=128
 host=0.0.0.0
 max_model_len=16384
@@ -48,7 +48,7 @@ while getopts hw:u:p:l:b:c:s flag; do
     b) # batch size
         max_num_seqs=$OPTARG ;;
     c) # use_recipe_cache
-        cache_path=$OPTARG ;;
+        warmup_cache_path=$OPTARG ;;
     s) # skip_warmup
         skip_warmup=true ;;
     \?) # Invalid option
@@ -60,10 +60,10 @@ while getopts hw:u:p:l:b:c:s flag; do
 done
 
 
-if [ "$cache_path" != "" ]; then
-    echo "HPU recipe cache will be saved to $cache_path"
-    export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,16384
-    mkdir -p "${cache_path}"
+if [ "$warmup_cache_path" != "" ]; then
+    echo "HPU recipe cache will be saved to $warmup_cache_path"
+    export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},false,16384
+    mkdir -p "${warmup_cache_path}"
 fi
 
 if [ "$skip_warmup" = "true" ]; then
