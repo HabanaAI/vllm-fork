@@ -50,9 +50,7 @@ def scaled_dot_product_attention(query,
 
     attn_weight = query @ key.transpose(-2, -1) * scale_factor
     attn_weight += attn_bias
-    print("before softmax", attn_weight)
     attn_weight = torch.softmax(attn_weight, dim=-1)
-    print("after softmax", attn_weight)
     attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
     return attn_weight @ value
 
@@ -249,17 +247,18 @@ def test_window_attention_mask_with_gaps_small(use_fused=False):
     attn_mask[-1, :, :] = torch.outer(vector_mask, vector_mask)
     attn_mask = attn_mask.bool()
 
+    print("mask", attn_mask[-1, :, :])
     if use_fused:
         attn_mask.to(torch.bfloat16)
     y_with_mask = model(padded_x, new_cu_seqlens,
                          attn_mask=attn_mask).to('cpu')
 
-    # # y_with_mask = model(padded_x, new_cu_seqlens).to('cpu')
+    # y_with_mask = model(padded_x, new_cu_seqlens).to('cpu')
 
     print(y)
     print(y_with_mask)
-    # assert torch.allclose(y[:192], y_with_mask[:192], atol=atol)
-    # assert torch.allclose(y[192:], y_with_mask[192:192 + 48], atol=atol)
+    assert torch.allclose(y[:192], y_with_mask[:192], atol=atol)
+    assert torch.allclose(y[192:], y_with_mask[192:192 + 48], atol=atol)
 
 
 def test_window_attention_mask_with_gaps(use_fused=False):
@@ -325,6 +324,54 @@ def test_scaled_dot_product_attention_masks_one():
 
     assert torch.allclose(output_no_mask, output_mask, atol=0.001)
 
+def test_scaled_dot_product_attention_masks_last_row():
+    q_i = torch.rand(1, 16, 64, 80)
+    k_i = torch.rand(1, 16, 64, 80)
+    v_i = torch.rand(1, 16, 64, 80)
+    attn_mask_i = torch.ones(64, 64).bool()
+    attn_mask_i[-1, :] = False
+    output_no_mask = F.scaled_dot_product_attention(q_i,
+                                                    k_i,
+                                                    v_i,
+                                                    dropout_p=0.0)
+
+    output_mask = F.scaled_dot_product_attention(q_i,
+                                                 k_i,
+                                                 v_i,
+                                                 attn_mask_i,
+                                                 dropout_p=0.0)
+
+    assert torch.allclose(output_no_mask[:, :, :63, :], output_mask[:, :, :63, :], atol=0.001)
+
+
+def test_scaled_dot_product_attention_padded():
+    n = 3
+    q_i = torch.rand(1, 2, n, 5)
+    k_i = torch.rand(1, 2, n, 5)
+    v_i = torch.rand(1, 2, n, 5)
+    output = F.scaled_dot_product_attention(q_i, k_i, v_i)
+
+    m = 8
+    padded_q_i = torch.zeros(1, 2, m, 5)
+    padded_k_i = torch.zeros(1, 2, m, 5)
+    padded_v_i = torch.zeros(1, 2, m, 5)
+
+    padded_q_i[:, :, :n, :] = q_i
+    padded_k_i[:, :, :n, :] = k_i
+    padded_v_i[:, :, :n, :] = v_i
+
+    attn_mask_i = torch.ones(m, m).bool()
+    attn_mask_i[n:, :] = False
+    attn_mask_i[:, n:] = False
+
+    padded_output = F.scaled_dot_product_attention(
+        padded_q_i,
+        padded_k_i,
+        padded_v_i,
+        attn_mask_i,
+    )
+
+    assert torch.allclose(output, padded_output[:, :, :n, :])
 
 def test_scaled_dot_product_attention():
     n = 64
@@ -374,6 +421,11 @@ def test_scaled_dot_product_attention():
 test_pad_input_with_fixed_size_groups(device="cpu")
 test_window_attention_mask_of_ones(use_fused=False)
 test_scaled_dot_product_attention()
+test_scaled_dot_product_attention_masks_one()
+test_scaled_dot_product_attention_masks_last_row()
+# test_window_attention_mask_with_gaps_small()
+test_scaled_dot_product_attention_padded()
+
 # test_window_attention_mask_with_gaps(use_fused=False)
 
 # [h, w]: (308, 308)

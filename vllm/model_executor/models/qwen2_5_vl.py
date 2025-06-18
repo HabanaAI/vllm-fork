@@ -951,10 +951,6 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
     def forward(self, x: torch.Tensor, fullattn_mask: Optional[torch.Tensor],
                 rotary_pos_emb: torch.Tensor) -> torch.Tensor:
-        assert_msg = ("Expect inputs to be 112x112 aligned. "
-                      "Please align before sending image and "
-                      "check PR #1163 description for more details")
-        assert x.shape[0] % 64 == 0, assert_msg
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             htcore.mark_step()
@@ -979,47 +975,6 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         grid_thw: torch.Tensor,
         vision_buckets,
     ) -> torch.Tensor:
-
-        num_patches = pixel_values.shape[0]
-        if num_patches % 64 != 0:
-            assert num_patches > 64, "Image needs to be at least 112 x 112"
-            logger_msg = (
-                "QWEN 2.5VL for HPU is under development. "
-                "Image height and width need to be multiples of 112 pixels. "
-                "We are prunning the last visual tokens to comply with this "
-                "requirement but this leads to accuracy degradation. "
-                "Please, reshape the images or use this custom transformer "
-                "that does the resizing/alignment automatically: "
-                "pip install "
-                "git+https://github.com/malkomes/transformers.git"
-                "@ac372cd18f836c41f57cdce46094db00019d4280"
-                "See PR #1163 description, for more details")
-            logger.warning_once(logger_msg)
-
-            # reshape grid_thw with multiples of 8
-            old_img_sizes = []
-            new_img_sizes = []
-            for img_idx in range(grid_thw.shape[0]):
-                img_shape = grid_thw[img_idx, :].tolist()
-                tt, hh, ww = img_shape
-                hh_new = (hh // 8) * 8
-                ww_new = (ww // 8) * 8
-                old_img_sizes.append(tt * hh * ww)
-                new_img_sizes.append(tt * hh_new * ww_new)
-                grid_thw[img_idx, 1] = hh_new
-                grid_thw[img_idx, 2] = ww_new
-
-            # truncate pixel_values to new shapes
-            copy_pointer = 0
-            paste_pointer = 0
-            for old_img_size, new_img_size in zip(old_img_sizes,
-                                                  new_img_sizes):
-                pixel_values[paste_pointer:paste_pointer + new_img_size, :] = \
-                    pixel_values[copy_pointer:copy_pointer + new_img_size, :]
-                copy_pointer += old_img_size
-                paste_pointer += new_img_size
-
-            pixel_values = pixel_values[:paste_pointer, :]
 
         offset = 0
         results = []
