@@ -22,7 +22,7 @@ Help() {
     echo
 }
 
-#Default values for paramters
+#Default values for parameters
 model_path=/data/hf_models/DeepSeek-R1-Gaudi
 vllm_port=8688
 warmup_cache_path=/data/warmup_cache
