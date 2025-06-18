@@ -299,7 +299,7 @@ class HpuModelAdapter(torch.nn.Module):
             logger.info("[Multimodal] Wrapping Visual Model")
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                 self.model.visual, disable_tensor_cache=True)
-            
+
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
         self._rotary_prepare_cos_sin = self._get_prepare_cos_sin()
