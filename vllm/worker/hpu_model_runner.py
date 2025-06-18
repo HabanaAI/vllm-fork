@@ -2471,9 +2471,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     ctx=ctx) for i in range(batch_size)
             ]
         else:
-            # FIXME: seq_len is actually number of blocks
-            blocks = [seq_len // batch_size for _ in range(batch_size)]
-            blocks[0] += seq_len % batch_size
+            blocks = [ctx // batch_size for _ in range(batch_size)]
+            blocks[0] += ctx % batch_size
             seqs = [
                 self.create_dummy_seq_group_metadata(
                     i,
@@ -2739,9 +2738,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
         if not self.is_pooler:
             max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
+        self.bucketing_ctx.generate_prompt_buckets()
+        prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
+        if not self.is_pooler:
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
             decode_buckets = len(self.bucketing_ctx.decode_buckets)
         else:
