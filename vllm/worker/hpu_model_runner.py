@@ -87,8 +87,6 @@ _PAD_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
-VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
-                                     'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
 UNSET_NUM_PATCHES = 9999999
 
@@ -339,7 +337,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.layer_names = layer_names
         self.is_pooler = hasattr(self.model, "_pooler")
         self.is_causal = is_causal
-        self.use_merged_prefill = VLLM_MERGED_PREFILL
+        self.use_merged_prefill = get_config().merged_prefill
         self.dp_awared_padding = \
             self.vllm_config.parallel_config.data_parallel_size > 1
 
@@ -817,7 +815,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.max_num_batched_tokens = \
             self.scheduler_config.max_num_batched_tokens
         self.block_size = self.cache_config.block_size
-        self.use_merged_prefill = VLLM_MERGED_PREFILL
+        self.use_merged_prefill = get_config().merged_prefill
         assert not (self.scheduler_config.use_padding_aware_scheduling
                     and self.use_merged_prefill), \
             'Merged prefill is not compatible with padding aware scheduling!'
@@ -2827,9 +2825,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
         if not self.is_pooler:
             max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
+        self.bucketing_ctx.generate_prompt_buckets()
+        prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
+        if not self.is_pooler:
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
             decode_buckets = len(self.bucketing_ctx.decode_buckets)
         else:
@@ -2845,13 +2845,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
             is_prompt = phase == 'prompt'
-            cfg = (int(bs), int(seq_len), 0, is_prompt)
+            ctx = 0
+            if not is_prompt:
+                ctx = int(seq_len)
+                seq_len = '1'
+            cfg = (int(bs), int(seq_len), ctx, is_prompt)
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
             self.warmup_scenario(int(bs),
                                  int(seq_len),
-                                 0,
+                                 ctx,
                                  is_prompt,
                                  kv_caches,
                                  is_pt_profiler_run=True)
