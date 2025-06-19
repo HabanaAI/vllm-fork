@@ -1111,7 +1111,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
                 if weight_sub_tensor.is_cuda:
                     loaded_weight = weight_sub_tensor
                 else:
-                    loaded_weight = weight_sub_tensor.cuda()
+                    loaded_weight = weight_sub_tensor
 
                 # remove the following after the issue is fixed:
                 # https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1342

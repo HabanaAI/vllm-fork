@@ -9,19 +9,22 @@ import gc
 import pytest
 import torch
 
+from transformers import BitsAndBytesConfig
 from tests.quantization.utils import is_quant_method_supported
 
 from ..utils import compare_two_settings, create_new_process_for_each_test
 
 models_4bit_to_test = [
     ("facebook/opt-125m", "quantize opt model inflight"),
+    ("meta-llama/Llama-3.2-1B", "quantize_llama_model_inflight"),
     ("mistralai/Mistral-7B-Instruct-v0.3",
      "quantize inflight model with both HF and Mistral format weights")
 ]
 
-models_pre_qaunt_4bit_to_test = [
+models_pre_quant_4bit_to_test = [
     ('PrunaAI/Einstein-v6.1-Llama3-8B-bnb-4bit-smashed',
      'read pre-quantized 4-bit FP4 model'),
+    ("hugging-quants/Meta-Llama-3.1-8B-BNB-NF4", "read_pre-quantized_4-bit_NF4_model"),
     ('poedator/opt-125m-bnb-4bit', 'read pre-quantized 4-bit NF4 opt model'),
 ]
 
@@ -32,22 +35,22 @@ models_pre_quant_8bit_to_test = [
 ]
 
 
-@pytest.mark.skipif(not is_quant_method_supported("bitsandbytes"),
-                    reason='bitsandbytes is not supported on this GPU type.')
 @pytest.mark.parametrize("model_name, description", models_4bit_to_test)
 @create_new_process_for_each_test()
 def test_load_4bit_bnb_model(hf_runner, vllm_runner, example_prompts,
                              model_name, description) -> None:
 
-    hf_model_kwargs = {"load_in_4bit": True}
+    hf_model_kwargs = dict(quantization_config=BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16))
     validate_generated_texts(hf_runner, vllm_runner, example_prompts[:1],
                              model_name, False, hf_model_kwargs)
 
 
-@pytest.mark.skipif(not is_quant_method_supported("bitsandbytes"),
-                    reason='bitsandbytes is not supported on this GPU type.')
 @pytest.mark.parametrize("model_name, description",
-                         models_pre_qaunt_4bit_to_test)
+                         models_pre_quant_4bit_to_test)
 @create_new_process_for_each_test()
 def test_load_pre_quant_4bit_bnb_model(hf_runner, vllm_runner, example_prompts,
                                        model_name, description) -> None:

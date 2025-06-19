@@ -390,6 +390,7 @@ try:
         op_func=_apply_bnb_4bit,
         mutates_args=["out"],
         fake_impl=_apply_bnb_4bit_fake,
+        dispatch_key="HPU",
     )
     apply_bnb_4bit = torch.ops.vllm.apply_bnb_4bit
 
