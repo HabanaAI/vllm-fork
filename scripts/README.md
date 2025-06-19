@@ -117,6 +117,11 @@ Running vLLM with FP8 precision can be achieved using [Intel(R) Neural Compresso
 
 - #### Run vLLM with FP8 using INC
 To run vLLM with FP8 precision using INC, pass `-d fp8` and specify the path to your bfloat16 or float16 model with `-w <model_path>`. The model will be quantized to FP8 using calibration data obtained from the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.21.0/calibration/README.md).
+> For the Qwen3 MoE models, a custom INC should be installed:
+``` bash
+pip install git+https://github.com/intel/neural-compressor.git@qwen-fp8
+```
+
 #### 1. Copy open_orca_gpt4_tokenized_llama.calibration_1000.pkl to vllm-hpu-extension/calibration folder
 ```bash
 gzip -dk Gaudi-fp8-calibration/open_orca_gpt4_tokenized_llama.calibration_1000.pkl.gz
@@ -131,6 +136,14 @@ MODEL=/models/Qwen2.5-72B-Instruct
 HPU_SIZE=2
 ./calibrate_model.sh -m $MODEL -d open_orca_gpt4_tokenized_llama.calibration_1000.pkl  -o quantization -t $HPU_SIZE
 ```
+For Qwen3-235B-A22B, the calibration process needs 8 HPUs to load the original bfloat16 weights. Then the fp8 inference could run on 4 HPUs. Thus the measurements should be unified as follow:
+``` bash
+bash calibrate_model.sh -m /models/Qwen3-235B-A22B -d open_orca_gpt4_tokenized_llama.calibration_1000.pkl.gz -o Qwen3-235B-A22B -t 8 -b 256 -r 4 -u
+```
+Where the 
+ - `-t 8` means run calibration with 8 HPUs.
+ - `-r 4` means to unify the measurements to 4 HPUs.
+ - `-u` means the model have MoE weights.
 
 #### 3. Make the Quantization folder
 Create a quantization folder at the same level as start_gaudi_vllm_server.sh.
