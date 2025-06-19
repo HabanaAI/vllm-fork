@@ -117,7 +117,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
             if os.getenv('VLLM_PROFILER_ENABLED') == 'full':
                 fn = self.full_trace_handler
-                with_stack = False
+                with_stack = True
             else:
                 fn = torch.profiler.tensorboard_trace_handler
                 with_stack = True
