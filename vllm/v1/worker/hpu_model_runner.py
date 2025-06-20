@@ -922,7 +922,7 @@ class HPUModelRunner:
             req_id_output_token_ids_lst, skip_copy=not batch_changed)
         return sampling_metadata
 
-    def get_habana_paged_attn_buffers(self, block_tables, slot_mapping):
+    def get_habana_paged_attn_buffers(self, block_tables, slot_mapping, batch_size):
         last_block_usage = [
             slot[0] % self.block_size + 1 for slot in slot_mapping
         ]
@@ -952,7 +952,7 @@ class HPUModelRunner:
         else:
             if self.enable_bucketing:
                 block_bucket_size = \
-                    self.bucketing_manager.find_bucket(batch_size, 1, len(block_list), is_prompt)[2]
+                    self.bucketing_manager.find_bucket(batch_size, 1, len(block_list), False)[2]
             else:
                 block_bucket_size = len(block_list)
             padding_fn = lambda tensor, pad_value: pad_list(
@@ -971,7 +971,6 @@ class HPUModelRunner:
                                    device='cpu')
         return block_list, block_groups, block_usage
 
-    #VERIFY - bucketing manager
     def _align_and_pad(self, data, bucketing, padding_gen):
         bs = len(data)
         target_bs, target_len = bucketing
@@ -996,8 +995,8 @@ class HPUModelRunner:
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
         if self.enable_bucketing:
             if bs <= self.max_prefill_batch_size:
-                bs = self.bucketing_ctx.get_padded_batch_size(bs, True)
-            seq = self.bucketing_ctx.get_padded_prompt_seq_len(seq)
+                bs = self.bucketing_manager.find_bucket(bs, seq, num_blocks, True)[0]
+            seq = self.bucketing_manager.find_bucket(bs, seq, num_blocks, True)[1]
             num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
 
@@ -1281,7 +1280,7 @@ class HPUModelRunner:
         # CONTEXT_LENS [batch_size]
         block_list, block_groups, block_usage = \
             self.get_habana_paged_attn_buffers(
-            block_tables_list, slot_mapping.tolist())
+            block_tables_list, slot_mapping.tolist(), padded_batch_size)
 
         logits_indices = torch.zeros(padded_batch_size,
                                      dtype=torch.int32,
@@ -1869,7 +1868,8 @@ class HPUModelRunner:
                 block_list, block_groups, block_usage = \
                     self.get_habana_paged_attn_buffers(
                         slot_mapping=slot_mapping,
-                        block_tables=block_tables)
+                        block_tables=block_tables,
+                        batch_size=batch_size)
                 block_list_device = _async_h2d_tensor_copy(
                     block_list, self.device)
                 block_usage_device = _async_h2d_tensor_copy(
@@ -2142,7 +2142,7 @@ class HPUModelRunner:
         if prompt_profile_cfg or decode_profile_cfg:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
-        self.bucketing_ctx.generate_prompt_buckets()
+        self.bucketing_manager.generate_prompt_buckets()
         kv_caches = self.kv_caches
         max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
         self.bucketing_manager.generate_decode_buckets(max_blocks)

@@ -1081,8 +1081,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             query_len = seq_len - ctx * self.block_size
         else:
             query_len = 1
-            ctx = 1 # ctx is not importnat here?
-        print("buruburu", real_batch_size, query_len, ctx, is_prompt)
+            ctx = 1 # TODO ctx is not importnat here?
         closest_bucket = self.bucketing_manager.find_bucket(real_batch_size, query_len, ctx, is_prompt)
         batch_size_padded = closest_bucket[0]
         batch_size_padding = batch_size_padded - real_batch_size
@@ -1462,8 +1461,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             target_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
-        print(real_num_seqs)
-
         ctx = len(computed_block_nums) if computed_block_nums else 0
         max_prompt_len = max(
             self.bucketing_manager.find_bucket(len(seq_group_metadata_list),
@@ -1791,8 +1788,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
         else:
-            print("szubidubi", len(seq_group_metadata_list), 1, len(block_list))
-            import pdb; pdb.set_trace()
             block_bucket_size = self.bucketing_manager.find_bucket(
                                     len(seq_group_metadata_list),
                                     1,
@@ -2766,8 +2761,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_manager.generate_prompt_buckets()
         prompt_buckets = len(self.bucketing_manager.prompt_buckets)
         if not self.is_pooler:
-            self.bucketing_ctx.generate_decode_buckets(max_blocks)
-            decode_buckets = len(self.bucketing_ctx.decode_buckets)
+            self.bucketing_manager.generate_decode_buckets(max_blocks)
+            decode_buckets = len(self.bucketing_manager.decode_buckets)
         else:
             # When pooling we're not using decode phase
             decode_buckets = 0
