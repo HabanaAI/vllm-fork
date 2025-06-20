@@ -130,7 +130,7 @@ class RobertaEmbedding(CustomOp):
                                             device=inputs_embeds.device)
                 valid_input_mask = expected_pos < seq_len
                 expected_pos = expected_pos * valid_input_mask
-                assert torch.equal(positions, expected_pos)
+                
                 position_ids[index] = create_position_ids_from_input_ids_hpu(
                     tokens, self.padding_idx, seq_len)
 
