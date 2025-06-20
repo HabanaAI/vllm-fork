@@ -130,7 +130,7 @@ class HPUPoolingModelRunner(
             return []
 
         return [
-            self.model.model._pooler(
+            self.model.model.pooler(
                 hidden_states=hidden_states,
                 pooling_metadata=model_input.pooling_metadata)
         ]
