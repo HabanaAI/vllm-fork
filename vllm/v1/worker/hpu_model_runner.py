@@ -889,6 +889,8 @@ class HPUModelRunner:
     def get_habana_paged_attn_buffers(self,
                                       block_tables,
                                       slot_mapping,
+                                      batch_size,
+                                      is_prompt,
                                       bucketing=True):
 
         last_block_usage = [
@@ -920,7 +922,7 @@ class HPUModelRunner:
         else:
             if bucketing:
                 block_bucket_size = \
-                    self.bucketing_manager.find_bucket(1, 1, len(block_list), False)[2]
+                    self.bucketing_manager.find_bucket(batch_size, 1, len(block_list), is_prompt)[2]
             else:
                 block_bucket_size = len(block_list)
             padding_fn = lambda tensor, pad_value: pad_list(
@@ -1284,7 +1286,7 @@ class HPUModelRunner:
         # CONTEXT_LENS [batch_size]
         block_list, block_groups, block_usage = \
             self.get_habana_paged_attn_buffers(
-            block_tables_list, slot_mapping.tolist(), bucketing)
+            block_tables_list, slot_mapping.tolist(), padded_batch_size, False, bucketing)
 
         logits_indices = torch.zeros(padded_batch_size,
                                      dtype=torch.int32,
@@ -1374,7 +1376,6 @@ class HPUModelRunner:
         cfg = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
-        print(cfg)
         if not seen and not warmup_mode:
             logger.warning(
                 "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
@@ -1851,8 +1852,8 @@ class HPUModelRunner:
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
         num_candidates = len(buckets)
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
-        graphed = list(c[:2] for c in self.graphed_buckets
-                       if c[2] == is_prompt)
+        graphed = list(c[:3] for c in self.graphed_buckets
+                       if c[3] == is_prompt)
         if num_candidates == 0:
             num_candidates = 1
         msg = (f'{phase} captured:{len(graphed)} '
@@ -1945,6 +1946,8 @@ class HPUModelRunner:
                     self.get_habana_paged_attn_buffers(
                     block_tables=block_tables,
                     slot_mapping=slot_mapping,
+                    batch_size=batch_size,
+                    is_prompt=False,
                     bucketing=True)
                 block_list_device = _async_h2d_tensor_copy(
                     block_list, self.device)

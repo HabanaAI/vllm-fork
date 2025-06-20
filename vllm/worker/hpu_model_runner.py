@@ -23,7 +23,7 @@ import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 import vllm_hpu_extension.environment as environment
 from attr import dataclass
-from vllm_hpu_extension.bucketing.common import get_bucketing_context
+from vllm_hpu_extension.bucketing.common import HPUBucketingManager
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
@@ -835,11 +835,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._mem_margin: Optional[int] = None
         self.use_prefix_caching = (
             self.vllm_config.cache_config.enable_prefix_caching)
-        HPUBucketingContext = get_bucketing_context()
-        self.bucketing_ctx = HPUBucketingContext(
+        self.bucketing_manager = HPUBucketingManager(
             self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
             self.max_num_batched_tokens, self.use_merged_prefill,
             self.use_prefix_caching, self.max_model_len)
+        self.bucketing_manager.generate_prompt_buckets()
+        self.bucketing_manager.hello()
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
         ]  #TODO: Move to HPUBucketingContext
@@ -1075,8 +1076,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
-        batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
-            real_batch_size, is_prompt)
+        ctx = seq_group_metadata_list[0].computed_block_nums
+        ctx = 0 if ctx == None else sum(ctx)
+        if is_prompt:
+            seq_len = len(seq_group_metadata_list[0].seq_data[0].prompt_token_ids)
+            query_len = seq_len - ctx * self.block_size
+        else:
+            query_len = 1
+            ctx = 1 # ctx is not importnat here?
+        print("buruburu", real_batch_size, query_len, ctx, is_prompt)
+        closest_bucket = self.bucketing_manager.find_bucket(real_batch_size, query_len, ctx, is_prompt)
+        batch_size_padded = closest_bucket[0]
         batch_size_padding = batch_size_padded - real_batch_size
 
         seq_group_metadata_list = seq_group_metadata_list.copy()
@@ -1454,9 +1464,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             target_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
+        print(real_num_seqs)
 
+        ctx = len(computed_block_nums) if computed_block_nums else 0
         max_prompt_len = max(
-            self.bucketing_ctx.get_padded_prompt_seq_len(target_query_len),
+            self.bucketing_manager.find_bucket(len(seq_group_metadata_list),
+                                               target_query_len,
+                                               ctx,
+                                               True)[1],
             self.block_size)
 
         lora_ids: List[int] = []
@@ -1766,8 +1781,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         padding_fn = None
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
-            block_bucket_size = self.bucketing_ctx.get_padded_decode_num_blocks(
-                block_bucket_size)
+            block_bucket_size = self.bucketing_manager.find_bucket(
+                                    len(seq_group_metadata_list),
+                                    1, 
+                                    block_bucket_size, 
+                                    False)[2]
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -1775,8 +1793,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
         else:
-            block_bucket_size = self.bucketing_ctx.get_padded_decode_num_blocks(
-                len(block_list))
+            print("szubidubi", len(seq_group_metadata_list), 1, len(block_list))
+            import pdb; pdb.set_trace()
+            block_bucket_size = self.bucketing_manager.find_bucket(
+                                    len(seq_group_metadata_list),
+                                    1,
+                                    len(block_list),
+                                    False)[2]
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, pad_value)
 
@@ -2385,7 +2408,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
             [kv_caches] * self.parallel_config.pipeline_parallel_size)
-        _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
+        max_seq_len = self.bucketing_manager.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
         # Using batch_size 1 is profile multimodal models
@@ -2741,11 +2764,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        prompt_buckets = len(self.bucketing_ctx.prompt_buckets)
+        prompt_buckets = len(self.bucketing_manager.prompt_buckets)
         if not self.is_pooler:
             max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
-            self.bucketing_ctx.generate_decode_buckets(max_blocks)
-            decode_buckets = len(self.bucketing_ctx.decode_buckets)
+            self.bucketing_manager.generate_decode_buckets(max_blocks)
+            decode_buckets = len(self.bucketing_manager.decode_buckets)
         else:
             # When pooling we're not using decode phase
             decode_buckets = 0
@@ -2818,12 +2841,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if not self.is_pooler:
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
-                        self.bucketing_ctx.prompt_buckets,
+                        self.bucketing_manager.prompt_buckets,
                         True, kv_caches)
 
                     mem_post_decode, decode_batch_seq, decode_captured_all = \
                         self.warmup_graphs(
-                        self.bucketing_ctx.decode_buckets,
+                        self.bucketing_manager.decode_buckets,
                         False, kv_caches)
                 else:
                     msg = (f"Using {format_bytes(graph_free_mem)}"
@@ -2833,20 +2856,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
-                        self.bucketing_ctx.prompt_buckets,
+                        self.bucketing_manager.prompt_buckets,
                         True, kv_caches)
                     if mem_post_prompt < graph_free_mem \
                         and not prompt_captured_all:
                         mem_post_prompt, _, prompt_captured_all = (
                             self.warmup_graphs(
-                                self.bucketing_ctx.prompt_buckets, True,
+                                self.bucketing_manager.prompt_buckets, True,
                                 kv_caches))
 
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
+                    self.bucketing_manager.prompt_buckets, True, mem_post_prompt)
                 if not self.is_pooler:
                     self.log_graph_warmup_summary(
-                        self.bucketing_ctx.decode_buckets, False,
+                        self.bucketing_manager.decode_buckets, False,
                         mem_post_decode)
 
         end_time = time.perf_counter()
