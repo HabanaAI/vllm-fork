@@ -451,6 +451,7 @@ def update_mem(shape=None):
         msg = f"[rank: {local_rank}]Memory stats: "
         for key in fieldnames:
             msg += f"{key}: {str(memory_stats[key])}, "
+        msg += "FreeMem: " + format_bytes(memory_stats["FreeMem"])
         logger.warning(msg)
 
 class LoggingStatLogger(StatLoggerBase):
