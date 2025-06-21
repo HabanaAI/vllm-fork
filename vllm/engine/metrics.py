@@ -412,6 +412,46 @@ def get_throughput(tracked_stats: List[int], now: float,
                    last_log: float) -> float:
     return float(np.sum(tracked_stats) / (now - last_log))
 
+import os
+
+def update_mem(shape=None):
+    import torch
+
+    import habana_frameworks.torch as htorch 
+    from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
+    memory_stats = torch.hpu.memory.memory_stats()
+    local_rank = torch.distributed.get_rank()
+    csv_file = f"vllm_memory_stats_pp_rank_{local_rank}.csv"
+
+    # Define the field names (header)
+    fieldnames = [
+        "Timestamp", "Shape",
+        "Limit", "InUse", "MaxInUse", "NumAllocs", "NumFrees",
+        "ActiveAllocs", "MaxAllocSize", "TotalSystemAllocs",
+        "TotalSystemFrees", "TotalActiveAllocs",
+        "FreeMem",
+    ]
+
+    # Check if the file exists to decide if the header needs to be written
+    import os
+    import csv
+    write_header = not os.path.exists(csv_file)
+
+    # Append the row to the CSV
+    with open(csv_file, mode='a', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        import time
+        memory_stats['Timestamp'] = time.strftime("%Y-%m-%d-%H:%M:%S")
+        memory_stats['Shape'] = str(shape)
+        memory_stats["FreeMem"] = memory_stats["MaxInUse"] - memory_stats["InUse"]
+        writer.writerow({key: memory_stats[key] for key in fieldnames})
+        logger.warning(f"<<<<<<<<<<<<<<<<< Update mem >>>>>>>>>>>>>>>>>")
+        msg = f"[rank: {local_rank}]Memory stats: "
+        for key in fieldnames:
+            msg += f"{key}: {str(memory_stats[key])}, "
+        logger.warning(msg)
 
 class LoggingStatLogger(StatLoggerBase):
     """LoggingStatLogger is used in LLMEngine to log to Stdout."""
@@ -466,6 +506,8 @@ class LoggingStatLogger(StatLoggerBase):
                 stats.gpu_cache_usage_sys * 100,
                 stats.cpu_cache_usage_sys * 100,
             )
+            if os.getenv("VLLM_LOG_MEMORY_STATS", "0") in ("1", "true", "True"):
+                update_mem()
             if (stats.cpu_prefix_cache_hit_rate >= 0
                     or stats.gpu_prefix_cache_hit_rate >= 0):
                 log_fn(
