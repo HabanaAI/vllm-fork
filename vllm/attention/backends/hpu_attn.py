@@ -541,19 +541,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             block_mapping = attn_metadata.block_mapping if not self.sliding_window else attn_metadata.window_block_mapping
             attn_bias = attn_metadata.attn_bias if not self.sliding_window else attn_metadata.window_attn_bias
 
-            if self.sliding_window:
-                block_size = len(attn_metadata.block_groups)
-                window_block = (self.sliding_window // block_size)
-                valid_block = (attn_metadata.block_groups == 0).sum()
-
-                # Create a mask to retain elements within the sliding window and exclude others.
-                rng = torch.arange(block_size, device='hpu')
-                mask = torch.logical_and(rng > 0, rng < valid_block-window_block+1)
-
-                block_groups= torch.where(mask,  torch.tensor(-1), attn_metadata.block_groups)
-                block_mapping=  torch.where(mask.unsqueeze(1), torch.tensor(0.0), attn_metadata.block_mapping)
-                block_list= torch.where(mask,  torch.tensor(0), attn_metadata.block_list)
-
             output = HPUPagedAttention.forward_decode(
                 query=query,
                 block_mapping=block_mapping,
