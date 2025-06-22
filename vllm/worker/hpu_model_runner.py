@@ -72,6 +72,105 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
+import pydevd_pycharm
+
+pydevd_pycharm.settrace(
+    '10.111.62.53',  # Not 'localhost'!
+    port=12345,
+    stdoutToServer=True,
+    stderrToServer=True,
+    suspend=True
+)
+import collections
+import contextlib
+import dataclasses
+
+import torch
+from torch.utils._contextlib import (
+    _DecoratorContextManager,
+    _NoParamDecoratorContextManager,
+    F,
+)
+
+class inference_mode(_DecoratorContextManager):
+    r"""Context-manager that enables or disables inference mode.
+
+    InferenceMode is a context manager analogous to :class:`~no_grad`
+    to be used when you are certain your operations will have no interactions
+    with autograd (e.g., model training). Code run under this mode gets better
+    performance by disabling view tracking and version counter bumps. Note that
+    unlike some other mechanisms that locally enable or disable grad,
+    entering inference_mode also disables to :ref:`forward-mode AD <forward-mode-ad>`.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    Also functions as a decorator.
+
+    .. note::
+        Inference mode is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
+
+    Args:
+        mode (bool or function): Either a boolean flag whether to enable or
+            disable inference mode or a Python function to decorate with
+            inference mode enabled
+
+    Example::
+        >>> # xdoctest: REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
+        >>> import torch
+        >>> x = torch.ones(1, 2, 3, requires_grad=True)
+        >>> with torch.inference_mode():
+        ...     y = x * x
+        >>> y.requires_grad
+        False
+        >>> # xdoctest: SKIP("want string isnt quite right")
+        >>> y._version
+        Traceback (most recent call last):
+        File "<stdin>", line 1, in <module>
+        RuntimeError: Inference tensors do not track version counter.
+        >>> @torch.inference_mode()
+        ... def func(x):
+        ...     return x * x
+        >>> out = func(x)
+        >>> out.requires_grad
+        False
+        >>> @torch.inference_mode()
+        ... def doubler(x):
+        ...     return x * 2
+        >>> out = doubler(x)
+        >>> out.requires_grad
+        False
+
+    """
+
+    def __init__(self, mode: bool = True) -> None:
+        self.mode = False
+
+    def __new__(cls, mode=False):
+        if isinstance(mode, bool):
+            return super().__new__(cls)
+        return cls()(mode)
+
+    def __enter__(self) -> None:
+        # self._inference_mode_context = torch._C._InferenceMode(self.mode)
+        # self._inference_mode_context.__enter__()
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        # self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
+        pass
+
+    def clone(self) -> "inference_mode":
+        r"""
+        Create a copy of this class
+        """
+        return self.__class__(self.mode)
+
+
+# torch.inference_mode=inference_mode
+
 _TYPE_CACHE = {}
 # These values are assumed to be zero in several places.
 # Use caution when updating them!
@@ -909,8 +1008,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return htorch.hpu.wrap_in_hpu_graph(
             HpuModelAdapter(*args, **kwargs),
             disable_tensor_cache=True,
-        ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-            *args, **kwargs)
+        ) if (htorch.utils.internal.is_lazy() and (not os.getenv('DISABLE_HPU_GRAPHS', False))) else HpuModelAdapter(*args, **kwargs)
 
     def _maybe_compile(self, *args, **kwargs):
         if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
