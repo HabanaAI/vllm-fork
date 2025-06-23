@@ -661,15 +661,20 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         img_pos = (input_ids == self.config.image_token_index)
 
         img_mask[img_pos.unsqueeze(1)] += 1
-        img_mask = img_mask.permute(0,1,3,2)
+        img_mask = img_mask.permute(0, 1, 3, 2)
         img_mask[img_pos.unsqueeze(1)] += 1
-        img_mask = img_mask.permute(0,1,3,2)
+        img_mask = img_mask.permute(0, 1, 3, 2)
 
         img_pos_cum = torch.cumsum(img_pos, 1)
-        img_causal = torch.arange(seq_len, device = input_ids.device).unsqueeze(0) - img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
-        img_causal = torch.cat((img_causal[:,0:1]-1, img_causal[:,:-1]), dim=1)
-        img_causal = img_causal.clamp_(min=0, max=seq_len-1).unsqueeze(1).unsqueeze(3)
-        ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        img_causal = torch.arange(seq_len, device=input_ids.device).unsqueeze(
+            0) - img_pos_cum + (img_pos_cum // IMG_TOKENS + 1) * IMG_TOKENS + 1
+        img_causal = torch.cat((img_causal[:, 0:1] - 1, img_causal[:, :-1]),
+                               dim=1)
+        img_causal = img_causal.clamp_(min=0, max=seq_len -
+                                       1).unsqueeze(1).unsqueeze(3)
+        ind = torch.arange(
+            seq_len,
+            device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         img_mask[ind < img_causal] += 1
         global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
 
@@ -677,9 +682,9 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             # Create a local causal mask with sliding window (1024).
             local_attn_mask = torch.ones_like(global_attn_mask)
             local_attn_mask = torch.tril(local_attn_mask,
-                                            diagonal=-self.sliding_window)
+                                         diagonal=-self.sliding_window)
             local_attn_mask = torch.where(local_attn_mask == 0,
-                                            global_attn_mask, float("-inf"))
+                                          global_attn_mask, float("-inf"))
 
         kwargs["global_attn_masks"] = global_attn_mask
         kwargs["local_attn_masks"] = local_attn_mask

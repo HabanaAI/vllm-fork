@@ -128,8 +128,10 @@ class Singleton(type):
             cls._instances[cls] = super().__call__(*args, **kwargs)
         return cls._instances[cls]
 
+
 def is_gemma3(model):
     return 'Gemma3ForConditionalGeneration' in str(type(model))
+
 
 def pad_flat_tensor(tensor, desired_size):
     assert tensor.dim() == 1, 'Only flat tensors are supported'
@@ -376,13 +378,12 @@ class HpuModelAdapter(torch.nn.Module):
         compile_only_mode_context_false = functools.partial(
             bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
 
-
         input_ids = kwargs['input_ids']
         #
         #with compile_only_mode_context_false():
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
-        inputs_embeds = self.model.get_input_embeddings(input_ids,
-                                                      vision_embeddings)
+        inputs_embeds = self.model.get_input_embeddings(
+            input_ids, vision_embeddings)
 
         if vision_embeddings is not None:
             print('vision_embeddings is not None')
@@ -462,7 +463,8 @@ class HpuModelAdapter(torch.nn.Module):
                                              attn_bias=attn_bias)
         return attn_metadata
 
-    def _set_block_mapping(self, metadata, batch_size, device, dtype, is_window_block):
+    def _set_block_mapping(self, metadata, batch_size, device, dtype,
+                           is_window_block):
 
         block_usage = metadata.block_usage if not is_window_block else metadata.window_block_usage
         block_groups = metadata.block_groups if not is_window_block else metadata.window_block_groups
@@ -494,9 +496,10 @@ class HpuModelAdapter(torch.nn.Module):
                                                 "TrimmedAttentionMetadata",
                                                 block_groups=block_groups)
             else:
-                metadata = custom_tuple_replace(metadata,
-                                                "TrimmedAttentionMetadata",
-                                                window_block_groups=block_groups)
+                metadata = custom_tuple_replace(
+                    metadata,
+                    "TrimmedAttentionMetadata",
+                    window_block_groups=block_groups)
 
         block_mapping = block_mapping.to(dtype)
         if not is_window_block:
@@ -506,9 +509,9 @@ class HpuModelAdapter(torch.nn.Module):
                                             attn_bias=attn_bias)
         else:
             metadata = custom_tuple_replace(metadata,
-                                "TrimmedAttentionMetadata",
-                                window_block_mapping=block_mapping,
-                                window_attn_bias=attn_bias)
+                                            "TrimmedAttentionMetadata",
+                                            window_block_mapping=block_mapping,
+                                            window_attn_bias=attn_bias)
         return metadata
 
     def forward_update_meta_only(self, *args, **kwargs):
@@ -533,9 +536,8 @@ class HpuModelAdapter(torch.nn.Module):
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
         if attn_metadata.window_block_list is not None:
-                attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
-                                                    device, dtype,
-                                                    True)
+            attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
+                                                    device, dtype, True)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -868,8 +870,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.sliding_window = (self.model_config.get_sliding_window()
                                if self.model_config is not None else None)
 
-        self.interleaved_sliding_window = getattr(self.model_config.hf_text_config,
-                        "interleaved_sliding_window", None)
+        self.interleaved_sliding_window = getattr(
+            self.model_config.hf_text_config, "interleaved_sliding_window",
+            None)
 
         self.device_config = (self.device_config if self.device_config
                               is not None else DeviceConfig())
@@ -1842,7 +1845,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 if self.interleaved_sliding_window is not None:
                     sliding_window_blocks = (self.interleaved_sliding_window //
-                                            self.block_size)
+                                             self.block_size)
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
 
@@ -1877,10 +1880,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert len(block_list) == len(block_usage)
 
         if self.interleaved_sliding_window is not None:
-            window_block_groups = [[i] * len(bt) for i, bt in enumerate(window_block_tables)]
-            window_block_usage = [[self.block_size] * (len(bt) - 1) + [lbu]
-                        for bt, lbu in zip(block_tables, last_block_usage)
-                        if bt]
+            window_block_groups = [[i] * len(bt)
+                                   for i, bt in enumerate(window_block_tables)]
+            window_block_usage = [
+                [self.block_size] * (len(bt) - 1) + [lbu]
+                for bt, lbu in zip(block_tables, last_block_usage) if bt
+            ]
 
             window_block_list = flatten(window_block_tables)
             window_block_groups = flatten(window_block_groups)
@@ -1961,10 +1966,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = padding_fn(block_usage, 1)
 
         if self.interleaved_sliding_window is not None:
-            window_block_list = window_padding_fn(window_block_list, _PAD_BLOCK_ID)
+            window_block_list = window_padding_fn(window_block_list,
+                                                  _PAD_BLOCK_ID)
             window_block_groups = window_padding_fn(window_block_groups, -1)
             #window_block_usage = window_padding_fn(window_block_usage, 1)
-            window_block_usage = [1 if i == 0 else block_usage[idx] for idx, (i, j) in enumerate(zip(window_block_list, block_usage))]
+            window_block_usage = [
+                1 if i == 0 else block_usage[idx]
+                for idx, (i,
+                          j) in enumerate(zip(window_block_list, block_usage))
+            ]
 
         if is_enc_dec_model:
             if self.use_contiguous_pa:
@@ -2058,16 +2068,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
 
         if self.interleaved_sliding_window is not None:
-            window_block_list = torch.tensor(window_block_list, dtype=torch.int, device='cpu')
+            window_block_list = torch.tensor(window_block_list,
+                                             dtype=torch.int,
+                                             device='cpu')
             window_block_groups = torch.tensor(window_block_groups,
-                                        dtype=torch.int,
-                                        device='cpu')
+                                               dtype=torch.int,
+                                               device='cpu')
             window_block_usage = torch.tensor(window_block_usage,
-                                    dtype=self.model_config.dtype,
-                                    device='cpu')
+                                              dtype=self.model_config.dtype,
+                                              device='cpu')
 
             window_block_list = window_block_list.to(  # type: ignore
-            self.device, non_blocking=True)
+                self.device, non_blocking=True)
             window_block_groups = window_block_groups.to(  # type: ignore
                 self.device, non_blocking=True)
             window_block_usage = window_block_usage.to(  # type: ignore
