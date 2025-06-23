@@ -35,7 +35,7 @@ from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
 from .siglip import SiglipVisionModel
 from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
-                    maybe_prefix, merge_multimodal_embeddings)
+                    maybe_prefix, merge_multimodal_embeddings, greedy_plan)
 
 logger = init_logger(__name__)
 
@@ -538,24 +538,45 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         pixel_values = flatten_bn(pixel_values, concat=True)
         num_crops = flatten_bn(num_crops, concat=True)
 
-        return Gemma3ImagePixelInputs(
+        x = Gemma3ImagePixelInputs(
             type="pixel_values",
             pixel_values=self._validate_pixel_values(pixel_values),
-            num_patches=num_crops + 1,
-        )
+            # TODO.. some bug in adding 1 here to num_crops.. currently assuming no panscan so just passing in torch.ones
+            # seeing 0 + 1 = 0 here sometimes!! hence wrapping in torch.tensor
+            # num_patches=num_crops + 1,
+            num_patches= torch.ones(num_crops.shape, dtype=num_crops.dtype).to(pixel_values.device))
+        return x
 
     def _image_pixels_to_features(
         self,
         vision_tower: SiglipVisionModel,
         pixel_values: torch.Tensor,
+        graphed_multimodal_buckets = []
     ) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
-        image_features = vision_tower(pixel_values.to(dtype=target_dtype))
+        return vision_tower(pixel_values.to(dtype=target_dtype))
+        '''
+        #breakpoint()
+        batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
+        #batch_breakdown = [4,2,1,1]
+        start_idx = 0
+        # note this for loop is not hpu graph friendly, but vision_tower is
+        image_features_multibatches = []
+        pixel_values = pixel_values.to(dtype=target_dtype)
+        for i in batch_breakdown:
+            end_idx = start_idx + i
+            batch_sliced_pixel_values = pixel_values[start_idx:end_idx, ...]
+            image_features_multibatches += [vision_tower(batch_sliced_pixel_values, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+            start_idx = end_idx
+        #breakpoint()
+        image_features = torch.cat(image_features_multibatches, dim=0)
+        # Note.. this does not produce Exactly the same result as vision_tower(pixel_values.to(dtype=target_dtype)).. why? is it a bug?
         return image_features
-
+        '''
     def _process_image_input(
         self,
         image_input: Gemma3ImageInputs,
+        graphed_multimodal_buckets = []
     ) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
@@ -565,8 +586,26 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         image_features = self._image_pixels_to_features(
             self.vision_tower,
             pixel_values,
+            graphed_multimodal_buckets
         )
         image_embeds = self.multi_modal_projector(image_features)
+
+        batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
+        start_idx = 0
+        image_embeds_multibatches = []
+        # TODO .. same code here and in _image_pixels_to_features. unify...
+        import os
+        is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
+        for i in batch_breakdown:
+            end_idx = start_idx + i
+            batch_sliced_image_features = image_features[start_idx:end_idx, ...]
+            if is_lazy:
+                image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+            else:
+                image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features)]
+            start_idx = end_idx
+        #image_embeds = self.multi_modal_projector(image_features, bypass_hpu_graphs=not use_graph_vision)
+        image_embeds = torch.cat(image_embeds_multibatches, dim=0)
 
         return [
             e.flatten(0, 1) for e in image_embeds.split(num_patches.tolist())
@@ -581,7 +620,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         if image_input is None:
             return None
 
-        return self._process_image_input(image_input)
+        return self._process_image_input(image_input, kwargs.get('graphed_multimodal_buckets', []))
 
     def get_input_embeddings(
         self,
@@ -610,6 +649,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
+            assert False, "hpu_model_runner should be computing inputs_embeds"
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
             inputs_embeds = self.get_input_embeddings(input_ids,
@@ -630,7 +670,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                                   **kwargs)
 
         return hidden_states
-
+    '''
     def prepare_attn_masks(
         self,
         input_ids: torch.Tensor,
@@ -691,6 +731,58 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 local_attn_masks.append(local_attn_mask)
         kwargs["global_attn_masks"] = global_attn_masks
         kwargs["local_attn_masks"] = local_attn_masks
+        return kwargs
+        '''
+    def prepare_attn_masks(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        mask_dtype: torch.dtype,
+        **kwargs,
+    ):
+        kwargs["has_images"] = True
+        IMG_TOKENS = 256
+        seq_len = input_ids.shape[1]
+        bs = input_ids.shape[0]
+        kwargs["seq_lens"] = [seq_len] * bs
+
+        global_attn_mask = torch.empty(
+            bs,
+            1,
+            seq_len,
+            seq_len,
+            dtype=mask_dtype,
+            device=input_ids.device,
+        )
+        global_attn_mask.fill_(float("-inf"))
+        global_attn_mask = global_attn_mask.triu(diagonal=1)
+
+        img_mask = torch.zeros_like(global_attn_mask)
+        img_pos = (input_ids == self.config.image_token_index)
+
+        img_mask[img_pos.unsqueeze(1)] += 1
+        img_mask = img_mask.permute(0,1,3,2)
+        img_mask[img_pos.unsqueeze(1)] += 1
+        img_mask = img_mask.permute(0,1,3,2)
+
+        img_pos_cum = torch.cumsum(img_pos, 1)
+        img_causal = torch.arange(seq_len, device = input_ids.device).unsqueeze(0) - img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
+        img_causal = torch.cat((img_causal[:,0:1]-1, img_causal[:,:-1]), dim=1)
+        img_causal = img_causal.clamp_(min=0, max=seq_len-1).unsqueeze(1).unsqueeze(3)
+        ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+        img_mask[ind < img_causal] += 1
+        global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
+
+        if self.sliding_window is not None:
+            # Create a local causal mask with sliding window (1024).
+            local_attn_mask = torch.ones_like(global_attn_mask)
+            local_attn_mask = torch.tril(local_attn_mask,
+                                            diagonal=-self.sliding_window)
+            local_attn_mask = torch.where(local_attn_mask == 0,
+                                            global_attn_mask, float("-inf"))
+
+        kwargs["global_attn_masks"] = global_attn_mask
+        kwargs["local_attn_masks"] = local_attn_mask
         return kwargs
 
     def compute_logits(
