@@ -1,6 +1,6 @@
 services:
   vllm-server:
-    image: docker_auto_24
+    image: ${DOCKER_IMAGE}
     environment:
       - HF_HOME=/mnt/hf_cache
       - HF_TOKEN=${HF_TOKEN}
@@ -15,7 +15,7 @@ services:
     ipc: host
     runtime: habana
     restart: unless-stopped
-    command: ["server", "--config-file", "${SERVER_CONFIG_FILE}", "--config-name", "${SERVER_CONFIG_NAME}"]
+    command: ["server", "--config-file", "${VLLM_SERVER_CONFIG_FILE}", "--config-name", "${VLLM_SERVER_CONFIG_NAME}"]
     healthcheck:
       test: ["CMD", "sh", "-c", "[ -f logs/vllm_server.log ] && grep -q 'Application startup complete' logs/vllm_server.log"]
       interval: 10s
@@ -24,7 +24,8 @@ services:
       start_period: 10s
 
   benchmark:
-    image: docker_auto_24
+    profiles: ["benchmark"]
+    image: ${DOCKER_IMAGE}
     network_mode: service:vllm-server
     depends_on:
       vllm-server:
@@ -32,4 +33,4 @@ services:
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - PYTHONUNBUFFERED=1
-    command: ["benchmark", "--config-file", "${BENCHMARK_CONFIG_FILE}", "--config-name", "${BENCHMARK_CONFIG_NAME}"]
+    command: ["benchmark", "--config-file", "${VLLM_BENCHMARK_CONFIG_FILE}", "--config-name", "${VLLM_BENCHMARK_CONFIG_NAME}"]
