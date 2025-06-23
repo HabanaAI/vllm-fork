@@ -71,11 +71,13 @@ class MyWorker(HPUWorker):
         weight = torch.empty(shape, dtype=dtype, device="hpu")
         self.model_update_group.broadcast(weight,
                                           src=0)
+        torch.hpu.synchronize()
         weight = weight.to("cpu")
 
         self.model_runner.model.model.load_weights(weights=[(name, weight)])
 
         del weight
+        torch.hpu.synchronize()
 
     def check_weights_changed(self):
         """
@@ -100,6 +102,7 @@ Start the inference process, here we use vLLM to hold a model on GPU 1 and
 GPU 2. For the details on how to use ray, please refer to the ray 
 documentation https://docs.ray.io/en/latest/ .
 """
+os.environ["HABANA_VISIBLE_MODULES"] = "1,2"
 ray.init()
 
 pg_inference = placement_group([{"HPU": 1, "CPU": 0}] * 2)
