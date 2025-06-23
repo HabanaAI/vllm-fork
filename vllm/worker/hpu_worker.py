@@ -19,9 +19,10 @@ import torch.distributed
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
-from vllm.config import ParallelConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
                               init_distributed_environment)
+from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -205,7 +206,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
-            torch.hpu.set_device(self.device)
+            torch.hpu.set_device(self.local_rank)
         elif self.device_config.device_type == "cpu":
             self.device = torch.device("cpu")
         else:
@@ -214,7 +215,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         # Initialize the distributed environment.
         if self.model_config.quantization == 'inc':
             self._set_env_vars()
-        init_worker_distributed_environment(self.parallel_config, self.rank,
+        init_worker_distributed_environment(self.vllm_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
         # Set random seed.
@@ -255,12 +256,17 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 seq_group_metadata.is_prompt
                 for seq_group_metadata in seq_group_metadata_list
             ])
-            max_context_len = max([
-                max([
-                    len(v.prompt_token_ids) + len(v.output_token_ids)
-                    for v in seq_group_metadata.seq_data.values()
-                ]) for seq_group_metadata in seq_group_metadata_list
-            ])  # whoa, that's some spicy stuff right here
+            # for dummy run in DP, we don't have real seq,
+            # so use a dummy context_len here
+            if len(seq_group_metadata_list) == 0:
+                max_context_len = 128
+            else:
+                max_context_len = max([
+                    max([
+                        len(v.prompt_token_ids) + len(v.output_token_ids)
+                        for v in seq_group_metadata.seq_data.values()
+                    ]) for seq_group_metadata in seq_group_metadata_list
+                ])  # whoa, that's some spicy stuff right here
             max_num_blocks = (
                 (max_context_len - 1) // self.cache_config.block_size) + 1
             input_stats = (f'is_prompt: {is_prompt}, '
@@ -512,12 +518,13 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
 
 def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
+    vllm_config: VllmConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    parallel_config = vllm_config.parallel_config
     backend = hpu_backend_string()
     init_distributed_environment(parallel_config.world_size,
                                  rank,
@@ -559,6 +566,7 @@ def init_worker_distributed_environment(
     assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
+    ensure_kv_transfer_initialized(vllm_config)
 
 
 def raise_if_cache_size_invalid(num_gpu_blocks, block_size, max_model_len,
