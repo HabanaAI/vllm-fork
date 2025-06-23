@@ -2774,8 +2774,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
             seq_len = max_seq_len
             batch_seq = 1 * num_patches
-            # Graph memory usage is proportional to seq dimension in a batch
-            mem_estimate = batch_seq / total_batch_seq * total_mem
             graphed_multimodal_bucket = num_patches
             if graphed_multimodal_bucket in self.graphed_multimodal_buckets:
                 continue
