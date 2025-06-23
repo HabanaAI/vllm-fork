@@ -2761,7 +2761,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _warmup_multimodal_graph(self,
                                  kv_caches,
-                                 available_mem,
                                  starting_mem=0,
                                  total_batch_seq=0.001):
 
@@ -2777,9 +2776,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             batch_seq = 1 * num_patches
             # Graph memory usage is proportional to seq dimension in a batch
             mem_estimate = batch_seq / total_batch_seq * total_mem
-            if mem_estimate >= available_mem:
-                captured_all = False
-                continue
             graphed_multimodal_bucket = num_patches
             if graphed_multimodal_bucket in self.graphed_multimodal_buckets:
                 continue
@@ -2797,7 +2793,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
-            available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
 
