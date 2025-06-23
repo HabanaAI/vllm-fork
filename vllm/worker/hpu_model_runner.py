@@ -307,7 +307,6 @@ class HpuModelAdapter(torch.nn.Module):
             self.model.multi_modal_projector = htorch.hpu.wrap_in_hpu_graph(
                 self.model.multi_modal_projector, disable_tensor_cache=True)
 
-
     # copying from PR 1163
     # needs cleanup/unified approach later
     def compute_input_embeddings_for_gemma(self, **kwargs):
@@ -760,6 +759,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.sliding_window = (self.model_config.get_sliding_window()
                                if self.model_config is not None else None)
+
+        self.interleaved_sliding_window = getattr(self.model_config.hf_text_config,
+                        "interleaved_sliding_window", None)
+
         self.device_config = (self.device_config if self.device_config
                               is not None else DeviceConfig())
         if is_fake_hpu():
@@ -1278,7 +1281,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_lens.append(seq_len)
 
             # NOTE: This only works for oooooooxxx style attention.
-            #import pdb;pdb.set_trace()
             if computed_block_nums is not None and len(
                     computed_block_nums) > 0 and self.sliding_window is None:
                 # Prefix is not supported with sliding_window
@@ -1618,7 +1620,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
 
-                #logger.info(f"Decode: sliding_window:{self.sliding_window}, blocksize:{self.block_size}, block_table:{block_table}")
                 if self.sliding_window is not None:
                     sliding_window_blocks = (self.sliding_window //
                                              self.block_size)
@@ -1627,8 +1628,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 #TODO: There are many places which checks this config parameter, however this is
                 #very specific config to gemma3, we should first check if this parameter even exist before check.
-                if self.model_config.hf_text_config.interleaved_sliding_window is not None:
-                    sliding_window_blocks = (self.model_config.hf_text_config.interleaved_sliding_window //
+                #This is for the models which use interleaved sliding window such as gemma3
+                if self.interleaved_sliding_window is not None:
+                    sliding_window_blocks = (self.interleaved_sliding_window //
                                             self.block_size)
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
@@ -1663,7 +1665,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
 
-        if self.model_config.hf_text_config.interleaved_sliding_window is not None:
+        if self.interleaved_sliding_window is not None:
             window_block_groups = [[i] * len(bt) for i, bt in enumerate(window_block_tables)]
             window_block_usage = [[self.block_size] * (len(bt) - 1) + [lbu]
                         for bt, lbu in zip(block_tables, last_block_usage)
@@ -1715,7 +1717,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
-            if self.model_config.hf_text_config.interleaved_sliding_window is not None:
+            if self.interleaved_sliding_window is not None:
                 window_indices: List[Any]
                 window_indices = [None] * block_bucket_size
                 for i, bid in enumerate(window_block_list):
@@ -1733,7 +1735,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
 
-        if self.model_config.hf_text_config.interleaved_sliding_window is not None:
+        if self.interleaved_sliding_window is not None:
             window_block_list = window_padding_fn(window_block_list, _PAD_BLOCK_ID)
             window_block_groups = window_padding_fn(window_block_groups, -1)
             #window_block_usage = window_padding_fn(window_block_usage, 1)
@@ -1816,7 +1818,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             encoder_seq_lens_tensor = encoder_seq_lens_tensor.to(  # type: ignore
                 self.device, non_blocking=True)
 
-        if self.model_config.hf_text_config.interleaved_sliding_window is not None:
+        if self.interleaved_sliding_window is not None:
             window_block_list = torch.tensor(window_block_list, dtype=torch.int, device='cpu')
             window_block_groups = torch.tensor(window_block_groups,
                                         dtype=torch.int,
