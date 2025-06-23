@@ -745,7 +745,7 @@ def _make_prompt_alibi_bias(
         seq_len,  # Directly use seq_len instead of padded_len
         device=alibi_slopes.device,
         dtype=dtype,
-    )[:, :, :, :seq_len].copy_(bias)
+    )
 
     # Copy the bias matrix into each head
     per_head_bias[:, :] = bias
@@ -754,6 +754,7 @@ def _make_prompt_alibi_bias(
     per_head_bias.mul_(alibi_slopes[:, None, None])
 
     return per_head_bias
+
 
 def _make_decode_alibi_bias(
     alibi_blocks: torch.Tensor,

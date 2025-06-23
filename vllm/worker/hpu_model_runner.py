@@ -1840,9 +1840,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
-                #TODO: There are many places which checks this config parameter, however this is
-                #very specific config to gemma3, we should first check if this parameter even exist before check.
-                #This is for the models which use interleaved sliding window such as gemma3
                 if self.interleaved_sliding_window is not None:
                     sliding_window_blocks = (self.interleaved_sliding_window //
                                             self.block_size)
