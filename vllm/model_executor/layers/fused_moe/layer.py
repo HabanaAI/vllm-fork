@@ -974,12 +974,16 @@ class FusedMoE(torch.nn.Module):
             if final_hidden_states.ndim == 3:
                 final_hidden_states = final_hidden_states.view(
                     -1, final_hidden_states.size(2))
-            start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
-                self.dp_rank - 1]
-            end = cu_tokens_across_dp_cpu[self.dp_rank]
 
-            all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
-            final_hidden_states = all_hidden_states[start:end, :]
+            import habana_frameworks.torch as htorch
+            htorch.core.mark_step()
+            local_hidden_states = get_forward_context(
+            ).dp_metadata.hidden_states
+            torch.distributed.reduce_scatter_tensor(
+                local_hidden_states,
+                final_hidden_states,
+                group=get_dp_group().device_group)
+            final_hidden_states = local_hidden_states
 
         if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1):
             # Default set to False. (May have to add shared expert outputs.)

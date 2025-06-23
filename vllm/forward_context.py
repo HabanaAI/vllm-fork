@@ -35,6 +35,7 @@ class DPMetadata:
     cu_tokens_across_dp_cpu: torch.Tensor
     hidden_states_across_dp: Optional[torch.Tensor] = None
     router_logits_across_dp: Optional[torch.Tensor] = None
+    hidden_states: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -132,9 +133,11 @@ def set_forward_context(attn_metadata: Any,
                 dtype=dtype)
             router_logits_across_dp = torch.empty(
                 (batchsize * dp_size, num_experts), device=device, dtype=dtype)
+            hidden_states = torch.empty((batchsize, hidden_size),\
+                device=device, dtype=dtype)
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu,
                                      hidden_states_across_dp,
-                                     router_logits_across_dp)
+                                     router_logits_across_dp, hidden_states)
         else:
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu)
 
