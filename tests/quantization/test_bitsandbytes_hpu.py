@@ -22,8 +22,8 @@ models_4bit_to_test = [
     ("meta-llama/Llama-3.2-1B", "quantize_llama_model_inflight"),
 ]
 
-models_pre_quant_4bit_to_test = [("hugging-quants/Meta-Llama-3.1-8B-BNB-NF4",
-                                  "read_pre-quantized_4-bit_NF4_opt_model")]
+models_pre_quant_4bit_to_test = [("unsloth/Llama-3.2-1B-bnb-4bit",
+                                  "read_pre-quantized_4-bit_NF4_model")]
 
 
 @pytest.mark.parametrize("model_name, description", models_4bit_to_test)
