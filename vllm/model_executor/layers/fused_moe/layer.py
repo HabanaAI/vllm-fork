@@ -295,13 +295,28 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             topk_weights = F.softmax(router_logits, dim=1, dtype=torch.float32)
             topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
             topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
-            topk_weights = topk_weights.to(x.dtype)
+        topk_ids = topk_ids.to(torch.int64)
+        topk_weights = topk_weights.to(x.dtype)
+        if layer.dp_size > 1:
+            cu_tokens_across_dp_cpu = get_forward_context(
+            ).dp_metadata.cu_tokens_across_dp_cpu
+
+            topk_ids_across_dp = get_forward_context(
+            ).dp_metadata.topk_ids_across_dp
+            topk_ids = layer.multicast_fn(topk_ids, cu_tokens_across_dp_cpu,
+                                          topk_ids_across_dp)
+
+            topk_weights_across_dp = get_forward_context(
+            ).dp_metadata.topk_weights_across_dp
+            topk_weights = layer.multicast_fn(topk_weights,
+                                              cu_tokens_across_dp_cpu,
+                                              topk_weights_across_dp)
         topk_ids = topk_ids.view(*x.shape[:-1], -1)
         topk_weights = topk_weights.view(*x.shape[:-1], -1)
         return layer.moe_op(
             x,
-            topk_ids.to(torch.int64),
-            topk_weights.to(x.dtype),
+            topk_ids,
+            topk_weights,
             permuted_weights=True,
             activation=activation,
         ).view(*input_shape)
@@ -941,15 +956,10 @@ class FusedMoE(torch.nn.Module):
             ).dp_metadata.cu_tokens_across_dp_cpu
             hidden_states_across_dp = get_forward_context(
             ).dp_metadata.hidden_states_across_dp
-            router_logits_across_dp = get_forward_context(
-            ).dp_metadata.router_logits_across_dp
 
             hidden_states = self.multicast_fn(hidden_states,
                                               cu_tokens_across_dp_cpu,
                                               hidden_states_across_dp)
-            router_logits = self.multicast_fn(router_logits,
-                                              cu_tokens_across_dp_cpu,
-                                              router_logits_across_dp)
 
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
