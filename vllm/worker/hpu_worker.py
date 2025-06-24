@@ -206,8 +206,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
-            dp_size = int(os.environ.get("VLLM_DP_SIZE", "1"))
-            if dp_size > 1:
+            if envs.VLLM_DP_SIZE > 1:
                 torch.hpu.set_device(self.device)
             else:
                 torch.hpu.set_device(self.local_rank)
