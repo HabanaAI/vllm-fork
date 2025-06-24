@@ -1971,7 +1971,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             window_block_groups = window_padding_fn(window_block_groups, -1)
             #window_block_usage = window_padding_fn(window_block_usage, 1)
             window_block_usage = [
-                1 if i == 0 else block_usage[idx]
+                [1] if i == 0 else [block_usage[idx]]
                 for idx, (i,
                           j) in enumerate(zip(window_block_list, block_usage))
             ]
