@@ -553,10 +553,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                                      attn_metadata.block_size)
 
             if self.sliding_window:
-                attn_bias = _make_sliding_window_bias(
-                    batch_size, seq_len, attn_metadata.seq_lens_tensor,
-                    self.sliding_window, query.dtype)
-                common_args['pad'] = 'left'
+                attn_bias = attn_metadata.window_attn_bias
 
             out = ops.prompt_attention(
                 impl=self.prefill_impl,

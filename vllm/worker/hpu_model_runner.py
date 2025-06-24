@@ -348,6 +348,9 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
         self.model_is_mrope = uses_mrope(model_config)
 
+        self.interleaved_sliding_window = getattr(
+            model_config.get_text_config(), "interleaved_sliding_window", None)
+
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
         # models separately with HPU graph.
@@ -454,6 +457,42 @@ class HpuModelAdapter(torch.nn.Module):
                                              attn_bias=attn_bias)
         return attn_metadata
 
+    def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
+                                          seq_len, window_size, device, dtype):
+
+        prefill_metadata = attn_metadata
+        shift = 0
+
+        #causal + window size : accuracy good
+        tensor = torch.full((batch_size, 1, seq_len, seq_len),
+                            device=device,
+                            dtype=dtype,
+                            fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        attn_bias = torch.log(mask)
+        '''
+        #TODO:causal + window size + q_len : accuracy and perf issue.
+        #Further need to be optimized when custom kernel is available.
+        query_lens_t = prefill_metadata.seq_lens_tensor
+        query_lens_t = query_lens_t.reshape(batch_size, 1)
+
+        tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,
+            dtype=dtype, fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        len_mask = torch.arange(0, seq_len, device=device,
+            dtype=torch.int32).view(seq_len,1)
+        len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size,
+            1, seq_len, 1)
+        len_mask = torch.where(len_mask == False, 1, 0)
+        mask = mask.logical_and(len_mask)
+        mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        attn_bias =torch.where(mask,0, -math.inf)
+        '''
+        attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
+
+        return attn_metadata
+
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
                            is_window_block):
 
@@ -527,6 +566,10 @@ class HpuModelAdapter(torch.nn.Module):
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
+            if self.interleaved_sliding_window:
+                attn_metadata = self._set_attn_bias_for_sliding_window(
+                    attn_metadata, batch_size, seq_len,
+                    self.interleaved_sliding_window, device, dtype)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
