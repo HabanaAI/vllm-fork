@@ -450,18 +450,27 @@ class GroupCoordinator:
                 not self.xpu_communicator.disabled:
             return self.xpu_communicator.gather(input_, self.rank_in_group,
                                                 dst, dim)
+        
+        if envs.VLLM_TP_USE_CPU_COMS:
+            # If we are using CPU COMS, we need to move the tensor to CPU
+            # before gathering.
+            orig_device = input_.device
+            input_ = input_.to('cpu')
         # Allocate output tensor.
         if self.rank_in_group == dst:
             gather_list = [torch.empty_like(input_) for _ in range(world_size)]
         else:
             gather_list = None
         # Gather.
+        target_group = self.cpu_group if envs.VLLM_TP_USE_CPU_COMS else self.device_group
         torch.distributed.gather(input_,
                                  gather_list,
                                  dst=self.ranks[dst],
-                                 group=self.device_group)
+                                 group=target_group)
         if self.rank_in_group == dst:
             output_tensor = torch.cat(gather_list, dim=dim)
+            if envs.VLLM_TP_USE_CPU_COMS:
+                output_tensor = output_tensor.to(orig_device)
         else:
             output_tensor = None
         return output_tensor
