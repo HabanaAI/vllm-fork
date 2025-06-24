@@ -554,7 +554,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         graphed_multimodal_buckets = []
     ) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
-        return vision_tower(pixel_values.to(dtype=target_dtype))
+        image_features = vision_tower(pixel_values.to(dtype=target_dtype))
+        return image_features
         '''
         #breakpoint()
         batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
@@ -589,23 +590,23 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             graphed_multimodal_buckets
         )
         image_embeds = self.multi_modal_projector(image_features)
-
-        batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
-        start_idx = 0
-        image_embeds_multibatches = []
-        # TODO .. same code here and in _image_pixels_to_features. unify...
-        import os
-        is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
-        for i in batch_breakdown:
-            end_idx = start_idx + i
-            batch_sliced_image_features = image_features[start_idx:end_idx, ...]
-            if is_lazy:
-                image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
-            else:
-                image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features)]
-            start_idx = end_idx
-        #image_embeds = self.multi_modal_projector(image_features, bypass_hpu_graphs=not use_graph_vision)
-        image_embeds = torch.cat(image_embeds_multibatches, dim=0)
+        if len(graphed_multimodal_buckets) > 1:
+            batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
+            start_idx = 0
+            image_embeds_multibatches = []
+            # TODO .. same code here and in _image_pixels_to_features. unify...
+            import os
+            is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
+            for i in batch_breakdown:
+                end_idx = start_idx + i
+                batch_sliced_image_features = image_features[start_idx:end_idx, ...]
+                if is_lazy:
+                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+                else:
+                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features)]
+                start_idx = end_idx
+            #image_embeds = self.multi_modal_projector(image_features, bypass_hpu_graphs=not use_graph_vision)
+            image_embeds = torch.cat(image_embeds_multibatches, dim=0)
 
         return [
             e.flatten(0, 1) for e in image_embeds.split(num_patches.tolist())
@@ -741,11 +742,12 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         **kwargs,
     ):
         kwargs["has_images"] = True
-        IMG_TOKENS = 256
+        #import pdb;pdb.set_trace()
+        IMG_TOKENS = self.config.mm_tokens_per_image
         seq_len = input_ids.shape[1]
         bs = input_ids.shape[0]
         kwargs["seq_lens"] = [seq_len] * bs
-
+        
         global_attn_mask = torch.empty(
             bs,
             1,
@@ -772,7 +774,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         img_mask[ind < img_causal] += 1
         global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
-
+        
         if self.sliding_window is not None:
             # Create a local causal mask with sliding window (1024).
             local_attn_mask = torch.ones_like(global_attn_mask)

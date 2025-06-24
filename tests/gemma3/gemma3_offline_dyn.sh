@@ -23,4 +23,4 @@ export PT_HPU_LAZY_MODE=1
 
 #python gemma3_offline_dyn.py --model /root/google/gemma-3-4b-it --tensor-parallel-size 1 --batchconfig config1.json
 
-python gemma3_offline_dyn.py --model /root/software/data/pytorch/huggingface/hub/models--google--gemma-3-4b-it/snapshots/093f9f388b31de276ce2de164bdc2081324b9767/ --tensor-parallel-size 1 --batchconfig config0.json
+python gemma3_offline_dyn.py --model /root/software/data/pytorch/huggingface/hub/models--google--gemma-3-4b-it/snapshots/093f9f388b31de276ce2de164bdc2081324b9767/ --tensor-parallel-size 1 --batchconfig config1.json

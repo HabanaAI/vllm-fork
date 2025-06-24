@@ -333,6 +333,7 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
 
         self.model_is_mrope = uses_mrope(model_config)
+        self.is_mm_optimized = is_mm_optimized(self.model)
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -345,7 +346,7 @@ class HpuModelAdapter(torch.nn.Module):
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
 
-            if is_mm_optimized(self.model):
+            if self.is_mm_optimized:
                 if hasattr(self.model, 'vision_tower'):
                     self.model.vision_tower = htorch.hpu.wrap_in_hpu_graph(
                         self.model.vision_tower, disable_tensor_cache=True)
@@ -528,20 +529,8 @@ class HpuModelAdapter(torch.nn.Module):
 
     # copying from PR 1163
     # needs cleanup/unified approach later
-    def compute_input_embeddings_for_gemma(self, **kwargs):
-
-        if 'inputs_embeds' in kwargs:
-            print('do nothing')
-            return kwargs
-
-        # todo may or may not be needed for gemma3, check
-        compile_only_mode_context_false = functools.partial(
-            bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
-
-
+    def compute_input_embeddings_for_mm_optimized(self, **kwargs):
         input_ids = kwargs['input_ids']
-        #
-        #with compile_only_mode_context_false():
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
         inputs_embeds = self.model.get_input_embeddings(input_ids,
                                                       vision_embeddings)
@@ -562,12 +551,12 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs.pop('pixel_values', None)
         return kwargs
     
-    def compute_input_embeddings_for_mrope(self, **kwargs):
+    def compute_input_embeddings_for_mrope_mm_optimized(self, **kwargs):
         
         if 'inputs_embeds' in kwargs:
             return kwargs
-        #if not self.model_is_mrope:
-        #    return None
+        if not self.model_is_mrope and not self.is_mm_optimized:
+            return None
 
         # For Qwen2.5-VL/Gemma3 VL multimodal embedding,
         # this embedding part should be executed
@@ -584,12 +573,14 @@ class HpuModelAdapter(torch.nn.Module):
 
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
-            image_input = self.model._parse_and_validate_image_input(**kwargs)
-            video_input = self.model._parse_and_validate_video_input(**kwargs)
-            inputs_embeds = self.model.get_input_embeddings_v0(
-                input_ids, image_input=image_input, video_input=video_input)
-            input_ids = None
-
+            if self.model_is_mropt:
+                image_input = self.model._parse_and_validate_image_input(**kwargs)
+                video_input = self.model._parse_and_validate_video_input(**kwargs)
+                inputs_embeds = self.model.get_input_embeddings_v0(
+                    input_ids, image_input=image_input, video_input=video_input)
+                input_ids = None
+            else:
+                return compute_input_embeddings_for_mm_optimized(**kwargs)
         return inputs_embeds
 
     def forward(self, *args, **kwargs):
@@ -608,7 +599,7 @@ class HpuModelAdapter(torch.nn.Module):
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None and not self.model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
-        if self.model_is_mrope or is_mm_optimized(self.model):
+        if self.model_is_mrope or self.is_mm_optimized:
             # inputs_embeds was computed on execute_model
             # now we always want to use the inputs_embeds
             # even if the prompt is text only
@@ -903,7 +894,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.multi_modal_input_mapper = self.mm_registry \
             .create_input_mapper(self.model_config)
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
-
+        self.is_mm_optimized = False
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
@@ -1154,7 +1145,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # Models that process images at different resolutions
         # need to be warmed up. Current tested for MRoPE models only.
-        self.add_vision_buckets_to_mrope_optimized_models()
+        self.add_vision_buckets_to_mrope_mm_optimized()
 
     def _add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -1358,12 +1349,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model_type = getattr(self.model_config.hf_config, 'model_type', '')
         return -1 if model_type == 'gemma3' else 0
     
-    def add_vision_buckets_to_mrope_optimized_models(self):
-        if self.model_is_mrope or is_mm_optimized(self.model):
+    def add_vision_buckets_to_mrope_mm_optimized(self):
+        if self.mm_registry is not None:
             model = self.get_model()
-            is_batch_based = False if "Qwen2_5_VLForConditionalGeneration" in model.config.architectures \
-                else is_mm_optimized(model)
-            model.vision_buckets = VisionBuckets(is_batch_based)
+            self.is_mm_optimized = is_mm_optimized(model)
+            if self.model_is_mrope or self.is_mm_optimized:
+                model.vision_buckets = VisionBuckets(is_mm_optimized)
 
     def _prepare_prompt(
         self,
@@ -1412,8 +1403,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             context_len = seq_data.get_num_computed_tokens()
             # We should use get_len here because in case of preemption
             # it contains output tokens.
+
             seq_len = min(seq_data.get_len(), context_len + token_chunk_size)
             prompt_tokens = seq_data.get_token_ids()[context_len:seq_len]
+            #print("libin debug sl/ get_len/cl/tcs ", seq_len, seq_data.get_len(), context_len ,  token_chunk_size)
             seq_lens.append(seq_len)
 
             # NOTE: This only works for oooooooxxx style attention.
@@ -1465,7 +1458,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         block_offset = i % self.block_size
                         slot = block_number * self.block_size + block_offset
                         cross_slot_mapping.append(slot)
-
+    
             if seq_group_metadata.multi_modal_data:
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
@@ -1643,6 +1636,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                           pad=0,
                                           dtype=torch.long,
                                           flat=True).flatten()
+        #print("libin debug seq_len_tensor ", seq_lens_tensor)
         context_lens_tensor = make_cpu_tensor([context_lens],
                                               max_len=num_seqs,
                                               pad=0,
@@ -2553,7 +2547,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         computed_block_nums = None
         if is_prompt:
             if img_args is not None:
-                if is_mm_optimized(self.model):
+                if self.is_mm_optimized:
                     return self.create_dummy_multi_modal_seq_group_metadata_static(
                         group_id=group_id,
                         img_args=img_args,
@@ -2600,6 +2594,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.compilation_config.static_forward_context,
             [kv_caches] * self.parallel_config.pipeline_parallel_size)
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
+        
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
         # Using batch_size 1 is profile multimodal models
@@ -2810,7 +2805,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
     def _warmup_multimodal(self, kv_caches):
-        if not self.model_is_mrope or not is_mm_optimized(self.model):
+        if not self.model_is_mrope and not self.is_mm_optimized:
             return
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         seq_len = max_seq_len
@@ -2870,7 +2865,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             total_mem += used_mem
             total_batch_seq += batch_seq
 
-        if is_prompt and (self.model_is_mrope or is_mm_optimized(self.model)):
+        if is_prompt and (self.model_is_mrope or self.is_mm_optimized):
             #For multimodal total_batch_seq and total_mem, we store it in the
             #attribute for now.
             mm_outputs = self._warmup_multimodal_graph(
@@ -2973,7 +2968,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # When pooling we're not using decode phase
             decode_buckets = 0
 
-        if self.model_is_mrope or is_mm_optimized(self.model):
+        if self.model_is_mrope or self.is_mm_optimized:
             model = self.get_model()
             self.multimodal_buckets = model.vision_buckets.multimodal_buckets
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
@@ -3597,13 +3592,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 }
 
                 if not bypass_model_exec:
-                    if is_mm_optimized(self.model.model):
+                    if self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs:
                             execute_model_kwargs['graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets) # set is unhasable and causes friction with hpu graphs, hence turning it to a list
 
                         execute_model_kwargs = \
-                            self.model.compute_input_embeddings_for_gemma(
+                            self.model.compute_input_embeddings_for_mm_optimized(
                                 **execute_model_kwargs
                             )
                     with self.profiler.record_event('internal',
