@@ -627,13 +627,23 @@ class GroupCoordinator:
                                                          src=self.ranks[src],
                                                          group=metadata_group,
                                                          async_op=True)
+                    async_handles.append(handle)
+                elif envs.VLLM_TP_USE_CPU_COMS:
+                    orig_device = tensor.device
+                    tensor = tensor.to('cpu')
+                    handle = torch.distributed.broadcast(
+                        tensor,
+                        src=self.ranks[src],
+                        group=metadata_group,
+                        async_op=False)
+                    tensor = tensor.to(orig_device)
                 else:
                     # use group for GPU tensors
                     handle = torch.distributed.broadcast(tensor,
                                                          src=self.ranks[src],
                                                          group=group,
                                                          async_op=True)
-                async_handles.append(handle)
+                    async_handles.append(handle)
             for async_handle in async_handles:
                 async_handle.wait()
 
@@ -657,6 +667,16 @@ class GroupCoordinator:
                             src=self.ranks[src],
                             group=metadata_group,
                             async_op=True)
+                        async_handles.append(handle)
+                    elif envs.VLLM_TP_USE_CPU_COMS:
+                        orig_device = tensor.device
+                        tensor = tensor.to('cpu')
+                        handle = torch.distributed.broadcast(
+                            tensor,
+                            src=self.ranks[src],
+                            group=metadata_group,
+                            async_op=False)
+                        tensor = tensor.to(orig_device)
                     else:
                         # use group for GPU tensors
                         handle = torch.distributed.broadcast(
@@ -664,7 +684,7 @@ class GroupCoordinator:
                             src=self.ranks[src],
                             group=group,
                             async_op=True)
-                    async_handles.append(handle)
+                        async_handles.append(handle)
                     tensor_dict[key] = tensor
                 else:
                     tensor_dict[key] = value
