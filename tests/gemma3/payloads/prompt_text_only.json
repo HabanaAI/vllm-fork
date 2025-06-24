@@ -1,0 +1,20 @@
+{
+	"model": "google/gemma-3-27b-it",
+	"messages": [
+		{
+			"role": "system",
+			"content": "You are a helpful assistant"
+		},
+		{
+			"role": "user",
+			"content": [
+				{
+					"type": "text",
+					"text": "###OCR RESULTS\n\n##Page 1\nUnitedHealthcare' Community Plan\nPRIOR AUTHORIZATION REQUEST FORM\nComplete ENTIRE form and Fax to: 866-940-7328\nToday's Date: |  | \nSECTION A - PATIENT INFORMATION |  | \nFirst Name: Juan | Last Name: Rodr\u00edguez | Member ID: 56791377\nAddress: 1942 Slocum Rd, D& Hills, NY |  | \nDix Hills | State: New York | Zip: 13295\nPhone: 515-739-8864 | DOB: 10/17/1992 | Allergies : Peanuts\nPrimary Insurance: United Select | Policy #: 574469812 | Group #: 2647\nIs the requested medication NEW L'ora CONTINUATION of THERAPY[]? If so, start date: 12/19/21\nIs this patient currently hospitalized? _ Yes No\nSECTION B - PHYSICIAN INFORMATION\nLast Name: Charles\nM.D. D.O.\nFirst Name: Samuel\nAddress: 13 Jericho Ave\nCity: Watertown\nState: MA Zip: 02838\nPhone: 617-744-5056 Fax: 617-744-2295 NPI #: 11134397\nSpecialty: Dermatology\nOffice Contact Name / Fax Attention to:\nSusan\nStotomuer\nSECTION C - MEDICAL INFORMATION\nStrength:\n9,000 Grams\nMedication:\nOxycodone XR\nDirections for use:\nQ6H for Severe Pain\nICD-9 CODE:\nDiagnosis (Please be specific & provide as much information as possible):\nCellulitis RLE\nfoot pain\n12 Check here if member has diagnosis of HIV/AIDS\nIs this member pregnant? [] Yes E No If yes, what is this member's due date?\nExplanation of why the preferred medication(s) would not meet your patient's needs (Additional documentation may be faxed with this form to assist with the determination of medical necessity): 1\nAcetaminophen is not strong enough consitering this patient's Pain co registering\n1 Other Medications Tried |  |  |  |  | \nMedications | Strength | Directions | Dates of Therapy | Reason for failure /\ndiscontinuation | \nAcetaminophen | 1500 mg | 1 tab Qui for | 7/7/1999-11/15/2021 | Needs\nStranger,. | \nNaproxen | 200 mg | tab QYH Br | 11/15/2021-12/18/2021, | Stomach uberet. modulation | \n |  |  |  | & GI bleed | \nSa | D |  |  |  |  a 5 out of 10 and stating \"Ouche, I can't sleep \"\n1 Other Medications Tried\nReason for failure /\nDates of Therapy\nMedications\nStrength\nDirections\ndiscontinuation\nNeeds\nAcetaminophen\n1500 mg\n1 tab Qui for\n7/7/1999-11/15/2021\nStranger,.\nNaproxen\n200 mg\ntab QYH Br 11/15/2021-12/18/2021, Stomach uberet. modulation\n& GI bleed\nD\nDate:\n12/18/21\nPhysician Signature:\nSa Che\nConfidentiality Notice: This transmission contains confidential information belonging to the sender and UnitedHealthcare. This information is intended only for the use of UnitedHealthcare. If you are not the intended recipient, you are hereby notied that any dledosure, copying, distribution or action involving the contents of this document is prohibited. If you have received this telecopy in error, please notify the sender immediately.\nWebsite: www.uhccommunityplan.com\nRev 7.28.14 SMB\nMade fillable by eForme\nFax: 868-940-7328\nPhone: 800-310-6826 :selected: :unselected: :unselected: :selected: :selected: :unselected: :selected:\n\n###QUESTION\n\nWhat kind of document is this?"
+				},
+			]
+		}
+	],
+	"max_tokens": 4096,
+	"temperature": 0
+}
