@@ -374,20 +374,13 @@ class HpuModelAdapter(torch.nn.Module):
             print('do nothing')
             return kwargs
 
-        # todo may or may not be needed for gemma3, check
-        compile_only_mode_context_false = functools.partial(
-            bc.env_setting, "PT_COMPILE_ONLY_MODE", False)
-
         input_ids = kwargs['input_ids']
-        #
-        #with compile_only_mode_context_false():
+
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
 
         if vision_embeddings is not None:
-            print('vision_embeddings is not None')
-            #breakpoint()
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
             kwargs = self.model.prepare_attn_masks(
@@ -396,10 +389,8 @@ class HpuModelAdapter(torch.nn.Module):
             )
             kwargs['input_ids'] = input_ids
             kwargs['positions'] = positions
-            #input_ids = None
 
         kwargs.update({'inputs_embeds': inputs_embeds})
-        # done compute the visual tokens
         kwargs.pop('pixel_values', None)
         return kwargs
 
@@ -466,8 +457,12 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
                            is_window_block):
 
-        block_usage = metadata.block_usage if not is_window_block else metadata.window_block_usage
-        block_groups = metadata.block_groups if not is_window_block else metadata.window_block_groups
+        if not is_window_block:
+            block_usage = metadata.block_usage
+            block_groups = metadata.block_groups
+        else:
+            block_usage = metadata.window_block_usage
+            block_groups = metadata.window_block_groups
 
         mask = torch.arange(0,
                             self.block_size,
@@ -1815,7 +1810,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(3):
                         input_mrope_positions[idx].extend(pos_for_mrope[idx])
 
-                #logger.info(f"Decode: seq_len:{seq_len}, sliding_window{self.sliding_window}")
                 seq_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
                 seq_lens.append(seq_len)
