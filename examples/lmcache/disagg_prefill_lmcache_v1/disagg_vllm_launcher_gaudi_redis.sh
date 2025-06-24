@@ -18,7 +18,7 @@ fi
 
 if [[ $1 == "prefiller" ]]; then
     # Prefiller listens on port 8100
-    prefill_config_file=$SCRIPT_DIR/configs/lmcache-config-lm.yaml
+    prefill_config_file=$SCRIPT_DIR/configs/lmcache-config-redis.yaml
 
     #UCX_TLS=tcp \
     LMCACHE_CONFIG_FILE=$prefill_config_file \

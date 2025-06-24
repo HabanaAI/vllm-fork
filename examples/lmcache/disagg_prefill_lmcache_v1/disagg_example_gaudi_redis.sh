@@ -92,7 +92,8 @@ main() {
 
     echo "Launching prefiller, decoder and proxy..."
     echo "Please check prefiller.log, decoder.log and proxy.log for logs."
-
+    echo "starting redis-server"
+    redis-server &
     echo "starting lmcache "
     python -m lmcache.v1.server localhost 8100 2>&1 &
     echo "start prefiller "
@@ -130,7 +131,14 @@ main() {
         --dataset-name random --random-input-len 8000 --random-output-len 200 \
         --num-prompts 100 --burstiness 100 --request-rate 3.6 | tee benchmark.log
 
-    echo "Benchmarking done. Cleaning up..."
+    #echo "Benchmarking done. Cleaning up..."
+    #curl http://localhost:1000/v1/completions \
+    #-H "Content-Type: application/json" \
+    #-d '{
+    #    "model": "/root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/",
+    #    "prompt": "San Francisco is a",
+    #    "max_tokens": 100,
+    #    "temperature": 0}'
 
     cleanup
 
