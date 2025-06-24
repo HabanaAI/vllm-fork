@@ -515,8 +515,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             value_cache = self.v_cache(value, value_cache, slot_mapping)
 
         if attn_metadata.is_prompt:
-            #if seq_len == 384:
-            #    import pdb;pdb.set_trace()
             # Prompt run.
             query_shape = (batch_size, seq_len, self.num_heads, self.head_size)
             kv_shape = (batch_size, seq_len_kv, self.num_kv_heads,
@@ -553,10 +551,10 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             common_args = self.common_attention_args(block_list, key_cache,
                                              value_cache, attn_metadata.block_size)
-
+            '''
             #TODO: Ideally we want to create this sliding_window_bias mask only
             #once in the model_runner or gemma model file then only retrieve here.
-            '''
+
             if self.sliding_window:
                 attn_bias = _make_sliding_window_bias(batch_size, seq_len,
                        attn_metadata.seq_lens_tensor,

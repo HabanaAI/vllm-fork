@@ -573,14 +573,14 @@ class HpuModelAdapter(torch.nn.Module):
 
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
-            if self.model_is_mropt:
+            if self.model_is_mrope:
                 image_input = self.model._parse_and_validate_image_input(**kwargs)
                 video_input = self.model._parse_and_validate_video_input(**kwargs)
                 inputs_embeds = self.model.get_input_embeddings_v0(
                     input_ids, image_input=image_input, video_input=video_input)
                 input_ids = None
             else:
-                return compute_input_embeddings_for_mm_optimized(**kwargs)
+                return self.compute_input_embeddings_for_mm_optimized(**kwargs)
         return inputs_embeds
 
     def forward(self, *args, **kwargs):
@@ -3576,7 +3576,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if self.model_is_mrope:
                     # run multimodal encoder for mrope before forward
                     inputs_embeds = \
-                        self.model.compute_input_embeddings_for_mrope(
+                        self.model.compute_input_embeddings_for_mrope_mm_optimized(
                             **execute_model_kwargs
                         )
                     execute_model_kwargs.update({
@@ -3598,7 +3598,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 list(self.graphed_multimodal_buckets) # set is unhasable and causes friction with hpu graphs, hence turning it to a list
 
                         execute_model_kwargs = \
-                            self.model.compute_input_embeddings_for_mm_optimized(
+                            self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs
                             )
                     with self.profiler.record_event('internal',
