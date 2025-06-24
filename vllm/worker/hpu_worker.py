@@ -585,7 +585,7 @@ def init_worker_distributed_environment(
     # A small all_reduce for warmup & checking conformance.
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
-    if not envs.VLLM_PP_USE_CPU_COMS:
+    if not envs.VLLM_PP_USE_CPU_COMS and not envs.VLLM_TP_USE_CPU_COMS:
         torch.distributed.all_reduce(dummy_tensor_hpu)
         assert dummy_tensor_hpu.item(
         ) == parallel_config.world_size * parallel_config.data_parallel_size

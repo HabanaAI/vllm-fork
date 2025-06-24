@@ -612,6 +612,9 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # VLLM_PP_USE_CPU_COMS can be used to force PP communications through GLOO on the CPU.
     "VLLM_PP_USE_CPU_COMS":
     lambda: bool(int(os.getenv("VLLM_PP_USE_CPU_COMS", "0"))),
+
+    "VLLM_TP_USE_CPU_COMS":
+    lambda: bool(int(os.getenv("VLLM_TP_USE_CPU_COMS", "0"))),
 }
 
 # end-env-vars-definition

@@ -82,6 +82,14 @@ class HpuPlatform(Platform):
                     "VLLM_WORKER_MULTIPROC_METHOD=fork explicitly.")
                 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
+        is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
+        if (parallel_config.tensor_parallel_size > 1
+                and envs.VLLM_TP_USE_CPU_COMS and is_lazy):
+            logger.info(
+                "Tensor Parallel CPU COMS: Forcing enforce eager to be True since CPU COMS is "
+                "currently not supported with HPU Graphs.")
+            vllm_config.model_config.enforce_eager = True
+
     @classmethod
     def is_pin_memory_available(cls):
         logger.warning("Pin memory is not supported on HPU.")
