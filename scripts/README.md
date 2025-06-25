@@ -131,11 +131,9 @@ bash benchmark_serving_sharegpt.sh # to benchmark with ShareGPT dataset
 > The input/output ranges passed to `start_gaudi_vllm_server.sh` should cover the following benchmark ranges to get expected performance.
 
 > The parameters in the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` must be modified to match the ones passed to `start_gaudi_vllm_server.sh`.
-### 4. Run vLLM with FP8 precision
-Running vLLM with FP8 precision can be achieved using [Intel(R) Neural Compressor (INC)](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#inference-using-fp8).
 
-- #### Run vLLM with FP8 using INC
-To run vLLM with FP8 precision using INC, pass `-d fp8` and specify the path to your bfloat16 or float16 model with `-w <model_path>`. The model will be quantized to FP8 using calibration data obtained from the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.21.0/calibration/README.md).
+### 4. Run vLLM with FP8 using INC
+Running vLLM with FP8 precision can be achieved using [Intel(R) Neural Compressor (INC)](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#inference-using-fp8). To run vLLM with FP8 precision using INC, pass `-d fp8` and specify the path to your bfloat16 or float16 model with `-w <model_path>`. The model will be quantized to FP8 using calibration data obtained from the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.21.0/calibration/README.md).
 > For the Qwen3 MoE models, a custom INC should be installed:
 ``` bash
 pip install git+https://github.com/intel/neural-compressor.git@qwen-fp8
@@ -190,35 +188,6 @@ bash start_gaudi_vllm_server.sh \
     -p 30001 \
     -c /vllm_cache/Qwen2.5-32B-Instruct/
 ```
-
-- #### Loading fp8 models directly
-Gaudi2 uses `fp8_e4m3fnuz` instead of `fp8_e4m3fn`, so the fp8 weights and the corresponding scales have to be converted by [convert_fp8_weights_for_gaudi2.py](quantization/convert_fp8_weights_for_gaudi2.py) first. vLLM on Gaudi supports dynamic and static activation quantization with extra `input_scales` provided, for example:
-``` bash
-# convert Qwen3-32B-FP8 with dynamic activation quantization
-python3 convert_fp8_weights_for_gaudi2.py \
-    -i /models/Qwen3-32B-FP8 \
-    -o /models/Qwen3-32B-FP8-G2-dynamic
-
-# convert Qwen3-32B-FP8 with static activation quantization
-python3 convert_fp8_weights_for_gaudi2.py \
-    -i /models/Qwen3-32B-FP8 \
-    -o /models/Qwen3-32B-FP8-G2-static \
-    -s quantization/Qwen3-32B-w8afp8_input_scales.pickle
-```
-Then the converted models could be used as normal bfloat16/float16 ones as in the following example:
-``` bash
-bash start_gaudi_vllm_server.sh \
-    -w "/models/Qwen3-32B-FP8-G2-static" \
-    -n 2 \
-    -m 0,1 \ 
-    -b 128 \
-    -i 800,1024 \
-    -o 400,512 \
-    -l 4096 \
-    -t 8192
-```
-
-> Note that loading fp8 models directly is experimental and currently tested on Qwen3 models only.
 
 
 ## Steps to run offline benchmark
