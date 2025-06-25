@@ -54,9 +54,9 @@ python3 -m vllm.entrypoints.openai.api_server --port $PORT \
 --kv-cache-dtype fp8_inc \
 --tensor-parallel-size 8 \
 --trust-remote-code  \
---max-model-len $max_model_len \
---max-num-seqs $max_num_seqs \
---max-num-batched-tokens $max_num_batched_tokens  \
+--max-model-len 32768 \
+--max-num-seqs 32 \
+--max-num-batched-tokens 32768  \
 --use-padding-aware-scheduling \
 --use-v2-block-manager \
 --distributed_executor_backend ray \
