@@ -47,7 +47,7 @@ if [ $use_inc -eq 1 ]; then
     export QUANT_CONFIG=inc_dynamic_quant_config.json
     export VLLM_HPU_FORCE_CHANNEL_FP8=0
     export CALC_SCALE_WITH_CGUID=1
-    export PT_HPU_RECIPE_CACHE_CONFIG=/mnt/disk3/yiliu4/gc_recipes/inc_dynamic,false,16384
+    export PT_HPU_RECIPE_CACHE_CONFIG=~/gc_recipes/inc_dynamic,false,16384
     export VLLM_DISABLE_MARK_SCALES_AS_CONST=1
 else
     echo "Using original vLLM"
@@ -234,6 +234,5 @@ for req_in_out in "${req_in_out_list[@]}"; do
     kill ${pid}
     echo "Script execution completed"
     sleep 10
-done
 
 
