@@ -1055,6 +1055,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
+                logger.info("INC MODEL : %s", self.model)
             elif not is_fake_hpu():
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
@@ -1131,6 +1132,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return seq_group_metadata_list, real_batch_size, batch_size_padded
 
     def _maybe_wrap_in_hpu_graph(self, *args, **kwargs):
+        logger.info(f"Wrapping model in HPU Graph")
         if htorch.utils.internal.is_lazy():
             return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
                 *args, **kwargs),
@@ -2450,6 +2452,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
+        logger.info(f"Start build kv_caches for {num_layers} layers")
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
             [kv_caches] * self.parallel_config.pipeline_parallel_size)
@@ -2458,6 +2461,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              self.max_num_batched_tokens // max_seq_len)
         # Using batch_size 1 is profile multimodal models
         max_batch_size = max_batch_size if not self.model_is_mrope else 1
+        logger.info(
+            "Start profiler run with batch_size %d and seq_len %d",
+            max_batch_size,
+            max_seq_len,
+        )
         self.warmup_scenario(
             batch_size=max_batch_size,
             seq_len=max_seq_len,

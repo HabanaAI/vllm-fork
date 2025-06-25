@@ -1,0 +1,2 @@
+bash bench_dynamic_quant.sh --model_path /mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/  --tp_size 8 --use_inc 1
+bash bench_dynamic_quant.sh --model_path /mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/  --tp_size 8
