@@ -1077,7 +1077,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ctx = seq_group_metadata_list[0].computed_block_nums
         ctx = 0 if ctx == None else sum(ctx)
         if is_prompt:
-            seq_len = len(seq_group_metadata_list[0].seq_data[0].prompt_token_ids)
+            first_key = next(iter(seq_group_metadata_list[0].seq_data))
+            seq_len = len(seq_group_metadata_list[0].seq_data[first_key].prompt_token_ids)
             query_len = seq_len - ctx * self.block_size
         else:
             query_len = 1
