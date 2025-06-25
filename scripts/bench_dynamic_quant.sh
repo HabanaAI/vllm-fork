@@ -23,6 +23,7 @@
 # model_path="/mnt/weka/data/pytorch/Qwen/Qwen3-30B-A3B"
 # model_path="/mnt/weka/data/pytorch/DeepSeek-R1/"
 
+export no_proxy=localhost,127.0.0.1
 if [ $# -gt 0 ] && [ "$1" == "--model_path" ]; then
     model=$2
 else

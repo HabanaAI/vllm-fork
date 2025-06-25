@@ -1,3 +1,4 @@
+export no_proxy=localhost,127.0.0.1
 model_path="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/"
 
 # check existence of model path
