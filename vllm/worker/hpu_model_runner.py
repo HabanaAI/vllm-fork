@@ -348,8 +348,9 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
         self.model_is_mrope = uses_mrope(model_config)
 
+        text_config = model_config.get_text_config()
         self.interleaved_sliding_window = getattr(
-            model_config.get_text_config(), "interleaved_sliding_window", None)
+            text_config, "interleaved_sliding_window", None)
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -560,16 +561,25 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
-    def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
-                         dtype):
+    def _update_metadata(self,
+                         attn_metadata,
+                         batch_size,
+                         seq_len,
+                         device,
+                         dtype,
+                         interleaved_sliding_window=None):
 
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
-            if self.interleaved_sliding_window:
-                attn_metadata = self._set_attn_bias_for_sliding_window(
-                    attn_metadata, batch_size, seq_len,
-                    self.interleaved_sliding_window, device, dtype)
+            if interleaved_sliding_window:
+                with HabanaMemoryProfiler() as m_wrap:
+                    attn_metadata = self._set_attn_bias_for_sliding_window(
+                        attn_metadata, batch_size, seq_len,
+                        interleaved_sliding_window, device, dtype)
+                msg = (f"Create attn_mask for SLIDING_WINDOW {seq_len}"
+                       f" took {m_wrap.get_summary_string()}")
+                logger.info(msg)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
@@ -647,9 +657,17 @@ class HpuModelAdapter(torch.nn.Module):
             virtual_engine = kwargs.pop('virtual_engine')
 
         input_ids = kwargs['input_ids']
+
+        #TODO:For gemma3, the attn_mask is overridden when there is image input,
+        #we don't calculate the mask in this case to reduce memory usage.
+        if kwargs.get("has_images", False) and is_gemma3(self.model):
+            interleaved_sliding_window = None
+        else:
+            interleaved_sliding_window = self.interleaved_sliding_window
+
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
+            input_ids.device, self.dtype, interleaved_sliding_window)
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None and not self.model_is_mrope:
