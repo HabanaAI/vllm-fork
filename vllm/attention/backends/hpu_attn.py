@@ -508,6 +508,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             # not cached. This happens during the initial memory profiling run.
             key_cache = self.k_cache(key, key_cache, slot_mapping)
             value_cache = self.v_cache(value, value_cache, slot_mapping)
+            if attn_metadata.fwd_key_cache:
+                attn_metadata.fwd_key_cache.update(key, key_cache,
+                                                   slot_mapping)
+            if attn_metadata.fwd_value_cache:
+                attn_metadata.fwd_value_cache.update(value, value_cache,
+                                                     slot_mapping)
 
         if attn_metadata.is_prompt:
             # Prompt run.

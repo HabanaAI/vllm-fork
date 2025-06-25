@@ -409,9 +409,9 @@ class HpuModelAdapter(torch.nn.Module):
             return metadata
         key_caches, value_caches = zip(*kv_caches)
         fwd_key_cache.initialize(self.block_size, metadata.block_list,
-                                 list(key_caches))
+                                 metadata.slot_mapping, list(key_caches))
         fwd_value_cache.initialize(self.block_size, metadata.block_list,
-                                   list(value_caches))
+                                   metadata.slot_mapping, list(value_caches))
         metadata = custom_tuple_replace(metadata,
                                         "TrimmedAttentionMetadata",
                                         fwd_key_cache=fwd_key_cache,
