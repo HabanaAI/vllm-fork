@@ -234,5 +234,4 @@ for req_in_out in "${req_in_out_list[@]}"; do
     kill ${pid}
     echo "Script execution completed"
     sleep 10
-
-
+done
