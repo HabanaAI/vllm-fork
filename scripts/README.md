@@ -132,7 +132,7 @@ bash benchmark_serving_sharegpt.sh # to benchmark with ShareGPT dataset
 
 > The parameters in the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` must be modified to match the ones passed to `start_gaudi_vllm_server.sh`.
 ### 4. Run vLLM with FP8 precision
-Running vLLM with FP8 precision can be achieved using [Intel(R) Neural Compressor (INC)](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#inference-using-fp8) and by loading FP8 models directly (experimental).
+Running vLLM with FP8 precision can be achieved using [Intel(R) Neural Compressor (INC)](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#inference-using-fp8).
 
 - #### Run vLLM with FP8 using INC
 To run vLLM with FP8 precision using INC, pass `-d fp8` and specify the path to your bfloat16 or float16 model with `-w <model_path>`. The model will be quantized to FP8 using calibration data obtained from the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.21.0/calibration/README.md).
