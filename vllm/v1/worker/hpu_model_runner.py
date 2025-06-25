@@ -17,6 +17,7 @@ import torch.distributed
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 from vllm_hpu_extension.runtime import get_config
+from vllm_hpu_extension.utils import fwd_key_cache, fwd_value_cache
 
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
@@ -51,6 +52,9 @@ from vllm_hpu_extension.bucketing.common import get_bucketing_context
 logger = init_logger(__name__)
 
 _TYPE_CACHE: dict[str, dict[str, Any]] = {}
+
+VLLM_PREFETCH_CACHE = os.environ.get('VLLM_PREFETCH_CACHE',
+                                     'f').lower()[0] in ['t', '1']
 
 
 def setup_profiler(warmup, active):
@@ -227,6 +231,30 @@ def get_target_layer_suffix_list(model_type) -> list[str]:
     ]
 
 
+def find_modules(module, suffix_list) -> list[torch.nn.Module]:
+    matching = []
+    name = module.__class__.__name__
+    if any(name.endswith(suffix) for suffix in suffix_list):
+        matching.append(module)
+    for _, child_module in module.named_children():
+        matching.extend(find_modules(child_module, suffix_list))
+    return matching
+
+
+def add_forward_cache(module):
+    if not VLLM_PREFETCH_CACHE:
+        return
+
+    def trigger_fwd_cache(_module, _args):
+        htorch.core.mark_step()
+        fwd_key_cache.prepare()
+        fwd_value_cache.prepare()
+
+    modules = find_modules(module, ['MLP'])
+    for m in modules:
+        m.register_forward_pre_hook(trigger_fwd_cache)
+
+
 def modify_model_layers(module: torch.nn.Module,
                         suffix_list: list[str],
                         n=1,
@@ -376,14 +404,29 @@ class HpuModelAdapter(torch.nn.Module):
                                         attn_bias=attn_bias)
         return metadata
 
+    def _init_fwd_caches(self, metadata, kv_caches):
+        if not VLLM_PREFETCH_CACHE:
+            return metadata
+        key_caches, value_caches = zip(*kv_caches)
+        fwd_key_cache.initialize(self.block_size, metadata.block_list,
+                                 list(key_caches))
+        fwd_value_cache.initialize(self.block_size, metadata.block_list,
+                                   list(value_caches))
+        metadata = custom_tuple_replace(metadata,
+                                        "TrimmedAttentionMetadata",
+                                        fwd_key_cache=fwd_key_cache,
+                                        fwd_value_cache=fwd_value_cache)
+        return metadata
+
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
-                         dtype):
+                         dtype, kv_caches):
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
+            attn_metadata = self._init_fwd_caches(attn_metadata, kv_caches)
         return attn_metadata
 
     def _prepare_cos_sin(self, positions):
@@ -422,9 +465,10 @@ class HpuModelAdapter(torch.nn.Module):
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
         input_ids = kwargs['input_ids']
+        kv_caches = kwargs['kv_caches']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
+            input_ids.device, self.dtype, kv_caches)
         if self.layer_names is not None:
             self._prepare_cos_sin(kwargs['positions'])
         attn_meta = kwargs.pop('attn_metadata')
@@ -516,7 +560,7 @@ def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
     attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
         'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
         'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt',
-        'block_size', 'block_groups'
+        'block_size', 'block_groups', 'fwd_key_cache', 'fwd_value_cache'
     ])
     return attention_metadata
 
@@ -1707,6 +1751,7 @@ class HPUModelRunner:
             get_target_layer_suffix_list(
                 model_config.model_type if model_config is not None else None),
             hidden_layer_markstep_interval)
+        add_forward_cache(self.model)
         path_to_rope = get_path_to_rope(self.model)
         torch.hpu.synchronize()
 

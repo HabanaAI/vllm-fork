@@ -135,6 +135,8 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     cross_block_groups: Optional[torch.Tensor] = None
     cross_block_usage: Optional[torch.Tensor] = None
     cross_attn_bias: Optional[torch.Tensor] = None
+    fwd_key_cache = None
+    fwd_value_cache = None
 
 
 @dataclass
@@ -578,7 +580,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 position_bias=self.position_bias,
                 **self.common_attention_args(attn_metadata.block_list,
                                              key_cache, value_cache,
-                                             attn_metadata.block_size))
+                                             attn_metadata.block_size,
+                                             attn_metadata.fwd_key_cache,
+                                             attn_metadata.fwd_value_cache))
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
@@ -586,7 +590,13 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                               block_list=None,
                               key_cache=None,
                               value_cache=None,
-                              block_size=None):
+                              block_size=None,
+                              fwd_key_cache=None,
+                              fwd_value_cache=None):
+        keys_fetch_fn = self.k_cache.fetch_from_cache\
+            if fwd_key_cache is None else fwd_key_cache.fetch_from_cache
+        values_fetch_fn = self.k_cache.fetch_from_cache\
+            if fwd_value_cache is None else fwd_value_cache.fetch_from_cache
         return {
             'scale': self.scale,
             'matmul_qk_op': self.matmul_qk,
@@ -594,8 +604,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             'batch2block_matmul_op': self.batch2block_matmul,
             'block2batch_matmul_op': self.block2batch_matmul,
             'fsdpa_op': self.fused_scaled_dot_product_attention,
-            'keys_fetch_func': self.k_cache.fetch_from_cache,
-            'values_fetch_func': self.v_cache.fetch_from_cache,
+            'keys_fetch_func': keys_fetch_fn,
+            'values_fetch_func': values_fetch_fn,
             'softmax_op': self.softmax,
             'block_list': block_list,
             'key_cache': key_cache,
