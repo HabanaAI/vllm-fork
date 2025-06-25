@@ -348,9 +348,10 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
         self.model_is_mrope = uses_mrope(model_config)
 
-        text_config = model_config.get_text_config()
+        text_config = vllm_config.model_config.hf_config.get_text_config()
         self.interleaved_sliding_window = getattr(
-            text_config, "interleaved_sliding_window", None)
+            text_config, "interleaved_sliding_window",
+            None) if text_config else None
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
