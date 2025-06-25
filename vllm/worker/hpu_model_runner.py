@@ -345,7 +345,8 @@ class HpuModelAdapter(torch.nn.Module):
         return None
 
     def _get_prepare_cos_sin(self):
-        if self._rotary_embed_module is not None:
+        if self._rotary_embed_module is not None and hasattr(
+                self._rotary_embed_module, 'prepare_cos_sin'):
             return self._rotary_embed_module.prepare_cos_sin
         return None
 
