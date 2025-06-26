@@ -1,0 +1,30 @@
+{
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "ACT_MAXABS_PCS_POW2_WEIGHT_MAXABS_PTS_POW2_HW",
+    "dynamic_quantization": "True",
+    "scale_format": "CONST",
+    "allowlist": {
+        "types": [],
+        "names": [
+            "q_a_proj",
+            "q_b_proj",
+            "kv_a_proj_with_mqa",
+            "kv_b_proj",
+            "o_proj",
+            "gate_up_proj",
+            "down_proj",
+            "gate",
+            "shared_experts"
+        ]
+    },
+    "blocklist": {
+        "types": [
+        ],
+        "names": [
+            "lm_head",
+            ".experts"
+        ]
+    },
+    "dump_stats_path": "./inc_output_dynamic_quant"
+}
