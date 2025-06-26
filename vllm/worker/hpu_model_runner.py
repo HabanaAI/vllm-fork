@@ -353,9 +353,7 @@ class HpuModelAdapter(torch.nn.Module):
                 if hasattr(self.model, 'multi_modal_projector'):
                     self.model.multi_modal_projector = htorch.hpu.wrap_in_hpu_graph(
                         self.model.multi_modal_projector, disable_tensor_cache=True)
-                 
-        
-            
+
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -538,6 +536,7 @@ class HpuModelAdapter(torch.nn.Module):
         if vision_embeddings is not None:
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
+
             kwargs = self.model.prepare_attn_masks(
                 mask_dtype=self.dtype,
                 **kwargs,
@@ -557,7 +556,7 @@ class HpuModelAdapter(torch.nn.Module):
             return kwargs
         if not self.model_is_mrope and not self.is_mm_optimized:
             return None
-
+        
         # For Qwen2.5-VL/Gemma3 VL multimodal embedding,
         # this embedding part should be executed
         # with PT_COMPILE_ONLY_MODE off at all times
@@ -579,9 +578,16 @@ class HpuModelAdapter(torch.nn.Module):
                 inputs_embeds = self.model.get_input_embeddings_v0(
                     input_ids, image_input=image_input, video_input=video_input)
                 input_ids = None
+                kwargs.update({
+                    'inputs_embeds': inputs_embeds,
+                })
+                # done compute the visual tokens
+                kwargs.pop('pixel_values', None)
+                kwargs.pop('image_grid_thw', None)
+                return kwargs
             else:
                 return self.compute_input_embeddings_for_mm_optimized(**kwargs)
-        return inputs_embeds
+
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -3572,31 +3578,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         attn_metadata,
                         kv_caches=kv_caches
                     )
-
-                if self.model_is_mrope:
-                    # run multimodal encoder for mrope before forward
-                    inputs_embeds = \
-                        self.model.compute_input_embeddings_for_mrope_mm_optimized(
-                            **execute_model_kwargs
-                        )
-                    execute_model_kwargs.update({
-                        'inputs_embeds': inputs_embeds,
-                    })
-                    # done compute the visual tokens
-                    execute_model_kwargs.pop('pixel_values', None)
-                    execute_model_kwargs.pop('image_grid_thw', None)
-
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
-                    'real_batch_size': real_batch_size
+                    'real_b,    .   atch_size': real_batch_size
                 }
-
                 if not bypass_model_exec:
-                    if self.is_mm_optimized:
-                        if 'pixel_values' in execute_model_kwargs:
+                    if self.model_is_mrope or self.is_mm_optimized:
+                        if 'pixel_values' in execute_model_kwargs and self.is_mm_optimized:
                             execute_model_kwargs['graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets) # set is unhasable and causes friction with hpu graphs, hence turning it to a list
-
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs
@@ -3608,6 +3598,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
                             selected_token_indices)
+                        htorch.core.mark_step()
                         if warmup_mode:
                             torch.hpu.synchronize()
                             import torch.distributed as dist

@@ -16,6 +16,4 @@ export PT_HPU_LAZY_MODE=1
 #export VLLM_FP32_SOFTMAX=1
 #export VLLM_PROMPT_USE_FUSEDSDPA=False
 
-#python gemma3_offline.py --model google/gemma-3-4b-it --tensor-parallel-size 1 --num-images 12 --batch-size 1
 python gemma3_offline.py --model /root/software/data/pytorch/huggingface/hub/models--google--gemma-3-4b-it/snapshots/093f9f388b31de276ce2de164bdc2081324b9767/ --tensor-parallel-size 1 --num-images 2 --batch-size 1
-#python gemma3_offline.py --model /root/litang/gemma-3-4b-it/ --tensor-parallel-size 1 --num-images 2 --batch-size 1
