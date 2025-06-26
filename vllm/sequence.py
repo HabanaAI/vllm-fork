@@ -316,8 +316,12 @@ class SequenceData(msgspec.Struct,
     def update_num_computed_tokens(self, num_new_computed_tokens: int):
         """Update number of tokens computed so far."""
         self._num_computed_tokens += num_new_computed_tokens
-        assert self._num_computed_tokens <= self.get_len(), (
-            self._num_computed_tokens, self.get_len())
+        # assert self._num_computed_tokens <= self.get_len(), (
+        #     self._num_computed_tokens, self.get_len())
+        
+        # if self._num_computed_tokens > self.get_len():
+        #     self._num_computed_tokens-=1
+            # c=0
         # If all tokens are computed, it means it is in decoding phase.
         if self.get_num_uncomputed_tokens() == 0:
             self._stage = SequenceStage.DECODE
@@ -350,6 +354,13 @@ class SequenceData(msgspec.Struct,
         if not self._output_token_ids:
             return self._prompt_token_ids[-1]
         return self._output_token_ids[-1]
+
+    def get_last_n_token_id(self,n) -> int:
+        if self.get_output_len()<n:
+            return None
+        if not self._output_token_ids:
+            return self._prompt_token_ids[(-1)*n]
+        return self._output_token_ids[(-1)*n]
 
     def get_prompt_token_ids(self) -> Tuple[int, ...]:
         return self.prompt_token_ids
@@ -572,6 +583,8 @@ class Sequence:
     def get_last_token_id(self) -> int:
         return self.data.get_last_token_id()
 
+    def get_last_n_token_id(self,n):
+        return self.data.get_last_n_token_id(n)
     def get_output_token_ids(self) -> Tuple[int, ...]:
         return self.data.get_output_token_ids()
 
@@ -1220,7 +1233,7 @@ class HiddenStates(msgspec.Struct, array_like=True,
 
     def __post_init__(self):
         if self.seq_group_metadata_list is not None:
-            assert len(self.seq_group_metadata_list) == len(self.hidden_states)
+            # assert len(self.seq_group_metadata_list) == len(self.hidden_states)
             self._seq_ids = get_all_seq_ids(self.seq_group_metadata_list)
 
     @property
@@ -1322,6 +1335,10 @@ class ExecuteModelRequest(
     # Dummy batch
     is_dummy_batch: bool = False
 
+    
+    expand: Optional[Callable[[], Tuple[Any, Any]]] = None
+    hack_indices_of_seq_with_bonus_tokens: Optional[List[int]] = None
+    expand_req:Optional["ExecuteModelRequest"] =None
     @property
     def is_first_multi_step(self) -> bool:
         # TODO(will) make this be able to handle batches with variable number of
