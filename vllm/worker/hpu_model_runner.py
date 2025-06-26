@@ -2569,7 +2569,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     temperature=temperature,
                     ctx=ctx) for i, b in enumerate(blocks)
             ]
-        torch.hpu.synchronize()
         profiler = None
         if is_pt_profiler_run and self.is_driver_worker:
             profiler = setup_profiler()
