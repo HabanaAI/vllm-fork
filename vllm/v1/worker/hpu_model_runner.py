@@ -641,7 +641,6 @@ class HPUModelRunner:
                 self.max_num_batched_tokens, self.use_merged_prefill,
                 self.use_prefix_caching, self.max_model_len)
             self.bucketing_manager.generate_prompt_buckets()
-            self.bucketing_manager.hello()
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
