@@ -2134,6 +2134,26 @@ class HPUModelRunner:
                 decode_cfg = (bs, seq_or_blocks)
         return prompt_cfg, decode_cfg
 
+    def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
+        num_candidates = len(buckets)
+        phase = 'Prompt' if is_prompt else 'Decode'
+        graphed = buckets
+        if num_candidates == 0:
+            num_candidates = 1
+        msg = (f'{phase} captured:{len(graphed)} '
+               f'({100 * len(graphed) / num_candidates:.1f}%) '
+               f'used_mem:{format_bytes(total_mem)} '
+               f'buckets:{sorted(list(graphed))}')
+        logger.info(msg)
+        if "Prompt" in phase and len(self.multimodal_buckets) > 0:
+            phase = "Graph/Multimodal"
+            num_candidates = len(self.multimodal_buckets)
+            mm_graphed = self.graphed_multimodal_buckets
+            msg = (f'{phase} captured:{len(mm_graphed)} '
+                   f'({100 * len(mm_graphed) / num_candidates:.1f}%) '
+                   f'buckets:{sorted(list(mm_graphed))}')
+            logger.info(msg)
+
     @torch.inference_mode()
     def warmup_model(self) -> None:
         if not self.enable_bucketing:
@@ -2215,6 +2235,11 @@ class HPUModelRunner:
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
+
+        self.log_graph_warmup_summary(
+                self.bucketing_manager.prompt_buckets, True, mem_post_prompt)
+        self.log_graph_warmup_summary(
+                self.bucketing_manager.decode_buckets, False, mem_post_decode)
 
     def shutdown_inc(self):
         can_finalize_inc = self._is_quant_with_inc() and \
