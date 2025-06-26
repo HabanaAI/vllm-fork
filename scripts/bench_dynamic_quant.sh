@@ -1,4 +1,6 @@
 #!/bin/bash
+# set -x
+
 # https://raw.githubusercontent.com/HabanaAI/vllm-fork/refs/heads/dev/qwen3/scripts/01-benchmark-online-235B-tp8.sh
 #########################################################
 # vLLM Benchmark Script for Qwen3
@@ -12,6 +14,7 @@
 #===========================================================
 
 # bash bench_dynamic_quant.sh --model_path /mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/  --tp_size 8 --use_inc 1
+# bash bench_dynamic_quant.sh --model_path /mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/  --tp_size 8 --use_inc 1 --quant_config 
 # bash bench_dynamic_quant.sh --model_path /mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/  --tp_size 8
 
 
@@ -24,28 +27,50 @@
 # model_path="/mnt/weka/data/pytorch/DeepSeek-R1/"
 
 export no_proxy=localhost,127.0.0.1
-if [ $# -gt 0 ] && [ "$1" == "--model_path" ]; then
-    model=$2
-else
-    model="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/"
-fi
+model="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/"
+tp_size=8
+use_inc=0
+quant_config="none.json"
 
-if [ $# -eq 4 ] && [ "$3" == "--tp_size" ]; then
-    tp_size=$4
-else
-    tp_size=8
-fi
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --model_path)
+            model=$2
+            shift 2
+            ;;
+        --tp_size)
+            tp_size=$2
+            shift 2
+            ;;
+        --use_inc)
+            use_inc=$2
+            shift 2
+            ;;
+        --quant_config)
+            quant_config=$2
+            shift 2
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            exit 1
+            ;;
+    esac
+done
 
-# use inc or not
-if [ $# -eq 6 ] && [ "$5" == "--use_inc" ]; then
-    use_inc=$6
-else
-    use_inc=0
-fi
+# Extract quantization config name
+quant_config_name="${quant_config%.*}"
 
+# Debugging output
+echo "Model path: $model"
+echo "Tensor parallelism size: $tp_size"
+echo "Use INC: $use_inc"
+echo "Quantization config: $quant_config_name"
+
+#### Export env variables for INC
 if [ $use_inc -eq 1 ]; then
     echo "Using inc fork of vLLM"
-    export QUANT_CONFIG=inc_dynamic_quant_config.json
+    export QUANT_CONFIG=$quant_config
     export VLLM_HPU_FORCE_CHANNEL_FP8=0
     export CALC_SCALE_WITH_CGUID=1
     export PT_HPU_RECIPE_CACHE_CONFIG=~/gc_recipes/inc_dynamic,false,16384
@@ -54,6 +79,8 @@ else
     echo "Using original vLLM"
     export   VLLM_HPU_FORCE_CHANNEL_FP8=1
 fi
+
+
 
 model_name=$(basename ${model})
 
@@ -68,6 +95,27 @@ gpu_utils=0.65        # GPU memory utilization
 max_model_len=9216    # Max model len
 request_rate="inf"    # Request rate (inf = unlimited)
 multi_step=1          # Number of scheduler steps
+
+
+
+
+#===========================================================
+# Helper Function
+#===========================================================
+gaudi_type="unknown"
+# check platform
+if hl-smi 2>/dev/null | grep -q HL-225; then
+    echo "Gaudi2 OAM platform"
+    gaudi_type="gaudi2-oam"
+elif hl-smi 2>/dev/null | grep -q HL-288; then
+    echo "Gaudi2 PCIe platform"
+    gaudi_type="gaudi2-pcie"
+elif hl-smi 2>/dev/null | grep -q HL-325; then
+    echo "Gaudi3 platform"
+    gaudi_type="gaudi3-oam"
+else
+    echo "Unknown platform and exit..."
+fi
 
 
 #===========================================================
@@ -133,7 +181,7 @@ for req_in_out in "${req_in_out_list[@]}"; do
 
     # Create a descriptive log name based on parameters
     timestamp=$(date +%Y%m%d-%H%M%S)
-    log_name="${model_name}-gaudi2-tp${tp_parallel}-ep${ep_size}-moe${moe_n_slice}-ms${multi_step}_np${num_prompts}_rr${request_rate}_bs${bs}_i${in_len}_o${out_len}_len${total_len}_${timestamp}"
+    log_name="${model_name}-tp${tp_parallel}_${gaudi_type}_${quant_config_name}_${timestamp}"
 
     # Create log directory
     mkdir -p benchmark_logs
