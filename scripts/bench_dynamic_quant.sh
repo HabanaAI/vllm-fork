@@ -272,7 +272,8 @@ for req_in_out in "${req_in_out_list[@]}"; do
         --random-output-len ${out_len} \
         --max-concurrency ${max_concurrency_client} \
         --append-result \
-        --save-result 2>&1 | tee benchmark_logs/${log_name}_benchmark.log
+        --save-result \
+        --result-filename benchmark_logs/${log_name}.json 2>&1 | tee benchmark_logs/${log_name}_benchmark.log
 
 
     end_time=$(date +%s)
