@@ -137,9 +137,7 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
     def _hpu_padding_fn(self, batch_size, max_seq_len):
         from vllm_hpu_extension.bucketing.common import get_bucketing_manager
         hpu_bucketing_manager = get_bucketing_manager()
-        print(batch_size, max_seq_len, 0)
         padded_bucket = hpu_bucketing_manager.find_bucket(batch_size, max_seq_len, 0, True)
-        print("recieved: ", padded_bucket)
         padded_bs = padded_bucket[0]
         padded_seq = padded_bucket[1]
         if padded_bs is None or padded_seq is None:
