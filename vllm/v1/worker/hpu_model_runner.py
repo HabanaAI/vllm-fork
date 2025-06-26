@@ -2193,10 +2193,10 @@ class HPUModelRunner:
                     ("HabanaWorker.determine_num_available_blocks needs "
                     "to be called before warming up the model.")
                 #TODO(kzawora): align_workers
-                mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
-                    self.warmup_graphs(
-                    self.bucketing_ctx.prompt_buckets,
-                    True, kv_caches)
+                #mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
+                #    self.warmup_graphs(
+                #    self.bucketing_ctx.prompt_buckets,
+                #    True, kv_caches)
                 mem_post_prompt = 0
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
