@@ -1,0 +1,1 @@
+time curl -X POST "http://localhost:8080/v1/chat/completions"  -H "Content-Type: application/json"  --data '{ "model": "google/gemma-3-27b-it", "messages": [{"role": "user","content": [{"type": "text","text": "Describe this image in one sentence. And write a long long hero story that takes place there."}]}],"temperature":0}' | jq
