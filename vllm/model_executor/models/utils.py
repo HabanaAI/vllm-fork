@@ -394,9 +394,6 @@ def _merge_multimodal_embeddings(
     if current_platform.is_hpu():
         htcore.mark_step()
         flattened = _flatten_embeddings(multimodal_embeddings)
-        #TODO Check if it's dynamic - maybe torch.where?
-        #however multimodal_embeddings is a list of varying length
-        #torch.where might be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
         return inputs_embeds
 

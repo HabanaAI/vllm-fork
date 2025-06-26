@@ -462,6 +462,10 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
+        if seq_len <= window_size:
+            #no need to set sliding window mask, just use causal mask
+            return attn_metadata
+
         prefill_metadata = attn_metadata
         shift = 0
 
@@ -568,19 +572,27 @@ class HpuModelAdapter(torch.nn.Module):
                          seq_len,
                          device,
                          dtype,
-                         interleaved_sliding_window=None):
+                         global_attn_masks=None,
+                         local_attn_masks=None):
 
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
-            if interleaved_sliding_window:
-                with HabanaMemoryProfiler() as m_wrap:
+
+            #For Gemma3, we need to override attn_mask with these sliding_window
+            #mask which are updated during prepare_attn_mask()
+            if global_attn_masks is not None:
+                attn_metadata = attn_metadata._replace(
+                    attn_bias=global_attn_masks)
+
+            if self.interleaved_sliding_window:
+                if local_attn_masks is not None:
+                    attn_metadata = attn_metadata._replace(
+                        window_attn_bias=local_attn_masks)
+                else:
                     attn_metadata = self._set_attn_bias_for_sliding_window(
                         attn_metadata, batch_size, seq_len,
-                        interleaved_sliding_window, device, dtype)
-                msg = (f"Create attn_mask for SLIDING_WINDOW {seq_len}"
-                       f" took {m_wrap.get_summary_string()}")
-                logger.info(msg)
+                        self.interleaved_sliding_window, device, dtype)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
@@ -659,16 +671,11 @@ class HpuModelAdapter(torch.nn.Module):
 
         input_ids = kwargs['input_ids']
 
-        #TODO:For gemma3, the attn_mask is overridden when there is image input,
-        #we don't calculate the mask in this case to reduce memory usage.
-        if kwargs.get("has_images", False) and is_gemma3(self.model):
-            interleaved_sliding_window = None
-        else:
-            interleaved_sliding_window = self.interleaved_sliding_window
-
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype, interleaved_sliding_window)
+            input_ids.device, self.dtype, kwargs.get("global_attn_masks"),
+            kwargs.get("local_attn_masks"))
+
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None and not self.model_is_mrope:
