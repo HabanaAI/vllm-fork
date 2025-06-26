@@ -1204,11 +1204,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, num_patches=None):
+    def _use_graphs(self, num_patches=None, is_profile_run=False):
         if not num_patches:
             return not self.enforce_eager
         #TODO: We might need to check both language bucket and multimodal bucket
         # and return True only it's avialble, or return separately.
+        if is_profile_run:
+            return False
         return (num_patches) in self.graphed_multimodal_buckets
 
     def _is_valid_bucket(self, bucket):
@@ -2467,6 +2469,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_pt_profiler_run=False,
             num_patches=UNSET_NUM_PATCHES,
             is_lora_profile_run=True,
+            is_profile_run=True,
         )
         return
 
@@ -2506,12 +2509,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         kv_caches,
                         is_pt_profiler_run=False,
                         is_lora_profile_run=False,
+                        is_profile_run=False,
                         temperature=0,
                         num_patches=None,
                         num_iters=3,
                         align_worker=False) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = self._use_graphs(num_patches)
+        use_graphs = self._use_graphs(num_patches,
+                                      is_profile_run=is_profile_run)
         scenario_name = ("warmup_"
                          f"{phase}_"
                          f"bs{batch_size}_"
@@ -2597,6 +2602,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
+                                   profile_run_mode=is_profile_run,
                                    ctx_blocks=ctx)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
@@ -2605,6 +2611,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.execute_model(inputs,
                                    kv_caches,
                                    warmup_mode=True,
+                                   profile_run_mode=is_profile_run,
                                    num_steps=2,
                                    seqs=seqs,
                                    ctx_blocks=ctx)
@@ -2614,6 +2621,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.execute_model(inputs,
                                    kv_caches,
                                    warmup_mode=True,
+                                   profile_run_mode=is_profile_run,
                                    num_steps=2,
                                    seqs=seqs,
                                    ctx_blocks=ctx)
@@ -3226,6 +3234,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
         warmup_mode=False,
+        profile_run_mode=False,
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
         ctx_blocks: int = 1
@@ -3315,7 +3324,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     ctx_blocks = seq_len
                 seq_len = 1
             num_patches = self._get_num_patches_from_model_input(model_input)
-            use_graphs = self._use_graphs(num_patches=num_patches)
+            use_graphs = self._use_graphs(num_patches=num_patches,
+                                          is_profile_run=profile_run_mode)
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None
