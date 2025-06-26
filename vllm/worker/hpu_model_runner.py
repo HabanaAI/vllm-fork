@@ -1104,15 +1104,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                        align_worker=False):
         real_batch_size = len(seq_group_metadata_list)
         ctx = seq_group_metadata_list[0].computed_block_nums
-        ctx = 0 if ctx == None else sum(ctx)
+        ctx = 0 if ctx is None else sum(ctx)
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
-            seq_len = len(seq_group_metadata_list[0].seq_data[first_key].prompt_token_ids)
+            seq_len = len(seq_group_metadata_list[0].seq_data[first_key].
+                          prompt_token_ids)
             query_len = seq_len - ctx * self.block_size
         else:
             query_len = 1
-            ctx = 1 # TODO ctx is not importnat here?
-        closest_bucket = self.bucketing_manager.find_bucket(real_batch_size, query_len, ctx, is_prompt)
+            ctx = 1  # TODO ctx is not importnat here?
+        closest_bucket = self.bucketing_manager.find_bucket(
+            real_batch_size, query_len, ctx, is_prompt)
         batch_size_padded = closest_bucket[0]
         if self.dp_awared_padding:
             if self.is_driver_worker:
@@ -1489,26 +1491,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             target_query_len = sum(query_lens)
         else:
             target_query_len = max(query_lens)
+        ctx = len(computed_block_nums) if computed_block_nums else 0
 
         if is_enc_dec_model:
             real_batch_size = len(seq_group_metadata_list)
             batch_size_padded = self.bucketing_manager.find_bucket(
-                                               real_batch_size,
-                                               target_query_len,
-                                               ctx,
-                                               True)[0]
+                real_batch_size, target_query_len, ctx, True)[0]
             batch_size_padding = batch_size_padded - real_batch_size
             if batch_size_padding > 0:
                 encoder_seq_lens.extend(encoder_seq_lens[0]
                                         for _ in range(batch_size_padding))
 
         real_num_seqs = len(query_lens)
-        ctx = len(computed_block_nums) if computed_block_nums else 0
         max_prompt_len = max(
             self.bucketing_manager.find_bucket(len(seq_group_metadata_list),
-                                               target_query_len,
-                                               ctx,
-                                               True)[1],
+                                               target_query_len, ctx, True)[1],
             self.block_size)
 
         if self.dp_awared_padding:
@@ -1828,10 +1825,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
             block_bucket_size = self.bucketing_manager.find_bucket(
-                                    len(seq_group_metadata_list),
-                                    1, 
-                                    block_bucket_size, 
-                                    False)[2]
+                len(seq_group_metadata_list), 1, block_bucket_size, False)[2]
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     block_bucket_size = align_dp_groups(
@@ -1847,10 +1841,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 tensor, indices, pad_value)
         else:
             block_bucket_size = self.bucketing_manager.find_bucket(
-                                    len(seq_group_metadata_list),
-                                    1,
-                                    len(block_list),
-                                    False)[2]
+                len(seq_group_metadata_list), 1, len(block_list), False)[2]
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     block_bucket_size = align_dp_groups(
@@ -1872,7 +1863,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     1, len(cross_block_list)) if cross_block_list else 0
                 cross_block_bucket_size = \
                     self.bucketing_manager.find_bucket(
-                        len(seq_group_metadata_list), 1, 
+                        len(seq_group_metadata_list), 1,
                         cross_block_bucket_size, False)[2]
                 indices = [None] * cross_block_bucket_size
                 for i, bid in enumerate(cross_block_list):
@@ -2952,7 +2943,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                 kv_caches))
 
                 self.log_graph_warmup_summary(
-                    self.bucketing_manager.prompt_buckets, True, mem_post_prompt)
+                    self.bucketing_manager.prompt_buckets, True,
+                    mem_post_prompt)
                 if not self.is_pooler:
                     self.log_graph_warmup_summary(
                         self.bucketing_manager.decode_buckets, False,
