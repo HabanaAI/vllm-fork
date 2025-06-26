@@ -2143,14 +2143,6 @@ class HPUModelRunner:
                f'used_mem:{format_bytes(total_mem)} '
                f'buckets:{sorted(list(graphed))}')
         logger.info(msg)
-        if "Prompt" in phase and len(self.multimodal_buckets) > 0:
-            phase = "Graph/Multimodal"
-            num_candidates = len(self.multimodal_buckets)
-            mm_graphed = self.graphed_multimodal_buckets
-            msg = (f'{phase} captured:{len(mm_graphed)} '
-                   f'({100 * len(mm_graphed) / num_candidates:.1f}%) '
-                   f'buckets:{sorted(list(mm_graphed))}')
-            logger.info(msg)
 
     @torch.inference_mode()
     def warmup_model(self) -> None:
