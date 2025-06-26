@@ -971,7 +971,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if hasattr(layer, 'self_attention') else None
 
         if (layers is not None and layer_alibi_config is not None):
-            _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
+            max_seq_len = self.bucketing_manager.get_max_prompt_shape()
             self.use_alibi = True
             prev_attn = None
             for layer in layers:
@@ -1485,19 +1485,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     slot = block_number * self.block_size + block_offset
                     slot_mapping[-1].append(slot)
 
+        if self.use_merged_prefill:
+            target_query_len = sum(query_lens)
+        else:
+            target_query_len = max(query_lens)
+
         if is_enc_dec_model:
             real_batch_size = len(seq_group_metadata_list)
-            batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
-                real_batch_size, True)
+            batch_size_padded = self.bucketing_manager.find_bucket(
+                                               real_batch_size,
+                                               target_query_len,
+                                               ctx,
+                                               True)[0]
             batch_size_padding = batch_size_padded - real_batch_size
             if batch_size_padding > 0:
                 encoder_seq_lens.extend(encoder_seq_lens[0]
                                         for _ in range(batch_size_padding))
 
-        if self.use_merged_prefill:
-            target_query_len = sum(query_lens)
-        else:
-            target_query_len = max(query_lens)
         real_num_seqs = len(query_lens)
         ctx = len(computed_block_nums) if computed_block_nums else 0
         max_prompt_len = max(
@@ -1867,8 +1871,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     max(cross_block_list) +
                     1, len(cross_block_list)) if cross_block_list else 0
                 cross_block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                    cross_block_bucket_size)
+                    self.bucketing_manager.find_bucket(
+                        len(seq_group_metadata_list), 1, 
+                        cross_block_bucket_size, False)[2]
                 indices = [None] * cross_block_bucket_size
                 for i, bid in enumerate(cross_block_list):
                     indices[bid] = i
@@ -1876,14 +1881,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     tensor, indices, pad_value)
             else:
                 cross_block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                    len(cross_block_list))
+                    self.bucketing_manager.find_bucket(
+                        len(seq_group_metadata_list), 1,
+                        len(cross_block_list), False)[2]
                 padding_fn = lambda tensor, pad_value: pad_list(
                     tensor, cross_block_bucket_size, pad_value)
 
             real_batch_size = len(seq_group_metadata_list)
-            batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
-                real_batch_size, False)
+            batch_size_padded = \
+                self.bucketing_manager.find_bucket(
+                        real_batch_size, 1,
+                        cross_block_bucket_size, False)[0]
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     batch_size_padded = align_dp_groups(
@@ -2699,7 +2707,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _warmup_multimodal(self, kv_caches):
         if not self.model_is_mrope:
             return
-        _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
+        max_seq_len = self.bucketing_manager.get_max_prompt_shape()
         seq_len = max_seq_len
         batch_size = 1
         phase = 'Multimodal'
@@ -2789,7 +2797,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         captured_all = True
         for idx, num_patches in enumerate(self.multimodal_buckets):
             batch_size = 1  # Note: Multimodal buckets do not change with bs
-            _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
+            max_seq_len = self.bucketing_manager.get_max_prompt_shape()
             seq_len = max_seq_len
             batch_seq = 1 * num_patches
             graphed_multimodal_bucket = num_patches
