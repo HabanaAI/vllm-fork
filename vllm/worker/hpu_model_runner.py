@@ -3503,9 +3503,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
 
-    def __del__(self):
-        self.shutdown_inc()
-
     def _patch_prev_output(self):
         if self.has_patched_prev_output:
             return
