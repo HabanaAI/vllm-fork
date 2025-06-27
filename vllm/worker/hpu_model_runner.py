@@ -118,6 +118,7 @@ class VisionBuckets:
     def __repr__(self):
         return str(self.multimodal_buckets)
 
+
 class AudioBuckets:
     '''
     This class is used to bucket audio tokens
@@ -138,6 +139,7 @@ class AudioBuckets:
 
     def __repr__(self):
         return str(self.multimodal_buckets)
+
 
 class Singleton(type):
     _instances: Dict[type, object] = {}
@@ -397,7 +399,7 @@ class HpuModelAdapter(torch.nn.Module):
             mask = attn_mask.logical_or(len_mask).logical_or(len_mask_v)
             off_value = -3E38  #small number, avoid nan and overflow
             if dtype == torch.float16:
-                off_value = -63000    # a small value close to float16.min
+                off_value = -63000  # a small value close to float16.min
         else:
             mask = attn_mask.logical_or(
                 len_mask)  #no need for len_mask_v as decode overwrites it
@@ -528,15 +530,20 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
             if self.model.config.model_type == 'qwen2_5_omni_thinker':
-                multimodal_embeddings = self.model.get_multimodal_embeddings_v0(**kwargs)
+                multimodal_embeddings = self.model.get_multimodal_embeddings_v0(
+                    **kwargs)
                 inputs_embeds = self.model.get_input_embeddings_v0(
                     input_ids, multimodal_embeddings)
                 input_ids = None
             else:
-                image_input = self.model._parse_and_validate_image_input(**kwargs)
-                video_input = self.model._parse_and_validate_video_input(**kwargs)
+                image_input = self.model._parse_and_validate_image_input(
+                    **kwargs)
+                video_input = self.model._parse_and_validate_video_input(
+                    **kwargs)
                 inputs_embeds = self.model.get_input_embeddings_v0(
-                    input_ids, image_input=image_input, video_input=video_input)
+                    input_ids,
+                    image_input=image_input,
+                    video_input=video_input)
                 input_ids = None
 
         return inputs_embeds
@@ -3502,9 +3509,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 finalize_calibration)
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
-
-    def __del__(self):
-        self.shutdown_inc()
 
     def _patch_prev_output(self):
         if self.has_patched_prev_output:

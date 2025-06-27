@@ -3,6 +3,12 @@
 ## Hardware Requirements
 This is used to set up vLLM service on Intel(R) Gaudi(R) accelerator. Please refer to [Hardware and Network Requirements](https://docs.habana.ai/en/latest/Installation_Guide/Platform_Readiness.html#) to check your hardware readiness. 
 
+### Set CPU to Performance Mode
+Please change the CPU setting to be performance optimization mode in BIOS setup and execute the command below in OS to make sure get the best CPU performance. 
+```
+sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+```
+
 ## Software Requirements
 * The supported OS are in [Supported Configurations and Components](https://docs.habana.ai/en/latest/Support_Matrix/Support_Matrix.html#support-matrix)
 * Refer to [Driver and Software Installation](https://docs.habana.ai/en/latest/Installation_Guide/Driver_Installation.html) to install the Intel(R) Gaudi(R) driver and software stack (>= 1.20.1) on each node. Make sure `habanalabs-container-runtime` is installed.
@@ -17,12 +23,12 @@ docker run -it --runtime=habana \
     -e HABANA_VISIBLE_DEVICES=all \
     -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
     --cap-add=sys_nice --net=host --ipc=host \
-    vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+    vault.habana.ai/gaudi-docker/1.21.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
  ```
 
 2. Install vLLM：
 ``` bash
-git clone -b aice/v1.20.1 https://github.com/HabanaAI/vllm-fork
+git clone -b aice/v1.21.0 https://github.com/HabanaAI/vllm-fork
 VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork
 ```
 
@@ -40,7 +46,20 @@ cd scripts
 ```
 
 ## Steps to host vLLM service
-### 1. Start the server
+
+### 1. Download the model weights
+You may download the required model weight files from [HuggingFace](https://huggingface.co/) or [ModelScope](https://www.modelscope.cn/).
+```bash
+sudo apt install git-lfs
+git-lfs install
+
+# Option1: Download from HuggingFace
+git clone https://huggingface.co/Qwen/Qwen2-72B-Instruct /models/Qwen2-72B-Instruct
+# Option2: Download from ModelScope
+git clone https://www.modelscope.cn/Qwen/Qwen2-72B-Instruct /models/Qwen2-72B-Instruct
+```
+
+### 2. Start the server
 There are some system environment variables which need be set to get the best vLLM performance. We provide the sample script to set the recommended environment variables.
 
 The script file "start_gaudi_vllm_server.sh" is used to start vLLM service. You may execute the command below to check its supported parameters.
@@ -102,8 +121,8 @@ INFO: Application startup complete.
 INFO: Uvicorn running on http://127.0.0.1:30001 (Press CTRL+C to quit)
 ```
 
-### 2. Run the benchmark
-You may use these scripts to check the vLLM server inference performance. vLLM benchmark_serving.py file is used. 
+### 3. Run the benchmark
+You may use these scripts to check the vLLM server inference performance. vLLM benchmark_serving.py file is used. Before running, please change the parameters in the script file, such as vLLM host, port, model weight path and so on.
 ``` bash
 bash benchmark_serving_range.sh # to benchmark with specified input/output ranges, random dataset
 bash benchmark_serving_sharegpt.sh # to benchmark with ShareGPT dataset
@@ -112,11 +131,9 @@ bash benchmark_serving_sharegpt.sh # to benchmark with ShareGPT dataset
 > The input/output ranges passed to `start_gaudi_vllm_server.sh` should cover the following benchmark ranges to get expected performance.
 
 > The parameters in the `benchmark_serving_range.sh` and `benchmark_serving_sharegpt.sh` must be modified to match the ones passed to `start_gaudi_vllm_server.sh`.
-### 3. Run vLLM with FP8 precision
-Running vLLM with FP8 precision can be achieved using [Intel(R) Neural Compressor (INC)](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#inference-using-fp8) and by loading FP8 models directly (experimental).
 
-- #### Run vLLM with FP8 using INC
-To run vLLM with FP8 precision using INC, pass `-d fp8` and specify the path to your bfloat16 or float16 model with `-w <model_path>`. The model will be quantized to FP8 using calibration data obtained from the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.21.0/calibration/README.md).
+### 4. Run vLLM with FP8 using INC
+Running vLLM with FP8 precision can be achieved using [Intel(R) Neural Compressor (INC)](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Quantization/Inference_Using_FP8.html#inference-using-fp8). To run vLLM with FP8 precision using INC, pass `-d fp8` and specify the path to your bfloat16 or float16 model with `-w <model_path>`. The model will be quantized to FP8 using calibration data obtained from the [FP8 Calibration Procedure](https://github.com/HabanaAI/vllm-hpu-extension/blob/v1.21.0/calibration/README.md).
 > For the Qwen3 MoE models, a custom INC should be installed:
 ``` bash
 pip install git+https://github.com/intel/neural-compressor.git@qwen-fp8
@@ -171,35 +188,6 @@ bash start_gaudi_vllm_server.sh \
     -p 30001 \
     -c /vllm_cache/Qwen2.5-32B-Instruct/
 ```
-
-- #### Loading fp8 models directly
-Gaudi2 uses `fp8_e4m3fnuz` instead of `fp8_e4m3fn`, so the fp8 weights and the corresponding scales have to be converted by [convert_fp8_weights_for_gaudi2.py](quantization/convert_fp8_weights_for_gaudi2.py) first. vLLM on Gaudi supports dynamic and static activation quantization with extra `input_scales` provided, for example:
-``` bash
-# convert Qwen3-32B-FP8 with dynamic activation quantization
-python3 convert_fp8_weights_for_gaudi2.py \
-    -i /models/Qwen3-32B-FP8 \
-    -o /models/Qwen3-32B-FP8-G2-dynamic
-
-# convert Qwen3-32B-FP8 with static activation quantization
-python3 convert_fp8_weights_for_gaudi2.py \
-    -i /models/Qwen3-32B-FP8 \
-    -o /models/Qwen3-32B-FP8-G2-static \
-    -s quantization/Qwen3-32B-w8afp8_input_scales.pickle
-```
-Then the converted models could be used as normal bfloat16/float16 ones as in the following example:
-``` bash
-bash start_gaudi_vllm_server.sh \
-    -w "/models/Qwen3-32B-FP8-G2-static" \
-    -n 2 \
-    -m 0,1 \ 
-    -b 128 \
-    -i 800,1024 \
-    -o 400,512 \
-    -l 4096 \
-    -t 8192
-```
-
-> Note that loading fp8 models directly is experimental and currently tested on Qwen3 models only.
 
 
 ## Steps to run offline benchmark
