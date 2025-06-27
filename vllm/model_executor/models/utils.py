@@ -398,11 +398,11 @@ def _merge_multimodal_embeddings(
             flattened = multimodal_embeddings.reshape(-1, hidden_size)
             inputs_embeds[is_multimodal] = flattened
             inputs_embeds = inputs_embeds.reshape(batch_size, seq_length,
-                                              hidden_size)
+                                                  hidden_size)
         else:
             flattened = _flatten_embeddings(multimodal_embeddings)
-            inputs_embeds[is_multimodal] = flattened   
-               
+            inputs_embeds[is_multimodal] = flattened
+
         return inputs_embeds
 
     num_expected_tokens = is_multimodal.sum().item()
@@ -713,6 +713,7 @@ def extract_layer_index(layer_name: str) -> int:
                                 " only contain one integer")
     return int_vals[0]
 
+
 def get_input_mask(hidden_states: torch.Tensor,
                    valid_len: torch.Tensor) -> torch.Tensor:
     """
@@ -726,6 +727,7 @@ def get_input_mask(hidden_states: torch.Tensor,
     # mask: (B, T)
     mask = mask.to(hidden_states.dtype)
     return mask
+
 
 def cast_overflow_tensors(
     tensors: torch.Tensor,
