@@ -3580,7 +3580,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     )
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
-                    'real_b,    .   atch_size': real_batch_size
+                    'real_batch_size': real_batch_size
                 }
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
@@ -3598,7 +3598,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
                             selected_token_indices)
-                        htorch.core.mark_step()
                         if warmup_mode:
                             torch.hpu.synchronize()
                             import torch.distributed as dist
