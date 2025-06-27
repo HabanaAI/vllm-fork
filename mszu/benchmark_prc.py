@@ -16,9 +16,9 @@ def get_timestamp_us():
     return time.time() * 1000000.0
 def stream_tokens(url, seq_len, i):
     payload = {
-        "prompt": "ha" * seq_len,
+        "prompt": "ha" * (seq_len//2 - 1),
         "stream": True,
-        "max_tokens": 256,
+        "max_tokens": 512,
         "ignore_eos": True,
         "temperature": 0,
         "top_p": 1,
@@ -47,6 +47,8 @@ def stream_tokens(url, seq_len, i):
                     event_name = "ITL"
                     ttft_complete.set()
                 start_time = get_timestamp_us()
+                if i == 1 and (idx%100 == 0):
+                    print("[{:.2f}] Request {} : {} tokens received".format(time.time() - t_start, i, idx))
             print("[{:.2f}] Request {} ({}): COMPLETED".format(time.time() - t_start, i, seq_len))
 
 
@@ -56,7 +58,7 @@ filename = "benchmark-{}.json".format(sys.argv[1].replace(":", "-"))
 print(url)
 print(filename)
 
-seq_lens = [256, 512, 1024, 2048] * 8
+seq_lens = [2048, 4096, 8192] * 8
 #seq_lens = [512] * 3
 #random.Random(1337).shuffle(seq_lens)
 
