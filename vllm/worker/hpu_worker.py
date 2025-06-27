@@ -20,8 +20,9 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
 from vllm.config import ParallelConfig, VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
-                              get_tp_group, ensure_kv_transfer_initialized,
+from vllm.distributed import (ensure_model_parallel_initialized, get_dp_group,
+                              get_pp_group, get_tp_group,
+                              ensure_kv_transfer_initialized,
                               init_distributed_environment)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -308,6 +309,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             self, execute_model_req)
         return output
 
+    def align_dp_groups(self, value, op) -> int:
+        group = get_dp_group().cpu_group
+        value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
+        torch.distributed.all_reduce(value_t, op=op, group=group)
+        return value_t.item()
+
     @torch.inference_mode()
     def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Profiles the peak memory usage of the model to determine how many
@@ -368,6 +375,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
+        num_hpu_blocks = self.align_dp_groups(
+            num_hpu_blocks, torch.distributed.ReduceOp.MIN)
+        num_cpu_blocks = self.align_dp_groups(
+            num_cpu_blocks, torch.distributed.ReduceOp.MIN)
+
         self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
         if self.model_runner.lora_manager:
@@ -382,13 +394,15 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         This also warms up the model, which may record CUDA graphs.
         """
-        raise_if_cache_size_invalid(num_gpu_blocks,
-                                    self.cache_config.block_size,
-                                    self.model_config.max_model_len)
+        raise_if_cache_size_invalid(
+            num_gpu_blocks, self.cache_config.block_size,
+            self.model_config.max_model_len,
+            self.parallel_config.pipeline_parallel_size)
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_gpu_blocks // self.parallel_config.pipeline_parallel_size
+        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+            num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
@@ -584,13 +598,14 @@ def init_worker_distributed_environment(
                                       parallel_config.pipeline_parallel_size)
     ensure_kv_transfer_initialized(vllm_config)
 
-def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
-                                max_model_len) -> None:
+
+def raise_if_cache_size_invalid(num_gpu_blocks, block_size, max_model_len,
+                                pipeline_parallel_size) -> None:
     if num_gpu_blocks <= 0:
         raise ValueError("No available memory for the cache blocks. "
                          "Try increasing `gpu_memory_utilization` when "
                          "initializing the engine.")
-    max_seq_len = block_size * num_gpu_blocks
+    max_seq_len = block_size * (num_gpu_blocks // pipeline_parallel_size)
     if max_model_len > max_seq_len:
         raise ValueError(
             f"The model's max seq len ({max_model_len}) "

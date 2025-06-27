@@ -60,7 +60,7 @@ HOST=${HOST:-127.0.0.1}
 PORT=${PORT:-8688}
 MODEL_PATH=${MODEL_PATH:-/root/.cache/huggingface/DeepSeek-R1-BF16-w8afp8-dynamic-no-ste-G2}
 
-# Server config list: max_len,num_prompts,max_conc,pp,tp,backend,warmup,profile,partition
+# Server config list: max_len,max_conc,pp,tp,backend,kv_dtype,warmup,profile,partition
 KV=auto
 WARMUP=true
 PROFILE=false

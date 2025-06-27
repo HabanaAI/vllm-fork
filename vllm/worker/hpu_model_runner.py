@@ -1986,15 +1986,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     broadcast_tensor_dict(src=0)
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
+            intermediate_tensors = None
+            if not get_pp_group().is_first_rank:
+                intermediate_tensors = \
+                    self.model.make_empty_intermediate_tensors(
+                        batch_size=batch_size,
+                        context_size=seq_len if is_prompt else 1,
+                        dtype=self.model_config.dtype,
+                        device=self.device)
             if is_prompt or is_single_step:
-                intermediate_tensors = None
-                if not get_pp_group().is_first_rank:
-                    intermediate_tensors = \
-                        self.model.make_empty_intermediate_tensors(
-                            batch_size=batch_size,
-                            context_size=seq_len if is_prompt else 1,
-                            dtype=self.model_config.dtype,
-                            device=self.device)
                 self.execute_model(inputs,
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
@@ -2008,6 +2008,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                              is_last_step=False)
                 self.execute_model(inputs,
                                    kv_caches,
+                                   intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
                                    profile_run_mode=is_profile_run,
                                    num_steps=2,
@@ -2018,6 +2019,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                              is_last_step=True)
                 self.execute_model(inputs,
                                    kv_caches,
+                                   intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
                                    profile_run_mode=is_profile_run,
                                    num_steps=2,
@@ -2082,6 +2084,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.log_warmup('Prompt' if is_prompt else 'Decode', i,
                             len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
+            torch.distributed.barrier()
 
     def warmup_graphs(self,
                       strategy,
@@ -2132,6 +2135,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             available_mem -= used_mem
             total_mem += used_mem
             total_batch_seq += batch_seq
+            torch.distributed.barrier()
 
         return total_mem, total_batch_seq, captured_all
 
@@ -2159,14 +2163,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
                                  True)
             raise AssertionError("Finished profiling")
-        if not self.is_pooler:
-            max_blocks = (
-                kv_caches[0][0].size(0)
-                // int(os.getenv("VLLM_DECODE_BLOCK_BUCKET_STEP", self.cache_config.block_size))
-                * int(os.getenv("VLLM_DECODE_BLOCK_BUCKET_STEP", self.cache_config.block_size))
-            )
         self.bucketing_ctx.generate_prompt_buckets()
         if not self.is_pooler:
+            max_blocks = kv_caches[0][0].size(0)
             self.bucketing_ctx.generate_decode_buckets(max_blocks)
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -2631,7 +2630,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
     def _pad_to_max_num_seqs(self, tensor, value):
         padding_needed = self.max_num_seqs - tensor.size(0)
-        if padding_needed:
+        if padding_needed > 0:
             padding = torch.full((padding_needed, *tensor.shape[1:]),
                                  value,
                                  device=tensor.device,
@@ -2921,7 +2920,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
-                    return []
+                    # We cannot return early here. Should continue instead, otherwise MSS breaks.
+                    continue #return []
 
                 is_prev_output_patched = False
                 if use_delayed_sampling:
