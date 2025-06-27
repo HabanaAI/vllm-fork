@@ -22,6 +22,7 @@ import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 import vllm_hpu_extension.environment as environment
+import vllm_hpu_extension.kernels as kernels
 from attr import dataclass
 from vllm_hpu_extension.bucketing.common import get_bucketing_context
 from vllm_hpu_extension.ops import LoraMask as LoraMask
@@ -319,6 +320,10 @@ class HpuModelAdapter(torch.nn.Module):
         self.model = model
         self.prefill_use_fusedsdpa = get_config(
         ).prompt_attn_impl == 'fsdpa_impl'
+        HPUFusedSDPA = kernels.fsdpa()
+        self.fusedsdpa_ws_opt = 'window_size' in HPUFusedSDPA.forward.__code__.co_varnames \
+            if HPUFusedSDPA and self.prefill_use_fusedsdpa else False
+
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
         self.sampler = sampler
@@ -596,8 +601,6 @@ class HpuModelAdapter(torch.nn.Module):
                 "The module at the end of the path does not have \
                a 'prepare_cos_sin' method.")
 
-    # copying from PR 1163
-    # needs cleanup/unified approach later
     def compute_input_embeddings_for_mm_optimized(self, **kwargs):
         input_ids = kwargs['input_ids']
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
@@ -607,7 +610,8 @@ class HpuModelAdapter(torch.nn.Module):
         if vision_embeddings is not None:
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
-
+            if self.fusedsdpa_ws_opt:
+                kwargs['fusedsdpa_ws_opt'] = True
             kwargs = self.model.prepare_attn_masks(
                 mask_dtype=self.dtype,
                 **kwargs,
@@ -1487,7 +1491,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             seq_len = min(seq_data.get_len(), context_len + token_chunk_size)
             prompt_tokens = seq_data.get_token_ids()[context_len:seq_len]
-            #print("libin debug sl/ get_len/cl/tcs ", seq_len, seq_data.get_len(), context_len ,  token_chunk_size)
             seq_lens.append(seq_len)
 
             # NOTE: This only works for oooooooxxx style attention.
@@ -1717,7 +1720,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                           pad=0,
                                           dtype=torch.long,
                                           flat=True).flatten()
-        #print("libin debug seq_len_tensor ", seq_lens_tensor)
+
         context_lens_tensor = make_cpu_tensor([context_lens],
                                               max_len=num_seqs,
                                               pad=0,

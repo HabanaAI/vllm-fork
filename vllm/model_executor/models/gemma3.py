@@ -39,7 +39,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.platforms import current_platform
+
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsLoRA, SupportsPP
@@ -198,17 +198,12 @@ class Gemma3Attention(nn.Module):
         k = k.flatten(-2, -1)
 
         q, k = self.rotary_emb(positions, q, k)
+
         attn_output = self.attn(q, k, v)
 
         # In HPU, naive_attn_with_masks is no longer needed since sliding_window
-        # is supported in hpu_attn.
-        if current_platform.is_hpu():
-            output, _ = self.o_proj(attn_output)
-            return output
-
+        # is supported in hpu_attn, we don't set "has_images" and let it return
         if not kwargs.get("has_images", False):
-            # Fast path for text-only inputs. The performance for the text-only
-            # inputs are not affected by the naive attention below.
             output, _ = self.o_proj(attn_output)
             return output
 
