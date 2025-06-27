@@ -45,6 +45,7 @@ def fail_on_exit():
 
 def launch_lm_eval(eval_config):
     trust_remote_code = eval_config.get('trust_remote_code', False)
+    enable_expert_parallel = eval_config.get('enable_expert_parallel', False)
     dtype = eval_config.get('dtype', 'bfloat16')
     max_num_seqs = eval_config.get('max_num_seqs', 128)
     model_args = f"pretrained={eval_config['model_name']}," \
@@ -54,7 +55,9 @@ def launch_lm_eval(eval_config):
                  f"dtype={dtype}," \
                  f"max_model_len=4096," \
                  f"max_num_seqs={max_num_seqs}," \
-                 f"trust_remote_code={trust_remote_code}"
+                 f"enable_prefix_caching=False," \
+                 f"trust_remote_code={trust_remote_code}," \
+                 f"enable_expert_parallel={enable_expert_parallel}"
     if eval_config.get("fp8"):
         model_args += ",quantization=inc," \
             "kv_cache_dtype=fp8_inc," \
