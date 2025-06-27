@@ -351,8 +351,10 @@ class HpuModelAdapter(torch.nn.Module):
         return None
 
     def _reset_rotary_cos_sin(self):
-        delattr(self._rotary_embed_module, "cos")
-        delattr(self._rotary_embed_module, "sin")
+        if hasattr(self._rotary_embed_module, "cos"):
+            delattr(self._rotary_embed_module, "cos")
+        if hasattr(self._rotary_embed_module, "sin"):
+            delattr(self._rotary_embed_module, "sin")
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
