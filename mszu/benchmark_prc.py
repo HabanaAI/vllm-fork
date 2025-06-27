@@ -58,7 +58,7 @@ filename = "benchmark-{}.json".format(sys.argv[1].replace(":", "-"))
 print(url)
 print(filename)
 
-seq_lens = [2048, 4096, 8192] * 8
+seq_lens = [2048, 4096, 8192] * 4
 #seq_lens = [512] * 3
 #random.Random(1337).shuffle(seq_lens)
 
