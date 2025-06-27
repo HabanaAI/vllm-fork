@@ -747,7 +747,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         seq_len = input_ids.shape[1]
         bs = input_ids.shape[0]
         kwargs["seq_lens"] = [seq_len] * bs
-        
+
         global_attn_mask = torch.empty(
             bs,
             1,
@@ -774,7 +774,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
         img_mask[ind < img_causal] += 1
         global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
-        
+
         if self.sliding_window is not None:
             # Create a local causal mask with sliding window (1024).
             local_attn_mask = torch.ones_like(global_attn_mask)

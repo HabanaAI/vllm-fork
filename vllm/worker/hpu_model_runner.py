@@ -135,7 +135,7 @@ class Singleton(type):
 
 def is_mm_optimized(model):
     return 'Gemma3ForConditionalGeneration' in str(type(model)) or \
-        'Gemma3ForConditionalGeneration' in str(type(model.model)) 
+        'Gemma3ForConditionalGeneration' in str(type(model.model))
 
 def pad_flat_tensor(tensor, desired_size):
     assert tensor.dim() == 1, 'Only flat tensors are supported'
@@ -334,6 +334,10 @@ class HpuModelAdapter(torch.nn.Module):
 
         self.model_is_mrope = uses_mrope(model_config)
         self.is_mm_optimized = is_mm_optimized(self.model)
+        text_config = vllm_config.model_config.hf_config.get_text_config()
+        self.interleaved_sliding_window = getattr(
+            text_config, "interleaved_sliding_window",
+            None) if text_config else None
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -353,7 +357,6 @@ class HpuModelAdapter(torch.nn.Module):
                 if hasattr(self.model, 'multi_modal_projector'):
                     self.model.multi_modal_projector = htorch.hpu.wrap_in_hpu_graph(
                         self.model.multi_modal_projector, disable_tensor_cache=True)
-
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -415,11 +418,56 @@ class HpuModelAdapter(torch.nn.Module):
                                              attn_bias=attn_bias)
         return attn_metadata
 
-    def _set_block_mapping(self, metadata, batch_size, device, dtype, is_window_block):
-        
-        block_usage = metadata.block_usage if not is_window_block else metadata.window_block_usage
-        block_groups = metadata.block_groups if not is_window_block else metadata.window_block_groups
-        
+    def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
+                                          seq_len, window_size, device, dtype):
+
+        if seq_len <= window_size:
+            #no need to set sliding window mask, just use causal mask
+            return attn_metadata
+
+        prefill_metadata = attn_metadata
+        shift = 0
+
+        #causal + window size : accuracy good
+        tensor = torch.full((batch_size, 1, seq_len, seq_len),
+                            device=device,
+                            dtype=dtype,
+                            fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        attn_bias = torch.log(mask)
+        '''
+        #TODO:causal + window size + q_len : accuracy and perf issue.
+        #Further need to be optimized when custom kernel is available.
+        query_lens_t = prefill_metadata.seq_lens_tensor
+        query_lens_t = query_lens_t.reshape(batch_size, 1)
+
+        tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,
+            dtype=dtype, fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        len_mask = torch.arange(0, seq_len, device=device,
+            dtype=torch.int32).view(seq_len,1)
+        len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size,
+            1, seq_len, 1)
+        len_mask = torch.where(len_mask == False, 1, 0)
+        mask = mask.logical_and(len_mask)
+        mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        attn_bias =torch.where(mask,0, -math.inf)
+        '''
+        attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
+
+        return attn_metadata
+
+    def _set_block_mapping(self, metadata, batch_size, device, dtype,
+                           is_window_block):
+
+        if not is_window_block:
+            block_usage = metadata.block_usage
+            block_groups = metadata.block_groups
+        else:
+            block_usage = metadata.window_block_usage
+            block_groups = metadata.window_block_groups
+
         mask = torch.arange(0,
                             self.block_size,
                             device=device,
@@ -442,7 +490,7 @@ class HpuModelAdapter(torch.nn.Module):
             oob_values = block_groups.lt(0)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
             block_groups.masked_fill_(oob_values, batch_size)
-            
+
             if not is_window_block:
                 metadata = custom_tuple_replace(metadata,
                                                 "TrimmedAttentionMetadata",
@@ -478,15 +526,32 @@ class HpuModelAdapter(torch.nn.Module):
         return attn_metadata
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
-                         dtype):
+                         dtype,
+                         global_attn_masks=None,
+                         local_attn_masks=None):
 
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
+
+            #For Gemma3, we need to override attn_mask with these sliding_window
+            #mask which are updated during prepare_attn_mask()
+            if global_attn_masks is not None:
+                attn_metadata = attn_metadata._replace(
+                    attn_bias=global_attn_masks)
+
+            if self.interleaved_sliding_window:
+                if local_attn_masks is not None:
+                    attn_metadata = attn_metadata._replace(
+                        window_attn_bias=local_attn_masks)
+                else:
+                    attn_metadata = self._set_attn_bias_for_sliding_window(
+                        attn_metadata, batch_size, seq_len,
+                        self.interleaved_sliding_window, device, dtype)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
-            
+
         if attn_metadata.window_block_list is not None:
                 attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype,
@@ -549,14 +614,14 @@ class HpuModelAdapter(torch.nn.Module):
         # done compute the visual tokens
         kwargs.pop('pixel_values', None)
         return kwargs
-    
+
     def compute_input_embeddings_for_mrope_mm_optimized(self, **kwargs):
-        
+
         if 'inputs_embeds' in kwargs:
             return kwargs
         if not self.model_is_mrope and not self.is_mm_optimized:
             return None
-        
+
         # For Qwen2.5-VL/Gemma3 VL multimodal embedding,
         # this embedding part should be executed
         # with PT_COMPILE_ONLY_MODE off at all times
@@ -600,7 +665,8 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
+            input_ids.device, self.dtype, kwargs.get("global_attn_masks"),
+            kwargs.get("local_attn_masks"))
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None and not self.model_is_mrope:
@@ -855,6 +921,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.sliding_window = (self.model_config.get_sliding_window()
                                if self.model_config is not None else None)
+        self.interleaved_sliding_window = getattr(
+            self.model_config.hf_text_config, "interleaved_sliding_window",
+            None)
         self.device_config = (self.device_config if self.device_config
                               is not None else DeviceConfig())
         if is_fake_hpu():
@@ -1354,7 +1423,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         """
         model_type = getattr(self.model_config.hf_config, 'model_type', '')
         return -1 if model_type == 'gemma3' else 0
-    
+
     def add_vision_buckets_to_mrope_mm_optimized(self):
         if self.mm_registry is not None:
             model = self.get_model()
@@ -1464,7 +1533,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         block_offset = i % self.block_size
                         slot = block_number * self.block_size + block_offset
                         cross_slot_mapping.append(slot)
-    
+
             if seq_group_metadata.multi_modal_data:
                 positions = input_positions[0]
                 mm_data, placeholder_maps = MultiModalPlaceholderMap \
@@ -1805,10 +1874,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                              self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
-                
-                if self.model_config.hf_text_config is not None and \
-                    self.model_config.hf_text_config.interleaved_sliding_window is not None:
-                    sliding_window_blocks = (self.model_config.hf_text_config.interleaved_sliding_window //
+
+                if self.interleaved_sliding_window is not None:
+                    sliding_window_blocks = (self.interleaved_sliding_window//
                                             self.block_size)
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
@@ -1842,10 +1910,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
-        
-        
-        if self.model_config.hf_text_config is not None and \
-            self.model_config.hf_text_config.interleaved_sliding_window is not None:
+
+
+        if self.interleaved_sliding_window is not None:
             window_block_groups = [[i] * len(bt) for i, bt in enumerate(window_block_tables)]
             window_block_usage = [[self.block_size] * (len(bt) - 1) + [lbu]
                         for bt, lbu in zip(block_tables, last_block_usage)
@@ -1897,8 +1964,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
-            if self.model_config.hf_text_config is not None and \
-                self.model_config.hf_text_config.interleaved_sliding_window is not None:
+            if self.interleaved_sliding_window is not None:
                 window_indices: List[Any]
                 window_indices = [None] * block_bucket_size
                 for i, bid in enumerate(window_block_list):
@@ -1914,9 +1980,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_list = padding_fn(block_list, _PAD_BLOCK_ID)
         block_groups = padding_fn(block_groups, -1)
         block_usage = padding_fn(block_usage, 1)
-        
-        if self.model_config.hf_text_config is not None and \
-            self.model_config.hf_text_config.interleaved_sliding_window is not None:
+
+        if self.interleaved_sliding_window is not None:
             window_block_list = window_padding_fn(window_block_list, _PAD_BLOCK_ID)
             window_block_groups = window_padding_fn(window_block_groups, -1)
             #window_block_usage = window_padding_fn(window_block_usage, 1)
@@ -2007,8 +2072,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
 
 
-        if self.model_config.hf_text_config is not None and \
-            self.model_config.hf_text_config.interleaved_sliding_window is not None:
+        if self.interleaved_sliding_window is not None:
             window_block_list = torch.tensor(window_block_list, dtype=torch.int, device='cpu')
             window_block_groups = torch.tensor(window_block_groups,
                                         dtype=torch.int,
@@ -2535,7 +2599,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_placeholders=placeholders_by_modality,
         )
         return seq_group
-    
+
     def create_dummy_seq_group_metadata(self,
                                         group_id,
                                         seq_len,
@@ -2600,7 +2664,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.compilation_config.static_forward_context,
             [kv_caches] * self.parallel_config.pipeline_parallel_size)
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
-        
+
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
         # Using batch_size 1 is profile multimodal models
