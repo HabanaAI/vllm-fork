@@ -2513,20 +2513,46 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     img_args,
                                                     sampling_params,
                                                     lora_request):
-        assert self.model_is_mrope, ("Warmup compatible with Qwen2vl models")
-        if not hasattr(self.get_model().config, "vision_config"):
-            raise ValueError("Expect mrope model to have vision_config")
-        vision_config = self.get_model().config.vision_config
-        if not hasattr(vision_config, "spatial_merge_size"):
-            raise ValueError("Expect mrope model to have spatial_merge_size")
-
+        assert self.model_is_mrope or self.is_mm_optimized, \
+            ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model(
             ).vision_buckets.multimodal_buckets[-1]
 
-        spatial_merge_unit = vision_config.spatial_merge_size**2
-        num_image_tokens = img_args // spatial_merge_unit
+        if self.model_is_mrope:
+            if not hasattr(self.get_model().config, "vision_config"):
+                raise ValueError("Expect mrope model to have vision_config")
+            vision_config = self.get_model().config.vision_config
+            if not hasattr(vision_config, "spatial_merge_size"):
+                raise ValueError("Expect mrope model to have spatial_merge_size")
+
+            spatial_merge_unit = vision_config.spatial_merge_size**2
+            num_image_tokens = img_args // spatial_merge_unit
+            assert img_args % 8 == 0, (
+                f"Expects img_args to be multiples of 8, got: {img_args}")
+            image_h = img_args // 8
+            image_grid_thw = torch.tensor(
+                [[1, image_h, int(img_args / image_h)]])
+            pixel_values = torch.randn(image_grid_thw[0].prod(),
+                                    1176)  # TODO: figure out the variable name
+
+            assert pixel_values.shape[0] % 64 == 0, (
+                f"pixel_values must be sliced in 64 chunks, "
+                f"got: {pixel_values.shape}")
+
+            multi_modal_data = {
+                "pixel_values": pixel_values,
+                "image_grid_thw": image_grid_thw,
+            }
+        else:
+            s =  self.model.model.config.vision_config.image_size
+            pixel_values = torch.randn([img_args, 3, s, s])
+            num_image_tokens = self.model.model.config.mm_tokens_per_image * img_args
+            multi_modal_data = {
+            "pixel_values": pixel_values,
+            "num_crops": torch.zeros([img_args], dtype=torch.int32)
+        }
 
         image_token_id = self.get_model().config.image_token_id
         prompt_token_ids = [image_token_id] * num_image_tokens
@@ -2537,66 +2563,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         }
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
-
-        assert img_args % 8 == 0, (
-            f"Expects img_args to be multiples of 8, got: {img_args}")
-        image_h = img_args // 8
-        image_grid_thw = torch.tensor(
-            [[1, image_h, int(img_args / image_h)]])
-        pixel_values = torch.randn(image_grid_thw[0].prod(),
-                                   1176)  # TODO: figure out the variable name
-
-        assert pixel_values.shape[0] % 64 == 0, (
-            f"pixel_values must be sliced in 64 chunks, "
-            f"got: {pixel_values.shape}")
-
-        multi_modal_data = {
-            "pixel_values": pixel_values,
-            "image_grid_thw": image_grid_thw,
-        }
         multi_modal_data = MultiModalKwargs(multi_modal_data)
-
-        seq_group = SequenceGroupMetadata(
-            request_id=str(group_id),
-            is_prompt=True,
-            seq_data={group_id: seq_data},
-            sampling_params=sampling_params,
-            block_tables=None,
-            lora_request=lora_request[group_id] if lora_request else None,
-            multi_modal_data=multi_modal_data,
-            multi_modal_placeholders=placeholders_by_modality,
-        )
-        return seq_group
-
-    def create_dummy_multi_modal_seq_group_metadata_static(self, group_id,
-                                                    img_args,
-                                                    sampling_params,
-                                                    lora_request):
-
-        if img_args == UNSET_IMG_ARGS:
-            # Using the largest bucket
-            img_args = self.get_model(
-            ).vision_buckets.multimodal_buckets[-1]
-
-        #bs = img_args
-        pixel_values = torch.randn([img_args, 3, 896, 896])
-        multi_modal_data = {
-            "pixel_values": pixel_values,
-            "num_crops": torch.zeros([img_args], dtype=torch.int32)
-        }
-        multi_modal_data = MultiModalKwargs(multi_modal_data)
-
-        image_token_id = self.get_model().config.image_token_id
-        num_image_tokens = 256
-        prompt_token_ids = [image_token_id] * num_image_tokens * img_args
-        prompt_token_ids_array = array('l', prompt_token_ids)
-        placeholders_by_modality = {
-            'image':
-            [PlaceholderRange(offset=0, length=len(prompt_token_ids))]
-        }
-        seq_data = SequenceData.from_seqs(prompt_token_ids)
-        seq_data = SequenceData(prompt_token_ids_array)
-
+ 
         seq_group = SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=True,
@@ -2626,20 +2594,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         computed_block_nums = None
         if is_prompt:
             if img_args is not None:
-                if self.is_mm_optimized:
-                    return self.create_dummy_multi_modal_seq_group_metadata_static(
-                        group_id=group_id,
-                        img_args=img_args,
-                        sampling_params=sampling_params,
-                        lora_request=lora_request,
-                    )
-                elif self.model_is_mrope:
-                    return self.create_dummy_multi_modal_seq_group_metadata(
-                        group_id=group_id,
-                        img_args=img_args,
-                        sampling_params=sampling_params,
-                        lora_request=lora_request,
-                    )
+                return self.create_dummy_multi_modal_seq_group_metadata(
+                    group_id=group_id,
+                    img_args=img_args,
+                    sampling_params=sampling_params,
+                    lora_request=lora_request,
+                )
             else:
                 input_len = seq_len
                 output_len = 0

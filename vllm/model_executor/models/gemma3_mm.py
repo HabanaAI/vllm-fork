@@ -544,14 +544,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         pixel_values = flatten_bn(pixel_values, concat=True)
         num_crops = flatten_bn(num_crops, concat=True)
 
-        x = Gemma3ImagePixelInputs(
+        return Gemma3ImagePixelInputs(
             type="pixel_values",
             pixel_values=self._validate_pixel_values(pixel_values),
             # TODO.. some bug in adding 1 here to num_crops.. currently assuming no panscan so just passing in torch.ones
             # seeing 0 + 1 = 0 here sometimes!! hence wrapping in torch.tensor
             # num_patches=num_crops + 1,
             num_patches= torch.ones(num_crops.shape, dtype=num_crops.dtype).to(pixel_values.device))
-        return x
 
     def _image_pixels_to_features(
         self,
@@ -588,11 +587,11 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 end_idx = start_idx + i
                 batch_sliced_image_features = image_features[start_idx:end_idx, ...]
                 if is_lazy:
-                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, \
+                        bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
                 else:
                     image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features)]
                 start_idx = end_idx
-            #image_embeds = self.multi_modal_projector(image_features, bypass_hpu_graphs=not use_graph_vision)
             image_embeds = torch.cat(image_embeds_multibatches, dim=0)
 
         return [
@@ -666,8 +665,15 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         mask_dtype: torch.dtype,
         **kwargs,
     ):
+        kwargs["has_images"] = True
         seq_lens = []
-        if not is_hpu:
+        if is_hpu:
+            IMG_TOKENS = self.config.mm_tokens_per_image
+            seq_len = input_ids.shape[1]
+            bs = input_ids.shape[0]
+            kwargs["seq_lens"] = [seq_len] * bs
+            seq_lens.append(seq_len)
+        else:
             # NOTE(woosuk): Here, we distinguish the sequences by the position id 0.
             # This is a HACK. Fix this.
             start_idices = (positions == 0).cpu().nonzero()
@@ -680,12 +686,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                     end_idx = len(input_ids)
                 seq_lens.append(end_idx - start_idx)
                 kwargs["seq_lens"] = seq_lens
-        else:
-            IMG_TOKENS = self.config.mm_tokens_per_image
-            seq_len = input_ids.shape[1]
-            bs = input_ids.shape[0]
-            kwargs["seq_lens"] = [seq_len] * bs
-            seq_lens.append(seq_len)
+
 
         global_attn_masks = []
         local_attn_masks = []
@@ -715,11 +716,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             img_mask = torch.zeros_like(global_attn_mask)
             img_pos = (input_token_ids == self.config.image_token_index)
 
-            if not is_hpu:
-                img_mask[:, :, :, img_pos] += 1
-                img_mask[:, :, img_pos, :] += 1
-                global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
-            else:
+            if is_hpu:
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0,1,3,2)
                 img_mask[img_pos.unsqueeze(1)] += 1
@@ -732,11 +729,15 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
                 img_mask[ind < img_causal] += 1
                 global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
+            else:
+                img_mask[:, :, :, img_pos] += 1
+                img_mask[:, :, img_pos, :] += 1
+                global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
 
             global_attn_masks.append(global_attn_mask)
 
             if self.sliding_window is not None:
-                if 'fusedsdpa_ws_opt' not in kwargs:
+                if 'fusedsdpa_ws_opt' not in kwargs :
                     # Create a local causal mask with sliding window (1024).
                     local_attn_mask = torch.ones_like(global_attn_mask)
                     local_attn_mask = torch.tril(local_attn_mask,

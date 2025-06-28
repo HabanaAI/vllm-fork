@@ -39,7 +39,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsLoRA, SupportsPP
@@ -198,12 +198,11 @@ class Gemma3Attention(nn.Module):
         k = k.flatten(-2, -1)
 
         q, k = self.rotary_emb(positions, q, k)
-
         attn_output = self.attn(q, k, v)
 
         # In HPU, naive_attn_with_masks is no longer needed since sliding_window
-        # is supported in hpu_attn, we don't set "has_images" and let it return
-        if not kwargs.get("has_images", False):
+        # is supported in hpu_attn, we don't set "has_images" for img and let it return
+        if current_platform.is_hpu() or not kwargs.get("has_images", False):
             output, _ = self.o_proj(attn_output)
             return output
 
@@ -237,34 +236,19 @@ class Gemma3Attention(nn.Module):
     ) -> torch.Tensor:
         # NOTE(woosuk): As described in the comment above, this code is not
         # meant to be performant. It is only meant to be correct.
-        s = q.shape[1]
-        #q = q.view(-1, self.num_heads, self.head_dim)
-        q = q.view(-1, s, self.num_heads, self.head_dim)
+        q = q.view(-1, self.num_heads, self.head_dim)
         # Expand the key and value to handle GQA.
         num_queries_per_kv = self.num_heads // self.num_kv_heads
-        k = k.view(-1, s, self.num_kv_heads, self.head_dim)
+        k = k.view(-1, self.num_kv_heads, self.head_dim)
         k = k.repeat_interleave(num_queries_per_kv, dim=-2)
-        v = v.view(-1, s, self.num_kv_heads, self.head_dim)
+        v = v.view(-1, self.num_kv_heads, self.head_dim)
         v = v.repeat_interleave(num_queries_per_kv, dim=-2)
 
         if self.is_sliding:
             attn_masks = kwargs["local_attn_masks"]
         else:
             attn_masks = kwargs["global_attn_masks"]
-        query = q.transpose(1, 2)
-        key = k.transpose(1, 2)
-        value = v.transpose(1, 2)
 
-        output = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_masks,
-                self.scaling,
-            )
-
-        out = output.transpose(1, 2).flatten(-2, -1)
-        '''
         seq_lens = kwargs["seq_lens"]
         start_idx = 0
         for seq_len, attn_mask in zip(seq_lens, attn_masks):
@@ -288,7 +272,6 @@ class Gemma3Attention(nn.Module):
             output = output.transpose(1, 2).flatten(-2, -1)
             out[start_idx:end_idx] = output
             start_idx = end_idx
-        '''
         return out
 
 
