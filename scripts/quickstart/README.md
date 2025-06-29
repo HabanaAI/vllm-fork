@@ -167,7 +167,7 @@ h  Help info
 
 ### Launch vLLM Serving with TP=8
 ```bash
-bash single_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
+bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
