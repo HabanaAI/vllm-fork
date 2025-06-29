@@ -723,7 +723,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask = img_mask.permute(0,1,3,2)
 
                 img_pos_cum = torch.cumsum(img_pos, 1)
-                img_causal = torch.arange(seq_len, device = input_ids.device).unsqueeze(0) - img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
+                img_causal = torch.arange(seq_len, device = input_ids.device).unsqueeze(0) - \
+                    img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
                 img_causal = torch.cat((img_causal[:,0:1]-1, img_causal[:,:-1]), dim=1)
                 img_causal = img_causal.clamp_(min=0, max=seq_len-1).unsqueeze(1).unsqueeze(3)
                 ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
@@ -737,18 +738,20 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             global_attn_masks.append(global_attn_mask)
 
             if self.sliding_window is not None:
-                if 'fusedsdpa_ws_opt' not in kwargs :
-                    # Create a local causal mask with sliding window (1024).
-                    local_attn_mask = torch.ones_like(global_attn_mask)
-                    local_attn_mask = torch.tril(local_attn_mask,
-                                                diagonal=-self.sliding_window)
-                    local_attn_mask = torch.where(local_attn_mask == 0,
-                                                global_attn_mask, float("-inf"))
-                    local_attn_masks.append(local_attn_mask)
-                else:
-                    local_attn_masks.append(global_attn_masks)
-        kwargs["global_attn_masks"] = global_attn_masks if len(global_attn_masks) > 1 else global_attn_masks[0]
-        kwargs["local_attn_masks"] = local_attn_masks if len(local_attn_masks) > 1 else local_attn_masks[0]
+                # Create a local causal mask with sliding window (1024).
+                local_attn_mask = torch.ones_like(global_attn_mask)
+                local_attn_mask = torch.tril(local_attn_mask,
+                                            diagonal=-self.sliding_window)
+                local_attn_mask = torch.where(local_attn_mask == 0,
+                                            global_attn_mask, float("-inf"))
+            if is_hpu:
+                global_attn_masks = global_attn_mask
+                local_attn_masks = local_attn_mask
+            else:
+                global_attn_masks.append(global_attn_masks)
+                local_attn_masks.append(local_attn_mask)
+        kwargs["global_attn_masks"] = global_attn_masks
+        kwargs["local_attn_masks"] = local_attn_masks
         return kwargs
 
     def compute_logits(

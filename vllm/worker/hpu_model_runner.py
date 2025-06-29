@@ -135,8 +135,9 @@ class Singleton(type):
         return cls._instances[cls]
 
 def is_mm_optimized(model):
-    return 'Gemma3ForConditionalGeneration' in str(type(model)) or \
-        'Gemma3ForConditionalGeneration' in str(type(model.model))
+    return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
+        if hasattr(model, 'model') else \
+        'Gemma3ForConditionalGeneration' in str(type(model))
 
 def pad_flat_tensor(tensor, desired_size):
     assert tensor.dim() == 1, 'Only flat tensors are supported'
@@ -321,8 +322,6 @@ class HpuModelAdapter(torch.nn.Module):
         self.prefill_use_fusedsdpa = get_config(
         ).prompt_attn_impl == 'fsdpa_impl'
         HPUFusedSDPA = kernels.fsdpa()
-        self.fusedsdpa_ws_opt = 'window_size' in HPUFusedSDPA.forward.__code__.co_varnames \
-            if HPUFusedSDPA and self.prefill_use_fusedsdpa else False
 
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
@@ -610,8 +609,6 @@ class HpuModelAdapter(torch.nn.Module):
         if vision_embeddings is not None:
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
-            if self.fusedsdpa_ws_opt:
-                kwargs['fusedsdpa_ws_opt'] = True
             kwargs = self.model.prepare_attn_masks(
                 mask_dtype=self.dtype,
                 **kwargs,
