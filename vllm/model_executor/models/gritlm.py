@@ -100,9 +100,9 @@ class GritLMPooler(nn.Module):
         # If user pattern is found in the prompt, that means there should be
         # a newline token before the embed pattern.
         embed_pattern_ids = self.embed_pattern_ids
-        if self._find_array(prompt_token_ids,
-                            self.user_pattern_ids,
-                            start_idx=1) == 1:
+        if (self._find_array(prompt_token_ids,
+                             self.user_pattern_ids,
+                             start_idx=1) == 1):
             embed_pattern_ids = self.embed_newline_pattern_ids
 
         # Find the embed pattern in the prompt.
@@ -222,7 +222,6 @@ class GritLM(LlamaForCausalLM, SupportsV0Only):
         positions: torch.Tensor,
         **kwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-
         # Change attention to non-causal for pooling tasks.
         if self.runner_type == "pooling":
             attn_metadata = get_forward_context().attn_metadata

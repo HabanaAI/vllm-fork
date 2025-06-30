@@ -2,6 +2,7 @@
 # Adapted from
 # https://github.com/THUDM/ChatGLM2-6B
 """Inference-only ChatGLM model compatible with THUDM weights."""
+
 import json
 from typing import Iterable, Optional, Set, Tuple, Union
 
@@ -97,13 +98,15 @@ class GLMAttention(nn.Module):
             base=10000 * rope_ratio,
             is_neox_style=is_neox_style,
         )
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              self.scaling,
-                              num_kv_heads=self.num_kv_heads,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn")
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn",
+        )
 
     def forward(
         self,
@@ -191,10 +194,12 @@ class GLMBlock(nn.Module):
                                                eps=config.layernorm_epsilon)
 
         # Self attention.
-        self.self_attention = GLMAttention(config,
-                                           cache_config,
-                                           quant_config,
-                                           prefix=f"{prefix}.self_attention")
+        self.self_attention = GLMAttention(
+            config,
+            cache_config,
+            quant_config,
+            prefix=f"{prefix}.self_attention",
+        )
         self.hidden_dropout = config.hidden_dropout
 
         # Layernorm on the attention output
@@ -296,8 +301,10 @@ class GLMTransformer(nn.Module):
 @support_torch_compile
 class ChatGLMModel(nn.Module, SupportsQuant):
     packed_modules_mapping = {
-        "linear_proj.merged_proj":
-        ["linear_proj.gate_proj", "linear_proj.dense_h_to_4h"]
+        "linear_proj.merged_proj": [
+            "linear_proj.gate_proj",
+            "linear_proj.dense_h_to_4h",
+        ]
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
@@ -309,10 +316,12 @@ class ChatGLMModel(nn.Module, SupportsQuant):
 
         self.config = config
 
-        self.embedding = VocabParallelEmbedding(config.padded_vocab_size,
-                                                config.hidden_size,
-                                                quant_config=quant_config,
-                                                prefix=f"{prefix}.embedding")
+        self.embedding = VocabParallelEmbedding(
+            config.padded_vocab_size,
+            config.hidden_size,
+            quant_config=quant_config,
+            prefix=f"{prefix}.embedding",
+        )
 
         self.num_layers = config.num_layers
         self.multi_query_group_num = config.multi_query_group_num
@@ -322,10 +331,12 @@ class ChatGLMModel(nn.Module, SupportsQuant):
                                       quant_config,
                                       prefix=f"{prefix}.encoder")
 
-        self.output_layer = ParallelLMHead(config.padded_vocab_size,
-                                           config.hidden_size,
-                                           quant_config=quant_config,
-                                           prefix=f"{prefix}.output_layer")
+        self.output_layer = ParallelLMHead(
+            config.padded_vocab_size,
+            config.hidden_size,
+            quant_config=quant_config,
+            prefix=f"{prefix}.output_layer",
+        )
 
         self.make_empty_intermediate_tensors = (
             self.encoder.make_empty_intermediate_tensors)
@@ -369,7 +380,7 @@ class ChatGLMModel(nn.Module, SupportsQuant):
         loaded_params: Set[str] = set()
 
         for name, loaded_weight in weights:
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -449,7 +460,7 @@ class ChatGLMForCausalLM(ChatGLMBaseModel, SupportsLoRA, SupportsPP,
                          SupportsQuant):
     packed_modules_mapping = {
         "query_key_value": ["query_key_value"],
-        "dense_h_to_4h": ["dense_h_to_4h"]
+        "dense_h_to_4h": ["dense_h_to_4h"],
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):

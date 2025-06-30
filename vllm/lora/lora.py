@@ -59,8 +59,8 @@ class LoRALayerWeights:
 
     @property
     def extra_vocab_size(self) -> int:
-        return self.embeddings_tensor.shape[
-            0] if self.embeddings_tensor is not None else 0
+        return (self.embeddings_tensor.shape[0]
+                if self.embeddings_tensor is not None else 0)
 
     @classmethod
     def from_config(
@@ -69,30 +69,40 @@ class LoRALayerWeights:
         peft_helper: PEFTHelper,
         embeddings_tensor: Optional[torch.Tensor] = None,
     ) -> "LoRALayerWeights":
-        return cls(module_name, peft_helper.r, peft_helper.lora_alpha, None,
-                   None, None, embeddings_tensor,
-                   peft_helper.vllm_lora_scaling_factor)
+        return cls(
+            module_name,
+            peft_helper.r,
+            peft_helper.lora_alpha,
+            None,
+            None,
+            None,
+            embeddings_tensor,
+            peft_helper.vllm_lora_scaling_factor,
+        )
 
     @classmethod
     def create_dummy_lora_weights(
-            cls,
-            module_name: str,
-            input_dim: int,
-            output_dim: int,
-            rank: int,
-            dtype: torch.dtype,
-            device: torch.types.Device,
-            embeddings_tensor_dim: Optional[int] = None,
-            bias_enabled: Optional[bool] = False) -> "LoRALayerWeights":
+        cls,
+        module_name: str,
+        input_dim: int,
+        output_dim: int,
+        rank: int,
+        dtype: torch.dtype,
+        device: torch.types.Device,
+        embeddings_tensor_dim: Optional[int] = None,
+        bias_enabled: Optional[bool] = False,
+    ) -> "LoRALayerWeights":
         pin_memory = str(device) == "cpu" and is_pin_memory_available()
         lora_a = torch.zeros([input_dim, rank],
                              dtype=dtype,
                              device=device,
                              pin_memory=pin_memory)
-        lora_b = torch.zeros([rank, output_dim],
-                             dtype=dtype,
-                             device=device,
-                             pin_memory=pin_memory)
+        lora_b = torch.zeros(
+            [rank, output_dim],
+            dtype=dtype,
+            device=device,
+            pin_memory=pin_memory,
+        )
         if bias_enabled:
             bias = torch.zeros([output_dim],
                                dtype=dtype,
@@ -101,12 +111,13 @@ class LoRALayerWeights:
         else:
             bias = None
 
-        embeddings_tensor = torch.rand(
+        embeddings_tensor = (torch.rand(
             10,
             embeddings_tensor_dim,
             dtype=dtype,
             device=device,
-            pin_memory=pin_memory) if embeddings_tensor_dim else None
+            pin_memory=pin_memory,
+        ) if embeddings_tensor_dim else None)
         return cls(
             module_name,
             rank=rank,
@@ -173,7 +184,8 @@ class PackedLoRALayerWeights(LoRALayerWeights):
             scaling=[
                 1 if lora is not None else None  # type: ignore
                 for lora in loras
-            ])
+            ],
+        )
         return obj
 
     def optimize(self) -> "PackedLoRALayerWeights":

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Benchmark offline prioritization."""
+
 import argparse
 import dataclasses
 import json
@@ -13,7 +14,7 @@ from vllm.engine.arg_utils import EngineArgs
 from vllm.utils import FlexibleArgumentParser
 
 
-#Select a equi-probable random priority
+# Select a equi-probable random priority
 def get_random_flag():
     return 0 if random.random() < 0.5 else 1
 
@@ -51,8 +52,8 @@ def sample_requests(
         completion = dataset[i][1]
         completion_token_ids = tokenizer(completion).input_ids
         prompt_len = len(prompt_token_ids)
-        output_len = len(completion_token_ids
-                         ) if fixed_output_len is None else fixed_output_len
+        output_len = (len(completion_token_ids)
+                      if fixed_output_len is None else fixed_output_len)
         if prompt_len < 4 or output_len < 4:
             # Prune too short sequences.
             continue
@@ -74,6 +75,7 @@ def run_vllm(
     disable_detokenize: bool = False,
 ) -> float:
     from vllm import LLM, SamplingParams
+
     llm = LLM(**dataclasses.asdict(engine_args))
 
     assert all(
@@ -122,9 +124,12 @@ def main(args: argparse.Namespace):
                                    args.output_len)
 
     if args.backend == "vllm":
-        elapsed_time = run_vllm(requests, args.n,
-                                EngineArgs.from_cli_args(args),
-                                args.disable_detokenize)
+        elapsed_time = run_vllm(
+            requests,
+            args.n,
+            EngineArgs.from_cli_args(args),
+            args.disable_detokenize,
+        )
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
     total_num_tokens = sum(prompt_len + output_len
@@ -155,31 +160,40 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="Path to the dataset.")
-    parser.add_argument("--input-len",
-                        type=int,
-                        default=None,
-                        help="Input prompt length for each request")
-    parser.add_argument("--output-len",
-                        type=int,
-                        default=None,
-                        help="Output length for each request. Overrides the "
-                        "output length from the dataset.")
-    parser.add_argument("--n",
-                        type=int,
-                        default=1,
-                        help="Number of generated sequences per prompt.")
-    parser.add_argument("--num-prompts",
-                        type=int,
-                        default=200,
-                        help="Number of prompts to process.")
     parser.add_argument(
-        '--output-json',
+        "--input-len",
+        type=int,
+        default=None,
+        help="Input prompt length for each request",
+    )
+    parser.add_argument(
+        "--output-len",
+        type=int,
+        default=None,
+        help="Output length for each request. Overrides the "
+        "output length from the dataset.",
+    )
+    parser.add_argument(
+        "--n",
+        type=int,
+        default=1,
+        help="Number of generated sequences per prompt.",
+    )
+    parser.add_argument(
+        "--num-prompts",
+        type=int,
+        default=200,
+        help="Number of prompts to process.",
+    )
+    parser.add_argument(
+        "--output-json",
         type=str,
         default=None,
-        help='Path to save the throughput results in JSON format.')
+        help="Path to save the throughput results in JSON format.",
+    )
     parser.add_argument(
-        '--disable-detokenize',
-        action='store_true',
+        "--disable-detokenize",
+        action="store_true",
         help=("Do not detokenize responses (i.e. do not include "
               "detokenization time in the latency measurement)"),
     )

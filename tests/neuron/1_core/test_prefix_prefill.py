@@ -295,29 +295,42 @@ def get_active_block_tables(block_tables, query_lens, seq_lens, block_size,
     "prefill_batch_size,decode_batch_size,block_size,large_tile_size,num_heads,num_queries_per_kv,head_size,mixed_precision",
     [
         # Test minimal configurations (small block size)
-        (1, 199, 1, 512, 4, 2, 8, False
-         ),  # minimal block size, small dimensions
+        (
+            1,
+            199,
+            1,
+            512,
+            4,
+            2,
+            8,
+            False,
+        ),  # minimal block size, small dimensions
         (1, 199, 1, 512, 4, 2, 8, True),  # same with mixed precision
-
         # Test common/medium configurations
         (4, 12, 32, 2048, 32, 8, 64, False),  # common case, larger heads
-        (4, 12, 32, 2048, 16, 4, 32,
-         True),  # medium size, mixed precision, grouped-query attention (GQA)
-
+        (
+            4,
+            12,
+            32,
+            2048,
+            16,
+            4,
+            32,
+            True,
+        ),  # medium size, mixed precision, grouped-query attention (GQA)
         # Test large configurations
         (4, 12, 256, 8192, 8, 1, 128, False),  # large blocks, large head size
         (4, 12, 256, 8192, 64, 8, 64, True),  # large blocks, many heads
-
         # Test asymmetric configurations
         (2, 24, 64, 4096, 12, 4, 96, False),  # varied batch sizes
         (8, 8, 128, 2048, 24, 2, 48, True),  # balanced batches
-
         # Test edge cases
         (1, 128, 16, 1024, 4, 2, 16, False),  # large decode batch
         (16, 4, 8, 1024, 4, 2, 128, True),  # large prefill batch
         (4, 12, 32, 2048, 16, 1, 32, True),  # multi-head attention (MHA)
         (4, 12, 32, 2048, 16, 16, 32, True),  # multi-query attention (MQA)
-    ])
+    ],
+)
 @torch.inference_mode()
 def test_contexted_kv_attention(
     monkeypatch: pytest.MonkeyPatch,
@@ -330,7 +343,6 @@ def test_contexted_kv_attention(
     large_tile_size,
     mixed_precision: bool,
 ) -> None:
-
     import torch_xla.core.xla_model as xm
 
     from vllm.attention.ops.nki_flash_attn import (flash_attn_varlen_nkifunc,
@@ -394,8 +406,8 @@ def test_contexted_kv_attention(
 
         # build neuron program
         B_P_SIZE = 128
-        assert (large_tile_size >= B_P_SIZE
-                ), f"Expect {large_tile_size=} to be larger than {B_P_SIZE=}"
+        assert large_tile_size >= B_P_SIZE, (
+            f"Expect {large_tile_size=} to be larger than {B_P_SIZE=}")
 
         def ceil_div(a, b):
             return (a + b - 1) // b
@@ -414,9 +426,8 @@ def test_contexted_kv_attention(
         num_active_blocks = pad_to_multiple(num_active_blocks,
                                             large_tile_size // block_size)
         context_kv_len = num_active_blocks * block_size
-        assert (
-            context_kv_len %
-            large_tile_size == 0), f"invalid context_kv_len={context_kv_len}"
+        assert context_kv_len % large_tile_size == 0, (
+            f"invalid context_kv_len={context_kv_len}")
 
         # pad QKV tensors
         pad_dims = (

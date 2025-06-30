@@ -57,9 +57,9 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
                             dtype=torch.int32).unsqueeze(0)
 
         cross_attn_mask = mask >= metadata.cross_block_usage.unsqueeze(-1)
-        cross_attn_bias = (torch.zeros_like(cross_attn_mask,
-                                            dtype=dtype).masked_fill_(
-                                                cross_attn_mask, -math.inf))
+        cross_attn_bias = torch.zeros_like(cross_attn_mask,
+                                           dtype=dtype).masked_fill_(
+                                               cross_attn_mask, -math.inf)
 
         if not is_fake_hpu() and htorch.utils.internal.is_lazy():
             cross_block_mapping = torch.nn.functional.one_hot(
@@ -78,8 +78,10 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
             metadata = metadata._replace(cross_block_groups=cross_block_groups)
 
         cross_block_mapping = cross_block_mapping.to(dtype)
-        metadata = metadata._replace(cross_block_mapping=cross_block_mapping,
-                                     cross_attn_bias=cross_attn_bias)
+        metadata = metadata._replace(
+            cross_block_mapping=cross_block_mapping,
+            cross_attn_bias=cross_attn_bias,
+        )
         return metadata
 
     def _update_seq_lens(self, attn_metadata, batch_size, seq_len, device):
@@ -108,34 +110,43 @@ class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
-        selected_token_indices = kwargs.pop('selected_token_indices')
-        if 'warmup_mode' in kwargs:
-            kwargs.pop('warmup_mode')
-        input_ids = kwargs['input_ids']
-        kwargs['attn_metadata'] = self._update_metadata(
-            kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
-        kwargs['attn_metadata'] = self._update_cross_metadata(
-            kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype)
+        selected_token_indices = kwargs.pop("selected_token_indices")
+        if "warmup_mode" in kwargs:
+            kwargs.pop("warmup_mode")
+        input_ids = kwargs["input_ids"]
+        kwargs["attn_metadata"] = self._update_metadata(
+            kwargs["attn_metadata"],
+            input_ids.size(0),
+            input_ids.size(1),
+            input_ids.device,
+            self.dtype,
+        )
+        kwargs["attn_metadata"] = self._update_cross_metadata(
+            kwargs["attn_metadata"],
+            input_ids.size(0),
+            input_ids.size(1),
+            input_ids.device,
+            self.dtype,
+        )
         if htorch.utils.internal.is_lazy() and hasattr(self.model,
                                                        "language_model"):
-            bypass_hpu_graphs = kwargs.get('bypass_hpu_graphs', False)
+            bypass_hpu_graphs = kwargs.get("bypass_hpu_graphs", False)
             self.model.language_model.forward = partial(
                 self.model.language_model.forward,
-                attn_metadata=kwargs['attn_metadata'],
-                bypass_hpu_graphs=bypass_hpu_graphs)
+                attn_metadata=kwargs["attn_metadata"],
+                bypass_hpu_graphs=bypass_hpu_graphs,
+            )
         # TODO: Change the input_ids to 1D to match the public vllm
         # implementation and avoid shape mismatch issues with some
         # models(i.e. Mllama). But currently this will cause graph
         # building error.
         # kwargs['input_ids'] = input_ids.flatten()
         virtual_engine = 0
-        if 'virtual_engine' in kwargs:
-            virtual_engine = kwargs.pop('virtual_engine')
-        attn_metadata = kwargs.pop('attn_metadata')
-        if 'kv_caches' in kwargs:
-            kwargs.pop('kv_caches')
+        if "virtual_engine" in kwargs:
+            virtual_engine = kwargs.pop("virtual_engine")
+        attn_metadata = kwargs.pop("attn_metadata")
+        if "kv_caches" in kwargs:
+            kwargs.pop("kv_caches")
         with set_forward_context(attn_metadata, self.vllm_config,
                                  virtual_engine):
             hidden_states = self.model(*args, **kwargs)
@@ -150,6 +161,7 @@ class EncoderDecoderModelInputForHPU(ModelInputForHPUWithSamplingMetadata):
     """
     Used by the EncoderDecoderModelRunner.
     """
+
     encoder_input_tokens: Optional[torch.Tensor] = None
     encoder_input_positions: Optional[torch.Tensor] = None
 
@@ -174,7 +186,8 @@ class EncoderDecoderModelInputForHPU(ModelInputForHPUWithSamplingMetadata):
     ) -> "EncoderDecoderModelInputForHPU":
         return cast(
             EncoderDecoderModelInputForHPU,
-            super().from_broadcasted_tensor_dict(tensor_dict, attn_backend))
+            super().from_broadcasted_tensor_dict(tensor_dict, attn_backend),
+        )
 
 
 class HPUEncoderDecoderModelRunner(
@@ -215,9 +228,9 @@ class HPUEncoderDecoderModelRunner(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
     ) -> EncoderDecoderModelInputForHPU:
-        with self.profiler.record_event('internal', 'prepare_input_tensors'):
+        with self.profiler.record_event("internal", "prepare_input_tensors"):
             assert seq_group_metadata_list is not None
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
@@ -227,10 +240,12 @@ class HPUEncoderDecoderModelRunner(
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
-        return dataclasses.replace(model_input,
-                                   sampling_metadata=sampling_metadata,
-                                   is_prompt=is_prompt,
-                                   virtual_engine=virtual_engine)
+        return dataclasses.replace(
+            model_input,
+            sampling_metadata=sampling_metadata,
+            is_prompt=is_prompt,
+            virtual_engine=virtual_engine,
+        )
 
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
@@ -240,7 +255,8 @@ class HPUEncoderDecoderModelRunner(
         ]
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
-            [kv_caches] * self.parallel_config.pipeline_parallel_size)
+            [kv_caches] * self.parallel_config.pipeline_parallel_size,
+        )
         max_batch_size = self.max_num_prefill_seqs
         _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
         max_seq_len = min(self.max_num_batched_tokens // max_batch_size,
@@ -262,7 +278,7 @@ class HPUEncoderDecoderModelRunner(
         num_iters=3,
         align_worker=False,
     ) -> None:
-        phase = 'prompt' if is_prompt else 'decode'
+        phase = "prompt" if is_prompt else "decode"
         use_graphs = self._use_graphs()
         scenario_name = ("warmup_"
                          f"{phase}_"
@@ -270,7 +286,7 @@ class HPUEncoderDecoderModelRunner(
                          f"seq{seq_len}_"
                          f"ctx{ctx}_"
                          f"graphs{'T' if use_graphs else 'F'}")
-        self.profiler.start('internal', scenario_name)
+        self.profiler.start("internal", scenario_name)
         times = num_iters if use_graphs or is_pt_profiler_run else 1
         if is_prompt:
             seqs = [
@@ -285,11 +301,12 @@ class HPUEncoderDecoderModelRunner(
             blocks = [seq_len // batch_size for _ in range(batch_size)]
             blocks[0] += seq_len % batch_size
             seqs = [
-                self.create_dummy_seq_group_metadata(i,
-                                                     b * self.block_size - 1,
-                                                     is_prompt,
-                                                     temperature=temperature)
-                for i, b in enumerate(blocks)
+                self.create_dummy_seq_group_metadata(
+                    i,
+                    b * self.block_size - 1,
+                    is_prompt,
+                    temperature=temperature,
+                ) for i, b in enumerate(blocks)
             ]
         torch.hpu.synchronize()
         profiler = None
@@ -298,29 +315,33 @@ class HPUEncoderDecoderModelRunner(
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            is_single_step = \
-                self.vllm_config.scheduler_config.num_scheduler_steps == 1
+            is_single_step = (
+                self.vllm_config.scheduler_config.num_scheduler_steps == 1)
             if is_prompt or is_single_step:
                 self.execute_model(inputs, kv_caches, warmup_mode=True)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
                                              is_last_step=False)
-                self.execute_model(inputs,
-                                   kv_caches,
-                                   warmup_mode=True,
-                                   num_steps=2,
-                                   seqs=seqs,
-                                   ctx_blocks=ctx)
+                self.execute_model(
+                    inputs,
+                    kv_caches,
+                    warmup_mode=True,
+                    num_steps=2,
+                    seqs=seqs,
+                    ctx_blocks=ctx,
+                )
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=False,
                                              is_last_step=True)
-                self.execute_model(inputs,
-                                   kv_caches,
-                                   warmup_mode=True,
-                                   num_steps=2,
-                                   seqs=seqs,
-                                   ctx_blocks=ctx)
+                self.execute_model(
+                    inputs,
+                    kv_caches,
+                    warmup_mode=True,
+                    num_steps=2,
+                    seqs=seqs,
+                    ctx_blocks=ctx,
+                )
             torch.hpu.synchronize()
             if profiler:
                 profiler.step()
@@ -341,12 +362,12 @@ class HPUEncoderDecoderModelRunner(
         cross_block_table: Optional[List[int]] = None
         max_mm_tokens = self.mm_registry.get_max_multimodal_tokens(
             self.model_config)
-        encoder_dummy_data \
-            = self.input_registry.dummy_data_for_profiling(
+        encoder_dummy_data = self.input_registry.dummy_data_for_profiling(
             self.model_config,
             max_mm_tokens,
             self.mm_registry,
-            is_encoder_data=True)
+            is_encoder_data=True,
+        )
         max_mm_num = max(
             self.mm_registry.get_mm_limits_per_prompt(
                 self.model_config).values())
@@ -360,20 +381,21 @@ class HPUEncoderDecoderModelRunner(
                 block_tables = {
                     group_id: [_PAD_BLOCK_ID] * ctx * self.block_size
                 }
-                computed_block_nums = ([1] * ctx)
+                computed_block_nums = [1] * ctx
         else:
             output_len = 1
             block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
             # limit cross blocks to the number of available blocks
-            num_cross_blocks = min(self.bucketing_ctx.num_hpu_blocks,
-                                   max_mm_tokens) // self.block_size
+            num_cross_blocks = (
+                min(self.bucketing_ctx.num_hpu_blocks, max_mm_tokens) //
+                self.block_size)
             cross_block_table = [_PAD_BLOCK_ID] * num_cross_blocks
         output_token_ids = [1] * output_len
-        decoder_dummy_data = self.input_registry \
-            .dummy_data_for_profiling(self.model_config,
-                                      seq_len,
-                                      self.mm_registry,
-                                      is_encoder_data=False)
+        decoder_dummy_data = self.input_registry.dummy_data_for_profiling(
+            self.model_config,
+            seq_len,
+            self.mm_registry,
+            is_encoder_data=False)
         seq_data = decoder_dummy_data.seq_data
         if not is_prompt:
             # subtract 1 here to avoid warning
@@ -391,7 +413,8 @@ class HPUEncoderDecoderModelRunner(
             multi_modal_data=decoder_dummy_data.multi_modal_data,
             multi_modal_placeholders=decoder_dummy_data.
             multi_modal_placeholders,
-            cross_block_table=cross_block_table)
+            cross_block_table=cross_block_table,
+        )
 
     def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:
         # NOTE(kzawora): To anyone working on this in the future:
@@ -414,43 +437,49 @@ class HPUEncoderDecoderModelRunner(
         # input_hash(torch.tensor(123)) == input_hash(torch.tensor(321))
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
-        attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'attn_bias',
-            'seq_lens_tensor',
-            'context_lens_tensor',
-            'block_list',
-            'block_mapping',
-            'block_usage',
-            'slot_mapping',
-            'is_prompt',
-            'block_size',
-            'block_groups',
-            'num_prefill_tokens',
-            'num_decode_tokens',
-            'num_prefills',
-            'seq_lens',
-            'encoder_seq_lens',
-            'encoder_seq_lens_tensor',
-            'max_encoder_seq_len',
-            'cross_block_list',
-            'cross_slot_mapping',
-            'cross_block_mapping',
-            'cross_block_groups',
-            'cross_block_usage',
-            'cross_attn_bias',
-        ])
+        attention_metadata = subtuple(
+            metadata,
+            "TrimmedAttentionMetadata",
+            [
+                "attn_bias",
+                "seq_lens_tensor",
+                "context_lens_tensor",
+                "block_list",
+                "block_mapping",
+                "block_usage",
+                "slot_mapping",
+                "is_prompt",
+                "block_size",
+                "block_groups",
+                "num_prefill_tokens",
+                "num_decode_tokens",
+                "num_prefills",
+                "seq_lens",
+                "encoder_seq_lens",
+                "encoder_seq_lens_tensor",
+                "max_encoder_seq_len",
+                "cross_block_list",
+                "cross_slot_mapping",
+                "cross_block_mapping",
+                "cross_block_groups",
+                "cross_block_usage",
+                "cross_attn_bias",
+            ],
+        )
         return attention_metadata
 
     def _check_config(self, batch_size, seq_len, ctx, attn_metadata,
                       warmup_mode):
-        phase = 'prompt' if attn_metadata.is_prompt else 'decode'
+        phase = "prompt" if attn_metadata.is_prompt else "decode"
         num_blocks = ctx if warmup_mode else self._num_blocks(attn_metadata)
         cfg: Optional[tuple] = (batch_size, seq_len, num_blocks, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            logger.warning("Configuration: %s was not warmed-up!",
-                           (phase, batch_size, seq_len, num_blocks))
+            logger.warning(
+                "Configuration: %s was not warmed-up!",
+                (phase, batch_size, seq_len, num_blocks),
+            )
 
     def add_dummy_seq(self, seq_group_metadata_list, is_prompt):
         real_batch_size = len(seq_group_metadata_list)
@@ -475,15 +504,15 @@ class HPUEncoderDecoderModelRunner(
         warmup_mode=False,
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
-        ctx_blocks: int = 1
+        ctx_blocks: int = 1,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
                 return []
             # last multi-step
-            output = self._decode_sampler_outputs(
-                model_input) if self.is_driver_worker else []
+            output = (self._decode_sampler_outputs(model_input)
+                      if self.is_driver_worker else [])
             torch.hpu.synchronize()
         if model_input.is_first_multi_step:
             # first multi-step
@@ -501,8 +530,8 @@ class HPUEncoderDecoderModelRunner(
             assert is_prompt is not None
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
-            phase = 'prompt' if is_prompt else 'decode'
-            if phase == 'decode':
+            phase = "prompt" if is_prompt else "decode"
+            if phase == "decode":
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
@@ -534,7 +563,7 @@ class HPUEncoderDecoderModelRunner(
                                     f"ctx{ctx_blocks}_"
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
-                model_event_name = 'model_executable'
+                model_event_name = "model_executable"
             if num_steps > 1:
                 # in case of multi-step scheduling
                 # we only want to pythonize in the last step
@@ -548,16 +577,16 @@ class HPUEncoderDecoderModelRunner(
                     for i in range(len(cache_orig_output_tokens_len)):
                         seq_group_metadata = seq_group_metadata_list[i]
                         for j, data in seq_group_metadata.seq_data.items():
-                            orig_output_tokens_len = \
-                                cache_orig_output_tokens_len[i][j]
-                            data.output_token_ids = \
-                                data.output_token_ids[:orig_output_tokens_len]
+                            orig_output_tokens_len = (
+                                cache_orig_output_tokens_len[i][j])
+                            data.output_token_ids = data.output_token_ids[:
+                                                                          orig_output_tokens_len]
 
             for i in range(num_steps):
                 if i != 0 and not self.is_driver_worker:
                     broadcast_data = broadcast_tensor_dict(src=0)
-                    if 'early_exit' in broadcast_data and broadcast_data[
-                            'early_exit']:
+                    if ("early_exit" in broadcast_data
+                            and broadcast_data["early_exit"]):
                         return [output] if num_steps == 1 else []
                     execute_model_kwargs.update({
                         "input_ids":
@@ -566,21 +595,24 @@ class HPUEncoderDecoderModelRunner(
                         broadcast_data["positions"],
                         "attn_metadata":
                         self.trim_attn_metadata(
-                            broadcast_data["attn_metadata"])
+                            broadcast_data["attn_metadata"]),
                     })
-                with self.profiler.record_event('internal', model_event_name):
+                with self.profiler.record_event("internal", model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
-                        selected_token_indices)
+                        selected_token_indices,
+                    )
 
                 # Compute the logits.
-                with self.profiler.record_event('internal',
-                                                ('compute_logits_'
-                                                 f'{phase}_bs'
-                                                 f'{batch_size}_'
-                                                 f'seq{seq_len}_ctx'
-                                                 f'{ctx_blocks}')):
+                with self.profiler.record_event(
+                        "internal",
+                    ("compute_logits_"
+                     f"{phase}_bs"
+                     f"{batch_size}_"
+                     f"seq{seq_len}_ctx"
+                     f"{ctx_blocks}"),
+                ):
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -593,12 +625,14 @@ class HPUEncoderDecoderModelRunner(
                 if model_input.async_callback is not None:
                     model_input.async_callback()
                 # Sample the next token.
-                with self.profiler.record_event('internal',
-                                                ('sample_'
-                                                 f'{phase}_'
-                                                 f'bs{batch_size}_'
-                                                 f'seq{seq_len}_'
-                                                 f'ctx{ctx_blocks}')):
+                with self.profiler.record_event(
+                        "internal",
+                    ("sample_"
+                     f"{phase}_"
+                     f"bs{batch_size}_"
+                     f"seq{seq_len}_"
+                     f"ctx{ctx_blocks}"),
+                ):
                     output = self.sampler(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
@@ -613,8 +647,8 @@ class HPUEncoderDecoderModelRunner(
                         if model_input.async_callback is not None:
                             ctx = model_input.async_callback.keywords[  # type: ignore
                                 "ctx"]
-                            seq_group_metadata_list = \
-                                ctx.seq_group_metadata_list
+                            seq_group_metadata_list = (
+                                ctx.seq_group_metadata_list)
                         elif seqs is not None:
                             seq_group_metadata_list = seqs
                         else:
@@ -628,8 +662,8 @@ class HPUEncoderDecoderModelRunner(
                             # Cache the original output token ids
                             cache_orig_output_tokens_len.append({})
                             for j, data in seq_group_metadata.seq_data.items():
-                                cache_orig_output_tokens_len[seq_idx][j] = \
-                                    len(data.output_token_ids)
+                                cache_orig_output_tokens_len[seq_idx][j] = len(
+                                    data.output_token_ids)
                     seq_group_metadata_list = self.add_dummy_seq(
                         seq_group_metadata_list, is_prompt=False)
                     for seq_group_metadata in seq_group_metadata_list:
@@ -640,9 +674,9 @@ class HPUEncoderDecoderModelRunner(
                                 # add a place holder for prepare_decode
                                 # arbitrary value, this could be any token
                                 dummy_token = (540, )
-                                data.output_token_ids += (dummy_token)
+                                data.output_token_ids += dummy_token
                             else:
-                                broadcast_tensor_dict({'early_exit': True},
+                                broadcast_tensor_dict({"early_exit": True},
                                                       src=0)
                                 if num_steps == 1:
                                     return [output]
@@ -658,12 +692,12 @@ class HPUEncoderDecoderModelRunner(
                         "positions":
                         result.input_positions,
                         "attn_metadata":
-                        self.trim_attn_metadata(result.attn_metadata)
+                        self.trim_attn_metadata(result.attn_metadata),
                     })
                     model_kwargs_broadcast_data = {
                         "input_ids": result.input_tokens,
                         "positions": result.input_positions,
-                        "attn_metadata": vars(result.attn_metadata)
+                        "attn_metadata": vars(result.attn_metadata),
                     }
                     broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
                 else:
@@ -679,7 +713,8 @@ class HPUEncoderDecoderModelRunner(
                     seq_len=seq_len,
                     batch_size_padded=batch_size_padded,
                     real_batch_size=real_batch_size,
-                    is_prompt=is_prompt)
+                    is_prompt=is_prompt,
+                )
                 self.profiler.record_counter(self.event_start, counters)
             if num_steps == 1:
                 if self.return_hidden_states:
@@ -699,8 +734,8 @@ class HPUEncoderDecoderModelRunner(
         sampler_outputs = []
         num_outputs = len(self.cached_step_outputs)
         for i in range(num_outputs):
-            next_token_ids = self.cached_step_outputs.pop(
-                0).token_ids.cpu().tolist()
+            next_token_ids = (
+                self.cached_step_outputs.pop(0).token_ids.cpu().tolist())
             sampler_output = self._make_decode_output(
                 next_token_ids, model_input.sampling_metadata.seq_groups)
             sampler_outputs.append(sampler_output)
@@ -715,7 +750,8 @@ class HPUEncoderDecoderModelRunner(
                     scheduler_outputs=ctx.scheduler_outputs,
                     is_async=False,
                     is_last_step=False,
-                    is_first_step_output=False)
+                    is_first_step_output=False,
+                )
                 model_input.async_callback()
 
         if use_async_out_proc:

@@ -105,13 +105,13 @@ class VllmModelForTextGeneration(VllmModel[T], Protocol[T]):
 
 @overload
 def is_text_generation_model(
-        model: Type[object]) -> TypeIs[Type[VllmModelForTextGeneration]]:
+    model: Type[object], ) -> TypeIs[Type[VllmModelForTextGeneration]]:
     ...
 
 
 @overload
 def is_text_generation_model(
-        model: object) -> TypeIs[VllmModelForTextGeneration]:
+    model: object, ) -> TypeIs[VllmModelForTextGeneration]:
     ...
 
 
@@ -142,7 +142,8 @@ class VllmModelForPooling(VllmModel[T], Protocol[T]):
 
 
 @overload
-def is_pooling_model(model: Type[object]) -> TypeIs[Type[VllmModelForPooling]]:
+def is_pooling_model(
+    model: Type[object], ) -> TypeIs[Type[VllmModelForPooling]]:
     ...
 
 

@@ -36,14 +36,18 @@ def parse_args():
     parser.set_defaults(load_format="sharded_state")
 
     # Add validation arguments
-    parser.add_argument("--prompt",
-                        type=str,
-                        default="Hello, world!",
-                        help="Prompt for validation")
-    parser.add_argument("--max-tokens",
-                        type=int,
-                        default=100,
-                        help="Maximum number of tokens to generate")
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default="Hello, world!",
+        help="Prompt for validation",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=100,
+        help="Maximum number of tokens to generate",
+    )
     parser.add_argument("--temperature",
                         type=float,
                         default=0.7,

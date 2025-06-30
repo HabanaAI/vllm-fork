@@ -22,8 +22,8 @@ def nki_load_and_transform_block_tables(
     head_id,
     block_size_tiling_factor,
 ):
-    assert is_power_of_2(
-        num_blocks_per_tile), f"{num_blocks_per_tile=} must be power of 2"
+    assert is_power_of_2(num_blocks_per_tile), (
+        f"{num_blocks_per_tile=} must be power of 2")
     block_tables_sbuf = load_block_tables(block_tables, num_tiles,
                                           num_blocks_per_tile)
 
@@ -148,6 +148,6 @@ def test_load_and_transform_block_tables(
             head_id,
             block_size_tiling_factor,
         )
-        assert (nki_out.shape == ref_out.shape
-                ), f"{nki_out.shape=} != {ref_out.shape=}"
+        assert nki_out.shape == ref_out.shape, (
+            f"{nki_out.shape=} != {ref_out.shape=}")
         assert torch.all(nki_out == ref_out)

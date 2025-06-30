@@ -40,13 +40,12 @@ class IncrementalDetokenizer:
         tokenizer: Optional[AnyTokenizer],
         request: EngineCoreRequest,
     ) -> "IncrementalDetokenizer":
-
         if tokenizer is None:
             # No tokenizer => skipping detokenization.
             return IncrementalDetokenizer()
 
-        if (isinstance(tokenizer, PreTrainedTokenizerFast) and version.parse(
-                tokenizers.__version__) >= version.parse("0.21.1")):
+        if isinstance(tokenizer, PreTrainedTokenizerFast) and version.parse(
+                tokenizers.__version__) >= version.parse("0.21.1"):
             # Fast tokenizer => use tokenizers library DecodeStream.
             # And only tokenizers >= 0.21.1 supports Fast Detokenizer.
             return FastIncrementalDetokenizer(tokenizer, request)
@@ -139,8 +138,8 @@ class BaseIncrementalDetokenizer(IncrementalDetokenizer, ABC):
         # We return the full output text if the sequence is finished.
         buffer_length = 0 if finished else self.stop_buffer_length
         if not delta:
-            return self.output_text[:-buffer_length] if buffer_length else (
-                self.output_text)
+            return (self.output_text[:-buffer_length] if buffer_length else
+                    (self.output_text))
         length = len(self.output_text) - buffer_length
         last_offset = self._last_output_text_offset
         if last_offset < length:
@@ -167,7 +166,7 @@ class FastIncrementalDetokenizer(BaseIncrementalDetokenizer):
         if prompt_len > 4:
             for i in range(4, min(prompt_len + 1, 24)):
                 suffix = request.prompt_token_ids[-i:]
-                if '�' not in self.tokenizer.decode(suffix):
+                if "�" not in self.tokenizer.decode(suffix):
                     prompt_suffix = suffix
                     break
 
@@ -237,8 +236,8 @@ class SlowIncrementalDetokenizer(BaseIncrementalDetokenizer):
 
     @property
     def output_token_ids(self) -> list[int]:
-        return self.token_ids if not self.prompt_len else (
-            self.token_ids[self.prompt_len:])
+        return (self.token_ids if not self.prompt_len else
+                (self.token_ids[self.prompt_len:]))
 
     def decode_next(self, next_token_id: int) -> str:
         new_tokens, decoded_text, prefix_offset, read_offset = (

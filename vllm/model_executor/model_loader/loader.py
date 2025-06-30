@@ -77,7 +77,7 @@ def device_loading_context(module: torch.nn.Module,
 
     # Store original device states and move parameters to GPU if they're on CPU
     for name, p in module.named_parameters():
-        if p.device.type == "cpu" and target_device.type != 'hpu':
+        if p.device.type == "cpu" and target_device.type != "hpu":
             original_device_states[name] = p.device
             p.data = p.data.to(target_device)
         # Parameters already on target device are not touched
@@ -183,8 +183,8 @@ def _process_weights_after_loading(model: nn.Module, model_config: ModelConfig,
     # NOTE: This intentionally happens after other modules so we can easily
     # decompress the weights for MLA.
     for _, module in model.named_modules():
-        if isinstance(module, Attention) and \
-            hasattr(module, "process_weights_after_loading"):
+        if isinstance(module, Attention) and hasattr(
+                module, "process_weights_after_loading"):
             # TODO(lucas): see if there is a way to unify the signatures
             # of process_weights_after_loading
             module.process_weights_after_loading(model_config.dtype)
@@ -357,8 +357,11 @@ class DefaultModelLoader(BaseModelLoader):
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
         """Get an iterator for the model weights based on the load format."""
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
-            source.model_or_path, source.revision, source.fall_back_to_pt,
-            source.allow_patterns_overrides)
+            source.model_or_path,
+            source.revision,
+            source.fall_back_to_pt,
+            source.allow_patterns_overrides,
+        )
         if self.load_config.load_format == LoadFormat.NPCACHE:
             # Currently np_cache only support *.bin checkpoints
             assert use_safetensors is False
@@ -439,18 +442,20 @@ class DefaultModelLoader(BaseModelLoader):
             yield from self._get_weights_iterator(source)
 
     def download_model(self, model_config: ModelConfig) -> None:
-        self._prepare_weights(model_config.model,
-                              model_config.revision,
-                              fall_back_to_pt=True,
-                              allow_patterns_overrides=None)
+        self._prepare_weights(
+            model_config.model,
+            model_config.revision,
+            fall_back_to_pt=True,
+            allow_patterns_overrides=None,
+        )
 
     def load_model(self, vllm_config: VllmConfig) -> nn.Module:
         device_config = vllm_config.device_config
         load_config = vllm_config.load_config
         model_config = vllm_config.model_config
 
-        load_device = device_config.device if load_config.device is None else \
-                      load_config.device
+        load_device = (device_config.device
+                       if load_config.device is None else load_config.device)
         target_device = torch.device(load_device)
         with set_default_torch_dtype(model_config.dtype):
             with target_device:
@@ -464,7 +469,8 @@ class DefaultModelLoader(BaseModelLoader):
             logger.info(
                 "Loading weights took %.2f seconds",
                 self.counter_after_loading_weights -
-                self.counter_before_loading_weights)
+                self.counter_before_loading_weights,
+            )
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             if model_config.quantization is None and loaded_weights is not None:
@@ -751,6 +757,7 @@ class ShardedStateLoader(BaseModelLoader):
             yield from runai_safetensors_weights_iterator(paths, True)
         else:
             from safetensors.torch import safe_open
+
             for path in paths:
                 with safe_open(path, framework="pt") as f:
                     for key in f.keys():  # noqa: SIM118
@@ -844,8 +851,11 @@ class BitsAndBytesModelLoader(BaseModelLoader):
                         revision,
                         ignore_patterns=self.load_config.ignore_patterns,
                     )
-                    return hf_folder, glob.glob(
-                        os.path.join(hf_folder, pattern)), pattern
+                    return (
+                        hf_folder,
+                        glob.glob(os.path.join(hf_folder, pattern)),
+                        pattern,
+                    )
 
         raise RuntimeError(
             f"No model weights found in: `{model_name_or_path}`")
@@ -1132,7 +1142,6 @@ class BitsAndBytesModelLoader(BaseModelLoader):
             yield org_weight_name, processed_weight
 
     def _get_bnb_target_modules(self, model: nn.Module) -> None:
-
         for name, module in model.named_modules():
             if isinstance(module, (LinearBase, )):
                 if modules_info := self.modules_mapping.get_sub_modules(name):
@@ -1146,8 +1155,8 @@ class BitsAndBytesModelLoader(BaseModelLoader):
                 # weights with same last name.
                 self.target_modules.append(name)
 
-        assert (self.target_modules
-                ), "vllm currently does not support BNB quantization for"
+        assert self.target_modules, (
+            "vllm currently does not support BNB quantization for")
         f" {type(model).__name__}"
 
     def _load_weights(self, model_config: ModelConfig,
@@ -1265,8 +1274,9 @@ class BitsAndBytesModelLoader(BaseModelLoader):
                 # param_dict before renaming.
                 new_quant_param_name = quant_param_name.replace(
                     shard_name, weight_name)
-                need_rename = (quant_param_name not in param_dict) \
-                              and (new_quant_param_name in param_dict)
+                need_rename = (quant_param_name
+                               not in param_dict) and (new_quant_param_name
+                                                       in param_dict)
                 if can_correct_rename and need_rename:
                     shard_index = index
                     quant_param_name = new_quant_param_name
@@ -1362,14 +1372,14 @@ class GGUFModelLoader(BaseModelLoader):
             # GGUF layer map assumes that we will have a merged expert weights
             # so we need to map them manually
             for idx in range(config.num_hidden_layers):
-                gguf_to_hf_name_map[f"blk.{idx}.exp_probs_b.bias"] = \
-                        f"model.layers.{idx}.mlp.gate.e_score_correction_bias"
-                gguf_to_hf_name_map[f"blk.{idx}.ffn_down_exps.weight"] = \
-                        f"model.layers.{idx}.mlp.experts.0.down_proj.weight"
-                gguf_to_hf_name_map[f"blk.{idx}.ffn_gate_exps.weight"] = \
-                        f"model.layers.{idx}.mlp.experts.0.gate_proj.weight"
-                gguf_to_hf_name_map[f"blk.{idx}.ffn_up_exps.weight"] = \
-                        f"model.layers.{idx}.mlp.experts.0.up_proj.weight"
+                gguf_to_hf_name_map[f"blk.{idx}.exp_probs_b.bias"] = (
+                    f"model.layers.{idx}.mlp.gate.e_score_correction_bias")
+                gguf_to_hf_name_map[f"blk.{idx}.ffn_down_exps.weight"] = (
+                    f"model.layers.{idx}.mlp.experts.0.down_proj.weight")
+                gguf_to_hf_name_map[f"blk.{idx}.ffn_gate_exps.weight"] = (
+                    f"model.layers.{idx}.mlp.experts.0.gate_proj.weight")
+                gguf_to_hf_name_map[f"blk.{idx}.ffn_up_exps.weight"] = (
+                    f"model.layers.{idx}.mlp.experts.0.up_proj.weight")
 
         arch = None
         for key, value in gguf.MODEL_ARCH_NAMES.items():
@@ -1423,8 +1433,8 @@ class GGUFModelLoader(BaseModelLoader):
 
 class RunaiModelStreamerLoader(BaseModelLoader):
     """
-        Model loader that can load safetensors
-        files from local FS or S3 bucket.
+    Model loader that can load safetensors
+    files from local FS or S3 bucket.
     """
 
     def __init__(self, load_config: LoadConfig):
@@ -1432,19 +1442,19 @@ class RunaiModelStreamerLoader(BaseModelLoader):
         if load_config.model_loader_extra_config:
             extra_config = load_config.model_loader_extra_config
 
-            if ("concurrency" in extra_config
-                    and isinstance(extra_config.get("concurrency"), int)):
+            if "concurrency" in extra_config and isinstance(
+                    extra_config.get("concurrency"), int):
                 os.environ["RUNAI_STREAMER_CONCURRENCY"] = str(
                     extra_config.get("concurrency"))
 
-            if ("memory_limit" in extra_config
-                    and isinstance(extra_config.get("memory_limit"), int)):
+            if "memory_limit" in extra_config and isinstance(
+                    extra_config.get("memory_limit"), int):
                 os.environ["RUNAI_STREAMER_MEMORY_LIMIT"] = str(
                     extra_config.get("memory_limit"))
 
             runai_streamer_s3_endpoint = os.getenv(
-                'RUNAI_STREAMER_S3_ENDPOINT')
-            aws_endpoint_url = os.getenv('AWS_ENDPOINT_URL')
+                "RUNAI_STREAMER_S3_ENDPOINT")
+            aws_endpoint_url = os.getenv("AWS_ENDPOINT_URL")
             if (runai_streamer_s3_endpoint is None
                     and aws_endpoint_url is not None):
                 os.environ["RUNAI_STREAMER_S3_ENDPOINT"] = aws_endpoint_url
@@ -1477,8 +1487,11 @@ class RunaiModelStreamerLoader(BaseModelLoader):
 
         if not is_local and not is_s3_path:
             download_safetensors_index_file_from_hf(
-                model_name_or_path, index_file, self.load_config.download_dir,
-                revision)
+                model_name_or_path,
+                index_file,
+                self.load_config.download_dir,
+                revision,
+            )
 
         if not hf_weights_files:
             raise RuntimeError(

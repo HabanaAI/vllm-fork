@@ -198,7 +198,7 @@ def write_to_kv_cache(
     kv_cache: torch.Tensor,
     slot_mapping: torch.Tensor,
 ) -> None:
-    """ Write the key and values to the KV cache.
+    """Write the key and values to the KV cache.
 
     Args:
         key: shape = [num_tokens, num_kv_heads * head_size]

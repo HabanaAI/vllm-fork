@@ -55,7 +55,7 @@ def test_silu_and_mul(
     layer = SiluAndMul()
 
     # Make inputs
-    scale = (torch.randn((1), device=device, dtype=torch.float32))
+    scale = torch.randn((1), device=device, dtype=torch.float32)
     x = torch.randn(num_tokens, hidden_size, dtype=dtype)
 
     ref_out = ref_impl(layer, x, scale)

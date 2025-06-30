@@ -29,12 +29,14 @@ def apply_w8a8_block_int8_linear(
     output_shape = [*input.shape[:-1], weight.shape[0]]
 
     q_input, x_scale = per_token_group_quant_int8(input_2d, block_size[1])
-    output = w8a8_block_int8_matmul(q_input,
-                                    weight,
-                                    x_scale,
-                                    weight_scale,
-                                    block_size,
-                                    output_dtype=input.dtype)
+    output = w8a8_block_int8_matmul(
+        q_input,
+        weight,
+        x_scale,
+        weight_scale,
+        block_size,
+        output_dtype=input.dtype,
+    )
 
     if bias is not None:
         output = output + bias
@@ -90,15 +92,17 @@ if current_platform.is_rocm():
     # NOTE: This can be removed when hip.libdevice.round() is available.
     @core.extern
     def round_f32(arg0, _builder=None):
-        return core.extern_elementwise("",
-                                       "", [arg0], {
-                                           (core.dtype("fp32"), ):
-                                           ("llvm.round", core.dtype("fp32")),
-                                           (core.dtype("fp64"), ):
-                                           ("llvm.round", core.dtype("fp64")),
-                                       },
-                                       is_pure=True,
-                                       _builder=_builder)
+        return core.extern_elementwise(
+            "",
+            "",
+            [arg0],
+            {
+                (core.dtype("fp32"), ): ("llvm.round", core.dtype("fp32")),
+                (core.dtype("fp64"), ): ("llvm.round", core.dtype("fp64")),
+            },
+            is_pure=True,
+            _builder=_builder,
+        )
 
     @triton.jit
     def round_int8(x):
@@ -228,8 +232,8 @@ def per_token_group_quant_int8(
         Tuple[torch.Tensor, torch.Tensor]: The quantized tensor and the
             scaling factor for quantization.
     """
-    assert (x.shape[-1] % group_size == 0
-            ), "the last dimension of `x` cannot be divisible by `group_size`"
+    assert x.shape[-1] % group_size == 0, (
+        "the last dimension of `x` cannot be divisible by `group_size`")
     assert x.is_contiguous(), "`x` is not contiguous"
 
     iinfo = torch.iinfo(dtype)

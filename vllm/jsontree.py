@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Helper functions to work with nested JSON structures."""
+
 from collections.abc import Iterable
 from functools import reduce
 from typing import Callable, TypeVar, Union, overload
@@ -7,8 +8,12 @@ from typing import Callable, TypeVar, Union, overload
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 
-JSONTree = Union[dict[str, "JSONTree[_T]"], list["JSONTree[_T]"],
-                 tuple["JSONTree[_T]", ...], _T]
+JSONTree = Union[
+    dict[str, "JSONTree[_T]"],
+    list["JSONTree[_T]"],
+    tuple["JSONTree[_T]", ...],
+    _T,
+]
 """A nested JSON structure where the leaves need not be JSON-serializable."""
 
 

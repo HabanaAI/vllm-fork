@@ -62,13 +62,17 @@ class Gemma2MLP(nn.Module):
     ) -> None:
         super().__init__()
         self.gate_up_proj = MergedColumnParallelLinear(
-            hidden_size, [intermediate_size] * 2,
+            hidden_size,
+            [intermediate_size] * 2,
             bias=False,
-            quant_config=quant_config)
-        self.down_proj = RowParallelLinear(intermediate_size,
-                                           hidden_size,
-                                           bias=False,
-                                           quant_config=quant_config)
+            quant_config=quant_config,
+        )
+        self.down_proj = RowParallelLinear(
+            intermediate_size,
+            hidden_size,
+            bias=False,
+            quant_config=quant_config,
+        )
         if not (hidden_act == hidden_activation == "gelu_pytorch_tanh"):
             raise ValueError(
                 "Gemma2 uses `gelu_pytorch_tanh` as the hidden activation "
@@ -85,18 +89,20 @@ class Gemma2MLP(nn.Module):
 
 class Gemma2Attention(nn.Module):
 
-    def __init__(self,
-                 config: Gemma2Config,
-                 hidden_size: int,
-                 num_heads: int,
-                 num_kv_heads: int,
-                 head_dim: int,
-                 max_position_embeddings: int,
-                 rope_theta: float,
-                 cache_config: Optional[CacheConfig] = None,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 attn_logits_soft_cap: Optional[float] = None,
-                 prefix: str = "") -> None:
+    def __init__(
+        self,
+        config: Gemma2Config,
+        hidden_size: int,
+        num_heads: int,
+        num_kv_heads: int,
+        head_dim: int,
+        max_position_embeddings: int,
+        rope_theta: float,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
+        attn_logits_soft_cap: Optional[float] = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.config = config
         self.hidden_size = hidden_size
@@ -147,17 +153,19 @@ class Gemma2Attention(nn.Module):
         layer_idx = extract_layer_index(prefix)
         use_sliding_window = (layer_idx % 2 == 0 and getattr(
             config, "interleaved_sliding_window", None) is not None)
-        sliding_window = config.interleaved_sliding_window if \
-            use_sliding_window else None
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              self.scaling,
-                              num_kv_heads=self.num_kv_heads,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              logits_soft_cap=attn_logits_soft_cap,
-                              per_layer_sliding_window=sliding_window,
-                              prefix=f"{prefix}.attn")
+        sliding_window = (config.interleaved_sliding_window
+                          if use_sliding_window else None)
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            logits_soft_cap=attn_logits_soft_cap,
+            per_layer_sliding_window=sliding_window,
+            prefix=f"{prefix}.attn",
+        )
 
     def forward(
         self,
@@ -257,7 +265,8 @@ class Gemma2Model(nn.Module):
             config.num_hidden_layers,
             lambda prefix: Gemma2DecoderLayer(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.layers")
+            prefix=f"{prefix}.layers",
+        )
         self.norm = GemmaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         # Normalize the embedding by sqrt(hidden_size)
@@ -318,8 +327,8 @@ class Gemma2Model(nn.Module):
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
-            if (self.quant_config is not None and
-                (scale_name := self.quant_config.get_cache_scale(name))):
+            if self.quant_config is not None and (
+                    scale_name := self.quant_config.get_cache_scale(name)):
                 # Loading kv cache scales for compressed-tensors quantization
                 param = params_dict[scale_name]
                 weight_loader = getattr(param, "weight_loader",
@@ -328,7 +337,7 @@ class Gemma2Model(nn.Module):
                 weight_loader(param, loaded_weight)
                 loaded_params.add(scale_name)
                 continue
-            for (param_name, shard_name, shard_id) in stacked_params_mapping:
+            for param_name, shard_name, shard_id in stacked_params_mapping:
                 if shard_name not in name:
                     continue
                 name = name.replace(shard_name, param_name)

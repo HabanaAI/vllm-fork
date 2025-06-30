@@ -34,7 +34,6 @@ def get_lora_requests(lora_path) -> list[LoRARequest]:
 
 async def requests_processing_time(llm,
                                    lora_requests: list[LoRARequest]) -> float:
-
     sampling_params = SamplingParams(n=1,
                                      temperature=0.0,
                                      top_p=1.0,
@@ -48,10 +47,11 @@ async def requests_processing_time(llm,
         lora_int_id = lora_request.lora_int_id
         generator = llm.generate(
             prompt=TextPrompt(prompt=f"hello {lora_int_id}",
-                              multi_modal_data=None),  # type: ignore 
+                              multi_modal_data=None),  # type: ignore
             sampling_params=sampling_params,
             lora_request=lora_request,
-            request_id=f"test{lora_int_id}")
+            request_id=f"test{lora_int_id}",
+        )
         generators.append(generator)
 
     all_gens = merge_async_iterators(*generators)
@@ -64,13 +64,13 @@ async def requests_processing_time(llm,
 
 @pytest.mark.asyncio
 async def test_add_lora(chatglm3_lora_files):
-    """ 
+    """
     The add_lora function is used to pre-load some LoRA adapters into the
     engine in anticipation of future requests using these adapters. To test
     this functionality, we use the async engine to process some requests - We
     do it twice, once with add_lora() pre-loading and once without.
 
-    We measure the request processing time in both cases and expect the time 
+    We measure the request processing time in both cases and expect the time
     to be lesser in the case with add_lora() calls.
     """
     lora_requests: list[LoRARequest] = get_lora_requests(chatglm3_lora_files)
@@ -84,9 +84,10 @@ async def test_add_lora(chatglm3_lora_files):
         max_loras=max_loras,
         max_lora_rank=LORA_RANK,
         max_model_len=128,
-        gpu_memory_utilization=0.8,  #avoid OOM
+        gpu_memory_utilization=0.8,  # avoid OOM
         trust_remote_code=True,
-        enforce_eager=True)
+        enforce_eager=True,
+    )
 
     # The run_with_both_engines_lora fixture sets up the `VLLM_USE_V1`
     # environment variable. reload vllm.enging.async_llm_engine as
@@ -95,6 +96,7 @@ async def test_add_lora(chatglm3_lora_files):
     import importlib
 
     import vllm.engine.async_llm_engine
+
     importlib.reload(vllm.engine.async_llm_engine)
     from vllm.entrypoints.openai.api_server import (
         build_async_engine_client_from_engine_args)
@@ -106,7 +108,6 @@ async def test_add_lora(chatglm3_lora_files):
     cold_run_requests = lora_requests[part_size * 2:]
 
     async with build_async_engine_client_from_engine_args(engine_args) as llm:
-
         # Dummy run - So any 1-time functionality like triton kernel compilation
         # is complete here.
         await requests_processing_time(llm, dummy_run_requests)

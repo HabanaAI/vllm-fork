@@ -66,10 +66,12 @@ class Idefics2VisionEmbeddings(nn.Module):
         self.position_embedding = nn.Embedding(self.num_positions,
                                                self.embed_dim)
 
-    def forward(self,
-                pixel_values: torch.FloatTensor,
-                patch_attention_mask: torch.BoolTensor,
-                tgt_sizes: Optional[torch.IntTensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        pixel_values: torch.FloatTensor,
+        patch_attention_mask: torch.BoolTensor,
+        tgt_sizes: Optional[torch.IntTensor] = None,
+    ) -> torch.Tensor:
         batch_size, _, max_im_h, max_im_w = pixel_values.shape
         target_dtype = self.patch_embedding.weight.dtype
         patch_embeds = self.patch_embedding(pixel_values.to(target_dtype))
@@ -85,7 +87,6 @@ class Idefics2VisionEmbeddings(nn.Module):
                                   fill_value=0)
 
         for batch_idx, p_attn_mask in enumerate(patch_attention_mask):
-
             if tgt_sizes is not None:
                 nb_patches_h = tgt_sizes[batch_idx][0]
                 nb_patches_w = tgt_sizes[batch_idx][1]
@@ -263,10 +264,11 @@ class Idefics2Encoder(nn.Module):
             num_hidden_layers = num_hidden_layers_override
 
         self.layers = nn.ModuleList([
-            Idefics2EncoderLayer(config,
-                                 quant_config=quant_config,
-                                 prefix=f"{prefix}.layers.{layer_idx}")
-            for layer_idx in range(num_hidden_layers)
+            Idefics2EncoderLayer(
+                config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.layers.{layer_idx}",
+            ) for layer_idx in range(num_hidden_layers)
         ])
 
     def forward(
@@ -309,7 +311,8 @@ class Idefics2VisionTransformer(nn.Module):
             config,
             quant_config=quant_config,
             num_hidden_layers_override=num_hidden_layers_override,
-            prefix=f"{prefix}.encoder")
+            prefix=f"{prefix}.encoder",
+        )
 
         num_hidden_layers = config.num_hidden_layers
         if len(self.encoder.layers) > config.num_hidden_layers:
@@ -319,10 +322,10 @@ class Idefics2VisionTransformer(nn.Module):
             )
 
         self.require_post_norm = require_post_norm
-        self.post_layernorm = nn.LayerNorm(
+        self.post_layernorm = (nn.LayerNorm(
             embed_dim,
             eps=config.layer_norm_eps,
-        ) if require_post_norm else nn.Identity()
+        ) if require_post_norm else nn.Identity())
 
     def get_input_embeddings(self):
         return self.embeddings

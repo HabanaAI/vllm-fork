@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Test model set-up and inference for quantized HF models supported
- on the HPU backend using AutoAWQ.
- 
- Validating the configuration and printing results for manual checking.
+on the HPU backend using AutoAWQ.
 
- Run `pytest tests/quantization/test_awq.py`.
+Validating the configuration and printing results for manual checking.
+
+Run `pytest tests/quantization/test_awq.py`.
 """
 
 import pytest
@@ -22,7 +22,7 @@ DTYPE = ["bfloat16"]
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", DTYPE)
 def test_awq(vllm_runner, model, dtype):
-    with vllm_runner(model, dtype=dtype, quantization='awq_hpu') as llm:
+    with vllm_runner(model, dtype=dtype, quantization="awq_hpu") as llm:
         output = llm.generate_greedy(["The capital of France is"],
                                      max_tokens=32)
     assert output

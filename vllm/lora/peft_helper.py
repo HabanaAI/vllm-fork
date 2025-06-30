@@ -16,9 +16,9 @@ logger = init_logger(__name__)
 
 @dataclass
 class PEFTHelper:
-    """ 
+    """
     A helper class for PEFT configurations, specifically designed for LoRA.
-    This class handles configuration validation, compatibility checks for 
+    This class handles configuration validation, compatibility checks for
     various LoRA implementations.
     """
 
@@ -100,7 +100,7 @@ class PEFTHelper:
 
     def validate_legal(self, lora_config: LoRAConfig) -> None:
         """
-        Validates the LoRA configuration settings against application 
+        Validates the LoRA configuration settings against application
         constraints and requirements.
         """
         error_msg = self._validate_features()

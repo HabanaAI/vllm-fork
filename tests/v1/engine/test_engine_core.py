@@ -46,7 +46,6 @@ def make_request() -> EngineCoreRequest:
 
 @create_new_process_for_each_test()
 def test_engine_core(monkeypatch: pytest.MonkeyPatch):
-
     with monkeypatch.context() as m:
         m.setenv("VLLM_USE_V1", "1")
         """Setup the EngineCore."""
@@ -54,9 +53,11 @@ def test_engine_core(monkeypatch: pytest.MonkeyPatch):
         vllm_config = engine_args.create_engine_config()
         executor_class = Executor.get_class(vllm_config)
 
-        engine_core = EngineCore(vllm_config=vllm_config,
-                                 executor_class=executor_class,
-                                 log_stats=True)
+        engine_core = EngineCore(
+            vllm_config=vllm_config,
+            executor_class=executor_class,
+            log_stats=True,
+        )
         """Test basic request lifecycle."""
 
         # First request.
@@ -188,9 +189,11 @@ def test_engine_core_advanced_sampling(monkeypatch: pytest.MonkeyPatch):
         vllm_config = engine_args.create_engine_config()
         executor_class = Executor.get_class(vllm_config)
 
-        engine_core = EngineCore(vllm_config=vllm_config,
-                                 executor_class=executor_class,
-                                 log_stats=True)
+        engine_core = EngineCore(
+            vllm_config=vllm_config,
+            executor_class=executor_class,
+            log_stats=True,
+        )
         """Test basic request lifecycle."""
         # First request.
         request: EngineCoreRequest = make_request()
@@ -267,7 +270,7 @@ def test_engine_core_concurrent_batches(monkeypatch: pytest.MonkeyPatch):
             return 2
 
         def shutdown(self):
-            if hasattr(self, 'thread_pool'):
+            if hasattr(self, "thread_pool"):
                 self.thread_pool.shutdown(wait=False)
 
     with monkeypatch.context() as m:
@@ -284,9 +287,11 @@ def test_engine_core_concurrent_batches(monkeypatch: pytest.MonkeyPatch):
             enforce_eager=True,
         )
         vllm_config = engine_args.create_engine_config()
-        engine_core = EngineCore(vllm_config=vllm_config,
-                                 log_stats=False,
-                                 executor_class=DummyExecutor)
+        engine_core = EngineCore(
+            vllm_config=vllm_config,
+            log_stats=False,
+            executor_class=DummyExecutor,
+        )
         assert engine_core.batch_queue is not None
 
         # Add two requests in a row. Each request have 12 prompt tokens.
@@ -301,8 +306,8 @@ def test_engine_core_concurrent_batches(monkeypatch: pytest.MonkeyPatch):
         scheduler_output = engine_core.batch_queue.queue[-1][1]
         assert scheduler_output.num_scheduled_tokens[0] == 10
         # num_computed_tokens should have been updated immediately.
-        assert engine_core.scheduler.requests[
-            req0.request_id].num_computed_tokens == 10
+        assert (engine_core.scheduler.requests[
+            req0.request_id].num_computed_tokens == 10)
 
         # Schedule Batch 2: (2, req0), (8, req1)
         assert engine_core.step_with_batch_queue() is None
@@ -364,8 +369,8 @@ def test_engine_core_concurrent_batches(monkeypatch: pytest.MonkeyPatch):
                 assert output is not None
                 assert len(output.outputs) == 1
                 if req_id in engine_core.scheduler.requests:
-                    assert engine_core.scheduler.requests[
-                        req_id].num_tokens == expected_num_tokens[req_id]
+                    assert (engine_core.scheduler.requests[req_id].num_tokens
+                            == expected_num_tokens[req_id])
                 expected_num_tokens[req_id] += 1
                 req_id = (req_id + 1) % 2
             else:

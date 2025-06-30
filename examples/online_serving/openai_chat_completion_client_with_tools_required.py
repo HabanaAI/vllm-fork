@@ -123,7 +123,7 @@ def main():
         model=model,
         tools=tools,
         tool_choice="required",
-        stream=True  # Enable streaming response
+        stream=True,  # Enable streaming response
     )
 
     for chunk in chat_completion:

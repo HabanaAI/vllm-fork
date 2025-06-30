@@ -22,6 +22,7 @@ class ModelInputForHPUWithPoolingMetadata(ModelInputForHPU):
     """
     Used by the HPUPoolingModelRunner.
     """
+
     pooling_metadata: Optional["PoolingMetadata"] = None
 
 
@@ -29,7 +30,7 @@ class HPUPoolingModelRunner(
         HPUModelRunnerBase[ModelInputForHPUWithPoolingMetadata]):
     _model_input_cls: Type[ModelInputForHPUWithPoolingMetadata] = (
         ModelInputForHPUWithPoolingMetadata)
-    #_builder_cls: Type[ModelInputForHPUBuilder] = ModelInputForHPUBuilder
+    # _builder_cls: Type[ModelInputForHPUBuilder] = ModelInputForHPUBuilder
 
     @torch.inference_mode()
     def execute_model(
@@ -52,12 +53,12 @@ class HPUPoolingModelRunner(
         input_tokens = model_input.input_tokens
         input_positions = model_input.input_positions
         attn_metadata = model_input.attn_metadata
-        #sampling_metadata = model_input.sampling_metadata
+        # sampling_metadata = model_input.sampling_metadata
         real_batch_size = model_input.real_batch_size
         batch_size_padded = model_input.batch_size_padded
         assert input_tokens is not None
         assert input_positions is not None
-        #assert sampling_metadata is None
+        # assert sampling_metadata is None
         assert attn_metadata is not None
         is_prompt = attn_metadata.is_prompt
         assert is_prompt is True
@@ -105,12 +106,12 @@ class HPUPoolingModelRunner(
                                 f"seq{seq_len}_"
                                 f"graphs{'T' if use_graphs else 'F'}")
         else:
-            model_event_name = 'model_executable'
-        with self.profiler.record_event('internal', model_event_name):
+            model_event_name = "model_executable"
+        with self.profiler.record_event("internal", model_event_name):
             hidden_states = self.model.forward(
                 **execute_model_kwargs,
                 selected_token_indices=
-                None  #sampling_metadata.selected_token_indices
+                None,  # sampling_metadata.selected_token_indices
             )
 
         htorch.core.mark_step()
@@ -125,7 +126,8 @@ class HPUPoolingModelRunner(
                 seq_len=seq_len,
                 batch_size_padded=batch_size_padded,
                 real_batch_size=real_batch_size,
-                is_prompt=is_prompt)
+                is_prompt=is_prompt,
+            )
             self.profiler.record_counter(self.event_start, counters)
         if not self.is_driver_worker:
             return []
@@ -133,7 +135,8 @@ class HPUPoolingModelRunner(
         return [
             self.model.model._pooler(
                 hidden_states=hidden_states,
-                pooling_metadata=model_input.pooling_metadata)
+                pooling_metadata=model_input.pooling_metadata,
+            )
         ]
 
     def make_model_input_from_broadcasted_tensor_dict(
@@ -149,9 +152,9 @@ class HPUPoolingModelRunner(
         self,
         seq_group_metadata_list: Optional[List[SequenceGroupMetadata]],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
     ) -> ModelInputForHPUWithPoolingMetadata:
-        with self.profiler.record_event('internal', 'prepare_input_tensors'):
+        with self.profiler.record_event("internal", "prepare_input_tensors"):
             assert seq_group_metadata_list is not None
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
@@ -160,14 +163,14 @@ class HPUPoolingModelRunner(
             model_input, sampling_metadata = self.prepare_input_tensors(
                 seq_group_metadata_list)
 
-            assert model_input.input_tokens is not None and \
-                model_input.attn_metadata is not None and \
-                model_input.batch_size_padded is not None and \
-                model_input.attn_metadata.seq_lens_tensor is not None
+            assert (model_input.input_tokens is not None
+                    and model_input.attn_metadata is not None
+                    and model_input.batch_size_padded is not None
+                    and model_input.attn_metadata.seq_lens_tensor is not None)
 
             if self.use_merged_prefill:
-                prompt_offsets_tensor = \
-                    model_input.attn_metadata.seq_lens_tensor
+                prompt_offsets_tensor = (
+                    model_input.attn_metadata.seq_lens_tensor)
                 prompt_offsets_tensor = prompt_offsets_tensor.roll(shifts=1)
                 prompt_offsets_tensor[0] = 0
                 prompt_offsets_tensor = torch.cumsum(prompt_offsets_tensor,
@@ -183,11 +186,14 @@ class HPUPoolingModelRunner(
             pooling_metadata = self._prepare_pooling(
                 seq_group_metadata_list,
                 prompt_lens=model_input.attn_metadata.seq_lens_tensor,
-                prompt_offsets=prompt_offsets_tensor)
+                prompt_offsets=prompt_offsets_tensor,
+            )
 
-        return dataclasses.replace(model_input,
-                                   virtual_engine=virtual_engine,
-                                   pooling_metadata=pooling_metadata)
+        return dataclasses.replace(
+            model_input,
+            virtual_engine=virtual_engine,
+            pooling_metadata=pooling_metadata,
+        )
 
     def _prepare_pooling(
         self,

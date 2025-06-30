@@ -65,7 +65,8 @@ def _get_alibi_slopes(total_num_heads: int) -> torch.Tensor:
     if closest_power_of_2 != total_num_heads:
         extra_base = torch.tensor(
             2**(-(2**-(math.log2(2 * closest_power_of_2) - 3))),
-            dtype=torch.float32)
+            dtype=torch.float32,
+        )
         num_remaining_heads = min(closest_power_of_2,
                                   total_num_heads - closest_power_of_2)
         extra_powers = torch.arange(1,
@@ -139,7 +140,8 @@ class FalconAttention(nn.Module):
             bias=config.bias,
             skip_bias_add=True,
             quant_config=quant_config,
-            reduce_results=self.reduce_row_parallel_results)
+            reduce_results=self.reduce_row_parallel_results,
+        )
 
         self.use_rotary = config.rotary
         self.use_alibi = config.alibi
@@ -156,12 +158,14 @@ class FalconAttention(nn.Module):
                 max_position=max_position_embeddings,
                 base=rope_theta,
             )
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  self.inv_norm_factor,
-                                  num_kv_heads=self.num_kv_heads,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                self.inv_norm_factor,
+                num_kv_heads=self.num_kv_heads,
+                quant_config=quant_config,
+                prefix=f"{prefix}.attn",
+            )
         elif self.use_alibi:
             tp_rank = get_tensor_model_parallel_rank()
             head_start = tp_rank * self.num_heads
@@ -169,21 +173,25 @@ class FalconAttention(nn.Module):
             alibi_slopes = (_get_alibi_slopes(self.total_num_heads) *
                             self.inv_norm_factor)
             alibi_slopes = alibi_slopes[head_start:head_end].tolist()
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  self.inv_norm_factor,
-                                  num_kv_heads=self.num_kv_heads,
-                                  alibi_slopes=alibi_slopes,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                self.inv_norm_factor,
+                num_kv_heads=self.num_kv_heads,
+                alibi_slopes=alibi_slopes,
+                quant_config=quant_config,
+                prefix=f"{prefix}.attn",
+            )
         else:
-            self.attn = Attention(self.num_heads,
-                                  self.head_dim,
-                                  scale=self.inv_norm_factor,
-                                  num_kv_heads=self.num_kv_heads,
-                                  cache_config=cache_config,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+            self.attn = Attention(
+                self.num_heads,
+                self.head_dim,
+                scale=self.inv_norm_factor,
+                num_kv_heads=self.num_kv_heads,
+                cache_config=cache_config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.attn",
+            )
 
     def forward(
         self,
@@ -211,11 +219,13 @@ class FalconMLP(nn.Module):
         super().__init__()
         hidden_size = config.hidden_size
 
-        self.dense_h_to_4h = ColumnParallelLinear(hidden_size,
-                                                  4 * hidden_size,
-                                                  bias=config.bias,
-                                                  skip_bias_add=True,
-                                                  quant_config=quant_config)
+        self.dense_h_to_4h = ColumnParallelLinear(
+            hidden_size,
+            4 * hidden_size,
+            bias=config.bias,
+            skip_bias_add=True,
+            quant_config=quant_config,
+        )
         self.act = get_act_fn("gelu")
         self.reduce_row_parallel_results = not (config.new_decoder_architecture
                                                 or config.parallel_attn)
@@ -225,7 +235,8 @@ class FalconMLP(nn.Module):
             bias=config.bias,
             skip_bias_add=True,
             reduce_results=self.reduce_row_parallel_results,
-            quant_config=quant_config)
+            quant_config=quant_config,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # NOTE(zhuohan): Following huggingface, we do not fuse bias add here.
@@ -253,11 +264,12 @@ class FalconDecoderLayer(nn.Module):
             config,
             cache_config,
             quant_config,
-            prefix=f"{prefix}.self_attention")
+            prefix=f"{prefix}.self_attention",
+        )
         self.mlp = FalconMLP(config, quant_config)
         self.config = config
 
-        if (not hasattr(config, "num_ln_in_parallel_attn")):
+        if not hasattr(config, "num_ln_in_parallel_attn"):
             config.num_ln_in_parallel_attn = None
 
         if (config.num_ln_in_parallel_attn is None
@@ -362,7 +374,8 @@ class FalconModel(nn.Module):
             config.num_hidden_layers,
             lambda prefix: FalconDecoderLayer(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.h")
+            prefix=f"{prefix}.h",
+        )
 
         # Final Layer Norm
         self.ln_f = LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
@@ -418,22 +431,32 @@ class FalconModel(nn.Module):
                 loaded_weight_shape = loaded_weight.shape
                 if output_dim is not None:
                     loaded_weight = loaded_weight.view(
-                        loaded_weight_shape[:output_dim] +
-                        (total_num_kv_heads, num_query_heads_per_kv_head + 2,
-                         -1) + loaded_weight_shape[output_dim + 1:])
+                        loaded_weight_shape[:output_dim] + (
+                            total_num_kv_heads,
+                            num_query_heads_per_kv_head + 2,
+                            -1,
+                        ) + loaded_weight_shape[output_dim + 1:])
                     wq = loaded_weight.narrow(
                         output_dim + 1, 0,
                         num_query_heads_per_kv_head).reshape(
-                            *loaded_weight_shape[:output_dim], -1,
-                            *loaded_weight_shape[output_dim + 1:])
+                            *loaded_weight_shape[:output_dim],
+                            -1,
+                            *loaded_weight_shape[output_dim + 1:],
+                        )
                     wk = loaded_weight.narrow(
                         output_dim + 1, num_query_heads_per_kv_head,
-                        1).reshape(*loaded_weight_shape[:output_dim], -1,
-                                   *loaded_weight_shape[output_dim + 1:])
+                        1).reshape(
+                            *loaded_weight_shape[:output_dim],
+                            -1,
+                            *loaded_weight_shape[output_dim + 1:],
+                        )
                     wv = loaded_weight.narrow(
                         output_dim + 1, num_query_heads_per_kv_head + 1,
-                        1).reshape(*loaded_weight_shape[:output_dim], -1,
-                                   *loaded_weight_shape[output_dim + 1:])
+                        1).reshape(
+                            *loaded_weight_shape[:output_dim],
+                            -1,
+                            *loaded_weight_shape[output_dim + 1:],
+                        )
                     loaded_weight = torch.cat([wq, wk, wv], dim=output_dim)
 
             weight_loader = getattr(param, "weight_loader",

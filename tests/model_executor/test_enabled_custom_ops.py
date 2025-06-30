@@ -57,7 +57,8 @@ class Relu3(ReLUSquaredActivation):
         ("-silu_and_mul,+relu3", 3, [0, 0, 0, 1], False),
         # All but RMSNorm
         ("all,-rms_norm", 4, [0, 1, 1, 1], True),
-    ])
+    ],
+)
 def test_enabled_ops(env: str, torch_level: int, ops_enabled: list[int],
                      default_on: bool):
     vllm_config = VllmConfig(compilation_config=CompilationConfig(
@@ -106,6 +107,7 @@ def test_topk_dispatch(use_rocm_aiter: str, monkeypatch):
     if current_platform.is_rocm() and int(use_rocm_aiter):
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
             rocm_aiter_topk_softmax)
+
         assert topk_func == rocm_aiter_topk_softmax
     else:
         assert topk_func == vllm_topk_softmax
@@ -115,13 +117,13 @@ def test_topk_dispatch(use_rocm_aiter: str, monkeypatch):
 @pytest.mark.parametrize("inplace", [True, False])
 def test_fused_experts_dispatch(use_rocm_aiter: str, inplace: bool,
                                 monkeypatch):
-
     monkeypatch.setenv("VLLM_ROCM_USE_AITER", use_rocm_aiter)
     is_rocm_aiter_moe_enabled.cache_clear()
     fused_experts_func = dispatch_fused_experts_func(inplace)
     if current_platform.is_rocm() and int(use_rocm_aiter):
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
             rocm_aiter_fused_experts)
+
         assert fused_experts_func == rocm_aiter_fused_experts
     elif inplace:
         assert fused_experts_func == torch_vllm_inplace_fused_experts
@@ -132,22 +134,28 @@ def test_fused_experts_dispatch(use_rocm_aiter: str, inplace: bool,
 @pytest.mark.parametrize("add_residual", [True, False])
 @pytest.mark.parametrize("use_rocm_aiter", ["0", "1"])
 @pytest.mark.parametrize("use_rocm_aiter_norm", ["0", "1"])
-@pytest.mark.skipif(not current_platform.is_rocm(),
-                    reason="AITER is a feature exclusive for ROCm")
-def test_rms_norm_dispatch(add_residual: bool, use_rocm_aiter: str,
-                           use_rocm_aiter_norm: str, monkeypatch):
+@pytest.mark.skipif(
+    not current_platform.is_rocm(),
+    reason="AITER is a feature exclusive for ROCm",
+)
+def test_rms_norm_dispatch(
+    add_residual: bool,
+    use_rocm_aiter: str,
+    use_rocm_aiter_norm: str,
+    monkeypatch,
+):
     monkeypatch.setenv("VLLM_ROCM_USE_AITER", use_rocm_aiter)
     monkeypatch.setenv("VLLM_ROCM_USE_AITER_RMSNORM", use_rocm_aiter_norm)
     rms_norm_func = dispatch_cuda_rmsnorm_func(add_residual)
 
     if not add_residual:
-        if current_platform.is_rocm() and int(use_rocm_aiter) and int(
-                use_rocm_aiter_norm):
+        if (current_platform.is_rocm() and int(use_rocm_aiter)
+                and int(use_rocm_aiter_norm)):
             assert rms_norm_func == rocm_aiter_rms_norm
         else:
             assert rms_norm_func == rms_norm
-    elif current_platform.is_rocm() and int(use_rocm_aiter) and int(
-            use_rocm_aiter_norm):
+    elif (current_platform.is_rocm() and int(use_rocm_aiter)
+          and int(use_rocm_aiter_norm)):
         assert rms_norm_func == rocm_aiter_fused_add_rms_norm
     else:
         assert rms_norm_func == fused_add_rms_norm

@@ -21,6 +21,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only GLM-4-0414 model compatible with HuggingFace weights."""
+
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -49,20 +50,22 @@ from .utils import AutoWeightsLoader, PPMissingLayer, maybe_prefix
 
 class Glm4Attention(nn.Module):
 
-    def __init__(self,
-                 config: Glm4Config,
-                 hidden_size: int,
-                 num_heads: int,
-                 num_kv_heads: int,
-                 max_position: int = 4096 * 32,
-                 head_dim: Optional[int] = None,
-                 qkv_bias: bool = False,
-                 rope_theta: float = 10000,
-                 cache_config: Optional[CacheConfig] = None,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 rope_scaling: Optional[Tuple] = None,
-                 prefix: str = "",
-                 attn_type: str = AttentionType.DECODER) -> None:
+    def __init__(
+        self,
+        config: Glm4Config,
+        hidden_size: int,
+        num_heads: int,
+        num_kv_heads: int,
+        max_position: int = 4096 * 32,
+        head_dim: Optional[int] = None,
+        qkv_bias: bool = False,
+        rope_theta: float = 10000,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
+        rope_scaling: Optional[Tuple] = None,
+        prefix: str = "",
+        attn_type: str = AttentionType.DECODER,
+    ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
@@ -111,14 +114,16 @@ class Glm4Attention(nn.Module):
             partial_rotary_factor=partial_rotary_factor,
             is_neox_style=False,
         )
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              self.scaling,
-                              num_kv_heads=self.num_kv_heads,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn",
-                              attn_type=attn_type)
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn",
+            attn_type=attn_type,
+        )
 
     def forward(
         self,
@@ -154,8 +159,8 @@ class Glm4DecoderLayer(nn.Module):
             max_position=config.max_position_embeddings,
             num_kv_heads=config.num_key_value_heads,
             rope_theta=rope_theta,
-            qkv_bias=getattr(config, 'attention_bias', False),
-            head_dim=getattr(config, 'head_dim', None),
+            qkv_bias=getattr(config, "attention_bias", False),
+            head_dim=getattr(config, "head_dim", None),
             cache_config=cache_config,
             quant_config=quant_config,
             rope_scaling=rope_scaling,
@@ -257,11 +262,12 @@ class Glm4ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             if config.tie_word_embeddings:
                 self.lm_head = self.model.embed_tokens
             else:
-                self.lm_head = ParallelLMHead(config.vocab_size,
-                                              config.hidden_size,
-                                              quant_config=quant_config,
-                                              prefix=maybe_prefix(
-                                                  prefix, "lm_head"))
+                self.lm_head = ParallelLMHead(
+                    config.vocab_size,
+                    config.hidden_size,
+                    quant_config=quant_config,
+                    prefix=maybe_prefix(prefix, "lm_head"),
+                )
         else:
             self.lm_head = PPMissingLayer()
 

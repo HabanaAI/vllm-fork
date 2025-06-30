@@ -77,8 +77,12 @@ def test_dequantize(hidden_size: int, dtype: torch.dtype,
 
         ref_output = torch.tensor(dequantize(tensor.data, quant_type),
                                   device="cuda").to(dtype)
-        output = ops.ggml_dequantize(torch.tensor(tensor.data, device="cuda"),
-                                     quant_type, *list(shape), dtype)
+        output = ops.ggml_dequantize(
+            torch.tensor(tensor.data, device="cuda"),
+            quant_type,
+            *list(shape),
+            dtype,
+        )
 
         torch.testing.assert_close(output, ref_output, atol=1e-2, rtol=4e-2)
 
@@ -121,10 +125,15 @@ def test_mmvq(hidden_size: int, dtype: torch.dtype,
         GGMLQuantizationType.Q4_0,
         GGMLQuantizationType.Q5_0,
         GGMLQuantizationType.Q8_0,
-    ])
+    ],
+)
 @torch.inference_mode()
-def test_mmq(num_tokens: int, hidden_size: int, dtype: torch.dtype,
-             quant_type: GGMLQuantizationType):
+def test_mmq(
+    num_tokens: int,
+    hidden_size: int,
+    dtype: torch.dtype,
+    quant_type: GGMLQuantizationType,
+):
     current_platform.seed_everything(0)
 
     tensors = get_gguf_sample_tensors(hidden_size, quant_type)
@@ -164,10 +173,16 @@ def test_mmq(num_tokens: int, hidden_size: int, dtype: torch.dtype,
         GGMLQuantizationType.Q4_0,
         GGMLQuantizationType.Q5_0,
         GGMLQuantizationType.Q8_0,
-    ])
+    ],
+)
 @torch.inference_mode()
-def test_moe(num_tokens: int, hidden_size: int, dtype: torch.dtype,
-             quant_type: GGMLQuantizationType, top_k: int):
+def test_moe(
+    num_tokens: int,
+    hidden_size: int,
+    dtype: torch.dtype,
+    quant_type: GGMLQuantizationType,
+    top_k: int,
+):
     current_platform.seed_everything(0)
     H, E = 1024, 256
 
@@ -188,10 +203,16 @@ def test_moe(num_tokens: int, hidden_size: int, dtype: torch.dtype,
                               device="cuda").to(dtype)
     act = SiluAndMul()
 
-    output = _fused_moe_gguf(x, torch.tensor(w13.data, device="cuda"),
-                             torch.tensor(w2.data,
-                                          device="cuda"), topk_weights,
-                             topk_ids, quant_type, quant_type, act)
+    output = _fused_moe_gguf(
+        x,
+        torch.tensor(w13.data, device="cuda"),
+        torch.tensor(w2.data, device="cuda"),
+        topk_weights,
+        topk_ids,
+        quant_type,
+        quant_type,
+        act,
+    )
 
     ref_output = fused_experts(x, w13_dequant, w2_dequant, topk_weights,
                                topk_ids).reshape(output.shape)

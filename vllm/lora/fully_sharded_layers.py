@@ -35,8 +35,8 @@ def _fully_sharded_can_replace(can_replace):
 
 
 def _mcp_apply(x, bias, layer: ColumnParallelLinearWithLoRA):
-    """ 
-    For `ColumnParallelLinearWithLoRA` or classes that inherit from 
+    """
+    For `ColumnParallelLinearWithLoRA` or classes that inherit from
     `ColumnParallelLinearWithLoRA`, they share the same `apply` logic.
     """
     assert (layer.n_slices == len(layer.lora_a_stacked) == len(
@@ -59,13 +59,15 @@ def _mcp_apply(x, bias, layer: ColumnParallelLinearWithLoRA):
 
     layer.punica_wrapper.add_shrink(buffers, x, layer.lora_a_stacked, 1.0)
     buffers = tensor_model_parallel_all_gather(buffers)
-    layer.punica_wrapper.add_expand(output,
-                                    buffers,
-                                    layer.lora_b_stacked,
-                                    layer.lora_bias_stacked,
-                                    layer.output_slices,
-                                    offset_start=0,
-                                    add_input=True)
+    layer.punica_wrapper.add_expand(
+        output,
+        buffers,
+        layer.lora_b_stacked,
+        layer.lora_bias_stacked,
+        layer.output_slices,
+        offset_start=0,
+        add_input=True,
+    )
 
     output = output.view(*out_orig_shape)
     # now have column partitioned and packed output
@@ -132,7 +134,7 @@ class MergedColumnParallelLinearWithShardedLoRA(
     def slice_lora_a(
         self, lora_a: List[Union[torch.Tensor, None]]
     ) -> List[Union[torch.Tensor, None]]:
-        #NOTE: lora_a contains 2 subloras, and each sublora could be None.
+        # NOTE: lora_a contains 2 subloras, and each sublora could be None.
         output_shard_size = self.lora_a_stacked[0].shape[2]
         output_start_idx = self.tp_rank * output_shard_size
         lora_a = [
@@ -189,9 +191,13 @@ class QKVParallelLinearWithShardedLoRA(QKVParallelLinearWithLoRA):
 
     @classmethod
     @_fully_sharded_can_replace
-    def can_replace_layer(cls, source_layer: nn.Module,
-                          lora_config: LoRAConfig, packed_modules_list: List,
-                          model_config: Optional[PretrainedConfig]) -> bool:
+    def can_replace_layer(
+        cls,
+        source_layer: nn.Module,
+        lora_config: LoRAConfig,
+        packed_modules_list: List,
+        model_config: Optional[PretrainedConfig],
+    ) -> bool:
         # specifying kwargs so they can be easily accessed in decorator
         return super().can_replace_layer(
             source_layer=source_layer,
@@ -204,7 +210,7 @@ class QKVParallelLinearWithShardedLoRA(QKVParallelLinearWithLoRA):
 
 class MergedQKVParallelLinearWithShardedLoRA(MergedQKVParallelLinearWithLoRA):
     """
-    Differs from MergedQKVParallelLinearWithLoRA by slicing the 
+    Differs from MergedQKVParallelLinearWithLoRA by slicing the
     LoRA A's also.
 
     Based on S-LoRA, slicing happens along the rank dim.

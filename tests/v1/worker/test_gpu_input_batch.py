@@ -31,7 +31,7 @@ def _compare_objs(obj1, obj2):
     attrs = inspect.getmembers(obj1, lambda a: not (inspect.isroutine(a)))
     attr_names = set([
         a[0] for a in attrs
-        if not (a[0].startswith('__') and a[0].endswith('__'))
+        if not (a[0].startswith("__") and a[0].endswith("__"))
     ])
     for attr_name in attr_names:
         a = getattr(obj1, attr_name)
@@ -39,8 +39,8 @@ def _compare_objs(obj1, obj2):
 
         is_same = False
         if isinstance(a, torch.Tensor):
-            if (a.numel() == 0 or b.numel() == 0):
-                is_same = (a.numel() == 0 and b.numel() == 0)
+            if a.numel() == 0 or b.numel() == 0:
+                is_same = a.numel() == 0 and b.numel() == 0
             elif torch.allclose(a.cpu(), b.cpu()):
                 is_same = True
         elif isinstance(a, np.ndarray):
@@ -51,8 +51,8 @@ def _compare_objs(obj1, obj2):
             is_same = True  # if we make it here must be same
         elif a == b:
             is_same = True
-        assert is_same, f"Attribute {attr_name} is different"\
-            f" in {obj1} and {obj2}: {a} != {b}"
+        assert is_same, (f"Attribute {attr_name} is different"
+                         f" in {obj1} and {obj2}: {a} != {b}")
 
 
 def _remove_requests(
@@ -112,8 +112,8 @@ def _construct_expected_sampling_metadata(
         index_in_input_batch = req_id_index_in_input_batch[req.req_id]
         output_token_ids[index_in_input_batch] = req.output_token_ids
         prompt_token_ids[index_in_input_batch] = req.prompt_token_ids
-        presence_penalties[
-            index_in_input_batch] = req.sampling_params.presence_penalty
+        presence_penalties[index_in_input_batch] = (
+            req.sampling_params.presence_penalty)
         frequency_penalties[index_in_input_batch] = (
             req.sampling_params.frequency_penalty)
         repetition_penalties[index_in_input_batch] = (
@@ -124,14 +124,15 @@ def _construct_expected_sampling_metadata(
         temperature[index_in_input_batch] = req.sampling_params.temperature
         min_tokens[index_in_input_batch] = (
             req.sampling_params.min_tokens,
-            req.sampling_params.all_stop_token_ids)
+            req.sampling_params.all_stop_token_ids,
+        )
         logit_bias[index_in_input_batch] = req.sampling_params.logit_bias
         if req.sampling_params.allowed_token_ids:
             allowed_token_ids_mask[index_in_input_batch][
                 req.sampling_params.allowed_token_ids] = True
         if req.sampling_params.bad_words_token_ids:
-            bad_words_token_ids[
-                index_in_input_batch] = req.sampling_params.bad_words_token_ids
+            bad_words_token_ids[index_in_input_batch] = (
+                req.sampling_params.bad_words_token_ids)
 
     return SamplingMetadata(
         temperature=torch.tensor(temperature, dtype=torch.float,
@@ -257,7 +258,8 @@ def test_sampling_metadata_in_input_batch(device: str, batch_size: int):
         reqs,
         req_ids_retained,
         input_batch.req_id_to_index,
-        device=torch.device(device))
+        device=torch.device(device),
+    )
 
     def same(t1: Optional[torch.Tensor], t2: Optional[torch.Tensor]) -> bool:
         return (t1 is None
@@ -281,20 +283,23 @@ def test_sampling_metadata_in_input_batch(device: str, batch_size: int):
         expected_sampling_metadata.repetition_penalties,
         sampling_metadata.repetition_penalties,
     )
-    assert torch.allclose(expected_sampling_metadata.prompt_token_ids,
-                          sampling_metadata.prompt_token_ids)
+    assert torch.allclose(
+        expected_sampling_metadata.prompt_token_ids,
+        sampling_metadata.prompt_token_ids,
+    )
     assert (expected_sampling_metadata.output_token_ids ==
             sampling_metadata.output_token_ids)
     assert expected_sampling_metadata.min_tokens == sampling_metadata.min_tokens
-    assert expected_sampling_metadata.no_penalties == \
-           sampling_metadata.no_penalties
+    assert (expected_sampling_metadata.no_penalties ==
+            sampling_metadata.no_penalties)
     assert expected_sampling_metadata.logit_bias == sampling_metadata.logit_bias
     if sampling_metadata.allowed_token_ids_mask:
         assert torch.allclose(
             expected_sampling_metadata.allowed_token_ids_mask,
-            sampling_metadata.allowed_token_ids_mask)
-    assert expected_sampling_metadata.bad_words_token_ids == \
-        sampling_metadata.bad_words_token_ids
+            sampling_metadata.allowed_token_ids_mask,
+        )
+    assert (expected_sampling_metadata.bad_words_token_ids ==
+            sampling_metadata.bad_words_token_ids)
 
 
 @pytest.mark.skipif(current_platform.is_hpu(),
@@ -343,8 +348,10 @@ def test_swap_states_in_input_batch(device: str, batch_size: int,
 
     reordered_reqs = reqs.copy()
     for swap_pair in swap_list:
-        reordered_reqs[swap_pair[0]], reordered_reqs[swap_pair[1]] = \
-            reordered_reqs[swap_pair[1]], reordered_reqs[swap_pair[0]]
+        reordered_reqs[swap_pair[0]], reordered_reqs[swap_pair[1]] = (
+            reordered_reqs[swap_pair[1]],
+            reordered_reqs[swap_pair[0]],
+        )
         input_batch.swap_states(swap_pair[0], swap_pair[1])
 
     for req_index in range(batch_size):

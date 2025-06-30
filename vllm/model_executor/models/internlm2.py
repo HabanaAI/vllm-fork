@@ -160,8 +160,12 @@ class InternLM2Attention(nn.Module):
         qkv = qkv.contiguous()
 
         # Dynamically reshape based on the number of batch dimensions
-        qkv = qkv.view(*batch_dims, self.total_num_kv_heads,
-                       self.key_value_groups + 2, self.head_dim)
+        qkv = qkv.view(
+            *batch_dims,
+            self.total_num_kv_heads,
+            self.key_value_groups + 2,
+            self.head_dim,
+        )
         q, k, v = torch.split(qkv, [self.key_value_groups, 1, 1], dim=-2)
         q = q.view(*batch_dims, self.q_size * self.tp_size)
         k = k.view(*batch_dims, self.kv_size * self.tp_size)
@@ -254,11 +258,12 @@ class InternLMDecoderLayer(nn.Module):
 class InternLM2Model(nn.Module):
 
     def __init__(
-            self,
-            *,
-            vllm_config: VllmConfig,
-            prefix: str = "",
-            layer_type: Type[InternLMDecoderLayer] = InternLMDecoderLayer):
+        self,
+        *,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+        layer_type: Type[InternLMDecoderLayer] = InternLMDecoderLayer,
+    ):
         super().__init__()
 
         config = vllm_config.model_config.hf_config
@@ -275,7 +280,8 @@ class InternLM2Model(nn.Module):
             config.num_hidden_layers,
             lambda prefix: layer_type(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.layers")
+            prefix=f"{prefix}.layers",
+        )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.make_empty_intermediate_tensors = (
             make_empty_intermediate_tensors_factory(
@@ -318,11 +324,13 @@ class InternLM2ForCausalLM(nn.Module, SupportsPP, SupportsLoRA):
         "gate_up_proj": ["w1", "w3"],
     }
 
-    def __init__(self,
-                 *,
-                 vllm_config: VllmConfig,
-                 prefix: str = "",
-                 model_type: Type[InternLM2Model] = InternLM2Model):
+    def __init__(
+        self,
+        *,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+        model_type: Type[InternLM2Model] = InternLM2Model,
+    ):
         super().__init__()
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
@@ -334,10 +342,12 @@ class InternLM2ForCausalLM(nn.Module, SupportsPP, SupportsLoRA):
 
         self.model = model_type(vllm_config=vllm_config,
                                 prefix=maybe_prefix(prefix, "model"))
-        self.output = ParallelLMHead(config.vocab_size,
-                                     config.hidden_size,
-                                     quant_config=quant_config,
-                                     prefix=maybe_prefix(prefix, "output"))
+        self.output = ParallelLMHead(
+            config.vocab_size,
+            config.hidden_size,
+            quant_config=quant_config,
+            prefix=maybe_prefix(prefix, "output"),
+        )
         if self.config.tie_word_embeddings:
             self.output.weight = self.model.tok_embeddings.weight
         self.logits_processor = LogitsProcessor(config.vocab_size)
@@ -379,7 +389,7 @@ class InternLM2ForCausalLM(nn.Module, SupportsPP, SupportsLoRA):
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

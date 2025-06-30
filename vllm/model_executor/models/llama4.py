@@ -16,6 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
+
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import torch
@@ -56,20 +57,24 @@ class Llama4MoE(nn.Module):
         router_scores = torch.sigmoid(router_scores.float())
         return (router_scores, router_indices.to(torch.int32))
 
-    def __init__(self,
-                 config: Llama4TextConfig,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+    def __init__(
+        self,
+        config: Llama4TextConfig,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ):
         super().__init__()
         self.tp_size = get_tensor_model_parallel_world_size()
         self.top_k = config.num_experts_per_tok
 
         intermediate_size_moe = config.intermediate_size
-        self.router = ReplicatedLinear(config.hidden_size,
-                                       config.num_local_experts,
-                                       bias=False,
-                                       quant_config=None,
-                                       prefix=f"{prefix}.router")
+        self.router = ReplicatedLinear(
+            config.hidden_size,
+            config.num_local_experts,
+            bias=False,
+            quant_config=None,
+            prefix=f"{prefix}.router",
+        )
 
         self.experts = FusedMoE(
             num_experts=config.num_local_experts,
@@ -81,7 +86,8 @@ class Llama4MoE(nn.Module):
             reduce_results=False,
             renormalize=False,
             quant_config=quant_config,
-            prefix=f"{prefix}.experts")
+            prefix=f"{prefix}.experts",
+        )
 
         self.shared_expert = LlamaMLP(
             hidden_size=config.hidden_size,
@@ -110,19 +116,21 @@ class Llama4MoE(nn.Module):
 
 class Llama4Attention(nn.Module):
 
-    def __init__(self,
-                 config: Llama4TextConfig,
-                 hidden_size: int,
-                 num_heads: int,
-                 num_kv_heads: int,
-                 rope_theta: float = 10000,
-                 rope_scaling: Optional[Dict[str, Any]] = None,
-                 max_position_embeddings: int = 8192,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 bias: bool = False,
-                 bias_o_proj: bool = False,
-                 cache_config: Optional[CacheConfig] = None,
-                 prefix: str = "") -> None:
+    def __init__(
+        self,
+        config: Llama4TextConfig,
+        hidden_size: int,
+        num_heads: int,
+        num_kv_heads: int,
+        rope_theta: float = 10000,
+        rope_scaling: Optional[Dict[str, Any]] = None,
+        max_position_embeddings: int = 8192,
+        quant_config: Optional[QuantizationConfig] = None,
+        bias: bool = False,
+        bias_o_proj: bool = False,
+        cache_config: Optional[CacheConfig] = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.layer_idx = extract_layer_index(prefix)
         self.hidden_size = hidden_size
@@ -148,20 +156,20 @@ class Llama4Attention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         # TODO: attn_temperature_tuning should be a bool in huggingface
-        self.attn_temperature_tuning = self.nope and \
-            config.attn_temperature_tuning > 0
+        self.attn_temperature_tuning = (self.nope
+                                        and config.attn_temperature_tuning > 0)
 
         self.floor_scale = getattr(config, "floor_scale", 8192.0)
         self.attn_scale = getattr(config, "attn_scale", 0.1)
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
         self.n_rep = self.num_heads // self.num_kv_heads
-        self.qk_norm = RMSNorm(
+        self.qk_norm = (RMSNorm(
             hidden_size=self.head_dim,
             eps=config.rms_norm_eps,
             has_weight=False,
             dtype=torch.float32,
-        ) if self.use_qk_norm else None
+        ) if self.use_qk_norm else None)
         self.qkv_proj = QKVParallelLinear(
             hidden_size=hidden_size,
             head_size=self.head_dim,
@@ -184,14 +192,14 @@ class Llama4Attention(nn.Module):
         if is_gguf and config.model_type == "llama":
             is_neox_style = False
 
-        self.rotary_emb = get_rope(
+        self.rotary_emb = (get_rope(
             self.head_dim,
             rotary_dim=self.head_dim,
             max_position=max_position_embeddings,
             base=int(rope_theta),
             rope_scaling=rope_scaling if rope_scaling != "default" else None,
             is_neox_style=is_neox_style,
-        ) if not self.nope else None
+        ) if not self.nope else None)
 
         self.attn = Attention(
             self.num_heads,
@@ -277,8 +285,9 @@ class Llama4DecoderLayer(nn.Module):
             cache_config=cache_config,
             prefix=f"{prefix}.self_attn",
         )
-        is_moe_layer = config.interleave_moe_layer_step > 0 and (
-            self.layer_idx + 1) % config.interleave_moe_layer_step == 0
+        is_moe_layer = (config.interleave_moe_layer_step > 0 and
+                        (self.layer_idx + 1) % config.interleave_moe_layer_step
+                        == 0)
         if is_moe_layer:
             self.feed_forward = Llama4MoE(
                 config=config,
@@ -325,11 +334,13 @@ class Llama4DecoderLayer(nn.Module):
 @support_torch_compile
 class Llama4Model(LlamaModel):
 
-    def __init__(self,
-                 *,
-                 vllm_config: VllmConfig,
-                 prefix: str = "",
-                 layer_type: type[Llama4DecoderLayer] = Llama4DecoderLayer):
+    def __init__(
+        self,
+        *,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+        layer_type: type[Llama4DecoderLayer] = Llama4DecoderLayer,
+    ):
         self.num_experts = vllm_config.model_config.hf_config.num_local_experts
         super().__init__(vllm_config=vllm_config,
                          prefix=prefix,
@@ -347,11 +358,15 @@ class Llama4Model(LlamaModel):
         expert_param_loaded = False
         if "experts.gate_up_proj" in name:
             loaded_weight = loaded_weight.chunk(2, dim=-1)
-        for (param_name, weight_name, expert_id,
-             shard_id) in expert_params_mapping:
+        for (
+                param_name,
+                weight_name,
+                expert_id,
+                shard_id,
+        ) in expert_params_mapping:
             new_loaded_weight = loaded_weight
             if fused:
-                e_str, _, proj_str, _ = weight_name.split('.')
+                e_str, _, proj_str, _ = weight_name.split(".")
                 weight_name = f"{e_str}.{proj_str}"
                 param_name = f"{param_name}weight"
             if weight_name not in name:
@@ -360,8 +375,8 @@ class Llama4Model(LlamaModel):
             # Skip layers on other devices.
             if is_pp_missing_parameter(name, self):
                 continue
-            if ((name.endswith(".bias") or name.endswith("_bias"))
-                    and name not in params_dict):
+            if (name.endswith(".bias")
+                    or name.endswith("_bias")) and name not in params_dict:
                 continue
             param = params_dict[full_param_name]
             weight_loader = param.weight_loader
@@ -375,20 +390,21 @@ class Llama4Model(LlamaModel):
                 expert_map = self.layers[
                     layer_idx].feed_forward.experts.expert_map
                 if expert_map is not None:
-                    local_expert_indices = (expert_map != -1) \
-                                            .nonzero() \
-                                            .flatten() \
-                                            .to(new_loaded_weight.device)
+                    local_expert_indices = ((expert_map
+                                             != -1).nonzero().flatten().to(
+                                                 new_loaded_weight.device))
                     new_loaded_weight = new_loaded_weight[local_expert_indices]
                     expert_id = local_expert_indices[0].item()
             else:
                 # TODO: add EP support for non fused weights
                 pass
-            weight_loader(param,
-                          new_loaded_weight,
-                          full_param_name,
-                          shard_id=shard_id,
-                          expert_id=expert_id)
+            weight_loader(
+                param,
+                new_loaded_weight,
+                full_param_name,
+                shard_id=shard_id,
+                expert_id=expert_id,
+            )
 
             loaded_params.add(full_param_name)
             expert_param_loaded = True
@@ -409,20 +425,22 @@ class Llama4Model(LlamaModel):
             ckpt_gate_proj_name="gate_proj",
             ckpt_down_proj_name="down_proj",
             ckpt_up_proj_name="up_proj",
-            num_experts=self.num_experts)
+            num_experts=self.num_experts,
+        )
         expert_params_mapping_fused = FusedMoE.make_expert_params_mapping(
             ckpt_gate_proj_name="gate_up_proj",
             ckpt_down_proj_name="down_proj",
             ckpt_up_proj_name="gate_up_proj",
-            num_experts=1)
+            num_experts=1,
+        )
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
             if "experts.gate_up_proj" in name or "experts.down_proj" in name:
                 fused_experts_params = True
                 expert_params_mapping = expert_params_mapping_fused
-            if (self.quant_config is not None and
-                (scale_name := self.quant_config.get_cache_scale(name))):
+            if self.quant_config is not None and (
+                    scale_name := self.quant_config.get_cache_scale(name)):
                 # Loading kv cache quantization scales
                 param = params_dict[scale_name]
                 weight_loader = getattr(param, "weight_loader",
@@ -450,7 +468,8 @@ class Llama4Model(LlamaModel):
                     params_dict,
                     loaded_params,
                     expert_params_mapping,
-                    fused=fused_experts_params)
+                    fused=fused_experts_params,
+                )
 
                 if not moe_loaded:
                     if is_pp_missing_parameter(name, self):
@@ -464,7 +483,6 @@ class Llama4Model(LlamaModel):
 
 
 class Llama4ForCausalLM(LlamaForCausalLM):
-
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
         "gate_up_proj": ["gate_proj", "up_proj"],
@@ -475,20 +493,24 @@ class Llama4ForCausalLM(LlamaForCausalLM):
         gen_config = vllm_config.model_config.try_get_generation_config()
         gen_config.update(vllm_config.model_config.override_generation_config)
         # enable temperature tuning by default when max_model_len > 32K
-        default_attn_temperature_tuning = \
-            vllm_config.model_config.max_model_len > 32768
-        vllm_config.model_config.hf_config.attn_temperature_tuning \
-            = gen_config.get(
-                "attn_temperature_tuning", default_attn_temperature_tuning)
+        default_attn_temperature_tuning = (
+            vllm_config.model_config.max_model_len > 32768)
+        vllm_config.model_config.hf_config.attn_temperature_tuning = (
+            gen_config.get("attn_temperature_tuning",
+                           default_attn_temperature_tuning))
 
-        super().__init__(vllm_config=vllm_config,
-                         prefix=prefix,
-                         layer_type=Llama4DecoderLayer)
+        super().__init__(
+            vllm_config=vllm_config,
+            prefix=prefix,
+            layer_type=Llama4DecoderLayer,
+        )
 
-    def _init_model(self,
-                    vllm_config: VllmConfig,
-                    prefix: str = "",
-                    layer_type: type[Llama4DecoderLayer] = Llama4DecoderLayer):
+    def _init_model(
+        self,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+        layer_type: type[Llama4DecoderLayer] = Llama4DecoderLayer,
+    ):
         return Llama4Model(vllm_config=vllm_config,
                            prefix=prefix,
                            layer_type=layer_type)
@@ -516,18 +538,19 @@ class Llama4ForCausalLM(LlamaForCausalLM):
             attn_in = self.config.head_dim * n_heads
             attn_out = self.config.hidden_size
 
-            return w.view(n_heads, attn_in // n_heads // 2, 2,
-                          attn_out).transpose(1, 2).reshape(attn_in, attn_out)
+            return (w.view(n_heads, attn_in // n_heads // 2, 2,
+                           attn_out).transpose(1,
+                                               2).reshape(attn_in, attn_out))
 
         modules = name.split(".")
 
         # rotary embeds should be sliced
-        if ("wk" in modules or "k_proj" in modules) \
-           and modules[-1] == "weight":
+        if ("wk" in modules
+                or "k_proj" in modules) and modules[-1] == "weight":
             loaded_weight = permute(loaded_weight,
                                     self.config.num_key_value_heads)
-        elif ("wq" in modules or "q_proj" in modules) \
-                and modules[-1] == "weight":
+        elif ("wq" in modules
+              or "q_proj" in modules) and modules[-1] == "weight":
             loaded_weight = permute(loaded_weight,
                                     self.config.num_attention_heads)
 

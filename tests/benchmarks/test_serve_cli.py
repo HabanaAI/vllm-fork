@@ -11,7 +11,11 @@ MODEL_NAME = "meta-llama/Llama-3.2-1B-Instruct"
 @pytest.fixture(scope="module")
 def server():
     args = [
-        "--max-model-len", "1024", "--enforce-eager", "--load-format", "dummy"
+        "--max-model-len",
+        "1024",
+        "--enforce-eager",
+        "--load-format",
+        "dummy",
     ]
 
     with RemoteOpenAIServer(MODEL_NAME, args) as remote_server:

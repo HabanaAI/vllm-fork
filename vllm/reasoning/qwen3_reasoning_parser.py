@@ -37,8 +37,7 @@ class Qwen3ReasoningParser(ReasoningParser):
 
         self.think_start_token_id = self.vocab.get(self.think_start_token)
         self.think_end_token_id = self.vocab.get(self.think_end_token)
-        if (self.think_start_token_id is None
-                or self.think_end_token_id is None):
+        if self.think_start_token_id is None or self.think_end_token_id is None:
             raise RuntimeError(
                 "Qwen3 reasoning parser could not locate think start/end "
                 "tokens in the tokenizer!")
@@ -85,8 +84,10 @@ class Qwen3ReasoningParser(ReasoningParser):
                 end_index = delta_text.find(self.think_end_token)
                 reasoning_content = delta_text[:end_index]
                 content = delta_text[end_index + len(self.think_end_token):]
-                return DeltaMessage(reasoning_content=reasoning_content,
-                                    content=content if content else None)
+                return DeltaMessage(
+                    reasoning_content=reasoning_content,
+                    content=content if content else None,
+                )
             elif self.think_end_token_id in previous_token_ids:
                 # <think> in previous, </think> in previous,
                 # reasoning content continues
@@ -104,8 +105,10 @@ class Qwen3ReasoningParser(ReasoningParser):
                                                len(self.think_start_token
                                                    ):end_index]
                 content = delta_text[end_index + len(self.think_end_token):]
-                return DeltaMessage(reasoning_content=reasoning_content,
-                                    content=content if content else None)
+                return DeltaMessage(
+                    reasoning_content=reasoning_content,
+                    content=content if content else None,
+                )
             else:
                 # <think> in delta, no </think> in delta,
                 # reasoning content continues
@@ -135,8 +138,8 @@ class Qwen3ReasoningParser(ReasoningParser):
         # Check if the <think> is present in the model output, remove it
         # if it is present.
         model_output_parts = model_output.partition(self.think_start_token)
-        model_output = model_output_parts[2] if model_output_parts[
-            1] else model_output_parts[0]
+        model_output = (model_output_parts[2]
+                        if model_output_parts[1] else model_output_parts[0])
         # Check if the model output contains the </think> tokens.
         # If the end token is not found, return the model output as is.
         if self.think_end_token not in model_output:

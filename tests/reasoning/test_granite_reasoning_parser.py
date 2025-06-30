@@ -11,7 +11,7 @@ START_RESPONSE = "Here is my response:"
 
 SIMPLE_REASONING = {
     "output":
-    f"{START_REASONING}This is a reasoning section{START_RESPONSE}This is the rest",  #noqa: E501
+    f"{START_REASONING}This is a reasoning section{START_RESPONSE}This is the rest",  # noqa: E501
     "reasoning_content": "This is a reasoning section",
     "content": "This is the rest",
 }
@@ -33,7 +33,7 @@ MULTIPLE_LINES = {
 }
 REASONING_WITH_THINK = {
     "output":
-    f"{START_REASONING}This is a reasoning section{START_RESPONSE}This is the rest",  #noqa: E501
+    f"{START_REASONING}This is a reasoning section{START_RESPONSE}This is the rest",  # noqa: E501
     "reasoning_content": "This is a reasoning section",
     "content": "This is the rest",
 }
@@ -319,9 +319,8 @@ STREAMING_SUBCASES = [
 @pytest.mark.parametrize("param_dict", STREAMING_SUBCASES)
 def test_streaming_subcases(param_dict):
     # Get all of the token IDs
-    previous_token_ids = tokenizer.encode(
-        param_dict["previous_text"]
-    ) if param_dict["previous_text"] is not None else []
+    previous_token_ids = (tokenizer.encode(param_dict["previous_text"])
+                          if param_dict["previous_text"] is not None else [])
     current_token_ids = tokenizer.encode(param_dict["current_text"])
     delta_token_ids = tokenizer.encode(param_dict["delta_text"])
 
@@ -338,8 +337,8 @@ def test_streaming_subcases(param_dict):
     )
     # Streaming currently expects at least one of reasoning content / content,
     # so the response should return None in that case.
-    if param_dict["reasoning_content"] is None and param_dict[
-            "content"] is None:
+    if (param_dict["reasoning_content"] is None
+            and param_dict["content"] is None):
         assert response is None
     else:
         assert isinstance(response, DeltaMessage)

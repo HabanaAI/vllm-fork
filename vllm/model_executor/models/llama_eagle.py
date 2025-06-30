@@ -49,8 +49,8 @@ class LlamaModel(nn.Module):
         start_layer_id: int = 0,
     ) -> None:
         super().__init__()
-        self.config = vllm_config. \
-            speculative_config.draft_model_config.hf_config
+        self.config = (
+            vllm_config.speculative_config.draft_model_config.hf_config)
         self.vocab_size = self.config.vocab_size
         self.embed_tokens = VocabParallelEmbedding(
             self.config.vocab_size,
@@ -121,11 +121,13 @@ class EagleLlamaForCausalLM(LlamaForCausalLM):
 
     def __init__(self, *, vllm_config: VllmConfig, start_layer_id: int = 0):
         nn.Module.__init__(self)
-        self.config = vllm_config. \
-            speculative_config.draft_model_config.hf_config
-        self.model = LlamaModel(vllm_config=vllm_config,
-                                prefix="model",
-                                start_layer_id=start_layer_id)
+        self.config = (
+            vllm_config.speculative_config.draft_model_config.hf_config)
+        self.model = LlamaModel(
+            vllm_config=vllm_config,
+            prefix="model",
+            start_layer_id=start_layer_id,
+        )
 
         logit_scale = getattr(self.config, "logit_scale", 1.0)
         self.logits_processor = LogitsProcessor(self.config.vocab_size,

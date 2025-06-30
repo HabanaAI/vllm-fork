@@ -10,8 +10,7 @@ from vllm.utils import STR_BACKEND_ENV_VAR
 
 @pytest.fixture(autouse=True)
 def clear_cache():
-    """Clear lru cache to ensure each test case runs without caching.
-    """
+    """Clear lru cache to ensure each test case runs without caching."""
     _cached_get_attn_backend.cache_clear()
 
 

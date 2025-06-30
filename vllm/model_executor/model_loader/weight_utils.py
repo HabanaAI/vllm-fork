@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Utilities for downloading and initializing model weights."""
+
 import fnmatch
 import glob
 import hashlib
@@ -56,12 +57,12 @@ temp_dir = tempfile.gettempdir()
 
 
 def enable_hf_transfer():
-    """automatically activates hf_transfer
-    """
+    """automatically activates hf_transfer"""
     if "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ:
         try:
             # enable hf hub transfer if available
             import hf_transfer  # type: ignore # noqa
+
             huggingface_hub.constants.HF_HUB_ENABLE_HF_TRANSFER = True
         except ImportError:
             pass
@@ -142,7 +143,6 @@ def convert_bin_to_safetensor_file(
 # TODO(woosuk): Move this to other place.
 def get_quant_config(model_config: ModelConfig,
                      load_config: LoadConfig) -> QuantizationConfig:
-
     quant_cls = get_quantization_config(model_config.quantization)
 
     # GGUF doesn't have config file
@@ -278,8 +278,11 @@ def download_weights_from_hf(
         )
         time_taken = time.perf_counter() - start_time
         if time_taken > 0.5:
-            logger.info("Time spent downloading weights for %s: %.6f seconds",
-                        model_name_or_path, time_taken)
+            logger.info(
+                "Time spent downloading weights for %s: %.6f seconds",
+                model_name_or_path,
+                time_taken,
+            )
     return hf_folder
 
 
@@ -347,7 +350,7 @@ def filter_duplicate_safetensors_files(hf_weights_files: List[str],
 
 
 def filter_files_not_needed_for_inference(
-        hf_weights_files: List[str]) -> List[str]:
+    hf_weights_files: List[str], ) -> List[str]:
     """
     Exclude files that are not needed for inference.
 
@@ -471,7 +474,7 @@ def fastsafetensors_weights_iterator(
     else:
         pg = SingleGroup()
 
-    device = torch.device(f'cuda:{pg.rank()}')
+    device = torch.device(f"cuda:{pg.rank()}")
     weight_files_sub_lists = [
         hf_weights_files[i:i + pg.size()]
         for i in range(0, len(hf_weights_files), pg.size())
@@ -668,13 +671,14 @@ def initialize_dummy_weights(
                 # from a CPU tensor.
                 # Note: We avoid using torch.rank_like as it doesn't currently
                 # support the generator argument.
-                param.copy_((high - low) *
-                            torch.rand(*param.shape,
-                                       generator=generator,
-                                       dtype=param.dtype,
-                                       layout=param.layout,
-                                       requires_grad=param.requires_grad,
-                                       device="cpu") + low)
+                param.copy_((high - low) * torch.rand(
+                    *param.shape,
+                    generator=generator,
+                    dtype=param.dtype,
+                    layout=param.layout,
+                    requires_grad=param.requires_grad,
+                    device="cpu",
+                ) + low)
                 torch._sync(param)
             if current_platform.is_hpu():
                 # XLA device does not support torch.Generator()
@@ -683,6 +687,7 @@ def initialize_dummy_weights(
 
             if current_platform.is_hpu():
                 import habana_frameworks.torch.hpu.random as htrandom
+
                 generator = htrandom.default_generators[0]
             else:
                 generator = torch.Generator(device=param.data.device)
@@ -736,7 +741,8 @@ def maybe_remap_kv_scale_name(name: str, params_dict: dict) -> Optional[str]:
 
     possible_scale_names = [".k_scale", ".v_scale"]
     modelopt_scale_names = [
-        ".self_attn.k_proj.k_scale", ".self_attn.v_proj.v_scale"
+        ".self_attn.k_proj.k_scale",
+        ".self_attn.v_proj.v_scale",
     ]
     for scale_name in possible_scale_names:
         if name.endswith(scale_name):
@@ -744,7 +750,8 @@ def maybe_remap_kv_scale_name(name: str, params_dict: dict) -> Optional[str]:
                    for mo_scale_name in modelopt_scale_names):
                 remapped_name = name.replace(
                     f".self_attn.{scale_name[1]}_proj{scale_name}",
-                    f".self_attn.attn{scale_name}")
+                    f".self_attn.attn{scale_name}",
+                )
             else:
                 remapped_name = name.replace(scale_name, f".attn{scale_name}")
             if remapped_name not in params_dict:

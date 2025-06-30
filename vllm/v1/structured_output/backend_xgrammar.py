@@ -35,15 +35,16 @@ class XgrammarBackend(StructuredOutputBackend):
         tokenizer_group = init_tokenizer_from_configs(
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
-            lora_config=vllm_config.lora_config)  # type: ignore[arg-type]
+            lora_config=vllm_config.lora_config,
+        )  # type: ignore[arg-type]
 
-        self.disable_any_whitespace = \
-            vllm_config.decoding_config.disable_any_whitespace
+        self.disable_any_whitespace = (
+            vllm_config.decoding_config.disable_any_whitespace)
 
         self.num_speculative_tokens = 0
         if self.vllm_config.speculative_config is not None:
-            self.num_speculative_tokens = \
-                self.vllm_config.speculative_config.num_speculative_tokens
+            self.num_speculative_tokens = (
+                self.vllm_config.speculative_config.num_speculative_tokens)
 
         tokenizer = tokenizer_group.get_lora_tokenizer(None)
         self.vocab_size = vllm_config.model_config.get_vocab_size()
@@ -61,10 +62,10 @@ class XgrammarBackend(StructuredOutputBackend):
                         )
                     ]
                 stop_token_ids = None
-                if hasattr(
+                if (hasattr(
                         tokenizer,
                         "eos_token_id",
-                ) and tokenizer.eos_token_id is not None:
+                ) and tokenizer.eos_token_id is not None):
                     stop_token_ids = [tokenizer.eos_token_id]
             except AttributeError as e:
                 raise ValueError(
@@ -100,7 +101,8 @@ class XgrammarBackend(StructuredOutputBackend):
         elif request_type == StructuredOutputOptions.JSON_OBJECT:
             ctx = self.compiler.compile_json_schema(
                 '{"type": "object"}',
-                any_whitespace=not self.disable_any_whitespace)
+                any_whitespace=not self.disable_any_whitespace,
+            )
         elif request_type == StructuredOutputOptions.GRAMMAR:
             ctx = self.compiler.compile_grammar(grammar_spec)
         elif request_type == StructuredOutputOptions.REGEX:
@@ -165,7 +167,10 @@ class XgrammarGrammar(StructuredOutputGrammar):
             if not self.matcher.accept_token(token):
                 logger.error(
                     "Failed to advance FSM for request %s "
-                    "for tokens %s. Please file an issue.", request_id, token)
+                    "for tokens %s. Please file an issue.",
+                    request_id,
+                    token,
+                )
                 return False
             self.num_processed_tokens += 1
         return True
@@ -214,10 +219,14 @@ def has_xgrammar_unsupported_json_features(schema: dict[str, Any]) -> bool:
             return True
 
         # Check for array unsupported keywords
-        if obj.get("type") == "array" and any(
-                key in obj
-                for key in ("uniqueItems", "contains", "minContains",
-                            "maxContains", "minItems", "maxItems")):
+        if obj.get("type") == "array" and any(key in obj for key in (
+                "uniqueItems",
+                "contains",
+                "minContains",
+                "maxContains",
+                "minItems",
+                "maxItems",
+        )):
             return True
 
         # Unsupported keywords for strings
@@ -225,9 +234,12 @@ def has_xgrammar_unsupported_json_features(schema: dict[str, Any]) -> bool:
             return True
 
         # Unsupported keywords for objects
-        if obj.get("type") == "object" and any(
-                key in obj for key in ("minProperties", "maxProperties",
-                                       "propertyNames", "patternProperties")):
+        if obj.get("type") == "object" and any(key in obj for key in (
+                "minProperties",
+                "maxProperties",
+                "propertyNames",
+                "patternProperties",
+        )):
             return True
 
         # Recursively check all nested objects and arrays
@@ -259,16 +271,16 @@ def validate_xgrammar_grammar(sampling_params: SamplingParams) -> None:
         try:
             xgr.Grammar.from_regex(gd_params.regex)
         except Exception as err:
-            raise ValueError("Failed to transform regex into a grammar: "
-                             f"{err}") from err
+            raise ValueError(
+                f"Failed to transform regex into a grammar: {err}") from err
 
     if gd_params.choice:
         choice_grammar = choice_as_grammar(gd_params.choice)
         try:
             xgr.Grammar.from_ebnf(choice_grammar)
         except Exception as err:
-            raise ValueError("Failed to transform choices into a grammar: "
-                             "{err}") from err
+            raise ValueError(
+                "Failed to transform choices into a grammar: {err}") from err
         gd_params.choice = None
         gd_params.grammar = choice_grammar
         return

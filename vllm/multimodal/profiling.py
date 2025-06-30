@@ -27,6 +27,7 @@ class ProcessorInputs:
     Represents the keyword arguments to
     {meth}`vllm.multimodal.processing.BaseMultiModalProcessor.apply`.
     """
+
     prompt_text: str
     mm_data: MultiModalDataDict
     hf_processor_mm_kwargs: Mapping[str, object] = field(default_factory=dict)

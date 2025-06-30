@@ -42,9 +42,11 @@ def test_async_llm_startup_error(monkeypatch, model: str,
     # Monkeypatch an error in the model.
     monkeypatch.setattr(LlamaForCausalLM, failing_method, evil_method)
 
-    engine_args = AsyncEngineArgs(model=model,
-                                  enforce_eager=True,
-                                  tensor_parallel_size=tensor_parallel_size)
+    engine_args = AsyncEngineArgs(
+        model=model,
+        enforce_eager=True,
+        tensor_parallel_size=tensor_parallel_size,
+    )
 
     # Confirm we get an exception.
     with pytest.raises(Exception, match="initialization failed"):
@@ -62,9 +64,13 @@ def test_async_llm_startup_error(monkeypatch, model: str,
 @pytest.mark.parametrize("tensor_parallel_size", [2, 1])
 @pytest.mark.parametrize("enable_multiprocessing", [True])
 @pytest.mark.parametrize("failing_method", ["forward", "load_weights"])
-def test_llm_startup_error(monkeypatch, model: str, tensor_parallel_size: int,
-                           enable_multiprocessing: bool,
-                           failing_method: str) -> None:
+def test_llm_startup_error(
+    monkeypatch,
+    model: str,
+    tensor_parallel_size: int,
+    enable_multiprocessing: bool,
+    failing_method: str,
+) -> None:
     """Test that LLM propagates an __init__ error and frees memory.
     Test profiling (forward()) and load weights failures.
     TODO(andy) - LLM without multiprocessing.
@@ -75,7 +81,6 @@ def test_llm_startup_error(monkeypatch, model: str, tensor_parallel_size: int,
         pytest.skip(reason="Not enough CUDA devices")
 
     with monkeypatch.context() as m:
-
         MP_VALUE = "1" if enable_multiprocessing else "0"
         m.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", MP_VALUE)
 
@@ -85,10 +90,13 @@ def test_llm_startup_error(monkeypatch, model: str, tensor_parallel_size: int,
         with pytest.raises(
                 Exception,
                 match="initialization failed"
-                if enable_multiprocessing else "Simulated Error in startup!"):
-            _ = LLM(model=model,
-                    enforce_eager=True,
-                    tensor_parallel_size=tensor_parallel_size)
+                if enable_multiprocessing else "Simulated Error in startup!",
+        ):
+            _ = LLM(
+                model=model,
+                enforce_eager=True,
+                tensor_parallel_size=tensor_parallel_size,
+            )
 
         # Confirm all the processes are cleaned up.
         wait_for_gpu_memory_to_clear(

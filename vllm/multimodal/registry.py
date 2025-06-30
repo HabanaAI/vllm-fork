@@ -218,7 +218,9 @@ class MultiModalRegistry:
                 logger.warning(
                     "Model class %s already has a multi-modal processor "
                     "registered to %s. It is overwritten by the new one.",
-                    model_cls, self)
+                    model_cls,
+                    self,
+                )
 
             self._processor_factories[model_cls] = _ProcessorFactories(
                 info=info,

@@ -24,8 +24,7 @@ if TYPE_CHECKING:
 
 
 def is_aiter_mla_enabled() -> bool:
-    return envs.VLLM_ROCM_USE_AITER \
-        and envs.VLLM_ROCM_USE_AITER_MLA
+    return envs.VLLM_ROCM_USE_AITER and envs.VLLM_ROCM_USE_AITER_MLA
 
 
 class AiterMLABackend(MLACommonBackend):
@@ -71,8 +70,8 @@ class AiterMLAMetadata(MLACommonMetadata):
         if prefill_metadata is not None:
             prefill_metadata.paged_kv_indptr = self.paged_kv_indptr
             prefill_metadata.paged_kv_indices = self.paged_kv_indices
-            prefill_metadata\
-                .paged_kv_last_page_lens = self.paged_kv_last_page_lens
+            prefill_metadata.paged_kv_last_page_lens = (
+                self.paged_kv_last_page_lens)
             prefill_metadata.block_table_bound = self.block_table_bound
 
             # update the cache
@@ -90,8 +89,8 @@ class AiterMLAMetadata(MLACommonMetadata):
         if decode_metadata is not None:
             decode_metadata.paged_kv_indptr = self.paged_kv_indptr
             decode_metadata.paged_kv_indices = self.paged_kv_indices
-            decode_metadata\
-                .paged_kv_last_page_lens = self.paged_kv_last_page_lens
+            decode_metadata.paged_kv_last_page_lens = (
+                self.paged_kv_last_page_lens)
             decode_metadata.block_table_bound = self.block_table_bound
 
             # update the cache
@@ -100,11 +99,15 @@ class AiterMLAMetadata(MLACommonMetadata):
 
         return self._cached_decode_metadata
 
-    def _ops_advance_step(self, num_seqs: int, num_queries: int,
-                          block_size: int, input_tokens: torch.Tensor,
-                          sampled_token_ids: torch.Tensor,
-                          input_positions: torch.Tensor) -> None:
-
+    def _ops_advance_step(
+        self,
+        num_seqs: int,
+        num_queries: int,
+        block_size: int,
+        input_tokens: torch.Tensor,
+        sampled_token_ids: torch.Tensor,
+        input_positions: torch.Tensor,
+    ) -> None:
         ops.advance_step_flashinfer(
             num_seqs=num_seqs,
             num_queries=num_queries,
@@ -118,7 +121,8 @@ class AiterMLAMetadata(MLACommonMetadata):
             paged_kv_indices=self.paged_kv_indices,
             paged_kv_indptr=self.paged_kv_indptr,
             paged_kv_last_page_lens=self.paged_kv_last_page_lens,
-            block_table_bound=self.block_table_bound)
+            block_table_bound=self.block_table_bound,
+        )
 
 
 class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
@@ -126,8 +130,8 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
 
     def __init__(self, input_builder: "ModelInputForGPUBuilder"):
         super().__init__(input_builder)
-        assert self.runner.model_config.max_model_len == 32768,\
-                "AITER MLA requires max model len to be set to 32768"
+        assert self.runner.model_config.max_model_len == 32768, (
+            "AITER MLA requires max model len to be set to 32768")
         assert self.block_size == 1, "AITER MLA requires only block size 1."
 
     def prepare(self):
@@ -147,13 +151,25 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
         is_prompt = inter_data.is_prompt
         block_tables = inter_data.block_tables
 
-        for (seq_id, token_len, seq_len, curr_seq_len, query_len, context_len,
-             curr_sliding_window_block, input_positions) in zip(
-                 inter_data.seq_ids, [len(t) for t in inter_data.input_tokens],
-                 inter_data.orig_seq_lens, inter_data.seq_lens,
-                 inter_data.query_lens, inter_data.context_lens,
-                 inter_data.curr_sliding_window_blocks,
-                 inter_data.input_positions):
+        for (
+                seq_id,
+                token_len,
+                seq_len,
+                curr_seq_len,
+                query_len,
+                context_len,
+                curr_sliding_window_block,
+                input_positions,
+        ) in zip(
+                inter_data.seq_ids,
+            [len(t) for t in inter_data.input_tokens],
+                inter_data.orig_seq_lens,
+                inter_data.seq_lens,
+                inter_data.query_lens,
+                inter_data.context_lens,
+                inter_data.curr_sliding_window_blocks,
+                inter_data.input_positions,
+        ):
             self.input_positions.extend(input_positions)
             self.context_lens.append(context_len)
             if is_prompt:
@@ -173,8 +189,8 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
                 # NOTE(woosuk): For flash-attn, the block table should
                 # include the entries for the incoming prefill tokens.
                 block_table = block_tables[seq_id]
-            elif ((chunked_prefill_enabled or not is_prompt)
-                  and block_tables is not None):
+            elif (chunked_prefill_enabled
+                  or not is_prompt) and block_tables is not None:
                 if curr_sliding_window_block == 0:
                     block_table = block_tables[seq_id]
                 else:
@@ -187,9 +203,16 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
             start_idx = compute_slot_mapping_start_idx(is_prompt, query_len,
                                                        context_len,
                                                        self.sliding_window)
-            compute_slot_mapping(is_profile_run, self.slot_mapping, seq_id,
-                                 seq_len, context_len, start_idx,
-                                 self.block_size, inter_data.block_tables)
+            compute_slot_mapping(
+                is_profile_run,
+                self.slot_mapping,
+                seq_id,
+                seq_len,
+                context_len,
+                start_idx,
+                self.block_size,
+                inter_data.block_tables,
+            )
             if is_profile_run:
                 return
 
@@ -204,9 +227,9 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
         # If seq_len = 15, block_size = 16,
         # block_table_bound is 0 + 1 with 1 valid block.
         self.total_blocks += len(block_table)
-        block_table_bound = seq_len // self.block_size + 1 \
-            if seq_len % self.block_size != 0 \
-            else seq_len // self.block_size
+        block_table_bound = (seq_len // self.block_size + 1 if seq_len %
+                             self.block_size != 0 else seq_len //
+                             self.block_size)
         self.paged_kv_indices.extend(block_table[:block_table_bound])
         self.paged_kv_indptr.append(self.paged_kv_indptr[-1] +
                                     block_table_bound)
@@ -216,8 +239,13 @@ class AiterMLAMetadataBuilder(MLACommonMetadataBuilder[AiterMLAMetadata]):
             last_page_len = self.block_size
         self.paged_kv_last_page_lens.append(last_page_len)
 
-    def build(self, seq_lens: list[int], query_lens: list[int],
-              cuda_graph_pad_size: int, batch_size: int) -> AiterMLAMetadata:
+    def build(
+        self,
+        seq_lens: list[int],
+        query_lens: list[int],
+        cuda_graph_pad_size: int,
+        batch_size: int,
+    ) -> AiterMLAMetadata:
         metadata = super().build(seq_lens, query_lens, cuda_graph_pad_size,
                                  batch_size)
         device = self.runner.device
@@ -269,7 +297,8 @@ class AiterMLAState(MLACommonState[AiterMLAMetadata]):
             max_batch_size=max_batch_size,
             block_size=self.runner.block_size,
             max_block_per_batch=self.runner.get_max_block_per_batch(),
-            device=self.runner.device)
+            device=self.runner.device,
+        )
         self._paged_kv_indices_tensor = kv_indices
         self._paged_kv_indptr_tensor = kv_indptr
         self._paged_kv_last_page_lens_tensor = last_page_lens
@@ -285,7 +314,6 @@ class AiterMLAState(MLACommonState[AiterMLAMetadata]):
             self,
             batch_size: int,
             is_encoder_decoder_model: bool = False) -> AiterMLAMetadata:
-
         metadata = super().graph_capture_get_metadata_for_batch(
             batch_size, is_encoder_decoder_model)
 
@@ -300,26 +328,28 @@ class AiterMLAState(MLACommonState[AiterMLAMetadata]):
 
         return metadata
 
-    def get_graph_input_buffers(self,
-                                attn_metadata: AiterMLAMetadata,
-                                is_encoder_decoder_model: bool = False):
+    def get_graph_input_buffers(
+        self,
+        attn_metadata: AiterMLAMetadata,
+        is_encoder_decoder_model: bool = False,
+    ):
         input_buffers = super().get_graph_input_buffers(
             attn_metadata, is_encoder_decoder_model)
-        input_buffers[
-            'paged_kv_indptr'] = attn_metadata.decode_metadata.paged_kv_indptr
-        input_buffers[
-            "paged_kv_indices"] = attn_metadata.\
-            decode_metadata.paged_kv_indices
-        input_buffers[
-            "paged_kv_last_page_lens"] = attn_metadata.\
-            decode_metadata.paged_kv_last_page_lens
+        input_buffers["paged_kv_indptr"] = (
+            attn_metadata.decode_metadata.paged_kv_indptr)
+        input_buffers["paged_kv_indices"] = (
+            attn_metadata.decode_metadata.paged_kv_indices)
+        input_buffers["paged_kv_last_page_lens"] = (
+            attn_metadata.decode_metadata.paged_kv_last_page_lens)
 
         return input_buffers
 
-    def prepare_graph_input_buffers(self,
-                                    input_buffers,
-                                    attn_metadata: AiterMLAMetadata,
-                                    is_encoder_decoder_model: bool = False):
+    def prepare_graph_input_buffers(
+        self,
+        input_buffers,
+        attn_metadata: AiterMLAMetadata,
+        is_encoder_decoder_model: bool = False,
+    ):
         super().prepare_graph_input_buffers(input_buffers, attn_metadata,
                                             is_encoder_decoder_model)
 
@@ -331,32 +361,46 @@ class AiterMLAState(MLACommonState[AiterMLAMetadata]):
             attn_metadata.decode_metadata.paged_kv_indices, non_blocking=True)
         input_buffers["paged_kv_last_page_lens"].copy_(
             attn_metadata.decode_metadata.paged_kv_last_page_lens,
-            non_blocking=True)
+            non_blocking=True,
+        )
 
 
 class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
 
     def __init__(
-            self,
-            num_heads: int,
-            head_size: int,
-            scale: float,
-            num_kv_heads: int,
-            alibi_slopes: Optional[list[float]],
-            sliding_window: Optional[int],
-            kv_cache_dtype: str,
-            blocksparse_params: Optional[dict[str, Any]],
-            logits_soft_cap: Optional[float],
-            attn_type: str,
-            # MLA Specific Arguments
-            **mla_args) -> None:
-        super().__init__(num_heads, head_size, scale, num_kv_heads,
-                         alibi_slopes, sliding_window, kv_cache_dtype,
-                         blocksparse_params, logits_soft_cap, attn_type,
-                         **mla_args)
+        self,
+        num_heads: int,
+        head_size: int,
+        scale: float,
+        num_kv_heads: int,
+        alibi_slopes: Optional[list[float]],
+        sliding_window: Optional[int],
+        kv_cache_dtype: str,
+        blocksparse_params: Optional[dict[str, Any]],
+        logits_soft_cap: Optional[float],
+        attn_type: str,
+        # MLA Specific Arguments
+        **mla_args,
+    ) -> None:
+        super().__init__(
+            num_heads,
+            head_size,
+            scale,
+            num_kv_heads,
+            alibi_slopes,
+            sliding_window,
+            kv_cache_dtype,
+            blocksparse_params,
+            logits_soft_cap,
+            attn_type,
+            **mla_args,
+        )
 
         unsupported_features = [
-            alibi_slopes, sliding_window, blocksparse_params, logits_soft_cap
+            alibi_slopes,
+            sliding_window,
+            blocksparse_params,
+            logits_soft_cap,
         ]
         if any(unsupported_features):
             raise NotImplementedError(
@@ -365,12 +409,18 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
                 "logits_soft_cap")
 
         from aiter import flash_attn_varlen_func
+
         self.flash_attn_varlen_func = flash_attn_varlen_func
 
     def _flash_attn_varlen_diff_headdims(
-            self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-            softmax_scale: float, return_softmax_lse: bool,
-            **kwargs) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale: float,
+        return_softmax_lse: bool,
+        **kwargs,
+    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
         output = self.flash_attn_varlen_func(
             q=q,
             k=k,
@@ -404,9 +454,14 @@ class AiterMLAImpl(MLACommonImpl[AiterMLAMetadata]):
 
         kv_buffer = kv_c_and_k_pe_cache.unsqueeze(2)
 
-        aiter_mla_decode_fwd(q, kv_buffer, o, self.scale,
-                             attn_metadata.paged_kv_indptr,
-                             attn_metadata.paged_kv_indices,
-                             attn_metadata.paged_kv_last_page_lens)
+        aiter_mla_decode_fwd(
+            q,
+            kv_buffer,
+            o,
+            self.scale,
+            attn_metadata.paged_kv_indptr,
+            attn_metadata.paged_kv_indices,
+            attn_metadata.paged_kv_last_page_lens,
+        )
 
         return self._v_up_proj(o)

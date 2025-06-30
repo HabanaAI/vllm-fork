@@ -35,16 +35,16 @@ def _walk_json_for_additional_properties(data: object):
     if isinstance(data, dict):
         for value in data.values():
             _walk_json_for_additional_properties(value)
-        if 'additionalProperties' not in data and \
-            ('properties' in data or 'patternProperties' in data):
-            data['additionalProperties'] = False
+        if "additionalProperties" not in data and (
+                "properties" in data or "patternProperties" in data):
+            data["additionalProperties"] = False
     elif isinstance(data, list):
         for item in data:
             _walk_json_for_additional_properties(item)
 
 
 def process_for_additional_properties(
-        guide_json: Union[str, dict[str, Any]]) -> dict[str, Any]:
+    guide_json: Union[str, dict[str, Any]], ) -> dict[str, Any]:
     if isinstance(guide_json, str):
         guide_json_obj = json.loads(guide_json)
     else:
@@ -61,14 +61,15 @@ class GuidanceBackend(StructuredOutputBackend):
         tokenizer_group = init_tokenizer_from_configs(
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
-            lora_config=vllm_config.lora_config)  # type: ignore[arg-type]
+            lora_config=vllm_config.lora_config,
+        )  # type: ignore[arg-type]
         self.vllm_config = vllm_config
         self.vocab_size = vllm_config.model_config.get_vocab_size()
 
-        self.disable_any_whitespace = \
-            vllm_config.decoding_config.disable_any_whitespace
-        self.disable_additional_properties = \
-            vllm_config.decoding_config.disable_additional_properties
+        self.disable_any_whitespace = (
+            vllm_config.decoding_config.disable_any_whitespace)
+        self.disable_additional_properties = (
+            vllm_config.decoding_config.disable_additional_properties)
 
         tokenizer = tokenizer_group.get_lora_tokenizer(None)
         self.ll_tokenizer = llguidance_hf.from_tokenizer(
@@ -77,8 +78,11 @@ class GuidanceBackend(StructuredOutputBackend):
     def compile_grammar(self, request_type: StructuredOutputOptions,
                         grammar_spec: str) -> StructuredOutputGrammar:
         self.serialized_grammar = serialize_guidance_grammar(
-            request_type, grammar_spec, self.disable_any_whitespace,
-            self.disable_additional_properties)
+            request_type,
+            grammar_spec,
+            self.disable_any_whitespace,
+            self.disable_additional_properties,
+        )
 
         ll_matcher = llguidance.LLMatcher(
             self.ll_tokenizer,
@@ -193,7 +197,8 @@ def serialize_guidance_grammar(
             grammar_spec,
             defaults={
                 "whitespace_flexible": not disable_any_whitespace,
-            })
+            },
+        )
 
     if request_type == StructuredOutputOptions.JSON:
         return _process_schema(grammar_spec)
@@ -202,7 +207,8 @@ def serialize_guidance_grammar(
             '{"type": "object"}',
             defaults={
                 "whitespace_flexible": not disable_any_whitespace,
-            })
+            },
+        )
     else:
         if request_type == StructuredOutputOptions.REGEX:
             tp = "regex"
@@ -235,16 +241,18 @@ def serialize_guidance_grammar(
                     "No structural tags found in the grammar spec.")
             return llguidance.StructTag.to_grammar(tags)
         else:
-            logger.error("Validation should have already occurred. "
-                         "Please file an issue.")
-            raise ValueError("grammar is not of valid supported types. "
-                             f"({request_type!s})")
+            logger.error(
+                "Validation should have already occurred. Please file an issue."
+            )
+            raise ValueError(
+                f"grammar is not of valid supported types. ({request_type!s})")
         return llguidance.grammar_from(tp, grammar_spec)
 
 
 def validate_guidance_grammar(
-        sampling_params: SamplingParams,
-        tokenizer: Optional[llguidance.LLTokenizer] = None) -> None:
+    sampling_params: SamplingParams,
+    tokenizer: Optional[llguidance.LLTokenizer] = None,
+) -> None:
     tp, grm = get_structured_output_key(sampling_params)
     guidance_grm = serialize_guidance_grammar(tp, grm)
     err = llguidance.LLMatcher.validate_grammar(guidance_grm, tokenizer)

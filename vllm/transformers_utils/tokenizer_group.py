@@ -14,8 +14,14 @@ from vllm.utils import LRUCache
 class TokenizerGroup:
     """A group of tokenizers that can be used for LoRA adapters."""
 
-    def __init__(self, tokenizer_id: str, enable_lora: bool, max_num_seqs: int,
-                 max_input_length: Optional[int], **tokenizer_config):
+    def __init__(
+        self,
+        tokenizer_id: str,
+        enable_lora: bool,
+        max_num_seqs: int,
+        max_input_length: Optional[int],
+        **tokenizer_config,
+    ):
         self.tokenizer_id = tokenizer_id
         self.tokenizer_config = tokenizer_config
         self.enable_lora = enable_lora
@@ -31,9 +37,11 @@ class TokenizerGroup:
         """Get the maximum input length for the LoRA request."""
         return self.max_input_length
 
-    def _raise_if_input_too_long(self,
-                                 encoded_tokens: List[int],
-                                 lora_request: Optional[LoRARequest] = None):
+    def _raise_if_input_too_long(
+        self,
+        encoded_tokens: List[int],
+        lora_request: Optional[LoRARequest] = None,
+    ):
         input_length = len(encoded_tokens)
         if lora_request:
             max_input_length = (lora_request.long_lora_max_len
@@ -43,35 +51,41 @@ class TokenizerGroup:
         if max_input_length is not None and input_length > max_input_length:
             raise ValueError("Input too long.", input_length, max_input_length)
 
-    def encode(self,
-               prompt: str,
-               max_length: Optional[int] = None,
-               truncation: Optional[bool] = None,
-               lora_request: Optional[LoRARequest] = None,
-               add_special_tokens: Optional[bool] = None) -> List[int]:
-
+    def encode(
+        self,
+        prompt: str,
+        max_length: Optional[int] = None,
+        truncation: Optional[bool] = None,
+        lora_request: Optional[LoRARequest] = None,
+        add_special_tokens: Optional[bool] = None,
+    ) -> List[int]:
         tokenizer = self.get_lora_tokenizer(lora_request)
-        ret = encode_tokens(tokenizer,
-                            prompt,
-                            max_length=max_length,
-                            truncation=truncation,
-                            add_special_tokens=add_special_tokens)
+        ret = encode_tokens(
+            tokenizer,
+            prompt,
+            max_length=max_length,
+            truncation=truncation,
+            add_special_tokens=add_special_tokens,
+        )
         self._raise_if_input_too_long(ret, lora_request)
         return ret
 
     async def encode_async(
-            self,
-            prompt: str,
-            max_length: Optional[int] = None,
-            truncation: Optional[bool] = None,
-            lora_request: Optional[LoRARequest] = None,
-            add_special_tokens: Optional[bool] = None) -> List[int]:
+        self,
+        prompt: str,
+        max_length: Optional[int] = None,
+        truncation: Optional[bool] = None,
+        lora_request: Optional[LoRARequest] = None,
+        add_special_tokens: Optional[bool] = None,
+    ) -> List[int]:
         tokenizer = await self.get_lora_tokenizer_async(lora_request)
-        ret = encode_tokens(tokenizer,
-                            prompt,
-                            max_length=max_length,
-                            truncation=truncation,
-                            add_special_tokens=add_special_tokens)
+        ret = encode_tokens(
+            tokenizer,
+            prompt,
+            max_length=max_length,
+            truncation=truncation,
+            add_special_tokens=add_special_tokens,
+        )
         self._raise_if_input_too_long(ret, lora_request)
         return ret
 
@@ -104,9 +118,11 @@ class TokenizerGroup:
             return self.lora_tokenizers[lora_request.lora_int_id]
 
 
-def init_tokenizer_from_configs(model_config: ModelConfig,
-                                scheduler_config: SchedulerConfig,
-                                lora_config: Optional[LoRAConfig]):
+def init_tokenizer_from_configs(
+    model_config: ModelConfig,
+    scheduler_config: SchedulerConfig,
+    lora_config: Optional[LoRAConfig],
+):
     return TokenizerGroup(
         tokenizer_id=model_config.tokenizer,
         enable_lora=bool(lora_config),
@@ -116,4 +132,5 @@ def init_tokenizer_from_configs(model_config: ModelConfig,
         tokenizer_mode=model_config.tokenizer_mode,
         trust_remote_code=model_config.trust_remote_code,
         revision=model_config.tokenizer_revision,
-        truncation_side=model_config.truncation_side)
+        truncation_side=model_config.truncation_side,
+    )

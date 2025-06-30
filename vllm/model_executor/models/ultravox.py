@@ -2,6 +2,7 @@
 
 # Adapted from https://github.com/fixie-ai/ultravox/blob/ecd58c4041030bae2ad15aa6bcf04ab43199ea02/ultravox/model/ultravox_model.py
 """PyTorch Ultravox model."""
+
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Optional, Set, Tuple, TypedDict, Union
 
@@ -169,7 +170,7 @@ class UltravoxMultiModalProcessor(
             mm_data=item_processor_data,
             mm_kwargs=mm_kwargs,
         )
-        output['audio_features'] = output.pop('audio_values')
+        output["audio_features"] = output.pop("audio_values")
 
         return output
 
@@ -178,7 +179,7 @@ class UltravoxMultiModalProcessor(
         hf_inputs: BatchFeature,
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
-        num_chunks = hf_inputs.get('audio_num_chunks', torch.zeros(0))
+        num_chunks = hf_inputs.get("audio_num_chunks", torch.zeros(0))
         return dict(
             # to handle longer than 30s audio, each audio might be split
             # into multiple chunks as such, their batch dimension can be
@@ -241,8 +242,8 @@ class StackAudioFrames(nn.Module):
 
     def forward(self, audio_embeds: torch.Tensor) -> torch.Tensor:
         B, T, C = audio_embeds.shape
-        T_pad = (T + self.stack_factor -
-                 1) // self.stack_factor * self.stack_factor
+        T_pad = ((T + self.stack_factor - 1) // self.stack_factor *
+                 self.stack_factor)
         audio_embeds = F.pad(audio_embeds, (0, 0, 0, T_pad - T))
         B, T, C = audio_embeds.shape
         audio_embeds = audio_embeds.view(B, T // self.stack_factor,
@@ -389,12 +390,12 @@ class ModifiedWhisperEncoder(WhisperEncoder):
 @MULTIMODAL_REGISTRY.register_processor(
     UltravoxMultiModalProcessor,
     info=UltravoxProcessingInfo,
-    dummy_inputs=UltravoxDummyInputsBuilder)
+    dummy_inputs=UltravoxDummyInputsBuilder,
+)
 class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
-
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-        "gate_up_proj": ["gate_proj", "up_proj"]
+        "gate_up_proj": ["gate_proj", "up_proj"],
     }
 
     hf_to_vllm_mapper = WeightsMapper(
@@ -429,9 +430,11 @@ class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
             # this prefix is not for initialization, but for loading weights
             # note the trailing dot
             self.secondary_weights.append(
-                DefaultModelLoader.Source(model_or_path=config.text_model_id,
-                                          revision=None,
-                                          prefix="language_model."))
+                DefaultModelLoader.Source(
+                    model_or_path=config.text_model_id,
+                    revision=None,
+                    prefix="language_model.",
+                ))
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
@@ -490,10 +493,12 @@ class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
                 raise ValueError("Incorrect type of audio_token_len. "
                                  f"Got type: {type(audio_features)}")
 
-            return UltravoxAudioFeatureInputs(type="audio_features",
-                                              data=audio_features,
-                                              lens=audio_lens,
-                                              token_len=audio_token_len)
+            return UltravoxAudioFeatureInputs(
+                type="audio_features",
+                data=audio_features,
+                lens=audio_lens,
+                token_len=audio_token_len,
+            )
 
         if audio_embeds is not None:
             if not isinstance(audio_embeds, (torch.Tensor, list)):
@@ -517,8 +522,8 @@ class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
         audio_features = pad_and_concat_to_dim3(audio_input["data"])
 
         # [B1, B2] -> [B1+B2]
-        audio_lens = flatten_bn(audio_input['lens'], concat=True)
-        audio_token_len = flatten_bn(audio_input['token_len'], concat=True)
+        audio_lens = flatten_bn(audio_input["lens"], concat=True)
+        audio_token_len = flatten_bn(audio_input["token_len"], concat=True)
 
         embeddings = self._audio_features_to_embeddings(
             audio_features, audio_lens)
@@ -538,7 +543,7 @@ class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
         # Return one tensor per input audio
         embed_lens = [
             token_len_item.sum().item()
-            for token_len_item in audio_input['token_len']
+            for token_len_item in audio_input["token_len"]
         ]
         return flattened_embeddings.split(embed_lens)
 
@@ -560,25 +565,31 @@ class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
     ) -> torch.Tensor:
         inputs_embeds = self.language_model.get_input_embeddings(input_ids)
         if multimodal_embeddings is not None:
-
             # TODO(ywang96): remove this block after v0 is deprecated.
             if not envs.VLLM_USE_V1:
                 attn_metadata = get_forward_context().attn_metadata
                 merge_multimodal_embeddings_from_map(
-                    inputs_embeds, multimodal_embeddings,
-                    attn_metadata.multi_modal_placeholder_index_maps["audio"])
+                    inputs_embeds,
+                    multimodal_embeddings,
+                    attn_metadata.multi_modal_placeholder_index_maps["audio"],
+                )
             else:
                 inputs_embeds = merge_multimodal_embeddings(
-                    input_ids, inputs_embeds, multimodal_embeddings,
-                    _AUDIO_PLACEHOLDER_TOKEN)
+                    input_ids,
+                    inputs_embeds,
+                    multimodal_embeddings,
+                    _AUDIO_PLACEHOLDER_TOKEN,
+                )
         return inputs_embeds
 
-    def forward(self,
-                input_ids: torch.Tensor,
-                positions: torch.Tensor,
-                intermediate_tensors: Optional[torch.Tensor] = None,
-                inputs_embeds: Optional[torch.Tensor] = None,
-                **kwargs) -> Union[torch.Tensor, IntermediateTensors]:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> Union[torch.Tensor, IntermediateTensors]:
         """Run forward pass for Ultravox
 
         One key thing to understand is the `input_ids` already accounts for the
@@ -608,10 +619,12 @@ class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
                                                       multimodal_embeddings)
             input_ids = None
 
-        hidden_states = self.language_model.model(input_ids,
-                                                  positions,
-                                                  intermediate_tensors,
-                                                  inputs_embeds=inputs_embeds)
+        hidden_states = self.language_model.model(
+            input_ids,
+            positions,
+            intermediate_tensors,
+            inputs_embeds=inputs_embeds,
+        )
         return hidden_states
 
     def compute_logits(self, hidden_states: torch.Tensor,
@@ -621,14 +634,14 @@ class UltravoxModel(nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA):
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
-
         loader = AutoWeightsLoader(self,
                                    ignore_unexpected_prefixes=["audio_tower."])
         return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
 
 
 def pad_and_concat_to_dim3(
-    features: Union[torch.Tensor, list[torch.Tensor], list[list[torch.Tensor]]]
+    features: Union[torch.Tensor, list[torch.Tensor],
+                    list[list[torch.Tensor]]],
 ) -> torch.Tensor:
     """
     Pad and concatenate a list of tensors.

@@ -16,7 +16,8 @@ class RequestStatsUpdate(
         msgspec.Struct,  # type: ignore
         array_like=True,
         omit_defaults=True,
-        gc=False):
+        gc=False,
+):
     """
     An update to the request stats.
 
@@ -369,9 +370,8 @@ class RequestStats:
         # Update if first output token is generated.
         if len(self.output_token_ts_s_lst) == 0:
             self.first_token_ts_s = ts_s
-            assert (
-                self.prefill_ts_s is not None
-            ), "Request must be running before generating output tokens."
+            assert self.prefill_ts_s is not None, (
+                "Request must be running before generating output tokens.")
 
         # Some X new tokens were generated at the ts.
         self.output_token_ts_s_lst.extend([ts_s] * num_new_tokens)
@@ -432,7 +432,8 @@ class EngineCoreStatsSnapshot(
         msgspec.Struct,  # type: ignore
         array_like=True,
         omit_defaults=True,
-        gc=False):
+        gc=False,
+):
     """
     A snapshot of the EngineCore's current stats over a period of time.
     """

@@ -6,7 +6,7 @@ from vllm.utils import FlexibleArgumentParser
 
 
 class BenchmarkSubcommandBase(CLISubcommand):
-    """ The base class of subcommands for vllm bench. """
+    """The base class of subcommands for vllm bench."""
 
     @property
     def help(self) -> str:
@@ -33,6 +33,7 @@ class BenchmarkSubcommandBase(CLISubcommand):
             self.name,
             help=self.help,
             description=self.help,
-            usage=f"vllm bench {self.name} [options]")
+            usage=f"vllm bench {self.name} [options]",
+        )
         self.add_cli_args(parser)
         return parser

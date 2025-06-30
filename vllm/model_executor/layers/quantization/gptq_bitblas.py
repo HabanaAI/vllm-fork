@@ -59,9 +59,9 @@ class GPTQBitBLASConfig(QuantizationConfig):
         quant_method: Optional[str],
         lm_head_quantized: bool,
     ) -> None:
-
         try:
             import bitblas
+
             if bitblas.__version__ < MINIMUM_BITBLAS_VERSION:
                 raise ImportError(
                     "bitblas version is wrong. Please "
@@ -149,8 +149,14 @@ class GPTQBitBLASConfig(QuantizationConfig):
         quant_method = cls.get_from_keys(config, ["quant_method"])
         lm_head_quantized = cls.get_from_keys_or(config, ["lm_head"],
                                                  default=False)
-        return cls(weight_bits, group_size, desc_act, is_sym, quant_method,
-                   lm_head_quantized)
+        return cls(
+            weight_bits,
+            group_size,
+            desc_act,
+            is_sym,
+            quant_method,
+            lm_head_quantized,
+        )
 
     @classmethod
     def override_quantization_method(
@@ -229,8 +235,10 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: GPTQBitBLASConfig) -> None:
         self.quant_config = quant_config
         # Verify supported on platform.
-        verify_bitblas_supported(quant_type=self.quant_config.quant_type,
-                                 group_size=self.quant_config.group_size)
+        verify_bitblas_supported(
+            quant_type=self.quant_config.quant_type,
+            group_size=self.quant_config.group_size,
+        )
 
     def create_weights(
         self,
@@ -244,7 +252,7 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
     ) -> None:
         """Creates quantized weights for use in linear operations.
 
-        The function initializes and returns a dictionary containing 
+        The function initializes and returns a dictionary containing
         quantized weights, scales, and zeros
         for performing quantized matrix multiplication operations.
 
@@ -253,16 +261,16 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
             output_partition_sizes: The size of the output partition.
             input_size: The total size of the input (unused).
             output_size: The total size of the output (unused).
-            params_dtype: 
+            params_dtype:
                 The data type of the parameters (expected to be torch.float16).
 
         Returns:
-            A dictionary containing the quantized weights ('qweight'), 
+            A dictionary containing the quantized weights ('qweight'),
             scales ('scales'), and zeros ('zeros').
 
         Raises:
-            ValueError: If `params_dtype` is not `torch.float16` or 
-            if the input size per partition is not divisible by the 
+            ValueError: If `params_dtype` is not `torch.float16` or
+            if the input size per partition is not divisible by the
             group size in `quant_config`.
         """
         if params_dtype != torch.float16:
@@ -290,13 +298,15 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
 
         mp_linear_kernel_config = MPLinearLayerConfig(
             full_weight_shape=(input_size, output_size),
-            partition_weight_shape=\
-                (input_size_per_partition, output_size_per_partition),
+            partition_weight_shape=(
+                input_size_per_partition,
+                output_size_per_partition,
+            ),
             weight_type=self.quant_config.quant_type,
             act_type=params_dtype,
             group_size=self.quant_config.group_size,
             zero_points=False,
-            has_g_idx=self.quant_config.desc_act
+            has_g_idx=self.quant_config.desc_act,
         )
 
         if kernel_type.__name__ not in self._kernel_backends_being_used:
@@ -311,9 +321,11 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
             group_size = input_size
 
         # Determine sharding
-        if bitblas_repeat_scales_on_all_ranks(self.quant_config.desc_act,
-                                              self.quant_config.group_size,
-                                              is_row_parallel):
+        if bitblas_repeat_scales_on_all_ranks(
+                self.quant_config.desc_act,
+                self.quant_config.group_size,
+                is_row_parallel,
+        ):
             # By setting scale_dim == None, weight_loader will
             # repeat the scales on each GPU in TP>1 case.
             scales_and_zp_input_dim = None
@@ -336,16 +348,19 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
             output_dim=1,
             packed_dim=0,
             packed_factor=self.quant_config.pack_factor,
-            weight_loader=weight_loader)
+            weight_loader=weight_loader,
+        )
 
         # Activation order
         # Ignore warning from fused linear layers such as QKVParallelLinear.
-        g_idx = RowvLLMParameter(data=torch.empty(
-            input_size_per_partition,
-            dtype=torch.int32,
-        ),
-                                 input_dim=0,
-                                 weight_loader=weight_loader)
+        g_idx = RowvLLMParameter(
+            data=torch.empty(
+                input_size_per_partition,
+                dtype=torch.int32,
+            ),
+            input_dim=0,
+            weight_loader=weight_loader,
+        )
 
         # Scales
         scales = Parameter(
@@ -374,7 +389,7 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
                 dtype=torch.int32,
             ),
             "weight_loader":
-            weight_loader
+            weight_loader,
         }
         weight_scale_args = {
             "data":
@@ -384,7 +399,7 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
                 dtype=params_dtype,
             ),
             "weight_loader":
-            weight_loader
+            weight_loader,
         }
 
         if scales_and_zp_input_dim is None:
@@ -394,7 +409,8 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
                 output_dim=1,
                 packed_dim=1,
                 packed_factor=self.quant_config.pack_factor,
-                **qzeros_args)
+                **qzeros_args,
+            )
 
         else:
             scales = GroupQuantScaleParameter(output_dim=1,
@@ -405,7 +421,8 @@ class GPTQBitBLASLinearMethod(LinearMethodBase):
                 output_dim=1,
                 packed_dim=1,
                 packed_factor=self.quant_config.pack_factor,
-                **qzeros_args)
+                **qzeros_args,
+            )
 
         layer.register_parameter("qweight", qweight)
         layer.register_parameter("g_idx", g_idx)

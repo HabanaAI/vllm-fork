@@ -20,8 +20,8 @@ def rejection_sampler():
 
 def create_logits_tensor(output_token_ids: list[list[int]],
                          vocab_size: int = 100) -> torch.Tensor:
-    """Helper function to create logits tensor that 
-       will produce desired token ids on argmax"""
+    """Helper function to create logits tensor that
+    will produce desired token ids on argmax"""
     token_ids = [tokens[:-1] for tokens in output_token_ids]
     num_total_tokens = sum(len(tokens) for tokens in token_ids)
     logits = torch.full((num_total_tokens, vocab_size), -100.0, device=DEVICE)
@@ -40,9 +40,9 @@ def create_sampling_metadata(
     top_p: Optional[torch.Tensor] = None,
     generators: Optional[dict[int, Any]] = None,
 ) -> SamplingMetadata:
-    """Create a v1 sampling metadata object with all_greedy set 
-        to the given value. Either all greedy or all random sampling 
-        is used.
+    """Create a v1 sampling metadata object with all_greedy set
+    to the given value. Either all greedy or all random sampling
+    is used.
     """
     generators = generators or {}
     if all_greedy:
@@ -128,8 +128,10 @@ def test_early_mismatch(rejection_sampler):
 def test_multiple_sequences(rejection_sampler):
     """Test handling multiple sequences of speculated tokens"""
     spec_tokens = [[1, 2], [3]]
-    output_tokens = [[1, 2, 5], [3,
-                                 4]]  # Two sequences with bonus tokens 5 and 4
+    output_tokens = [
+        [1, 2, 5],
+        [3, 4],
+    ]  # Two sequences with bonus tokens 5 and 4
 
     metadata = create_sampling_metadata(all_greedy=True)
     logits = create_logits_tensor(output_tokens)
@@ -145,9 +147,11 @@ def test_multiple_sequences(rejection_sampler):
         bonus_token_ids=bonus_token_tensor,
         sampling_metadata=metadata,
     )
-    expected = torch.tensor([[1, 2, 5], [3, 4, PLACEHOLDER_TOKEN_ID]],
-                            dtype=torch.int,
-                            device=logits.device)
+    expected = torch.tensor(
+        [[1, 2, 5], [3, 4, PLACEHOLDER_TOKEN_ID]],
+        dtype=torch.int,
+        device=logits.device,
+    )
     assert torch.equal(output, expected)
 
 
@@ -218,8 +222,10 @@ def test_multiple_mismatches(rejection_sampler):
         sampling_metadata=metadata,
     )
     expected = torch.tensor(
-        [[1, 2, 7, PLACEHOLDER_TOKEN_ID],
-         [4, 8, PLACEHOLDER_TOKEN_ID, PLACEHOLDER_TOKEN_ID]],
+        [
+            [1, 2, 7, PLACEHOLDER_TOKEN_ID],
+            [4, 8, PLACEHOLDER_TOKEN_ID, PLACEHOLDER_TOKEN_ID],
+        ],
         dtype=torch.int,
         device=logits.device,
     )
@@ -231,9 +237,13 @@ def test_multiple_mismatches(rejection_sampler):
     [
         ([[1, 2]], [[1, 2, 3]], [[1, 2, 3]]),  # Perfect match with bonus
         ([[1]], [[2, 3]], [[2, PLACEHOLDER_TOKEN_ID]]),  # First mismatch
-        ([[1, 2], [3, 4]], [[1, 5, 6], [3, 4, 7]],
-         [[1, 5, PLACEHOLDER_TOKEN_ID], [3, 4, 7]]),  # Mixed matches
-    ])
+        (
+            [[1, 2], [3, 4]],
+            [[1, 5, 6], [3, 4, 7]],
+            [[1, 5, PLACEHOLDER_TOKEN_ID], [3, 4, 7]],
+        ),  # Mixed matches
+    ],
+)
 def test_parametrized_cases(rejection_sampler, spec_tokens, output_tokens,
                             expected):
     """Parametrized test for various matching scenarios"""
@@ -278,16 +288,20 @@ def test_deterministic_when_seeded(
                              device=DEVICE)
     draft_probs = F.softmax(draft_probs, dim=-1)
     target_logits = torch.rand_like(draft_probs)
-    bonus_token_ids = torch.randint(low=0,
-                                    high=vocab_size,
-                                    size=(batch_size, 1),
-                                    dtype=torch.int64,
-                                    device=DEVICE)
-    draft_token_ids = torch.randint(low=0,
-                                    high=vocab_size,
-                                    size=(batch_size, k),
-                                    dtype=torch.int64,
-                                    device=DEVICE)
+    bonus_token_ids = torch.randint(
+        low=0,
+        high=vocab_size,
+        size=(batch_size, 1),
+        dtype=torch.int64,
+        device=DEVICE,
+    )
+    draft_token_ids = torch.randint(
+        low=0,
+        high=vocab_size,
+        size=(batch_size, k),
+        dtype=torch.int64,
+        device=DEVICE,
+    )
 
     seeded_mask = torch.rand(batch_size, dtype=torch.float32) <= frac_seeded
 
@@ -371,9 +385,9 @@ def test_rejection_sampling_approximates_target_distribution():
         rej_sample_probs = rej_sample_probs.to(DEVICE)
 
         # Average distance from reference probs.
-        reference_vs_rejsample_dist = torch.dist(
-            reference_probs,
-            rej_sample_probs).item() / reference_probs.shape[0]
+        reference_vs_rejsample_dist = (
+            torch.dist(reference_probs, rej_sample_probs).item() /
+            reference_probs.shape[0])
         target_vs_rejsample_dist = torch.dist(target_probs,
                                               rej_sample_probs).item()
 
@@ -457,11 +471,12 @@ def estimate_rejection_sampling_pdf(
     )
     output_token_ids = output_token_ids[:, :-1].flatten()
 
-    hist = torch.histogram(output_token_ids.to(dtype=torch.float,
-                                               device="cpu"),
-                           bins=vocab_size,
-                           range=(0, vocab_size),
-                           density=True)
+    hist = torch.histogram(
+        output_token_ids.to(dtype=torch.float, device="cpu"),
+        bins=vocab_size,
+        range=(0, vocab_size),
+        density=True,
+    )
 
     return hist.hist
 

@@ -79,8 +79,9 @@ class MediaConnector:
     ) -> _M:
         allowed_local_media_path = self.allowed_local_media_path
         if allowed_local_media_path is None:
-            raise RuntimeError("Cannot load local files without "
-                               "`--allowed-local-media-path`.")
+            raise RuntimeError(
+                "Cannot load local files without `--allowed-local-media-path`."
+            )
 
         filepath = Path(url_spec.path)
         if allowed_local_media_path not in filepath.resolve().parents:
@@ -301,13 +302,13 @@ def merge_and_sort_multimodal_metadata(
     mm_hashes: Optional[MultiModalHashDict],
 ) -> tuple[list[str], list[PlaceholderRange], Optional[list[str]]]:
     """Given a MultiModalPlaceholderDict, merge all PlaceholderRange
-    objects from all available modalities into a single list of 
+    objects from all available modalities into a single list of
     PlaceholderRange, sorted by their offset (starting index in the input
     sequence) in the ascending order.
 
     Optionally if a `MultiModalHashDict` is given, same operation will be
     applied to the object and the sorted list of hashes will be returned.
-    
+
     Returns:
         list[str]: List of item modalities in order of their positions in the
         input sequence.
@@ -327,18 +328,19 @@ def merge_and_sort_multimodal_metadata(
         modality = modalities[0]
         placeholder_list = list(mm_positions[modality])
 
-        return [modality] * len(
-            placeholder_list
-        ), placeholder_list, None if not mm_hashes else mm_hashes[modality]
+        return (
+            [modality] * len(placeholder_list),
+            placeholder_list,
+            None if not mm_hashes else mm_hashes[modality],
+        )
 
     # Create a list of (modality, placeholder, hash) tuples for all placeholders
     all_items = []
     for modality in modalities:
         placeholder_list = list(mm_positions[modality])
-        hash_list: list[Optional[str]] = list(
-            mm_hashes[modality]) if mm_hashes and modality in mm_hashes else [
-                None
-            ] * len(placeholder_list)
+        hash_list: list[Optional[str]] = (list(
+            mm_hashes[modality]) if mm_hashes and modality in mm_hashes else
+                                          [None] * len(placeholder_list))
 
         for placeholder, hash_value in zip(placeholder_list, hash_list):
             all_items.append((modality, placeholder, hash_value))
@@ -349,14 +351,14 @@ def merge_and_sort_multimodal_metadata(
     # Split into separate lists
     sorted_modalities = [item[0] for item in all_items]
     merged_placeholders = [item[1] for item in all_items]
-    merged_hashes = [str(item[2])
-                     for item in all_items] if mm_hashes is not None else None
+    merged_hashes = ([str(item[2]) for item in all_items]
+                     if mm_hashes is not None else None)
 
     return sorted_modalities, merged_placeholders, merged_hashes
 
 
 def group_mm_inputs_by_modality(
-        mm_inputs: list[MultiModalKwargs]) -> list[list[MultiModalKwargs]]:
+    mm_inputs: list[MultiModalKwargs], ) -> list[list[MultiModalKwargs]]:
     """Group consecutive MultiModalKwargs from mm_inputs with the same modality
     together into the same list for batching purpose. For MultiModalKwargs with
     multiple modalities, put them into their own list.

@@ -30,11 +30,13 @@ def test_tpu_compilation():
                                          n=N,
                                          max_tokens=16)
 
-        llm = LLM(model="Qwen/Qwen2-1.5B-Instruct",
-                  max_num_batched_tokens=256,
-                  max_model_len=256,
-                  max_num_seqs=32,
-                  enforce_eager=False)
+        llm = LLM(
+            model="Qwen/Qwen2-1.5B-Instruct",
+            max_num_batched_tokens=256,
+            max_model_len=256,
+            max_num_seqs=32,
+            enforce_eager=False,
+        )
 
         outputs = llm.generate(prompts, sampling_params)
         for output, answer in zip(outputs, answers):
@@ -64,9 +66,10 @@ def test_tpu_compilation():
         return numbers[0]
 
     # Check all the compilations are as expected
-    compiled_fns = sorted(glob.glob(
-        os.path.join(temp_dir, "__compiled_fn*Captured*.py")),
-                          key=lambda s: extract_compiled_index(s))
+    compiled_fns = sorted(
+        glob.glob(os.path.join(temp_dir, "__compiled_fn*Captured*.py")),
+        key=lambda s: extract_compiled_index(s),
+    )
 
     for i, compiled_fn in enumerate(compiled_fns):
         print("{} file: {}".format(i + 1, compiled_fn))
@@ -80,4 +83,4 @@ def test_tpu_compilation():
     # ragged_paged_attention
     with open(compiled_fns[1]) as f:
         content = f.read()
-        assert (kv_cache_prefix in content and attn_prefix in content)
+        assert kv_cache_prefix in content and attn_prefix in content

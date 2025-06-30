@@ -16,6 +16,7 @@ plugins_loaded = False
 
 def load_plugins_by_group(group: str) -> Dict[str, Callable]:
     import sys
+
     if sys.version_info < (3, 10):
         from importlib_metadata import entry_points
     else:
@@ -64,11 +65,12 @@ def load_general_plugins():
         # see https://github.com/pytorch/pytorch/blob/43c5f59/torch/_dynamo/config.py#L158
         torch._dynamo.config.disable = True
     elif current_platform.is_hpu():
-        os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES'] = 'true'
+        os.environ["PT_HPU_ENABLE_LAZY_COLLECTIVES"] = "true"
         import habana_frameworks.torch as htorch
+
         if htorch.utils.internal.is_lazy():
             torch._dynamo.config.disable = True
-    plugins = load_plugins_by_group(group='vllm.general_plugins')
+    plugins = load_plugins_by_group(group="vllm.general_plugins")
     # general plugins, we only need to execute the loaded functions
     for func in plugins.values():
         func()

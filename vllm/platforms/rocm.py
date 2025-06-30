@@ -56,7 +56,7 @@ _ROCM_PARTIALLY_SUPPORTED_MODELS: Dict[str, str] = {
     "Phi3VForCausalLM":
     ("ROCm Triton flash attention may run into compilation errors due to "
      "excessive use of shared memory. If this happens, disable Triton FA "
-     "by setting `VLLM_USE_TRITON_FLASH_ATTN=0`")
+     "by setting `VLLM_USE_TRITON_FLASH_ATTN=0`"),
 }
 _ROCM_DEVICE_ID_NAME_MAP: Dict[str, str] = {
     "0x74a0": "AMD_Instinct_MI300A",
@@ -110,11 +110,14 @@ def on_mi250_mi300() -> bool:
 
 
 @cache
-def use_rocm_custom_paged_attention(qtype: torch.dtype, head_size: int,
-                                    block_size: int, gqa_ratio: int,
-                                    max_seq_len: int,
-                                    sliding_window: int) -> bool:
-
+def use_rocm_custom_paged_attention(
+    qtype: torch.dtype,
+    head_size: int,
+    block_size: int,
+    gqa_ratio: int,
+    max_seq_len: int,
+    sliding_window: int,
+) -> bool:
     GPU_ARCH = torch.cuda.get_device_properties("cuda").gcnArchName
     ON_GFX9 = any(arch in GPU_ARCH for arch in ["gfx90a", "gfx942", "gfx950"])
 
@@ -142,14 +145,27 @@ class RocmPlatform(Platform):
     device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     supported_quantization: list[str] = [
-        "awq", "gptq", "fp8", "compressed-tensors", "fbgemm_fp8", "gguf",
-        "quark", "ptpc_fp8"
+        "awq",
+        "gptq",
+        "fp8",
+        "compressed-tensors",
+        "fbgemm_fp8",
+        "gguf",
+        "quark",
+        "ptpc_fp8",
     ]
 
     @classmethod
-    def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
-                             kv_cache_dtype, block_size, use_v1,
-                             use_mla) -> str:
+    def get_attn_backend_cls(
+        cls,
+        selected_backend,
+        head_size,
+        dtype,
+        kv_cache_dtype,
+        block_size,
+        use_v1,
+        use_mla,
+    ) -> str:
         if use_mla:
             from vllm.attention.backends.rocm_aiter_mla import (
                 is_aiter_mla_enabled)
@@ -170,7 +186,9 @@ class RocmPlatform(Platform):
             elif selected_backend == _Backend.ROCM_AITER_MLA:
                 if block_size == 1:
                     logger.info("Using AITER MLA backend.")
-                    return "vllm.attention.backends.rocm_aiter_mla.AiterMLABackend"  # noqa: E501
+                    return (
+                        "vllm.attention.backends.rocm_aiter_mla.AiterMLABackend"  # noqa: E501
+                    )
                 else:
                     raise ValueError(
                         f" The selected backend, {selected_backend.name},"
@@ -185,8 +203,9 @@ class RocmPlatform(Platform):
                             == _Backend.FLASH_ATTN else selected_backend)
         if envs.VLLM_USE_V1:
             logger.info("Using Triton Attention backend on V1 engine.")
-            return ("vllm.v1.attention.backends."
-                    "triton_attn.TritonAttentionBackend")
+            return (
+                "vllm.v1.attention.backends.triton_attn.TritonAttentionBackend"
+            )
         if selected_backend == _Backend.ROCM_FLASH:
             if not cls.has_device_capability(90):
                 # not Instinct series GPUs.
@@ -194,7 +213,9 @@ class RocmPlatform(Platform):
         else:
             logger.info("%s is not supported in AMD GPUs.", selected_backend)
         logger.info("Using ROCmFlashAttention backend.")
-        return "vllm.attention.backends.rocm_flash_attn.ROCmFlashAttentionBackend"  # noqa: E501
+        return (
+            "vllm.attention.backends.rocm_flash_attn.ROCmFlashAttentionBackend"  # noqa: E501
+        )
 
     @classmethod
     @lru_cache(maxsize=8)
@@ -271,22 +292,22 @@ class RocmPlatform(Platform):
                         "needed) on vLLM V1. Please launch without "
                         "--num-scheduler-steps.")
                 else:
-                    parallel_config.worker_cls = \
-                        "vllm.worker.multi_step_worker.MultiStepWorker"
+                    parallel_config.worker_cls = (
+                        "vllm.worker.multi_step_worker.MultiStepWorker")
             elif vllm_config.speculative_config:
                 if envs.VLLM_USE_V1:
                     raise NotImplementedError(
                         "Speculative decoding is not yet supported on vLLM V1."
                     )
                 else:
-                    parallel_config.worker_cls = \
+                    parallel_config.worker_cls = (
                         "vllm.spec_decode.spec_decode_worker.create_spec_worker"
-                    parallel_config.sd_worker_cls = \
-                        "vllm.worker.worker.Worker"
+                    )
+                    parallel_config.sd_worker_cls = "vllm.worker.worker.Worker"
             else:
                 if envs.VLLM_USE_V1:
-                    parallel_config.worker_cls = \
-                            "vllm.v1.worker.gpu_worker.Worker"
+                    parallel_config.worker_cls = (
+                        "vllm.v1.worker.gpu_worker.Worker")
                 else:
                     parallel_config.worker_cls = "vllm.worker.worker.Worker"
 
@@ -299,8 +320,10 @@ class RocmPlatform(Platform):
         if model_arch in _ROCM_PARTIALLY_SUPPORTED_MODELS:
             msg = _ROCM_PARTIALLY_SUPPORTED_MODELS[model_arch]
             logger.warning(
-                "Model architecture '%s' is partially "
-                "supported by ROCm: %s", model_arch, msg)
+                "Model architecture '%s' is partially supported by ROCm: %s",
+                model_arch,
+                msg,
+            )
 
     @classmethod
     def verify_quantization(cls, quant: str) -> None:
@@ -320,8 +343,8 @@ class RocmPlatform(Platform):
                                  device: Optional[torch.types.Device] = None
                                  ) -> float:
         torch.cuda.reset_peak_memory_stats(device)
-        return torch.cuda.mem_get_info(device)[1] - torch.cuda.mem_get_info(
-            device)[0]
+        return (torch.cuda.mem_get_info(device)[1] -
+                torch.cuda.mem_get_info(device)[0])
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
@@ -330,12 +353,12 @@ class RocmPlatform(Platform):
     @classmethod
     def supports_fp8(cls) -> bool:
         gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
-        return any(gfx in gcn_arch for gfx in ['gfx94', 'gfx95', 'gfx12'])
+        return any(gfx in gcn_arch for gfx in ["gfx94", "gfx95", "gfx12"])
 
     @classmethod
     def is_fp8_fnuz(cls) -> bool:
         # only device 0 is checked, this assumes MI300 platforms are homogeneous
-        return 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
+        return "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
 
     @classmethod
     def fp8_dtype(cls) -> torch.dtype:
@@ -353,7 +376,7 @@ class RocmPlatform(Platform):
     def use_custom_allreduce(cls) -> bool:
         # We only enable custom allreduce for MI300 series
         gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
-        supported_archs = ['gfx94', 'gfx95']
+        supported_archs = ["gfx94", "gfx95"]
         return any(gfx in gcn_arch for gfx in supported_archs)
 
     @classmethod

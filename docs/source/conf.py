@@ -27,9 +27,9 @@ sys.path.append(os.path.abspath(REPO_ROOT))
 
 # -- Project information -----------------------------------------------------
 
-project = 'vLLM'
-copyright = f'{datetime.datetime.now().year}, vLLM Team'
-author = 'the vLLM Team'
+project = "vLLM"
+copyright = f"{datetime.datetime.now().year}, vLLM Team"
+author = "the vLLM Team"
 
 # -- General configuration ---------------------------------------------------
 
@@ -67,7 +67,7 @@ autodoc2_sort_names = True
 autodoc2_index_template = None
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -84,19 +84,19 @@ copybutton_prompt_is_regexp = True
 # a list of builtin themes.
 #
 html_title = project
-html_theme = 'sphinx_book_theme'
-html_logo = 'assets/logos/vllm-logo-text-light.png'
-html_favicon = 'assets/logos/vllm-logo-only-light.ico'
+html_theme = "sphinx_book_theme"
+html_logo = "assets/logos/vllm-logo-text-light.png"
+html_favicon = "assets/logos/vllm-logo-only-light.ico"
 html_theme_options = {
-    'path_to_docs': 'docs/source',
-    'repository_url': 'https://github.com/vllm-project/vllm',
-    'use_repository_button': True,
-    'use_edit_page_button': True,
+    "path_to_docs": "docs/source",
+    "repository_url": "https://github.com/vllm-project/vllm",
+    "use_repository_button": True,
+    "use_edit_page_button": True,
     # Prevents the full API being added to the left sidebar of every page.
     # Reduces build time by 2.5x and reduces build size from ~225MB to ~95MB.
-    'collapse_navbar': True,
+    "collapse_navbar": True,
     # Makes API visible in the right sidebar on API reference pages.
-    'show_toc_level': 3,
+    "show_toc_level": 3,
 }
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
@@ -107,10 +107,10 @@ html_css_files = ["custom.css"]
 
 myst_heading_anchors = 2
 myst_url_schemes = {
-    'http': None,
-    'https': None,
-    'mailto': None,
-    'ftp': None,
+    "http": None,
+    "https": None,
+    "mailto": None,
+    "ftp": None,
     "gh-issue": {
         "url":
         "https://github.com/vllm-project/vllm/issues/{{path}}#{{fragment}}",
@@ -141,7 +141,7 @@ myst_url_schemes = {
 }
 
 # see https://docs.readthedocs.io/en/stable/reference/environment-variables.html # noqa
-READTHEDOCS_VERSION_TYPE = os.environ.get('READTHEDOCS_VERSION_TYPE')
+READTHEDOCS_VERSION_TYPE = os.environ.get("READTHEDOCS_VERSION_TYPE")
 if READTHEDOCS_VERSION_TYPE == "tag":
     # remove the warning banner if the version is a tagged release
     header_file = os.path.join(os.path.dirname(__file__),
@@ -155,6 +155,7 @@ if READTHEDOCS_VERSION_TYPE == "tag":
 # Generate additional rst documentation here.
 def setup(app):
     from docs.source.generate_examples import generate_examples
+
     generate_examples()
 
 
@@ -171,8 +172,8 @@ def get_repo_base_and_branch(pr_number):
     response = requests.get(url)
     if response.status_code == 200:
         data = response.json()
-        _cached_base = data['head']['repo']['full_name']
-        _cached_branch = data['head']['ref']
+        _cached_base = data["head"]["repo"]["full_name"]
+        _cached_branch = data["head"]["ref"]
         return _cached_base, _cached_branch
     else:
         logger.error("Failed to fetch PR details: %s", response)
@@ -180,9 +181,9 @@ def get_repo_base_and_branch(pr_number):
 
 
 def linkcode_resolve(domain, info):
-    if domain != 'py':
+    if domain != "py":
         return None
-    if not info['module']:
+    if not info["module"]:
         return None
 
     # Get path from module name
@@ -196,8 +197,8 @@ def linkcode_resolve(domain, info):
     # Get the line number of the object
     with open(path) as f:
         lines = f.readlines()
-    name = info['fullname'].split(".")[-1]
-    pattern = fr"^( {{4}})*((def|class) )?{name}\b.*"
+    name = info["fullname"].split(".")[-1]
+    pattern = rf"^( {{4}})*((def|class) )?{name}\b.*"
     for lineno, line in enumerate(lines, 1):
         if not line or line.startswith("#"):
             continue
@@ -215,9 +216,12 @@ def linkcode_resolve(domain, info):
         pr_number = REPO_ROOT.name
         base, branch = get_repo_base_and_branch(pr_number)
         if base and branch:
-            return f"https://github.com/{base}/blob/{branch}/{filename}#L{lineno}"
+            return (
+                f"https://github.com/{base}/blob/{branch}/{filename}#L{lineno}"
+            )
     # Otherwise, link to the source file on the main branch
-    return f"https://github.com/vllm-project/vllm/blob/main/{filename}#L{lineno}"
+    return (
+        f"https://github.com/vllm-project/vllm/blob/main/{filename}#L{lineno}")
 
 
 # Mock out external dependencies here, otherwise sphinx-argparse won't work.
@@ -250,12 +254,15 @@ for mock_target in autodoc_mock_imports:
             "Potentially problematic mock target (%s) found; "
             "autodoc_mock_imports cannot mock modules that have already "
             "been loaded into sys.modules when the sphinx build starts.",
-            mock_target)
+            mock_target,
+        )
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "typing_extensions":
-    ("https://typing-extensions.readthedocs.io/en/latest", None),
+    "typing_extensions": (
+        "https://typing-extensions.readthedocs.io/en/latest",
+        None,
+    ),
     "aiohttp": ("https://docs.aiohttp.org/en/stable", None),
     "pillow": ("https://pillow.readthedocs.io/en/stable", None),
     "numpy": ("https://numpy.org/doc/stable", None),

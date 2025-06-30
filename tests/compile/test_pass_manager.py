@@ -39,7 +39,7 @@ class ProperPass(InductorPass):
         # Can also wrap callables in CallableInductorPass for compliance
         CallableInductorPass(simple_callable),
         CallableInductorPass(simple_callable,
-                             InductorPass.hash_source(__file__))
+                             InductorPass.hash_source(__file__)),
     ],
 )
 def test_pass_manager_uuid(callable):
@@ -64,8 +64,8 @@ def test_pass_manager_uuid(callable):
 
     # UUID should be different due to config change
     config2 = copy.deepcopy(config)
-    config2.compilation_config.pass_config.enable_fusion = not \
-        config2.compilation_config.pass_config.enable_fusion
+    config2.compilation_config.pass_config.enable_fusion = (
+        not config2.compilation_config.pass_config.enable_fusion)
     pass_manager3 = PostGradPassManager()
     pass_manager3.configure(config2)
     pass_manager3.add(callable)

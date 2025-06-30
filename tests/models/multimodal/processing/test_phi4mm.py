@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for phi4mm's multimodal preprocessing kwargs."""
+
 import pytest
 
 from vllm.multimodal import MULTIMODAL_REGISTRY
@@ -17,7 +18,8 @@ from ...utils import build_model_context
         ({"dynamic_hd": 16}, 4433),
         # the default num_crops of phi-4-multimodal is 36
         ({}, 9585),
-    ])
+    ],
+)
 # yapf: enable
 @pytest.mark.parametrize("num_imgs", [1, 2])
 @pytest.mark.parametrize("kwargs_on_init", [True, False])

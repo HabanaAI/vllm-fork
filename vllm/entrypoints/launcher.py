@@ -21,10 +21,12 @@ from vllm.v1.engine.exceptions import EngineDeadError, EngineGenerateError
 logger = init_logger(__name__)
 
 
-async def serve_http(app: FastAPI,
-                     sock: Optional[socket.socket],
-                     enable_ssl_refresh: bool = False,
-                     **uvicorn_kwargs: Any):
+async def serve_http(
+    app: FastAPI,
+    sock: Optional[socket.socket],
+    enable_ssl_refresh: bool = False,
+    **uvicorn_kwargs: Any,
+):
     logger.info("Available routes are:")
     for route in app.routes:
         methods = getattr(route, "methods", None)
@@ -33,7 +35,7 @@ async def serve_http(app: FastAPI,
         if methods is None or path is None:
             continue
 
-        logger.info("Route: %s, Methods: %s", path, ', '.join(methods))
+        logger.info("Route: %s, Methods: %s", path, ", ".join(methods))
 
     config = uvicorn.Config(app, **uvicorn_kwargs)
     config.load()
@@ -47,11 +49,12 @@ async def serve_http(app: FastAPI,
     server_task = loop.create_task(
         server.serve(sockets=[sock] if sock else None))
 
-    ssl_cert_refresher = None if not enable_ssl_refresh else SSLCertRefresher(
+    ssl_cert_refresher = (None if not enable_ssl_refresh else SSLCertRefresher(
         ssl_context=config.ssl,
         key_path=config.ssl_keyfile,
         cert_path=config.ssl_certfile,
-        ca_path=config.ssl_ca_certs)
+        ca_path=config.ssl_ca_certs,
+    ))
 
     def signal_handler() -> None:
         # prevents the uvicorn signal handler to exit early
@@ -75,7 +78,10 @@ async def serve_http(app: FastAPI,
         if process is not None:
             logger.debug(
                 "port %s is used by process %s launched with command:\n%s",
-                port, process, " ".join(process.cmdline()))
+                port,
+                process,
+                " ".join(process.cmdline()),
+            )
         logger.info("Shutting down FastAPI HTTP server.")
         return server.shutdown()
     finally:
@@ -111,14 +117,14 @@ def _add_shutdown_handlers(app: FastAPI, server: uvicorn.Server) -> None:
     """
     VLLM V1 AsyncLLM catches exceptions and returns
     only two types: EngineGenerateError and EngineDeadError.
-    
+
     EngineGenerateError is raised by the per request generate()
     method. This error could be request specific (and therefore
     recoverable - e.g. if there is an error in input processing).
-    
+
     EngineDeadError is raised by the background output_handler
     method. This error is global and therefore not recoverable.
-    
+
     We register these @app.exception_handlers to return nice
     responses to the end user if they occur and shut down if needed.
     See https://fastapi.tiangolo.com/tutorial/handling-errors/

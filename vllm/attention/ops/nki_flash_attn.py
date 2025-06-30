@@ -70,7 +70,7 @@ def transform_block_tables_for_indirect_load(
     fully utilize hardware parallelization. The solution is to tile `block_size`
     into `(block_size_tiling_factor, tiled_block_size)` s.t. `M *
     block_size_tiling_factor = B_P_SIZE`. After tiling, KV cache has shape
-    `(num_block, num_head, block_size_tiling_factor, tiled_block_size, D)`. 
+    `(num_block, num_head, block_size_tiling_factor, tiled_block_size, D)`.
 
     Note:
     We don't further tile D dimension as small DMA size also hurts performance.
@@ -79,8 +79,8 @@ def transform_block_tables_for_indirect_load(
     num_partitions, num_tiles_per_partition, num_blocks_per_tile = (
         block_tables.shape)
     assert num_tiles_per_partition == B_P_SIZE
-    assert is_power_of_2(
-        num_blocks_per_tile), f"{num_blocks_per_tile=} is not power of 2"
+    assert is_power_of_2(num_blocks_per_tile), (
+        f"{num_blocks_per_tile=} is not power of 2")
 
     num_loads = ceil_div(num_blocks_per_tile, B_P_SIZE)
     block_tables_transposed = nl.ndarray(
@@ -477,8 +477,8 @@ def flash_paged_attention(
     assert b == 1, f"invalid batch size {b=}"
     assert d <= 128, f" we do not support head_dim > 128, got head dim {d=}"
     cache_shape = (2, num_blocks, k_h, block_size, d)
-    assert (tuple(kv_cache.shape) == cache_shape
-            ), f"{kv_cache.shape=} mismatch, expect {cache_shape}"
+    assert tuple(kv_cache.shape) == cache_shape, (
+        f"{kv_cache.shape=} mismatch, expect {cache_shape}")
     assert key is None or tuple(key.shape) == (
         1,
         k_h,
@@ -492,33 +492,30 @@ def flash_paged_attention(
         d,
     ), f"value shape {value.shape} mismatch!"
 
-    assert (
-        nl.program_ndim() == 2
-    ), f"Expect spmd grid with 2 dimensions, got {nl.program_ndim()} instead!"
+    assert nl.program_ndim() == 2, (
+        f"Expect spmd grid with 2 dimensions, got {nl.program_ndim()} instead!"
+    )
     batch_id = nl.program_id(axis=0)
     head_id = nl.program_id(axis=1)
 
     (num_active_blocks, ) = block_tables.shape
     context_kv_len = num_active_blocks * block_size
-    assert (
-        LARGE_TILE_SZ % B_F_SIZE == 0
-    ), f"Need {LARGE_TILE_SZ=} to be divisible by {B_F_SIZE=} in transpose_p"
-    assert (context_kv_len % LARGE_TILE_SZ == 0
-            ), f"Need {context_kv_len=} to be divisible by {LARGE_TILE_SZ=}"
+    assert LARGE_TILE_SZ % B_F_SIZE == 0, (
+        f"Need {LARGE_TILE_SZ=} to be divisible by {B_F_SIZE=} in transpose_p")
+    assert context_kv_len % LARGE_TILE_SZ == 0, (
+        f"Need {context_kv_len=} to be divisible by {LARGE_TILE_SZ=}")
 
     num_blocks_per_large_tile = LARGE_TILE_SZ // block_size
-    assert is_power_of_2(
-        num_blocks_per_large_tile
-    ), f"{num_blocks_per_large_tile=} is expected of be power of 2"
+    assert is_power_of_2(num_blocks_per_large_tile), (
+        f"{num_blocks_per_large_tile=} is expected of be power of 2")
     if seqlen_q > B_F_SIZE:
         MAX_REDUCTION_TILE = 2048
         if seqlen_q // 2 > MAX_REDUCTION_TILE:
-            assert (
-                seqlen_q % MAX_REDUCTION_TILE == 0
-            ), f"{seqlen_q=} should be divisible by {MAX_REDUCTION_TILE=}"
+            assert seqlen_q % MAX_REDUCTION_TILE == 0, (
+                f"{seqlen_q=} should be divisible by {MAX_REDUCTION_TILE=}")
         else:
-            assert (seqlen_q % B_F_SIZE == 0
-                    ), f"{seqlen_q=} should be divisible by {B_F_SIZE=})"
+            assert seqlen_q % B_F_SIZE == 0, (
+                f"{seqlen_q=} should be divisible by {B_F_SIZE=})")
 
     kernel_dtype = nl.bfloat16 if mixed_precision else query.dtype
     acc_type = np.dtype(np.float32) if mixed_precision else kernel_dtype
@@ -692,7 +689,6 @@ def flash_paged_attention(
                 nl.ds(context_kv_len, LARGE_TILE_SZ),
             ])
             for i_q_h in nl.affine_range(q_h_per_k_h):
-
                 q_tile = nl.ndarray((B_D_SIZE, B_P_SIZE), dtype=kernel_dtype)
                 q_hbm_tile = query[batch_id, head_id * q_h_per_k_h + i_q_h]
                 q_sbuf_tile = nl.load(q_hbm_tile[:,
@@ -774,7 +770,7 @@ def reorder_context_mask(mask, LARGE_TILE_SZ, block_size):
 
     We vectorize KV cache read to improve DMA utilization. However, the layout
     that maximizes DMA bandwidth changes the order tokens are consumed.
-    
+
     The token layout (inner 2 dimensions) after vectorized load is (B_P_SIZE,
     tiled_block_size) in a tile of `B_P_SIZE * tiled_block_size` tokens. And
     each step the engine consumes a column (rather than a row) of B_P_SIZE
@@ -787,8 +783,8 @@ def reorder_context_mask(mask, LARGE_TILE_SZ, block_size):
     context_kv_len = total_seq_len - total_query_len
 
     B_P_SIZE = 128
-    assert (LARGE_TILE_SZ
-            >= B_P_SIZE), f"{LARGE_TILE_SZ=} must be larger than {B_P_SIZE=}"
+    assert LARGE_TILE_SZ >= B_P_SIZE, (
+        f"{LARGE_TILE_SZ=} must be larger than {B_P_SIZE=}")
     num_tiled_blocks = max(B_P_SIZE, LARGE_TILE_SZ // block_size)
     tiled_block_size = LARGE_TILE_SZ // num_tiled_blocks
     if tiled_block_size > 1:
@@ -837,7 +833,7 @@ def flash_attn_varlen_nkifunc(
 
     Notes:
       - attn_mask must be reordered outside using `reorder_context_mask`
-      - Key/value cache layout must be (n_blocks, n_kv_heads, block_size, d) 
+      - Key/value cache layout must be (n_blocks, n_kv_heads, block_size, d)
         for better DMA throughput
     """
     if n_kv_head is None:
@@ -875,9 +871,9 @@ def reshape_and_cache(
     Args:
         key (torch.Tensor): Key tensor with shape
             (num_tokens, n_kv_head, d_head)
-        value (torch.Tensor): Value tensor with shape 
+        value (torch.Tensor): Value tensor with shape
             (num_tokens, n_kv_head, d_head)
-        kv_cache (torch.Tensor): Key/value cache tensor with shape 
+        kv_cache (torch.Tensor): Key/value cache tensor with shape
             (2, num_blocks, n_kv_head, block_size, d_head)
         slot_mapping (torch.Tensor): Mapping tensor indicating cache positions
             with shape (num_tokens)
@@ -897,9 +893,21 @@ def reshape_and_cache(
 
     # Update caches using index_put_
     kv_cache.index_put_(
-        (torch.tensor([0], device=key.device), block_indices[:, None],
-         head_indices[None, :], block_offsets[:, None]), key)
+        (
+            torch.tensor([0], device=key.device),
+            block_indices[:, None],
+            head_indices[None, :],
+            block_offsets[:, None],
+        ),
+        key,
+    )
 
     kv_cache.index_put_(
-        (torch.tensor([1], device=key.device), block_indices[:, None],
-         head_indices[None, :], block_offsets[:, None]), value)
+        (
+            torch.tensor([1], device=key.device),
+            block_indices[:, None],
+            head_indices[None, :],
+            block_offsets[:, None],
+        ),
+        value,
+    )

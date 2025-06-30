@@ -33,14 +33,14 @@ logger = init_logger(__name__)
 
 AnyFuture = Union[asyncio.Future[Any], Future[Any]]
 
-_R = TypeVar('_R')  # Return type for collective_rpc
+_R = TypeVar("_R")  # Return type for collective_rpc
 
 STARTUP_POLL_PERIOD_MS = 10000
 
 
 class EngineCoreClient(ABC):
     """
-    EngineCoreClient: subclasses handle different methods for pushing 
+    EngineCoreClient: subclasses handle different methods for pushing
         and pulling from the EngineCore for asyncio / multiprocessing.
 
     Subclasses:
@@ -57,7 +57,6 @@ class EngineCoreClient(ABC):
         executor_class: type[Executor],
         log_stats: bool,
     ) -> "EngineCoreClient":
-
         # TODO: support this for debugging purposes.
         if asyncio_mode and not multiprocess_mode:
             raise NotImplementedError(
@@ -121,17 +120,21 @@ class EngineCoreClient(ABC):
     def pin_lora(self, lora_id: int) -> bool:
         raise NotImplementedError
 
-    def save_sharded_state(self,
-                           path: str,
-                           pattern: Optional[str] = None,
-                           max_size: Optional[int] = None) -> None:
+    def save_sharded_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
         raise NotImplementedError
 
-    def collective_rpc(self,
-                       method: Union[str, Callable[..., _R]],
-                       timeout: Optional[float] = None,
-                       args: tuple = (),
-                       kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+    def collective_rpc(
+        self,
+        method: Union[str, Callable[..., _R]],
+        timeout: Optional[float] = None,
+        args: tuple = (),
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> list[_R]:
         raise NotImplementedError
 
     async def get_output_async(self) -> EngineCoreOutputs:
@@ -170,24 +173,27 @@ class EngineCoreClient(ABC):
     async def pin_lora_async(self, lora_id: int) -> bool:
         raise NotImplementedError
 
-    async def save_sharded_state_async(self,
-                                       path: str,
-                                       pattern: Optional[str] = None,
-                                       max_size: Optional[int] = None) -> None:
+    async def save_sharded_state_async(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
         raise NotImplementedError
 
     async def collective_rpc_async(
-            self,
-            method: Union[str, Callable[..., _R]],
-            timeout: Optional[float] = None,
-            args: tuple = (),
-            kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+        self,
+        method: Union[str, Callable[..., _R]],
+        timeout: Optional[float] = None,
+        args: tuple = (),
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> list[_R]:
         raise NotImplementedError
 
 
 class InprocClient(EngineCoreClient):
     """
-    InprocClient: client for in-process EngineCore. Intended 
+    InprocClient: client for in-process EngineCore. Intended
     for use in LLMEngine for V0-style add_request() and step()
         EngineCore setup in this process (no busy loop).
 
@@ -241,17 +247,21 @@ class InprocClient(EngineCoreClient):
     def pin_lora(self, lora_id: int) -> bool:
         return self.engine_core.pin_lora(lora_id)
 
-    def save_sharded_state(self,
-                           path: str,
-                           pattern: Optional[str] = None,
-                           max_size: Optional[int] = None) -> None:
+    def save_sharded_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
         self.engine_core.save_sharded_state(path, pattern, max_size)
 
-    def collective_rpc(self,
-                       method: Union[str, Callable[..., _R]],
-                       timeout: Optional[float] = None,
-                       args: tuple = (),
-                       kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+    def collective_rpc(
+        self,
+        method: Union[str, Callable[..., _R]],
+        timeout: Optional[float] = None,
+        args: tuple = (),
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> list[_R]:
         return self.engine_core.collective_rpc(method, timeout, args, kwargs)
 
 
@@ -283,7 +293,8 @@ class CoreEngine:
                     "local_dp_rank": local_dp_rank,
                     "executor_class": executor_class,
                     "log_stats": log_stats,
-                })
+                },
+            )
 
             self.num_reqs_in_flight = 0
         finally:
@@ -334,7 +345,7 @@ class BackgroundResources:
             with self.ctx.socket(zmq.PAIR) as shutdown_sender:
                 shutdown_sender.connect(self.shutdown_path)
                 # Send shutdown signal.
-                shutdown_sender.send(b'')
+                shutdown_sender.send(b"")
 
     def validate_alive(self, frames: Sequence[zmq.Frame]):
         if len(frames) == 1 and (frames[0].buffer
@@ -351,7 +362,7 @@ class MPClient(EngineCoreClient):
 
         * pushes EngineCoreRequests via input_socket
         * pulls EngineCoreOutputs via output_socket
-    
+
         * AsyncMPClient subclass for AsyncLLM usage
         * SyncMPClient subclass for LLM usage
     """
@@ -389,8 +400,14 @@ class MPClient(EngineCoreClient):
             self.resources.input_socket = self.input_socket
 
             new_core_engine = lambda index, local_dp_rank=None: CoreEngine(
-                vllm_config, executor_class, log_stats, input_path, self.
-                output_path, index, local_dp_rank)
+                vllm_config,
+                executor_class,
+                log_stats,
+                input_path,
+                self.output_path,
+                index,
+                local_dp_rank,
+            )
 
             # Start engine core process(es).
             self._init_core_engines(vllm_config, new_core_engine,
@@ -424,27 +441,30 @@ class MPClient(EngineCoreClient):
         while identities:
             events = poller.poll(STARTUP_POLL_PERIOD_MS)
             if not events:
-                logger.debug("Waiting for %d core engine proc(s) to start: %s",
-                             len(identities), identities)
+                logger.debug(
+                    "Waiting for %d core engine proc(s) to start: %s",
+                    len(identities),
+                    identities,
+                )
                 continue
             if len(events) > 1 or events[0][0] != sync_input_socket:
                 # One of the core processes exited.
-                raise RuntimeError("Engine core initialization failed. "
-                                   "See root cause above.")
+                raise RuntimeError(
+                    "Engine core initialization failed. See root cause above.")
 
             eng_id_bytes, data = sync_input_socket.recv_multipart()
             eng_id = int.from_bytes(eng_id_bytes, byteorder="little")
             if eng_id not in identities:
                 raise RuntimeError(f"Unexpected or duplicate engine: {eng_id}")
-            message_dict = json.loads(data.decode('utf-8'))
-            if message_dict['type'] != 'READY':
+            message_dict = json.loads(data.decode("utf-8"))
+            if message_dict["type"] != "READY":
                 raise RuntimeError(f"Engine {eng_id} failed: {data.decode()}")
             logger.info("Core engine process %d ready.", eng_id)
             identities.discard(eng_id)
             # Setup KV cache config with initialization state from
             # engine core process. Sum values from all engines in DP case.
             num_gpu_blocks = self.vllm_config.cache_config.num_gpu_blocks or 0
-            num_gpu_blocks += message_dict['num_gpu_blocks']
+            num_gpu_blocks += message_dict["num_gpu_blocks"]
             self.vllm_config.cache_config.num_gpu_blocks = num_gpu_blocks
 
     def _init_core_engines(
@@ -453,7 +473,6 @@ class MPClient(EngineCoreClient):
         new_core_engine: Callable[[int, Optional[int]], CoreEngine],
         core_engines: list[CoreEngine],
     ) -> None:
-
         # Default case - single core engine.
         core_engine = new_core_engine(
             vllm_config.parallel_config.data_parallel_rank,
@@ -468,8 +487,8 @@ class MPClient(EngineCoreClient):
 
     def _format_exception(self, e: Exception) -> Exception:
         """If errored, use EngineDeadError so root cause is clear."""
-        return EngineDeadError(
-            suppress_context=True) if self.resources.engine_dead else e
+        return (EngineDeadError(
+            suppress_context=True) if self.resources.engine_dead else e)
 
     def ensure_alive(self):
         if self.resources.engine_dead:
@@ -497,8 +516,12 @@ def _process_utility_output(output: UtilityOutput,
 class SyncMPClient(MPClient):
     """Synchronous client for multi-proc EngineCore."""
 
-    def __init__(self, vllm_config: VllmConfig, executor_class: type[Executor],
-                 log_stats: bool):
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        executor_class: type[Executor],
+        log_stats: bool,
+    ):
         super().__init__(
             asyncio_mode=False,
             vllm_config=vllm_config,
@@ -552,9 +575,11 @@ class SyncMPClient(MPClient):
                 out_socket.close(linger=0)
 
         # Process outputs from engine in separate thread.
-        self.output_queue_thread = Thread(target=process_outputs_socket,
-                                          name="EngineCoreOutputQueueThread",
-                                          daemon=True)
+        self.output_queue_thread = Thread(
+            target=process_outputs_socket,
+            name="EngineCoreOutputQueueThread",
+            daemon=True,
+        )
         self.output_queue_thread.start()
 
     def get_output(self) -> EngineCoreOutputs:
@@ -570,8 +595,11 @@ class SyncMPClient(MPClient):
         self.ensure_alive()
         self.free_pending_messages()
         # (Identity, RequestType, SerializedRequest)
-        msg = (self.core_engine.identity, request_type.value,
-               *self.encoder.encode(request))
+        msg = (
+            self.core_engine.identity,
+            request_type.value,
+            *self.encoder.encode(request),
+        )
 
         if len(msg) <= 3:
             # No auxiliary buffers => no tensor backing buffers in request.
@@ -627,26 +655,34 @@ class SyncMPClient(MPClient):
     def execute_dummy_batch(self) -> None:
         self.call_utility("execute_dummy_batch")
 
-    def collective_rpc(self,
-                       method: Union[str, Callable[..., _R]],
-                       timeout: Optional[float] = None,
-                       args: tuple = (),
-                       kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+    def collective_rpc(
+        self,
+        method: Union[str, Callable[..., _R]],
+        timeout: Optional[float] = None,
+        args: tuple = (),
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> list[_R]:
         return self.call_utility("collective_rpc", method, timeout, args,
                                  kwargs)
 
-    def save_sharded_state(self,
-                           path: str,
-                           pattern: Optional[str] = None,
-                           max_size: Optional[int] = None) -> None:
+    def save_sharded_state(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
         self.call_utility("save_sharded_state", path, pattern, max_size)
 
 
 class AsyncMPClient(MPClient):
     """Asyncio-compatible client for multi-proc EngineCore."""
 
-    def __init__(self, vllm_config: VllmConfig, executor_class: type[Executor],
-                 log_stats: bool):
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        executor_class: type[Executor],
+        log_stats: bool,
+    ):
         super().__init__(
             asyncio_mode=True,
             vllm_config=vllm_config,
@@ -724,10 +760,12 @@ class AsyncMPClient(MPClient):
             raise self._format_exception(outputs) from None
         return outputs
 
-    def _send_input(self,
-                    request_type: EngineCoreRequestType,
-                    request: Any,
-                    engine: Optional[CoreEngine] = None) -> Awaitable[Any]:
+    def _send_input(
+        self,
+        request_type: EngineCoreRequestType,
+        request: Any,
+        engine: Optional[CoreEngine] = None,
+    ) -> Awaitable[Any]:
         self.ensure_alive()
         if engine is None:
             engine = self.core_engine
@@ -770,8 +808,10 @@ class AsyncMPClient(MPClient):
         call_id = uuid.uuid1().int >> 64
         future = asyncio.get_running_loop().create_future()
         self.utility_results[call_id] = future
-        message = (EngineCoreRequestType.UTILITY.value, *self.encoder.encode(
-            (call_id, method, args)))
+        message = (
+            EngineCoreRequestType.UTILITY.value,
+            *self.encoder.encode((call_id, method, args)),
+        )
         await self._send_input_message(message, engine, args)
         self._ensure_output_queue_task()
         return await future
@@ -814,19 +854,22 @@ class AsyncMPClient(MPClient):
     async def pin_lora_async(self, lora_id: int) -> bool:
         return await self.call_utility_async("pin_lora", lora_id)
 
-    async def save_sharded_state_async(self,
-                                       path: str,
-                                       pattern: Optional[str] = None,
-                                       max_size: Optional[int] = None) -> None:
+    async def save_sharded_state_async(
+        self,
+        path: str,
+        pattern: Optional[str] = None,
+        max_size: Optional[int] = None,
+    ) -> None:
         await self.call_utility_async("save_sharded_state", path, pattern,
                                       max_size)
 
     async def collective_rpc_async(
-            self,
-            method: Union[str, Callable[..., _R]],
-            timeout: Optional[float] = None,
-            args: tuple = (),
-            kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+        self,
+        method: Union[str, Callable[..., _R]],
+        timeout: Optional[float] = None,
+        args: tuple = (),
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> list[_R]:
         return await self.call_utility_async("collective_rpc", method, timeout,
                                              args, kwargs)
 
@@ -835,9 +878,12 @@ class DPAsyncMPClient(AsyncMPClient):
     """Asyncio-compatible client for multi-proc, multi-engine (data parallel)
     EngineCore."""
 
-    def __init__(self, vllm_config: VllmConfig, executor_class: type[Executor],
-                 log_stats: bool):
-
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        executor_class: type[Executor],
+        log_stats: bool,
+    ):
         self.current_wave = 0
         self.engines_running = False
         self.reqs_in_flight: dict[str, CoreEngine] = {}
@@ -852,7 +898,6 @@ class DPAsyncMPClient(AsyncMPClient):
         new_core_engine: Callable[[int, Optional[int]], CoreEngine],
         core_engines: list[CoreEngine],
     ) -> None:
-
         # Launch a core engine for each data parallel rank.
         dp_size = vllm_config.parallel_config.data_parallel_size
         for i in range(dp_size):
@@ -883,7 +928,8 @@ class DPAsyncMPClient(AsyncMPClient):
             self.engines_running = True
             to_await = asyncio.gather(
                 to_await,  # type: ignore[assignment]
-                *self._start_wave_coros(exclude_index=chosen_engine.index))
+                *self._start_wave_coros(exclude_index=chosen_engine.index),
+            )
 
         await to_await
 

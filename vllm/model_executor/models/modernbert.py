@@ -26,7 +26,6 @@ from .utils import WeightsMapper, maybe_prefix
 class ModernBertEmbeddings(nn.Module):
 
     def __init__(self, config: ModernBertConfig):
-
         super().__init__()
         self.config = config
         self.tok_embeddings = VocabParallelEmbedding(config.vocab_size,
@@ -58,7 +57,8 @@ class ModernBertRotaryEmbedding(RotaryEmbedding):
             max_position_embeddings=config.max_position_embeddings,
             base=base,
             is_neox_style=True,
-            dtype=torch.float16)
+            dtype=torch.float16,
+        )
         self.config = config
 
 
@@ -86,24 +86,30 @@ class ModernBertAttention(nn.Module):
         )
 
         if layer_id % config.global_attn_every_n_layers != 0:
-            self.local_attention = (config.local_attention // 2,
-                                    config.local_attention // 2)
+            self.local_attention = (
+                config.local_attention // 2,
+                config.local_attention // 2,
+            )
         else:
             self.local_attention = (-1, -1)
 
         rope_theta = config.global_rope_theta
-        if self.local_attention != (
-                -1, -1) and config.local_rope_theta is not None:
+        if (self.local_attention != (-1, -1)
+                and config.local_rope_theta is not None):
             rope_theta = config.local_rope_theta
-        self.rotary_emb = ModernBertRotaryEmbedding(config=config,
-                                                    head_size=self.head_dim,
-                                                    dim=self.head_dim,
-                                                    base=rope_theta)
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              self.scaling,
-                              prefix=f"{layer_id}.attn",
-                              attn_type=AttentionType.ENCODER_ONLY)
+        self.rotary_emb = ModernBertRotaryEmbedding(
+            config=config,
+            head_size=self.head_dim,
+            dim=self.head_dim,
+            base=rope_theta,
+        )
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            prefix=f"{layer_id}.attn",
+            attn_type=AttentionType.ENCODER_ONLY,
+        )
         self.Wo = RowParallelLinear(config.hidden_size,
                                     config.hidden_size,
                                     bias=config.attention_bias)
@@ -127,9 +133,11 @@ class ModernBertMLP(nn.Module):
     def __init__(self, config: ModernBertConfig):
         super().__init__()
         self.config = config
-        self.Wi = nn.Linear(config.hidden_size,
-                            int(config.intermediate_size) * 2,
-                            bias=config.mlp_bias)
+        self.Wi = nn.Linear(
+            config.hidden_size,
+            int(config.intermediate_size) * 2,
+            bias=config.mlp_bias,
+        )
         self.act = nn.GELU()
         self.Wo = RowParallelLinear(config.intermediate_size,
                                     config.hidden_size,
@@ -142,10 +150,12 @@ class ModernBertMLP(nn.Module):
 
 class ModernBertLayer(nn.Module):
 
-    def __init__(self,
-                 config: ModernBertConfig,
-                 prefix: str = "",
-                 layer_id: Optional[int] = None):
+    def __init__(
+        self,
+        config: ModernBertConfig,
+        prefix: str = "",
+        layer_id: Optional[int] = None,
+    ):
         super().__init__()
         self.config = config
         if layer_id == 0:
@@ -278,7 +288,6 @@ class ModernBertForSequenceClassification(nn.Module, SupportsCrossEncoding):
                                            ModernBertPooler(config))
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-
         self_weights = []
 
         def weight_filter():

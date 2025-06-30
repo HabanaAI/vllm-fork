@@ -26,6 +26,7 @@ Usage:
     streamlit run streamlit_openai_chatbot_webserver.py \
         --logger.level=debug
 """
+
 import os
 from datetime import datetime
 
@@ -33,8 +34,8 @@ import streamlit as st
 from openai import OpenAI
 
 # Get command line arguments from environment variables
-openai_api_key = os.getenv('VLLM_API_KEY', "EMPTY")
-openai_api_base = os.getenv('VLLM_API_BASE', "http://localhost:8000/v1")
+openai_api_key = os.getenv("VLLM_API_KEY", "EMPTY")
+openai_api_base = os.getenv("VLLM_API_BASE", "http://localhost:8000/v1")
 
 # Initialize session states for managing chat sessions
 if "sessions" not in st.session_state:
@@ -109,16 +110,20 @@ if st.sidebar.button("New Session"):
 for session_id in sorted(st.session_state.sessions.keys(), reverse=True):
     # Mark the active session with a pinned button
     if session_id == st.session_state.active_session:
-        st.sidebar.button(f"📍 {session_id}",
-                          key=session_id,
-                          type="primary",
-                          on_click=switch_to_chat_session,
-                          args=(session_id, ))
+        st.sidebar.button(
+            f"📍 {session_id}",
+            key=session_id,
+            type="primary",
+            on_click=switch_to_chat_session,
+            args=(session_id, ),
+        )
     else:
-        st.sidebar.button(f"Session {session_id}",
-                          key=session_id,
-                          on_click=switch_to_chat_session,
-                          args=(session_id, ))
+        st.sidebar.button(
+            f"Session {session_id}",
+            key=session_id,
+            on_click=switch_to_chat_session,
+            args=(session_id, ),
+        )
 
 # Main interface
 st.title("vLLM Chat Assistant")
@@ -145,8 +150,8 @@ for message in st.session_state.messages:
 if prompt := st.chat_input("Type your message here..."):
     # Save user message to session
     st.session_state.messages.append({"role": "user", "content": prompt})
-    st.session_state.sessions[
-        st.session_state.current_session] = st.session_state.messages
+    st.session_state.sessions[st.session_state.current_session] = (
+        st.session_state.messages)
 
     # Display user message
     with st.chat_message("user"):

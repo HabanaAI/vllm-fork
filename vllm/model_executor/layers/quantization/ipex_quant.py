@@ -86,8 +86,14 @@ class IPEXConfig(QuantizationConfig):
                                            ["q_group_size", "group_size"])
             modules_to_not_convert = cls.get_from_keys_or(
                 config, ["modules_to_not_convert"], None)
-            return cls(method, weight_bits, group_size, modules_to_not_convert,
-                       False, False)
+            return cls(
+                method,
+                weight_bits,
+                group_size,
+                modules_to_not_convert,
+                False,
+                False,
+            )
         # otherwise for gptq
         weight_bits = cls.get_from_keys(config, ["bits"])
         group_size = cls.get_from_keys(config, ["group_size"])
@@ -123,8 +129,7 @@ class IPEXConfig(QuantizationConfig):
 
 
 class IPEXGPTQLinearMethod(GPTQLinearMethod):
-    """GPTQ linear method using IPEX for the CPU/XPU backend.
-    """
+    """GPTQ linear method using IPEX for the CPU/XPU backend."""
 
     def __init__(self, quant_config: IPEXConfig):
         self.quant_config = quant_config  # type: ignore
@@ -134,6 +139,7 @@ class IPEXGPTQLinearMethod(GPTQLinearMethod):
 
         try:
             import intel_extension_for_pytorch as ipex
+
             if ipex.__version__ < MIN_IPEX_VERSION:
                 raise ImportError(
                     "intel_extension_for_pytorch version is "
@@ -161,8 +167,7 @@ class IPEXGPTQLinearMethod(GPTQLinearMethod):
         )
         layer.ipex_output_size = layer.qweight.shape[-1]
         g_idx = layer.g_idx if self.quant_config.desc_act else None
-        layer.ipex_qlinear = ipex.llm.quantization.woq_linear. \
-            IPEXWeightOnlyQuantizedLinear.from_weight(
+        layer.ipex_qlinear = ipex.llm.quantization.woq_linear.IPEXWeightOnlyQuantizedLinear.from_weight(
             layer.qweight,
             layer.scales,
             layer.qzeros,
@@ -172,13 +177,15 @@ class IPEXGPTQLinearMethod(GPTQLinearMethod):
             g_idx=g_idx,
             bias=bias,
             group_size=self.quant_config.group_size,
-            quant_method=IPEXConfig.IPEX_QUANT_METHOD_MAP["gptq"]
+            quant_method=IPEXConfig.IPEX_QUANT_METHOD_MAP["gptq"],
         )
 
-    def apply(self,
-              layer: torch.nn.Module,
-              x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         reshaped_x = x.reshape(-1, x.shape[-1])
         out = layer.ipex_qlinear(reshaped_x)
         if bias is not None:
@@ -187,8 +194,7 @@ class IPEXGPTQLinearMethod(GPTQLinearMethod):
 
 
 class IPEXAWQLinearMethod(AWQLinearMethod):
-    """AWQ linear method using IPEX for the CPU/XPU backend.
-    """
+    """AWQ linear method using IPEX for the CPU/XPU backend."""
 
     def __init__(self, quant_config: IPEXConfig):
         self.quant_config = quant_config  # type: ignore
@@ -200,6 +206,7 @@ class IPEXAWQLinearMethod(AWQLinearMethod):
 
         try:
             import intel_extension_for_pytorch as ipex
+
             if ipex.__version__ < MIN_IPEX_VERSION:
                 raise ImportError(
                     "intel_extension_for_pytorch version is "
@@ -227,10 +234,9 @@ class IPEXAWQLinearMethod(AWQLinearMethod):
             group_size=self.quant_config.group_size,
         )
 
-        layer.ipex_output_size = layer.qweight.size(
-            1) * self.quant_config.pack_factor
-        layer.ipex_qlinear = ipex.llm.quantization.woq_linear. \
-            IPEXWeightOnlyQuantizedLinear.from_weight(
+        layer.ipex_output_size = (layer.qweight.size(1) *
+                                  self.quant_config.pack_factor)
+        layer.ipex_qlinear = ipex.llm.quantization.woq_linear.IPEXWeightOnlyQuantizedLinear.from_weight(
             layer.qweight,
             layer.scales,
             layer.qzeros,
@@ -239,13 +245,16 @@ class IPEXAWQLinearMethod(AWQLinearMethod):
             qconfig=qconfig,
             bias=bias,
             group_size=self.quant_config.group_size,
-            quant_method=IPEXConfig.IPEX_QUANT_METHOD_MAP["awq"]  # type: ignore
+            quant_method=IPEXConfig.
+            IPEX_QUANT_METHOD_MAP["awq"],  # type: ignore
         )
 
-    def apply(self,
-              layer: torch.nn.Module,
-              x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         reshaped_x = x.reshape(-1, x.shape[-1])
         out = layer.ipex_qlinear(reshaped_x)
         return out.reshape(x.shape[:-1] + (layer.ipex_output_size, ))

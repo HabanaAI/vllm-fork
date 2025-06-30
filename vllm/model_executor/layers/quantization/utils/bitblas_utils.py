@@ -48,11 +48,11 @@ def query_bitblas_supported_quant_types(has_zp: bool,
 
 
 def _check_bitblas_supported(
-        quant_type: ScalarType,
-        group_size: Optional[int],
-        has_zp: bool,
-        device_capability: Optional[int] = None) -> Tuple[bool, Optional[str]]:
-
+    quant_type: ScalarType,
+    group_size: Optional[int],
+    has_zp: bool,
+    device_capability: Optional[int] = None,
+) -> Tuple[bool, Optional[str]]:
     if device_capability is None:
         capability_tuple = current_platform.get_device_capability()
         device_capability = (-1 if capability_tuple is None else
@@ -62,18 +62,25 @@ def _check_bitblas_supported(
         has_zp, device_capability)
 
     if quant_type not in supported_types:
-        return (False, f"BitBLAS does not support weight_bits = {quant_type}. "
-                f"Only types = {supported_types} "
-                f"are supported (for group_size = {group_size}, "
-                f"device_capability = {device_capability}, zp = {has_zp}).")
-    if (group_size is None or group_size not in BITBLAS_SUPPORTED_GROUP_SIZES):
-        return (False, f"BitBLAS does not support group_size = {group_size}. "
-                f"Only group_sizes = {BITBLAS_SUPPORTED_GROUP_SIZES} "
-                "are supported.")
+        return (
+            False,
+            f"BitBLAS does not support weight_bits = {quant_type}. "
+            f"Only types = {supported_types} "
+            f"are supported (for group_size = {group_size}, "
+            f"device_capability = {device_capability}, zp = {has_zp}).",
+        )
+    if group_size is None or group_size not in BITBLAS_SUPPORTED_GROUP_SIZES:
+        return (
+            False,
+            f"BitBLAS does not support group_size = {group_size}. "
+            f"Only group_sizes = {BITBLAS_SUPPORTED_GROUP_SIZES} "
+            "are supported.",
+        )
 
     # Finally, check if bitblas is installed
     try:
         import bitblas
+
         if bitblas.__version__ < MINIMUM_BITBLAS_VERSION:
             raise ImportError("bitblas version is wrong. Please "
                               f"install bitblas>={MINIMUM_BITBLAS_VERSION}")
@@ -83,10 +90,12 @@ def _check_bitblas_supported(
     return True, None
 
 
-def check_bitblas_supported(quant_type: ScalarType,
-                            group_size: int,
-                            has_zp: bool = False,
-                            device_capability: Optional[int] = None) -> bool:
+def check_bitblas_supported(
+    quant_type: ScalarType,
+    group_size: int,
+    has_zp: bool = False,
+    device_capability: Optional[int] = None,
+) -> bool:
     cond, _ = _check_bitblas_supported(quant_type, group_size, has_zp,
                                        device_capability)
     return cond
@@ -101,10 +110,12 @@ def verify_bitblas_supported(quant_type: ScalarType,
         raise ValueError(err_msg)
 
 
-def verify_bitblas_supports_shape(output_size_per_partition: int,
-                                  input_size_per_partition: int,
-                                  input_size: int, group_size: int) -> None:
-
+def verify_bitblas_supports_shape(
+    output_size_per_partition: int,
+    input_size_per_partition: int,
+    input_size: int,
+    group_size: int,
+) -> None:
     # Validate output_size_per_partition
     if output_size_per_partition % BITBLAS_MIN_WEIGHT_SIZE_N != 0:
         raise ValueError(f"Weight output_size_per_partition = "
@@ -121,8 +132,7 @@ def verify_bitblas_supports_shape(output_size_per_partition: int,
                          "Consider reducing tensor_parallel_size or running "
                          "with --quantization gptq.")
 
-    if (group_size < input_size
-            and input_size_per_partition % group_size != 0):
+    if group_size < input_size and input_size_per_partition % group_size != 0:
         raise ValueError(
             f"Weight input_size_per_partition = {input_size_per_partition}"
             f" is not divisible by group_size = {group_size}."
@@ -130,14 +140,19 @@ def verify_bitblas_supports_shape(output_size_per_partition: int,
             "with --quantization gptq.")
 
 
-def check_bitblas_supports_shape(output_size_per_partition: int,
-                                input_size_per_partition: int,
-                                input_size: int, group_size: int) \
-                                    -> Tuple[bool, Optional[str]]:
+def check_bitblas_supports_shape(
+    output_size_per_partition: int,
+    input_size_per_partition: int,
+    input_size: int,
+    group_size: int,
+) -> Tuple[bool, Optional[str]]:
     try:
-        verify_bitblas_supports_shape(output_size_per_partition,
-                                      input_size_per_partition, input_size,
-                                      group_size)
+        verify_bitblas_supports_shape(
+            output_size_per_partition,
+            input_size_per_partition,
+            input_size,
+            group_size,
+        )
     except ValueError as e:
         return False, e.__str__()
     return True, None
@@ -166,7 +181,7 @@ def bitblas_make_empty_zp(device: torch.device) -> torch.Tensor:
 
 
 def bitblas_sort_g_idx(
-        g_idx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    g_idx: torch.Tensor, ) -> Tuple[torch.Tensor, torch.Tensor]:
     g_idx_sort_indices = torch.argsort(g_idx).to(torch.int)
     return g_idx[g_idx_sort_indices], g_idx_sort_indices
 
@@ -201,7 +216,7 @@ def unpack_gptq_qweight(qweight, bits):
     )
     for col in range(unpacked_weight.shape[1]):
         i = col % elems_per_int8
-        unpacked_weight[:, col] = (qweight[:, col // elems_per_int8] >>
-                                   (bits * i))
+        unpacked_weight[:,
+                        col] = qweight[:, col // elems_per_int8] >> (bits * i)
 
     return torch.bitwise_and(unpacked_weight, 2**bits - 1)

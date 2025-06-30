@@ -40,15 +40,18 @@ class MultiModalHasher:
             return cls.item_to_bytes("tensor", obj.numpy())
         if isinstance(obj, np.ndarray):
             return cls.item_to_bytes(
-                "ndarray", {
+                "ndarray",
+                {
                     "dtype": obj.dtype.str,
                     "shape": obj.shape,
                     "data": obj.data.tobytes(),
-                })
+                },
+            )
 
         logger.warning(
-            "No serialization method found for %s. "
-            "Falling back to pickle.", type(obj))
+            "No serialization method found for %s. Falling back to pickle.",
+            type(obj),
+        )
 
         return pickle.dumps(obj)
 
@@ -58,7 +61,7 @@ class MultiModalHasher:
         key: str,
         obj: object,
     ) -> bytes:
-        return b''.join(kb + vb for kb, vb in cls.iter_item_to_bytes(key, obj))
+        return b"".join(kb + vb for kb, vb in cls.iter_item_to_bytes(key, obj))
 
     @classmethod
     def iter_item_to_bytes(

@@ -83,16 +83,23 @@ AITER_MODEL_LIST = [
         pytest.param(
             "TitanML/tiny-mixtral",  # mixtral
             marks=[pytest.mark.cpu_model],
-        )
-    ])
+        ),
+    ],
+)
 @pytest.mark.parametrize("max_tokens", [32])
 @pytest.mark.parametrize("num_logprobs", [5])
 @pytest.mark.parametrize(
     "use_rocm_aiter", [True, False] if current_platform.is_rocm() else [False])
-def test_models(hf_runner, vllm_runner, example_prompts, model: str,
-                max_tokens: int, num_logprobs: int, use_rocm_aiter: bool,
-                monkeypatch) -> None:
-
+def test_models(
+    hf_runner,
+    vllm_runner,
+    example_prompts,
+    model: str,
+    max_tokens: int,
+    num_logprobs: int,
+    use_rocm_aiter: bool,
+    monkeypatch,
+) -> None:
     model_info = HF_EXAMPLE_MODELS.find_hf_info(model)
     model_info.check_available_online(on_fail="skip")
     model_info.check_transformers_version(on_fail="skip")

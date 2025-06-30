@@ -9,7 +9,7 @@ from vllm.utils import FlexibleArgumentParser
 
 
 class CollectEnvSubcommand(CLISubcommand):
-    """The `serve` subcommand for the vLLM CLI. """
+    """The `serve` subcommand for the vLLM CLI."""
 
     def __init__(self):
         self.name = "collect-env"
@@ -27,7 +27,8 @@ class CollectEnvSubcommand(CLISubcommand):
             "collect-env",
             help="Start collecting environment information.",
             description="Start collecting environment information.",
-            usage="vllm collect-env")
+            usage="vllm collect-env",
+        )
         return make_arg_parser(serve_parser)
 
 

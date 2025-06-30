@@ -16,6 +16,7 @@ vllm serve --model NousResearch/Hermes-2-Pro-Llama-3-8B \
             --chat-template examples/tool_chat_template_hermes.jinja \
             --enable-auto-tool-choice --tool-call-parser hermes
 """
+
 import json
 from typing import Any
 
@@ -37,41 +38,45 @@ tools = [{
                     "type":
                     "string",
                     "description":
-                    "The city to find the weather for, e.g. 'San Francisco'"
+                    "The city to find the weather for, e.g. 'San Francisco'",
                 },
                 "state": {
                     "type":
                     "string",
                     "description":
                     "the two-letter abbreviation for the state that the city is"
-                    " in, e.g. 'CA' which would mean 'California'"
+                    " in, e.g. 'CA' which would mean 'California'",
                 },
                 "unit": {
                     "type": "string",
                     "description": "The unit to fetch the temperature in",
-                    "enum": ["celsius", "fahrenheit"]
-                }
+                    "enum": ["celsius", "fahrenheit"],
+                },
             },
-            "required": ["city", "state", "unit"]
-        }
-    }
+            "required": ["city", "state", "unit"],
+        },
+    },
 }]
 
-messages = [{
-    "role": "user",
-    "content": "Hi! How are you doing today?"
-}, {
-    "role": "assistant",
-    "content": "I'm doing well! How can I help you?"
-}, {
-    "role":
-    "user",
-    "content":
-    "Can you tell me what the temperate will be in Dallas, in fahrenheit?"
-}]
+messages = [
+    {
+        "role": "user",
+        "content": "Hi! How are you doing today?"
+    },
+    {
+        "role": "assistant",
+        "content": "I'm doing well! How can I help you?"
+    },
+    {
+        "role":
+        "user",
+        "content":
+        "Can you tell me what the temperate will be in Dallas, in fahrenheit?",
+    },
+]
 
 
-def get_current_weather(city: str, state: str, unit: 'str'):
+def get_current_weather(city: str, state: str, unit: "str"):
     return ("The weather in Dallas, Texas is 85 degrees fahrenheit. It is "
             "partly cloudly, with highs in the 90's.")
 
@@ -159,8 +164,10 @@ def main():
 
     # Add tool call results to the conversation
     messages.append({
-        "role": "assistant",
-        "tool_calls": chat_completion.choices[0].message.tool_calls
+        "role":
+        "assistant",
+        "tool_calls":
+        chat_completion.choices[0].message.tool_calls,
     })
 
     # Now, simulate a tool call
@@ -176,7 +183,7 @@ def main():
             "role": "tool",
             "content": result,
             "tool_call_id": call.id,
-            "name": call.function.name
+            "name": call.function.name,
         })
 
     chat_completion_2 = client.chat.completions.create(messages=messages,

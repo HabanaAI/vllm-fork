@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Minimal implementation of BlipVisionModel intended to be only used 
+"""Minimal implementation of BlipVisionModel intended to be only used
 within a vision language model."""
+
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -117,8 +118,8 @@ class BlipAttention(nn.Module):
                                        self.head_dim, self.scale)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
-        return tensor.view(bsz, seq_len, self.num_heads,
-                           self.head_dim).transpose(1, 2).contiguous()
+        return (tensor.view(bsz, seq_len, self.num_heads,
+                            self.head_dim).transpose(1, 2).contiguous())
 
     def forward(
         self,
@@ -147,16 +148,20 @@ class BlipMLP(nn.Module):
         self.config = config
 
         self.activation_fn = get_act_fn(config.hidden_act)
-        self.fc1 = ColumnParallelLinear(config.hidden_size,
-                                        config.intermediate_size,
-                                        bias=True,
-                                        quant_config=quant_config,
-                                        prefix=f"{prefix}.fc1")
-        self.fc2 = RowParallelLinear(config.intermediate_size,
-                                     config.hidden_size,
-                                     bias=True,
-                                     quant_config=quant_config,
-                                     prefix=f"{prefix}.fc2")
+        self.fc1 = ColumnParallelLinear(
+            config.hidden_size,
+            config.intermediate_size,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc1",
+        )
+        self.fc2 = RowParallelLinear(
+            config.intermediate_size,
+            config.hidden_size,
+            bias=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.fc2",
+        )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states, _ = self.fc1(hidden_states)
@@ -207,7 +212,7 @@ class BlipEncoderLayer(nn.Module):
 
 class BlipEncoder(nn.Module):
     """
-    Transformer encoder consisting of `config.num_hidden_layers` self 
+    Transformer encoder consisting of `config.num_hidden_layers` self
     attention layers. Each layer is a [`BlipEncoderLayer`].
 
     Args:
@@ -231,10 +236,11 @@ class BlipEncoder(nn.Module):
             num_hidden_layers = num_hidden_layers_override
 
         self.layers = nn.ModuleList([
-            BlipEncoderLayer(config=config,
-                             quant_config=quant_config,
-                             prefix=f"{prefix}.layers.{layer_idx}")
-            for layer_idx in range(num_hidden_layers)
+            BlipEncoderLayer(
+                config=config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.layers.{layer_idx}",
+            ) for layer_idx in range(num_hidden_layers)
         ])
 
     def forward(self, inputs_embeds: torch.Tensor):
@@ -320,7 +326,7 @@ class BlipVisionModel(nn.Module, SupportsQuant):
                 if layer_idx >= layer_count:
                     continue
 
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

@@ -14,7 +14,8 @@ def test_msgspec_serialization():
     execute_model_req = ExecuteModelRequest(
         seq_group_metadata_list=seq_group_metadata_list,
         num_lookahead_slots=num_lookahead_slots,
-        running_queue_size=4)
+        running_queue_size=4,
+    )
 
     encoder = msgspec.msgpack.Encoder(enc_hook=encode_hook)
     decoder = msgspec.msgpack.Decoder(ExecuteModelRequest,
@@ -22,7 +23,7 @@ def test_msgspec_serialization():
     req = decoder.decode(encoder.encode(execute_model_req))
     expected = execute_model_req.seq_group_metadata_list
     actual = req.seq_group_metadata_list
-    assert (len(expected) == len(actual))
+    assert len(expected) == len(actual)
     expected = expected[0]
     actual = actual[0]
 

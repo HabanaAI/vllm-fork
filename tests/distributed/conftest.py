@@ -31,13 +31,15 @@ def publisher_config(random_port, request):
         endpoint = f"tcp://*:{random_port}"
         replay_endpoint = f"tcp://*:{random_port + 1}"
 
-    return KVEventsConfig(enable_kv_cache_events=True,
-                          publisher="zmq",
-                          endpoint=endpoint,
-                          replay_endpoint=replay_endpoint,
-                          buffer_steps=100,
-                          hwm=1000,
-                          topic="test")
+    return KVEventsConfig(
+        enable_kv_cache_events=True,
+        publisher="zmq",
+        endpoint=endpoint,
+        replay_endpoint=replay_endpoint,
+        buffer_steps=100,
+        hwm=1000,
+        topic="test",
+    )
 
 
 @pytest.fixture
@@ -67,16 +69,18 @@ def subscriber(publisher_config):
 class MockSubscriber:
     """Helper class to receive and verify published events"""
 
-    def __init__(self,
-                 pub_endpoint: str,
-                 replay_endpoint: Optional[str] = None,
-                 topic: str = "",
-                 decode_type=SampleBatch):
+    def __init__(
+        self,
+        pub_endpoint: str,
+        replay_endpoint: Optional[str] = None,
+        topic: str = "",
+        decode_type=SampleBatch,
+    ):
         self.ctx = zmq.Context.instance()
 
         # Set up subscriber socket
         self.sub = self.ctx.socket(zmq.SUB)
-        self.sub.setsockopt(zmq.SUBSCRIBE, topic.encode('utf-8'))
+        self.sub.setsockopt(zmq.SUBSCRIBE, topic.encode("utf-8"))
         self.sub.connect(pub_endpoint)
 
         # Set up replay socket if provided
@@ -86,7 +90,7 @@ class MockSubscriber:
             self.replay.connect(replay_endpoint)
 
         self.topic = topic
-        self.topic_bytes = topic.encode('utf-8')
+        self.topic_bytes = topic.encode("utf-8")
         self.received_msgs: list[tuple[int, SampleBatch]] = []
         self.last_seq = -1
         self.decoder = msgspec.msgpack.Decoder(type=decode_type)

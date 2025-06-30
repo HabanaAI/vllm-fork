@@ -44,6 +44,7 @@ PromptSeq = Union[str, list[int]]
 @dataclass
 class PromptIndex:
     """Resolves to an index in the prompt."""
+
     get_match_index: Callable[[AnyTokenizer, PromptSeq], Optional[int]]
 
 
@@ -394,6 +395,7 @@ class _BoundPromptSequence:
     A {data}`_PromptSeq` bound to a tokenizer to automatically
     convert between token sequence and text representations.
     """
+
     tokenizer: AnyTokenizer = field(repr=False)
 
     _text: Optional[str]
@@ -412,8 +414,8 @@ class _BoundPromptSequence:
 
     def __post_init__(self) -> None:
         if self._text is None and self._token_ids is None:
-            raise ValueError("At least one of 'text' and 'token_ids' must be "
-                             "specified")
+            raise ValueError(
+                "At least one of 'text' and 'token_ids' must be specified")
 
     @property
     def text(self) -> str:
@@ -447,6 +449,7 @@ class BoundPromptUpdate:
     {attr}`target` and the result of {meth}`get_content` between
     token sequence and text representations.
     """
+
     _origin: PromptUpdate
     tokenizer: AnyTokenizer = field(repr=False)
 
@@ -913,8 +916,11 @@ class ProcessingCache:
             return sys.getsizeof(leaf)
 
         def get_item_size(
-            value: Union[MultiModalKwargs, MultiModalKwargsItem,
-                         Mapping[str, NestedTensors]]
+            value: Union[
+                MultiModalKwargs,
+                MultiModalKwargsItem,
+                Mapping[str, NestedTensors],
+            ],
         ) -> int:
             size = json_reduce_leaves(
                 lambda a, b: a + b,
@@ -922,8 +928,11 @@ class ProcessingCache:
             )
 
             if debug:
-                logger.debug("Calculated size of %s to be %.2f GiB",
-                             type(value), size / GiB_bytes)
+                logger.debug(
+                    "Calculated size of %s to be %.2f GiB",
+                    type(value),
+                    size / GiB_bytes,
+                )
 
             return size
 
@@ -954,11 +963,15 @@ class ProcessingCache:
 
         total = self.debug_cache_total
         if total > 0 and total % steps == 0:
-            logger.debug("ProcessingCache: hit_ratio = %.2f",
-                         self.debug_cache_hits / total)
-            logger.debug("ProcessingCache: size = %.2f / %.2f GiB",
-                         self._cache.currsize / GiB_bytes,
-                         self._cache.maxsize / GiB_bytes)
+            logger.debug(
+                "ProcessingCache: hit_ratio = %.2f",
+                self.debug_cache_hits / total,
+            )
+            logger.debug(
+                "ProcessingCache: size = %.2f / %.2f GiB",
+                self._cache.currsize / GiB_bytes,
+                self._cache.maxsize / GiB_bytes,
+            )
 
     def get(
         self,
@@ -1094,11 +1107,13 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
     Not to be confused with {class}`transformers.ProcessorMixin`.
     """
 
-    def __init__(self,
-                 info: _I,
-                 dummy_inputs: "BaseDummyInputsBuilder[_I]",
-                 *,
-                 cache: Optional[ProcessingCache] = None) -> None:
+    def __init__(
+        self,
+        info: _I,
+        dummy_inputs: "BaseDummyInputsBuilder[_I]",
+        *,
+        cache: Optional[ProcessingCache] = None,
+    ) -> None:
         super().__init__()
 
         self.info = info
@@ -1266,7 +1281,7 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
         )
         processed_data.update(passthrough_data)
 
-        prompt_ids, = processed_data.pop("input_ids").tolist()
+        (prompt_ids, ) = processed_data.pop("input_ids").tolist()
 
         mm_kwargs = MultiModalKwargs.from_hf_inputs(
             processed_data,
@@ -1413,10 +1428,11 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
 
         return {
             modality: [
-                MultiModalHasher.hash_kwargs(model_id=model_id,
-                                             **{modality: item},
-                                             **hf_processor_mm_kwargs)
-                for item in items
+                MultiModalHasher.hash_kwargs(
+                    model_id=model_id,
+                    **{modality: item},
+                    **hf_processor_mm_kwargs,
+                ) for item in items
             ]
             for modality, items in mm_items.items()
         }
@@ -1537,10 +1553,10 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
             for item in cache_items
         ])
 
-        mm_hashes = {
+        mm_hashes = ({
             modality: [item.key for item in cache_items]
             for modality, cache_items in mm_cache_items_merged.items()
-        } if return_mm_hashes else None
+        } if return_mm_hashes else None)
 
         return prompt_ids, mm_kwargs, mm_hashes, is_update_applied
 
@@ -1827,7 +1843,8 @@ class EncDecMultiModalProcessor(BaseMultiModalProcessor[_I]):
         mm_inputs = MultiModalEncDecInputs(
             encoder_prompt=encoder_inputs["prompt"],
             encoder_prompt_token_ids=encoder_inputs["prompt_token_ids"],
-            **encoder_inputs)
+            **encoder_inputs,
+        )
         mm_inputs.update({
             "prompt": decoder_prompt,
             "prompt_token_ids": decoder_prompt_ids

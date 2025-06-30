@@ -70,8 +70,8 @@ class BenchmarkDataset(ABC):
     ) -> None:
         """
         Initialize the BenchmarkDataset with an optional dataset path and random
-        seed.  
-        
+        seed.
+
         Args:
             dataset_path (Optional[str]): Path to the dataset. If None, it
             indicates that a default or random dataset might be used.
@@ -256,8 +256,8 @@ def process_image(image: Any) -> Mapping[str, Any]:
     Raises:
         ValueError: If the input is not a supported type.
     """
-    if isinstance(image, dict) and 'bytes' in image:
-        image = Image.open(BytesIO(image['bytes']))
+    if isinstance(image, dict) and "bytes" in image:
+        image = Image.open(BytesIO(image["bytes"]))
     if isinstance(image, Image.Image):
         image = image.convert("RGB")
         with io.BytesIO() as image_data:
@@ -408,10 +408,11 @@ class ShareGPTDataset(BenchmarkDataset):
             prompt_len = len(prompt_ids)
             new_output_len = (len(completion_ids)
                               if output_len is None else output_len)
-            if not is_valid_sequence(prompt_len,
-                                     new_output_len,
-                                     skip_min_output_len_check=output_len
-                                     is not None):
+            if not is_valid_sequence(
+                    prompt_len,
+                    new_output_len,
+                    skip_min_output_len_check=output_len is not None,
+            ):
                 continue
             if enable_multimodal_chat:
                 prompt = self.apply_multimodal_chat_transformation(
@@ -632,16 +633,20 @@ class HuggingFaceDataset(BenchmarkDataset):
 
 class ConversationDataset(HuggingFaceDataset):
     """Dataset for conversation data with multimodal support."""
+
     SUPPORTED_DATASET_PATHS = {
-        'lmms-lab/LLaVA-OneVision-Data', 'Aeala/ShareGPT_Vicuna_unfiltered'
+        "lmms-lab/LLaVA-OneVision-Data",
+        "Aeala/ShareGPT_Vicuna_unfiltered",
     }
 
-    def sample(self,
-               tokenizer: PreTrainedTokenizerBase,
-               num_requests: int,
-               output_len: Optional[int] = None,
-               enable_multimodal_chat: bool = False,
-               **kwargs) -> list:
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: Optional[int] = None,
+        enable_multimodal_chat: bool = False,
+        **kwargs,
+    ) -> list:
         # Filter examples with at least 2 conversations
         filtered_data = self.data.filter(
             lambda x: len(x["conversations"]) >= 2)
@@ -663,8 +668,8 @@ class ConversationDataset(HuggingFaceDataset):
             if dynamic_output and not is_valid_sequence(
                     prompt_len, completion_len):
                 continue
-            mm_content = process_image(
-                item["image"]) if "image" in item else None
+            mm_content = (process_image(item["image"])
+                          if "image" in item else None)
             if enable_multimodal_chat:
                 # Note: when chat is enabled the request prompt_len is no longer
                 # accurate and we will be using request output to count the
@@ -697,7 +702,7 @@ class VisionArenaDataset(HuggingFaceDataset):
         "lmarena-ai/VisionArena-Chat":
         lambda x: x["conversation"][0][0]["content"],
         "lmarena-ai/vision-arena-bench-v0.1":
-        lambda x: x["turns"][0][0]["content"]
+        lambda x: x["turns"][0][0]["content"],
     }
 
     def sample(
@@ -758,12 +763,14 @@ class InstructCoderDataset(HuggingFaceDataset):
         "likaixin/InstructCoder",
     }
 
-    def sample(self,
-               tokenizer: PreTrainedTokenizerBase,
-               num_requests: int,
-               output_len: Optional[int] = None,
-               enable_multimodal_chat: bool = False,
-               **kwargs) -> list:
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: Optional[int] = None,
+        enable_multimodal_chat: bool = False,
+        **kwargs,
+    ) -> list:
         output_len = (output_len
                       if output_len is not None else self.DEFAULT_OUTPUT_LEN)
         sampled_requests = []
@@ -791,23 +798,27 @@ class AIMODataset(HuggingFaceDataset):
     """
     Dataset class for processing a AIMO dataset with reasoning questions.
     """
+
     SUPPORTED_DATASET_PATHS = {
-        "AI-MO/aimo-validation-aime", "AI-MO/NuminaMath-1.5",
-        "AI-MO/NuminaMath-CoT"
+        "AI-MO/aimo-validation-aime",
+        "AI-MO/NuminaMath-1.5",
+        "AI-MO/NuminaMath-CoT",
     }
 
-    def sample(self,
-               tokenizer: PreTrainedTokenizerBase,
-               num_requests: int,
-               output_len: Optional[int] = None,
-               **kwargs) -> list:
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: Optional[int] = None,
+        **kwargs,
+    ) -> list:
         sampled_requests = []
         dynamic_output = output_len is None
 
         for item in self.data:
             if len(sampled_requests) >= num_requests:
                 break
-            prompt, completion = item['problem'], item["solution"]
+            prompt, completion = item["problem"], item["solution"]
 
             prompt_ids = tokenizer(prompt).input_ids
             completion_ids = tokenizer(completion).input_ids
@@ -815,10 +826,12 @@ class AIMODataset(HuggingFaceDataset):
             completion_len = len(completion_ids)
             output_len = completion_len if dynamic_output else output_len
             assert isinstance(output_len, int) and output_len > 0
-            if dynamic_output and not is_valid_sequence(prompt_len,
-                                                        completion_len,
-                                                        max_prompt_len=2048,
-                                                        max_total_len=32000):
+            if dynamic_output and not is_valid_sequence(
+                    prompt_len,
+                    completion_len,
+                    max_prompt_len=2048,
+                    max_total_len=32000,
+            ):
                 continue
             sampled_requests.append(
                 SampleRequest(

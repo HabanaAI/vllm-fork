@@ -30,8 +30,8 @@ def native_per_token_group_quant_int8(x,
     It converts the tensor values into int8 values and returns the
     quantized tensor along with the scaling factor used for quantization.
     """
-    assert (x.shape[-1] % group_size == 0
-            ), "the last dimension of `x` cannot be divisible by `group_size`"
+    assert x.shape[-1] % group_size == 0, (
+        "the last dimension of `x` cannot be divisible by `group_size`")
     assert x.is_contiguous(), "`x` is not contiguous"
 
     iinfo = torch.iinfo(dtype)
@@ -40,11 +40,12 @@ def native_per_token_group_quant_int8(x,
 
     x_ = x.reshape(x.numel() // group_size, group_size)
     # Use float32 for scale calculation for stability
-    amax = x_.abs().max(dim=-1,
-                        keepdim=True)[0].clamp(min=eps).to(torch.float32)
+    amax = (x_.abs().max(dim=-1,
+                         keepdim=True)[0].clamp(min=eps).to(torch.float32))
     x_s = amax / int8_max
-    x_q = (x_.to(torch.float32) / x_s).round().clamp(
-        min=int8_min, max=int8_max).to(dtype)  # Round before clamping
+    x_q = ((x_.to(torch.float32) / x_s).round().clamp(min=int8_min,
+                                                      max=int8_max).to(dtype)
+           )  # Round before clamping
     x_q = x_q.reshape(x.shape)
     x_s = x_s.reshape(x.shape[:-1] + (x.shape[-1] // group_size, ))
 
@@ -68,22 +69,26 @@ def torch_w8a8_block_int8_moe(a, w1, w2, w1_s, w2_s, score, topk, block_shape):
     for i in range(w1.shape[0]):
         mask = topk_ids == i
         if mask.sum():
-            inter_out = native_w8a8_block_matmul(a_q[mask],
-                                                 w1[i],
-                                                 a_s[mask],
-                                                 w1_s[i],
-                                                 block_shape,
-                                                 output_dtype=a.dtype)
+            inter_out = native_w8a8_block_matmul(
+                a_q[mask],
+                w1[i],
+                a_s[mask],
+                w1_s[i],
+                block_shape,
+                output_dtype=a.dtype,
+            )
             act_out = SiluAndMul().forward_native(inter_out)
             act_out_q, act_out_s = native_per_token_group_quant_int8(
                 act_out, block_k)
             act_out = act_out.to(torch.float32)
-            out[mask] = native_w8a8_block_matmul(act_out_q,
-                                                 w2[i],
-                                                 act_out_s,
-                                                 w2_s[i],
-                                                 block_shape,
-                                                 output_dtype=a.dtype)
+            out[mask] = native_w8a8_block_matmul(
+                act_out_q,
+                w2[i],
+                act_out_s,
+                w2_s[i],
+                block_shape,
+                output_dtype=a.dtype,
+            )
     return (out.view(B, -1, w2.shape[1]) *
             topk_weight.view(B, -1, 1).to(out.dtype)).sum(dim=1)
 
@@ -105,8 +110,10 @@ def setup_cuda():
     torch.set_default_device("cuda")
 
 
-@pytest.mark.parametrize("M,N,K,block_size,out_dtype,seed",
-                         itertools.product(M, N, K, BLOCK_SIZE, DTYPES, SEEDS))
+@pytest.mark.parametrize(
+    "M,N,K,block_size,out_dtype,seed",
+    itertools.product(M, N, K, BLOCK_SIZE, DTYPES, SEEDS),
+)
 @torch.inference_mode()
 def test_w8a8_block_int8_matmul(M, N, K, block_size, out_dtype, seed):
     torch.manual_seed(seed)
@@ -131,15 +138,17 @@ def test_w8a8_block_int8_matmul(M, N, K, block_size, out_dtype, seed):
                                        out_dtype)
     out = w8a8_block_int8_matmul(A_fp8, B_fp8, As, Bs, block_size, out_dtype)
 
-    rel_diff = (torch.mean(
-        torch.abs(out.to(torch.float32) - ref_out.to(torch.float32))) /
-                torch.mean(torch.abs(ref_out.to(torch.float32))))
+    rel_diff = torch.mean(
+        torch.abs(out.to(torch.float32) -
+                  ref_out.to(torch.float32))) / torch.mean(
+                      torch.abs(ref_out.to(torch.float32)))
     assert rel_diff < 0.001
 
 
 @pytest.mark.parametrize(
     "M, N, K, E, topk, block_size, dtype, seed",
-    itertools.product(M, N, K, E, TOP_KS, BLOCK_SIZE, DTYPES, SEEDS))
+    itertools.product(M, N, K, E, TOP_KS, BLOCK_SIZE, DTYPES, SEEDS),
+)
 @torch.inference_mode()
 def test_w8a8_block_int8_fused_moe(M, N, K, E, topk, block_size, dtype, seed):
     """Tests the fused_moe kernel with W8A8 INT8 block quantization against a
@@ -153,8 +162,8 @@ def test_w8a8_block_int8_fused_moe(M, N, K, E, topk, block_size, dtype, seed):
 
     a = torch.randn((M, K), dtype=dtype) / 10
 
-    w1_fp32 = (torch.rand(
-        (E, 2 * N, K), dtype=torch.float32) - 0.5) * 2 * int8_max
+    w1_fp32 = ((torch.rand(
+        (E, 2 * N, K), dtype=torch.float32) - 0.5) * 2 * int8_max)
     w1 = w1_fp32.clamp(min=int8_min, max=int8_max).to(torch.int8)
 
     w2_fp32 = (torch.rand((E, K, N), dtype=torch.float32) - 0.5) * 2 * int8_max
@@ -192,7 +201,8 @@ def test_w8a8_block_int8_fused_moe(M, N, K, E, topk, block_size, dtype, seed):
                                             block_size)
 
     # Check results
-    rel_diff = (torch.mean(
-        torch.abs(out.to(torch.float32) - ref_out.to(torch.float32))) /
-                torch.mean(torch.abs(ref_out.to(torch.float32))))
+    rel_diff = torch.mean(
+        torch.abs(out.to(torch.float32) -
+                  ref_out.to(torch.float32))) / torch.mean(
+                      torch.abs(ref_out.to(torch.float32)))
     assert rel_diff < 0.06

@@ -60,21 +60,25 @@ def apply_w8a8_block_fp8_linear(
         q_input, x_scale = per_token_group_quant_fp8(input_2d,
                                                      block_size[1],
                                                      column_major_scales=True)
-        output = ops.cutlass_scaled_mm(q_input,
-                                       weight.T,
-                                       out_dtype=input.dtype,
-                                       scale_a=x_scale,
-                                       scale_b=weight_scale.T)
+        output = ops.cutlass_scaled_mm(
+            q_input,
+            weight.T,
+            out_dtype=input.dtype,
+            scale_a=x_scale,
+            scale_b=weight_scale.T,
+        )
     else:
         q_input, x_scale = per_token_group_quant_fp8(input_2d,
                                                      block_size[1],
                                                      column_major_scales=False)
-        output = w8a8_block_fp8_matmul(q_input,
-                                       weight,
-                                       x_scale,
-                                       weight_scale,
-                                       block_size,
-                                       output_dtype=input.dtype)
+        output = w8a8_block_fp8_matmul(
+            q_input,
+            weight,
+            x_scale,
+            weight_scale,
+            block_size,
+            output_dtype=input.dtype,
+        )
     if bias is not None:
         output = output + bias
     return output.to(dtype=input.dtype).view(*output_shape)
@@ -250,7 +254,7 @@ def per_token_group_quant_fp8(
         scaling factor for quantization.
     """
     dtype = current_platform.fp8_dtype() if dtype is None else dtype
-    assert (x.shape[-1] % group_size == 0), (
+    assert x.shape[-1] % group_size == 0, (
         f"the last dimension of `x` {x.shape[-1]} must be divisible "
         f"by `group_size` {group_size}")
     assert x.stride(-1) == 1, "`x` groups must be contiguous"

@@ -17,7 +17,7 @@ class TargetModelRunner(ModelRunnerWrapperBase):
     tokens are accepted. For this reason disabling log probabilities in the
     target model will make decode faster. The model runner sets the
     SamplingMetadata parameters according to whether log probabilities are
-    requested or not. 
+    requested or not.
     """
 
     def __init__(self, model_runner: ModelRunnerBase):
@@ -32,9 +32,10 @@ class TargetModelRunner(ModelRunnerWrapperBase):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
     ) -> ModelRunnerInputBase:
-        model_input: ModelRunnerInputBase =\
-            self.model_runner.prepare_model_input(
-            seq_group_metadata_list, virtual_engine, finished_requests_ids)
+        model_input: ModelRunnerInputBase = (
+            self.model_runner.prepare_model_input(seq_group_metadata_list,
+                                                  virtual_engine,
+                                                  finished_requests_ids))
         # If token log probabilities is disabled then skip generating sampler
         # CPU output. We directly serialize the GPU sampled_token_id tensors
         # as needed. If log probabilities is enabled then synchronize all the

@@ -7,7 +7,7 @@ from vllm.entrypoints.cli.types import CLISubcommand
 
 
 class BenchmarkThroughputSubcommand(BenchmarkSubcommandBase):
-    """ The `throughput` subcommand for vllm bench. """
+    """The `throughput` subcommand for vllm bench."""
 
     def __init__(self):
         self.name = "throughput"

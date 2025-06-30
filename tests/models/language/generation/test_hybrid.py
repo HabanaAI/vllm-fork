@@ -78,9 +78,8 @@ def test_batching(
     for_loop_outputs = []
     with vllm_runner(model, max_num_seqs=MAX_NUM_SEQS) as vllm_model:
         for prompt in example_prompts:
-            single_output, = vllm_model.generate_greedy_logprobs([prompt],
-                                                                 max_tokens,
-                                                                 num_logprobs)
+            (single_output, ) = vllm_model.generate_greedy_logprobs(
+                [prompt], max_tokens, num_logprobs)
             for_loop_outputs.append(single_output)
 
         batched_outputs = vllm_model.generate_greedy_logprobs(
@@ -109,10 +108,12 @@ def test_chunked_prefill(
     max_num_seqs = chunked_prefill_token_size
     max_num_batched_tokens = chunked_prefill_token_size
 
-    with vllm_runner(model,
-                     enable_chunked_prefill=True,
-                     max_num_batched_tokens=max_num_batched_tokens,
-                     max_num_seqs=max_num_seqs) as vllm_model:
+    with vllm_runner(
+            model,
+            enable_chunked_prefill=True,
+            max_num_batched_tokens=max_num_batched_tokens,
+            max_num_seqs=max_num_seqs,
+    ) as vllm_model:
         chunked = vllm_model.generate_greedy_logprobs(example_prompts,
                                                       max_tokens, num_logprobs)
 
@@ -139,8 +140,8 @@ def test_chunked_prefill_with_parallel_sampling(
     max_tokens: int,
 ) -> None:
     """
-    Tests chunked prefill in conjunction with n > 1. 
-    
+    Tests chunked prefill in conjunction with n > 1.
+
     In this case, prefill is populated with decoding tokens and
     we test that it doesn't fail.
 
@@ -248,10 +249,10 @@ def test_state_cleanup(
     example_prompts,
     model: str,
 ) -> None:
-    """ 
+    """
     This test is for verifying that the Hybrid state is cleaned up between
     steps.
-    
+
     If its not cleaned, an error would be expected.
     """
     try:

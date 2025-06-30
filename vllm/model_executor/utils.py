@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Utils for model executor."""
+
 from typing import Any, Dict, Optional
 
 import torch
@@ -9,6 +10,7 @@ from vllm.platforms import current_platform
 
 def set_random_seed(seed: int) -> None:
     from vllm.platforms import current_platform
+
     current_platform.seed_everything(seed)
 
 

@@ -53,10 +53,12 @@ def test_fusion_silu_and_mul_quant(num_tokens, hidden_size):
     result2 = model2(x)
 
     # Check that it gives the same answer
-    torch.testing.assert_close(result[0].to(dtype=torch.float16),
-                               result2[0].to(dtype=torch.float16),
-                               atol=1e-3,
-                               rtol=1e-3)
+    torch.testing.assert_close(
+        result[0].to(dtype=torch.float16),
+        result2[0].to(dtype=torch.float16),
+        atol=1e-3,
+        rtol=1e-3,
+    )
 
     # Check substitution worked
     pre_nodes = backend.graph_pre_pass.nodes

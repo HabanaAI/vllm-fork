@@ -22,6 +22,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only deci model compatible with HuggingFace weights."""
+
 from typing import Iterable, Optional, Set, Tuple, Type, Union
 
 import torch
@@ -141,7 +142,7 @@ class DeciLMDecoderLayer(nn.Module):
         if self._is_no_op_attention:
             pass
         else:
-            if (residual is None):
+            if residual is None:
                 residual = hidden_states
                 hidden_states = self.input_layernorm(hidden_states)
             else:

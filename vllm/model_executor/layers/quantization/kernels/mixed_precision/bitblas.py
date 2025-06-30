@@ -20,7 +20,6 @@ logger = init_logger(__name__)
 
 
 class BitBLASLinearKernel(MPLinearKernel):
-
     OPT_FEATURES: List[int] = BITBLAS_OPTIMIZE_FEATURES
     ENABLE_TUNING: bool = True
     MATMUL_LAYOUT: str = "nt"
@@ -43,8 +42,13 @@ class BitBLASLinearKernel(MPLinearKernel):
         bitblas_quant_config: Optional[QuantizationConfig] = None,
     ):
         self.quant_config = bitblas_quant_config
-        super().__init__(c, w_q_param_name, w_s_param_name, w_zp_param_name,
-                         w_gidx_param_name)
+        super().__init__(
+            c,
+            w_q_param_name,
+            w_s_param_name,
+            w_zp_param_name,
+            w_gidx_param_name,
+        )
 
     def repack_bitblas_from_gptq(
         self,
@@ -53,6 +57,7 @@ class BitBLASLinearKernel(MPLinearKernel):
         qzeros: Optional[torch.Tensor] = None,
     ):
         from bitblas.quantization.utils import general_compress
+
         assert self.bitblas_matmul is not None, "bitblas_matmul is None"
 
         quant_config = self.quant_config
@@ -104,11 +109,11 @@ class BitBLASLinearKernel(MPLinearKernel):
     @classmethod
     def can_implement(cls,
                       c: MPLinearLayerConfig) -> Tuple[bool, Optional[str]]:
-
         is_bitblas_installed = True
 
         try:
             import bitblas
+
             if bitblas.__version__ < MINIMUM_BITBLAS_VERSION:
                 raise ImportError(
                     "bitblas version is wrong. Please "
@@ -117,9 +122,12 @@ class BitBLASLinearKernel(MPLinearKernel):
             is_bitblas_installed = False
 
         if not is_bitblas_installed:
-            return False, "bitblas is not installed. Please install bitblas "\
-                          "by running `pip install bitblas>="\
-                           f"{MINIMUM_BITBLAS_VERSION}`"
+            return (
+                False,
+                "bitblas is not installed. Please install bitblas "
+                "by running `pip install bitblas>="
+                f"{MINIMUM_BITBLAS_VERSION}`",
+            )
 
         quant_types = query_bitblas_supported_quant_types(c.zero_points)
         if c.weight_type not in quant_types:
@@ -135,7 +143,8 @@ class BitBLASLinearKernel(MPLinearKernel):
             c.partition_weight_shape[1],  # out_features
             c.partition_weight_shape[0],  # in_features
             c.full_weight_shape[0],  # in_features
-            c.group_size)
+            c.group_size,
+        )
 
     # note assumes that
     #  `weight_packed` is: {input_dim = 0, output_dim = 1, packed_dim = 0}
@@ -171,8 +180,9 @@ class BitBLASLinearKernel(MPLinearKernel):
             self.repack_bitblas_from_gptq(
                 layer.qweight,
                 layer.scales,
-                None if quant_config.is_sym else  # type: ignore[union-attr]
-                layer.qzeros,  # type: ignore[union-attr]
+                None if quant_config.is_sym
+                # type: ignore[union-attr]
+                else layer.qzeros,  # type: ignore[union-attr]
             ))
         replace_parameter(layer, self.w_q_name, bitblas_qweight)
         replace_parameter(layer, self.w_s_name, bitblas_scales)
@@ -210,6 +220,7 @@ class BitBLASLinearKernel(MPLinearKernel):
         bits,
     ):
         from bitblas import MatmulConfig
+
         bitblas_dtype = self.BITBLAS_DTYPES[params_dtype]
         quant_config = self.quant_config
         with_scaling = False
@@ -251,6 +262,7 @@ class BitBLASLinearKernel(MPLinearKernel):
     def _get_or_create_bitblas_operator(self, config, enable_tuning):
         from bitblas import Matmul, auto_detect_nvidia_target
         from bitblas.cache import get_database_path, global_operator_cache
+
         BITBLAS_DATABASE_PATH = get_database_path()
         BITBLAS_TARGET = auto_detect_nvidia_target()
 

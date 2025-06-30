@@ -68,13 +68,13 @@ class TPUSupportedSamplingMetadata:
         input_batch: InputBatch,
         padded_num_reqs: int,
         xla_device: torch.device,
-        generate_params_if_all_greedy: bool = False
+        generate_params_if_all_greedy: bool = False,
     ) -> "TPUSupportedSamplingMetadata":
         """
         Copy sampling tensors slices from `input_batch` to on device tensors.
 
-        `InputBatch._make_sampling_metadata` causes recompilation on XLA as it 
-        slices dynamic shapes on device tensors. This impl moves the dynamic 
+        `InputBatch._make_sampling_metadata` causes recompilation on XLA as it
+        slices dynamic shapes on device tensors. This impl moves the dynamic
         ops to CPU and produces tensors of fixed `padded_num_reqs` size.
 
         Args:
@@ -86,8 +86,8 @@ class TPUSupportedSamplingMetadata:
                 we want to pre-compile a graph with sampling parameters, even if
                 they are not strictly needed for greedy decoding.
         """
-        needs_logprobs = input_batch.max_num_logprobs>0 if \
-            input_batch.max_num_logprobs else False
+        needs_logprobs = (input_batch.max_num_logprobs > 0
+                          if input_batch.max_num_logprobs else False)
         # Early return to avoid unnecessary cpu to tpu copy
         if (input_batch.all_greedy is True
                 and generate_params_if_all_greedy is False):
@@ -99,8 +99,10 @@ class TPUSupportedSamplingMetadata:
             # Pad value is the default one.
             cpu_tensor[num_reqs:padded_num_reqs] = fill_val
 
-        fill_slice(input_batch.temperature_cpu_tensor,
-                   DEFAULT_SAMPLING_PARAMS["temperature"])
+        fill_slice(
+            input_batch.temperature_cpu_tensor,
+            DEFAULT_SAMPLING_PARAMS["temperature"],
+        )
         fill_slice(input_batch.min_p_cpu_tensor,
                    DEFAULT_SAMPLING_PARAMS["min_p"])
         fill_slice(input_batch.top_k_cpu_tensor,
@@ -120,4 +122,5 @@ class TPUSupportedSamplingMetadata:
                 xla_device),
             min_p=input_batch.min_p_cpu_tensor[:padded_num_reqs].to(
                 xla_device),
-            logprobs=needs_logprobs)
+            logprobs=needs_logprobs,
+        )

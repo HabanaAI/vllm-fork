@@ -3,6 +3,7 @@
 
 Run `pytest tests/quantization/test_fp8.py --forked`.
 """
+
 import pytest
 import torch
 
@@ -19,15 +20,21 @@ MODELS = [
 ]
 
 
-@pytest.mark.skipif(not is_quant_method_supported("fp8"),
-                    reason="FP8 is not supported on this GPU type.")
+@pytest.mark.skipif(
+    not is_quant_method_supported("fp8"),
+    reason="FP8 is not supported on this GPU type.",
+)
 @pytest.mark.parametrize("model_id", MODELS)
 @pytest.mark.parametrize("force_marlin", [False, True])
 @pytest.mark.parametrize(
     "use_rocm_aiter", [True, False] if current_platform.is_rocm() else [False])
-def test_model_load_and_run(vllm_runner, model_id: str, force_marlin: bool,
-                            use_rocm_aiter: bool, monkeypatch) -> None:
-
+def test_model_load_and_run(
+    vllm_runner,
+    model_id: str,
+    force_marlin: bool,
+    use_rocm_aiter: bool,
+    monkeypatch,
+) -> None:
     if use_rocm_aiter:
         monkeypatch.setenv("VLLM_ROCM_USE_AITER", "1")
 
@@ -50,8 +57,10 @@ KV_CACHE_MODELS = [
 ]
 
 
-@pytest.mark.skipif(not is_quant_method_supported("fp8"),
-                    reason="FP8 is not supported on this GPU type.")
+@pytest.mark.skipif(
+    not is_quant_method_supported("fp8"),
+    reason="FP8 is not supported on this GPU type.",
+)
 @pytest.mark.parametrize("model_id", KV_CACHE_MODELS)
 @pytest.mark.parametrize(
     "use_rocm_aiter", [True, False] if current_platform.is_rocm() else [False])
@@ -94,14 +103,21 @@ def test_kv_cache_model_load_and_run(vllm_runner, model_id: str,
         print(outputs[0][1])
 
 
-@pytest.mark.skipif(not is_quant_method_supported("fp8"),
-                    reason="FP8 is not supported on this GPU type.")
+@pytest.mark.skipif(
+    not is_quant_method_supported("fp8"),
+    reason="FP8 is not supported on this GPU type.",
+)
 @pytest.mark.parametrize("kv_cache_dtype", ["auto", "fp8"])
 @pytest.mark.parametrize("force_marlin", [False, True])
 @pytest.mark.parametrize(
     "use_rocm_aiter", [True, False] if current_platform.is_rocm() else [False])
-def test_load_fp16_model(vllm_runner, kv_cache_dtype: str, force_marlin: bool,
-                         use_rocm_aiter: bool, monkeypatch) -> None:
+def test_load_fp16_model(
+    vllm_runner,
+    kv_cache_dtype: str,
+    force_marlin: bool,
+    use_rocm_aiter: bool,
+    monkeypatch,
+) -> None:
     if use_rocm_aiter:
         monkeypatch.setenv("VLLM_ROCM_USE_AITER", "1")
 
@@ -148,8 +164,10 @@ def test_load_fp16_model(vllm_runner, kv_cache_dtype: str, force_marlin: bool,
         llm.apply_model(check_model)
 
 
-@pytest.mark.skipif(not is_quant_method_supported("fp8"),
-                    reason="FP8 is not supported on this GPU type.")
+@pytest.mark.skipif(
+    not is_quant_method_supported("fp8"),
+    reason="FP8 is not supported on this GPU type.",
+)
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_scaled_fp8_quant(dtype) -> None:
 
@@ -192,4 +210,5 @@ def test_scaled_fp8_quant(dtype) -> None:
     torch.testing.assert_close(
         ref_y,
         per_tensor_dequantize(torch.narrow(y, 0, 0, x.shape[0]), inv_scale,
-                              dtype))
+                              dtype),
+    )

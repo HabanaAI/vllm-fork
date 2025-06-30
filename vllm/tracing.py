@@ -22,6 +22,7 @@ try:
     from opentelemetry.trace import SpanKind, Tracer, set_tracer_provider
     from opentelemetry.trace.propagation.tracecontext import (
         TraceContextTextMapPropagator)
+
     _is_otel_imported = True
 except ImportError:
     # Capture and format traceback to provide detailed context for the import
@@ -29,6 +30,7 @@ except ImportError:
     # memory leaks.
     # See https://github.com/vllm-project/vllm/pull/7266#discussion_r1707395458
     import traceback
+
     otel_import_error_traceback = traceback.format_exc()
 
     class Context:  # type: ignore
@@ -81,7 +83,7 @@ def get_span_exporter(endpoint):
 
 
 def extract_trace_context(
-        headers: Optional[Mapping[str, str]]) -> Optional[Context]:
+    headers: Optional[Mapping[str, str]], ) -> Optional[Context]:
     if is_otel_available():
         headers = headers or {}
         return TraceContextTextMapPropagator().extract(headers)
@@ -90,7 +92,6 @@ def extract_trace_context(
 
 
 def extract_trace_headers(headers: Mapping[str, str]) -> Mapping[str, str]:
-
     return {h: headers[h] for h in TRACE_HEADERS if h in headers}
 
 

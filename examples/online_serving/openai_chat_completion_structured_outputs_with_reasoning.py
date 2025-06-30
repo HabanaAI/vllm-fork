@@ -34,7 +34,7 @@ def print_completion_details(completion):
 
 # Guided decoding by Regex
 def guided_regex_completion(client: OpenAI, model: str):
-    prompt = ("What is the capital of France?")
+    prompt = "What is the capital of France?"
 
     completion = client.chat.completions.create(
         model=model,
@@ -57,7 +57,7 @@ class People(BaseModel):
 def guided_json_completion(client: OpenAI, model: str):
     json_schema = People.model_json_schema()
 
-    prompt = ("Generate a JSON with the name and age of one random person.")
+    prompt = "Generate a JSON with the name and age of one random person."
     completion = client.chat.completions.create(
         model=model,
         messages=[{

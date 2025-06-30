@@ -55,7 +55,7 @@ class ImageMediaIO(MediaIO[Image.Image]):
             image.save(buffer, image_format)
             data = buffer.getvalue()
 
-        return base64.b64encode(data).decode('utf-8')
+        return base64.b64encode(data).decode("utf-8")
 
 
 class ImageEmbeddingMediaIO(MediaIO[torch.Tensor]):
@@ -74,4 +74,4 @@ class ImageEmbeddingMediaIO(MediaIO[torch.Tensor]):
         return torch.load(filepath, weights_only=True)
 
     def encode_base64(self, media: torch.Tensor) -> str:
-        return base64.b64encode(media.numpy()).decode('utf-8')
+        return base64.b64encode(media.numpy()).decode("utf-8")

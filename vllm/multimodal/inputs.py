@@ -158,8 +158,12 @@ class PlaceholderRange:
         return nested_tensors_equal(self.is_embed, other.is_embed)
 
 
-NestedTensors = Union[list["NestedTensors"], list[torch.Tensor], torch.Tensor,
-                      tuple[torch.Tensor, ...]]
+NestedTensors = Union[
+    list["NestedTensors"],
+    list[torch.Tensor],
+    torch.Tensor,
+    tuple[torch.Tensor, ...],
+]
 """
 Uses a list instead of a tensor if the dimensions of each element do not match.
 """
@@ -173,11 +177,11 @@ def nested_tensors_equal(a: NestedTensors, b: NestedTensors) -> bool:
         return isinstance(a, torch.Tensor) and torch.equal(b, a)
 
     if isinstance(a, list):
-        return (isinstance(b, list)
-                and all(nested_tensors_equal(a_, b_) for a_, b_ in zip(a, b)))
+        return isinstance(b, list) and all(
+            nested_tensors_equal(a_, b_) for a_, b_ in zip(a, b))
     if isinstance(b, list):
-        return (isinstance(a, list)
-                and all(nested_tensors_equal(b_, a_) for b_, a_ in zip(b, a)))
+        return isinstance(a, list) and all(
+            nested_tensors_equal(b_, a_) for b_, a_ in zip(b, a))
 
     # Both a and b are scalars
     return a == b
@@ -261,7 +265,7 @@ class BaseMultiModalField(ABC):
         """
         Construct {class}`MultiModalFieldElem` instances to represent
         the provided data.
-        
+
         This is the inverse of {meth}`reduce_data`.
         """
         raise NotImplementedError
@@ -322,6 +326,7 @@ class MultiModalFlatField(BaseMultiModalField):
     {func}`MultiModalFieldConfig.flat_from_sizes`
     :::
     """
+
     slices: Union[Sequence[slice], Sequence[Sequence[slice]]]
     dim: int = 0
 
@@ -333,8 +338,9 @@ class MultiModalFlatField(BaseMultiModalField):
     ) -> Sequence[MultiModalFieldElem]:
         field_factory = self._field_factory(modality=modality, key=key)
         if not is_list_of(self.slices, slice, check="all"):
-            assert isinstance(data, torch.Tensor), \
-                "torch.Tensor is required for multiple slices"
+            assert isinstance(
+                data,
+                torch.Tensor), ("torch.Tensor is required for multiple slices")
         return [field_factory(data[cast(slice, s)]) for s in self.slices]
 
     def _reduce_data(self, batch: list[NestedTensors]) -> NestedTensors:
@@ -364,6 +370,7 @@ class MultiModalSharedField(BaseMultiModalField):
     {func}`MultiModalFieldConfig.shared`
     :::
     """
+
     batch_size: int
 
     def build_elems(
@@ -411,9 +418,11 @@ class MultiModalFieldConfig:
         )
 
     @staticmethod
-    def flat(modality: str,
-             slices: Union[Sequence[slice], Sequence[Sequence[slice]]],
-             dim: int = 0):
+    def flat(
+        modality: str,
+        slices: Union[Sequence[slice], Sequence[Sequence[slice]]],
+        dim: int = 0,
+    ):
         """
         Defines a field where an element in the batch is obtained by
         slicing along the first dimension of the underlying data.
@@ -422,7 +431,7 @@ class MultiModalFieldConfig:
             modality: The modality of the multi-modal item that uses this
                 keyword argument.
             slices: For each multi-modal item, a slice (dim=0) or a tuple of
-                slices (dim>0) that is used to extract the data corresponding 
+                slices (dim>0) that is used to extract the data corresponding
                 to it.
             dim: The dimension to extract data, default to 0.
 
@@ -756,8 +765,8 @@ class MultiModalKwargs(UserDict[str, NestedTensors]):
             return False
 
         ks = self.keys()
-        return (ks == other.keys()
-                and all(nested_tensors_equal(self[k], other[k]) for k in ks))
+        return ks == other.keys() and all(
+            nested_tensors_equal(self[k], other[k]) for k in ks)
 
     def _validate_modality(self, method_name: str, modality: str) -> None:
         if not self._items_by_modality:

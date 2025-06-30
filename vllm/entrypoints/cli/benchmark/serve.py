@@ -7,7 +7,7 @@ from vllm.entrypoints.cli.types import CLISubcommand
 
 
 class BenchmarkServingSubcommand(BenchmarkSubcommandBase):
-    """ The `serve` subcommand for vllm bench. """
+    """The `serve` subcommand for vllm bench."""
 
     def __init__(self):
         self.name = "serve"

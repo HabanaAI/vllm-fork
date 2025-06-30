@@ -632,9 +632,11 @@ class WhisperMultiModalProcessor(
         ]
 
 
-@MULTIMODAL_REGISTRY.register_processor(WhisperMultiModalProcessor,
-                                        info=WhisperProcessingInfo,
-                                        dummy_inputs=WhisperDummyInputsBuilder)
+@MULTIMODAL_REGISTRY.register_processor(
+    WhisperMultiModalProcessor,
+    info=WhisperProcessingInfo,
+    dummy_inputs=WhisperDummyInputsBuilder,
+)
 class WhisperForConditionalGeneration(nn.Module, SupportsTranscription,
                                       SupportsMultiModal, SupportsV0Only):
     packed_modules_mapping = {
@@ -732,7 +734,7 @@ class WhisperForConditionalGeneration(nn.Module, SupportsTranscription,
 
 
 def _create_fake_bias_for_k_proj(
-    weights: Iterable[Tuple[str, torch.Tensor]]
+    weights: Iterable[Tuple[str, torch.Tensor]],
 ) -> Iterable[Tuple[str, torch.Tensor]]:
     """
     Create full zeros bias for k_proj weight in self-attn and x-attn layers.

@@ -116,14 +116,15 @@ class MultiprocExecutor(Executor):
             sentinels = [h.proc.sentinel for h in workers]
             died = multiprocessing.connection.wait(sentinels)
             _self = self_ref()
-            if not _self or getattr(_self, 'shutting_down', False):
+            if not _self or getattr(_self, "shutting_down", False):
                 return
             _self.is_failed = True
             proc_name = next(h.proc.name for h in workers
                              if h.proc.sentinel == died[0])
             logger.error(
-                "Worker proc %s died unexpectedly, "
-                "shutting down executor.", proc_name)
+                "Worker proc %s died unexpectedly, shutting down executor.",
+                proc_name,
+            )
             _self.shutdown()
             callback = _self.failure_callback
             if callback is not None:
@@ -144,18 +145,22 @@ class MultiprocExecutor(Executor):
         self,
         scheduler_output,
     ) -> Union[ModelRunnerOutput, Future[ModelRunnerOutput]]:
-        (output, ) = self.collective_rpc("execute_model",
-                                         args=(scheduler_output, ),
-                                         rank0_reply_only=True,
-                                         timeout=EXECUTE_MODEL_TIMEOUT_S)
+        (output, ) = self.collective_rpc(
+            "execute_model",
+            args=(scheduler_output, ),
+            rank0_reply_only=True,
+            timeout=EXECUTE_MODEL_TIMEOUT_S,
+        )
         return output
 
-    def collective_rpc(self,
-                       method: Union[str, Callable],
-                       timeout: Optional[float] = None,
-                       args: tuple = (),
-                       kwargs: Optional[dict] = None,
-                       rank0_reply_only: bool = False) -> list[Any]:
+    def collective_rpc(
+        self,
+        method: Union[str, Callable],
+        timeout: Optional[float] = None,
+        args: tuple = (),
+        kwargs: Optional[dict] = None,
+        rank0_reply_only: bool = False,
+    ) -> list[Any]:
         if self.is_failed:
             raise RuntimeError("Executor failed.")
 
@@ -177,8 +182,8 @@ class MultiprocExecutor(Executor):
             workers = (self.workers[0], ) if rank0_reply_only else self.workers
             responses = [None] * len(workers)
             for w in workers:
-                dequeue_timeout = None if deadline is None else (
-                    deadline - time.monotonic())
+                dequeue_timeout = (None if deadline is None else
+                                   (deadline - time.monotonic()))
                 status, result = w.worker_response_mq.dequeue(
                     timeout=dequeue_timeout, cancel=self.shutdown_event)
 
@@ -223,7 +228,7 @@ class MultiprocExecutor(Executor):
 
     def shutdown(self):
         """Properly shut down the executor and its workers"""
-        if not getattr(self, 'shutting_down', False):
+        if not getattr(self, "shutting_down", False):
             self.shutting_down = True
             self.shutdown_event.set()
             for w in self.workers:
@@ -240,6 +245,7 @@ class MultiprocExecutor(Executor):
 @dataclass
 class UnreadyWorkerProcHandle:
     """WorkerProcess handle before READY."""
+
     proc: BaseProcess
     rank: int
     ready_pipe: Connection
@@ -253,8 +259,10 @@ class WorkerProcHandle:
 
     @classmethod
     def from_unready_handle(
-            cls, unready_handle: UnreadyWorkerProcHandle,
-            worker_response_mq: MessageQueue) -> "WorkerProcHandle":
+        cls,
+        unready_handle: UnreadyWorkerProcHandle,
+        worker_response_mq: MessageQueue,
+    ) -> "WorkerProcHandle":
         return cls(
             proc=unready_handle.proc,
             rank=unready_handle.rank,
@@ -327,10 +335,12 @@ class WorkerProc:
             "ready_pipe": (reader, writer),
         }
         # Run EngineCore busy loop in background process.
-        proc = context.Process(target=WorkerProc.worker_main,
-                               kwargs=process_kwargs,
-                               name=f"VllmWorker-{rank}",
-                               daemon=True)
+        proc = context.Process(
+            target=WorkerProc.worker_main,
+            kwargs=process_kwargs,
+            name=f"VllmWorker-{rank}",
+            daemon=True,
+        )
 
         proc.start()
         writer.close()
@@ -338,16 +348,15 @@ class WorkerProc:
 
     @staticmethod
     def wait_for_ready(
-        unready_proc_handles: list[UnreadyWorkerProcHandle]
+        unready_proc_handles: list[UnreadyWorkerProcHandle],
     ) -> list[WorkerProcHandle]:
-
         e = Exception("WorkerProc initialization failed due to "
                       "an exception in a background process. "
                       "See stack trace for root cause.")
 
         pipes = {handle.ready_pipe: handle for handle in unready_proc_handles}
-        ready_proc_handles: list[Optional[WorkerProcHandle]] = (
-            [None] * len(unready_proc_handles))
+        ready_proc_handles: list[
+            Optional[WorkerProcHandle]] = [None] * len(unready_proc_handles)
         while pipes:
             ready = multiprocessing.connection.wait(pipes.keys())
             for pipe in ready:
@@ -384,8 +393,8 @@ class WorkerProc:
 
     @staticmethod
     def worker_main(*args, **kwargs):
-        """ Worker initialization and execution loops.
-        This runs a background process """
+        """Worker initialization and execution loops.
+        This runs a background process"""
 
         # Signal handler used for graceful termination.
         # SystemExit exception is only raised once to allow this and worker

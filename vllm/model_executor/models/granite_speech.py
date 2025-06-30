@@ -22,6 +22,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only IBM Granite speeech model."""
+
 import math
 from typing import Iterable, Mapping, Optional, Set, Tuple, TypedDict, Union
 
@@ -57,7 +58,6 @@ from .utils import (AutoWeightsLoader, embed_multimodal,
 
 ### Audio Input
 class GraniteSpeechAudioInputs(TypedDict):
-
     input_features: torch.Tensor
     """Shape: `(bsz, num_features, 160)`"""
 
@@ -250,10 +250,12 @@ class GraniteSpeechEncoderProjector(nn.Module):
 class GraniteSpeechConformerFeedForward(nn.Module):
     """Feedforward module for conformer encoder blocks."""
 
-    def __init__(self,
-                 config: PretrainedConfig,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+    def __init__(
+        self,
+        config: PretrainedConfig,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ):
         super().__init__()
         self.pre_norm = nn.LayerNorm(config.hidden_dim)
 
@@ -338,26 +340,31 @@ class GraniteSpeechConformerAttention(nn.Module):
         rel_pos_emb = self.rel_pos_emb(dist)
         rel_pos_emb_expanded = rel_pos_emb.view([1, 1, 1] +
                                                 list(rel_pos_emb.shape))
-        pos_attn = torch.sum(query_states.unsqueeze(-2) * rel_pos_emb_expanded,
-                             dim=-1) * self.scale
+        pos_attn = (torch.sum(
+            query_states.unsqueeze(-2) * rel_pos_emb_expanded, dim=-1) *
+                    self.scale)
 
         if remainder > 0:
             # masked attention in the extended block
-            mask = torch.ones(self.context_size,
-                              self.context_size,
-                              dtype=bool,
-                              device=hidden_states.device)
+            mask = torch.ones(
+                self.context_size,
+                self.context_size,
+                dtype=bool,
+                device=hidden_states.device,
+            )
             mask[:remainder, :remainder] = 0
             mask_value = -torch.finfo(pos_attn.dtype).max
             pos_attn[:, -1, :].masked_fill_(mask, mask_value)
 
         with torch.nn.attention.sdpa_kernel(
                 torch.nn.attention.SDPBackend.MATH):
-            out = F.scaled_dot_product_attention(query_states,
-                                                 key_states,
-                                                 value_states,
-                                                 attn_mask=pos_attn,
-                                                 scale=self.scale)
+            out = F.scaled_dot_product_attention(
+                query_states,
+                key_states,
+                value_states,
+                attn_mask=pos_attn,
+                scale=self.scale,
+            )
         out = out.transpose(2, 3).reshape(bsz, hidden_states.shape[1], -1)
         return self.to_out(out[:, :num_features, :])
 
@@ -438,8 +445,9 @@ class GraniteSpeechConformerBlock(nn.Module):
     def forward(self, hidden_states: torch.Tensor,
                 attention_dists: torch.Tensor) -> torch.Tensor:
         hidden_states = 0.5 * self.ff1(hidden_states) + hidden_states
-        hidden_states = self.attn(
-            hidden_states, attention_dists=attention_dists) + hidden_states
+        hidden_states = (
+            self.attn(hidden_states, attention_dists=attention_dists) +
+            hidden_states)
         hidden_states = self.conv(hidden_states) + hidden_states
         hidden_states = 0.5 * self.ff2(hidden_states) + hidden_states
         hidden_states = self.post_norm(hidden_states)
@@ -449,19 +457,21 @@ class GraniteSpeechConformerBlock(nn.Module):
 class GraniteSpeechCTCEncoder(nn.Module):
     """CTC Encoder comprising conformer blocks and additional linear layers."""
 
-    def __init__(self,
-                 config: PretrainedConfig,
-                 prefix: str,
-                 quant_config: Optional[QuantizationConfig] = None):
+    def __init__(
+        self,
+        config: PretrainedConfig,
+        prefix: str,
+        quant_config: Optional[QuantizationConfig] = None,
+    ):
         super().__init__()
         self.config = config
 
         # Precompute clamped relative positional encoding distances
         seq = torch.arange(config.context_size)
         relpos_dist = seq.view(-1, 1) - seq.view(1, -1)
-        self.attention_dists = torch.clamp(
-            relpos_dist, -config.context_size,
-            config.context_size) + config.max_pos_emb
+        self.attention_dists = (torch.clamp(relpos_dist, -config.context_size,
+                                            config.context_size) +
+                                config.max_pos_emb)
 
         self.input_linear = nn.Linear(config.input_dim,
                                       config.hidden_dim,
@@ -509,14 +519,14 @@ class GraniteSpeechCTCEncoder(nn.Module):
 @MULTIMODAL_REGISTRY.register_processor(
     GraniteSpeechMultiModalProcessor,
     info=GraniteSpeechMultiModalProcessingInfo,
-    dummy_inputs=GraniteSpeechDummyInputsBuilder)
+    dummy_inputs=GraniteSpeechDummyInputsBuilder,
+)
 class GraniteSpeechForConditionalGeneration(
         nn.Module,
         SupportsMultiModal,
         SupportsPP,
         SupportsLoRA,
 ):
-
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -684,7 +694,7 @@ class GraniteSpeechForConditionalGeneration(
         audio_input: GraniteSpeechAudioInputs,
     ) -> tuple[torch.Tensor]:
         """Compute the audio features to be merged into the LLM embeddings.
-        
+
         Args:
             audio_input: GraniteSpeechAudioInputs
                 Audio inputs object containing Mel features, an input features

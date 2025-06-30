@@ -253,7 +253,7 @@ class MultiModalDataItems(UserDict[str, ModalityDataItems[Any, Any]]):
     def get_count(self, modality: str, *, strict: bool = True) -> int:
         """
         Get the number of data items belonging to a modality.
-        
+
         If `strict=False`, return `0` instead of raising {exc}`KeyError`
         even if the modality is not found.
         """

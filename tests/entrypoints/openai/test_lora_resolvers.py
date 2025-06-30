@@ -32,6 +32,7 @@ class MockHFConfig:
 @dataclass
 class MockModelConfig:
     """Minimal mock ModelConfig for testing."""
+
     model: str = MODEL_NAME
     tokenizer: str = MODEL_NAME
     trust_remote_code: bool = False
@@ -56,13 +57,17 @@ class MockLoRAResolver(LoRAResolver):
     async def resolve_lora(self, base_model_name: str,
                            lora_name: str) -> Optional[LoRARequest]:
         if lora_name == "test-lora":
-            return LoRARequest(lora_name="test-lora",
-                               lora_int_id=1,
-                               lora_local_path="/fake/path/test-lora")
+            return LoRARequest(
+                lora_name="test-lora",
+                lora_int_id=1,
+                lora_local_path="/fake/path/test-lora",
+            )
         elif lora_name == "invalid-lora":
-            return LoRARequest(lora_name="invalid-lora",
-                               lora_int_id=2,
-                               lora_local_path="/fake/path/invalid-lora")
+            return LoRARequest(
+                lora_name="invalid-lora",
+                lora_int_id=2,
+                lora_local_path="/fake/path/invalid-lora",
+            )
         return None
 
 
@@ -91,17 +96,19 @@ def mock_serving_setup():
             return
         elif lora_request.lora_name == "invalid-lora":
             # Simulate failure during addition (e.g. invalid format)
-            raise ValueError(f"Simulated failure adding LoRA: "
-                             f"{lora_request.lora_name}")
+            raise ValueError(
+                f"Simulated failure adding LoRA: {lora_request.lora_name}")
 
     mock_engine.add_lora.side_effect = mock_add_lora_side_effect
     mock_engine.generate.reset_mock()
     mock_engine.add_lora.reset_mock()
 
     mock_model_config = MockModelConfig()
-    models = OpenAIServingModels(engine_client=mock_engine,
-                                 base_model_paths=BASE_MODEL_PATHS,
-                                 model_config=mock_model_config)
+    models = OpenAIServingModels(
+        engine_client=mock_engine,
+        base_model_paths=BASE_MODEL_PATHS,
+        model_config=mock_model_config,
+    )
 
     serving_completion = OpenAIServingCompletion(mock_engine,
                                                  mock_model_config,
@@ -135,7 +142,7 @@ async def test_serving_completion_with_lora_resolver(mock_serving_setup,
     assert called_lora_request.lora_name == lora_model_name
 
     mock_engine.generate.assert_called_once()
-    called_lora_request = mock_engine.generate.call_args[1]['lora_request']
+    called_lora_request = mock_engine.generate.call_args[1]["lora_request"]
     assert isinstance(called_lora_request, LoRARequest)
     assert called_lora_request.lora_name == lora_model_name
 

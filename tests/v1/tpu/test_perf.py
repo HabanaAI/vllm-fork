@@ -3,6 +3,7 @@
 
 Run `pytest tests/v1/tpu/test_perf.py`.
 """
+
 from __future__ import annotations
 
 import time
@@ -36,7 +37,6 @@ TEST_PARAMS = [
     #   open(/dev/vfio/0): Device or resource busy: Device or resource busy;
     #   Couldn't open iommu group /dev/vfio/0
     # => Investigate
-
     # TestParams(
     #     model="Qwen/Qwen2.5-1.5B-Instruct",
     #     num_prompts=1,
@@ -58,16 +58,14 @@ TEST_PARAMS = [
         num_prompts=64,
         prefix_len=500,
         decode_len=50,
-
         # commit id: ccb246776d93ef105904a8ec015b3587240a1183
         # tpu: v5lite (old vllm CI/CD)
         # expected_avg_time=1.4,
         # err_tol=0.30,
-
         # (This is the active CI/CD instance)
         # commit id: ccb246776d93ef105904a8ec015b3587240a1183
         # tpu: v6e (current vllm CI/CD)
-        expected_avg_time=1.7,  # measured with VLLM_XLA_CACHE_PATH=  
+        expected_avg_time=1.7,  # measured with VLLM_XLA_CACHE_PATH=
         err_tol=0.20,
     ),
 ]
@@ -80,8 +78,10 @@ MAX_NUM_SEQS = 32
 GPU_UTIL = 0.9
 
 
-@pytest.mark.skipif(not current_platform.is_tpu(),
-                    reason="This is a basic performance test for TPU only")
+@pytest.mark.skipif(
+    not current_platform.is_tpu(),
+    reason="This is a basic performance test for TPU only",
+)
 @pytest.mark.parametrize("params", TEST_PARAMS)
 def test_perf(
     vllm_runner: type[VllmRunner],
@@ -111,13 +111,15 @@ def test_perf(
                                          temperature=1.0,
                                          min_p=0.0)
 
-        with vllm_runner(params.model,
-                         max_num_batched_tokens=MAX_MODEL_LEN,
-                         max_model_len=MAX_MODEL_LEN,
-                         max_num_seqs=MAX_NUM_SEQS,
-                         gpu_memory_utilization=GPU_UTIL,
-                         enforce_eager=False,
-                         tensor_parallel_size=1) as vllm_model:
+        with vllm_runner(
+                params.model,
+                max_num_batched_tokens=MAX_MODEL_LEN,
+                max_model_len=MAX_MODEL_LEN,
+                max_num_seqs=MAX_NUM_SEQS,
+                gpu_memory_utilization=GPU_UTIL,
+                enforce_eager=False,
+                tensor_parallel_size=1,
+        ) as vllm_model:
             print("  -- Warmup / Compile")
             for i in range(NUM_WARMUPS):
                 _ = vllm_model.generate(prompts, sampling_params)

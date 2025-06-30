@@ -34,8 +34,8 @@ class EagleProposer:
 
         self.dtype = vllm_config.model_config.dtype
 
-        self.max_num_tokens = vllm_config.scheduler_config \
-            .max_num_batched_tokens
+        self.max_num_tokens = (
+            vllm_config.scheduler_config.max_num_batched_tokens)
 
         self.hidden_size = vllm_config.model_config.get_hidden_size()
 
@@ -58,13 +58,15 @@ class EagleProposer:
         self.hidden_states = torch.zeros(
             (self.max_num_tokens, self.hidden_size),
             dtype=self.dtype,
-            device=device)
+            device=device,
+        )
         # We need +1 here because the arange is used to set query_start_loc,
         # which has one more element than batch_size.
-        self.arange = torch.arange(vllm_config.scheduler_config.max_num_seqs +
-                                   1,
-                                   device=device,
-                                   dtype=torch.int32)
+        self.arange = torch.arange(
+            vllm_config.scheduler_config.max_num_seqs + 1,
+            device=device,
+            dtype=torch.int32,
+        )
 
     def propose(
         self,
@@ -122,8 +124,7 @@ class EagleProposer:
             prefix_kv_lens=None,
             suffix_kv_lens=None,
         )
-        if self.use_cuda_graph and \
-            num_tokens <= self.cudagraph_batch_sizes[-1]:
+        if self.use_cuda_graph and num_tokens <= self.cudagraph_batch_sizes[-1]:
             num_input_tokens = self.vllm_config.pad_for_cudagraph(num_tokens)
         else:
             num_input_tokens = num_tokens
@@ -154,8 +155,7 @@ class EagleProposer:
 
         positions = target_positions[last_token_indices]
         hidden_states = hidden_states[last_token_indices]
-        if self.use_cuda_graph and \
-            batch_size <= self.cudagraph_batch_sizes[-1]:
+        if self.use_cuda_graph and batch_size <= self.cudagraph_batch_sizes[-1]:
             input_batch_size = self.vllm_config.pad_for_cudagraph(batch_size)
         else:
             input_batch_size = batch_size
@@ -245,8 +245,7 @@ class EagleProposer:
         #                 a + b, a + b + 1, ..., a + b + c - n3 - 1]
 
         # [0, a, a + b, a + b + c] -> [a, b, c]
-        query_len_per_req = (cu_target_query_lens[1:] -
-                             cu_target_query_lens[:-1])
+        query_len_per_req = cu_target_query_lens[1:] - cu_target_query_lens[:-1]
         # [a, b, c] -> [a - n1, b - n2, c - n3]
         num_tokens_per_req = query_len_per_req - num_rejected_tokens
 
@@ -277,15 +276,16 @@ class EagleProposer:
         target_layer_num = self.vllm_config.model_config.get_num_layers(
             self.vllm_config.parallel_config)
 
-        draft_model_config = \
-            self.vllm_config.speculative_config.draft_model_config
+        draft_model_config = (
+            self.vllm_config.speculative_config.draft_model_config)
         # FIXME(lily): This does not handle with distributed inference.
         target_device = self.vllm_config.device_config.device
         # We need to set the vllm_config here to register attention
         # layers in the forward context.
-        with set_default_torch_dtype(
-                draft_model_config.dtype), set_current_vllm_config(
-                    self.vllm_config):
+        with (
+                set_default_torch_dtype(draft_model_config.dtype),
+                set_current_vllm_config(self.vllm_config),
+        ):
             draft_model_cls, arch = ModelRegistry.resolve_model_cls(
                 draft_model_config.architectures)
             self.model = draft_model_cls(

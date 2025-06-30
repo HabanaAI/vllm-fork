@@ -63,10 +63,11 @@ class Mistral3PatchMerger(nn.Module):
         self.vision_hidden_size = vision_hidden_size
         self.spatial_merge_size = spatial_merge_size
         self.patch_size = patch_size
-        self.merging_layer = nn.Linear(vision_hidden_size *
-                                       self.spatial_merge_size**2,
-                                       vision_hidden_size,
-                                       bias=False)
+        self.merging_layer = nn.Linear(
+            vision_hidden_size * self.spatial_merge_size**2,
+            vision_hidden_size,
+            bias=False,
+        )
 
     def forward(self, image_features: torch.Tensor,
                 image_sizes: torch.Tensor) -> torch.Tensor:
@@ -82,12 +83,13 @@ class Mistral3PatchMerger(nn.Module):
                 image_features.split(tokens_per_image)):
             # Reshape image_tokens into a 2D grid
             h, w = image_sizes[image_index]
-            image_grid = image_tokens.view(h, w, d).permute(2, 0,
-                                                            1).unsqueeze(0)
+            image_grid = (image_tokens.view(h, w, d).permute(2, 0,
+                                                             1).unsqueeze(0))
             grid = torch.nn.functional.unfold(
                 image_grid,
                 kernel_size=self.spatial_merge_size,
-                stride=self.spatial_merge_size)
+                stride=self.spatial_merge_size,
+            )
             grid = grid.view(d * self.spatial_merge_size**2, -1).t()
             permuted_tensor.append(grid)
 
@@ -98,34 +100,41 @@ class Mistral3PatchMerger(nn.Module):
 
 class Mistral3MultiModalProjector(nn.Module):
 
-    def __init__(self,
-                 vision_hidden_size: int,
-                 text_hidden_size: int,
-                 spatial_merge_size: int,
-                 patch_size: int,
-                 projector_hidden_act: str,
-                 multimodal_projector_bias: bool,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+    def __init__(
+        self,
+        vision_hidden_size: int,
+        text_hidden_size: int,
+        spatial_merge_size: int,
+        patch_size: int,
+        projector_hidden_act: str,
+        multimodal_projector_bias: bool,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ):
         super().__init__()
 
         self.norm = RMSNorm(vision_hidden_size, eps=1e-5)
         self.patch_merger = Mistral3PatchMerger(
             vision_hidden_size=vision_hidden_size,
             spatial_merge_size=spatial_merge_size,
-            patch_size=patch_size)
+            patch_size=patch_size,
+        )
 
-        self.linear_1 = ColumnParallelLinear(vision_hidden_size,
-                                             text_hidden_size,
-                                             bias=multimodal_projector_bias,
-                                             quant_config=quant_config,
-                                             prefix=f"{prefix}.linear_1")
+        self.linear_1 = ColumnParallelLinear(
+            vision_hidden_size,
+            text_hidden_size,
+            bias=multimodal_projector_bias,
+            quant_config=quant_config,
+            prefix=f"{prefix}.linear_1",
+        )
         self.act = get_act_fn(projector_hidden_act)
-        self.linear_2 = RowParallelLinear(text_hidden_size,
-                                          text_hidden_size,
-                                          bias=multimodal_projector_bias,
-                                          quant_config=quant_config,
-                                          prefix=f"{prefix}.linear_2")
+        self.linear_2 = RowParallelLinear(
+            text_hidden_size,
+            text_hidden_size,
+            bias=multimodal_projector_bias,
+            quant_config=quant_config,
+            prefix=f"{prefix}.linear_2",
+        )
 
     def forward(self, image_features: torch.Tensor,
                 image_sizes: torch.Tensor) -> torch.Tensor:
@@ -201,8 +210,8 @@ class Mistral3DummyInputsBuilder(BaseDummyInputsBuilder[_I]):
     ) -> MultiModalDataDict:
         num_images = mm_counts.get("image", 0)
 
-        target_width, target_height = \
-            self.info.get_image_size_with_most_features()
+        target_width, target_height = (
+            self.info.get_image_size_with_most_features())
 
         return {
             "image":
@@ -235,7 +244,6 @@ class Mistral3MultiModalProcessor(
 
         pixel_values = processed_outputs.get("pixel_values")
         if pixel_values is not None:
-
             # Avoid padding since we need the output for each image to be
             # independent of other images for the cache to work correctly
             image_sizes = processed_outputs["image_sizes"]
@@ -322,7 +330,7 @@ def _build_mistral3_processor(
 def _get_num_hidden_layers(hf_config: LlavaLikeConfig) -> int:
     """Determine the number of hidden layers to initialize up to in the
     visual encoder.
-    
+
     Args:
         hf_config: Model config with vision feature layer(s).
     """
@@ -335,8 +343,8 @@ def _get_num_hidden_layers(hf_config: LlavaLikeConfig) -> int:
     elif isinstance(feature_layers, (list, tuple)):
         return max(
             _get_layer_index(idx, num_hidden_layers) for idx in feature_layers)
-    raise TypeError(f"vision_layer_feature type: {type(feature_layers)}"
-                    " is not supported")
+    raise TypeError(
+        f"vision_layer_feature type: {type(feature_layers)} is not supported")
 
 
 def _get_layer_index(feature_layer_index: int, num_hidden_layers: int) -> int:
@@ -379,13 +387,13 @@ def init_vision_tower_for_llava(
 @MULTIMODAL_REGISTRY.register_processor(
     _build_mistral3_processor,
     info=_build_mistral3_info,
-    dummy_inputs=Mistral3DummyInputsBuilder)
+    dummy_inputs=Mistral3DummyInputsBuilder,
+)
 class Mistral3ForConditionalGeneration(nn.Module, SupportsLoRA,
                                        SupportsMultiModal, SupportsPP):
-
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-        "gate_up_proj": ["gate_proj", "up_proj"]
+        "gate_up_proj": ["gate_proj", "up_proj"],
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
@@ -412,7 +420,8 @@ class Mistral3ForConditionalGeneration(nn.Module, SupportsLoRA,
             config,
             quant_config,
             require_post_norm=False,
-            prefix=maybe_prefix(prefix, "vision_tower"))
+            prefix=maybe_prefix(prefix, "vision_tower"),
+        )
         self.multi_modal_projector = Mistral3MultiModalProjector(
             vision_hidden_size=config.vision_config.hidden_size,
             text_hidden_size=config.text_config.hidden_size,
@@ -421,7 +430,8 @@ class Mistral3ForConditionalGeneration(nn.Module, SupportsLoRA,
             patch_size=config.vision_config.patch_size,
             multimodal_projector_bias=config.multimodal_projector_bias,
             quant_config=quant_config,
-            prefix=maybe_prefix(prefix, "multi_modal_projector"))
+            prefix=maybe_prefix(prefix, "multi_modal_projector"),
+        )
 
         self.language_model = init_vllm_registered_model(
             vllm_config=vllm_config,
@@ -574,10 +584,12 @@ class Mistral3ForConditionalGeneration(nn.Module, SupportsLoRA,
                                                       vision_embeddings)
             input_ids = None
 
-        hidden_states = self.language_model.model(input_ids,
-                                                  positions,
-                                                  intermediate_tensors,
-                                                  inputs_embeds=inputs_embeds)
+        hidden_states = self.language_model.model(
+            input_ids,
+            positions,
+            intermediate_tensors,
+            inputs_embeds=inputs_embeds,
+        )
 
         return hidden_states
 
@@ -601,4 +613,5 @@ class Mistral3ForConditionalGeneration(nn.Module, SupportsLoRA,
         return MultiModelKeys.from_string_field(
             language_model="language_model",
             connector="multi_modal_projector",
-            tower_model="vision_tower")
+            tower_model="vision_tower",
+        )

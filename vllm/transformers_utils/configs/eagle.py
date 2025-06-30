@@ -12,12 +12,13 @@ from vllm.transformers_utils.configs.deepseek_vl2 import DeepseekV2Config
 class EAGLEConfig(PretrainedConfig):
     model_type = "eagle"
 
-    def __init__(self,
-                 model: Union[PretrainedConfig, dict, None] = None,
-                 truncated_vocab_size: Optional[int] = None,
-                 method: Optional[str] = 'eagle',
-                 **kwargs):
-
+    def __init__(
+        self,
+        model: Union[PretrainedConfig, dict, None] = None,
+        truncated_vocab_size: Optional[int] = None,
+        method: Optional[str] = "eagle",
+        **kwargs,
+    ):
         model_config: Union[PretrainedConfig, DeepseekV2Config, None]
         if isinstance(model, dict):
             archs = model.get("architectures", [])
@@ -31,8 +32,8 @@ class EAGLEConfig(PretrainedConfig):
             model_config = model
 
         for k, v in kwargs.items():
-            if k != "architectures" and k != "model_type" and hasattr(
-                    model_config, k):
+            if (k != "architectures" and k != "model_type"
+                    and hasattr(model_config, k)):
                 setattr(model_config, k, v)
 
         self.model = model_config
@@ -40,8 +41,9 @@ class EAGLEConfig(PretrainedConfig):
         if self.model is None:
             self.truncated_vocab_size = None
         else:
-            self.truncated_vocab_size = self.model.vocab_size if \
-                truncated_vocab_size is None else truncated_vocab_size
+            self.truncated_vocab_size = (self.model.vocab_size
+                                         if truncated_vocab_size is None else
+                                         truncated_vocab_size)
 
         if not envs.VLLM_USE_V1:
             kwargs["architectures"] = ["EAGLEModel"]
@@ -49,14 +51,14 @@ class EAGLEConfig(PretrainedConfig):
             # Eagle model name should follow naming convention of
             # LlamaForCausalLM -> EagleLlamaForCausalLM
             if method == "eagle":
-                assert self.model is not None, \
-                    "model should not be None when method is eagle"
+                assert self.model is not None, (
+                    "model should not be None when method is eagle")
                 kwargs["architectures"] = [
                     f"Eagle{arch}" for arch in self.model.architectures
                 ]
             elif method == "eagle3":
-                assert self.model is not None, \
-                    "model should not be None when method is eagle3"
+                assert self.model is not None, (
+                    "model should not be None when method is eagle3")
                 kwargs["architectures"] = [
                     f"Eagle3{arch}" for arch in self.model.architectures
                 ]

@@ -14,11 +14,13 @@ from .base_device_communicator import DeviceCommunicatorBase
 
 class CpuCommunicator(DeviceCommunicatorBase):
 
-    def __init__(self,
-                 cpu_group: ProcessGroup,
-                 device: Optional[torch.device] = None,
-                 device_group: Optional[ProcessGroup] = None,
-                 unique_name: str = ""):
+    def __init__(
+        self,
+        cpu_group: ProcessGroup,
+        device: Optional[torch.device] = None,
+        device_group: Optional[ProcessGroup] = None,
+        unique_name: str = "",
+    ):
         super().__init__(cpu_group, device, device_group, unique_name)
         self.dist_module = torch.distributed
 
@@ -123,17 +125,25 @@ class _CPUSHMDistributed:
                    group: Optional[ProcessGroup] = None) -> None:
         torch.ops._C.shm_allreduce(self.handle, input)
 
-    def gather(self,
-               input: torch.Tensor,
-               gather_list: Optional[List[torch.Tensor]],
-               dst: int = -1,
-               group: Optional[ProcessGroup] = None) -> None:
+    def gather(
+        self,
+        input: torch.Tensor,
+        gather_list: Optional[List[torch.Tensor]],
+        dst: int = -1,
+        group: Optional[ProcessGroup] = None,
+    ) -> None:
         # Note: different from the torch gather, here we use local dst rank.
-        torch.ops._C.shm_gather(self.handle, input, gather_list,
-                                torch.distributed.get_group_rank(group, dst))
+        torch.ops._C.shm_gather(
+            self.handle,
+            input,
+            gather_list,
+            torch.distributed.get_group_rank(group, dst),
+        )
 
-    def all_gather_into_tensor(self,
-                               output: torch.Tensor,
-                               input: torch.Tensor,
-                               group: Optional[ProcessGroup] = None) -> None:
+    def all_gather_into_tensor(
+        self,
+        output: torch.Tensor,
+        input: torch.Tensor,
+        group: Optional[ProcessGroup] = None,
+    ) -> None:
         torch.ops._C.shm_all_gather(self.handle, input, output)

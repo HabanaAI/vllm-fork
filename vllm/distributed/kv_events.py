@@ -33,7 +33,8 @@ class KVCacheEvent(
         array_like=True,  # type: ignore[call-arg]
         omit_defaults=True,  # type: ignore[call-arg]
         gc=False,  # type: ignore[call-arg]
-        tag=True):
+        tag=True,
+):
     """Base class for all KV cache-related events"""
 
 
@@ -106,6 +107,7 @@ class ZmqEventPublisher(EventPublisher):
     topic:
         Topic to publish events to.
     """
+
     SHUTDOWN_TIMEOUT: float = 1.0
     END_SEQ = (-1).to_bytes(8, "big", signed=True)
 
@@ -132,7 +134,7 @@ class ZmqEventPublisher(EventPublisher):
 
         # Payload
         self._seq_gen = count()
-        self._topic_bytes = topic.encode('utf-8')
+        self._topic_bytes = topic.encode("utf-8")
 
         # Thread
         self._running = True

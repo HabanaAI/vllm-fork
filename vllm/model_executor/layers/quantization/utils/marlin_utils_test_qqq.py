@@ -64,7 +64,7 @@ def get_qqq_weight_perm(num_bits: int, quant_type: str):
     perm = numpy.array(perm_list)
 
     assert quant_type in ["per-channel",
-                          "per-group"], "not supported quantization type"
+                          "per-group"], ("not supported quantization type")
     if num_bits == 4:
         if quant_type == "per-channel":
             interleave = numpy.array([4, 0, 5, 1, 6, 2, 7, 3])

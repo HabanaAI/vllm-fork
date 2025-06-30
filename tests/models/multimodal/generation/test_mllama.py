@@ -42,26 +42,61 @@ models = [
 ]
 
 # Indices for inputs
-TEXT_ONLY = '0'
-IMAGE_AT_BEG = '1'
-IMAGE_AT_MIDDLE = '2'
-TWO_IMAGES = '3'
+TEXT_ONLY = "0"
+IMAGE_AT_BEG = "1"
+IMAGE_AT_MIDDLE = "2"
+TWO_IMAGES = "3"
 
 # Input tokenized
 prompt_data = {
     # Tell me a story
     TEXT_ONLY: [41551, 757, 264, 3446],
     # <|image|> What's the content of this image
-    IMAGE_AT_BEG:
-    [MLLAMA_IMAGE_TOKEN_ID, 3639, 596, 279, 2262, 315, 420, 2217, 220],
+    IMAGE_AT_BEG: [
+        MLLAMA_IMAGE_TOKEN_ID,
+        3639,
+        596,
+        279,
+        2262,
+        315,
+        420,
+        2217,
+        220,
+    ],
     # Hello <|image|>What' the content of this image
-    IMAGE_AT_MIDDLE:
-    [9906, 220, MLLAMA_IMAGE_TOKEN_ID, 3923, 6, 279, 2262, 315, 420, 2217],
-    #<|image|>Is there a duck in this image?<|image|>What's the animal in this image? # noqa: E501
+    IMAGE_AT_MIDDLE: [
+        9906,
+        220,
+        MLLAMA_IMAGE_TOKEN_ID,
+        3923,
+        6,
+        279,
+        2262,
+        315,
+        420,
+        2217,
+    ],
+    # <|image|>Is there a duck in this image?<|image|>What's the animal in this image? # noqa: E501
     TWO_IMAGES: [
-        MLLAMA_IMAGE_TOKEN_ID, 3957, 1070, 264, 37085, 304, 420, 2217, 30,
-        MLLAMA_IMAGE_TOKEN_ID, 3923, 596, 279, 10065, 304, 420, 2217, 30
-    ]
+        MLLAMA_IMAGE_TOKEN_ID,
+        3957,
+        1070,
+        264,
+        37085,
+        304,
+        420,
+        2217,
+        30,
+        MLLAMA_IMAGE_TOKEN_ID,
+        3923,
+        596,
+        279,
+        10065,
+        304,
+        420,
+        2217,
+        30,
+    ],
 }
 
 
@@ -199,7 +234,7 @@ def _run_test(
 
     All the image fixtures for the test are from IMAGE_ASSETS.
     For huggingface runner, we provide the PIL images as input.
-    For vllm runner, we provide MultiModalDataDict objects 
+    For vllm runner, we provide MultiModalDataDict objects
     and corresponding MultiModalConfig as input.
     Note, the text input is also adjusted to abide by vllm contract.
     The text output is sanitized to be able to compare with hf.
@@ -217,8 +252,8 @@ def _run_test(
             max_num_seqs=3,
             tensor_parallel_size=tensor_parallel_size,
             distributed_executor_backend=distributed_executor_backend,
-            limit_mm_per_prompt={"image":
-                                 _LIMIT_IMAGE_PER_PROMPT}) as vllm_model:
+            limit_mm_per_prompt={"image": _LIMIT_IMAGE_PER_PROMPT},
+    ) as vllm_model:
         vllm_outputs_per_image = [
             vllm_model.generate_greedy_logprobs(prompts,
                                                 max_tokens,
@@ -227,10 +262,12 @@ def _run_test(
             for prompts, images in inputs
         ]
 
-    with hf_runner(model,
-                   dtype=dtype,
-                   model_kwargs={"device_map": "auto"},
-                   auto_cls=AutoModelForImageTextToText) as hf_model:
+    with hf_runner(
+            model,
+            dtype=dtype,
+            model_kwargs={"device_map": "auto"},
+            auto_cls=AutoModelForImageTextToText,
+    ) as hf_model:
         hf_outputs_per_image = [
             hf_model.generate_greedy_logprobs_limit(prompts,
                                                     max_tokens,
@@ -272,26 +309,51 @@ def clear_cache():
         # Single-size, batched
         [(512, 512), (512, 512), (512, 512)],
         # Multi-size, batched
-        [(512, 512), (1024, 512), (1536, 512), (2048, 512), (512, 1024),
-         (1024, 1024), (512, 1536), (512, 2028)],
+        [
+            (512, 512),
+            (1024, 512),
+            (1536, 512),
+            (2048, 512),
+            (512, 1024),
+            (1024, 1024),
+            (512, 1536),
+            (512, 2028),
+        ],
         # Multi-size, batched, including text only
-        [(512, 512), (1024, 512), (1536, 512), (2048, 512), (512, 1024),
-         (1024, 1024), (512, 1536), (512, 2028), None],
+        [
+            (512, 512),
+            (1024, 512),
+            (1536, 512),
+            (2048, 512),
+            (512, 1024),
+            (1024, 1024),
+            (512, 1536),
+            (512, 2028),
+            None,
+        ],
         # mllama has 8 possible aspect ratios, carefully set the sizes
         # to cover all of them
-    ])
+    ],
+)
 @pytest.mark.parametrize("dtype", ["bfloat16"])
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [5])
 @pytest.mark.parametrize("attn_backend", LIST_ENC_DEC_SUPPORTED_BACKENDS)
-def test_models_single_leading_image(hf_runner, vllm_runner, image_assets,
-                                     model, sizes, dtype, max_tokens,
-                                     num_logprobs,
-                                     attn_backend: _Backend) -> None:
+def test_models_single_leading_image(
+    hf_runner,
+    vllm_runner,
+    image_assets,
+    model,
+    sizes,
+    dtype,
+    max_tokens,
+    num_logprobs,
+    attn_backend: _Backend,
+) -> None:
     with global_force_attn_backend_context_manager(attn_backend):
         if attn_backend == _Backend.FLASH_ATTN:
             # Flash Attention works only with bfloat16 data-type
-            dtype = 'bfloat16'
+            dtype = "bfloat16"
         run_test(
             hf_runner,
             vllm_runner,
@@ -306,14 +368,25 @@ def test_models_single_leading_image(hf_runner, vllm_runner, image_assets,
 
 
 @pytest.mark.parametrize("model", models)
-@pytest.mark.parametrize("sizes", [
-    [(512, 512), (512, 512), (512, 512)],
-])
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        [(512, 512), (512, 512), (512, 512)],
+    ],
+)
 @pytest.mark.parametrize("dtype", ["bfloat16"])
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [5])
-def test_hpu_models(hf_hpu_runner, vllm_runner, image_assets, model, sizes,
-                    dtype, max_tokens, num_logprobs) -> None:
+def test_hpu_models(
+    hf_hpu_runner,
+    vllm_runner,
+    image_assets,
+    model,
+    sizes,
+    dtype,
+    max_tokens,
+    num_logprobs,
+) -> None:
     run_test(
         hf_hpu_runner,
         vllm_runner,
@@ -334,10 +407,16 @@ def test_hpu_models(hf_hpu_runner, vllm_runner, image_assets, model, sizes,
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [5])
 @pytest.mark.parametrize("attn_backend", LIST_ENC_DEC_SUPPORTED_BACKENDS)
-def test_models_multi_leading_images(hf_runner, vllm_runner, image_assets,
-                                     model, dtype, max_tokens, num_logprobs,
-                                     attn_backend: _Backend) -> None:
-
+def test_models_multi_leading_images(
+    hf_runner,
+    vllm_runner,
+    image_assets,
+    model,
+    dtype,
+    max_tokens,
+    num_logprobs,
+    attn_backend: _Backend,
+) -> None:
     stop_sign = image_assets[0].pil_image
     cherry_blossom = image_assets[1].pil_image
 
@@ -359,11 +438,12 @@ def test_models_multi_leading_images(hf_runner, vllm_runner, image_assets,
                 stop_sign.resize((512, 1536)),
                 cherry_blossom.resize((512, 1024)),
             ],
-        ])]
+        ],
+    )]
     with global_force_attn_backend_context_manager(attn_backend):
         if attn_backend == _Backend.FLASH_ATTN:
             # Flash Attention works only with bfloat16 data-type
-            dtype = 'bfloat16'
+            dtype = "bfloat16"
         _run_test(
             hf_runner,
             vllm_runner,
@@ -383,10 +463,16 @@ def test_models_multi_leading_images(hf_runner, vllm_runner, image_assets,
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [5])
 @pytest.mark.parametrize("attn_backend", LIST_ENC_DEC_SUPPORTED_BACKENDS)
-def test_models_interleaved_images(hf_runner, vllm_runner, image_assets, model,
-                                   dtype, max_tokens, num_logprobs,
-                                   attn_backend: _Backend) -> None:
-
+def test_models_interleaved_images(
+    hf_runner,
+    vllm_runner,
+    image_assets,
+    model,
+    dtype,
+    max_tokens,
+    num_logprobs,
+    attn_backend: _Backend,
+) -> None:
     stop_sign = image_assets[0].pil_image
     cherry_blossom = image_assets[1].pil_image
 
@@ -399,11 +485,12 @@ def test_models_interleaved_images(hf_runner, vllm_runner, image_assets, model,
         [
             [stop_sign],
             [stop_sign, cherry_blossom],
-        ])]
+        ],
+    )]
     with global_force_attn_backend_context_manager(attn_backend):
         if attn_backend == _Backend.FLASH_ATTN:
             # Flash Attention works only with bfloat16 data-type
-            dtype = 'bfloat16'
+            dtype = "bfloat16"
         _run_test(
             hf_runner,
             vllm_runner,
@@ -452,8 +539,10 @@ def test_models_distributed(
 @pytest.mark.parametrize("model", models)
 @pytest.mark.parametrize("dtype", ["float16"])
 @pytest.mark.parametrize("max_tokens", [32])
-@pytest.mark.skipif(not is_quant_method_supported("bitsandbytes"),
-                    reason='bitsandbytes is not supported on this GPU type.')
+@pytest.mark.skipif(
+    not is_quant_method_supported("bitsandbytes"),
+    reason="bitsandbytes is not supported on this GPU type.",
+)
 def test_bnb_regression(
     image_assets: ImageTestAssets,
     model: str,
@@ -553,20 +642,28 @@ def test_explicit_implicit_prompt(
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [5])
 @pytest.mark.parametrize("attn_backend", LIST_ENC_DEC_SUPPORTED_BACKENDS)
-def test_regression(vllm_runner, image_assets, model, dtype, max_tokens,
-                    num_logprobs, attn_backend: _Backend) -> None:
-
+def test_regression(
+    vllm_runner,
+    image_assets,
+    model,
+    dtype,
+    max_tokens,
+    num_logprobs,
+    attn_backend: _Backend,
+) -> None:
     stop_sign = image_assets[0].pil_image
 
-    with global_force_attn_backend_context_manager(attn_backend), vllm_runner(
-            model,
-            dtype=dtype,
-            max_model_len=8192,
-            max_num_seqs=4,
-            tensor_parallel_size=1,
-            limit_mm_per_prompt={"image":
-                                 _LIMIT_IMAGE_PER_PROMPT}) as vllm_model:
-
+    with (
+            global_force_attn_backend_context_manager(attn_backend),
+            vllm_runner(
+                model,
+                dtype=dtype,
+                max_model_len=8192,
+                max_num_seqs=4,
+                tensor_parallel_size=1,
+                limit_mm_per_prompt={"image": _LIMIT_IMAGE_PER_PROMPT},
+            ) as vllm_model,
+    ):
         # Regression tests for https://github.com/vllm-project/vllm/issues/10648
 
         # Number of groups of image tokens is greater than the number of images
@@ -633,17 +730,22 @@ class DummyModel:
 @pytest.mark.parametrize(
     "input_indices_and_output",
     # inputs, (cross_attention_mask, kv_range_for_decode)
-    [([TEXT_ONLY], (None, None)), ([IMAGE_AT_BEG], (None, None)),
-     ([TEXT_ONLY, IMAGE_AT_BEG], (None, None)),
-     ([IMAGE_AT_MIDDLE], ((10, 12), [[0, 6]])),
-     ([TEXT_ONLY, IMAGE_AT_MIDDLE], ((14, 12), [[0, 6]])),
-     ([TEXT_ONLY, IMAGE_AT_BEG, IMAGE_AT_MIDDLE],
-      ((23, 24), [[0, 6], [6, 12]])),
-     ([IMAGE_AT_MIDDLE, TEXT_ONLY], ((14, 12), [[0, 6]])),
-     ([TWO_IMAGES], ((18, 12), [[6, 12]])),
-     ([TEXT_ONLY, TWO_IMAGES], ((22, 12), [[6, 12]]))])
+    [
+        ([TEXT_ONLY], (None, None)),
+        ([IMAGE_AT_BEG], (None, None)),
+        ([TEXT_ONLY, IMAGE_AT_BEG], (None, None)),
+        ([IMAGE_AT_MIDDLE], ((10, 12), [[0, 6]])),
+        ([TEXT_ONLY, IMAGE_AT_MIDDLE], ((14, 12), [[0, 6]])),
+        (
+            [TEXT_ONLY, IMAGE_AT_BEG, IMAGE_AT_MIDDLE],
+            ((23, 24), [[0, 6], [6, 12]]),
+        ),
+        ([IMAGE_AT_MIDDLE, TEXT_ONLY], ((14, 12), [[0, 6]])),
+        ([TWO_IMAGES], ((18, 12), [[6, 12]])),
+        ([TEXT_ONLY, TWO_IMAGES], ((22, 12), [[6, 12]])),
+    ],
+)
 def test_get_cross_attention_mask(input_indices_and_output) -> None:
-
     input_indices, expected_output = input_indices_and_output
 
     sequences = [torch.tensor(prompt_data[i]) for i in input_indices]
@@ -672,16 +774,18 @@ def test_get_cross_attention_mask(input_indices_and_output) -> None:
 
     dummy = DummyModel()
 
-    cross_attention_mask, kv_range_for_decode = MllamaForConditionalGeneration\
-        .get_cross_attention_mask(dummy,
-                                  input,
-                                  attn_data,
-                                  num_tiles=num_tiles,
-                                  num_tokens_per_tile=3,
-                                  dtype=torch.bfloat16)
+    cross_attention_mask, kv_range_for_decode = (
+        MllamaForConditionalGeneration.get_cross_attention_mask(
+            dummy,
+            input,
+            attn_data,
+            num_tiles=num_tiles,
+            num_tokens_per_tile=3,
+            dtype=torch.bfloat16,
+        ))
 
-    expected_cross_attention_mask, expected_kv_range_for_decode = \
-        expected_output
+    expected_cross_attention_mask, expected_kv_range_for_decode = (
+        expected_output)
 
     assert kv_range_for_decode == expected_kv_range_for_decode
     if expected_cross_attention_mask is not None:
@@ -694,11 +798,19 @@ def test_get_cross_attention_mask(input_indices_and_output) -> None:
 @pytest.mark.core_model
 @pytest.mark.parametrize(
     "input_indices",
-    [[TEXT_ONLY], [IMAGE_AT_BEG], [TEXT_ONLY, IMAGE_AT_BEG], [IMAGE_AT_MIDDLE],
-     [TEXT_ONLY, IMAGE_AT_MIDDLE], [TEXT_ONLY, IMAGE_AT_BEG, IMAGE_AT_MIDDLE],
-     [IMAGE_AT_MIDDLE, TEXT_ONLY], [TWO_IMAGES], [TEXT_ONLY, TWO_IMAGES]])
+    [
+        [TEXT_ONLY],
+        [IMAGE_AT_BEG],
+        [TEXT_ONLY, IMAGE_AT_BEG],
+        [IMAGE_AT_MIDDLE],
+        [TEXT_ONLY, IMAGE_AT_MIDDLE],
+        [TEXT_ONLY, IMAGE_AT_BEG, IMAGE_AT_MIDDLE],
+        [IMAGE_AT_MIDDLE, TEXT_ONLY],
+        [TWO_IMAGES],
+        [TEXT_ONLY, TWO_IMAGES],
+    ],
+)
 def test_get_full_text_row_masked_out_mask(input_indices) -> None:
-
     sequences = [torch.tensor(prompt_data[i]) for i in input_indices]
 
     seq_lens = [len(s) for s in sequences]
@@ -729,10 +841,9 @@ def test_get_full_text_row_masked_out_mask(input_indices) -> None:
 
     dummy = DummyModel()
 
-    full_text_row_masked_out_mask = MllamaForConditionalGeneration\
-        .get_full_text_row_masked_out_mask(dummy,
-                                  attn_data,
-                                  torch.get_default_device())
+    full_text_row_masked_out_mask = (
+        MllamaForConditionalGeneration.get_full_text_row_masked_out_mask(
+            dummy, attn_data, torch.get_default_device()))
 
     full_text_row_masked_out_mask = full_text_row_masked_out_mask.squeeze()
     full_text_row_masked_out_mask = full_text_row_masked_out_mask.tolist()
@@ -742,30 +853,32 @@ def test_get_full_text_row_masked_out_mask(input_indices) -> None:
     for i, seq_len in enumerate(seq_lens):
         must_be_masked = input_indices[i] != TEXT_ONLY
         for _ in range(seq_len):
-            assert full_text_row_masked_out_mask[idx] == must_be_masked, \
-                f"full_text_row_masked_out_mask[{idx}] must be " \
-                f"'{must_be_masked}' "
+            assert full_text_row_masked_out_mask[idx] == must_be_masked, (
+                f"full_text_row_masked_out_mask[{idx}] must be "
+                f"'{must_be_masked}' ")
             idx += 1
 
 
 @pytest.mark.core_model
-@pytest.mark.parametrize("encoder_seq_lens, num_tiles, expected", [
-    ([6404], [[4]], [6404]),
-    ([0, 6404], [[4]], [6404]),
-    ([0, 1601, 8005], [[1], [4, 1]], [1601, 8005]),
-    ([0, 19212, 0, 3202], [[4, 4, 4], [2]], [19212, 3202]),
-])
+@pytest.mark.parametrize(
+    "encoder_seq_lens, num_tiles, expected",
+    [
+        ([6404], [[4]], [6404]),
+        ([0, 6404], [[4]], [6404]),
+        ([0, 1601, 8005], [[1], [4, 1]], [1601, 8005]),
+        ([0, 19212, 0, 3202], [[4, 4, 4], [2]], [19212, 3202]),
+    ],
+)
 def test_parse_and_validate_encoder_lens(encoder_seq_lens, num_tiles,
                                          expected) -> None:
-
     dummy = DummyModel()
     num_tokens_per_tile = 1601
-    actual_encoder_seq_lens = MllamaForConditionalGeneration \
-        ._get_and_validate_encoder_lens(
+    actual_encoder_seq_lens = (
+        MllamaForConditionalGeneration._get_and_validate_encoder_lens(
             dummy,
             encoder_seq_lens,
             num_tiles,
             num_tokens_per_tile,
-        )
-    assert actual_encoder_seq_lens == expected, \
-        f"Expected {expected} but got {actual_encoder_seq_lens}"
+        ))
+    assert actual_encoder_seq_lens == expected, (
+        f"Expected {expected} but got {actual_encoder_seq_lens}")

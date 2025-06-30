@@ -32,7 +32,7 @@ async def test_out_of_vocab_token_ids():
         client = remote_server.get_async_client()
 
         with pytest.raises(openai.BadRequestError,
-                           match=re.compile('.*out of vocabulary.*')):
+                           match=re.compile(".*out of vocabulary.*")):
             await client.completions.create(model=model_name,
                                             prompt=[999999],
                                             max_tokens=5,
@@ -46,9 +46,10 @@ async def test_reject_multistep_with_guided_decoding():
     with RemoteOpenAIServer(model_name, server_args) as remote_server:
         client = remote_server.get_async_client()
 
-        with pytest.raises(openai.BadRequestError,
-                           match=re.compile(
-                               '.*Guided decoding .* multi-step decoding.*')):
+        with pytest.raises(
+                openai.BadRequestError,
+                match=re.compile(".*Guided decoding .* multi-step decoding.*"),
+        ):
             await client.completions.create(
                 model=model_name,
                 prompt="Hello",
@@ -56,4 +57,5 @@ async def test_reject_multistep_with_guided_decoding():
                 temperature=0.0,
                 extra_body={"response_format": {
                     "type": "json_object"
-                }})
+                }},
+            )

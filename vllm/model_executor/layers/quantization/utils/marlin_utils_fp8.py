@@ -20,40 +20,45 @@ def is_fp8_marlin_supported():
 
 
 def apply_fp8_marlin_linear(
-        input: torch.Tensor,
-        weight: torch.Tensor,
-        weight_scale: torch.Tensor,
-        workspace: torch.Tensor,
-        size_n: int,
-        size_k: int,
-        bias: Optional[torch.Tensor],
-        use_fp32_reduce: bool = USE_FP32_REDUCE_DEFAULT) -> torch.Tensor:
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    workspace: torch.Tensor,
+    size_n: int,
+    size_k: int,
+    bias: Optional[torch.Tensor],
+    use_fp32_reduce: bool = USE_FP32_REDUCE_DEFAULT,
+) -> torch.Tensor:
     # For GPUs that lack FP8 hardware support, we can leverage the
     # Marlin kernel for fast weight-only FP8 quantization
 
     reshaped_x = input.reshape(-1, input.shape[-1])
     out_shape = input.shape[:-1] + (size_n, )
 
-    use_atomic_add = should_use_atomic_add_reduce(m=reshaped_x.size(0),
-                                                  n=size_n,
-                                                  k=size_k,
-                                                  device=input.device,
-                                                  dtype=input.dtype)
+    use_atomic_add = should_use_atomic_add_reduce(
+        m=reshaped_x.size(0),
+        n=size_n,
+        k=size_k,
+        device=input.device,
+        dtype=input.dtype,
+    )
 
-    output = ops.gptq_marlin_gemm(a=reshaped_x,
-                                  c=None,
-                                  b_q_weight=weight,
-                                  b_scales=weight_scale,
-                                  b_zeros=None,
-                                  g_idx=None,
-                                  perm=None,
-                                  workspace=workspace,
-                                  b_q_type=scalar_types.float8_e4m3fn,
-                                  size_m=reshaped_x.size(0),
-                                  size_n=size_n,
-                                  size_k=size_k,
-                                  use_atomic_add=use_atomic_add,
-                                  use_fp32_reduce=use_fp32_reduce)
+    output = ops.gptq_marlin_gemm(
+        a=reshaped_x,
+        c=None,
+        b_q_weight=weight,
+        b_scales=weight_scale,
+        b_zeros=None,
+        g_idx=None,
+        perm=None,
+        workspace=workspace,
+        b_q_type=scalar_types.float8_e4m3fn,
+        size_m=reshaped_x.size(0),
+        size_n=size_n,
+        size_k=size_k,
+        use_atomic_add=use_atomic_add,
+        use_fp32_reduce=use_fp32_reduce,
+    )
 
     if bias is not None:
         output.add_(bias)  # In-place add
@@ -89,11 +94,13 @@ def prepare_fp8_layer_for_marlin(layer: torch.nn.Module,
     if not size_k_first:
         qweight = qweight.T.contiguous()
 
-    marlin_qweight = ops.gptq_marlin_repack(b_q_weight=qweight,
-                                            perm=perm,
-                                            size_k=part_size_k,
-                                            size_n=part_size_n,
-                                            num_bits=8)
+    marlin_qweight = ops.gptq_marlin_repack(
+        b_q_weight=qweight,
+        perm=perm,
+        size_k=part_size_k,
+        size_n=part_size_n,
+        num_bits=8,
+    )
     layer.weight = torch.nn.Parameter(marlin_qweight, requires_grad=False)
 
     # WEIGHT SCALES
@@ -181,11 +188,13 @@ def prepare_moe_fp8_layer_for_marlin(layer: torch.nn.Module,
             if not size_k_first:
                 qweight = qweight.T.contiguous()
 
-            marlin_qweight = ops.gptq_marlin_repack(b_q_weight=qweight,
-                                                    perm=perm,
-                                                    size_k=size_k,
-                                                    size_n=size_n,
-                                                    num_bits=8)
+            marlin_qweight = ops.gptq_marlin_repack(
+                b_q_weight=qweight,
+                perm=perm,
+                size_k=size_k,
+                size_n=size_n,
+                num_bits=8,
+            )
             tensor_list.append(marlin_qweight)
 
         weight = torch.cat([x.unsqueeze(0) for x in tensor_list], 0)

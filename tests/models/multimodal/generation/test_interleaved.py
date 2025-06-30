@@ -44,14 +44,16 @@ def test_models(vllm_runner, model, dtype: str, max_tokens: int) -> None:
         ),
     ]
 
-    with vllm_runner(model,
-                     task="generate",
-                     dtype=dtype,
-                     limit_mm_per_prompt={"image": 2},
-                     max_model_len=32768,
-                     max_num_seqs=2,
-                     tensor_parallel_size=1,
-                     enforce_eager=True) as vllm_model:
+    with vllm_runner(
+            model,
+            task="generate",
+            dtype=dtype,
+            limit_mm_per_prompt={"image": 2},
+            max_model_len=32768,
+            max_num_seqs=2,
+            tensor_parallel_size=1,
+            enforce_eager=True,
+    ) as vllm_model:
         vllm_outputs_per_case = [
             vllm_model.generate_greedy(prompts,
                                        max_tokens,

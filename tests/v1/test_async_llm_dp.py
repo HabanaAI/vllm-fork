@@ -28,32 +28,35 @@ if not current_platform.supports_v1(engine_args.create_model_config()):
                 allow_module_level=True)
 
 
-async def generate(engine: AsyncLLM,
-                   request_id: str,
-                   prompt: PromptType,
-                   output_kind: RequestOutputKind,
-                   max_tokens: int,
-                   prompt_logprobs: Optional[int] = None) -> tuple[int, str]:
+async def generate(
+    engine: AsyncLLM,
+    request_id: str,
+    prompt: PromptType,
+    output_kind: RequestOutputKind,
+    max_tokens: int,
+    prompt_logprobs: Optional[int] = None,
+) -> tuple[int, str]:
     # Ensure generate doesn't complete too fast for cancellation test.
     await asyncio.sleep(0.2)
 
     count = 0
-    sampling_params = SamplingParams(max_tokens=max_tokens,
-                                     ignore_eos=True,
-                                     output_kind=output_kind,
-                                     temperature=0,
-                                     prompt_logprobs=prompt_logprobs)
+    sampling_params = SamplingParams(
+        max_tokens=max_tokens,
+        ignore_eos=True,
+        output_kind=output_kind,
+        temperature=0,
+        prompt_logprobs=prompt_logprobs,
+    )
     async for out in engine.generate(request_id=request_id,
                                      prompt=prompt,
                                      sampling_params=sampling_params):
-
         num_tokens = len(out.outputs[0].token_ids)
         if output_kind == RequestOutputKind.DELTA:
             count += num_tokens
         else:
             count = num_tokens
 
-        await asyncio.sleep(0.)
+        await asyncio.sleep(0.0)
 
     return count, request_id
 
@@ -62,9 +65,7 @@ async def generate(engine: AsyncLLM,
     "output_kind", [RequestOutputKind.DELTA, RequestOutputKind.FINAL_ONLY])
 @pytest.mark.asyncio
 async def test_load(output_kind: RequestOutputKind):
-
     with ExitStack() as after:
-
         prompt = "This is a test of data parallel"
 
         engine = AsyncLLM.from_engine_args(engine_args)
@@ -80,8 +81,13 @@ async def test_load(output_kind: RequestOutputKind):
         for request_id in request_ids:
             tasks.append(
                 asyncio.create_task(
-                    generate(engine, request_id, prompt, output_kind,
-                             NUM_EXPECTED_TOKENS)))
+                    generate(
+                        engine,
+                        request_id,
+                        prompt,
+                        output_kind,
+                        NUM_EXPECTED_TOKENS,
+                    )))
 
         # Confirm that we got all the EXPECTED tokens from the requests.
         done, pending = await asyncio.wait(tasks,

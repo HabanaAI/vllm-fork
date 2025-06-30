@@ -16,7 +16,6 @@ from vllm.v1.structured_output.backend_types import (StructuredOutputGrammar,
 
 @dataclasses.dataclass
 class StructuredOutputRequest:
-
     sampling_params: SamplingParams
     _grammar: Optional[Union[Future[StructuredOutputGrammar],
                              StructuredOutputGrammar]] = None
@@ -41,13 +40,14 @@ class StructuredOutputRequest:
     @property
     def grammar(self) -> Optional[StructuredOutputGrammar]:
         completed = self._check_grammar_completion()
-        return cast(Optional[StructuredOutputGrammar],
-                    self._grammar) if completed else None
+        return (cast(Optional[StructuredOutputGrammar], self._grammar)
+                if completed else None)
 
     @grammar.setter
     def grammar(
-        self, grammar: Union[StructuredOutputGrammar,
-                             Future[StructuredOutputGrammar]]
+        self,
+        grammar: Union[StructuredOutputGrammar,
+                       Future[StructuredOutputGrammar]],
     ) -> None:
         self._grammar = grammar
 
@@ -57,7 +57,7 @@ class StructuredOutputRequest:
 
 
 def get_structured_output_key(
-        sampling_params: SamplingParams) -> StructuredOutputKey:
+    sampling_params: SamplingParams, ) -> StructuredOutputKey:
     params = sampling_params.guided_decoding
     assert params is not None, "params can't be None."
     if params.json is not None:

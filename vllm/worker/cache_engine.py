@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """CacheEngine class for managing the KV cache."""
+
 from typing import List
 
 import torch
@@ -53,12 +54,14 @@ class CacheEngine:
             self.dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
 
         # Get attention backend.
-        self.attn_backend = get_attn_backend(self.head_size,
-                                             model_config.dtype,
-                                             cache_config.cache_dtype,
-                                             self.block_size,
-                                             model_config.is_attention_free,
-                                             use_mla=model_config.use_mla)
+        self.attn_backend = get_attn_backend(
+            self.head_size,
+            model_config.dtype,
+            cache_config.cache_dtype,
+            self.block_size,
+            model_config.is_attention_free,
+            use_mla=model_config.use_mla,
+        )
 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache(
@@ -76,8 +79,8 @@ class CacheEngine:
         pin_memory = is_pin_memory_available() if device == "cpu" else False
         kv_cache: List[torch.Tensor] = []
         try:
-            kv_cache_stride_order = self.attn_backend.get_kv_cache_stride_order(
-            )
+            kv_cache_stride_order = (
+                self.attn_backend.get_kv_cache_stride_order())
         except (AttributeError, NotImplementedError):
             kv_cache_stride_order = tuple(range(len(kv_cache_generic_shape)))
 
@@ -96,7 +99,8 @@ class CacheEngine:
                 kv_cache_allocation_shape,
                 dtype=self.dtype,
                 pin_memory=pin_memory,
-                device=device).permute(*kv_cache_stride_order)
+                device=device,
+            ).permute(*kv_cache_stride_order)
 
             # view back to (TOTAL_PAGES, PAGE_SIZE, entry_shape...) for cases
             # when entry_shape is higher than 1D
@@ -137,8 +141,8 @@ class CacheEngine:
         # For MLA there is no value cache, since the latent vector
         # is joint keys and values.
         value_cache_entry = key_cache_entry if not model_config.use_mla else 0
-        total = num_attention_layers * cache_config.block_size * \
-            (key_cache_entry + value_cache_entry)
+        total = (num_attention_layers * cache_config.block_size *
+                 (key_cache_entry + value_cache_entry))
 
         dtype_size = get_dtype_size(dtype)
         return dtype_size * total

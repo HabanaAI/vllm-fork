@@ -39,9 +39,9 @@ from .interfaces import MultiModalEmbeddings, SupportsMultiModal, SupportsPP
 from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
                     maybe_prefix, merge_multimodal_embeddings)
 
-IMG_START = '<img>'
-IMG_END = '</img>'
-IMG_CONTEXT = '<IMG_CONTEXT>'
+IMG_START = "<img>"
+IMG_END = "</img>"
+IMG_CONTEXT = "<IMG_CONTEXT>"
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -78,11 +78,13 @@ SkyworkR1VImageInputs = Union[SkyworkR1VImagePixelInputs,
 def build_transform(input_size: int):
     MEAN, STD = IMAGENET_MEAN, IMAGENET_STD
     return T.Compose([
-        T.Lambda(lambda img: img.convert('RGB') if img.mode != 'RGB' else img),
-        T.Resize((input_size, input_size),
-                 interpolation=T.InterpolationMode.BICUBIC),
+        T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+        T.Resize(
+            (input_size, input_size),
+            interpolation=T.InterpolationMode.BICUBIC,
+        ),
         T.ToTensor(),
-        T.Normalize(mean=MEAN, std=STD)
+        T.Normalize(mean=MEAN, std=STD),
     ])
 
 
@@ -95,7 +97,7 @@ def find_closest_aspect_ratio(
     height: int,
     image_size: int,
 ) -> tuple[int, int]:
-    best_ratio_diff = float('inf')
+    best_ratio_diff = float("inf")
     best_ratio = (1, 1)
     area = width * height
     for ratio in target_ratios:
@@ -190,10 +192,12 @@ def dynamic_preprocess_skyworkr1v(
     resized_img = image.resize((target_width, target_height))
     processed_images = []
     for i in range(blocks):
-        box = ((i % (target_width // image_size)) * image_size,
-               (i // (target_width // image_size)) * image_size,
-               ((i % (target_width // image_size)) + 1) * image_size,
-               ((i // (target_width // image_size)) + 1) * image_size)
+        box = (
+            (i % (target_width // image_size)) * image_size,
+            (i // (target_width // image_size)) * image_size,
+            ((i % (target_width // image_size)) + 1) * image_size,
+            ((i // (target_width // image_size)) + 1) * image_size,
+        )
         # split the image
         split_img = resized_img.crop(box)
         processed_images.append(split_img)
@@ -414,7 +418,7 @@ class BaseSkyworkR1VProcessor(ABC):
 
                 image_repl = self.get_image_repl(feature_size, num_patches)
 
-                text = [t.replace('<image>', image_repl.full, 1) for t in text]
+                text = [t.replace("<image>", image_repl.full, 1) for t in text]
 
         text_inputs = self.tokenizer(text)
 
@@ -513,8 +517,8 @@ class SkyworkR1VDummyInputsBuilder(BaseDummyInputsBuilder[_I]):
         seq_len: int,
         mm_counts: Mapping[str, int],
     ) -> MultiModalDataDict:
-        target_width, target_height = \
-            self.info.get_image_size_with_most_features()
+        target_width, target_height = (
+            self.info.get_image_size_with_most_features())
         num_images = mm_counts.get("image", 0)
 
         return {
@@ -641,7 +645,8 @@ class SkyworkR1VProcessingInfo(BaseSkyworkR1VProcessingInfo):
 @MULTIMODAL_REGISTRY.register_processor(
     SkyworkR1VMultiModalProcessor,
     info=SkyworkR1VProcessingInfo,
-    dummy_inputs=SkyworkR1VDummyInputsBuilder)
+    dummy_inputs=SkyworkR1VDummyInputsBuilder,
+)
 class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
@@ -664,7 +669,7 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
         self.ps_version = config.ps_version
 
         self.llm_arch_name = config.text_config.architectures[0]
-        self.is_mono = self.llm_arch_name == 'SkyworkLM2VEForCausalLM'
+        self.is_mono = self.llm_arch_name == "SkyworkLM2VEForCausalLM"
         self.vision_model = self._init_vision_model(
             config,
             quant_config=quant_config,
@@ -693,8 +698,8 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
             text_config = config.text_config
             llm_quant_config = getattr(text_config, "quantization_config",
                                        None)
-            if (not quant_config.modules_to_not_convert) and \
-                (llm_quant_config is not None):
+            if (not quant_config.modules_to_not_convert) and (llm_quant_config
+                                                              is not None):
                 quant_config.modules_to_not_convert.append("vision_model")
 
     def _init_vision_model(
@@ -708,8 +713,8 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
         if not is_mono:
             vision_feature_layer = config.select_layer
             if vision_feature_layer < 0:
-                num_hidden_layers = config.vision_config.num_hidden_layers \
-                    + vision_feature_layer + 1
+                num_hidden_layers = (config.vision_config.num_hidden_layers +
+                                     vision_feature_layer + 1)
             else:
                 num_hidden_layers = vision_feature_layer + 1
 
@@ -728,10 +733,11 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
 
         return nn.Sequential(
             nn.LayerNorm(vit_hidden_size * int(1 / self.downsample_ratio)**2),
-            ReplicatedLinear(vit_hidden_size *
-                             int(1 / self.downsample_ratio)**2,
-                             llm_hidden_size,
-                             return_bias=False),
+            ReplicatedLinear(
+                vit_hidden_size * int(1 / self.downsample_ratio)**2,
+                llm_hidden_size,
+                return_bias=False,
+            ),
             nn.GELU(),
             ReplicatedLinear(llm_hidden_size,
                              llm_hidden_size,
@@ -744,9 +750,13 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
         x = x.view(n, w, int(h * scale_factor), int(c / scale_factor))
         # N, W, H * scale, C // scale --> N, H * scale, W, C // scale
         x = x.permute(0, 2, 1, 3).contiguous()
-        x = x.view(n, int(h * scale_factor), int(w * scale_factor),
-                   int(c / (scale_factor * scale_factor)))
-        if self.ps_version == 'v1':
+        x = x.view(
+            n,
+            int(h * scale_factor),
+            int(w * scale_factor),
+            int(c / (scale_factor * scale_factor)),
+        )
+        if self.ps_version == "v1":
             pass
         else:
             x = x.permute(0, 2, 1, 3).contiguous()
@@ -766,7 +776,6 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
         return vit_embeds
 
     def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
-
         h = w = self.config.vision_config.image_size
         expected_dims = (3, h, w)
 
@@ -900,7 +909,6 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> IntermediateTensors:
-
         if intermediate_tensors is not None:
             input_ids = None
             inputs_embeds = None
@@ -940,10 +948,18 @@ class SkyworkR1VChatModel(nn.Module, SupportsMultiModal, SupportsPP):
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
         skip_prefixes = [
-            "action_embed", "temporal_embed", "track_embed",
-            "track_embed_decoder", "box_token", "cg_criterion", "cg_model",
-            "loc_encoder", "loc_decoder", "sam", "temporal_token",
-            "track_token"
+            "action_embed",
+            "temporal_embed",
+            "track_embed",
+            "track_embed_decoder",
+            "box_token",
+            "cg_criterion",
+            "cg_model",
+            "loc_encoder",
+            "loc_decoder",
+            "sam",
+            "temporal_token",
+            "track_token",
         ]
         loader = AutoWeightsLoader(self, skip_prefixes=skip_prefixes)
         return loader.load_weights(weights)

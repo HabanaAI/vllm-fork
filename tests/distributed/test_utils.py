@@ -34,9 +34,9 @@ def test_cuda_device_count_stateless():
     CUDA_VISIBLE_DEVICES is changed."""
     actor = _CUDADeviceCountStatelessTestActor.options(  # type: ignore
         num_gpus=2).remote()
-    assert len(
+    assert (len(
         sorted(ray.get(
-            actor.get_cuda_visible_devices.remote()).split(","))) == 2
+            actor.get_cuda_visible_devices.remote()).split(","))) == 2)
     assert ray.get(actor.get_count.remote()) == 2
     ray.get(actor.set_cuda_visible_devices.remote("0"))
     assert ray.get(actor.get_count.remote()) == 1
@@ -128,6 +128,7 @@ def test_stateless_process_group(worker):
         port2 = get_open_port()
     WORLD_SIZE = 4
     from multiprocessing import get_context
+
     ctx = get_context("fork")
     processes = []
     for i in range(WORLD_SIZE):

@@ -86,8 +86,8 @@ def multihead_attention(
     assert q.dim() == k.dim() == v.dim() == 3, "q, k, v must have 3 dims"
     assert q_cu_seqlens[-1] == q.shape[
         0], "q_cu_seqlens must sum to q.shape[0]"
-    assert (k_cu_seqlens[-1] == k.shape[0] ==
-            v.shape[0]), "k_cu_seqlens must sum to k.shape[0]"
+    assert k_cu_seqlens[-1] == k.shape[0] == v.shape[0], (
+        "k_cu_seqlens must sum to k.shape[0]")
     assert q.dtype in [
         torch.bfloat16,
         torch.float16,
@@ -185,11 +185,13 @@ def apply_rope(xq: torch.Tensor, xk: torch.Tensor,
 
 class Learnable2DInterpPosEmb(nn.Module):
 
-    def __init__(self,
-                 height: int,
-                 width: int,
-                 dim: int,
-                 interpolation_mode: str = "bicubic") -> None:
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        dim: int,
+        interpolation_mode: str = "bicubic",
+    ) -> None:
         super().__init__()
         self.height = height
         self.width = width
@@ -229,11 +231,11 @@ class MoonVisionPatchEmbed(nn.Module):
         super().__init__()
         assert isinstance(
             patch_size,
-            (int, Sequence)), f"Invalid patch_size type: {type(patch_size)}"
+            (int, Sequence)), (f"Invalid patch_size type: {type(patch_size)}")
         if isinstance(patch_size, int):
             patch_size = (patch_size, patch_size)
-        assert (len(patch_size) == 2
-                ), f"Expected patch_size to be a tuple of 2, got {patch_size}"
+        assert len(patch_size) == 2, (
+            f"Expected patch_size to be a tuple of 2, got {patch_size}")
         self.patch_size = patch_size
 
         self.proj = nn.Conv2d(in_dim,
@@ -282,12 +284,14 @@ class Rope2DPosEmb(nn.Module):
         device (str): the device to store the precomputed cis
     """
 
-    def __init__(self,
-                 dim: int,
-                 max_height: int,
-                 max_width: int,
-                 theta_base=10000,
-                 device="cuda"):
+    def __init__(
+        self,
+        dim: int,
+        max_height: int,
+        max_width: int,
+        theta_base=10000,
+        device="cuda",
+    ):
         super().__init__()
         self.dim = dim
         assert self.dim % 4 == 0, "dim must be divisible by 4"
@@ -560,8 +564,8 @@ class MoonVitVLProjector(nn.Module):
         out_dim: int = 4096,
     ):
         super().__init__()
-        self.hidden_size = in_channels * merge_kernel_size[
-            0] * merge_kernel_size[1]
+        self.hidden_size = (in_channels * merge_kernel_size[0] *
+                            merge_kernel_size[1])
 
         self.pre_norm = nn.nn.LayerNorm(in_channels, eps=ln_eps)
         self.linear_1 = nn.Linear(self.hidden_size,

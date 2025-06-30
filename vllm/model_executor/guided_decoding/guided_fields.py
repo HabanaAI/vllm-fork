@@ -20,6 +20,7 @@ class LLMGuidedOptions(TypedDict, total=False):
 @dataclass
 class GuidedDecodingRequest:
     """One of the fields will be used to retrieve the logit processor."""
+
     guided_json: Optional[Union[Dict, BaseModel, str]] = None
     guided_regex: Optional[str] = None
     guided_choice: Optional[List[str]] = None
@@ -31,11 +32,14 @@ class GuidedDecodingRequest:
 
     def __post_init__(self):
         """Validate that some fields are mutually exclusive."""
-        guide_count = sum(x is not None
-                          for x in (self.guided_json, self.guided_regex,
-                                    self.guided_choice, self.guided_grammar,
-                                    self.guided_json_object,
-                                    self.structural_tag))
+        guide_count = sum(x is not None for x in (
+            self.guided_json,
+            self.guided_regex,
+            self.guided_choice,
+            self.guided_grammar,
+            self.guided_json_object,
+            self.structural_tag,
+        ))
         if guide_count > 1:
             raise ValueError(
                 "You can only use one kind of guided decoding but multiple are "

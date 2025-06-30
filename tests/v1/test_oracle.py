@@ -36,7 +36,6 @@ def test_reject_bad_config(monkeypatch):
 
 
 def test_unsupported_configs(monkeypatch):
-
     with monkeypatch.context() as m:
         m.setenv("VLLM_USE_V1", "1")
 
@@ -157,8 +156,10 @@ def test_reject_using_constructor_directly(monkeypatch):
 
         # This uses the V0 constructor directly.
         with pytest.raises(ValueError):
-            AsyncLLMEngine(vllm_config,
-                           AsyncLLMEngine._get_executor_cls(vllm_config),
-                           log_stats=True)
+            AsyncLLMEngine(
+                vllm_config,
+                AsyncLLMEngine._get_executor_cls(vllm_config),
+                log_stats=True,
+            )
 
         m.delenv("VLLM_USE_V1")

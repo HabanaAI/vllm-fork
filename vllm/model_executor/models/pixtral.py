@@ -51,6 +51,7 @@ from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs
 
 try:
     from xformers import ops as xops
+
     USE_XFORMERS_OPS = True
 except ImportError:
     USE_XFORMERS_OPS = False
@@ -214,8 +215,8 @@ class PixtralDummyInputsBuilder(BaseDummyInputsBuilder[PixtralProcessingInfo]):
     ) -> MultiModalDataDict:
         num_images = mm_counts.get("image", 0)
 
-        target_width, target_height = \
-            self.info.get_image_size_with_most_features()
+        target_width, target_height = (
+            self.info.get_image_size_with_most_features())
 
         return {
             "image":
@@ -275,21 +276,23 @@ class PixtralMultiModalProcessor(BaseMultiModalProcessor[PixtralProcessingInfo]
         *,
         return_mm_hashes: bool,
     ) -> tuple[list[int], MultiModalKwargs, Optional[MultiModalHashes], bool]:
-        prompt_ids, mm_kwargs, mm_hashes, _ = super(
-        )._cached_apply_hf_processor(
-            prompt=prompt,
-            mm_data_items=mm_data_items,
-            hf_processor_mm_kwargs=hf_processor_mm_kwargs,
-            return_mm_hashes=return_mm_hashes,
-        )
+        prompt_ids, mm_kwargs, mm_hashes, _ = (
+            super()._cached_apply_hf_processor(
+                prompt=prompt,
+                mm_data_items=mm_data_items,
+                hf_processor_mm_kwargs=hf_processor_mm_kwargs,
+                return_mm_hashes=return_mm_hashes,
+            ))
 
         # NOTE: The tokens are already inserted by the chat template
         return prompt_ids, mm_kwargs, mm_hashes, True
 
 
-@MULTIMODAL_REGISTRY.register_processor(PixtralMultiModalProcessor,
-                                        info=PixtralProcessingInfo,
-                                        dummy_inputs=PixtralDummyInputsBuilder)
+@MULTIMODAL_REGISTRY.register_processor(
+    PixtralMultiModalProcessor,
+    info=PixtralProcessingInfo,
+    dummy_inputs=PixtralDummyInputsBuilder,
+)
 class PixtralForConditionalGeneration(nn.Module, SupportsMultiModal,
                                       SupportsPP):
 
@@ -342,8 +345,8 @@ class PixtralForConditionalGeneration(nn.Module, SupportsMultiModal,
             return None
 
         if not isinstance(images, (torch.Tensor, list)):
-            raise ValueError("Incorrect type of images. "
-                             f"Got type: {type(images)}")
+            raise ValueError(
+                f"Incorrect type of images. Got type: {type(images)}")
 
         return PixtralImagePixelInputs(
             type="pixel_values",
@@ -423,10 +426,12 @@ class PixtralForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                       vision_embeddings)
             input_ids = None
 
-        hidden_states = self.language_model.model(input_ids,
-                                                  positions,
-                                                  intermediate_tensors,
-                                                  inputs_embeds=inputs_embeds)
+        hidden_states = self.language_model.model(
+            input_ids,
+            positions,
+            intermediate_tensors,
+            inputs_embeds=inputs_embeds,
+        )
 
         return hidden_states
 
@@ -454,11 +459,12 @@ class PixtralForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         # Get references to parameters for direct loading
         vision_encoder_dict = dict(self.vision_encoder.named_parameters())
-        patch_merger_dict = dict(self.patch_merger.named_parameters(
-        )) if self.vision_args.mm_projector_id == PATCH_MERGE else dict()
-        pre_mm_projector_norm_dict = dict(
-            self.pre_mm_projector_norm.named_parameters(
-            )) if self.vision_args.add_pre_mm_projector_layer_norm else dict()
+        patch_merger_dict = (dict(self.patch_merger.named_parameters())
+                             if self.vision_args.mm_projector_id == PATCH_MERGE
+                             else dict())
+        pre_mm_projector_norm_dict = (
+            dict(self.pre_mm_projector_norm.named_parameters())
+            if self.vision_args.add_pre_mm_projector_layer_norm else dict())
         vision_lang_adapter_dict = dict(
             self.vision_language_adapter.named_parameters())
 
@@ -467,25 +473,25 @@ class PixtralForConditionalGeneration(nn.Module, SupportsMultiModal,
             for name, w in weights:
                 if is_vision_encoder_weights((name, w)):
                     # Load vision encoder weights directly
-                    trimmed_name = '.'.join(name.split(".")[1:])
+                    trimmed_name = ".".join(name.split(".")[1:])
                     param = vision_encoder_dict[trimmed_name]
                     with torch.no_grad():
                         default_weight_loader(param, w)
                 elif is_patch_merger((name, w)):
                     # Load vision patch merger weights directly
-                    trimmed_name = '.'.join(name.split(".")[1:])
+                    trimmed_name = ".".join(name.split(".")[1:])
                     param = patch_merger_dict[trimmed_name]
                     with torch.no_grad():
                         default_weight_loader(param, w)
                 elif is_pre_mm_projector_norm((name, w)):
                     # Load vision pre_mm_projector_norm weights directly
-                    trimmed_name = '.'.join(name.split(".")[1:])
+                    trimmed_name = ".".join(name.split(".")[1:])
                     param = pre_mm_projector_norm_dict[trimmed_name]
                     with torch.no_grad():
                         default_weight_loader(param, w)
                 elif is_vision_lang_adapter_weights((name, w)):
                     # Load vision-language adapter weights directly
-                    trimmed_name = '.'.join(name.split(".")[1:])
+                    trimmed_name = ".".join(name.split(".")[1:])
                     param = vision_lang_adapter_dict[trimmed_name]
                     with torch.no_grad():
                         default_weight_loader(param, w)
@@ -850,7 +856,7 @@ class PatchMerger(nn.Module):
         sub_grids = get_sub_grids(
             x=x,
             image_sizes=image_sizes,
-            spatial_merge_size=self.spatial_merge_size
+            spatial_merge_size=self.spatial_merge_size,
         )  # list of [d x sub_grid_size x sub_grid_size x n_patches]
         permuted_tensor: list[torch.Tensor] = []
         for grid in sub_grids:
@@ -968,12 +974,15 @@ class PixtralHFMLP(nn.Module):
             output_sizes=[config.intermediate_size] * 2,
             bias=False,
             quant_config=quant_config,
-            prefix=f"{prefix}.gate_up_proj")
-        self.down_proj = RowParallelLinear(input_size=config.intermediate_size,
-                                           output_size=config.hidden_size,
-                                           bias=False,
-                                           quant_config=quant_config,
-                                           prefix=f"{prefix}.down_proj")
+            prefix=f"{prefix}.gate_up_proj",
+        )
+        self.down_proj = RowParallelLinear(
+            input_size=config.intermediate_size,
+            output_size=config.hidden_size,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.down_proj",
+        )
         self.act_and_mul = get_act_and_mul_fn(config.hidden_act)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1083,9 +1092,11 @@ class PixtralHFTransformerBlock(nn.Module):
         attention_mask: torch.Tensor,
         position_embeddings: torch.Tensor,
     ) -> torch.Tensor:
-        r, _ = self.attention.forward(self.attention_norm(hidden_states),
-                                      attention_mask=attention_mask,
-                                      position_embeddings=position_embeddings)
+        r, _ = self.attention.forward(
+            self.attention_norm(hidden_states),
+            attention_mask=attention_mask,
+            position_embeddings=position_embeddings,
+        )
         h = hidden_states + r
         r = self.feed_forward.forward(self.ffn_norm(h))
         out = h + r
@@ -1110,10 +1121,11 @@ class PixtralHFTransformer(nn.Module):
             num_hidden_layers = num_hidden_layers_override
 
         self.layers = nn.ModuleList([
-            PixtralHFTransformerBlock(config=config,
-                                      quant_config=quant_config,
-                                      prefix=f"{prefix}.layers.{layer_idx}")
-            for layer_idx in range(num_hidden_layers)
+            PixtralHFTransformerBlock(
+                config=config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.layers.{layer_idx}",
+            ) for layer_idx in range(num_hidden_layers)
         ])
 
     def forward(
@@ -1219,8 +1231,8 @@ class PixtralHFVisionModel(nn.Module):
         # positional embeddings
         position_ids = position_ids_in_meshgrid(
             patch_embeds_list,
-            max_width=self.config.image_size // self.config.patch_size).to(
-                self.device)
+            max_width=self.config.image_size // self.config.patch_size,
+        ).to(self.device)
         position_embedding = self.patch_positional_embedding(
             patch_embeds, position_ids)
 
@@ -1230,16 +1242,19 @@ class PixtralHFVisionModel(nn.Module):
         else:
             from transformers.models.pixtral.modeling_pixtral import (
                 generate_block_attention_mask)
+
             attention_mask = generate_block_attention_mask(
                 [p.shape[-2] * p.shape[-1] for p in patch_embeds_list],
-                patch_embeds)
+                patch_embeds,
+            )
 
         return_all_hidden_states = feature_sample_layers is not None
         out = self.transformer(
             patch_embeds,
             attention_mask,
             position_embedding,
-            return_all_hidden_states=return_all_hidden_states)
+            return_all_hidden_states=return_all_hidden_states,
+        )
 
         out = resolve_visual_encoder_outputs(out, feature_sample_layers, None,
                                              self.config.num_hidden_layers)
@@ -1270,7 +1285,7 @@ class PixtralHFVisionModel(nn.Module):
                 if layer_idx >= layer_count:
                     continue
 
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

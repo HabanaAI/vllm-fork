@@ -162,17 +162,28 @@ class RPCAdapterLoadedResponse:
     request_id: str
 
 
-RPC_REQUEST_T = Union[RPCProcessRequest, RPCAbortRequest, RPCStartupRequest,
-                      RPCUProfileRequest, RPCLoadAdapterRequest,
-                      RPCResetPrefixCacheRequest, RPCSleepRequest,
-                      RPCWakeUpRequest, RPCIsSleepingRequest]
+RPC_REQUEST_T = Union[
+    RPCProcessRequest,
+    RPCAbortRequest,
+    RPCStartupRequest,
+    RPCUProfileRequest,
+    RPCLoadAdapterRequest,
+    RPCResetPrefixCacheRequest,
+    RPCSleepRequest,
+    RPCWakeUpRequest,
+    RPCIsSleepingRequest,
+]
 
-REQUEST_OUTPUTS_T = Union[List[RequestOutput], RPCAdapterLoadedResponse,
-                          RPCIsSleepingResponse, RPCError]
+REQUEST_OUTPUTS_T = Union[
+    List[RequestOutput],
+    RPCAdapterLoadedResponse,
+    RPCIsSleepingResponse,
+    RPCError,
+]
 
 
 def ENGINE_DEAD_ERROR(
-        error: Optional[BaseException] = None) -> MQEngineDeadError:
+    error: Optional[BaseException] = None, ) -> MQEngineDeadError:
     if error is None:
         return MQEngineDeadError(
             "Engine loop is not running. Inspect the stacktrace to "

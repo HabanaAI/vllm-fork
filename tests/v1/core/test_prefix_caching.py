@@ -18,12 +18,14 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, SlidingWindowSpec)
 
 
-def make_request(request_id,
-                 prompt_token_ids,
-                 mm_positions=None,
-                 mm_hashes=None,
-                 prompt_logprobs: Optional[int] = None,
-                 cache_salt: Optional[str] = None):
+def make_request(
+    request_id,
+    prompt_token_ids,
+    mm_positions=None,
+    mm_hashes=None,
+    prompt_logprobs: Optional[int] = None,
+    cache_salt: Optional[str] = None,
+):
     if mm_positions is None:
         multi_modal_inputs = None
     else:
@@ -150,9 +152,9 @@ def test_prefill(hash_algo):
         b.ref_cnt == 0
         for b in manager.block_pool.free_block_queue.get_all_free_blocks()
     ])
-    assert len([
+    assert (len([
         b for b in manager.block_pool.free_block_queue.get_all_free_blocks()
-    ]) == 6
+    ]) == 6)
 
     manager.free(req2)
 
@@ -170,12 +172,12 @@ def test_prefill(hash_algo):
 
 
 def test_prefill_plp():
-    '''Test prefill with APC and some prompt logprobs (plp) requests.
+    """Test prefill with APC and some prompt logprobs (plp) requests.
 
     1. Schedule plp request and validate APC block allocation
     2. Schedule non-plp request and validate blocks
     3. Schedule plp request; no hit should occur; validate blocks
-    '''
+    """
     manager = KVCacheManager(
         make_kv_cache_config(16, 11),
         max_model_len=8192,
@@ -825,7 +827,7 @@ def test_kv_cache_events(blocks_to_cache: int):
     for blocks in events[:-1]:
         assert blocks.block_hashes[0] in stored_block_hash
     assert len(events) == blocks_to_cache + 1
-    assert (isinstance(events[-2], BlockRemoved))
+    assert isinstance(events[-2], BlockRemoved)
     assert (len(events[-1].block_hashes) == blocks_to_cache == len(
         manager.block_pool.cached_block_hash_to_block))
 
@@ -840,7 +842,7 @@ def test_kv_cache_events(blocks_to_cache: int):
 
 
 def test_eagle_enabled_removes_last_block():
-    """Verify Eagle does NOT remove blocks when request 
+    """Verify Eagle does NOT remove blocks when request
     length is divisible by block size."""
     block_size = 16
     manager = KVCacheManager(
@@ -911,7 +913,7 @@ def test_eagle_with_sliding_window():
         KVCacheConfig(
             num_blocks=10,
             tensors={},
-            kv_cache_groups=[KVCacheGroupSpec(['layer'], sliding_window_spec)],
+            kv_cache_groups=[KVCacheGroupSpec(["layer"], sliding_window_spec)],
         ),
         max_model_len=8192,
         enable_caching=True,
@@ -938,8 +940,8 @@ def test_eagle_with_sliding_window():
     assert num_tokens == 1 * block_size
 
     # Evict the first block in the request
-    assert manager.block_pool.get_cached_block(
-        block_hash_first_block) is not None
+    assert (manager.block_pool.get_cached_block(block_hash_first_block)
+            is not None)
     manager.block_pool.cached_block_hash_to_block.pop(block_hash_first_block)
 
     # New request

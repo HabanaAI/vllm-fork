@@ -30,7 +30,7 @@ from vllm import _custom_ops as ops
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
-SUPPORTED_LAYOUTS = ['thd', 'bhsd', 'bshd']
+SUPPORTED_LAYOUTS = ["thd", "bhsd", "bshd"]
 
 default_eight_bit_dtype_triton = tl.float8e4b8
 default_eight_bit_dtype_torch = current_platform.fp8_dtype()
@@ -95,7 +95,7 @@ class MetaData:
         max_seqlens_q=0,
         max_seqlens_k=0,
         # varlen params
-        cu_seqlens_q=None,  # only 'thd' layout supported for varlen 
+        cu_seqlens_q=None,  # only 'thd' layout supported for varlen
         cu_seqlens_k=None,
         # quant params
         q_descale=None,
@@ -121,9 +121,8 @@ class MetaData:
         self.layout = layout
         if cu_seqlens_q is not None or cu_seqlens_k is not None:
             assert cu_seqlens_q is not None and cu_seqlens_k is not None
-            assert layout is None or layout not in [
-                'bshd', 'bhsd'
-            ], "Varlen only implemented for thd layout"
+            assert layout is None or layout not in ["bshd", "bhsd"], (
+                "Varlen only implemented for thd layout")
             self.set_varlen_params(cu_seqlens_q, cu_seqlens_k)
         quant_params = [q_descale, k_descale, v_descale, p_scale, o_scale]
         if any(x is not None for x in quant_params):
@@ -139,7 +138,7 @@ class MetaData:
 
     def set_varlen_params(self, cu_seqlens_q, cu_seqlens_k):
         self.varlen = True
-        self.layout = 'thd'
+        self.layout = "thd"
         self.cu_seqlens_q = cu_seqlens_q
         self.cu_seqlens_k = cu_seqlens_k
         # Without "varlen", there should still be one sequence.
@@ -149,10 +148,12 @@ class MetaData:
         for i in range(0, self.num_contexts):
             self.max_seqlens_q = max(
                 cu_seqlens_q[i + 1].item() - cu_seqlens_q[i].item(),
-                self.max_seqlens_q)
+                self.max_seqlens_q,
+            )
             self.max_seqlens_k = max(
                 cu_seqlens_k[i + 1].item() - cu_seqlens_k[i].item(),
-                self.max_seqlens_k)
+                self.max_seqlens_k,
+            )
 
     def set_eight_bit_params(self, q_descale, k_descale, v_descale, p_scale,
                              p_descale, o_scale):
@@ -163,8 +164,8 @@ class MetaData:
         self.p_scale = p_scale
         self.p_descale = p_descale
         self.o_scale = o_scale
-        self.use_p_scale = (p_scale is not None) and (
-            p_descale is not None) and (v_descale is not None)
+        self.use_p_scale = ((p_scale is not None) and (p_descale is not None)
+                            and (v_descale is not None))
         self.eight_bit_kv = ((q_descale is None) and (k_descale is not None)
                              and (v_descale is not None))
         self.eight_bit_dtype_torch = default_eight_bit_dtype_torch
@@ -217,10 +218,9 @@ class MetaData:
             else:
                 assert (q.dtype == k.dtype and q.dtype == v.dtype
                         and q.dtype == self.eight_bit_dtype_torch)
-                assert (self.q_descale
-                        is not None) and (self.k_descale
-                                          is not None) and (self.v_descale
-                                                            is not None)
+                assert ((self.q_descale is not None)
+                        and (self.k_descale is not None)
+                        and (self.v_descale is not None))
                 if self.use_p_scale:
                     assert (self.p_scale is not None) and (self.p_descale
                                                            is not None)
@@ -230,7 +230,7 @@ class MetaData:
         assert o.shape == q.shape
         assert (nheads_q % nheads_k) == 0
         assert self.layout is not None
-        assert self.layout == 'thd' or not self.varlen
+        assert self.layout == "thd" or not self.varlen
 
 
 @triton.jit
@@ -249,8 +249,8 @@ def max_fn(x, y):
 def masked_load(ptrs, offset_first, offset_second, boundary_first,
                 boundary_second):
     if offset_first is not None and offset_second is not None:
-        mask = (offset_first[:, None] < boundary_first) & \
-               (offset_second[None, :] < boundary_second)
+        mask = (offset_first[:, None]
+                < boundary_first) & (offset_second[None, :] < boundary_second)
         tensor = tl.load(ptrs, mask=mask, other=0.0)
     elif offset_first is not None:
         mask = offset_first[:, None] < boundary_first
@@ -297,8 +297,8 @@ def compute_alibi_block(alibi_slope,
     # [[3], - [[0, 1, 2, 3, 4]] =  [[ 3, 2, 1, 0,-1], [4], [ 4, 3, 2, 1, 0]]
     # 5. -1 * alibi_slope * tl.abs(relative_pos_block) = [[ -3, -2, -1, 0,-1],
     #                                                    [ -4, -3, -2, -1, 0]],
-    relative_pos_block = (offs_m[:, None] + seqlen_k - seqlen_q -
-                          offs_n[None, :])
+    relative_pos_block = offs_m[:,
+                                None] + seqlen_k - seqlen_q - offs_n[None, :]
     alibi_block = -1 * alibi_slope * tl.abs(relative_pos_block)
     if transpose:
         return alibi_block.T
@@ -313,8 +313,8 @@ def compute_alibi_tensor(alibi_slopes, seqlen_q, seqlen_k):
                          device="cuda").unsqueeze(0)  # (1, N_CTX_K)
     relative_pos = torch.abs(q_idx + seqlen_k - seqlen_q -
                              k_idx)  # (N_CTX_Q, N_CTX_K)
-    return -1 * alibi_slopes.unsqueeze(-1).unsqueeze(
-        -1) * relative_pos  # (Z, H, N_CTX_Q, N_CTX_K)
+    return (-1 * alibi_slopes.unsqueeze(-1).unsqueeze(-1) * relative_pos
+            )  # (Z, H, N_CTX_Q, N_CTX_K)
 
 
 @triton.jit
@@ -369,20 +369,24 @@ def _attn_fwd_inner(
     IS_EIGHT_BIT_KV: tl.constexpr,
     QUANT_DTYPE: tl.constexpr = default_eight_bit_dtype_triton,
 ):
-
     # loop over k, v, and update accumulator
     for start_n in range(block_min, block_max, BLOCK_N):
         # For padded blocks, we will overrun the tensor size if
         # we load all BLOCK_N. For others, the blocks are all within range.
-        k_offs_n = start_n + tl.arange(0,
-                                       BLOCK_N) if SHOULD_MASK_STEPS else None
+        k_offs_n = (start_n +
+                    tl.arange(0, BLOCK_N) if SHOULD_MASK_STEPS else None)
         k_offs_k = None if not USE_PADDED_HEAD else tl.arange(0, BLOCK_DMODEL)
         k = masked_load(k_ptrs, k_offs_k, k_offs_n, IS_ACTUAL_BLOCK_DMODEL,
                         actual_seqlen_k)
         if SHOULD_PRE_LOAD_V:
             # We can use the same offsets as k, just with dims transposed.
-            v = masked_load(v_ptrs, k_offs_n, k_offs_k, actual_seqlen_k,
-                            IS_ACTUAL_BLOCK_DMODEL)
+            v = masked_load(
+                v_ptrs,
+                k_offs_n,
+                k_offs_k,
+                actual_seqlen_k,
+                IS_ACTUAL_BLOCK_DMODEL,
+            )
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         # We start from end of seqlen_k so only the first iteration would need
         # to be checked for padding if it is not a multiple of block_n
@@ -407,33 +411,36 @@ def _attn_fwd_inner(
 
         # -- compute qk ----
         if IS_EIGHT_BIT_GEMM:
-            qk += ((((tl.dot(q, k).to(tl.float32) * q_descale)) * k_descale) *
-                   QK_SCALE)
+            qk += ((tl.dot(q, k).to(tl.float32) * q_descale) *
+                   k_descale) * QK_SCALE
         else:
             if IS_EIGHT_BIT_KV:
                 k = (k * k_descale).to(q.type.element_ty)
-            qk += (tl.dot(q, k) * QK_SCALE)
+            qk += tl.dot(q, k) * QK_SCALE
 
         if bias_ptrs is not None:
-            bias_offs_n = start_n + tl.arange(
-                0, BLOCK_N) if SHOULD_MASK_STEPS else None
+            bias_offs_n = (start_n + tl.arange(0, BLOCK_N)
+                           if SHOULD_MASK_STEPS else None)
             bias = masked_load(bias_ptrs, OFFS_M, bias_offs_n, actual_seqlen_q,
                                actual_seqlen_k)
             # While bias is added after multiplying qk with sm_scale,
             # our optimization to use 2^x instead of e^x results in an
             # additional scale factor of log2(e) which we must also multiply
             # the bias with.
-            qk += (bias * 1.44269504089)
+            qk += bias * 1.44269504089
 
         if alibi_slope is not None:
             # Compute the global position of each token within the sequence
             global_m_positions = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
-            alibi_block = compute_alibi_block(alibi_slope, actual_seqlen_q,
-                                              actual_seqlen_k,
-                                              global_m_positions,
-                                              global_n_positions)
-            qk += (alibi_block * 1.44269504089)  # scale factor of log2(e)
+            alibi_block = compute_alibi_block(
+                alibi_slope,
+                actual_seqlen_q,
+                actual_seqlen_k,
+                global_m_positions,
+                global_n_positions,
+            )
+            qk += alibi_block * 1.44269504089  # scale factor of log2(e)
 
         # softmax
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
@@ -448,8 +455,13 @@ def _attn_fwd_inner(
         alpha = tl.math.exp2(m_i - m_ij)
         acc = acc * alpha[:, None]
         if not SHOULD_PRE_LOAD_V:
-            v = masked_load(v_ptrs, k_offs_n, k_offs_k, actual_seqlen_k,
-                            IS_ACTUAL_BLOCK_DMODEL)
+            v = masked_load(
+                v_ptrs,
+                k_offs_n,
+                k_offs_k,
+                actual_seqlen_k,
+                IS_ACTUAL_BLOCK_DMODEL,
+            )
         # -- update m_i and l_i
         l_i = l_i * alpha + l_ij
         # update m_i and l_i
@@ -480,57 +492,67 @@ def get_cdna_autotune_configs():
     return [
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 128,
-                'waves_per_eu': 2,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "waves_per_eu": 2,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 64,
-                'waves_per_eu': 2,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 64,
+                "waves_per_eu": 2,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 64,
-                'waves_per_eu': 3,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 64,
+                "waves_per_eu": 3,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 64,
-                'waves_per_eu': 1,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 64,
+                "waves_per_eu": 1,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 32,
-                'waves_per_eu': 2,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 32,
+                "waves_per_eu": 2,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
     ], [
-        'IS_CAUSAL', 'MAX_SEQLENS_Q', 'MAX_SEQLENS_K',
-        'IS_ACTUAL_BLOCK_DMODEL', 'VARLEN', 'HQ', 'HK'
+        "IS_CAUSAL",
+        "MAX_SEQLENS_Q",
+        "MAX_SEQLENS_K",
+        "IS_ACTUAL_BLOCK_DMODEL",
+        "VARLEN",
+        "HQ",
+        "HK",
     ]
 
 
@@ -538,78 +560,90 @@ def get_rdna_autotune_configs():
     return [
         triton.Config(
             {
-                'BLOCK_M': 32,
-                'BLOCK_N': 32,
-                'waves_per_eu': 4,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+                "waves_per_eu": 4,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=2),
+            num_warps=2,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 32,
-                'BLOCK_N': 32,
-                'waves_per_eu': 2,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+                "waves_per_eu": 2,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=2),
+            num_warps=2,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 32,
-                'BLOCK_N': 16,
-                'waves_per_eu': 4,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 32,
+                "BLOCK_N": 16,
+                "waves_per_eu": 4,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=2),
+            num_warps=2,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 32,
-                'BLOCK_N': 16,
-                'waves_per_eu': 2,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 32,
+                "BLOCK_N": 16,
+                "waves_per_eu": 2,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=2),
+            num_warps=2,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 16,
-                'BLOCK_N': 16,
-                'waves_per_eu': 4,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 16,
+                "BLOCK_N": 16,
+                "waves_per_eu": 4,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=2),
+            num_warps=2,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 16,
-                'BLOCK_N': 16,
-                'waves_per_eu': 2,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 16,
+                "BLOCK_N": 16,
+                "waves_per_eu": 2,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=2),
+            num_warps=2,
+        ),
         # Fall-back config.
         triton.Config(
             {
-                'BLOCK_M': 16,
-                'BLOCK_N': 16,
-                'waves_per_eu': 1,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 16,
+                "BLOCK_N": 16,
+                "waves_per_eu": 1,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=2),
+            num_warps=2,
+        ),
     ], [
-        'IS_CAUSAL', 'MAX_SEQLENS_Q', 'MAX_SEQLENS_K',
-        'IS_ACTUAL_BLOCK_DMODEL', 'VARLEN', 'HQ', 'HK'
+        "IS_CAUSAL",
+        "MAX_SEQLENS_Q",
+        "MAX_SEQLENS_K",
+        "IS_ACTUAL_BLOCK_DMODEL",
+        "VARLEN",
+        "HQ",
+        "HK",
     ]
 
 
@@ -617,41 +651,49 @@ def get_general_autotune_configs():
     return [
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 128,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 64,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 64,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
         triton.Config(
             {
-                'BLOCK_M': 128,
-                'BLOCK_N': 32,
-                'SHOULD_PRE_LOAD_V': False,
-                'GRID_CU_MULTIP': 2
+                "BLOCK_M": 128,
+                "BLOCK_N": 32,
+                "SHOULD_PRE_LOAD_V": False,
+                "GRID_CU_MULTIP": 2,
             },
             num_stages=1,
-            num_warps=4),
+            num_warps=4,
+        ),
     ], [
-        'IS_CAUSAL', 'MAX_SEQLENS_Q', 'MAX_SEQLENS_K',
-        'IS_ACTUAL_BLOCK_DMODEL', 'VARLEN', 'HQ', 'HK'
+        "IS_CAUSAL",
+        "MAX_SEQLENS_Q",
+        "MAX_SEQLENS_K",
+        "IS_ACTUAL_BLOCK_DMODEL",
+        "VARLEN",
+        "HQ",
+        "HK",
     ]
 
 
 def has_cdna_target():
     ROCM_CDNA_TARGETS = ["gfx942", "gfx90a", "gfx908"]
-    return triton.runtime.driver.active.get_current_target(
-    ).arch in ROCM_CDNA_TARGETS
+    return (triton.runtime.driver.active.get_current_target().arch
+            in ROCM_CDNA_TARGETS)
 
 
 def is_rocm_cdna():
@@ -744,7 +786,6 @@ def attn_fwd(
     IS_EIGHT_BIT_KV: tl.constexpr,
     QUANT_DTYPE: tl.constexpr = default_eight_bit_dtype_triton,
 ):
-
     if o_descale_ptr is not None:
         o_descale = tl.load(o_descale_ptr)
 
@@ -785,7 +826,7 @@ def attn_fwd(
         # this case. This block of code determines what N is, and if this
         # WG is operating on those M rows.
         n_blocks = cdiv_fn(seqlen_k, BLOCK_N)
-        if (IS_CAUSAL):
+        if IS_CAUSAL:
             # If seqlen_q == seqlen_k, the attn scores are a square matrix.
             # If seqlen_q != seqlen_k, attn scores are rectangular which
             # means the causal mask boundary is bottom right aligned, and
@@ -1004,13 +1045,14 @@ def attn_fwd(
                     IS_EIGHT_BIT_GEMM,
                     USE_P_SCALE,
                     IS_EIGHT_BIT_KV,
-                    QUANT_DTYPE)
+                    QUANT_DTYPE,
+                )
                 block_min = block_max
                 block_max = n_blocks * BLOCK_N
 
             tl.debug_barrier()
             # Remaining blocks, if any, are full / not masked.
-            if (masked_blocks > 0):
+            if masked_blocks > 0:
                 if IS_CAUSAL:
                     offs_n_causal = offs_n + (seqlen_q - seqlen_k)
                 else:
@@ -1064,7 +1106,8 @@ def attn_fwd(
                     IS_EIGHT_BIT_GEMM,
                     USE_P_SCALE,
                     IS_EIGHT_BIT_KV,
-                    QUANT_DTYPE)
+                    QUANT_DTYPE,
+                )
 
             if IS_EIGHT_BIT and not IS_EIGHT_BIT_KV:
                 if USE_P_SCALE:
@@ -1135,14 +1178,14 @@ def attn_fwd(
 def get_shape_from_layout(q, k, metadata):
     assert metadata.layout in SUPPORTED_LAYOUTS, "Got unsupported layout."
 
-    if metadata.layout == 'thd':
+    if metadata.layout == "thd":
         nheads_q, nheads_k = q.shape[1], k.shape[1]
         head_size = q.shape[-1]
         batch = metadata.num_contexts
-    elif metadata.layout == 'bhsd':
+    elif metadata.layout == "bhsd":
         batch, nheads_q, _, head_size = q.shape
         nheads_k = k.shape[1]
-    elif metadata.layout == 'bshd':
+    elif metadata.layout == "bshd":
         batch, _, nheads_q, head_size = q.shape
         nheads_k = k.shape[2]
     return batch, nheads_q, nheads_k, head_size
@@ -1152,9 +1195,9 @@ def get_strides_from_layout(q, k, v, o, metadata):
     assert metadata.layout in SUPPORTED_LAYOUTS, "Got unsupported layout."
 
     STRIDE_PERMUTATIONS = {
-        'thd': (None, 1, 0, 2),
-        'bhsd': (0, 1, 2, 3),
-        'bshd': (0, 2, 1, 3),
+        "thd": (None, 1, 0, 2),
+        "bhsd": (0, 1, 2, 3),
+        "bshd": (0, 2, 1, 3),
     }
 
     perm = STRIDE_PERMUTATIONS[metadata.layout]
@@ -1169,15 +1212,16 @@ class _attention(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, o, metadata: MetaData):
         # NOTE: a large bias tensor leads to overflow during pointer arithmetic
-        if (metadata.bias is not None):
-            assert (metadata.bias.numel() < 2**31)
+        if metadata.bias is not None:
+            assert metadata.bias.numel() < 2**31
 
         if o is None:
             if metadata.eight_bit:
                 o = torch.empty_like(
                     q,
                     dtype=metadata.output_dtype if metadata.output_dtype
-                    is not None else metadata.eight_bit_dtype_torch)
+                    is not None else metadata.eight_bit_dtype_torch,
+                )
             else:
                 o = torch.empty_like(q, dtype=q.dtype)
 
@@ -1205,34 +1249,48 @@ class _attention(torch.autograd.Function):
             encoded_softmax = torch.zeros(
                 (q.shape[0], q.shape[1], q.shape[2], k.shape[2]),
                 device=q.device,
-                dtype=torch.float32)
+                dtype=torch.float32,
+            )
         else:
             encoded_softmax = None
 
-        M = torch.empty((batch, nheads_q, metadata.max_seqlens_q),
-                        device=q.device,
-                        dtype=torch.float32)
+        M = torch.empty(
+            (batch, nheads_q, metadata.max_seqlens_q),
+            device=q.device,
+            dtype=torch.float32,
+        )
 
         # Seed the RNG so we get reproducible results for testing.
         philox_seed = 0x1BF52
         philox_offset = 0x1D4B42
 
         if metadata.bias is not None:
-            bias_strides = (metadata.bias.stride(0), metadata.bias.stride(1),
-                            metadata.bias.stride(2), metadata.bias.stride(3))
+            bias_strides = (
+                metadata.bias.stride(0),
+                metadata.bias.stride(1),
+                metadata.bias.stride(2),
+                metadata.bias.stride(3),
+            )
         else:
             bias_strides = (0, 0, 0, 0)
 
         if metadata.alibi_slopes is not None:
-            alibi_strides = (metadata.alibi_slopes.stride(0),
-                             metadata.alibi_slopes.stride(1))
+            alibi_strides = (
+                metadata.alibi_slopes.stride(0),
+                metadata.alibi_slopes.stride(1),
+            )
         else:
             alibi_strides = (0, 0)
 
         if metadata.eight_bit:
             q_descale, k_descale, p_scale, p_descale, v_descale, o_scale = (
-                metadata.q_descale, metadata.k_descale, metadata.p_scale,
-                metadata.p_descale, metadata.v_descale, metadata.o_scale)
+                metadata.q_descale,
+                metadata.k_descale,
+                metadata.p_scale,
+                metadata.p_descale,
+                metadata.v_descale,
+                metadata.o_scale,
+            )
             o_descale = 1.0 / o_scale if o_scale is not None else None
         else:
             q_descale = k_descale = p_scale = None
@@ -1241,8 +1299,11 @@ class _attention(torch.autograd.Function):
         # number of compute units available
         NUM_CU = torch.cuda.get_device_properties("cuda").multi_processor_count
 
-        grid = lambda META: (triton.cdiv(metadata.max_seqlens_q, META[
-            'BLOCK_M']), nheads_q, batch)
+        grid = lambda META: (
+            triton.cdiv(metadata.max_seqlens_q, META["BLOCK_M"]),
+            nheads_q,
+            batch,
+        )
 
         attn_fwd[grid](
             q,
@@ -1290,7 +1351,8 @@ class _attention(torch.autograd.Function):
             IS_EIGHT_BIT_KV=metadata.eight_bit and metadata.eight_bit_kv,
             NUM_CU=NUM_CU,
             B=batch,
-            QUANT_DTYPE=metadata.eight_bit_dtype_triton)
+            QUANT_DTYPE=metadata.eight_bit_dtype_triton,
+        )
 
         ctx.grid = grid
         ctx.sm_scale = metadata.sm_scale
@@ -1354,19 +1416,21 @@ def triton_attention(
     else:
         q_descale = k_descale = v_descale = p_scale = None
 
-    attn_metadata = MetaData(sm_scale=sm_scale,
-                             max_seqlens_q=max_seqlens_q,
-                             max_seqlens_k=max_seqlens_k,
-                             causal=causal,
-                             bias=bias,
-                             output_dtype=q.dtype,
-                             cu_seqlens_q=cu_seqlens_q,
-                             cu_seqlens_k=cu_seqlens_k,
-                             q_descale=q_descale,
-                             k_descale=k_descale,
-                             v_descale=v_descale,
-                             p_scale=p_scale,
-                             o_scale=input_scale)
+    attn_metadata = MetaData(
+        sm_scale=sm_scale,
+        max_seqlens_q=max_seqlens_q,
+        max_seqlens_k=max_seqlens_k,
+        causal=causal,
+        bias=bias,
+        output_dtype=q.dtype,
+        cu_seqlens_q=cu_seqlens_q,
+        cu_seqlens_k=cu_seqlens_k,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
+        p_scale=p_scale,
+        o_scale=input_scale,
+    )
 
     if fp8_scales is not None:
         q, k, v = check_and_maybe_quantize_qkv(q, k, v, fp8_scales)

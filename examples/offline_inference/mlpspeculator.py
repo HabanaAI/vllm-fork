@@ -25,8 +25,10 @@ def time_generation(llm: LLM, prompts: list[str],
     end = time.time()
     print("-" * 50)
     print(title)
-    print("time: ",
-          (end - start) / sum(len(o.outputs[0].token_ids) for o in outputs))
+    print(
+        "time: ",
+        (end - start) / sum(len(o.outputs[0].token_ids) for o in outputs),
+    )
     # Print the outputs.
     for output in outputs:
         generated_text = output.outputs[0].text

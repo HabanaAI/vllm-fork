@@ -48,8 +48,8 @@ class TorchAOConfig(QuantizationConfig):
 
         hf_config = cls.get_from_keys_or(config, ["quant_type"], None)
         assert hf_config is not None, "quant_type must be specified"
-        assert (len(hf_config) == 1 and "default" in hf_config
-                ), "Expected only one key 'default' in quant_type dictionary"
+        assert len(hf_config) == 1 and "default" in hf_config, (
+            "Expected only one key 'default' in quant_type dictionary")
         quant_type = hf_config["default"]
         ao_config = config_from_dict(quant_type)
         return cls(ao_config)
@@ -75,6 +75,7 @@ def torchao_quantize_param_data(param: torch.Tensor,
     """
     from torchao.core.config import AOBaseConfig
     from torchao.quantization import quantize_
+
     assert isinstance(torchao_config, AOBaseConfig)
     dummy_linear = torch.nn.Linear(param.shape[1], param.shape[0], bias=False)
     dummy_linear.weight = param

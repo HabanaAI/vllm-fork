@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Gemma model compatible with HuggingFace weights."""
+
 from functools import cache
 from typing import Iterable, Optional, Set, Tuple, Union
 
@@ -64,7 +65,10 @@ def _get_gemma_act_fn(
                 "`%s`, edit the config JSON to set "
                 "`hidden_activation=%s` instead of `hidden_act`. "
                 "See https://github.com/huggingface/transformers/pull/29402 "
-                "for more details.", hidden_act, hidden_act)
+                "for more details.",
+                hidden_act,
+                hidden_act,
+            )
         return GeluAndMul(approximate="tanh")
     elif hidden_activation == "gelu_pytorch_tanh":
         return GeluAndMul(approximate="tanh")
@@ -170,13 +174,15 @@ class GemmaAttention(nn.Module):
             base=self.rope_theta,
             is_neox_style=True,
         )
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              self.scaling,
-                              num_kv_heads=self.num_kv_heads,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn")
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn",
+        )
 
     def forward(
         self,
@@ -271,7 +277,8 @@ class GemmaModel(nn.Module):
             config.num_hidden_layers,
             lambda prefix: GemmaDecoderLayer(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.layers")
+            prefix=f"{prefix}.layers",
+        )
         self.norm = GemmaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         # Normalize the embedding by sqrt(hidden_size)
@@ -331,7 +338,7 @@ class GemmaModel(nn.Module):
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
-            for (param_name, shard_name, shard_id) in stacked_params_mapping:
+            for param_name, shard_name, shard_id in stacked_params_mapping:
                 if shard_name not in name:
                     continue
                 name = name.replace(shard_name, param_name)

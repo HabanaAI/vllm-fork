@@ -15,7 +15,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch Ovis2 model."""
+"""PyTorch Ovis2 model."""
+
 from typing import (Iterable, List, Literal, Mapping, Optional, Set, Tuple,
                     TypedDict, Union)
 
@@ -78,7 +79,11 @@ class VisualEmbedding(torch.nn.Embedding):
 
     def forward(self, visual_tokens: Tensor) -> Tensor:
         if visual_tokens.dtype in [
-                torch.int8, torch.int16, torch.int32, torch.int64, torch.long
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.long,
         ]:
             return super().forward(visual_tokens)
         return torch.matmul(visual_tokens, self.weight)
@@ -112,8 +117,10 @@ class Ovis2ProcessingInfo(BaseProcessingInfo):
 
     def get_image_size_with_most_features(self) -> ImageSize:
         image_processor = self.get_image_processor()
-        return ImageSize(width=image_processor.size['shortest_edge'] * 9 * 2,
-                         height=image_processor.size['shortest_edge'] * 9 * 2)
+        return ImageSize(
+            width=image_processor.size["shortest_edge"] * 9 * 2,
+            height=image_processor.size["shortest_edge"] * 9 * 2,
+        )
 
 
 class Ovis2DummyInputsBuilder(BaseDummyInputsBuilder[Ovis2ProcessingInfo]):
@@ -129,8 +136,8 @@ class Ovis2DummyInputsBuilder(BaseDummyInputsBuilder[Ovis2ProcessingInfo]):
     ) -> MultiModalDataDict:
         num_images = mm_counts.get("image", 0)
 
-        target_width, target_height = \
-            self.info.get_image_size_with_most_features()
+        target_width, target_height = (
+            self.info.get_image_size_with_most_features())
 
         mm_data = {
             "image":
@@ -148,7 +155,7 @@ class Ovis2MultiModalProcessor(BaseMultiModalProcessor[Ovis2ProcessingInfo]):
         image_indicators: list[int],
     ) -> list[int]:
         """
-        Filter image indicators placeholders and convert them to corresponding 
+        Filter image indicators placeholders and convert them to corresponding
         tokens in visual tokenizer.
         For example, [-301, -300, -302, -300, -303, -300, -304, -300, -305]
         should return [vocab_size-1, vocab_size-2, ..., vocab_size-5]
@@ -192,7 +199,6 @@ class Ovis2MultiModalProcessor(BaseMultiModalProcessor[Ovis2ProcessingInfo]):
         self,
         prompt_tokens: list[int],
     ) -> list[int]:
-
         return prompt_tokens
 
     def _get_mm_fields_config(
@@ -200,9 +206,11 @@ class Ovis2MultiModalProcessor(BaseMultiModalProcessor[Ovis2ProcessingInfo]):
         hf_inputs: BatchFeature,
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
-        return dict(pixel_values=MultiModalFieldConfig.batched("image"),
-                    grids=MultiModalFieldConfig.batched("image"),
-                    indicator_tokens=MultiModalFieldConfig.batched("image"))
+        return dict(
+            pixel_values=MultiModalFieldConfig.batched("image"),
+            grids=MultiModalFieldConfig.batched("image"),
+            indicator_tokens=MultiModalFieldConfig.batched("image"),
+        )
 
     def _get_prompt_updates(
         self,
@@ -226,9 +234,11 @@ class Ovis2MultiModalProcessor(BaseMultiModalProcessor[Ovis2ProcessingInfo]):
         ]
 
 
-@MULTIMODAL_REGISTRY.register_processor(Ovis2MultiModalProcessor,
-                                        info=Ovis2ProcessingInfo,
-                                        dummy_inputs=Ovis2DummyInputsBuilder)
+@MULTIMODAL_REGISTRY.register_processor(
+    Ovis2MultiModalProcessor,
+    info=Ovis2ProcessingInfo,
+    dummy_inputs=Ovis2DummyInputsBuilder,
+)
 class Ovis2ForConditionalGeneration(nn.Module, SupportsMultiModal):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
@@ -252,7 +262,8 @@ class Ovis2ForConditionalGeneration(nn.Module, SupportsMultiModal):
 
         self.vte = VisualEmbedding(
             self.config.visual_tokenizer_config.vocab_size,
-            self.config.hidden_size)
+            self.config.hidden_size,
+        )
 
         # TODO(Isotr0py): PP support
         # self.make_empty_intermediate_tensors = (
@@ -337,8 +348,11 @@ class Ovis2ForConditionalGeneration(nn.Module, SupportsMultiModal):
         inputs_embeds = self.llm.get_input_embeddings(input_ids)
         if multimodal_embeddings is not None:
             inputs_embeds = merge_multimodal_embeddings(
-                input_ids, inputs_embeds, multimodal_embeddings,
-                [IMAGE_PAD_TOKEN_ID])
+                input_ids,
+                inputs_embeds,
+                multimodal_embeddings,
+                [IMAGE_PAD_TOKEN_ID],
+            )
         return inputs_embeds
 
     def forward(

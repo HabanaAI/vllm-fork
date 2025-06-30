@@ -84,14 +84,16 @@ class Llama4ImagePatchInputs(TypedDict):
 
 class Llama4VisionMLP(nn.Module):
 
-    def __init__(self,
-                 input_size: int,
-                 intermediate_size: int,
-                 output_size: int,
-                 bias: bool,
-                 output_activation: bool,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+    def __init__(
+        self,
+        input_size: int,
+        intermediate_size: int,
+        output_size: int,
+        bias: bool,
+        output_activation: bool,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ):
         super().__init__()
         self.fc1 = ColumnParallelLinear(
             input_size=input_size,
@@ -150,15 +152,20 @@ def pixel_shuffle(input_tensor, shuffle_ratio):
     input_tensor = input_tensor.view(batch_size, patch_size, patch_size, -1)
     batch_size, height, width, channels = input_tensor.size()
 
-    reshaped_tensor = input_tensor.view(batch_size, height,
-                                        int(width * shuffle_ratio),
-                                        int(channels / shuffle_ratio))
+    reshaped_tensor = input_tensor.view(
+        batch_size,
+        height,
+        int(width * shuffle_ratio),
+        int(channels / shuffle_ratio),
+    )
     reshaped_tensor = reshaped_tensor.permute(0, 2, 1, 3).contiguous()
 
-    reshaped_tensor = reshaped_tensor.view(batch_size,
-                                           int(height * shuffle_ratio),
-                                           int(width * shuffle_ratio),
-                                           int(channels / (shuffle_ratio**2)))
+    reshaped_tensor = reshaped_tensor.view(
+        batch_size,
+        int(height * shuffle_ratio),
+        int(width * shuffle_ratio),
+        int(channels / (shuffle_ratio**2)),
+    )
     reshaped_tensor = reshaped_tensor.permute(0, 2, 1, 3).contiguous()
 
     output_tensor = reshaped_tensor.view(batch_size, -1,
@@ -186,7 +193,8 @@ class Llama4VisionPixelShuffleMLP(nn.Module):
             bias=config.multi_modal_projector_bias,
             output_activation=True,
             quant_config=quant_config,
-            prefix=f"{prefix}.mlp")
+            prefix=f"{prefix}.mlp",
+        )
 
     def forward(self, encoded_patches: torch.Tensor) -> torch.Tensor:
         encoded_patches = pixel_shuffle(encoded_patches,
@@ -242,7 +250,7 @@ class Llama4VisionAttention(nn.Module):
             base=config.rope_theta,
             rope_scaling={"rope_type": "mllama4"},
             is_neox_style=False,
-            dtype='auto',  # important
+            dtype="auto",  # important
         )
 
     def forward(
@@ -284,13 +292,15 @@ class Llama4VisionEncoderLayer(nn.Module):
         self.self_attn = Llama4VisionAttention(config,
                                                quant_config=quant_config,
                                                prefix=f"{prefix}.self_attn")
-        self.mlp = Llama4VisionMLP(input_size=config.hidden_size,
-                                   intermediate_size=config.intermediate_size,
-                                   output_size=config.hidden_size,
-                                   bias=True,
-                                   output_activation=False,
-                                   quant_config=quant_config,
-                                   prefix=f"{prefix}.mlp")
+        self.mlp = Llama4VisionMLP(
+            input_size=config.hidden_size,
+            intermediate_size=config.intermediate_size,
+            output_size=config.hidden_size,
+            bias=True,
+            output_activation=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.mlp",
+        )
 
         self.input_layernorm = nn.LayerNorm(config.hidden_size)
         self.post_attention_layernorm = nn.LayerNorm(config.hidden_size)
@@ -357,23 +367,26 @@ class Llama4VisionEncoder(nn.Module):
 
 class Llama4UnfoldConvolution(nn.Module):
 
-    def __init__(self,
-                 config: Llama4VisionConfig,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+    def __init__(
+        self,
+        config: Llama4VisionConfig,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ):
         super().__init__()
         kernel_size = config.patch_size
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
         self.unfold = torch.nn.Unfold(kernel_size=kernel_size,
                                       stride=config.patch_size)
-        self.linear = ColumnParallelLinear(config.num_channels *
-                                           kernel_size[0] * kernel_size[1],
-                                           config.hidden_size,
-                                           bias=False,
-                                           quant_config=quant_config,
-                                           gather_output=True,
-                                           prefix=f"{prefix}.linear")
+        self.linear = ColumnParallelLinear(
+            config.num_channels * kernel_size[0] * kernel_size[1],
+            config.hidden_size,
+            bias=False,
+            quant_config=quant_config,
+            gather_output=True,
+            prefix=f"{prefix}.linear",
+        )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = self.unfold(hidden_states)
@@ -403,7 +416,8 @@ class Llama4VisionModel(nn.Module):
         self.patch_embedding = Llama4UnfoldConvolution(
             config,
             quant_config=quant_config,
-            prefix=f"{prefix}.patch_embedding")
+            prefix=f"{prefix}.patch_embedding",
+        )
 
         self.class_embedding = nn.Parameter(self.scale *
                                             torch.randn(self.hidden_size))
@@ -484,9 +498,8 @@ class Mllama4ProcessingInfo(BaseProcessingInfo):
         image_size = vision_config.image_size
         patch_size = vision_config.patch_size
 
-        assert (
-            image_size %
-            patch_size == 0), f"chunk size {image_size} should be multiple of "
+        assert image_size % patch_size == 0, (
+            f"chunk size {image_size} should be multiple of ")
         f"patch_size {patch_size}"
 
         ds_ratio = int(round(1.0 / (vision_config.pixel_shuffle_ratio**2)))
@@ -528,8 +541,9 @@ class Mllama4MultiModalProcessor(BaseMultiModalProcessor[Mllama4ProcessingInfo]
         vision_config = self.info.get_hf_config().vision_config
 
         if processed_outputs.get("pixel_values") is not None:
-            assert "images" in mm_data, \
+            assert "images" in mm_data, (
                 "images expected to be in mm_data when pixel_values is present"
+            )
 
             images = mm_data["images"]
             parsed_images = (self._get_data_parser().parse_mm_data({
@@ -546,8 +560,8 @@ class Mllama4MultiModalProcessor(BaseMultiModalProcessor[Mllama4ProcessingInfo]
                 get_best_fit(
                     (image.size[1], image.size[0]),
                     torch.tensor(possible_resolutions),
-                    resize_to_max_canvas=image_processor.resize_to_max_canvas)
-                for image in parsed_images
+                    resize_to_max_canvas=image_processor.resize_to_max_canvas,
+                ) for image in parsed_images
             ]
             # TODO tile height/width do not necessarily need to match
             aspect_ratios = [(image_size[0] // tile_size,
@@ -633,7 +647,7 @@ class Mllama4DummyInputsBuilder(BaseDummyInputsBuilder[Mllama4ProcessingInfo]):
         num_images = mm_counts.get("image", 0)
 
         (target_width,
-         target_height) = self.info.get_image_size_with_most_features()
+         target_height) = (self.info.get_image_size_with_most_features())
 
         return {
             "image":
@@ -662,14 +676,16 @@ class Llama4ForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.config = config
         self.quant_config = quant_config
         self.multimodal_config = multimodal_config
-        self.vision_model = Llama4VisionModel(config.vision_config,
-                                              None,
-                                              prefix=maybe_prefix(
-                                                  prefix, "vision_model"))
+        self.vision_model = Llama4VisionModel(
+            config.vision_config,
+            None,
+            prefix=maybe_prefix(prefix, "vision_model"),
+        )
         self.multi_modal_projector = Llama4MultiModalProjector(
             self.config,
             None,
-            prefix=maybe_prefix(prefix, "multi_modal_projector"))
+            prefix=maybe_prefix(prefix, "multi_modal_projector"),
+        )
         self.language_model = _initialize_model(
             vllm_config=vllm_config.with_hf_config(config.text_config,
                                                    ["LlamaForCausalLM"]),
@@ -798,7 +814,6 @@ class Llama4ForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
-
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
             (".self_attn.qkv_proj", ".self_attn.q_proj", "q"),

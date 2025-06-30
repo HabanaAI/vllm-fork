@@ -66,10 +66,10 @@ def test_ngram_correctness(
     sampling_config: SamplingParams,
     model_name: str,
 ):
-    '''
+    """
     Compare the outputs of a original LLM and a speculative LLM
     should be the same when using ngram speculative decoding.
-    '''
+    """
     with monkeypatch.context() as m:
         m.setenv("VLLM_USE_V1", "1")
 
@@ -112,10 +112,10 @@ def test_eagle_correctness(
     model_name: str,
     use_eagle3: bool,
 ):
-    '''
+    """
     Compare the outputs of a original LLM and a speculative LLM
     should be the same when using eagle speculative decoding.
-    '''
+    """
     with monkeypatch.context() as m:
         m.setenv("VLLM_USE_V1", "1")
 
@@ -123,8 +123,8 @@ def test_eagle_correctness(
         ref_outputs = ref_llm.chat(test_prompts, sampling_config)
         del ref_llm
 
-        spec_model_name = eagle3_model_name(
-        ) if use_eagle3 else eagle_model_name()
+        spec_model_name = (eagle3_model_name()
+                           if use_eagle3 else eagle_model_name())
         spec_llm = LLM(
             model=model_name,
             trust_remote_code=True,

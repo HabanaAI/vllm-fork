@@ -12,15 +12,17 @@ from vllm.distributed.kv_events import (EventBatch, EventPublisherFactory,
 class EventSample(
         msgspec.Struct,
         tag=True,  # type: ignore
-        array_like=True  # type: ignore
+        array_like=True,  # type: ignore
 ):
     """Test event for publisher testing"""
+
     id: int
     value: str
 
 
 class SampleBatch(EventBatch):
     """Test event batch for publisher testing"""
+
     events: list[EventSample]
 
 
@@ -124,6 +126,7 @@ def test_topic_filtering(publisher_config):
     pub = EventPublisherFactory.create(cfg)
 
     from .conftest import MockSubscriber
+
     sub_foo = MockSubscriber(cfg.endpoint, None, "foo")
     sub_bar = MockSubscriber(cfg.endpoint, None, "bar")
 

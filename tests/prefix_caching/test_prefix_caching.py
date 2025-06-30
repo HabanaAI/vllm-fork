@@ -25,7 +25,7 @@ def use_v0_only(monkeypatch: pytest.MonkeyPatch):
     This module relies on V0 internals, so set VLLM_USE_V1=0.
     """
     with monkeypatch.context() as m:
-        m.setenv('VLLM_USE_V1', '0')
+        m.setenv("VLLM_USE_V1", "0")
         yield
 
 
@@ -125,7 +125,6 @@ def test_unstable_prompt_sequence(
     backend: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-
     if backend == "FLASHINFER" and current_platform.is_rocm():
         pytest.skip("Flashinfer does not support ROCm/HIP.")
     if backend == "XFORMERS" and current_platform.is_rocm():
@@ -140,8 +139,10 @@ def test_unstable_prompt_sequence(
                 max_model_len=4096,
         ) as vllm_model:
             for prompt in UNSTABLE_PROMPT_SEQUENCE:
-                vllm_model.generate(TokensPrompt(prompt_token_ids=prompt),
-                                    SamplingParams(max_tokens=1))
+                vllm_model.generate(
+                    TokensPrompt(prompt_token_ids=prompt),
+                    SamplingParams(max_tokens=1),
+                )
 
 
 @pytest.mark.parametrize("model", MODELS)

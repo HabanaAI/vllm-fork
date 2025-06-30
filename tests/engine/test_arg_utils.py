@@ -16,23 +16,26 @@ from vllm.engine.arg_utils import (EngineArgs, contains_type, get_kwargs,
 from vllm.utils import FlexibleArgumentParser
 
 
-@pytest.mark.parametrize(("type", "value", "expected"), [
-    (int, "42", 42),
-    (int, "None", None),
-    (float, "3.14", 3.14),
-    (float, "None", None),
-    (str, "Hello World!", "Hello World!"),
-    (str, "None", None),
-    (json.loads, '{"foo":1,"bar":2}', {
-        "foo": 1,
-        "bar": 2
-    }),
-    (json.loads, "foo=1,bar=2", {
-        "foo": 1,
-        "bar": 2
-    }),
-    (json.loads, "None", None),
-])
+@pytest.mark.parametrize(
+    ("type", "value", "expected"),
+    [
+        (int, "42", 42),
+        (int, "None", None),
+        (float, "3.14", 3.14),
+        (float, "None", None),
+        (str, "Hello World!", "Hello World!"),
+        (str, "None", None),
+        (json.loads, '{"foo":1,"bar":2}', {
+            "foo": 1,
+            "bar": 2
+        }),
+        (json.loads, "foo=1,bar=2", {
+            "foo": 1,
+            "bar": 2
+        }),
+        (json.loads, "None", None),
+    ],
+)
 def test_optional_type(type, value, expected):
     optional_type_func = optional_type(type)
     context = nullcontext()
@@ -42,43 +45,55 @@ def test_optional_type(type, value, expected):
         assert optional_type_func(value) == expected
 
 
-@pytest.mark.parametrize(("type_hint", "type", "expected"), [
-    (int, int, True),
-    (int, float, False),
-    (list[int], list, True),
-    (list[int], tuple, False),
-    (Literal[0, 1], Literal, True),
-])
+@pytest.mark.parametrize(
+    ("type_hint", "type", "expected"),
+    [
+        (int, int, True),
+        (int, float, False),
+        (list[int], list, True),
+        (list[int], tuple, False),
+        (Literal[0, 1], Literal, True),
+    ],
+)
 def test_is_type(type_hint, type, expected):
     assert is_type(type_hint, type) == expected
 
 
-@pytest.mark.parametrize(("type_hints", "type", "expected"), [
-    ({float, int}, int, True),
-    ({int, tuple[int]}, int, True),
-    ({int, tuple[int]}, float, False),
-    ({str, Literal["x", "y"]}, Literal, True),
-])
+@pytest.mark.parametrize(
+    ("type_hints", "type", "expected"),
+    [
+        ({float, int}, int, True),
+        ({int, tuple[int]}, int, True),
+        ({int, tuple[int]}, float, False),
+        ({str, Literal["x", "y"]}, Literal, True),
+    ],
+)
 def test_contains_type(type_hints, type, expected):
     assert contains_type(type_hints, type) == expected
 
 
-@pytest.mark.parametrize(("type_hints", "type", "expected"), [
-    ({int, float}, int, int),
-    ({int, float}, str, None),
-    ({str, Literal["x", "y"]}, Literal, Literal["x", "y"]),
-])
+@pytest.mark.parametrize(
+    ("type_hints", "type", "expected"),
+    [
+        ({int, float}, int, int),
+        ({int, float}, str, None),
+        ({str, Literal["x", "y"]}, Literal, Literal["x", "y"]),
+    ],
+)
 def test_get_type(type_hints, type, expected):
     assert get_type(type_hints, type) == expected
 
 
-@pytest.mark.parametrize(("type_hints", "expected"), [
-    ({Literal[1, 2]}, {
-        "type": int,
-        "choices": [1, 2]
-    }),
-    ({Literal[1, "a"]}, Exception),
-])
+@pytest.mark.parametrize(
+    ("type_hints", "expected"),
+    [
+        ({Literal[1, 2]}, {
+            "type": int,
+            "choices": [1, 2]
+        }),
+        ({Literal[1, "a"]}, Exception),
+    ],
+)
 def test_literal_to_kwargs(type_hints, expected):
     context = nullcontext()
     if expected is Exception:
@@ -110,10 +125,13 @@ class DummyConfigClass:
     """Dict which will be JSON in CLI"""
 
 
-@pytest.mark.parametrize(("type_hint", "expected"), [
-    (int, False),
-    (DummyConfigClass, True),
-])
+@pytest.mark.parametrize(
+    ("type_hint", "expected"),
+    [
+        (int, False),
+        (DummyConfigClass, True),
+    ],
+)
 def test_is_not_builtin(type_hint, expected):
     assert is_not_builtin(type_hint) == expected
 
@@ -144,24 +162,27 @@ def test_get_kwargs():
     assert kwargs["json_tip"]["help"].endswith(json_tip)
 
 
-@pytest.mark.parametrize(("arg", "expected"), [
-    (None, dict()),
-    ("image=16", {
-        "image": 16
-    }),
-    ("image=16,video=2", {
-        "image": 16,
-        "video": 2
-    }),
-    ("Image=16, Video=2", {
-        "image": 16,
-        "video": 2
-    }),
-])
+@pytest.mark.parametrize(
+    ("arg", "expected"),
+    [
+        (None, dict()),
+        ("image=16", {
+            "image": 16
+        }),
+        ("image=16,video=2", {
+            "image": 16,
+            "video": 2
+        }),
+        ("Image=16, Video=2", {
+            "image": 16,
+            "video": 2
+        }),
+    ],
+)
 def test_limit_mm_per_prompt_parser(arg, expected):
     """This functionality is deprecated and will be removed in the future.
     This argument should be passed as JSON string instead.
-    
+
     TODO: Remove with nullable_kvs."""
     parser = EngineArgs.add_cli_args(FlexibleArgumentParser())
     if arg is None:
@@ -213,8 +234,8 @@ def test_prefix_cache_default():
     args = parser.parse_args([])
 
     engine_args = EngineArgs.from_cli_args(args=args)
-    assert (not engine_args.enable_prefix_caching
-            ), "prefix caching defaults to off."
+    assert not engine_args.enable_prefix_caching, (
+        "prefix caching defaults to off.")
 
     # with flag to turn it on.
     args = parser.parse_args(["--enable-prefix-caching"])
@@ -232,8 +253,9 @@ def test_prefix_cache_default():
     [
         "image",  # Missing =
         "image=4,image=5",  # Conflicting values
-        "image=video=4"  # Too many = in tokenized arg
-    ])
+        "image=video=4",  # Too many = in tokenized arg
+    ],
+)
 def test_bad_nullable_kvs(arg):
     with pytest.raises(ArgumentTypeError):
         nullable_kvs(arg)

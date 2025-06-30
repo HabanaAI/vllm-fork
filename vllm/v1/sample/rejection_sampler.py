@@ -53,7 +53,7 @@ class RejectionSampler(nn.Module):
         bonus_token_ids: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> torch.Tensor:
-        '''
+        """
         Args:
             metadata:
                 Metadata for spec decoding.
@@ -80,7 +80,7 @@ class RejectionSampler(nn.Module):
         Returns:
             output_token_ids (torch.Tensor):
                 A tensor containing the final output token IDs.
-        '''
+        """
         assert metadata.max_spec_len <= MAX_SPEC_LEN
         # [num_tokens, vocab_size]
         # NOTE(woosuk): `target_logits` can be updated in place inside the
@@ -122,8 +122,8 @@ class RejectionSampler(nn.Module):
         """
         output_token_ids_np = output_token_ids.cpu().numpy()
         # Create mask for valid tokens.
-        valid_mask = ((output_token_ids_np != PLACEHOLDER_TOKEN_ID) &
-                      (output_token_ids_np < vocab_size))
+        valid_mask = (output_token_ids_np != PLACEHOLDER_TOKEN_ID) & (
+            output_token_ids_np < vocab_size)
         outputs = [
             row[valid_mask[i]].tolist()
             for i, row in enumerate(output_token_ids_np)
@@ -461,8 +461,10 @@ def rejection_greedy_sample_kernel(
         if not rejected:
             draft_token_id = tl.load(draft_token_ids_ptr + start_idx + pos)
             target_argmax_id = tl.load(target_argmax_ptr + start_idx + pos)
-            tl.store(output_token_ids_ptr + req_idx * (max_spec_len + 1) + pos,
-                     target_argmax_id)
+            tl.store(
+                output_token_ids_ptr + req_idx * (max_spec_len + 1) + pos,
+                target_argmax_id,
+            )
             if draft_token_id != target_argmax_id:
                 # Reject.
                 rejected = True
@@ -472,7 +474,9 @@ def rejection_greedy_sample_kernel(
         bonus_token_id = tl.load(bonus_token_ids_ptr + req_idx)
         tl.store(
             output_token_ids_ptr + req_idx * (max_spec_len + 1) +
-            num_draft_tokens, bonus_token_id)
+            num_draft_tokens,
+            bonus_token_id,
+        )
 
 
 # NOTE(woosuk): Avoid specialization to prevent unnecessary recompilation.
@@ -527,15 +531,19 @@ def rejection_random_sample_kernel(
                 # Reject. Use recovered token.
                 rejected = True
                 token_id = tl.load(recovered_token_ids_ptr + start_idx + pos)
-            tl.store(output_token_ids_ptr + req_idx * (max_spec_len + 1) + pos,
-                     token_id)
+            tl.store(
+                output_token_ids_ptr + req_idx * (max_spec_len + 1) + pos,
+                token_id,
+            )
 
     if not rejected:
         # If all tokens are accepted, append the bonus token.
         bonus_token_id = tl.load(bonus_token_ids_ptr + req_idx)
         tl.store(
             output_token_ids_ptr + req_idx * (max_spec_len + 1) +
-            num_draft_tokens, bonus_token_id)
+            num_draft_tokens,
+            bonus_token_id,
+        )
 
 
 # NOTE(woosuk): Avoid specialization to prevent unnecessary recompilation.
@@ -599,27 +607,33 @@ def sample_recovered_tokens_kernel(
         # n-gram does not have draft_prob. We regard it as 1.
         tl.store(
             target_probs_ptr + (start_idx + pos) * vocab_size + draft_token_id,
-            0)
-        prob = tl.load(target_probs_ptr + (start_idx + pos) * vocab_size +
-                       vocab_offset,
-                       mask=vocab_offset < vocab_size,
-                       other=0)
+            0,
+        )
+        prob = tl.load(
+            target_probs_ptr + (start_idx + pos) * vocab_size + vocab_offset,
+            mask=vocab_offset < vocab_size,
+            other=0,
+        )
     else:
-        draft_prob = tl.load(draft_probs_ptr + (start_idx + pos) * vocab_size +
-                             vocab_offset,
-                             mask=vocab_offset < vocab_size,
-                             other=0)
-        target_prob = tl.load(target_probs_ptr +
-                              (start_idx + pos) * vocab_size + vocab_offset,
-                              mask=vocab_offset < vocab_size,
-                              other=0)
+        draft_prob = tl.load(
+            draft_probs_ptr + (start_idx + pos) * vocab_size + vocab_offset,
+            mask=vocab_offset < vocab_size,
+            other=0,
+        )
+        target_prob = tl.load(
+            target_probs_ptr + (start_idx + pos) * vocab_size + vocab_offset,
+            mask=vocab_offset < vocab_size,
+            other=0,
+        )
         prob = tl.maximum(target_prob - draft_prob, 0)
         # NOTE(woosuk): We don't need `prob = prob / tl.sum(prob)` here because
         # `tl.argmax` will select the maximum value.
 
-    q = tl.load(q_ptr + req_idx * vocab_size + vocab_offset,
-                mask=vocab_offset < vocab_size,
-                other=float("-inf"))
+    q = tl.load(
+        q_ptr + req_idx * vocab_size + vocab_offset,
+        mask=vocab_offset < vocab_size,
+        other=float("-inf"),
+    )
     recovered_id = tl.argmax(prob / q, axis=-1)
     tl.store(output_token_ids_ptr + start_idx + pos, recovered_id)
 
@@ -627,4 +641,5 @@ def sample_recovered_tokens_kernel(
         # Restore the original probability.
         tl.store(
             target_probs_ptr + (start_idx + pos) * vocab_size + draft_token_id,
-            orig_prob)
+            orig_prob,
+        )

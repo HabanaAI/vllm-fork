@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only IBM/NASA Prithvi Geospatial model."""
+
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Optional, Set, Tuple, Union
 
@@ -111,16 +112,17 @@ class PrithviGeoSpatialMAEMultiModalProcessor(BaseMultiModalProcessor):
 @MULTIMODAL_REGISTRY.register_processor(
     PrithviGeoSpatialMAEMultiModalProcessor,
     info=PrithviGeoSpatialMAEProcessingInfo,
-    dummy_inputs=PrithviGeoSpatialMAEInputBuilder)
+    dummy_inputs=PrithviGeoSpatialMAEInputBuilder,
+)
 class PrithviGeoSpatialMAE(nn.Module, IsAttentionFree, SupportsMultiModal,
                            SupportsV0Only):
-    """ Prithvi Masked Autoencoder"""
+    """Prithvi Masked Autoencoder"""
 
     def _instantiate_model(self, config: dict) -> Optional[nn.Module]:
-
         # We might be able/need to support different tasks with this same model
         if config["task_args"]["task"] == "SemanticSegmentationTask":
             from terratorch.cli_tools import SemanticSegmentationTask
+
             task = SemanticSegmentationTask(
                 config["model_args"],
                 config["task_args"]["model_factory"],
@@ -133,7 +135,8 @@ class PrithviGeoSpatialMAE(nn.Module, IsAttentionFree, SupportsMultiModal,
                 scheduler_hparams=config["scheduler_params"],
                 plot_on_val=config["task_args"]["plot_on_val"],
                 freeze_decoder=config["task_args"]["freeze_decoder"],
-                freeze_backbone=config["task_args"]["freeze_backbone"])
+                freeze_backbone=config["task_args"]["freeze_backbone"],
+            )
 
             return task.model
         else:
@@ -155,7 +158,6 @@ class PrithviGeoSpatialMAE(nn.Module, IsAttentionFree, SupportsMultiModal,
 
     def _parse_and_validate_multimodal_data(
             self, **kwargs) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-
         pixel_values = kwargs.pop("pixel_values", None)
         if not isinstance(pixel_values, torch.Tensor):
             raise ValueError(f"Incorrect type of pixel_values. "
@@ -180,7 +182,6 @@ class PrithviGeoSpatialMAE(nn.Module, IsAttentionFree, SupportsMultiModal,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ):
-
         pixel_values, location_coords = (
             self._parse_and_validate_multimodal_data(**kwargs))
         model_output = self.model(pixel_values,

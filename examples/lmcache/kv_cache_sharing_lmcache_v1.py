@@ -3,13 +3,14 @@
 This file demonstrates the example usage of remote KV cache sharing
 with LMCache.
 We will launch 2 vllm instances, and launch an additional LMCache server.
-KV cache is transferred in the following manner: 
+KV cache is transferred in the following manner:
 (1) vLLM instance 1 -> LMCache server (KV cache store).
 (2) LMCache server -> vLLM instance 2 (KV cache reuse/retrieve).
 
 Note that lmcache needs to be installed to run this example.
 Learn more about LMCache in https://github.com/LMCache/LMCache.
 """
+
 import os
 import subprocess
 import time
@@ -53,11 +54,13 @@ def run_store(store_done, prompts):
         '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}')
     # Set GPU memory utilization to 0.8 for an A40 GPU with 40GB
     # memory. Reduce the value if your GPU has less memory.
-    llm = LLM(model="mistralai/Mistral-7B-Instruct-v0.2",
-              kv_transfer_config=ktc,
-              max_model_len=8000,
-              gpu_memory_utilization=0.8,
-              enforce_eager=True)
+    llm = LLM(
+        model="mistralai/Mistral-7B-Instruct-v0.2",
+        kv_transfer_config=ktc,
+        max_model_len=8000,
+        gpu_memory_utilization=0.8,
+        enforce_eager=True,
+    )
 
     outputs = llm.generate(prompts, sampling_params)
     for output in outputs:
@@ -80,11 +83,13 @@ def run_retrieve(store_done, prompts, timeout=1):
         '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}')
     # Set GPU memory utilization to 0.8 for an A40 GPU with 40GB
     # of memory. Reduce the value if your GPU has less memory.
-    llm = LLM(model="mistralai/Mistral-7B-Instruct-v0.2",
-              kv_transfer_config=ktc,
-              max_model_len=8000,
-              gpu_memory_utilization=0.8,
-              enforce_eager=True)
+    llm = LLM(
+        model="mistralai/Mistral-7B-Instruct-v0.2",
+        kv_transfer_config=ktc,
+        max_model_len=8000,
+        gpu_memory_utilization=0.8,
+        enforce_eager=True,
+    )
 
     print("Waiting for KV cache store to finish...")
     store_done.wait()

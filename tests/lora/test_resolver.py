@@ -17,7 +17,8 @@ class DummyLoRAResolver(LoRAResolver):
             return LoRARequest(
                 lora_name=lora_name,
                 lora_path=f"/dummy/path/{base_model_name}/{lora_name}",
-                lora_int_id=abs(hash(lora_name)))
+                lora_int_id=abs(hash(lora_name)),
+            )
         return None
 
 

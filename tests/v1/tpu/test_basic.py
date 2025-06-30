@@ -3,6 +3,7 @@
 
 Run `pytest tests/v1/tpu/test_basic.py`.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -43,8 +44,8 @@ def test_basic(
     tensor_parallel_size: int,
     max_num_seqs: int,
 ) -> None:
-    prompt = "The next numbers of the sequence " + ", ".join(
-        str(i) for i in range(1024)) + " are:"
+    prompt = ("The next numbers of the sequence " +
+              ", ".join(str(i) for i in range(1024)) + " are:")
     example_prompts = [prompt]
 
     with monkeypatch.context() as m:
@@ -58,7 +59,8 @@ def test_basic(
                 max_model_len=8192,
                 gpu_memory_utilization=0.7,
                 max_num_seqs=max_num_seqs,
-                tensor_parallel_size=tensor_parallel_size) as vllm_model:
+                tensor_parallel_size=tensor_parallel_size,
+        ) as vllm_model:
             vllm_outputs = vllm_model.generate_greedy(example_prompts,
                                                       max_tokens)
         output = vllm_outputs[0][1]
@@ -71,8 +73,10 @@ TP_SIZE_8 = 8
 
 @pytest.mark.skipif(not current_platform.is_tpu(),
                     reason="This is a test for TPU only")
-@pytest.mark.skipif(tpu.num_available_chips() < TP_SIZE_8,
-                    reason=f"This test requires {TP_SIZE_8} TPU chips.")
+@pytest.mark.skipif(
+    tpu.num_available_chips() < TP_SIZE_8,
+    reason=f"This test requires {TP_SIZE_8} TPU chips.",
+)
 def test_gemma3_27b_with_text_input_and_tp(
     vllm_runner: type[VllmRunner],
     monkeypatch: pytest.MonkeyPatch,
@@ -99,7 +103,8 @@ def test_gemma3_27b_with_text_input_and_tp(
                 model,
                 max_num_batched_tokens=256,
                 max_num_seqs=max_num_seqs,
-                tensor_parallel_size=tensor_parallel_size) as vllm_model:
+                tensor_parallel_size=tensor_parallel_size,
+        ) as vllm_model:
             vllm_outputs = vllm_model.generate_greedy(prompts, max_tokens)
         # vllm_outputs is a list of tuples whose first element is the token id
         # and the second element is the output (including the prompt).

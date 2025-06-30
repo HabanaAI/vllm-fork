@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """A GPU worker class."""
+
 import contextlib
 import gc
 import os
@@ -40,7 +41,6 @@ class HPUWorker:
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ):
-
         # TODO: use WorkerBase.__init__(self, vllm_config=vllm_config)
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
@@ -67,13 +67,16 @@ class HPUWorker:
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
+
             init_cached_hf_modules()
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: %s",
-                        torch_profiler_trace_dir)
+            logger.info(
+                "Profiling enabled. Traces will be saved to: %s",
+                torch_profiler_trace_dir,
+            )
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
@@ -81,7 +84,8 @@ class HPUWorker:
                 ],
                 with_stack=True,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                    torch_profiler_trace_dir, use_gzip=True),
+            )
         else:
             self.profiler = None
         self.gc_track_recompiles = bool(
@@ -90,9 +94,12 @@ class HPUWorker:
 
     def init_device(self):
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.parallel_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank)
+        init_worker_distributed_environment(
+            self.parallel_config,
+            self.rank,
+            self.distributed_init_method,
+            self.local_rank,
+        )
         # Set random seed.
         set_random_seed(self.model_config.seed)
         self.model_runner = HPUModelRunner(self.vllm_config)
@@ -137,8 +144,8 @@ class HPUWorker:
 
                 # Use an empty tensor instead of `None`` to force Dynamo to pass
                 # it by reference, rather by specializing on the value ``None``.
-                hpu_k_cache = torch.tensor([], dtype=dtype, device='hpu')
-                hpu_v_cache = torch.tensor([], dtype=dtype, device='hpu')
+                hpu_k_cache = torch.tensor([], dtype=dtype, device="hpu")
+                hpu_v_cache = torch.tensor([], dtype=dtype, device="hpu")
 
                 kv_caches[layer_name] = (hpu_k_cache, hpu_v_cache)
 
@@ -151,26 +158,26 @@ class HPUWorker:
         bind_kv_cache(
             kv_caches,
             self.vllm_config.compilation_config.static_forward_context,
-            runner_kv_caches)
+            runner_kv_caches,
+        )
         if is_fake_hpu():
             fake_hpu_cache_alloc = 4 * 2**30  # take 4 GiB flat on fake hpu
             return fake_hpu_cache_alloc
         with HabanaMemoryProfiler() as m:
             self.model_runner.profile_run()
             torch.hpu.synchronize()
-        msg = ("Model profiling run "
-               f"took {m.get_summary_string()}")
+        msg = f"Model profiling run took {m.get_summary_string()}"
         logger.info(msg)
         # At this point we should've allocated the maximum workspace for all
         # recipes we will use the extra memory for graphs/blocks
         free_hpu_memory = torch.hpu.mem_get_info()[0]
 
         graph_reserved_mem = (float(
-            os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.1'))
+            os.environ.get("VLLM_GRAPH_RESERVED_MEM", "0.1"))
                               if not self.model_config.enforce_eager else 0)
         graph_headroom = 1 - graph_reserved_mem
-        available_hpu_memory = free_hpu_memory * \
-            self.cache_config.gpu_memory_utilization
+        available_hpu_memory = (free_hpu_memory *
+                                self.cache_config.gpu_memory_utilization)
         hpu_memory_margin = free_hpu_memory * (
             1 - self.cache_config.gpu_memory_utilization)
         self.model_runner.mem_margin = hpu_memory_margin
@@ -184,7 +191,7 @@ class HPUWorker:
             f" {format_bytes(graph_headroom_bytes)} reserved for HPUGraphs "
             f"(VLLM_GRAPH_RESERVED_MEM={graph_reserved_mem}), "
             f"{format_bytes(dummy_block_headroom)} reserved for KV cache dummy "
-            f"block {format_bytes(cache_size_bytes-dummy_block_headroom)} "
+            f"block {format_bytes(cache_size_bytes - dummy_block_headroom)} "
             "reserved for usable KV cache")
 
         logger.info(msg)
@@ -204,8 +211,7 @@ class HPUWorker:
                f"(_PAD_BLOCK_ID={self.model_runner._PAD_BLOCK_ID}, "
                f"_PAD_SLOT_ID={self.model_runner._PAD_SLOT_ID})")
         logger.info(msg)
-        msg = ("Initializing cache engine "
-               f"took {m.get_summary_string()}")
+        msg = f"Initializing cache engine took {m.get_summary_string()}"
         logger.info(msg)
         self.compile_or_warm_up_model()
 
@@ -221,9 +227,8 @@ class HPUWorker:
         self,
         scheduler_output: "SchedulerOutput",
     ) -> ModelRunnerOutput:
-        with track_graph_compile('HPUWorker.execute_model') \
-            if self.gc_track_recompiles \
-            else contextlib.nullcontext():
+        with (track_graph_compile("HPUWorker.execute_model")
+              if self.gc_track_recompiles else contextlib.nullcontext()):
             output = self.model_runner.execute_model(scheduler_output)
         # TODO(woosuk): Send the output to the engine process.
         return output if self.rank == 0 else None
@@ -236,24 +241,31 @@ def init_worker_distributed_environment(
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
-    init_distributed_environment(parallel_config.world_size,
-                                 rank,
-                                 distributed_init_method,
-                                 local_rank,
-                                 backend='hccl')
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
-    dummy_tensor_hpu = torch.ones(1).to('hpu')
+    init_distributed_environment(
+        parallel_config.world_size,
+        rank,
+        distributed_init_method,
+        local_rank,
+        backend="hccl",
+    )
+    ensure_model_parallel_initialized(
+        parallel_config.tensor_parallel_size,
+        parallel_config.pipeline_parallel_size,
+    )
+    dummy_tensor_hpu = torch.ones(1).to("hpu")
     torch.distributed.all_reduce(dummy_tensor_hpu)
     assert dummy_tensor_hpu.item() == parallel_config.world_size
-    ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
-                                      parallel_config.pipeline_parallel_size)
+    ensure_model_parallel_initialized(
+        parallel_config.tensor_parallel_size,
+        parallel_config.pipeline_parallel_size,
+    )
 
 
 @contextmanager
 def track_graph_compile(name: str):
     import habana_frameworks.torch as htorch
     from habana_frameworks.torch.hpu.metrics import metric_localcontext
+
     with metric_localcontext("graph_compilation") as gc:
         yield
         htorch.hpu.synchronize()

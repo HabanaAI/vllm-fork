@@ -122,8 +122,8 @@ def _get_sparse_attn_mask_homo_head(
                              & ((q_pos - k_pos < local_blocks)
                                 | mask_vert_strided)).to(device).to(dtype))
         num_blocks_q = triton.cdiv(q_len, block_size)
-        block_mask_dense_output = (dense_to_crow_col(
-            block_mask_dense[-num_blocks_q:].contiguous()))
+        block_mask_dense_output = dense_to_crow_col(
+            block_mask_dense[-num_blocks_q:].contiguous())
     if return_dense:
         mask_dense = torch.kron(
             block_mask_dense,

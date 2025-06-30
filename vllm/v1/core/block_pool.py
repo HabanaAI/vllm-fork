@@ -47,6 +47,7 @@ class BlockPool:
         # enabled).
         if current_platform.is_hpu() and not enable_caching:
             from vllm.v1.core.kv_cache_utils import FreeKVCacheBlockQueueHPU
+
             self.free_block_queue = FreeKVCacheBlockQueueHPU(self.blocks)
         else:
             self.free_block_queue = FreeKVCacheBlockQueue(
@@ -284,11 +285,13 @@ class BlockPool:
             bool: True if the prefix cache is successfully reset,
             False otherwise.
         """
-        num_used_blocks = (self.num_gpu_blocks - self.get_num_free_blocks())
+        num_used_blocks = self.num_gpu_blocks - self.get_num_free_blocks()
         if num_used_blocks != 1:  # The null block is always marked as used
             logger.warning(
                 "Failed to reset prefix cache because some "
-                "blocks (%d) are not freed yet", num_used_blocks - 1)
+                "blocks (%d) are not freed yet",
+                num_used_blocks - 1,
+            )
             return False
 
         # Remove all hashes so that no new blocks will hit.
@@ -323,7 +326,7 @@ class BlockPool:
 
     def take_events(self) -> list[KVCacheEvent]:
         """Atomically takes all events and clears the queue.
-        
+
         Returns:
             A list of KV cache events.
         """

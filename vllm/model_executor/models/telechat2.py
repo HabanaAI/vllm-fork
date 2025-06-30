@@ -53,8 +53,8 @@ class TeleChat2Model(LlamaModel):
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
         stacked_params_mapping = [
-            ('gate_up_proj', 'gate_proj', 0),
-            ('gate_up_proj', 'up_proj', 1),
+            ("gate_up_proj", "gate_proj", 0),
+            ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
@@ -108,7 +108,6 @@ class TeleChat2Model(LlamaModel):
 
 
 class TeleChat2ForCausalLM(LlamaForCausalLM):
-
     hf_to_vllm_mapper = WeightsMapper(
         orig_to_new_prefix={
             "transformer.": "model.",
@@ -122,15 +121,16 @@ class TeleChat2ForCausalLM(LlamaForCausalLM):
         },
     )
 
-    def _init_model(self,
-                    vllm_config: VllmConfig,
-                    prefix: str = "",
-                    layer_type: type[nn.Module] = LlamaDecoderLayer):
+    def _init_model(
+        self,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+        layer_type: type[nn.Module] = LlamaDecoderLayer,
+    ):
         return TeleChat2Model(vllm_config=vllm_config, prefix=prefix)
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
-
         loader = AutoWeightsLoader(
             self,
             skip_prefixes=(["lm_head."]

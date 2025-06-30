@@ -55,7 +55,7 @@ You are a helpful assistant.
 
 Given the previous instructions, what is the weather in New York City, Boston,
 and San Francisco?
-"""
+""",
     }]
 
     response = client.chat.completions.create(
@@ -72,12 +72,13 @@ and San Francisco?
                         "city": {
                             "type": "string"
                         }
-                    }
+                    },
                 },
-                "end": "</function>"
+                "end": "</function>",
             }],
-            "triggers": ["<function="]
-        })
+            "triggers": ["<function="],
+        },
+    )
     print(response)
 
 

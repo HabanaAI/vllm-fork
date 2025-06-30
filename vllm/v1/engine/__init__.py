@@ -30,6 +30,7 @@ class FinishReason(enum.IntEnum):
     abort - aborted for another reason
 
     """
+
     STOP = 0
     LENGTH = 1
     ABORT = 2
@@ -42,8 +43,8 @@ class EngineCoreRequest(
         msgspec.Struct,
         array_like=True,  # type: ignore[call-arg]
         omit_defaults=True,  # type: ignore[call-arg]
-        gc=False):  # type: ignore[call-arg]
-
+        gc=False,
+):  # type: ignore[call-arg]
     # NOTE: prompt and prompt_token_ids should be DecoderOnlyInput,
     # but this object is currently not playing well with msgspec
     # due to circular imports and typing we have in data.py
@@ -67,6 +68,7 @@ class EngineCoreRequest(
 
 class EngineCoreEventType(enum.IntEnum):
     """The type of engine core request event."""
+
     QUEUED = 1
     SCHEDULED = 2
     PREEMPTED = 3
@@ -79,6 +81,7 @@ class EngineCoreEvent(msgspec.Struct):
     frontend to calculate intervals between engine core events. These
     timestamps should not be compared with timestamps from other processes.
     """
+
     type: EngineCoreEventType
     timestamp: float
 
@@ -94,8 +97,8 @@ class EngineCoreOutput(
         msgspec.Struct,
         array_like=True,  # type: ignore[call-arg]
         omit_defaults=True,  # type: ignore[call-arg]
-        gc=False):  # type: ignore[call-arg]
-
+        gc=False,
+):  # type: ignore[call-arg]
     request_id: str
     new_token_ids: list[int]
 
@@ -114,8 +117,8 @@ class EngineCoreOutput(
 class UtilityOutput(
         msgspec.Struct,
         array_like=True,  # type: ignore[call-arg]
-        gc=False):  # type: ignore[call-arg]
-
+        gc=False,
+):  # type: ignore[call-arg]
     call_id: int
 
     # Non-None implies the call failed, result should be None.
@@ -127,9 +130,9 @@ class EngineCoreOutputs(
         msgspec.Struct,
         array_like=True,  # type: ignore[call-arg]
         omit_defaults=True,  # type: ignore[call-arg]
-        gc=False):  # type: ignore[call-arg]
-
-    #NOTE(Nick): We could consider ways to make this more compact,
+        gc=False,
+):  # type: ignore[call-arg]
+    # NOTE(Nick): We could consider ways to make this more compact,
     # e.g. columnwise layout
 
     engine_index: int = 0
@@ -159,9 +162,10 @@ class EngineCoreRequestType(enum.Enum):
     Request types defined as hex byte strings, so it can be sent over sockets
     without separate encoding step.
     """
-    ADD = b'\x00'
-    ABORT = b'\x01'
-    START_DP_WAVE = b'\x02'
-    UTILITY = b'\x03'
+
+    ADD = b"\x00"
+    ABORT = b"\x01"
+    START_DP_WAVE = b"\x02"
+    UTILITY = b"\x03"
     # Sentinel used within EngineCoreProc.
-    EXECUTOR_FAILED = b'\x04'
+    EXECUTOR_FAILED = b"\x04"

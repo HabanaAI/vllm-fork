@@ -5,6 +5,7 @@
 # Copyright (c) Alibaba Cloud.
 # LICENSE: https://huggingface.co/Qwen/Qwen-7B/blob/main/LICENSE
 """Inference-only QWen model compatible with HuggingFace weights."""
+
 import json
 from typing import Any, Dict, Iterable, Optional, Set, Tuple, Union
 
@@ -49,13 +50,17 @@ class QWenMLP(nn.Module):
     ):
         super().__init__()
         self.gate_up_proj = MergedColumnParallelLinear(
-            hidden_size, [intermediate_size] * 2,
+            hidden_size,
+            [intermediate_size] * 2,
             bias=False,
-            quant_config=quant_config)
-        self.c_proj = RowParallelLinear(intermediate_size,
-                                        hidden_size,
-                                        bias=False,
-                                        quant_config=quant_config)
+            quant_config=quant_config,
+        )
+        self.c_proj = RowParallelLinear(
+            intermediate_size,
+            hidden_size,
+            bias=False,
+            quant_config=quant_config,
+        )
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
@@ -83,8 +88,8 @@ class QWenAttention(nn.Module):
     ):
         super().__init__()
         self.hidden_size = hidden_size
-        tensor_model_parallel_world_size = get_tensor_model_parallel_world_size(
-        )
+        tensor_model_parallel_world_size = (
+            get_tensor_model_parallel_world_size())
         self.total_num_heads = num_heads
         assert self.total_num_heads % tensor_model_parallel_world_size == 0
         self.num_heads = (self.total_num_heads //
@@ -112,12 +117,14 @@ class QWenAttention(nn.Module):
             base=rope_theta,
             rope_scaling=rope_scaling,
         )
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              self.scaling,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn")
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn",
+        )
 
     def forward(
         self,
@@ -146,20 +153,24 @@ class QWenBlock(nn.Module):
 
         rope_theta = getattr(config, "rope_theta", 10000)
         rope_scaling = getattr(config, "rope_scaling", None)
-        self.attn = QWenAttention(config.hidden_size,
-                                  config.num_attention_heads,
-                                  config.max_position_embeddings,
-                                  rope_theta=rope_theta,
-                                  rope_scaling=rope_scaling,
-                                  cache_config=cache_config,
-                                  quant_config=quant_config,
-                                  prefix=f"{prefix}.attn")
+        self.attn = QWenAttention(
+            config.hidden_size,
+            config.num_attention_heads,
+            config.max_position_embeddings,
+            rope_theta=rope_theta,
+            rope_scaling=rope_scaling,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn",
+        )
 
         self.ln_2 = RMSNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
-        self.mlp = QWenMLP(config.hidden_size,
-                           config.intermediate_size // 2,
-                           quant_config=quant_config)
+        self.mlp = QWenMLP(
+            config.hidden_size,
+            config.intermediate_size // 2,
+            quant_config=quant_config,
+        )
 
     def forward(
         self,
@@ -205,7 +216,8 @@ class QWenModel(nn.Module):
             config.num_hidden_layers,
             lambda prefix: QWenBlock(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.h")
+            prefix=f"{prefix}.h",
+        )
         self.ln_f = RMSNorm(config.hidden_size, eps=config.layer_norm_epsilon)
         self.make_empty_intermediate_tensors = (
             make_empty_intermediate_tensors_factory(
@@ -296,7 +308,7 @@ class QWenBaseModel(nn.Module):
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

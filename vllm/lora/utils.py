@@ -55,17 +55,21 @@ _all_lora_classes: Set[Type[BaseLayerWithLoRA]] = {
 }
 
 
-def from_layer(layer: nn.Module,
-               max_loras: int,
-               lora_config: LoRAConfig,
-               packed_modules_list: List,
-               model_config: Optional[PretrainedConfig] = None) -> nn.Module:
+def from_layer(
+    layer: nn.Module,
+    max_loras: int,
+    lora_config: LoRAConfig,
+    packed_modules_list: List,
+    model_config: Optional[PretrainedConfig] = None,
+) -> nn.Module:
     for lora_cls in _all_lora_classes:
         # specifying kwargs so they can be easily accessed in decorator
-        if lora_cls.can_replace_layer(source_layer=layer,
-                                      lora_config=lora_config,
-                                      packed_modules_list=packed_modules_list,
-                                      model_config=model_config):
+        if lora_cls.can_replace_layer(
+                source_layer=layer,
+                lora_config=lora_config,
+                packed_modules_list=packed_modules_list,
+                model_config=model_config,
+        ):
             instance_layer = lora_cls(layer)
             instance_layer.create_lora_weights(max_loras, lora_config,
                                                model_config)
@@ -80,9 +84,13 @@ def from_layer_logits_processor(
     lora_config: LoRAConfig,
     model_config: Optional[PretrainedConfig] = None,
 ) -> LogitsProcessorWithLoRA:
-    ret = LogitsProcessorWithLoRA(layer, lm_head.embedding_dim,
-                                  lm_head.weight.dtype, lm_head.weight.device,
-                                  lm_head.get_sharded_to_full_mapping())
+    ret = LogitsProcessorWithLoRA(
+        layer,
+        lm_head.embedding_dim,
+        lm_head.weight.dtype,
+        lm_head.weight.device,
+        lm_head.get_sharded_to_full_mapping(),
+    )
     ret.create_lora_weights(max_loras, lora_config, model_config)
     return ret
 
@@ -148,9 +156,9 @@ def parse_fine_tuned_lora_name(
 def is_regex_target_modules(load_modules: Union[str, List[str]],
                             expected_lora_modules: List[str]) -> bool:
     """
-    PEFT supports passing `target_modules` in the form of regular expressions, 
-    such as `model.*(q_proj|k_proj|v_proj)$`. This function is mainly used to 
-    determine whether the suffix in the regular expression is present in the 
+    PEFT supports passing `target_modules` in the form of regular expressions,
+    such as `model.*(q_proj|k_proj|v_proj)$`. This function is mainly used to
+    determine whether the suffix in the regular expression is present in the
     `expected_lora_modules`.
     """
 
@@ -216,7 +224,7 @@ def get_adapter_absolute_path(lora_path: str) -> str:
         return lora_path
 
     # If the path starts with ~, expand the user home directory.
-    if lora_path.startswith('~'):
+    if lora_path.startswith("~"):
         return os.path.expanduser(lora_path)
 
     # Check if the expanded relative path exists locally.
@@ -227,8 +235,12 @@ def get_adapter_absolute_path(lora_path: str) -> str:
     try:
         local_snapshot_path = huggingface_hub.snapshot_download(
             repo_id=lora_path)
-    except (HfHubHTTPError, RepositoryNotFoundError, EntryNotFoundError,
-            HFValidationError):
+    except (
+            HfHubHTTPError,
+            RepositoryNotFoundError,
+            EntryNotFoundError,
+            HFValidationError,
+    ):
         # Handle errors that may occur during the download
         # Return original path instead instead of throwing error here
         logger.exception("Error downloading the HuggingFace model")

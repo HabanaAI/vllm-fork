@@ -17,6 +17,7 @@ you can install it manually by following these steps:
 2. Rename the downloaded file to: frpc_linux_amd64_v0.3
 3. Move the file to this location: /home/user/.cache/huggingface/gradio/frpc
 """
+
 import argparse
 import json
 

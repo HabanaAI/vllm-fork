@@ -31,7 +31,6 @@ class LoRAKernelMeta:
     @staticmethod
     def make(max_loras: int, max_num_tokens: int,
              device: Union[torch.device, str]) -> "LoRAKernelMeta":
-
         token_lora_mapping = torch.empty(max_num_tokens,
                                          dtype=torch.int32,
                                          device=device)
@@ -61,7 +60,7 @@ class LoRAKernelMeta:
 
         no_lora_flag_cpu = torch.tensor([False],
                                         dtype=torch.bool,
-                                        device='cpu')
+                                        device="cpu")
 
         return LoRAKernelMeta(
             token_lora_mapping=token_lora_mapping,
@@ -69,7 +68,8 @@ class LoRAKernelMeta:
             active_lora_ids=active_lora_ids,
             num_tokens_per_lora=num_tokens_per_lora,
             lora_token_start_loc=lora_token_start_loc,
-            no_lora_flag_cpu=no_lora_flag_cpu)
+            no_lora_flag_cpu=no_lora_flag_cpu,
+        )
 
     def _reset(self):
         self.active_lora_ids.fill_(-1)
@@ -125,8 +125,14 @@ class LoRAKernelMeta:
 
     def meta_args(
         self, token_nums: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
-               torch.Tensor, torch.Tensor]:
+    ) -> Tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+    ]:
         """
         This function returns the kernel metadata required for the current
         forward pass execution of the kernel. The function returns all the
@@ -135,7 +141,7 @@ class LoRAKernelMeta:
 
         Args:
             token_nums (int): Number of input tokens in the current forward
-            pass. 
+            pass.
         """
         return (
             self.token_lora_mapping[:token_nums],

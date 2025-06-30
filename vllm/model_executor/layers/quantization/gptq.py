@@ -115,7 +115,6 @@ class GPTQConfig(QuantizationConfig):
 
 
 class ExllamaState(Enum):
-
     UNUSED = enum.auto()
     UNINITIALIZED = enum.auto()
     READY = enum.auto()
@@ -183,17 +182,20 @@ class GPTQLinearMethod(LinearMethodBase):
             output_dim=1,
             packed_dim=0,
             packed_factor=self.quant_config.pack_factor,
-            weight_loader=weight_loader)
+            weight_loader=weight_loader,
+        )
 
-        g_idx = RowvLLMParameter(data=torch.tensor(
-            [
-                i // self.quant_config.group_size
-                for i in range(input_size_per_partition)
-            ],
-            dtype=torch.int32,
-        ),
-                                 input_dim=0,
-                                 weight_loader=weight_loader)
+        g_idx = RowvLLMParameter(
+            data=torch.tensor(
+                [
+                    i // self.quant_config.group_size
+                    for i in range(input_size_per_partition)
+                ],
+                dtype=torch.int32,
+            ),
+            input_dim=0,
+            weight_loader=weight_loader,
+        )
         qzeros_args = {
             "data":
             torch.empty(
@@ -202,7 +204,7 @@ class GPTQLinearMethod(LinearMethodBase):
                 dtype=torch.int32,
             ),
             "weight_loader":
-            weight_loader
+            weight_loader,
         }
         weight_scale_args = {
             "data":
@@ -212,7 +214,7 @@ class GPTQLinearMethod(LinearMethodBase):
                 dtype=params_dtype,
             ),
             "weight_loader":
-            weight_loader
+            weight_loader,
         }
         if scale_and_zero_input_dim is None:
             scales = ChannelQuantScaleParameter(output_dim=1,
@@ -221,7 +223,8 @@ class GPTQLinearMethod(LinearMethodBase):
                 output_dim=1,
                 packed_dim=1,
                 packed_factor=self.quant_config.pack_factor,
-                **qzeros_args)
+                **qzeros_args,
+            )
 
         else:
             scales = GroupQuantScaleParameter(output_dim=1,
@@ -232,7 +235,8 @@ class GPTQLinearMethod(LinearMethodBase):
                 output_dim=1,
                 packed_dim=1,
                 packed_factor=self.quant_config.pack_factor,
-                **qzeros_args)
+                **qzeros_args,
+            )
 
         layer.register_parameter("qweight", qweight)
         layer.register_parameter("g_idx", g_idx)
@@ -261,17 +265,24 @@ class GPTQLinearMethod(LinearMethodBase):
             ops.gptq_shuffle(layer.qweight, layer.g_idx,
                              self.quant_config.weight_bits)
 
-    def apply(self,
-              layer: torch.nn.Module,
-              x: torch.Tensor,
-              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         out_shape = x.shape[:-1] + (layer.qweight.shape[-1], )
         reshaped_x = x.reshape(-1, x.shape[-1])
 
-        output = ops.gptq_gemm(reshaped_x, layer.qweight, layer.qzeros,
-                               layer.scales, layer.g_idx,
-                               layer.exllama_state == ExllamaState.READY,
-                               self.quant_config.weight_bits)
+        output = ops.gptq_gemm(
+            reshaped_x,
+            layer.qweight,
+            layer.qzeros,
+            layer.scales,
+            layer.g_idx,
+            layer.exllama_state == ExllamaState.READY,
+            self.quant_config.weight_bits,
+        )
         if bias is not None:
             output.add_(bias)
         return output.reshape(out_shape)

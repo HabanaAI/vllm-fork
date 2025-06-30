@@ -15,9 +15,9 @@ from vllm.utils import is_pin_memory_available
 class SpecDecodeWorkerMetrics(
         msgspec.Struct,
         omit_defaults=True,  # type: ignore[call-arg]
-        array_like=True):  # type: ignore[call-arg]
-    """Dataclass holding metrics emitted from the spec decode worker.
-    """
+        array_like=True,
+):  # type: ignore[call-arg]
+    """Dataclass holding metrics emitted from the spec decode worker."""
 
     # The empirical acceptance rate of the proposal method on a per-token basis.
     # This is useful for evaluating how well the proposal method aligns with the
@@ -56,10 +56,12 @@ class AsyncMetricsCollector:
     from the device to CPU on a non-default Torch stream.
     """
 
-    def __init__(self,
-                 spec_decode_sampler: SpecDecodeBaseSampler,
-                 timer: Optional[Timer] = None,
-                 collect_interval_s: float = 5.0):
+    def __init__(
+        self,
+        spec_decode_sampler: SpecDecodeBaseSampler,
+        timer: Optional[Timer] = None,
+        collect_interval_s: float = 5.0,
+    ):
         self.spec_decode_sampler = spec_decode_sampler
         self._timer = time.time if timer is None else timer
 
@@ -82,7 +84,7 @@ class AsyncMetricsCollector:
 
     def init_tensors(self,
                      rank: int,
-                     device_type: Union[torch.device, str] = 'cuda') -> None:
+                     device_type: Union[torch.device, str] = "cuda") -> None:
         self._rank = rank
         if isinstance(device_type, torch.device):
             device_type = device_type.type
@@ -91,8 +93,9 @@ class AsyncMetricsCollector:
         if stream is not None:
             self._copy_stream = stream()
 
-        if device_type == 'hpu':
+        if device_type == "hpu":
             import habana_frameworks.torch as htorch
+
             self._copy_stream = htorch.hpu.Stream()
 
     def maybe_collect_rejsample_metrics(
@@ -124,7 +127,8 @@ class AsyncMetricsCollector:
         if self._rank != 0:
             return False
 
-        return now - self._last_metrics_collect_time >= self._rejsample_metrics_collect_interval_s  # noqa: E501
+        return (now - self._last_metrics_collect_time
+                >= self._rejsample_metrics_collect_interval_s)  # noqa: E501
 
     def _copy_rejsample_metrics_async(self) -> torch.cuda.Event:
         """Copy rejection/typical-acceptance sampling metrics

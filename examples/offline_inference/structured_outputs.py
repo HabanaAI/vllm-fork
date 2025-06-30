@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-This file demonstrates the example usage of guided decoding 
-to generate structured outputs using vLLM. It shows how to apply 
-different guided decoding techniques such as Choice, Regex, JSON schema, 
-and Grammar to produce structured and formatted results 
+This file demonstrates the example usage of guided decoding
+to generate structured outputs using vLLM. It shows how to apply
+different guided decoding techniques such as Choice, Regex, JSON schema,
+and Grammar to produce structured and formatted results
 based on specific prompts.
 """
 

@@ -26,6 +26,7 @@ class BitBLASConfig(QuantizationConfig):
 
     Reference: https://github.com/Microsoft/BitBLAS
     """
+
     TORCH_DTYPE = torch.float16
     STORAGE_DTYPE = "int8"  # assume int8 storage
     TORCH_STORAGE_DTYPE = getattr(torch, STORAGE_DTYPE)
@@ -44,6 +45,7 @@ class BitBLASConfig(QuantizationConfig):
     ) -> None:
         try:
             import bitblas
+
             if bitblas.__version__ < MINIMUM_BITBLAS_VERSION:
                 raise ImportError(
                     "bitblas version is wrong. Please "
@@ -136,16 +138,23 @@ class BitBLASConfig(QuantizationConfig):
         quant_method = cls.get_from_keys(config, ["quant_method"])
         lm_head_quantized = cls.get_from_keys_or(config, ["lm_head"],
                                                  default=False)
-        return cls(weight_bits, group_size, desc_act, is_sym, quant_method,
-                   lm_head_quantized)
+        return cls(
+            weight_bits,
+            group_size,
+            desc_act,
+            is_sym,
+            quant_method,
+            lm_head_quantized,
+        )
 
     @classmethod
     def override_quantization_method(
             cls, hf_quant_cfg, user_quant) -> Optional[QuantizationMethods]:
         # compat: autogptq >=0.8.0 use checkpoint_format: str
         # compat: autogptq <=0.7.1 is_bitblas_format: bool
-        is_bitblas_format = (hf_quant_cfg.get("checkpoint_format") == "bitblas"
-                             or hf_quant_cfg.get("is_bitblas_format", False))
+        is_bitblas_format = hf_quant_cfg.get(
+            "checkpoint_format") == "bitblas" or hf_quant_cfg.get(
+                "is_bitblas_format", False)
 
         is_valid_user_quant = (user_quant is None or user_quant == "gptq"
                                or user_quant == "bitblas")
@@ -172,6 +181,7 @@ class BitBLASLinearMethod(LinearMethodBase):
     Args:
         quant_config: The BitBLAS quantization config.
     """
+
     # USE BITBLAS_OPTIMIZE_FEATURES_CONTIGUOUS
     # Instead of BITBLAS_OPTIMIZE_FEATURES
     # If you want to high contiguous batching
@@ -201,7 +211,7 @@ class BitBLASLinearMethod(LinearMethodBase):
     ):
         """Creates quantized weights for use in linear operations.
 
-        The function initializes and returns a dictionary containing quantized 
+        The function initializes and returns a dictionary containing quantized
         weights, scales, and zeros
         for performing quantized matrix multiplication operations.
 
@@ -210,16 +220,16 @@ class BitBLASLinearMethod(LinearMethodBase):
             output_size_per_partition: The size of the output partition.
             input_size: The total size of the input (unused).
             output_size: The total size of the output (unused).
-            params_dtype: 
+            params_dtype:
                 The data type of the parameters (expected to be torch.float16).
 
         Returns:
-            A dictionary containing the quantized weights ('qweight'), 
+            A dictionary containing the quantized weights ('qweight'),
             scales ('scales'), and zeros ('zeros').
 
         Raises:
-            ValueError: If `params_dtype` is not `torch.float16` or if the 
-            input size per partition is not divisible by the group size in 
+            ValueError: If `params_dtype` is not `torch.float16` or if the
+            input size per partition is not divisible by the group size in
             `quant_config`.
         """
         del input_size, output_size  # Unused arguments.
@@ -233,7 +243,7 @@ class BitBLASLinearMethod(LinearMethodBase):
             group_size = -1
         # Validate output_size_per_partition
         output_size_per_partition = sum(output_partition_sizes)
-        if (group_size != -1 and input_size_per_partition % group_size != 0):
+        if group_size != -1 and input_size_per_partition % group_size != 0:
             raise ValueError(
                 f"Input size per partition ({input_size_per_partition}) must "
                 f"be divisible by group size ({group_size}).")
@@ -281,7 +291,7 @@ class BitBLASLinearMethod(LinearMethodBase):
                 dtype=params_dtype,
             ),
             "weight_loader":
-            weight_loader
+            weight_loader,
         }
         if input_groups == 1:
             scales = ChannelQuantScaleParameter(output_dim=0,
@@ -309,17 +319,22 @@ class BitBLASLinearMethod(LinearMethodBase):
 
         else:
             zeros = BasevLLMParameter(
-                torch.empty(output_size_per_partition,
-                            input_groups,
-                            device="cuda",
-                            dtype=params_dtype),
+                torch.empty(
+                    output_size_per_partition,
+                    input_groups,
+                    device="cuda",
+                    dtype=params_dtype,
+                ),
                 weight_loader=weight_loader,
             )
             # Set attributes to indicate how scales and zeros are applied.
-            set_weight_attrs(zeros, {
-                "input_dim": None if input_groups == 1 else 1,
-                "output_dim": 0,
-            })
+            set_weight_attrs(
+                zeros,
+                {
+                    "input_dim": None if input_groups == 1 else 1,
+                    "output_dim": 0,
+                },
+            )
 
         layer.register_parameter("qweight", qweight)
         layer.register_parameter("scales", scales)
@@ -336,10 +351,15 @@ class BitBLASLinearMethod(LinearMethodBase):
         **extra_weight_attrs,
     ):
         if self.quant_config.quant_method == "gptq":
-            return self.create_weights_gptq(layer, input_size_per_partition,
-                                            output_partition_sizes, input_size,
-                                            output_size, params_dtype,
-                                            **extra_weight_attrs)
+            return self.create_weights_gptq(
+                layer,
+                input_size_per_partition,
+                output_partition_sizes,
+                input_size,
+                output_size,
+                params_dtype,
+                **extra_weight_attrs,
+            )
         else:
             raise ValueError(
                 f"Unsupported quant_method {self.quant_config.quant_method}")
@@ -356,6 +376,7 @@ class BitBLASLinearMethod(LinearMethodBase):
         out_dtype="float16",
     ):
         from bitblas import MatmulConfig
+
         bitblas_dtype = self.BITBLAS_DTYPES[params_dtype]
 
         with_scaling = False
@@ -394,6 +415,7 @@ class BitBLASLinearMethod(LinearMethodBase):
     def _get_or_create_bitblas_operator(self, config, enable_tuning):
         from bitblas import Matmul, auto_detect_nvidia_target
         from bitblas.cache import get_database_path, global_operator_cache
+
         BITBLAS_DATABASE_PATH = get_database_path()
         BITBLAS_TARGET = auto_detect_nvidia_target()
         if global_operator_cache.size() == 0:
@@ -406,7 +428,7 @@ class BitBLASLinearMethod(LinearMethodBase):
                                     target=BITBLAS_TARGET,
                                     enable_tuning=False)
             if enable_tuning:
-                TUNING_MESSAGE = (f"BitBLAS Operator {config} is tuning ...")
+                TUNING_MESSAGE = f"BitBLAS Operator {config} is tuning ..."
                 logger.info(TUNING_MESSAGE)
                 bitblas_matmul.hardware_aware_finetune(topk=20)
                 global_operator_cache.add(config, bitblas_matmul)

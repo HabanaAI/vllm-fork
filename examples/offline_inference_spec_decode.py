@@ -26,7 +26,6 @@ def time_generation(llm: LLM, prompts: list[str],
 
 
 if __name__ == "__main__":
-
     # Sample prompts.
     prompts = [
         "The future of AI is",

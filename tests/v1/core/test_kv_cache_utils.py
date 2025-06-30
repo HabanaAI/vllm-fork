@@ -26,11 +26,13 @@ from vllm.v1.request import Request
 # yapf: enable
 
 
-def make_request(request_id,
-                 prompt_token_ids,
-                 mm_positions=None,
-                 mm_hashes=None,
-                 cache_salt=None):
+def make_request(
+    request_id,
+    prompt_token_ids,
+    mm_positions=None,
+    mm_hashes=None,
+    cache_salt=None,
+):
     if mm_positions is None:
         multi_modal_inputs = None
     else:
@@ -50,16 +52,20 @@ def make_request(request_id,
     )
 
 
-def new_kv_cache_spec(block_size=16,
-                      num_kv_heads=2,
-                      head_size=64,
-                      dtype=torch.float32,
-                      use_mla=False):
-    return FullAttentionSpec(block_size=block_size,
-                             num_kv_heads=num_kv_heads,
-                             head_size=head_size,
-                             dtype=dtype,
-                             use_mla=use_mla)
+def new_kv_cache_spec(
+    block_size=16,
+    num_kv_heads=2,
+    head_size=64,
+    dtype=torch.float32,
+    use_mla=False,
+):
+    return FullAttentionSpec(
+        block_size=block_size,
+        num_kv_heads=num_kv_heads,
+        head_size=head_size,
+        dtype=dtype,
+        use_mla=use_mla,
+    )
 
 
 def test_none_hash():
@@ -166,8 +172,8 @@ def test_free_kv_cache_block_queue_get_all_free_blocks():
 
     # Append a block back and check again
     queue.append(block_to_remove)
-    assert queue.get_all_free_blocks() == \
-        blocks[1:2] + blocks[3:] + [block_to_remove]
+    assert queue.get_all_free_blocks(
+    ) == blocks[1:2] + blocks[3:] + [block_to_remove]
 
 
 def test_generate_block_hash_extra_keys():
@@ -198,7 +204,7 @@ def test_generate_block_hash_extra_keys():
 
     # Test with multiple extra keys
     extra_keys, next_mm_idx = generate_block_hash_extra_keys(request, 0, 15, 0)
-    assert extra_keys == ('hash1', 'hash2')
+    assert extra_keys == ("hash1", "hash2")
     assert next_mm_idx == 2
 
 
@@ -226,9 +232,9 @@ def test_generate_block_hash_extra_keys_cache_salt():
 
     # salt is added for the first token
     extra_keys, _ = generate_block_hash_extra_keys(request, 0, 1, 0)
-    assert extra_keys == ('salt', )
+    assert extra_keys == ("salt", )
     extra_keys, _ = generate_block_hash_extra_keys(request, 0, 10, 0)
-    assert extra_keys == ('salt', )
+    assert extra_keys == ("salt", )
 
     # no salt added for other tokens
     extra_keys, _ = generate_block_hash_extra_keys(request, 1, 2, 0)
@@ -472,10 +478,12 @@ def test_unify_kv_cache_configs():
 
 
 @pytest.mark.parametrize(
-    ("model_id", "max_model_len", "want_estimated_max_len"), [
+    ("model_id", "max_model_len", "want_estimated_max_len"),
+    [
         ("Qwen/Qwen1.5-7B", 16385, 16384),
         ("Qwen/Qwen1.5-7B", 16383, 16383),
-    ])
+    ],
+)
 def test_estimate_max_model_len(model_id, max_model_len,
                                 want_estimated_max_len):
     # Create a VllmConfig

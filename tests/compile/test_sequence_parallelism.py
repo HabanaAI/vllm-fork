@@ -55,18 +55,18 @@ class TestModel(torch.nn.Module):
     def forward(self, hidden_states, residual):
         """
         Forward pass implementing the operations in the FX graph
-        
+
         Args:
             hidden_states: Input tensor
             residual: Residual tensor from previous layer
-            
+
         Returns:
             Tuple containing the output tensor
         """
         # Reshape input
         view = hidden_states.reshape(-1, self.hidden_size)
 
-        #matrix multiplication
+        # matrix multiplication
         permute = self.gate_proj.permute(1, 0)
         mm = torch.mm(view, permute)
 
@@ -93,18 +93,23 @@ def test_sequence_parallelism_pass(batch_size: int, seq_len: int,
     def run_torch_spawn(fn, nprocs):
         # need to use torch.mp.spawn otherwise will have problems with
         # torch.distributed and cuda
-        torch.multiprocessing.spawn(fn,
-                                    args=(num_processes, batch_size, seq_len,
-                                          hidden_size, dtype),
-                                    nprocs=nprocs)
+        torch.multiprocessing.spawn(
+            fn,
+            args=(num_processes, batch_size, seq_len, hidden_size, dtype),
+            nprocs=nprocs,
+        )
 
     run_torch_spawn(sequence_parallelism_pass_on_test_model, num_processes)
 
 
-def sequence_parallelism_pass_on_test_model(local_rank: int, world_size: int,
-                                            batch_size: int, seq_len: int,
-                                            hidden_size: int,
-                                            dtype: torch.dtype):
+def sequence_parallelism_pass_on_test_model(
+    local_rank: int,
+    world_size: int,
+    batch_size: int,
+    seq_len: int,
+    hidden_size: int,
+    dtype: torch.dtype,
+):
     current_platform.seed_everything(0)
 
     device = torch.device(f"cuda:{local_rank}")
@@ -113,11 +118,11 @@ def sequence_parallelism_pass_on_test_model(local_rank: int, world_size: int,
     torch.set_default_dtype(dtype)
 
     update_environment_variables({
-        'RANK': str(local_rank),
-        'LOCAL_RANK': str(local_rank),
-        'WORLD_SIZE': str(world_size),
-        'MASTER_ADDR': 'localhost',
-        'MASTER_PORT': '12345',
+        "RANK": str(local_rank),
+        "LOCAL_RANK": str(local_rank),
+        "WORLD_SIZE": str(world_size),
+        "MASTER_ADDR": "localhost",
+        "MASTER_PORT": "12345",
     })
 
     # initialize distributed
@@ -134,13 +139,15 @@ def sequence_parallelism_pass_on_test_model(local_rank: int, world_size: int,
     # this is a fake model name to construct the model config
     # in the vllm_config, it's not really used.
     model = "nm-testing/TinyLlama-1.1B-Chat-v1.0-FP8-e2e"
-    vllm_config.model_config = ModelConfig(model=model,
-                                           task="auto",
-                                           tokenizer=model,
-                                           tokenizer_mode="auto",
-                                           trust_remote_code=True,
-                                           dtype=dtype,
-                                           seed=42)
+    vllm_config.model_config = ModelConfig(
+        model=model,
+        task="auto",
+        tokenizer=model,
+        tokenizer_mode="auto",
+        trust_remote_code=True,
+        dtype=dtype,
+        seed=42,
+    )
 
     sequence_parallelism_pass = SequenceParallelismPass(vllm_config)
     backend_no_func = TestBackend(sequence_parallelism_pass)
@@ -178,8 +185,8 @@ def sequence_parallelism_pass_on_test_model(local_rank: int, world_size: int,
     # check if the functionalization pass is applied
     for op in OPS_IN_MODEL:
         find_auto_fn(backend_no_func.graph_post_pass.nodes, op)
-        assert find_auto_fn_maybe(backend_func.graph_post_pass.nodes,
-                                  op) is None  # noqa: E501
+        assert (find_auto_fn_maybe(backend_func.graph_post_pass.nodes, op)
+                is None)  # noqa: E501
 
     # make sure the ops were all de-functionalized
     found = dict()

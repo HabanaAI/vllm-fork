@@ -6,6 +6,7 @@ WARNING: This test runs in both single-node (4 GPUs) and multi-node
  all workers in a node other than the head node, which can cause the test
  to fail.
 """
+
 import json
 import os
 from dataclasses import dataclass
@@ -66,22 +67,30 @@ class SPTestSettings:
     ):
         return SPTestSettings(
             parallel_setups=[
-                ParallelSetup(tp_size=tp_base,
-                              sp_enabled=True,
-                              eager_mode=False,
-                              chunked_prefill=False),
-                ParallelSetup(tp_size=tp_base,
-                              sp_enabled=True,
-                              eager_mode=False,
-                              chunked_prefill=True),
-                ParallelSetup(tp_size=tp_base,
-                              sp_enabled=True,
-                              eager_mode=True,
-                              chunked_prefill=False),
-                ParallelSetup(tp_size=tp_base,
-                              sp_enabled=True,
-                              eager_mode=True,
-                              chunked_prefill=True)
+                ParallelSetup(
+                    tp_size=tp_base,
+                    sp_enabled=True,
+                    eager_mode=False,
+                    chunked_prefill=False,
+                ),
+                ParallelSetup(
+                    tp_size=tp_base,
+                    sp_enabled=True,
+                    eager_mode=False,
+                    chunked_prefill=True,
+                ),
+                ParallelSetup(
+                    tp_size=tp_base,
+                    sp_enabled=True,
+                    eager_mode=True,
+                    chunked_prefill=False,
+                ),
+                ParallelSetup(
+                    tp_size=tp_base,
+                    sp_enabled=True,
+                    eager_mode=True,
+                    chunked_prefill=True,
+                ),
             ],
             distributed_backends=["mp", "ray"],
             vllm_major_versions=["1", "1"],
@@ -100,10 +109,12 @@ class SPTestSettings:
     ):
         return SPTestSettings(
             parallel_setups=[
-                ParallelSetup(tp_size=tp_base,
-                              sp_enabled=True,
-                              eager_mode=False,
-                              chunked_prefill=False),
+                ParallelSetup(
+                    tp_size=tp_base,
+                    sp_enabled=True,
+                    eager_mode=False,
+                    chunked_prefill=False,
+                ),
             ],
             distributed_backends=["mp", "ray"],
             vllm_major_versions=["1", "1"],
@@ -118,8 +129,14 @@ class SPTestSettings:
         for parallel_setup in self.parallel_setups:
             for backend, vllm_major_version in zip(self.distributed_backends,
                                                    self.vllm_major_versions):
-                yield (model_id, parallel_setup, backend, vllm_major_version,
-                       self.task, opts)
+                yield (
+                    model_id,
+                    parallel_setup,
+                    backend,
+                    vllm_major_version,
+                    self.task,
+                    opts,
+                )
 
 
 def _compare_sp(
@@ -201,14 +218,14 @@ def _compare_sp(
         common_args.extend(["--hf-overrides", json.dumps(hf_overrides)])
 
     compilation_config = {
-        'level': 3,
-        'custom_ops': ["+rms_norm"],
-        'compile_sizes': [4, 8],
-        'splitting_ops': [],
-        'pass_config': {
-            'enable_sequence_parallism': sp_enabled,
-            'enable_noop': True,
-            'enable_fusion': True,
+        "level": 3,
+        "custom_ops": ["+rms_norm"],
+        "compile_sizes": [4, 8],
+        "splitting_ops": [],
+        "pass_config": {
+            "enable_sequence_parallism": sp_enabled,
+            "enable_noop": True,
+            "enable_fusion": True,
         },
     }
 
@@ -267,8 +284,14 @@ SP_TEST_MODELS = [
 
 
 @pytest.mark.parametrize(
-    ("model_id", "parallel_setup", "distributed_backend", "vllm_major_version",
-     "task", "test_options"),
+    (
+        "model_id",
+        "parallel_setup",
+        "distributed_backend",
+        "vllm_major_version",
+        "task",
+        "test_options",
+    ),
     [
         params for model_id, settings in SP_TEXT_GENERATION_MODELS.items()
         for params in settings.iter_params(model_id)
@@ -285,12 +308,14 @@ def test_tp_sp_generation(
     test_options: SPTestOptions,
     num_gpus_available,
 ):
-    _compare_sp(model_id,
-                parallel_setup,
-                distributed_backend,
-                vllm_major_version,
-                task,
-                test_options,
-                num_gpus_available,
-                method="generate",
-                is_multimodal=False)
+    _compare_sp(
+        model_id,
+        parallel_setup,
+        distributed_backend,
+        vllm_major_version,
+        task,
+        test_options,
+        num_gpus_available,
+        method="generate",
+        is_multimodal=False,
+    )

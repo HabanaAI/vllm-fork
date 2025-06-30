@@ -9,7 +9,7 @@ from tests.kernels.utils import DEFAULT_OPCHECK_TEST_UTILS, opcheck
 from vllm import _custom_ops as ops
 from vllm.platforms import current_platform
 
-COPYING_DIRECTION = [('cuda', 'cpu'), ('cuda', 'cuda'), ('cpu', 'cuda')]
+COPYING_DIRECTION = [("cuda", "cpu"), ("cuda", "cuda"), ("cpu", "cuda")]
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [42]  # Arbitrary values for testing
 NUM_LAYERS = [1]  # Arbitrary values for testing
@@ -82,10 +82,17 @@ def test_copy_blocks(
         block_mapping.append((src, dst2))
 
     # Create the KV caches.
-    key_caches, value_caches = kv_cache_factory(num_blocks, block_size,
-                                                num_layers, num_heads,
-                                                head_size, kv_cache_dtype,
-                                                dtype, seed, device)
+    key_caches, value_caches = kv_cache_factory(
+        num_blocks,
+        block_size,
+        num_layers,
+        num_heads,
+        head_size,
+        kv_cache_dtype,
+        dtype,
+        seed,
+        device,
+    )
 
     # Clone the KV caches.
     cloned_key_caches = [key_cache.clone() for key_cache in key_caches]
@@ -96,10 +103,12 @@ def test_copy_blocks(
                                         dtype=torch.int64,
                                         device=device).view(-1, 2)
 
-    opcheck(torch.ops._C_cache_ops.copy_blocks,
-            (key_caches, value_caches, block_mapping_tensor),
-            test_utils=DEFAULT_OPCHECK_TEST_UTILS,
-            cond=(head_size == HEAD_SIZES[0]))
+    opcheck(
+        torch.ops._C_cache_ops.copy_blocks,
+        (key_caches, value_caches, block_mapping_tensor),
+        test_utils=DEFAULT_OPCHECK_TEST_UTILS,
+        cond=(head_size == HEAD_SIZES[0]),
+    )
     ops.copy_blocks(key_caches, value_caches, block_mapping_tensor)
 
     # Run the reference implementation.
@@ -152,10 +161,17 @@ def test_reshape_and_cache(
     _, key, value = qkv.unbind(dim=1)
 
     # Create the KV caches.
-    key_caches, value_caches = kv_cache_factory(num_blocks, block_size, 1,
-                                                num_heads, head_size,
-                                                kv_cache_dtype, dtype, seed,
-                                                device)
+    key_caches, value_caches = kv_cache_factory(
+        num_blocks,
+        block_size,
+        1,
+        num_heads,
+        head_size,
+        kv_cache_dtype,
+        dtype,
+        seed,
+        device,
+    )
     key_cache, value_cache = key_caches[0], value_caches[0]
 
     # Using default kv_scale
@@ -173,12 +189,30 @@ def test_reshape_and_cache(
         cloned_value_cache = value_cache.clone()
 
     # Call the reshape_and_cache kernel.
-    opcheck(torch.ops._C_cache_ops.reshape_and_cache,
-            (key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype,
-             k_scale, v_scale),
-            cond=(head_size == HEAD_SIZES[0]))
-    ops.reshape_and_cache(key, value, key_cache, value_cache, slot_mapping,
-                          kv_cache_dtype, k_scale, v_scale)
+    opcheck(
+        torch.ops._C_cache_ops.reshape_and_cache,
+        (
+            key,
+            value,
+            key_cache,
+            value_cache,
+            slot_mapping,
+            kv_cache_dtype,
+            k_scale,
+            v_scale,
+        ),
+        cond=(head_size == HEAD_SIZES[0]),
+    )
+    ops.reshape_and_cache(
+        key,
+        value,
+        key_cache,
+        value_cache,
+        slot_mapping,
+        kv_cache_dtype,
+        k_scale,
+        v_scale,
+    )
 
     if kv_cache_dtype == "fp8":
         result_key_cache = torch.empty_like(key_cache, dtype=torch.float16)
@@ -291,34 +325,60 @@ def test_reshape_and_cache_flash(
                         kv_cache_dtype)
         cloned_value_cache = torch.empty_like(value_cache_compact,
                                               dtype=torch.float16)
-        ops.convert_fp8(cloned_value_cache, value_cache_compact,
-                        v_scale.item(), kv_cache_dtype)
+        ops.convert_fp8(
+            cloned_value_cache,
+            value_cache_compact,
+            v_scale.item(),
+            kv_cache_dtype,
+        )
     else:
         cloned_key_cache = key_cache_compact.clone()
         cloned_value_cache = value_cache_compact.clone()
     # Call the reshape_and_cache kernel.
-    opcheck(torch.ops._C_cache_ops.reshape_and_cache_flash,
-            (key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype,
-             k_scale, v_scale),
-            cond=(head_size == HEAD_SIZES[0]))
-    ops.reshape_and_cache_flash(key, value, key_cache, value_cache,
-                                slot_mapping, kv_cache_dtype, k_scale, v_scale)
+    opcheck(
+        torch.ops._C_cache_ops.reshape_and_cache_flash,
+        (
+            key,
+            value,
+            key_cache,
+            value_cache,
+            slot_mapping,
+            kv_cache_dtype,
+            k_scale,
+            v_scale,
+        ),
+        cond=(head_size == HEAD_SIZES[0]),
+    )
+    ops.reshape_and_cache_flash(
+        key,
+        value,
+        key_cache,
+        value_cache,
+        slot_mapping,
+        kv_cache_dtype,
+        k_scale,
+        v_scale,
+    )
     key_cache_compact = permute_and_compact(key_cache)
     value_cache_compact = permute_and_compact(value_cache)
 
     if kv_cache_dtype == "fp8":
         result_key_cache = torch.empty_like(key_cache_compact,
                                             dtype=torch.float16)
-        ops.convert_fp8(result_key_cache,
-                        key_cache_compact,
-                        k_scale.item(),
-                        kv_dtype=kv_cache_dtype)
+        ops.convert_fp8(
+            result_key_cache,
+            key_cache_compact,
+            k_scale.item(),
+            kv_dtype=kv_cache_dtype,
+        )
         result_value_cache = torch.empty_like(value_cache_compact,
                                               dtype=torch.float16)
-        ops.convert_fp8(result_value_cache,
-                        value_cache_compact,
-                        v_scale.item(),
-                        kv_dtype=kv_cache_dtype)
+        ops.convert_fp8(
+            result_value_cache,
+            value_cache_compact,
+            v_scale.item(),
+            kv_dtype=kv_cache_dtype,
+        )
 
     # Run the reference implementation.
     block_indicies = torch.div(slot_mapping, block_size, rounding_mode="floor")
@@ -380,8 +440,8 @@ def test_swap_blocks(
 
     current_platform.seed_everything(seed)
 
-    src_device = device if direction[0] == "cuda" else 'cpu'
-    dst_device = device if direction[1] == "cuda" else 'cpu'
+    src_device = device if direction[0] == "cuda" else "cpu"
+    dst_device = device if direction[1] == "cuda" else "cpu"
 
     src_blocks = random.sample(range(num_blocks), num_mappings)
     # For the same device, mapping must not overlap
@@ -398,25 +458,45 @@ def test_swap_blocks(
 
     # Create the KV caches on the first device.
     src_key_caches, src_value_caches = kv_cache_factory(
-        num_blocks, block_size, 1, num_heads, head_size, kv_cache_dtype, dtype,
-        seed, src_device)
+        num_blocks,
+        block_size,
+        1,
+        num_heads,
+        head_size,
+        kv_cache_dtype,
+        dtype,
+        seed,
+        src_device,
+    )
 
     # Create the KV caches on the second device.
     dist_key_caches, dist_value_caches = kv_cache_factory(
-        num_blocks, block_size, 1, num_heads, head_size, kv_cache_dtype, dtype,
-        seed, dst_device)
+        num_blocks,
+        block_size,
+        1,
+        num_heads,
+        head_size,
+        kv_cache_dtype,
+        dtype,
+        seed,
+        dst_device,
+    )
 
     src_key_caches_clone = src_key_caches[0].clone()
     src_value_caches_clone = src_value_caches[0].clone()
 
     # Call the swap_blocks kernel.
-    do_opcheck = (head_size == HEAD_SIZES[0])
-    opcheck(torch.ops._C_cache_ops.swap_blocks,
-            (src_key_caches[0], dist_key_caches[0], block_mapping_tensor),
-            cond=do_opcheck)
-    opcheck(torch.ops._C_cache_ops.swap_blocks,
-            (src_value_caches[0], dist_value_caches[0], block_mapping_tensor),
-            cond=do_opcheck)
+    do_opcheck = head_size == HEAD_SIZES[0]
+    opcheck(
+        torch.ops._C_cache_ops.swap_blocks,
+        (src_key_caches[0], dist_key_caches[0], block_mapping_tensor),
+        cond=do_opcheck,
+    )
+    opcheck(
+        torch.ops._C_cache_ops.swap_blocks,
+        (src_value_caches[0], dist_value_caches[0], block_mapping_tensor),
+        cond=do_opcheck,
+    )
 
     ops.swap_blocks(src_key_caches[0], dist_key_caches[0],
                     block_mapping_tensor)
@@ -560,10 +640,12 @@ def test_concat_and_cache_mla(
 
     if kv_cache_dtype == "fp8":
         result_temp = torch.empty_like(kv_cache, dtype=torch.float16)
-        ops.convert_fp8(result_temp,
-                        kv_cache.contiguous(),
-                        scale.item(),
-                        kv_dtype=kv_cache_dtype)
+        ops.convert_fp8(
+            result_temp,
+            kv_cache.contiguous(),
+            scale.item(),
+            kv_dtype=kv_cache_dtype,
+        )
         expected_temp = torch.empty_like(ref_kv_cache, dtype=torch.float16)
         ops.convert_fp8(expected_temp,
                         ref_kv_cache,
@@ -698,7 +780,8 @@ def test_swap_blocks_mla(
             src_cache_clone[src].cpu(),
             dst_cache[dst].cpu(),
             msg=f"Block {src} from src should have been swapped to block "
-            f"{dst} in dst_cache.")
+            f"{dst} in dst_cache.",
+        )
 
 
 @pytest.mark.parametrize("kv_lora_rank", [512])
@@ -712,9 +795,17 @@ def test_swap_blocks_mla(
                          ["auto"])  # You can also test "fp8" if needed.
 @pytest.mark.parametrize("device", CUDA_DEVICES)
 @torch.inference_mode()
-def test_gather_cache_mla(kv_lora_rank, qk_rope_head_dim, block_size,
-                          num_blocks, max_seq_len, batch_size, dtype,
-                          kv_cache_dtype, device):
+def test_gather_cache_mla(
+    kv_lora_rank,
+    qk_rope_head_dim,
+    block_size,
+    num_blocks,
+    max_seq_len,
+    batch_size,
+    dtype,
+    kv_cache_dtype,
+    device,
+):
     entry_size = kv_lora_rank + qk_rope_head_dim
     src_cache = _create_mla_cache(num_blocks, block_size, entry_size, dtype,
                                   kv_cache_dtype, device)

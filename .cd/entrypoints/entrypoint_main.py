@@ -26,7 +26,8 @@ class EntrypointMain:
             print(
                 "[ERROR] Both --config-file and --config-name must be "
                 "provided together, or neither.",
-                file=sys.stderr)
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     def _load_env_from_config(self):
@@ -38,13 +39,15 @@ class EntrypointMain:
                     print(
                         f"[ERROR] Section '{self.config_name}' not found in "
                         f"'{self.config_file}'.",
-                        file=sys.stderr)
+                        file=sys.stderr,
+                    )
                     sys.exit(1)
                 if not isinstance(section, dict):
                     print(
                         f"[ERROR] Section '{self.config_name}' is not a "
                         f"dictionary in '{self.config_file}'.",
-                        file=sys.stderr)
+                        file=sys.stderr,
+                    )
                     sys.exit(1)
                 self.config_envs = section
                 print(f"[INFO] Loaded configuration from file: "
@@ -69,26 +72,30 @@ class EntrypointMain:
             variables = VarsGenerator(
                 defaults_path="server_autoconfig/defaults.yaml",
                 varlist_conf_path="server_autoconfig/varlist_conf.yaml",
-                model_def_settings_path=("server_autoconfig/settings_vllm.csv"
-                                         )).calculate_variables()
+                model_def_settings_path=(
+                    "server_autoconfig/settings_vllm.csv"),
+            ).calculate_variables()
             ScriptGenerator(
                 template_script_path="templates/template_vllm_server.sh",
                 output_script_path="vllm_server.sh",
                 variables=variables,
-                log_dir="logs").create_and_run()
+                log_dir="logs",
+            ).create_and_run()
         elif self.mode == "benchmark":
             print("[INFO] Starting container in benchmark mode.")
             ScriptGenerator(
                 template_script_path="templates/template_vllm_benchmark.sh",
                 output_script_path="vllm_benchmark.sh",
                 variables=self.config_envs,
-                log_dir="logs").create_and_run()
+                log_dir="logs",
+            ).create_and_run()
         elif self.mode == "test":
             print("[INFO] Test mode: keeping container active. "
                   "Press Ctrl+C to exit.")
             try:
                 while True:
                     import time
+
                     time.sleep(60)
             except KeyboardInterrupt:
                 print("Exiting test mode.")
@@ -102,17 +109,21 @@ class EntrypointMain:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="EntrypointMain for vllm docker")
-    parser.add_argument("mode",
-                        nargs="?",
-                        default="server",
-                        choices=["server", "benchmark", "test"],
-                        help="Mode to run: server, benchmark, or test")
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        default="server",
+        choices=["server", "benchmark", "test"],
+        help="Mode to run: server, benchmark, or test",
+    )
     parser.add_argument("--config-file", type=str, help="Path to config file")
     parser.add_argument("--config-name",
                         type=str,
                         help="Config name in the config file")
     args = parser.parse_args()
 
-    EntrypointMain(mode=args.mode,
-                   config_file=args.config_file,
-                   config_name=args.config_name).run()
+    EntrypointMain(
+        mode=args.mode,
+        config_file=args.config_file,
+        config_name=args.config_name,
+    ).run()

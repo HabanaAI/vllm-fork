@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Types for writing multimodal model tests."""
+
 from collections.abc import Iterable
 from enum import Enum
 from pathlib import PosixPath
@@ -175,6 +176,7 @@ class VLMTestInfo(NamedTuple):
 
 class ExpandableVLMTestArgs(NamedTuple):
     """The expanded kwargs which correspond to a single test case."""
+
     model: str
     max_tokens: int
     num_logprobs: int

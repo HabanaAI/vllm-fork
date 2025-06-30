@@ -15,7 +15,7 @@ BENCHMARK_CMD_MODULES = [
 
 
 class BenchmarkSubcommand(CLISubcommand):
-    """ The `bench` subcommand for the vLLM CLI. """
+    """The `bench` subcommand for the vLLM CLI."""
 
     def __init__(self):
         self.name = "bench"
@@ -36,7 +36,8 @@ class BenchmarkSubcommand(CLISubcommand):
             "bench",
             help="vLLM bench subcommand.",
             description="vLLM bench subcommand.",
-            usage="vllm bench <bench_type> [options]")
+            usage="vllm bench <bench_type> [options]",
+        )
         bench_subparsers = bench_parser.add_subparsers(required=True,
                                                        dest="bench_type")
         self.cmds = {}

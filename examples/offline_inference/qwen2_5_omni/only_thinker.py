@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-This example shows how to use vLLM for running offline inference 
+This example shows how to use vLLM for running offline inference
 with the correct prompt format on Qwen2.5-Omni (thinker only).
 """
 
@@ -122,11 +122,13 @@ def main(args):
     model_name = "Qwen/Qwen2.5-Omni-7B"
     query_result = query_map[args.query_type]()
 
-    llm = LLM(model=model_name,
-              max_model_len=5632,
-              max_num_seqs=5,
-              limit_mm_per_prompt=query_result.limit_mm_per_prompt,
-              seed=args.seed)
+    llm = LLM(
+        model=model_name,
+        max_model_len=5632,
+        max_num_seqs=5,
+        limit_mm_per_prompt=query_result.limit_mm_per_prompt,
+        seed=args.seed,
+    )
 
     # We set temperature to 0.2 so that outputs can be different
     # even when all prompts are identical when running batch inference.
@@ -142,18 +144,22 @@ def main(args):
 
 if __name__ == "__main__":
     parser = FlexibleArgumentParser(
-        description='Demo on using vLLM for offline inference with '
-        'audio language models')
-    parser.add_argument('--query-type',
-                        '-q',
-                        type=str,
-                        default="mixed_modalities",
-                        choices=query_map.keys(),
-                        help='Query type.')
-    parser.add_argument("--seed",
-                        type=int,
-                        default=None,
-                        help="Set the seed when initializing `vllm.LLM`.")
+        description="Demo on using vLLM for offline inference with "
+        "audio language models")
+    parser.add_argument(
+        "--query-type",
+        "-q",
+        type=str,
+        default="mixed_modalities",
+        choices=query_map.keys(),
+        help="Query type.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Set the seed when initializing `vllm.LLM`.",
+    )
 
     args = parser.parse_args()
     main(args)

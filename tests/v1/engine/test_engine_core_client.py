@@ -51,7 +51,6 @@ def make_request(params: SamplingParams) -> EngineCoreRequest:
 
 
 def loop_until_done(client: EngineCoreClient, outputs: dict):
-
     while True:
         engine_core_outputs = client.get_output().outputs
 
@@ -69,7 +68,6 @@ def loop_until_done(client: EngineCoreClient, outputs: dict):
 
 
 async def loop_until_done_async(client: EngineCoreClient, outputs: dict):
-
     while True:
         engine_core_outputs = (await client.get_output_async()).outputs
 
@@ -98,7 +96,6 @@ def echo(self, msg: str, err_msg: Optional[str] = None) -> str:
 @pytest.mark.parametrize("multiprocessing_mode", [True, False])
 def test_engine_core_client(monkeypatch: pytest.MonkeyPatch,
                             multiprocessing_mode: bool):
-
     with monkeypatch.context() as m:
         m.setenv("VLLM_USE_V1", "1")
 
@@ -163,7 +160,7 @@ def test_engine_core_client(monkeypatch: pytest.MonkeyPatch,
 
         request = requests[0]
         client.add_request(request)
-        time.sleep(10.)
+        time.sleep(10.0)
 
         client.abort_requests([request.request_id])
 
@@ -183,7 +180,6 @@ def test_engine_core_client(monkeypatch: pytest.MonkeyPatch,
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_engine_core_client_asyncio(monkeypatch: pytest.MonkeyPatch):
-
     with monkeypatch.context() as m:
         m.setenv("VLLM_USE_V1", "1")
 
@@ -265,16 +261,17 @@ def test_kv_cache_events(
     multiprocessing_mode: bool,
     publisher_config,
 ):
-
     with monkeypatch.context() as m:
         m.setenv("VLLM_USE_V1", "1")
         block_size = 16
         num_blocks = 2
 
-        engine_args = EngineArgs(model=MODEL_NAME,
-                                 enforce_eager=True,
-                                 enable_prefix_caching=True,
-                                 block_size=block_size)
+        engine_args = EngineArgs(
+            model=MODEL_NAME,
+            enforce_eager=True,
+            enable_prefix_caching=True,
+            block_size=block_size,
+        )
         engine_args.kv_events_config = publisher_config
 
         vllm_config = engine_args.create_engine_config(
@@ -342,7 +339,6 @@ def test_kv_cache_events(
 
 @pytest.mark.timeout(20)
 def test_startup_failure(monkeypatch: pytest.MonkeyPatch):
-
     with monkeypatch.context() as m, pytest.raises(Exception) as e_info:
         m.setenv("VLLM_USE_V1", "1")
 

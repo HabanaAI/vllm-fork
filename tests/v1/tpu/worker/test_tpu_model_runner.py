@@ -13,11 +13,13 @@ from vllm.v1.worker.tpu_model_runner import (
 
 # Mock torch_xla module since it may not be available in the test environments
 torch_xla_patcher = mock.patch.dict(
-    "sys.modules", {
+    "sys.modules",
+    {
         "torch_xla": mock.MagicMock(),
         "torch_xla.core.xla_model": mock.MagicMock(),
         "torch_xla.runtime": mock.MagicMock(),
-    })
+    },
+)
 torch_xla_patcher.start()
 
 # Mock the PallasAttentionBackend
@@ -55,9 +57,11 @@ def model_runner():
         scheduler_config=scheduler_config,
     )
     device = "xla:0"  # Mocking TPU device
-    with mock.patch("vllm.v1.worker.tpu_model_runner.torch"), \
-         mock.patch("vllm.v1.worker.tpu_model_runner.xm"), \
-         mock.patch("vllm.v1.worker.tpu_model_runner.xr"):
+    with (
+            mock.patch("vllm.v1.worker.tpu_model_runner.torch"),
+            mock.patch("vllm.v1.worker.tpu_model_runner.xm"),
+            mock.patch("vllm.v1.worker.tpu_model_runner.xr"),
+    ):
         return TPUModelRunner(vllm_config, device)
 
 

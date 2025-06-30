@@ -17,8 +17,10 @@ async def lifespan(app: FastAPI):
     Lifespan context manager to handle startup and shutdown events.
     """
     # Startup: Initialize clients
-    prefiller_base_url = f'http://{global_args.prefiller_host}:{global_args.prefiller_port}/v1'
-    decoder_base_url = f'http://{global_args.decoder_host}:{global_args.decoder_port}/v1'
+    prefiller_base_url = (
+        f"http://{global_args.prefiller_host}:{global_args.prefiller_port}/v1")
+    decoder_base_url = (
+        f"http://{global_args.decoder_host}:{global_args.decoder_port}/v1")
 
     app.state.prefill_client = httpx.AsyncClient(timeout=None,
                                                  base_url=prefiller_base_url)
@@ -51,13 +53,17 @@ class StatsCalculator:
     def _log_stats(self):
         # Print average, median, and 99th percentile
         np_arr = np.array(self._stats)
-        output_str = f"\nNum requests: {len(self._stats)}" + \
-                "\nPrefill node TTFT stats:" + \
-                f"\n - Average (ms): {np.mean(np_arr)}" + \
-                f"\n - Median (ms): {np.median(np_arr)}" + \
-                f"\n - 99th Percentile (ms): {np.percentile(np_arr, 99)}\n"
-        print("===============================", output_str,
-              "===============================")
+        output_str = (
+            f"\nNum requests: {len(self._stats)}" +
+            "\nPrefill node TTFT stats:" +
+            f"\n - Average (ms): {np.mean(np_arr)}" +
+            f"\n - Median (ms): {np.median(np_arr)}" +
+            f"\n - 99th Percentile (ms): {np.percentile(np_arr, 99)}\n")
+        print(
+            "===============================",
+            output_str,
+            "===============================",
+        )
 
 
 stats_calculator = StatsCalculator()
@@ -88,9 +94,9 @@ async def send_request_to_service(client: httpx.AsyncClient, endpoint: str,
     Send a request to a service using a persistent client.
     """
     req_data = req_data.copy()
-    req_data['max_tokens'] = 1
-    if 'max_completion_tokens' in req_data:
-        req_data['max_completion_tokens'] = 1
+    req_data["max_tokens"] = 1
+    if "max_completion_tokens" in req_data:
+        req_data["max_completion_tokens"] = 1
 
     headers = {"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"}
     response = await client.post(endpoint, json=req_data, headers=headers)
@@ -140,6 +146,7 @@ async def handle_completions(request: Request):
     except Exception as e:
         import sys
         import traceback
+
         exc_info = sys.exc_info()
         print("Error occurred in disagg prefill proxy server"
               " - completions endpoint")
@@ -177,6 +184,7 @@ async def handle_chat_completions(request: Request):
     except Exception as e:
         import sys
         import traceback
+
         exc_info = sys.exc_info()
         print("Error occurred in disagg prefill proxy server "
               " - chat completions endpoint")
@@ -185,9 +193,10 @@ async def handle_chat_completions(request: Request):
         raise
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     global global_args
     global_args = parse_args()
 
     import uvicorn
+
     uvicorn.run(app, host=global_args.host, port=global_args.port)

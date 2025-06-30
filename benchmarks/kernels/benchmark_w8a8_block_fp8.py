@@ -20,8 +20,8 @@ from vllm.utils import FlexibleArgumentParser
 
 mp.set_start_method("spawn", force=True)
 
-assert current_platform.is_cuda(
-), "Only support tune w8a8 block fp8 kernel on CUDA device."
+assert current_platform.is_cuda(), (
+    "Only support tune w8a8 block fp8 kernel on CUDA device.")
 
 DTYPE_MAP = {
     "float32": torch.float32,
@@ -40,7 +40,7 @@ def w8a8_block_matmul(
     config: dict[str, Any],
     output_dtype: torch.dtype = torch.float16,
 ) -> torch.Tensor:
-    """This function performs matrix multiplication with 
+    """This function performs matrix multiplication with
     block-wise quantization.
 
     It takes two input tensors `A` and `B` with scales `As` and `Bs`.
@@ -51,7 +51,7 @@ def w8a8_block_matmul(
         B: The input tensor, e.g., weight.
         As: The per-token-group quantization scale for `A`.
         Bs: The per-block quantization scale for `B`.
-        block_size: The block size for per-block quantization. 
+        block_size: The block size for per-block quantization.
                     It should be 2-dim, e.g., [128, 128].
         output_dytpe: The dtype of the returned tensor.
 
@@ -222,8 +222,8 @@ def tune(M, N, K, block_size, out_dtype, search_space, input_type):
     n_tiles = (N + block_n - 1) // block_n
     k_tiles = (K + block_k - 1) // block_k
 
-    As = torch.rand(M, k_tiles, dtype=torch.float32,
-                    device="cuda") * factor_for_scale
+    As = (torch.rand(M, k_tiles, dtype=torch.float32, device="cuda") *
+          factor_for_scale)
     Bs = (torch.rand(n_tiles, k_tiles, dtype=torch.float32, device="cuda") *
           factor_for_scale)
 
@@ -398,7 +398,8 @@ Tune triton w8a8 block fp8 for DeepSeek-V3/DeepSeek-R1:
     python3 benchmark_w8a8_block_fp8.py --tp-size 8 --input-type fp8
 Then copy to model_executor/layers/quantization/utils/configs
         """,
-        formatter_class=argparse.RawTextHelpFormatter)
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
 
     parser.add_argument("--tp-size", "-tp", type=int, default=8)
     parser.add_argument("--input-type",

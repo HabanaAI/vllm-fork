@@ -40,12 +40,14 @@ class MultiStepHPUWorker(HPUWorker):
                 execute_model_req=execute_model_req)
             worker_input = dataclasses.replace(
                 worker_input,
-                num_steps=execute_model_req.num_lookahead_slots + 1)
+                num_steps=execute_model_req.num_lookahead_slots + 1,
+            )
             model_input: ModelInputForHPU = (
                 self.model_runner.prepare_model_input(
                     execute_model_req.seq_group_metadata_list,
                     execute_model_req.virtual_engine,
-                    execute_model_req.finished_requests_ids))
+                    execute_model_req.finished_requests_ids,
+                ))
 
             if execute_model_req.async_callback:
                 model_input = dataclasses.replace(
@@ -60,7 +62,8 @@ class MultiStepHPUWorker(HPUWorker):
         model_input = dataclasses.replace(
             model_input,
             is_first_multi_step=is_first_multi_step,
-            is_last_step=is_last_step)
+            is_last_step=is_last_step,
+        )
 
         if self.do_metadata_broadcast:
             if is_first_multi_step:
@@ -109,7 +112,8 @@ class MultiStepHPUWorker(HPUWorker):
                 self.cached_model_input = dataclasses.replace(
                     self.cached_model_input,
                     is_first_multi_step=broadcast_data["is_first_multi_step"],
-                    is_last_step=broadcast_data["is_last_step"])
+                    is_last_step=broadcast_data["is_last_step"],
+                )
                 empty_worker_input = WorkerInput()
                 return self.cached_model_input, empty_worker_input, {}
 

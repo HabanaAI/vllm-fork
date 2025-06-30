@@ -159,12 +159,12 @@ def bind_kv_cache(
     This function:
       1) Fills the ModelRunner's kv cache list (`runner_kv_caches`) with
          kv_caches.
-      2) Associates each attention layer in the `forward_context` with its 
+      2) Associates each attention layer in the `forward_context` with its
          corresponding KV cache in kv_caches.
 
     Args:
         kv_caches: The allocated kv_caches with layer names as keys.
-        forward_context: The global forward context containing all Attention 
+        forward_context: The global forward context containing all Attention
         layers with layer names as keys.
         runner_kv_caches: The kv_cache declared by ModelRunner.
     """
@@ -228,13 +228,11 @@ def report_usage_stats(
             vllm_config.cache_config.block_size,
             "gpu_memory_utilization":
             vllm_config.cache_config.gpu_memory_utilization,
-
             # Quantization
             "quantization":
             vllm_config.model_config.quantization,
             "kv_cache_dtype":
             str(vllm_config.cache_config.cache_dtype),
-
             # Feature flags
             "enable_lora":
             bool(vllm_config.lora_config),
@@ -246,4 +244,5 @@ def report_usage_stats(
             vllm_config.model_config.enforce_eager,
             "disable_custom_all_reduce":
             vllm_config.parallel_config.disable_custom_all_reduce,
-        })
+        },
+    )

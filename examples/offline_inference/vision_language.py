@@ -6,6 +6,7 @@ the correct prompt format on vision language models for text generation.
 For most models, the prompt format should follow corresponding examples
 on HuggingFace model repository.
 """
+
 import os
 import random
 from contextlib import contextmanager
@@ -252,8 +253,8 @@ def run_h2ovl(questions: list[str], modality: str) -> ModelRequestData:
     tokenizer = AutoTokenizer.from_pretrained(model_name,
                                               trust_remote_code=True)
     messages = [[{
-        'role': 'user',
-        'content': f"<image>\n{question}"
+        "role": "user",
+        "content": f"<image>\n{question}"
     }] for question in questions]
     prompts = tokenizer.apply_chat_template(messages,
                                             tokenize=False,
@@ -343,8 +344,8 @@ def run_internvl(questions: list[str], modality: str) -> ModelRequestData:
     tokenizer = AutoTokenizer.from_pretrained(model_name,
                                               trust_remote_code=True)
     messages = [[{
-        'role': 'user',
-        'content': f"<image>\n{question}"
+        "role": "user",
+        "content": f"<image>\n{question}"
     }] for question in questions]
     prompts = tokenizer.apply_chat_template(messages,
                                             tokenize=False,
@@ -449,7 +450,6 @@ def run_llava_next_video(questions: list[str],
 # LLaVA-OneVision
 def run_llava_onevision(questions: list[str],
                         modality: str) -> ModelRequestData:
-
     if modality == "video":
         prompts = [
             f"<|im_start|>user <video>\n{question}<|im_end|> \
@@ -478,7 +478,7 @@ def run_llava_onevision(questions: list[str],
 def run_mantis(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
 
-    llama3_template = '<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'  # noqa: E501
+    llama3_template = "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"  # noqa: E501
     prompts = [
         llama3_template.format(f"{question}\n<image>")
         for question in questions
@@ -539,7 +539,7 @@ def run_minicpmv_base(questions: list[str], modality: str, model_name):
     # stop_token_ids = [tokenizer.eos_id, tokenizer.eot_id]
 
     # 2.6 / o2.6
-    stop_tokens = ['<|im_end|>', '<|endoftext|>']
+    stop_tokens = ["<|im_end|>", "<|endoftext|>"]
     stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
 
     modality_placeholder = {
@@ -550,11 +550,12 @@ def run_minicpmv_base(questions: list[str], modality: str, model_name):
     prompts = [
         tokenizer.apply_chat_template(
             [{
-                'role': 'user',
-                'content': f"{modality_placeholder[modality]}\n{question}"
+                "role": "user",
+                "content": f"{modality_placeholder[modality]}\n{question}",
             }],
             tokenize=False,
-            add_generation_prompt=True) for question in questions
+            add_generation_prompt=True,
+        ) for question in questions
     ]
 
     return ModelRequestData(
@@ -617,12 +618,15 @@ def run_mllama(questions: list[str], modality: str) -> ModelRequestData:
     messages = [[{
         "role":
         "user",
-        "content": [{
-            "type": "image"
-        }, {
-            "type": "text",
-            "text": question
-        }]
+        "content": [
+            {
+                "type": "image"
+            },
+            {
+                "type": "text",
+                "text": question
+            },
+        ],
     }] for question in questions]
     prompts = tokenizer.apply_chat_template(messages,
                                             add_generation_prompt=True,
@@ -652,12 +656,15 @@ def run_llama4(questions: list[str], modality: str) -> ModelRequestData:
     messages = [[{
         "role":
         "user",
-        "content": [{
-            "type": "image"
-        }, {
-            "type": "text",
-            "text": f"{question}"
-        }]
+        "content": [
+            {
+                "type": "image"
+            },
+            {
+                "type": "text",
+                "text": f"{question}"
+            },
+        ],
     }] for question in questions]
     prompts = tokenizer.apply_chat_template(messages,
                                             add_generation_prompt=True,
@@ -712,8 +719,8 @@ def run_nvlm_d(questions: list[str], modality: str) -> ModelRequestData:
     tokenizer = AutoTokenizer.from_pretrained(model_name,
                                               trust_remote_code=True)
     messages = [[{
-        'role': 'user',
-        'content': f"<image>\n{question}"
+        "role": "user",
+        "content": f"<image>\n{question}"
     }] for question in questions]
     prompts = tokenizer.apply_chat_template(messages,
                                             tokenize=False,
@@ -904,7 +911,6 @@ def run_qwen_vl(questions: list[str], modality: str) -> ModelRequestData:
 
 # Qwen2-VL
 def run_qwen2_vl(questions: list[str], modality: str) -> ModelRequestData:
-
     model_name = "Qwen/Qwen2-VL-7B-Instruct"
 
     engine_args = EngineArgs(
@@ -939,7 +945,6 @@ def run_qwen2_vl(questions: list[str], modality: str) -> ModelRequestData:
 
 # Qwen2.5-VL
 def run_qwen2_5_vl(questions: list[str], modality: str) -> ModelRequestData:
-
     model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
 
     engine_args = EngineArgs(
@@ -1024,8 +1029,8 @@ def run_skyworkr1v(questions: list[str], modality: str) -> ModelRequestData:
     tokenizer = AutoTokenizer.from_pretrained(model_name,
                                               trust_remote_code=True)
     messages = [[{
-        'role': 'user',
-        'content': f"<image>\n{question}"
+        "role": "user",
+        "content": f"<image>\n{question}"
     }] for question in questions]
     prompts = tokenizer.apply_chat_template(messages,
                                             tokenize=False,
@@ -1093,8 +1098,7 @@ def get_multi_modal_input(args):
     """
     if args.modality == "image":
         # Input image and question
-        image = ImageAsset("cherry_blossom") \
-            .pil_image.convert("RGB")
+        image = ImageAsset("cherry_blossom").pil_image.convert("RGB")
         img_questions = [
             "What is the content of this image?",
             "Describe the content of this image in detail.",
@@ -1124,10 +1128,10 @@ def get_multi_modal_input(args):
 
 def apply_image_repeat(image_repeat_prob, num_prompts, data,
                        prompts: list[str], modality):
-    """Repeats images with provided probability of "image_repeat_prob". 
+    """Repeats images with provided probability of "image_repeat_prob".
     Used to simulate hit/miss for the MM preprocessor cache.
     """
-    assert (image_repeat_prob <= 1.0 and image_repeat_prob >= 0)
+    assert image_repeat_prob <= 1.0 and image_repeat_prob >= 0
     no_yes = [0, 1]
     probs = [1.0 - image_repeat_prob, image_repeat_prob]
 
@@ -1146,7 +1150,7 @@ def apply_image_repeat(image_repeat_prob, num_prompts, data,
             "prompt": prompts[i % len(prompts)],
             "multi_modal_data": {
                 modality: cur_image
-            }
+            },
         })
 
     return inputs
@@ -1156,6 +1160,7 @@ def apply_image_repeat(image_repeat_prob, num_prompts, data,
 def time_counter(enable: bool):
     if enable:
         import time
+
         start_time = time.time()
         yield
         elapsed_time = time.time() - start_time
@@ -1168,54 +1173,66 @@ def time_counter(enable: bool):
 
 def parse_args():
     parser = FlexibleArgumentParser(
-        description='Demo on using vLLM for offline inference with '
-        'vision language models for text generation')
-    parser.add_argument('--model-type',
-                        '-m',
-                        type=str,
-                        default="llava",
-                        choices=model_example_map.keys(),
-                        help='Huggingface "model_type".')
-    parser.add_argument('--num-prompts',
+        description="Demo on using vLLM for offline inference with "
+        "vision language models for text generation")
+    parser.add_argument(
+        "--model-type",
+        "-m",
+        type=str,
+        default="llava",
+        choices=model_example_map.keys(),
+        help='Huggingface "model_type".',
+    )
+    parser.add_argument("--num-prompts",
                         type=int,
                         default=4,
-                        help='Number of prompts to run.')
-    parser.add_argument('--modality',
-                        type=str,
-                        default="image",
-                        choices=['image', 'video'],
-                        help='Modality of the input.')
-    parser.add_argument('--num-frames',
-                        type=int,
-                        default=16,
-                        help='Number of frames to extract from the video.')
-    parser.add_argument("--seed",
-                        type=int,
-                        default=None,
-                        help="Set the seed when initializing `vllm.LLM`.")
+                        help="Number of prompts to run.")
+    parser.add_argument(
+        "--modality",
+        type=str,
+        default="image",
+        choices=["image", "video"],
+        help="Modality of the input.",
+    )
+    parser.add_argument(
+        "--num-frames",
+        type=int,
+        default=16,
+        help="Number of frames to extract from the video.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Set the seed when initializing `vllm.LLM`.",
+    )
 
     parser.add_argument(
-        '--image-repeat-prob',
+        "--image-repeat-prob",
         type=float,
         default=None,
-        help='Simulates the hit-ratio for multi-modal preprocessor cache'
-        ' (if enabled)')
+        help="Simulates the hit-ratio for multi-modal preprocessor cache"
+        " (if enabled)",
+    )
 
     parser.add_argument(
-        '--disable-mm-preprocessor-cache',
-        action='store_true',
-        help='If True, disables caching of multi-modal preprocessor/mapper.')
+        "--disable-mm-preprocessor-cache",
+        action="store_true",
+        help="If True, disables caching of multi-modal preprocessor/mapper.",
+    )
 
     parser.add_argument(
-        '--time-generate',
-        action='store_true',
-        help='If True, then print the total generate() call time')
+        "--time-generate",
+        action="store_true",
+        help="If True, then print the total generate() call time",
+    )
 
     parser.add_argument(
-        '--use-different-prompt-per-request',
-        action='store_true',
-        help='If True, then use different prompt (with the same multi-modal '
-        'data) for each request.')
+        "--use-different-prompt-per-request",
+        action="store_true",
+        help="If True, then use different prompt (with the same multi-modal "
+        "data) for each request.",
+    )
     return parser.parse_args()
 
 
@@ -1243,9 +1260,8 @@ def main(args):
     llm = LLM(**engine_args)
 
     # Don't want to check the flag multiple times, so just hijack `prompts`.
-    prompts = req_data.prompts if args.use_different_prompt_per_request else [
-        req_data.prompts[0]
-    ]
+    prompts = (req_data.prompts if args.use_different_prompt_per_request else
+               [req_data.prompts[0]])
 
     # We set temperature to 0.2 so that outputs can be different
     # even when all prompts are identical when running batch inference.
@@ -1266,9 +1282,13 @@ def main(args):
         # Batch inference
         if args.image_repeat_prob is not None:
             # Repeat images with specified probability of "image_repeat_prob"
-            inputs = apply_image_repeat(args.image_repeat_prob,
-                                        args.num_prompts, data, prompts,
-                                        modality)
+            inputs = apply_image_repeat(
+                args.image_repeat_prob,
+                args.num_prompts,
+                data,
+                prompts,
+                modality,
+            )
         else:
             # Use the same image for all prompts
             inputs = [{

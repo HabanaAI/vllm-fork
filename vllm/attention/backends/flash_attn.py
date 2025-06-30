@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Attention layer with FlashAttention."""
+
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import accumulate
@@ -38,7 +39,6 @@ logger = init_logger(__name__)
 
 
 class FlashAttentionBackend(AttentionBackend):
-
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -109,6 +109,7 @@ class FlashAttentionMetadata(AttentionMetadata):
     dynamically, it should be stored in tensor. The tensor has to be
     updated from `CUDAGraphRunner.forward` API.
     """
+
     # (batch_size,). The sequence length per sequence. Sequence length means
     # the computed tokens + new tokens None if it is a decoding.
     seq_lens: Optional[List[int]]
@@ -186,18 +187,18 @@ class FlashAttentionMetadata(AttentionMetadata):
 
     @property
     def is_all_encoder_attn_metadata_set(self):
-        '''
+        """
         All attention metadata required for encoder attention is set.
-        '''
+        """
         return is_all_encoder_attn_metadata_set(self)
 
     @property
     def is_all_cross_attn_metadata_set(self):
-        '''
+        """
         All attention metadata required for enc/dec cross-attention is set.
 
         Superset of encoder attention required metadata.
-        '''
+        """
         return is_all_cross_attn_metadata_set(self)
 
     @property
@@ -208,10 +209,10 @@ class FlashAttentionMetadata(AttentionMetadata):
         if self._cached_prefill_metadata is not None:
             return self._cached_prefill_metadata
 
-        assert ((self.seq_lens is not None)
-                or (self.encoder_seq_lens is not None))
-        assert ((self.seq_lens_tensor is not None)
-                or (self.encoder_seq_lens_tensor is not None))
+        assert (self.seq_lens is not None) or (self.encoder_seq_lens
+                                               is not None)
+        assert (self.seq_lens_tensor
+                is not None) or (self.encoder_seq_lens_tensor is not None)
 
         # Compute some attn_metadata fields which default to None
         query_start_loc = (None if self.query_start_loc is None else
@@ -254,7 +255,8 @@ class FlashAttentionMetadata(AttentionMetadata):
             encoder_seq_start_loc=self.encoder_seq_start_loc,
             max_encoder_seq_len=self.max_encoder_seq_len,
             cross_slot_mapping=self.cross_slot_mapping,
-            cross_block_tables=self.cross_block_tables)
+            cross_block_tables=self.cross_block_tables,
+        )
         return self._cached_prefill_metadata
 
     @property
@@ -264,8 +266,8 @@ class FlashAttentionMetadata(AttentionMetadata):
 
         if self._cached_decode_metadata is not None:
             return self._cached_decode_metadata
-        assert ((self.seq_lens_tensor is not None)
-                or (self.encoder_seq_lens_tensor is not None))
+        assert (self.seq_lens_tensor
+                is not None) or (self.encoder_seq_lens_tensor is not None)
 
         # Compute some attn_metadata fields which default to None
         slot_mapping = (None if self.slot_mapping is None else
@@ -305,16 +307,19 @@ class FlashAttentionMetadata(AttentionMetadata):
             encoder_seq_start_loc=self.encoder_seq_start_loc,
             max_encoder_seq_len=self.max_encoder_seq_len,
             cross_slot_mapping=self.cross_slot_mapping,
-            cross_block_tables=self.cross_block_tables)
+            cross_block_tables=self.cross_block_tables,
+        )
         return self._cached_decode_metadata
 
-    def advance_step(self,
-                     model_input: "ModelInputForGPUWithSamplingMetadata",
-                     sampled_token_ids: Optional[torch.Tensor],
-                     block_size: int,
-                     num_seqs: int,
-                     num_queries: int,
-                     turn_prefills_into_decodes: bool = False):
+    def advance_step(
+        self,
+        model_input: "ModelInputForGPUWithSamplingMetadata",
+        sampled_token_ids: Optional[torch.Tensor],
+        block_size: int,
+        num_seqs: int,
+        num_queries: int,
+        turn_prefills_into_decodes: bool = False,
+    ):
         """
         Update metadata in-place to advance one decode step.
         """
@@ -371,15 +376,17 @@ class FlashAttentionMetadata(AttentionMetadata):
             self.seq_lens[i] += 1
         self.max_decode_seq_len = max(self.seq_lens)
 
-        ops.advance_step_flashattn(num_seqs=num_seqs,
-                                   num_queries=num_queries,
-                                   block_size=block_size,
-                                   input_tokens=model_input.input_tokens,
-                                   sampled_token_ids=sampled_token_ids,
-                                   input_positions=model_input.input_positions,
-                                   seq_lens=self.seq_lens_tensor,
-                                   slot_mapping=self.slot_mapping,
-                                   block_tables=self.block_tables)
+        ops.advance_step_flashattn(
+            num_seqs=num_seqs,
+            num_queries=num_queries,
+            block_size=block_size,
+            input_tokens=model_input.input_tokens,
+            sampled_token_ids=sampled_token_ids,
+            input_positions=model_input.input_positions,
+            seq_lens=self.seq_lens_tensor,
+            slot_mapping=self.slot_mapping,
+            block_tables=self.block_tables,
+        )
 
 
 class FlashAttentionMetadataBuilder(
@@ -406,8 +413,11 @@ class FlashAttentionMetadataBuilder(
         self.has_prefix_cache_hit = False
 
     def _add_seq_group(
-            self, inter_data: "ModelInputForGPUBuilder.InterDataForSeqGroup",
-            chunked_prefill_enabled: bool, prefix_cache_hit: bool):
+        self,
+        inter_data: "ModelInputForGPUBuilder.InterDataForSeqGroup",
+        chunked_prefill_enabled: bool,
+        prefix_cache_hit: bool,
+    ):
         """Add a sequence group to the metadata. Specifically update/append
         1. context length.
         2. block table.
@@ -416,12 +426,23 @@ class FlashAttentionMetadataBuilder(
         is_prompt = inter_data.is_prompt
         block_tables = inter_data.block_tables
 
-        for (seq_id, token_len, seq_len, curr_seq_len, query_len, context_len,
-             curr_sliding_window_block) in zip(
-                 inter_data.seq_ids, [len(t) for t in inter_data.input_tokens],
-                 inter_data.orig_seq_lens, inter_data.seq_lens,
-                 inter_data.query_lens, inter_data.context_lens,
-                 inter_data.curr_sliding_window_blocks):
+        for (
+                seq_id,
+                token_len,
+                seq_len,
+                curr_seq_len,
+                query_len,
+                context_len,
+                curr_sliding_window_block,
+        ) in zip(
+                inter_data.seq_ids,
+            [len(t) for t in inter_data.input_tokens],
+                inter_data.orig_seq_lens,
+                inter_data.seq_lens,
+                inter_data.query_lens,
+                inter_data.context_lens,
+                inter_data.curr_sliding_window_blocks,
+        ):
             self.context_lens.append(context_len)
 
             if is_prompt:
@@ -447,8 +468,8 @@ class FlashAttentionMetadataBuilder(
                 # NOTE(woosuk): For flash-attn, the block table should
                 # include the entries for the incoming prefill tokens.
                 block_table = block_tables[seq_id]
-            elif ((chunked_prefill_enabled or not is_prompt)
-                  and block_tables is not None):
+            elif (chunked_prefill_enabled
+                  or not is_prompt) and block_tables is not None:
                 if curr_sliding_window_block == 0:
                     block_table = block_tables[seq_id]
                 else:
@@ -461,9 +482,16 @@ class FlashAttentionMetadataBuilder(
             start_idx = compute_slot_mapping_start_idx(is_prompt, query_len,
                                                        context_len,
                                                        self.sliding_window)
-            compute_slot_mapping(is_profile_run, self.slot_mapping, seq_id,
-                                 seq_len, context_len, start_idx,
-                                 self.block_size, inter_data.block_tables)
+            compute_slot_mapping(
+                is_profile_run,
+                self.slot_mapping,
+                seq_id,
+                seq_len,
+                context_len,
+                start_idx,
+                self.block_size,
+                inter_data.block_tables,
+            )
 
     def _get_graph_runner_block_tables(
             self, num_seqs: int,
@@ -489,8 +517,13 @@ class FlashAttentionMetadataBuilder(
         return torch.from_numpy(graph_block_tables).to(
             device=self.runner.device, non_blocking=True)
 
-    def build(self, seq_lens: List[int], query_lens: List[int],
-              cuda_graph_pad_size: int, batch_size: int):
+    def build(
+        self,
+        seq_lens: List[int],
+        query_lens: List[int],
+        cuda_graph_pad_size: int,
+        batch_size: int,
+    ):
         """Build attention metadata with on-device tensors.
 
         Args:
@@ -505,9 +538,11 @@ class FlashAttentionMetadataBuilder(
             for inter_data in self.input_builder.inter_data_list
         ])
         for inter_data in self.input_builder.inter_data_list:
-            self._add_seq_group(inter_data,
-                                self.input_builder.chunked_prefill_enabled,
-                                prefix_cache_hit)
+            self._add_seq_group(
+                inter_data,
+                self.input_builder.chunked_prefill_enabled,
+                prefix_cache_hit,
+            )
 
         device = self.runner.device
         use_captured_graph = cuda_graph_pad_size != -1
@@ -538,7 +573,7 @@ class FlashAttentionMetadataBuilder(
                 dtype=torch.int,
                 device=device,
             )
-        assert max_query_len > 0, ("query_lens: {}".format(query_lens))
+        assert max_query_len > 0, "query_lens: {}".format(query_lens)
 
         assert device is not None
         context_lens_tensor = async_tensor_h2d(self.context_lens, torch.int,
@@ -582,11 +617,11 @@ class FlashAttentionMetadataBuilder(
 class FlashAttentionImpl(AttentionImpl):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
-    |<--------------- num_prefill_tokens ----------------->|	
+    |<--------------- num_prefill_tokens ----------------->|
     |<--prefill_0-->|<--prefill_1-->|...|<--prefill_N-1--->|
 
-    Otherwise, the layout is as follows:	
-    |<----------------- num_decode_tokens ------------------>|	
+    Otherwise, the layout is as follows:
+    |<----------------- num_decode_tokens ------------------>|
     |<--decode_0-->|..........|<--decode_M-1-->|<--padding-->|
 
     Generation tokens can contain padding when cuda-graph is used.
@@ -696,12 +731,12 @@ class FlashAttentionImpl(AttentionImpl):
                     "base dtype bfloat16")
 
         attn_type = self.attn_type
-        if (attn_type == AttentionType.ENCODER
-                and (not attn_metadata.is_all_encoder_attn_metadata_set)):
+        if attn_type == AttentionType.ENCODER and (
+                not attn_metadata.is_all_encoder_attn_metadata_set):
             raise AttributeError("Encoder attention requires setting "
                                  "encoder metadata attributes.")
-        elif (attn_type == AttentionType.ENCODER_DECODER
-              and (not attn_metadata.is_all_cross_attn_metadata_set)):
+        elif attn_type == AttentionType.ENCODER_DECODER and (
+                not attn_metadata.is_all_cross_attn_metadata_set):
             raise AttributeError("Encoder/decoder cross-attention "
                                  "requires setting cross-attention "
                                  "metadata attributes.")
@@ -727,8 +762,8 @@ class FlashAttentionImpl(AttentionImpl):
             #     cross-attention computation in the decoding phase, where the
             #     KV cache is already populated with the cross-attention
             #     tensor. Thus, we skip cache updates during this time.
-            if (attn_type != AttentionType.ENCODER) and (key is not None) and (
-                    value is not None):
+            if ((attn_type != AttentionType.ENCODER) and (key is not None)
+                    and (value is not None)):
                 if attn_type == AttentionType.ENCODER_DECODER:
                     # Update cross-attention KV cache (prefill-only)
                     updated_slot_mapping = attn_metadata.cross_slot_mapping
@@ -761,12 +796,15 @@ class FlashAttentionImpl(AttentionImpl):
             query, _ = ops.scaled_fp8_quant(
                 query.reshape(
                     (num_tokens, num_heads * head_size)).contiguous(),
-                layer._q_scale)
+                layer._q_scale,
+            )
             query = query.reshape((num_tokens, num_heads, head_size))
 
-        (num_prefill_query_tokens, num_prefill_kv_tokens,
-        num_decode_query_tokens) = \
-            get_num_prefill_decode_query_kv_tokens(attn_metadata, attn_type)
+        (
+            num_prefill_query_tokens,
+            num_prefill_kv_tokens,
+            num_decode_query_tokens,
+        ) = get_num_prefill_decode_query_kv_tokens(attn_metadata, attn_type)
         decode_query = query[num_prefill_query_tokens:]
         decode_output = output[num_prefill_query_tokens:]
         # QKV for prefill.
@@ -782,8 +820,8 @@ class FlashAttentionImpl(AttentionImpl):
                 # normal attention
                 # When block_tables are not filled, it means q and k are the
                 # prompt, and they have the same length.
-                q_seq_start_loc, q_seq_len, k_seq_start_loc, k_seq_len = \
-                    _get_query_key_seq_metadata(prefill_meta, True, attn_type)
+                q_seq_start_loc, q_seq_len, k_seq_start_loc, k_seq_len = (
+                    _get_query_key_seq_metadata(prefill_meta, True, attn_type))
 
                 key = key[:num_prefill_kv_tokens]
                 value = value[:num_prefill_kv_tokens]
@@ -794,13 +832,15 @@ class FlashAttentionImpl(AttentionImpl):
                     key, _ = ops.scaled_fp8_quant(
                         key.reshape((num_kv_tokens,
                                      num_kv_heads * head_size)).contiguous(),
-                        layer._k_scale)
+                        layer._k_scale,
+                    )
                     key = key.reshape((num_kv_tokens, num_kv_heads, head_size))
 
                     value, _ = ops.scaled_fp8_quant(
                         value.reshape((num_kv_tokens,
                                        num_kv_heads * head_size)).contiguous(),
-                        layer._v_scale)
+                        layer._v_scale,
+                    )
                     value = value.reshape(
                         (num_kv_tokens, num_kv_heads, head_size))
 
@@ -831,8 +871,10 @@ class FlashAttentionImpl(AttentionImpl):
                 assert prefill_meta.seq_lens is not None
                 assert prefill_meta.query_start_loc is not None
                 max_seq_len = max(prefill_meta.seq_lens)
-                descale_shape = (prefill_meta.query_start_loc.shape[0] - 1,
-                                 key.shape[1])
+                descale_shape = (
+                    prefill_meta.query_start_loc.shape[0] - 1,
+                    key.shape[1],
+                )
                 flash_attn_varlen_func(  # noqa
                     q=query,
                     k=key_cache,
@@ -866,8 +908,10 @@ class FlashAttentionImpl(AttentionImpl):
                     "Only decoder-only models support max_decode_query_len > 1"
                 )
                 assert decode_meta.query_start_loc is not None
-                descale_shape = (decode_meta.query_start_loc.shape[0] - 1,
-                                 key.shape[1])
+                descale_shape = (
+                    decode_meta.query_start_loc.shape[0] - 1,
+                    key.shape[1],
+                )
                 flash_attn_varlen_func(
                     q=decode_query,
                     k=key_cache,
@@ -922,10 +966,10 @@ def _get_query_key_seq_metadata(
     attn_type: str,
 ) -> tuple:
     """
-    Returns sequence metadata for key and query based on the specified 
+    Returns sequence metadata for key and query based on the specified
     attention type and whether input is a prompt.
 
-    This function computes the starting locations and maximum sequence lengths 
+    This function computes the starting locations and maximum sequence lengths
     for key and query sequences for different attention types.
 
     Args:
@@ -950,8 +994,12 @@ def _get_query_key_seq_metadata(
             max_seq_len = attn_metadata.max_prefill_seq_len
         else:
             max_seq_len = attn_metadata.max_decode_seq_len
-        return (attn_metadata.seq_start_loc, max_seq_len,
-                attn_metadata.seq_start_loc, max_seq_len)
+        return (
+            attn_metadata.seq_start_loc,
+            max_seq_len,
+            attn_metadata.seq_start_loc,
+            max_seq_len,
+        )
 
     elif attn_type == AttentionType.ENCODER_DECODER:
         # This is cross attention between the where the key
@@ -963,35 +1011,44 @@ def _get_query_key_seq_metadata(
             max_seq_len = attn_metadata.max_prefill_seq_len
         else:
             max_seq_len = attn_metadata.max_decode_seq_len
-        return (attn_metadata.seq_start_loc, max_seq_len,
-                attn_metadata.encoder_seq_start_loc,
-                attn_metadata.max_encoder_seq_len)
+        return (
+            attn_metadata.seq_start_loc,
+            max_seq_len,
+            attn_metadata.encoder_seq_start_loc,
+            attn_metadata.max_encoder_seq_len,
+        )
     elif attn_type == AttentionType.ENCODER:
         # For encoder attention both the query and the key are same i.e the
         # encoder sequence.
-        return (attn_metadata.encoder_seq_start_loc,
-                attn_metadata.max_encoder_seq_len,
-                attn_metadata.encoder_seq_start_loc,
-                attn_metadata.max_encoder_seq_len)
+        return (
+            attn_metadata.encoder_seq_start_loc,
+            attn_metadata.max_encoder_seq_len,
+            attn_metadata.encoder_seq_start_loc,
+            attn_metadata.max_encoder_seq_len,
+        )
     elif attn_type == AttentionType.ENCODER_ONLY:
         assert is_prompt, "Should not have decode for encoder only model."
-        return (attn_metadata.seq_start_loc, attn_metadata.max_prefill_seq_len,
-                attn_metadata.seq_start_loc, attn_metadata.max_prefill_seq_len)
+        return (
+            attn_metadata.seq_start_loc,
+            attn_metadata.max_prefill_seq_len,
+            attn_metadata.seq_start_loc,
+            attn_metadata.max_prefill_seq_len,
+        )
     else:
         raise AttributeError(f"Invalid attention type {str(attn_type)}")
 
 
 def _get_causal_option(attn_type: str) -> bool:
     """
-    Determine whether the given attention type is suitable for causal 
+    Determine whether the given attention type is suitable for causal
     attention mechanisms.
 
     Args:
         attn_type (AttentionType): The type of attention being evaluated
 
     Returns:
-        bool: Returns `True` if the attention type is suitable for causal 
-        attention (i.e., not encoder, encoder-only, or encoder-decoder), 
+        bool: Returns `True` if the attention type is suitable for causal
+        attention (i.e., not encoder, encoder-only, or encoder-decoder),
         otherwise returns `False`.
     """
     return not (attn_type == AttentionType.ENCODER

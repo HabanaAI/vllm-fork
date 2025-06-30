@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """A layer that compute logits from hidden_stats."""
+
 import inspect
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -30,12 +31,14 @@ class LogitsProcessor(nn.Module):
     3. Apply logits processors (if any).
     """
 
-    def __init__(self,
-                 vocab_size: int,
-                 org_vocab_size: Optional[int] = None,
-                 scale: float = 1.0,
-                 logits_as_input: bool = False,
-                 soft_cap: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        vocab_size: int,
+        org_vocab_size: Optional[int] = None,
+        scale: float = 1.0,
+        logits_as_input: bool = False,
+        soft_cap: Optional[float] = None,
+    ) -> None:
         """
         Args:
             scale: A scaling factor to apply to the logits.
@@ -78,8 +81,8 @@ class LogitsProcessor(nn.Module):
                 logits *= self.scale
 
             # Apply logits processors (if any).
-            if sampling_metadata is not None and \
-                sampling_metadata.seq_groups is not None:
+            if (sampling_metadata is not None
+                    and sampling_metadata.seq_groups is not None):
                 logits = _apply_logits_processors(logits, sampling_metadata)
 
         return logits
@@ -141,7 +144,7 @@ def _prune_hidden_states(
 def get_num_parameters(logits_processor):
     """Extracts the number of parameters from the
     signature and stores it for further use"""
-    if hasattr(logits_processor, 'num_parameters'):
+    if hasattr(logits_processor, "num_parameters"):
         return logits_processor.num_parameters
     logits_processor.num_parameters = len(
         inspect.signature(logits_processor).parameters)
@@ -175,17 +178,24 @@ def _apply_logits_processors(
                 prompt_tokens_ids = seq_group.seq_data[seq_id].prompt_token_ids
 
                 if _logits_processor_threadpool is not None:
-                    logits_row_ids_and_logits_row_futures.append(
-                        (logits_row_idx,
-                         _logits_processor_threadpool.submit(
-                             _apply_logits_processors_single_seq, logits_row,
-                             logits_processors, past_tokens_ids,
-                             prompt_tokens_ids)))
+                    logits_row_ids_and_logits_row_futures.append((
+                        logits_row_idx,
+                        _logits_processor_threadpool.submit(
+                            _apply_logits_processors_single_seq,
+                            logits_row,
+                            logits_processors,
+                            past_tokens_ids,
+                            prompt_tokens_ids,
+                        ),
+                    ))
                 else:
-                    logits[logits_row_idx] = \
+                    logits[logits_row_idx] = (
                         _apply_logits_processors_single_seq(
-                            logits_row, logits_processors, past_tokens_ids,
-                            prompt_tokens_ids)
+                            logits_row,
+                            logits_processors,
+                            past_tokens_ids,
+                            prompt_tokens_ids,
+                        ))
 
         logits_processed += len(seq_group.sample_indices) + len(
             seq_group.prompt_logprob_indices)

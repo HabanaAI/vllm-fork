@@ -19,6 +19,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only GPTBigCode model compatible with HuggingFace weights."""
+
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -103,13 +104,15 @@ class GPTBigCodeAttention(nn.Module):
             bias=True,
             quant_config=quant_config,
         )
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              scale=self.scale,
-                              num_kv_heads=self.num_kv_heads,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn")
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            scale=self.scale,
+            num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn",
+        )
 
     def forward(
         self,
@@ -122,7 +125,8 @@ class GPTBigCodeAttention(nn.Module):
             q, k, v = qkv.split(
                 [
                     self.hidden_size // self.tensor_model_parallel_world_size,
-                    self.kv_dim, self.kv_dim
+                    self.kv_dim,
+                    self.kv_dim,
                 ],
                 dim=-1,
             )
@@ -217,12 +221,14 @@ class GPTBigCodeModel(nn.Module):
         assert not config.add_cross_attention
 
         self.embed_dim = config.hidden_size
-        lora_vocab = (lora_config.lora_extra_vocab_size *
-                      (lora_config.max_loras or 1)) if lora_config else 0
+        lora_vocab = ((lora_config.lora_extra_vocab_size *
+                       (lora_config.max_loras or 1)) if lora_config else 0)
         self.vocab_size = config.vocab_size + lora_vocab
-        self.wte = VocabParallelEmbedding(self.vocab_size,
-                                          self.embed_dim,
-                                          org_num_embeddings=config.vocab_size)
+        self.wte = VocabParallelEmbedding(
+            self.vocab_size,
+            self.embed_dim,
+            org_num_embeddings=config.vocab_size,
+        )
         self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
         self.start_layer, self.end_layer, self.h = make_layers(
             config.num_hidden_layers,
@@ -254,6 +260,7 @@ class GPTBigCodeModel(nn.Module):
 
         if is_hpu:
             import habana_frameworks.torch as htorch
+
             htorch.core.mark_step()
         for layer in self.h[self.start_layer:self.end_layer]:
             hidden_states = layer(hidden_states)
@@ -279,9 +286,9 @@ class GPTBigCodeModel(nn.Module):
                                     default_weight_loader)
             # TODO (@robertgshaw2-neuralmagic): move to fp8 linear method
             if "c_attn.input_scale" in name or "c_attn.weight_scale" in name:
-                weight_loader(param, loaded_weight, 'q')
-                weight_loader(param, loaded_weight, 'k')
-                weight_loader(param, loaded_weight, 'v')
+                weight_loader(param, loaded_weight, "q")
+                weight_loader(param, loaded_weight, "k")
+                weight_loader(param, loaded_weight, "v")
             else:
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
@@ -316,7 +323,8 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             self.lm_head = ParallelLMHead(
                 self.transformer.vocab_size,
                 self.transformer.embed_dim,
-                org_num_embeddings=self.config.vocab_size)
+                org_num_embeddings=self.config.vocab_size,
+            )
         self.unpadded_vocab_size = config.vocab_size
         if lora_config:
             self.unpadded_vocab_size += lora_config.lora_extra_vocab_size
@@ -374,7 +382,7 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                 attn_block = self.transformer.h[
                     self.transformer.start_layer].attn
                 weight = {}
-                weight['q'], weight['k'], weight['v'] = loaded_weight.split(
+                weight["q"], weight["k"], weight["v"] = loaded_weight.split(
                     [
                         attn_block.num_heads * attn_block.head_dim *
                         attn_block.tensor_model_parallel_world_size,
@@ -383,7 +391,8 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                         attn_block.num_kv_heads * attn_block.head_dim *
                         attn_block.tensor_model_parallel_world_size,
                     ],
-                    dim=0)
+                    dim=0,
+                )
                 for param_name, weight_name, shard_id in stacked_params_mapping:
                     new_name = name.replace(weight_name, param_name)
                     param = params_dict[new_name]
@@ -400,9 +409,9 @@ class GPTBigCodeForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                 # TODO (@robertgshaw2-neuralmagic): move to fp8 linear method
                 if ("c_attn.input_scale" in name
                         or "c_attn.weight_scale" in name):
-                    weight_loader(param, loaded_weight, 'q')
-                    weight_loader(param, loaded_weight, 'k')
-                    weight_loader(param, loaded_weight, 'v')
+                    weight_loader(param, loaded_weight, "q")
+                    weight_loader(param, loaded_weight, "k")
+                    weight_loader(param, loaded_weight, "v")
                 else:
                     weight_loader(param, loaded_weight)
                 loaded_params.add(name)

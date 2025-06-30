@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Inference-only Bamba model."""
+
 # Added by the IBM Team, 2024
 from typing import Iterable, Optional, Set, Tuple
 
@@ -75,27 +76,30 @@ class BambaMLP(nn.Module):
 
 class BambaMixerDecoderLayer(nn.Module):
 
-    def __init__(self,
-                 config: BambaConfig,
-                 layer_idx: int,
-                 cache_config: Optional[CacheConfig] = None,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = "") -> None:
+    def __init__(
+        self,
+        config: BambaConfig,
+        layer_idx: int,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.config = config
-        self.mamba = MambaMixer2(hidden_size= config.hidden_size,
-                                ssm_state_size = config.mamba_d_state,
-                                conv_kernel_size = config.mamba_d_conv,
-                                intermediate_size = config.mamba_expand *\
-                                                    config.hidden_size,
-                                use_conv_bias = config.mamba_conv_bias,
-                                use_bias = config.mamba_proj_bias,
-                                n_groups=config.mamba_n_groups,
-                                num_heads=config.mamba_n_heads,
-                                head_dim=config.mamba_d_head,
-                                rms_norm_eps=config.rms_norm_eps,
-                                activation=config.hidden_act,
-                                quant_config=quant_config)
+        self.mamba = MambaMixer2(
+            hidden_size=config.hidden_size,
+            ssm_state_size=config.mamba_d_state,
+            conv_kernel_size=config.mamba_d_conv,
+            intermediate_size=config.mamba_expand * config.hidden_size,
+            use_conv_bias=config.mamba_conv_bias,
+            use_bias=config.mamba_proj_bias,
+            n_groups=config.mamba_n_groups,
+            num_heads=config.mamba_n_heads,
+            head_dim=config.mamba_d_head,
+            rms_norm_eps=config.rms_norm_eps,
+            activation=config.hidden_act,
+            quant_config=quant_config,
+        )
 
         self.feed_forward = BambaMLP(config, quant_config=quant_config)
         self.input_layernorm = RMSNorm(config.hidden_size,
@@ -189,10 +193,12 @@ class BambaAttentionDecoderLayer(nn.Module):
             bias=False,
             quant_config=quant_config,
         )
-        self.o_proj = RowParallelLinear(self.total_num_heads * self.head_dim,
-                                        config.hidden_size,
-                                        bias=False,
-                                        quant_config=quant_config)
+        self.o_proj = RowParallelLinear(
+            self.total_num_heads * self.head_dim,
+            config.hidden_size,
+            bias=False,
+            quant_config=quant_config,
+        )
 
         self.attn = Attention(
             self.num_heads,
@@ -250,7 +256,7 @@ class BambaAttentionDecoderLayer(nn.Module):
 
 ALL_DECODER_LAYER_TYPES = {
     "attention": BambaAttentionDecoderLayer,
-    "mamba": BambaMixerDecoderLayer
+    "mamba": BambaMixerDecoderLayer,
 }
 
 
@@ -308,7 +314,6 @@ class BambaModel(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-
         attn_metadata = get_forward_context().attn_metadata
 
         mamba2_metadata = prepare_mamba2_metadata(
@@ -409,15 +414,22 @@ class BambaModel(nn.Module):
         return loaded_params
 
 
-class BambaForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
-                       IsHybrid, SupportsV0Only, SupportsQuant):
+class BambaForCausalLM(
+        nn.Module,
+        HasInnerState,
+        SupportsLoRA,
+        SupportsPP,
+        IsHybrid,
+        SupportsV0Only,
+        SupportsQuant,
+):
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
             "k_proj",
             "v_proj",
         ],
-        "gate_up_proj": ["up_proj", "down_proj"]
+        "gate_up_proj": ["up_proj", "down_proj"],
     }
 
     # LoRA specific attributes
@@ -434,8 +446,8 @@ class BambaForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
         cache_config = vllm_config.cache_config
         lora_config = vllm_config.lora_config
         scheduler_config = vllm_config.scheduler_config
-        assert not cache_config.enable_prefix_caching, \
-            "Bamba currently does not support prefix caching"
+        assert not cache_config.enable_prefix_caching, (
+            "Bamba currently does not support prefix caching")
 
         self.quant_config = vllm_config.quant_config
 
@@ -468,23 +480,32 @@ class BambaForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.get_input_embeddings(input_ids)
 
-    def forward(self,
-                input_ids: torch.Tensor,
-                positions: torch.Tensor,
-                intermediate_tensors: Optional[IntermediateTensors] = None,
-                inputs_embeds: Optional[torch.Tensor] = None,
-                **kwargs):
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        **kwargs,
+    ):
         if self.mamba_cache is None:
-
             num_mamba_layers = self.model_config.get_num_layers_by_block_type(
                 self.vllm_config.parallel_config, LayerBlockType.mamba)
 
             self.mamba_cache = MambaCacheManager(
-                self.vllm_config, self.lm_head.weight.dtype, num_mamba_layers,
-                *self._get_mamba_cache_shape())
+                self.vllm_config,
+                self.lm_head.weight.dtype,
+                num_mamba_layers,
+                *self._get_mamba_cache_shape(),
+            )
         mamba_cache_params = self.mamba_cache.current_run_tensors(**kwargs)
-        hidden_states = self.model(input_ids, positions, mamba_cache_params,
-                                   intermediate_tensors, inputs_embeds)
+        hidden_states = self.model(
+            input_ids,
+            positions,
+            mamba_cache_params,
+            intermediate_tensors,
+            inputs_embeds,
+        )
 
         return hidden_states
 
@@ -506,12 +527,11 @@ class BambaForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
 
         # if n_groups is not divisible by world_size, need to extend the shards
         # to ensure all groups needed by a head is sharded along with it
-        n_groups = (self.config.mamba_n_groups + extra_groups_for_head_shards(
-            self.config.mamba_n_groups, world_size))
+        n_groups = self.config.mamba_n_groups + extra_groups_for_head_shards(
+            self.config.mamba_n_groups, world_size)
 
         # - heads and n_groups are TP-ed
-        conv_dim = (intermediate_size +
-                    2 * n_groups * self.config.mamba_d_state)
+        conv_dim = intermediate_size + 2 * n_groups * self.config.mamba_d_state
         conv_state_shape = (
             divide(conv_dim, world_size),
             self.config.mamba_d_conv - 1,

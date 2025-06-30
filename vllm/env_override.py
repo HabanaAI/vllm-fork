@@ -8,7 +8,7 @@ import torch
 # that interact with vllm workers.
 # they are executed whenever `import vllm` is called.
 
-if not os.path.exists('/dev/nvidia-caps-imex-channels'):
+if not os.path.exists("/dev/nvidia-caps-imex-channels"):
     # normally, we disable NCCL_CUMEM_ENABLE because it
     # will cost 1~2 GiB GPU memory with cudagraph+allreduce,
     # see https://github.com/NVIDIA/nccl/issues/1234
@@ -22,13 +22,13 @@ if not os.path.exists('/dev/nvidia-caps-imex-channels'):
     # multi-node NVLink to communicate across nodes.
     # This will still cost some GPU memory, but it is worthwhile
     # because we can get very fast cross-node bandwidth with NVLink.
-    os.environ['NCCL_CUMEM_ENABLE'] = '0'
+    os.environ["NCCL_CUMEM_ENABLE"] = "0"
 
 # see https://github.com/vllm-project/vllm/pull/15951
 # it avoids unintentional cuda initialization from torch.cuda.is_available()
-os.environ['PYTORCH_NVML_BASED_CUDA_CHECK'] = '1'
+os.environ["PYTORCH_NVML_BASED_CUDA_CHECK"] = "1"
 
 # see https://github.com/vllm-project/vllm/issues/10480
-os.environ['TORCHINDUCTOR_COMPILE_THREADS'] = '1'
+os.environ["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
 # see https://github.com/vllm-project/vllm/issues/10619
 torch._inductor.config.compile_threads = 1

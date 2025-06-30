@@ -66,16 +66,18 @@ def test_topp_result_sums_past_p():
 
 def test_topp_basic():
     with torch.device(xm.xla_device()):
-        logits = torch.tensor([[math.log(0.2),
-                                math.log(0.3),
-                                math.log(0.5)],
-                               [math.log(0.5),
-                                math.log(0.1),
-                                math.log(0.4)]])
+        logits = torch.tensor([
+            [math.log(0.2), math.log(0.3),
+             math.log(0.5)],
+            [math.log(0.5), math.log(0.1),
+             math.log(0.4)],
+        ])
 
-        result = apply_top_k_top_p_tpu(logits=logits.clone(),
-                                       k=torch.tensor([3, 3]),
-                                       p=torch.tensor([0.79, 0.79]))
+        result = apply_top_k_top_p_tpu(
+            logits=logits.clone(),
+            k=torch.tensor([3, 3]),
+            p=torch.tensor([0.79, 0.79]),
+        )
 
         xm.mark_step()
 
@@ -88,16 +90,18 @@ def test_topp_basic():
 
 def test_topp_select_all():
     with torch.device(xm.xla_device()):
-        logits = torch.tensor([[math.log(0.2),
-                                math.log(0.3),
-                                math.log(0.5)],
-                               [math.log(0.5),
-                                math.log(0.1),
-                                math.log(0.4)]])
+        logits = torch.tensor([
+            [math.log(0.2), math.log(0.3),
+             math.log(0.5)],
+            [math.log(0.5), math.log(0.1),
+             math.log(0.4)],
+        ])
 
-        result = apply_top_k_top_p_tpu(logits=logits.clone(),
-                                       k=torch.tensor([3, 3]),
-                                       p=torch.tensor([1.0, 1.0]))
+        result = apply_top_k_top_p_tpu(
+            logits=logits.clone(),
+            k=torch.tensor([3, 3]),
+            p=torch.tensor([1.0, 1.0]),
+        )
 
         xm.mark_step()
 
@@ -129,17 +133,19 @@ def test_topp_with_ties():
 
 def test_both_topk_topp():
     with torch.device(xm.xla_device()):
-        logits = torch.tensor([[math.log(0.2),
-                                math.log(0.3),
-                                math.log(0.5)],
-                               [math.log(0.5),
-                                math.log(0.1),
-                                math.log(0.4)]])
+        logits = torch.tensor([
+            [math.log(0.2), math.log(0.3),
+             math.log(0.5)],
+            [math.log(0.5), math.log(0.1),
+             math.log(0.4)],
+        ])
 
         # Set k=1 for the first batch.
-        result = apply_top_k_top_p_tpu(logits=logits.clone(),
-                                       k=torch.tensor([1, 3]),
-                                       p=torch.tensor([0.79, 0.79]))
+        result = apply_top_k_top_p_tpu(
+            logits=logits.clone(),
+            k=torch.tensor([1, 3]),
+            p=torch.tensor([0.79, 0.79]),
+        )
 
         xm.mark_step()
 

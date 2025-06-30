@@ -10,9 +10,11 @@ def parse_args():
     parser = FlexibleArgumentParser()
     parser = EngineArgs.add_cli_args(parser)
     # Set example specific arguments
-    parser.set_defaults(model="jason9693/Qwen2.5-1.5B-apeach",
-                        task="classify",
-                        enforce_eager=True)
+    parser.set_defaults(
+        model="jason9693/Qwen2.5-1.5B-apeach",
+        task="classify",
+        enforce_eager=True,
+    )
     return parser.parse_args()
 
 

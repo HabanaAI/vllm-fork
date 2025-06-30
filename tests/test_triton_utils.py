@@ -86,6 +86,7 @@ def test_no_triton_fallback():
     # mock triton not being installed
     with mock.patch.dict(sys.modules, {"triton": None}):
         from vllm.triton_utils import HAS_TRITON, tl, triton
+
         assert HAS_TRITON is False
         assert triton.__class__.__name__ == "TritonPlaceholder"
         assert triton.language.__class__.__name__ == "TritonLanguagePlaceholder"

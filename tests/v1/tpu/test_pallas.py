@@ -53,10 +53,11 @@ def test_ragged_paged_attention():
                                dtype=torch.int32)
     context_lens = torch.ones((max_num_reqs, ), dtype=torch.int32)
     query_lens = [1] * max_num_reqs
-    query_start_loc = torch.cumsum(torch.tensor([0] + query_lens,
-                                                dtype=torch.int32),
-                                   dim=0,
-                                   dtype=torch.int32)
+    query_start_loc = torch.cumsum(
+        torch.tensor([0] + query_lens, dtype=torch.int32),
+        dim=0,
+        dtype=torch.int32,
+    )
     num_seqs = torch.tensor([max_num_reqs], dtype=torch.int32)
     attn_metadata = PallasMetadata(
         slot_mapping=slot_mapping,

@@ -48,15 +48,16 @@ def with_cancellation(handler_func):
     # normal route handler, with the correct request type hinting.
     @functools.wraps(handler_func)
     async def wrapper(*args, **kwargs):
-
         # The request is either the second positional arg or `raw_request`
         request = args[1] if len(args) > 1 else kwargs["raw_request"]
 
         handler_task = asyncio.create_task(handler_func(*args, **kwargs))
         cancellation_task = asyncio.create_task(listen_for_disconnect(request))
 
-        done, pending = await asyncio.wait([handler_task, cancellation_task],
-                                           return_when=asyncio.FIRST_COMPLETED)
+        done, pending = await asyncio.wait(
+            [handler_task, cancellation_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
         for task in pending:
             task.cancel()
 
@@ -103,9 +104,11 @@ def load_aware_call(func):
                 # Convert the single BackgroundTask to BackgroundTasks
                 # and chain the decrement_server_load task to it
                 tasks = BackgroundTasks()
-                tasks.add_task(response.background.func,
-                               *response.background.args,
-                               **response.background.kwargs)
+                tasks.add_task(
+                    response.background.func,
+                    *response.background.args,
+                    **response.background.kwargs,
+                )
                 tasks.add_task(decrement_server_load, raw_request)
                 response.background = tasks
         else:
@@ -142,7 +145,6 @@ def _validate_truncation_size(
     truncate_prompt_tokens: Optional[int],
     tokenization_kwargs: Optional[dict[str, Any]] = None,
 ) -> Optional[int]:
-
     if truncate_prompt_tokens is not None:
         if truncate_prompt_tokens <= -1:
             truncate_prompt_tokens = max_model_len

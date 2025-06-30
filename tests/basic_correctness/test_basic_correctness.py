@@ -3,6 +3,7 @@
 
 Run `pytest tests/basic_correctness/test_basic_correctness.py`.
 """
+
 import os
 import weakref
 
@@ -55,12 +56,11 @@ def test_models(
     max_tokens: int,
     enforce_eager: bool,
 ) -> None:
-
     if backend == "FLASHINFER" and current_platform.is_rocm():
         pytest.skip("Flashinfer does not support ROCm/HIP.")
 
-    if backend in ("XFORMERS",
-                   "FLASHINFER") and model == "google/gemma-2-2b-it":
+    if (backend in ("XFORMERS", "FLASHINFER")
+            and model == "google/gemma-2-2b-it"):
         pytest.skip(
             f"{backend} does not support gemma2 with full context length.")
 
@@ -70,18 +70,20 @@ def test_models(
         # 5042 tokens for gemma2
         # gemma2 has alternating sliding window size of 4096
         # we need a prompt with more than 4096 tokens to test the sliding window
-        prompt = "The following numbers of the sequence " + ", ".join(
-            str(i) for i in range(1024)) + " are:"
+        prompt = ("The following numbers of the sequence " +
+                  ", ".join(str(i) for i in range(1024)) + " are:")
         example_prompts = [prompt]
 
         with hf_runner(model, dtype=dtype) as hf_model:
             hf_outputs = hf_model.generate_greedy(example_prompts, max_tokens)
 
-        with VllmRunner(model,
-                        max_model_len=8192,
-                        dtype=dtype,
-                        enforce_eager=enforce_eager,
-                        gpu_memory_utilization=0.7) as vllm_model:
+        with VllmRunner(
+                model,
+                max_model_len=8192,
+                dtype=dtype,
+                enforce_eager=enforce_eager,
+                gpu_memory_utilization=0.7,
+        ) as vllm_model:
             vllm_outputs = vllm_model.generate_greedy(example_prompts,
                                                       max_tokens)
 
@@ -95,8 +97,8 @@ def test_models(
 
 @multi_gpu_test(num_gpus=2)
 @pytest.mark.parametrize(
-    "model, distributed_executor_backend, attention_backend, "
-    "test_suite", [
+    "model, distributed_executor_backend, attention_backend, test_suite",
+    [
         ("distilbert/distilgpt2", "ray", "", "L4"),
         ("distilbert/distilgpt2", "mp", "", "L4"),
         ("meta-llama/Llama-3.2-1B-Instruct", "ray", "", "L4"),
@@ -105,7 +107,8 @@ def test_models(
         ("distilbert/distilgpt2", "mp", "", "A100"),
         ("distilbert/distilgpt2", "mp", "FLASHINFER", "A100"),
         ("meta-llama/Meta-Llama-3-8B", "ray", "FLASHINFER", "A100"),
-    ])
+    ],
+)
 def test_models_distributed(
     monkeypatch: pytest.MonkeyPatch,
     hf_runner,
@@ -116,12 +119,13 @@ def test_models_distributed(
     attention_backend: str,
     test_suite: str,
 ) -> None:
-
     if test_suite != TARGET_TEST_SUITE:
         pytest.skip(f"Skip test for {test_suite}")
 
     with monkeypatch.context() as monkeypatch_context:
-        if model == "meta-llama/Llama-3.2-1B-Instruct" and distributed_executor_backend == "ray" and attention_backend == "" and test_suite == "L4":  # noqa
+        if (model == "meta-llama/Llama-3.2-1B-Instruct"
+                and distributed_executor_backend == "ray"
+                and attention_backend == "" and test_suite == "L4"):  # noqa
             # test Ray Compiled Graph
             monkeypatch_context.setenv("VLLM_USE_RAY_SPMD_WORKER", "1")
             monkeypatch_context.setenv("VLLM_USE_RAY_COMPILED_DAG", "1")

@@ -87,7 +87,8 @@ class TestSetting:
             method="generate_with_image",
             fullgraph=False,
         ),
-    ])
+    ],
+)
 def test_compile_correctness(
     monkeypatch: pytest.MonkeyPatch,
     test_setting: TestSetting,
@@ -109,9 +110,12 @@ def test_compile_correctness(
     with monkeypatch.context() as m:
         m.setenv("VLLM_ATTENTION_BACKEND", attn_backend)
         final_args = [
-            "--enforce-eager", *model_args, "-pp",
-            str(pp_size), "-tp",
-            str(tp_size)
+            "--enforce-eager",
+            *model_args,
+            "-pp",
+            str(pp_size),
+            "-tp",
+            str(tp_size),
         ]
 
         all_args: list[list[str]] = []
@@ -130,7 +134,8 @@ def test_compile_correctness(
             model,
             all_args,
             all_envs,
-            method=method if method != "generate" else "generate_close")
+            method=method if method != "generate" else "generate_close",
+        )
         all_envs.clear()
         all_args.clear()
 

@@ -23,6 +23,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Qwen2 model compatible with HuggingFace weights."""
+
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -100,17 +101,19 @@ class Qwen2MLP(nn.Module):
 
 class Qwen2Attention(nn.Module):
 
-    def __init__(self,
-                 hidden_size: int,
-                 num_heads: int,
-                 num_kv_heads: int,
-                 max_position: int = 4096 * 32,
-                 rope_theta: float = 10000,
-                 cache_config: Optional[CacheConfig] = None,
-                 quant_config: Optional[QuantizationConfig] = None,
-                 rope_scaling: Optional[Tuple] = None,
-                 prefix: str = "",
-                 attn_type: str = AttentionType.DECODER) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        num_kv_heads: int,
+        max_position: int = 4096 * 32,
+        rope_theta: float = 10000,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
+        rope_scaling: Optional[Tuple] = None,
+        prefix: str = "",
+        attn_type: str = AttentionType.DECODER,
+    ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         tp_size = get_tensor_model_parallel_world_size()
@@ -157,14 +160,16 @@ class Qwen2Attention(nn.Module):
             base=self.rope_theta,
             rope_scaling=rope_scaling,
         )
-        self.attn = Attention(self.num_heads,
-                              self.head_dim,
-                              self.scaling,
-                              num_kv_heads=self.num_kv_heads,
-                              cache_config=cache_config,
-                              quant_config=quant_config,
-                              prefix=f"{prefix}.attn",
-                              attn_type=attn_type)
+        self.attn = Attention(
+            self.num_heads,
+            self.head_dim,
+            self.scaling,
+            num_kv_heads=self.num_kv_heads,
+            cache_config=cache_config,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn",
+            attn_type=attn_type,
+        )
 
     def forward(
         self,
@@ -263,11 +268,13 @@ class Qwen2DecoderLayer(nn.Module):
     })
 class Qwen2Model(nn.Module):
 
-    def __init__(self,
-                 *,
-                 vllm_config: VllmConfig,
-                 prefix: str = "",
-                 decoder_layer_type: type[nn.Module] = Qwen2DecoderLayer):
+    def __init__(
+        self,
+        *,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+        decoder_layer_type: type[nn.Module] = Qwen2DecoderLayer,
+    ):
         super().__init__()
 
         config = vllm_config.model_config.hf_config
@@ -275,8 +282,8 @@ class Qwen2Model(nn.Module):
         quant_config = vllm_config.quant_config
 
         # TODO (@robertgshaw2): see if this can be moved out
-        if (cache_config.sliding_window is not None
-                and hasattr(config, "max_window_layers")):
+        if cache_config.sliding_window is not None and hasattr(
+                config, "max_window_layers"):
             raise ValueError("Sliding window for some but all layers is not "
                              "supported. This model uses sliding window "
                              "but `max_window_layers` = {} is less than "
@@ -305,10 +312,12 @@ class Qwen2Model(nn.Module):
         decoder_layer_type = decoder_layer_type or Qwen2DecoderLayer
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            lambda prefix: decoder_layer_type(config=config,
-                                              cache_config=cache_config,
-                                              quant_config=quant_config,
-                                              prefix=prefix),
+            lambda prefix: decoder_layer_type(
+                config=config,
+                cache_config=cache_config,
+                quant_config=quant_config,
+                prefix=prefix,
+            ),
             prefix=f"{prefix}.layers",
         )
 
@@ -342,6 +351,7 @@ class Qwen2Model(nn.Module):
             residual = intermediate_tensors["residual"]
         if current_platform.is_hpu():
             import habana_frameworks.torch as htorch
+
             htorch.core.mark_step()
         for layer in self.layers[self.start_layer:self.end_layer]:
             hidden_states, residual = layer(
@@ -373,8 +383,8 @@ class Qwen2Model(nn.Module):
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
                 continue
-            if (self.quant_config is not None and
-                (scale_name := self.quant_config.get_cache_scale(name))):
+            if self.quant_config is not None and (
+                    scale_name := self.quant_config.get_cache_scale(name)):
                 # Loading kv cache quantization scales
                 param = params_dict[scale_name]
                 weight_loader = getattr(param, "weight_loader",
@@ -384,7 +394,7 @@ class Qwen2Model(nn.Module):
                 weight_loader(param, loaded_weight)
                 loaded_params.add(scale_name)
                 continue
-            for (param_name, weight_name, shard_id) in stacked_params_mapping:
+            for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -445,11 +455,12 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             if config.tie_word_embeddings:
                 self.lm_head = self.model.embed_tokens
             else:
-                self.lm_head = ParallelLMHead(config.vocab_size,
-                                              config.hidden_size,
-                                              quant_config=quant_config,
-                                              prefix=maybe_prefix(
-                                                  prefix, "lm_head"))
+                self.lm_head = ParallelLMHead(
+                    config.vocab_size,
+                    config.hidden_size,
+                    quant_config=quant_config,
+                    prefix=maybe_prefix(prefix, "lm_head"),
+                )
         else:
             self.lm_head = PPMissingLayer()
 
@@ -526,14 +537,15 @@ class Qwen2EmbeddingModel(nn.Module, SupportsLoRA, SupportsPP):
             logger.warning(
                 "This embedding model will default to last-token pooling in "
                 "an upcoming version. To avoid breaking changes, you should "
-                "pass `--override-pooler-config '{\"pooling_type\": \"MEAN\"}'`"
+                'pass `--override-pooler-config \'{"pooling_type": "MEAN"}\'`'
                 " explicitly.")
 
         self._pooler = Pooler.from_config_with_defaults(
             pooler_config,
             pooling_type=PoolingType.MEAN,
             normalize=True,
-            softmax=False)
+            softmax=False,
+        )
 
     def forward(
         self,

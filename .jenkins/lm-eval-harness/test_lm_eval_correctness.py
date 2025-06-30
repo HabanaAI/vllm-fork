@@ -4,10 +4,11 @@ LM eval harness on model to compare vs HF baseline computed offline.
 Configs are found in configs/$MODEL.yaml
 
 * export LM_EVAL_TEST_DATA_FILE=configs/Meta-Llama-3-70B-Instruct.yaml
-* export LM_EVAL_TP_SIZE=4 
-* export LM_EVAL_APC_ENABLED=true 
+* export LM_EVAL_TP_SIZE=4
+* export LM_EVAL_APC_ENABLED=true
 * pytest -s test_lm_eval_correctness.py
 """
+
 import atexit
 import itertools
 import os
@@ -24,19 +25,20 @@ import vllm
 RTOL = 0.06
 TEST_DATA_FILE = os.environ.get(
     "LM_EVAL_TEST_DATA_FILE",
-    ".jenkins/lm-eval-harness/configs/Meta-Llama-3-8B-Instruct.yaml")
+    ".jenkins/lm-eval-harness/configs/Meta-Llama-3-8B-Instruct.yaml",
+)
 
-REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE",
-                                    "false") in ['1', 'true']
+REPORT_PERFORMANCE = os.environ.get("LM_EVAL_REPORT_PERFORMANCE", "false") in [
+    "1",
+    "true",
+]
 
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
-APC_ENABLED = os.environ.get("LM_EVAL_APC_ENABLED", 'false')
+APC_ENABLED = os.environ.get("LM_EVAL_APC_ENABLED", "false")
 
 
 def setup_fp8():
-    os.environ[
-        "QUANT_CONFIG"] = \
-            "inc_unit_scales_config.json"
+    os.environ["QUANT_CONFIG"] = "inc_unit_scales_config.json"
 
 
 def fail_on_exit():
@@ -44,29 +46,28 @@ def fail_on_exit():
 
 
 def launch_lm_eval(eval_config):
-    trust_remote_code = eval_config.get('trust_remote_code', False)
-    dtype = eval_config.get('dtype', 'bfloat16')
-    max_num_seqs = eval_config.get('max_num_seqs', 128)
-    model_args = f"pretrained={eval_config['model_name']}," \
-                 f"tensor_parallel_size={TP_SIZE}," \
-                 f"enable_prefix_caching={APC_ENABLED}," \
-                 f"add_bos_token=true," \
-                 f"dtype={dtype}," \
-                 f"max_model_len=4096," \
-                 f"max_num_seqs={max_num_seqs}," \
-                 f"trust_remote_code={trust_remote_code}"
+    trust_remote_code = eval_config.get("trust_remote_code", False)
+    dtype = eval_config.get("dtype", "bfloat16")
+    max_num_seqs = eval_config.get("max_num_seqs", 128)
+    model_args = (f"pretrained={eval_config['model_name']},"
+                  f"tensor_parallel_size={TP_SIZE},"
+                  f"enable_prefix_caching={APC_ENABLED},"
+                  f"add_bos_token=true,"
+                  f"dtype={dtype},"
+                  f"max_model_len=4096,"
+                  f"max_num_seqs={max_num_seqs},"
+                  f"trust_remote_code={trust_remote_code}")
     if eval_config.get("fp8"):
-        model_args += ",quantization=inc," \
-            "kv_cache_dtype=fp8_inc," \
-            "weights_load_device=cpu"
+        model_args += (
+            ",quantization=inc,kv_cache_dtype=fp8_inc,weights_load_device=cpu")
     if eval_config.get("num_scheduler_steps"):
-        model_args += \
-            f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}"
+        model_args += (
+            f",num_scheduler_steps={eval_config.get('num_scheduler_steps')}")
     kwargs = {}
-    if 'fewshot_as_multiturn' in eval_config:
-        kwargs['fewshot_as_multiturn'] = eval_config['fewshot_as_multiturn']
-    if 'apply_chat_template' in eval_config:
-        kwargs['apply_chat_template'] = eval_config['apply_chat_template']
+    if "fewshot_as_multiturn" in eval_config:
+        kwargs["fewshot_as_multiturn"] = eval_config["fewshot_as_multiturn"]
+    if "apply_chat_template" in eval_config:
+        kwargs["apply_chat_template"] = eval_config["apply_chat_template"]
     results = lm_eval.simple_evaluate(
         model="vllm",
         model_args=model_args,
@@ -74,7 +75,8 @@ def launch_lm_eval(eval_config):
         num_fewshot=eval_config["num_fewshot"],
         limit=eval_config["limit"],
         batch_size="auto",
-        **kwargs)
+        **kwargs,
+    )
 
     return results
 
@@ -93,10 +95,10 @@ def report_performance(task, input_lens, output_lens, time, record_property):
     stddev_input_tokens, stddev_output_tokens, stddev_context_tokens = (
         statistics.stdev(x) for x in all_lens)
     msg = (
-        f'{task} | estimated average generation throughput: {gen_tput:.2f} tokens/s \n'  # noqa: G004, E501
-        f'{task} | input_tokens   | min: {min_input_tokens} | max: {max_input_tokens} | mean: {mean_input_tokens:.2f} | stddev: {stddev_input_tokens:.2f}\n'  # noqa: E501
-        f'{task} | output_tokens  | min: {min_output_tokens} | max: {max_output_tokens} | mean: {mean_output_tokens:.2f} | stddev: {stddev_output_tokens:.2f}\n'  # noqa: E501
-        f'{task} | context_length | min: {min_context_tokens} | max: {max_context_tokens} | mean: {mean_context_tokens:.2f} | stddev: {stddev_context_tokens:.2f}'  # noqa: E501
+        f"{task} | estimated average generation throughput: {gen_tput:.2f} tokens/s \n"  # noqa: G004, E501
+        f"{task} | input_tokens   | min: {min_input_tokens} | max: {max_input_tokens} | mean: {mean_input_tokens:.2f} | stddev: {stddev_input_tokens:.2f}\n"  # noqa: E501
+        f"{task} | output_tokens  | min: {min_output_tokens} | max: {max_output_tokens} | mean: {mean_output_tokens:.2f} | stddev: {stddev_output_tokens:.2f}\n"  # noqa: E501
+        f"{task} | context_length | min: {min_context_tokens} | max: {max_context_tokens} | mean: {mean_context_tokens:.2f} | stddev: {stddev_context_tokens:.2f}"  # noqa: E501
     )
 
     # Log all of these stats to JUnitXML
@@ -144,10 +146,10 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
             Path(TEST_DATA_FILE).read_text(encoding="utf-8"))
 
         # Record JUnitXML test name
-        tasks_str = '_'.join([t['name'] for t in eval_config["tasks"]])
+        tasks_str = "_".join([t["name"] for t in eval_config["tasks"]])
         platform = get_current_gaudi_platform()
-        testname = (f'test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_'
-                    f'tp{TP_SIZE}')
+        testname = (f"test_{Path(TEST_DATA_FILE).stem}_{tasks_str}_{platform}_"
+                    f"tp{TP_SIZE}")
         record_xml_attribute("name", testname)
 
         # Set up environment for FP8 inference
@@ -159,14 +161,13 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
         total_time = time.perf_counter() - start_time
 
         tokenizer = vllm.transformers_utils.tokenizer.get_tokenizer(
-            eval_config['model_name'])
+            eval_config["model_name"])
 
         # Confirm scores match ground truth.
         for task in eval_config["tasks"]:
-
-            samples = results['samples'][task["name"]]
+            samples = results["samples"][task["name"]]
             tokenized_inputs = [
-                tokenizer(x['arguments'][0][0])['input_ids'] for x in samples
+                tokenizer(x["arguments"][0][0])["input_ids"] for x in samples
             ]
             tokenized_inputs_lens = [len(x) for x in tokenized_inputs]
             tokenized_outputs = [
@@ -174,26 +175,31 @@ def test_lm_eval_correctness(record_xml_attribute, record_property):
                     itertools.chain.from_iterable(
                         tokenizer(
                             list(itertools.chain.from_iterable(
-                                x['resps'])))['input_ids'])) for x in samples
+                                x["resps"])))["input_ids"])) for x in samples
             ]
             tokenized_outputs_lens = [len(x) for x in tokenized_outputs]
             if REPORT_PERFORMANCE:
-                report_performance(task['name'], tokenized_inputs_lens,
-                                   tokenized_outputs_lens, total_time,
-                                   record_property)
+                report_performance(
+                    task["name"],
+                    tokenized_inputs_lens,
+                    tokenized_outputs_lens,
+                    total_time,
+                    record_property,
+                )
 
             for metric in task["metrics"]:
                 ground_truth = metric["value"]
                 measured_value = results["results"][task["name"]][
                     metric["name"]]
                 print(
-                    f'{task["name"]} | {metric["name"]}: '
-                    f'ground_truth={ground_truth} | measured={measured_value}')
+                    f"{task['name']} | {metric['name']}: "
+                    f"ground_truth={ground_truth} | measured={measured_value}")
 
                 # Record ground truth and measured value to JUnitXML
                 record_property(
                     f"{task['name']}_{metric['name']}_ground_truth",
-                    ground_truth)
+                    ground_truth,
+                )
                 record_property(f"{task['name']}_{metric['name']}_measured",
                                 measured_value)
                 if measured_value < ground_truth:

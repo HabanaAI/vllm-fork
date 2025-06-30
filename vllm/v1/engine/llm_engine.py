@@ -77,12 +77,15 @@ class LLMEngine:
         self.tokenizer = init_tokenizer_from_configs(
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
-            lora_config=vllm_config.lora_config)
+            lora_config=vllm_config.lora_config,
+        )
 
         # Processor (convert Inputs --> EngineCoreRequests)
-        self.processor = Processor(vllm_config=vllm_config,
-                                   tokenizer=self.tokenizer,
-                                   mm_registry=mm_registry)
+        self.processor = Processor(
+            vllm_config=vllm_config,
+            tokenizer=self.tokenizer,
+            mm_registry=mm_registry,
+        )
 
         # OutputProcessor (convert EngineCoreOutputs --> RequestOutput).
         self.output_processor = OutputProcessor(self.tokenizer,
@@ -109,12 +112,14 @@ class LLMEngine:
         stat_loggers: Optional[list[StatLoggerFactory]] = None,
         disable_log_stats: bool = False,
     ) -> "LLMEngine":
-        return cls(vllm_config=vllm_config,
-                   executor_class=Executor.get_class(vllm_config),
-                   log_stats=(not disable_log_stats),
-                   usage_context=usage_context,
-                   stat_loggers=stat_loggers,
-                   multiprocess_mode=envs.VLLM_ENABLE_V1_MULTIPROCESSING)
+        return cls(
+            vllm_config=vllm_config,
+            executor_class=Executor.get_class(vllm_config),
+            log_stats=(not disable_log_stats),
+            usage_context=usage_context,
+            stat_loggers=stat_loggers,
+            multiprocess_mode=envs.VLLM_ENABLE_V1_MULTIPROCESSING,
+        )
 
     @classmethod
     def from_engine_args(
@@ -135,12 +140,14 @@ class LLMEngine:
             enable_multiprocessing = True
 
         # Create the LLMEngine.
-        return cls(vllm_config=vllm_config,
-                   executor_class=executor_class,
-                   log_stats=not engine_args.disable_log_stats,
-                   usage_context=usage_context,
-                   stat_loggers=stat_loggers,
-                   multiprocess_mode=enable_multiprocessing)
+        return cls(
+            vllm_config=vllm_config,
+            executor_class=executor_class,
+            log_stats=not engine_args.disable_log_stats,
+            usage_context=usage_context,
+            stat_loggers=stat_loggers,
+            multiprocess_mode=enable_multiprocessing,
+        )
 
     def get_num_unfinished_requests(self) -> int:
         return self.output_processor.get_num_unfinished_requests()
@@ -182,9 +189,16 @@ class LLMEngine:
     ) -> None:
         # Process raw inputs into the request.
         prompt_str, request = self.processor.process_inputs(
-            request_id, prompt, params, arrival_time, lora_request,
-            tokenization_kwargs, trace_headers, prompt_adapter_request,
-            priority)
+            request_id,
+            prompt,
+            params,
+            arrival_time,
+            lora_request,
+            tokenization_kwargs,
+            trace_headers,
+            prompt_adapter_request,
+            priority,
+        )
 
         n = params.n if isinstance(params, SamplingParams) else 1
 
@@ -210,7 +224,6 @@ class LLMEngine:
             self.engine_core.add_request(child_request)
 
     def step(self) -> list[RequestOutput]:
-
         if self.should_execute_dummy_batch:
             self.should_execute_dummy_batch = False
             self.engine_core.execute_dummy_batch()
@@ -254,8 +267,8 @@ class LLMEngine:
 
     def get_tokenizer_group(self) -> TokenizerGroup:
         if self.tokenizer is None:
-            raise ValueError("Unable to get tokenizer because "
-                             "skip_tokenizer_init is True")
+            raise ValueError(
+                "Unable to get tokenizer because skip_tokenizer_init is True")
 
         return self.tokenizer
 
@@ -275,11 +288,13 @@ class LLMEngine:
         """Prevent an adapter from being evicted."""
         return self.engine_core.pin_lora(lora_id)
 
-    def collective_rpc(self,
-                       method: Union[str, Callable[..., _R]],
-                       timeout: Optional[float] = None,
-                       args: tuple = (),
-                       kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+    def collective_rpc(
+        self,
+        method: Union[str, Callable[..., _R]],
+        timeout: Optional[float] = None,
+        args: tuple = (),
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> list[_R]:
         return self.engine_core.collective_rpc(method, timeout, args, kwargs)
 
     def __del__(self):

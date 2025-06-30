@@ -79,7 +79,8 @@ async def test_single_chat_session_audio(client: openai.AsyncOpenAI,
         max_completion_tokens=10,
         logprobs=True,
         temperature=0.0,
-        top_logprobs=5)
+        top_logprobs=5,
+    )
     assert len(chat_completion.choices) == 1
 
     choice = chat_completion.choices[0]
@@ -127,19 +128,23 @@ async def test_error_on_invalid_audio_url_type(client: openai.AsyncOpenAI,
 
     # audio_url should be a dict {"url": "some url"}, not directly a string
     with pytest.raises(openai.BadRequestError):
-        _ = await client.chat.completions.create(model=model_name,
-                                                 messages=messages,
-                                                 max_completion_tokens=10,
-                                                 temperature=0.0)
+        _ = await client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_completion_tokens=10,
+            temperature=0.0,
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_name", [MODEL_NAME])
 @pytest.mark.parametrize("audio_url", [TEST_AUDIO_URLS[0]])
 async def test_single_chat_session_audio_base64encoded(
-        client: openai.AsyncOpenAI, model_name: str, audio_url: str,
-        base64_encoded_audio: dict[str, str]):
-
+    client: openai.AsyncOpenAI,
+    model_name: str,
+    audio_url: str,
+    base64_encoded_audio: dict[str, str],
+):
     messages = [{
         "role":
         "user",
@@ -149,7 +154,7 @@ async def test_single_chat_session_audio_base64encoded(
                 "audio_url": {
                     "url":
                     f"data:audio/wav;base64,{base64_encoded_audio[audio_url]}"
-                }
+                },
             },
             {
                 "type": "text",
@@ -165,7 +170,8 @@ async def test_single_chat_session_audio_base64encoded(
         max_completion_tokens=10,
         logprobs=True,
         temperature=0.0,
-        top_logprobs=5)
+        top_logprobs=5,
+    )
     assert len(chat_completion.choices) == 1
 
     choice = chat_completion.choices[0]
@@ -195,8 +201,11 @@ async def test_single_chat_session_audio_base64encoded(
 @pytest.mark.parametrize("model_name", [MODEL_NAME])
 @pytest.mark.parametrize("audio_url", [TEST_AUDIO_URLS[0]])
 async def test_single_chat_session_input_audio(
-        client: openai.AsyncOpenAI, model_name: str, audio_url: str,
-        base64_encoded_audio: dict[str, str]):
+    client: openai.AsyncOpenAI,
+    model_name: str,
+    audio_url: str,
+    base64_encoded_audio: dict[str, str],
+):
     messages = [{
         "role":
         "user",
@@ -205,8 +214,8 @@ async def test_single_chat_session_input_audio(
                 "type": "input_audio",
                 "input_audio": {
                     "data": base64_encoded_audio[audio_url],
-                    "format": "wav"
-                }
+                    "format": "wav",
+                },
             },
             {
                 "type": "text",
@@ -221,7 +230,8 @@ async def test_single_chat_session_input_audio(
         messages=messages,
         max_completion_tokens=10,
         logprobs=True,
-        top_logprobs=5)
+        top_logprobs=5,
+    )
     assert len(chat_completion.choices) == 1
 
     choice = chat_completion.choices[0]
@@ -306,10 +316,12 @@ async def test_chat_streaming_audio(client: openai.AsyncOpenAI,
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_name", [MODEL_NAME])
 @pytest.mark.parametrize("audio_url", TEST_AUDIO_URLS)
-async def test_chat_streaming_input_audio(client: openai.AsyncOpenAI,
-                                          model_name: str, audio_url: str,
-                                          base64_encoded_audio: dict[str,
-                                                                     str]):
+async def test_chat_streaming_input_audio(
+    client: openai.AsyncOpenAI,
+    model_name: str,
+    audio_url: str,
+    base64_encoded_audio: dict[str, str],
+):
     messages = [{
         "role":
         "user",
@@ -318,8 +330,8 @@ async def test_chat_streaming_input_audio(client: openai.AsyncOpenAI,
                 "type": "input_audio",
                 "input_audio": {
                     "data": base64_encoded_audio[audio_url],
-                    "format": "wav"
-                }
+                    "format": "wav",
+                },
             },
             {
                 "type": "text",
@@ -369,7 +381,6 @@ async def test_chat_streaming_input_audio(client: openai.AsyncOpenAI,
     "audio_urls", [TEST_AUDIO_URLS, TEST_AUDIO_URLS + [TEST_AUDIO_URLS[0]]])
 async def test_multi_audio_input(client: openai.AsyncOpenAI, model_name: str,
                                  audio_urls: list[str]):
-
     messages = [{
         "role":
         "user",

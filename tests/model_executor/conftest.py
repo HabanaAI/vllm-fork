@@ -26,7 +26,7 @@ def sample_json_schema():
                     "type": "string",
                     "maxLength": 10
                 },
-                "minItems": 3
+                "minItems": 3,
             },
             "work_history": {
                 "type": "array",
@@ -41,11 +41,11 @@ def sample_json_schema():
                         },
                         "position": {
                             "type": "string"
-                        }
+                        },
                     },
-                    "required": ["company", "position"]
-                }
-            }
+                    "required": ["company", "position"],
+                },
+            },
         },
-        "required": ["name", "age", "skills", "work_history"]
+        "required": ["name", "age", "skills", "work_history"],
     }

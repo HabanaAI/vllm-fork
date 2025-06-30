@@ -31,7 +31,6 @@ def base64_encoded_image() -> dict[str, str]:
 @pytest.mark.parametrize("model_name", ["llava-hf/llava-1.5-7b-hf"])
 async def test_basic_vision(model_name: str, base64_encoded_image: dict[str,
                                                                         str]):
-
     pytest.skip("Skip this test until it's fixed.")
 
     def whats_in_this_image_msg(b64):
@@ -65,7 +64,7 @@ async def test_basic_vision(model_name: str, base64_encoded_image: dict[str,
         # NOTE: max-num-batched-tokens>=mm_item_size
         "--disable_chunked_mm_input",
         "--chat-template",
-        "examples/template_llava.jinja"
+        "examples/template_llava.jinja",
     ]
 
     # Server will pre-compile on first startup (takes a long time).
@@ -76,12 +75,12 @@ async def test_basic_vision(model_name: str, base64_encoded_image: dict[str,
         # Other requests now should be much faster
         for image_url in TEST_IMAGE_URLS:
             image_base64 = base64_encoded_image[image_url]
-            chat_completion_from_base64 = await client.chat.completions\
-                .create(
+            chat_completion_from_base64 = await client.chat.completions.create(
                 model=model_name,
                 messages=whats_in_this_image_msg(image_base64),
                 max_completion_tokens=24,
-                temperature=0.0)
+                temperature=0.0,
+            )
             result = chat_completion_from_base64
             assert result
             choice = result.choices[0]

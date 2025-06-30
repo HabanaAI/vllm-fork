@@ -107,7 +107,7 @@ class VideoAsset:
     def get_audio(self, sampling_rate: Optional[float] = None) -> npt.NDArray:
         """
         Read audio data from the video asset, used in Qwen2.5-Omni examples.
-        
+
         See also: examples/offline_inference/qwen2_5_omni/only_thinker.py
         """
         video_path = download_video_asset(self.filename)

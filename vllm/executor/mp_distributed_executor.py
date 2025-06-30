@@ -54,8 +54,8 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
             })
 
     def _init_executor(self) -> None:
-
         from vllm.platforms import current_platform
+
         if current_platform.is_cuda_alike():
             self._check_cuda()
 
@@ -122,15 +122,17 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
             all_kwargs.append(kwargs)
         self._run_workers("init_worker", all_kwargs)
         self._run_workers("init_device")
-        self._run_workers("load_model",
-                          max_concurrent_workers=self.parallel_config.
-                          max_parallel_loading_workers)
+        self._run_workers(
+            "load_model",
+            max_concurrent_workers=self.parallel_config.
+            max_parallel_loading_workers,
+        )
         self.driver_exec_model = make_async(self.driver_worker.execute_model)
         self.pp_locks: Optional[List[asyncio.Lock]] = None
         self.shutdown_workers = True
 
     def shutdown(self):
-        if getattr(self, 'shutdown_workers', False):
+        if getattr(self, "shutdown_workers", False):
             self._run_workers("shutdown")
             self.shutdown_workers = False
         if (worker_monitor := getattr(self, "worker_monitor",
@@ -195,8 +197,8 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
 
     def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
-        if self.worker_monitor is not None and not self.worker_monitor.is_alive(
-        ):
+        if (self.worker_monitor is not None
+                and not self.worker_monitor.is_alive()):
             raise RuntimeError("Worker processes are not running")
 
     def _wait_for_tasks_completion(self, parallel_worker_tasks: Any) -> None:
@@ -231,9 +233,12 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
                                                 start=1):
             tasks.append(
                 asyncio.create_task(
-                    _run_task_with_lock(driver_worker.execute_method_async,
-                                        self.pp_locks[pp_rank],
-                                        "execute_model", execute_model_req)))
+                    _run_task_with_lock(
+                        driver_worker.execute_method_async,
+                        self.pp_locks[pp_rank],
+                        "execute_model",
+                        execute_model_req,
+                    )))
         results = await asyncio.gather(*tasks)
 
         # Only the last PP stage has the final results.

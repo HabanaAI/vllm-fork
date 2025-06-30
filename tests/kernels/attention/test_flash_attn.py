@@ -59,10 +59,10 @@ def ref_paged_attn(
         empty_mask = torch.ones(query_len, kv_len)
         mask = torch.triu(empty_mask, diagonal=kv_len - query_len + 1).bool()
         if sliding_window is not None:
-            sliding_window_mask = torch.triu(empty_mask,
-                                             diagonal=kv_len -
-                                             (query_len + sliding_window) +
-                                             1).bool().logical_not()
+            sliding_window_mask = (torch.triu(
+                empty_mask,
+                diagonal=kv_len - (query_len + sliding_window) + 1,
+            ).bool().logical_not())
             mask |= sliding_window_mask
         if soft_cap is not None:
             attn = soft_cap * torch.tanh(attn / soft_cap)
@@ -104,7 +104,7 @@ def test_flash_attn_with_paged_kv(
     torch.set_default_device("cuda")
     if not is_fa_version_supported(fa_version):
         pytest.skip(f"Flash attention version {fa_version} not supported due "
-                    f"to: \"{fa_version_unsupported_reason(fa_version)}\"")
+                    f'to: "{fa_version_unsupported_reason(fa_version)}"')
     if q_dtype is not None and (dtype != torch.bfloat16 or fa_version == 2):
         pytest.skip("Flash attention with quantized inputs is only "
                     "supported on version 3 with bfloat16 base type")
@@ -177,23 +177,28 @@ def test_flash_attn_with_paged_kv(
     if q_dtype is not None:
         atol, rtol = 1.5e-1, 1.5e-1
 
-    ref_output = ref_paged_attn(query=query,
-                                key_cache=key_cache,
-                                value_cache=value_cache,
-                                query_lens=[1] * num_seqs,
-                                kv_lens=kv_lens,
-                                block_tables=block_tables,
-                                scale=scale,
-                                soft_cap=soft_cap,
-                                sliding_window=sliding_window)
-    torch.testing.assert_close(output, ref_output, atol=atol, rtol=rtol), \
-        f"{torch.max(torch.abs(output - ref_output))}"
+    ref_output = ref_paged_attn(
+        query=query,
+        key_cache=key_cache,
+        value_cache=value_cache,
+        query_lens=[1] * num_seqs,
+        kv_lens=kv_lens,
+        block_tables=block_tables,
+        scale=scale,
+        soft_cap=soft_cap,
+        sliding_window=sliding_window,
+    )
+    (
+        torch.testing.assert_close(output, ref_output, atol=atol, rtol=rtol),
+        f"{torch.max(torch.abs(output - ref_output))}",
+    )
 
 
 @pytest.mark.parametrize("use_out", [True, False])
-@pytest.mark.parametrize("seq_lens",
-                         [[(1, 1328), (5, 18),
-                           (129, 463)], [(1, 523), (1, 37), (1, 2011)]])
+@pytest.mark.parametrize(
+    "seq_lens",
+    [[(1, 1328), (5, 18), (129, 463)], [(1, 523), (1, 37), (1, 2011)]],
+)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
@@ -220,7 +225,7 @@ def test_varlen_with_paged_kv(
     torch.set_default_device("cuda")
     if not is_fa_version_supported(fa_version):
         pytest.skip(f"Flash attention version {fa_version} not supported due "
-                    f"to: \"{fa_version_unsupported_reason(fa_version)}\"")
+                    f'to: "{fa_version_unsupported_reason(fa_version)}"')
     if q_dtype is not None and (dtype != torch.bfloat16 or fa_version == 2):
         pytest.skip("Flash attention with quantized inputs is only "
                     "supported on version 3 with bfloat16 base type")
@@ -312,5 +317,7 @@ def test_varlen_with_paged_kv(
     atol, rtol = 1.5e-2, 1e-2
     if q_dtype is not None:
         atol, rtol = 1.5e-1, 1.5e-1
-    torch.testing.assert_close(output, ref_output, atol=atol, rtol=rtol), \
-        f"{torch.max(torch.abs(output - ref_output))}"
+    (
+        torch.testing.assert_close(output, ref_output, atol=atol, rtol=rtol),
+        f"{torch.max(torch.abs(output - ref_output))}",
+    )

@@ -3,6 +3,7 @@
 
 Run `pytest tests/encoder_decoder/test_e2e_correctness.py`.
 """
+
 from typing import Optional
 
 import pytest
@@ -27,7 +28,7 @@ def use_v0_only(monkeypatch):
     Since this module is V0 only, set VLLM_USE_V1=0 for
     all tests in the module.
     """
-    monkeypatch.setenv('VLLM_USE_V1', '0')
+    monkeypatch.setenv("VLLM_USE_V1", "0")
 
 
 def vllm_to_hf_output(
@@ -60,7 +61,7 @@ def clear_cache():
 @pytest.mark.parametrize("enforce_eager", [True, False])
 @pytest.mark.skipif(
     current_platform.is_cpu(),
-    reason="CPU backend is not currently supported with encoder/decoder models"
+    reason="CPU backend is not currently supported with encoder/decoder models",
 )
 def test_encoder_decoder_e2e(
     hf_runner,
@@ -74,17 +75,17 @@ def test_encoder_decoder_e2e(
     enforce_eager: bool,
     attn_backend: _Backend,
 ) -> None:
-    '''
+    """
     End-to-End (E2E) test for the encoder-decoder framework.
     This test evaluates the encoder-decoder functionality using the BART
     model. We compare the outputs of the Hugging Face and vLLM
     implementations to ensure that both implementations produce consistent
     and correct results.
-    '''
+    """
     with global_force_attn_backend_context_manager(attn_backend):
         if attn_backend == _Backend.FLASH_ATTN:
             # Flash Attention works only with bfloat16 data-type
-            dtype = 'bfloat16'
+            dtype = "bfloat16"
         test_case_prompts = example_encoder_decoder_prompts[
             decoder_prompt_type]
 
@@ -97,7 +98,7 @@ def test_encoder_decoder_e2e(
             "length_penalty": 1.0,
             "early_stopping": False,
             "no_repeat_ngram_size": None,
-            "min_length": 0
+            "min_length": 0,
         }
 
         with hf_runner(model, dtype=dtype,

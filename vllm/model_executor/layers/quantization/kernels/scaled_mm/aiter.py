@@ -25,7 +25,8 @@ class AiterScaledMMLinearKernel(CutlassScaledMMLinearKernel):
             return (
                 False,
                 "AiterScaledMMLinearKernel requires `aiter` which is not " +
-                "currently supported on non-ROCm platform.")
+                "currently supported on non-ROCm platform.",
+            )
 
         try:
             import aiter  # noqa: F401 # deliberately attempt to import aiter
@@ -33,30 +34,35 @@ class AiterScaledMMLinearKernel(CutlassScaledMMLinearKernel):
             return (
                 False,
                 "AiterScaledMMLinearKernel requires `aiter` which is not " +
-                "installed on ROCm.")
+                "installed on ROCm.",
+            )
         # Check if rocm_aiter_gemm_w8a8_scaled_mm is enabled
-        if not (
-            envs.VLLM_ROCM_USE_AITER_LINEAR \
-            and envs.VLLM_ROCM_USE_AITER
-        ):
-            return (False, "AiterScaledMMLinearKernel is disabled. " +
-                    "Enable by setting `VLLM_ROCM_USE_AITER=1` " +
-                    "and `VLLM_ROCM_USE_AITER_LINEAR=1`. " +
-                    "`VLLM_ROCM_USE_AITER_LINEAR` default is True.")
+        if not (envs.VLLM_ROCM_USE_AITER_LINEAR and envs.VLLM_ROCM_USE_AITER):
+            return (
+                False,
+                "AiterScaledMMLinearKernel is disabled. " +
+                "Enable by setting `VLLM_ROCM_USE_AITER=1` " +
+                "and `VLLM_ROCM_USE_AITER_LINEAR=1`. " +
+                "`VLLM_ROCM_USE_AITER_LINEAR` default is True.",
+            )
 
         if not c.input_symmetric:
-            return (False,
-                    "AiterScaledMMLinearKernel only supports symmetric " +
-                    "quantization.")
+            return (
+                False,
+                "AiterScaledMMLinearKernel only supports symmetric " +
+                "quantization.",
+            )
         return True, None
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         super().process_weights_after_loading(layer)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def apply_weights(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """
         `AiterScaledMMLinearKernel` implements a fused version of
             `output = torch.mm((scale_a * a), (scale_b * b)).to(out_dtype)`
@@ -73,29 +79,29 @@ class AiterScaledMMLinearKernel(CutlassScaledMMLinearKernel):
         # * dynamic, i_s is None and x_s computed from x.
         # * static, i_s is scalar and x_s is i_s.
         symmetric = azp_adj is None
-        assert symmetric, ("AiterScaledMMLinearKernel only supports"
-                           " symmetric quantization.")
+        assert symmetric, (
+            "AiterScaledMMLinearKernel only supports symmetric quantization.")
         x_q, x_s, x_zp = ops.scaled_int8_quant(x,
                                                i_s,
                                                i_zp,
                                                symmetric=symmetric)
 
-        assert x_zp is None, ("AiterScaledMMLinearKernel only supports"
-                              " symmetric quantization.")
+        assert x_zp is None, (
+            "AiterScaledMMLinearKernel only supports symmetric quantization.")
         out_dtype = x.dtype
 
-        assert (w_q.shape[0] % 16 == 0 and w_q.shape[1] % 16 == 0)
-        assert (out_dtype is torch.bfloat16 or out_dtype is torch.float16)
-        assert bias is None or bias.shape[0] == w_q.shape[
-            1] and bias.dtype == out_dtype
+        assert w_q.shape[0] % 16 == 0 and w_q.shape[1] % 16 == 0
+        assert out_dtype is torch.bfloat16 or out_dtype is torch.float16
+        assert (bias is None
+                or bias.shape[0] == w_q.shape[1] and bias.dtype == out_dtype)
 
         m = x_q.shape[0]  # a
         n = w_q.shape[1]  # b
 
-        per_tensor_scale_a = (x_s.numel() == 1)
-        per_tensor_scale_b = (w_s.numel() == 1)
-        per_token_scale_a = (x_s.numel() == m)
-        per_channel_scale_b = (w_s.numel() == n)
+        per_tensor_scale_a = x_s.numel() == 1
+        per_tensor_scale_b = w_s.numel() == 1
+        per_token_scale_a = x_s.numel() == m
+        per_channel_scale_b = w_s.numel() == n
 
         # @TODO:
         # Maybe broadcast the per-tensor-scale into per-channel-scale
@@ -103,12 +109,12 @@ class AiterScaledMMLinearKernel(CutlassScaledMMLinearKernel):
         # For now, it only supports:
         # - per-tensor-per-tensor a8w8 scaled GEMM, and
         # - per-token-per-channel a8w8 scaled GEMM
-        assert ((per_tensor_scale_a and per_tensor_scale_b)
-                or (per_token_scale_a and per_channel_scale_b)), (
-                    "Currently only support per-tensor-per-tensor GEMM " +
-                    " and per-token-per-channel GEMM through AITER"
-                    " w8a8 scaled gemm. `AiterScaledMMLinearKernel` " +
-                    "does not support AITER block scaled GEMM.")
+        assert (per_tensor_scale_a and per_tensor_scale_b) or (
+            per_token_scale_a and per_channel_scale_b), (
+                "Currently only support per-tensor-per-tensor GEMM " +
+                " and per-token-per-channel GEMM through AITER"
+                " w8a8 scaled gemm. `AiterScaledMMLinearKernel` " +
+                "does not support AITER block scaled GEMM.")
 
         from aiter import gemm_a8w8_CK
 

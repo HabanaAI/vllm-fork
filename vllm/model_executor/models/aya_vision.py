@@ -56,11 +56,14 @@ class AyaVisionMultiModalProjector(nn.Module):
         self.config = config
         self.downsample_factor = config.downsample_factor
         self.alignment_intermediate_size = getattr(
-            config, "alignment_intermediate_size",
-            config.text_config.hidden_size)
-        self.layernorm = nn.LayerNorm(config.vision_config.hidden_size *
-                                      (config.downsample_factor**2),
-                                      eps=config.adapter_layer_norm_eps)
+            config,
+            "alignment_intermediate_size",
+            config.text_config.hidden_size,
+        )
+        self.layernorm = nn.LayerNorm(
+            config.vision_config.hidden_size * (config.downsample_factor**2),
+            eps=config.adapter_layer_norm_eps,
+        )
 
         self.linear_1 = nn.Linear(
             config.vision_config.hidden_size * (config.downsample_factor**2),
@@ -70,9 +73,11 @@ class AyaVisionMultiModalProjector(nn.Module):
 
         self.act = ACT2FN["silu"]  # SwiGLU uses SiLU activation
         # For SwiGLU, project down to half size since we split intermediate dim
-        self.linear_2 = nn.Linear(self.alignment_intermediate_size // 2,
-                                  config.text_config.hidden_size,
-                                  bias=True)
+        self.linear_2 = nn.Linear(
+            self.alignment_intermediate_size // 2,
+            config.text_config.hidden_size,
+            bias=True,
+        )
 
     def forward(self, image_features: torch.Tensor) -> torch.Tensor:
         image_features = self.pixel_shuffle(image_features)
@@ -94,12 +99,18 @@ class AyaVisionMultiModalProjector(nn.Module):
                                                 height, -1)
         channels = image_features.shape[-1]
         image_features = image_features.reshape(
-            batch_size, width, int(height / self.downsample_factor),
-            int(channels * self.downsample_factor))
+            batch_size,
+            width,
+            int(height / self.downsample_factor),
+            int(channels * self.downsample_factor),
+        )
         image_features = image_features.permute(0, 2, 1, 3)
         image_features = image_features.reshape(
-            batch_size, int(height / self.downsample_factor),
-            int(width / self.downsample_factor), -1)
+            batch_size,
+            int(height / self.downsample_factor),
+            int(width / self.downsample_factor),
+            -1,
+        )
         image_features = image_features.permute(0, 2, 1, 3)
         return image_features
 
@@ -120,14 +131,21 @@ class AyaVisionProcessingInfo(BaseProcessingInfo):
 
     def get_image_size_with_most_features(self) -> ImageSize:
         image_processor = self.get_image_processor()
-        height = image_processor.size['height']
-        width = image_processor.size['width']
+        height = image_processor.size["height"]
+        width = image_processor.size["width"]
         max_patches = image_processor.max_patches
         return ImageSize(height=height * max_patches,
                          width=width * max_patches)
 
-    def get_num_patches(self, *, image_width: int, image_height: int,
-                        size: dict, min_patches: int, max_patches: int) -> int:
+    def get_num_patches(
+        self,
+        *,
+        image_width: int,
+        image_height: int,
+        size: dict,
+        min_patches: int,
+        max_patches: int,
+    ) -> int:
         """
         Calculate the number of patches needed for a given image based on size
         constraints.  This method replicates and adjusts the logic from:
@@ -135,8 +153,11 @@ class AyaVisionProcessingInfo(BaseProcessingInfo):
         """
         size = get_size_dict(size, default_to_square=False)
         num_columns, num_rows = get_optimal_tiled_canvas(
-            (image_height, image_width), (size["height"], size["width"]),
-            min_patches, max_patches)
+            (image_height, image_width),
+            (size["height"], size["width"]),
+            min_patches,
+            max_patches,
+        )
         num_blocks = num_columns * num_rows
         return num_blocks if num_blocks == 1 else num_blocks + 1
 
@@ -158,14 +179,15 @@ class AyaVisionDummyInputsBuilder(
         mm_counts: Mapping[str, int],
     ) -> MultiModalDataDict:
         num_images = mm_counts.get("image", 0)
-        image_size = \
-            self.info.get_image_size_with_most_features()
+        image_size = self.info.get_image_size_with_most_features()
 
         return {
             "image":
-            self._get_dummy_images(width=image_size.width,
-                                   height=image_size.height,
-                                   num_images=num_images)
+            self._get_dummy_images(
+                width=image_size.width,
+                height=image_size.height,
+                num_images=num_images,
+            )
         }
 
 
@@ -188,7 +210,7 @@ class AyaVisionMultiModalProcessor(
 
         # HF processor pops the `num_patches` kwarg, which is needed by vLLM
         if (images :=
-                mm_data.get("images")) is not None and '<image>' in prompt:
+                mm_data.get("images")) is not None and "<image>" in prompt:
             assert isinstance(images, list)
             parsed_images = (self._get_data_parser().parse_mm_data({
                 "image":
@@ -205,8 +227,8 @@ class AyaVisionMultiModalProcessor(
                     image_height=image_size.height,
                     size=image_processor.size,
                     min_patches=image_processor.min_patches,
-                    max_patches=image_processor.max_patches)
-                for image_size in image_sizes
+                    max_patches=image_processor.max_patches,
+                ) for image_size in image_sizes
             ]
             processed_outputs["num_patches"] = torch.tensor(num_patches)
 
@@ -270,8 +292,8 @@ def _get_num_hidden_layers(hf_config: AyaVisionConfig) -> int:
     elif isinstance(feature_layers, (list, tuple)):
         return max(
             _get_layer_index(idx, num_hidden_layers) for idx in feature_layers)
-    raise TypeError(f"vision_layer_feature type: {type(feature_layers)}"
-                    " is not supported")
+    raise TypeError(
+        f"vision_layer_feature type: {type(feature_layers)} is not supported")
 
 
 def _get_layer_index(feature_layer_index: int, num_hidden_layers: int) -> int:
@@ -283,7 +305,8 @@ def _get_layer_index(feature_layer_index: int, num_hidden_layers: int) -> int:
 @MULTIMODAL_REGISTRY.register_processor(
     AyaVisionMultiModalProcessor,
     info=AyaVisionProcessingInfo,
-    dummy_inputs=AyaVisionDummyInputsBuilder)
+    dummy_inputs=AyaVisionDummyInputsBuilder,
+)
 class AyaVisionForConditionalGeneration(nn.Module, SupportsMultiModal,
                                         SupportsPP):
 
@@ -301,7 +324,8 @@ class AyaVisionForConditionalGeneration(nn.Module, SupportsMultiModal,
             config.vision_config,
             quant_config,
             num_hidden_layers_override=num_hidden_layers,
-            prefix=maybe_prefix(prefix, "vision_model"))
+            prefix=maybe_prefix(prefix, "vision_model"),
+        )
         self.vocab_size = config.text_config.vocab_size
         self.multi_modal_projector = AyaVisionMultiModalProjector(config)
         self.language_model = init_vllm_registered_model(
@@ -309,7 +333,8 @@ class AyaVisionForConditionalGeneration(nn.Module, SupportsMultiModal,
             hf_config=config.text_config,
             prefix=maybe_prefix(prefix, "model"),
             # Cohere2ForCausalLM and CohereForCausalLM are the same on vllm
-            architectures=["Cohere2ForCausalLM"])
+            architectures=["Cohere2ForCausalLM"],
+        )
 
     @property
     def dtype(self):
@@ -320,9 +345,12 @@ class AyaVisionForConditionalGeneration(nn.Module, SupportsMultiModal,
         loader = AutoWeightsLoader(self)
         return loader.load_weights(weights)
 
-    def _image_pixels_to_features(self, vision_tower: SiglipVisionModel,
-                                  pixel_values: torch.Tensor,
-                                  **kwargs) -> torch.Tensor:
+    def _image_pixels_to_features(
+        self,
+        vision_tower: SiglipVisionModel,
+        pixel_values: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
         image_features = vision_tower(pixel_values.to(dtype=target_dtype),
                                       **kwargs)
@@ -386,8 +414,9 @@ class AyaVisionForConditionalGeneration(nn.Module, SupportsMultiModal,
                              f"Got type: {type(pixel_values)}")
         if num_patches is not None and not isinstance(num_patches,
                                                       (torch.Tensor, list)):
-            raise ValueError("Incorrect type of num_patches. "
-                             f"Got type: {type(num_patches)}")
+            raise ValueError(
+                f"Incorrect type of num_patches. Got type: {type(num_patches)}"
+            )
 
         pixel_values = flatten_bn(pixel_values, concat=True)
         num_patches = flatten_bn(num_patches, concat=True)

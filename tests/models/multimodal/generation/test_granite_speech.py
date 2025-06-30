@@ -77,27 +77,28 @@ def run_test(
     ) as vllm_model:
         lora_request = LoRARequest("audio", 1, audio_lora_path)
         vllm_outputs_per_case = [
-            vllm_model.generate_greedy_logprobs(prompts,
-                                                max_tokens,
-                                                num_logprobs=num_logprobs,
-                                                audios=audios,
-                                                lora_request=lora_request)
-            for prompts, audios in inputs
+            vllm_model.generate_greedy_logprobs(
+                prompts,
+                max_tokens,
+                num_logprobs=num_logprobs,
+                audios=audios,
+                lora_request=lora_request,
+            ) for prompts, audios in inputs
         ]
 
     with hf_runner(model, dtype=dtype,
                    auto_cls=AutoModelForSpeechSeq2Seq) as hf_model:
-
         hf_processor = hf_model.processor
         eos_token_id = hf_processor.tokenizer.eos_token_id
 
         hf_outputs_per_case = [
-            hf_model.generate_greedy_logprobs_limit(prompts,
-                                                    max_tokens,
-                                                    num_logprobs=num_logprobs,
-                                                    audios=[audios],
-                                                    eos_token_id=eos_token_id)
-            for prompts, audios in inputs
+            hf_model.generate_greedy_logprobs_limit(
+                prompts,
+                max_tokens,
+                num_logprobs=num_logprobs,
+                audios=[audios],
+                eos_token_id=eos_token_id,
+            ) for prompts, audios in inputs
         ]
 
     for hf_outputs, vllm_outputs in zip(hf_outputs_per_case,
@@ -117,9 +118,16 @@ def run_test(
 @pytest.mark.parametrize("max_model_len", [2048])
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [10])
-def test_models(hf_runner, vllm_runner, model: str,
-                audio_assets: AudioTestAssets, dtype: str, max_model_len: int,
-                max_tokens: int, num_logprobs: int) -> None:
+def test_models(
+    hf_runner,
+    vllm_runner,
+    model: str,
+    audio_assets: AudioTestAssets,
+    dtype: str,
+    max_model_len: int,
+    max_tokens: int,
+    num_logprobs: int,
+) -> None:
     model_info = HF_EXAMPLE_MODELS.find_hf_info(model)
     model_info.check_available_online(on_fail="skip")
     model_info.check_transformers_version(on_fail="skip")

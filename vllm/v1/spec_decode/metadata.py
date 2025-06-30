@@ -7,7 +7,6 @@ import torch
 
 @dataclass
 class SpecDecodeMetadata:
-
     # [num_tokens]
     draft_token_ids: torch.Tensor
     # [batch_size]

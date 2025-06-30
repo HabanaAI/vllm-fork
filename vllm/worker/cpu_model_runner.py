@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
-TModelInputForCPU = TypeVar('TModelInputForCPU', bound="ModelInputForCPU")
+TModelInputForCPU = TypeVar("TModelInputForCPU", bound="ModelInputForCPU")
 _PAD_SLOT_ID = -1
 
 
@@ -47,6 +47,7 @@ class ModelInputForCPU(ModelRunnerInputBase):
     """
     Base class contains metadata needed for the base model forward pass on CPU
     """
+
     input_tokens: Optional[torch.Tensor] = None
     input_positions: Optional[torch.Tensor] = None
     token_type_ids: Optional[torch.Tensor] = None
@@ -59,7 +60,7 @@ class ModelInputForCPU(ModelRunnerInputBase):
     lora_requests: Optional[Set[LoRARequest]] = None
 
     def as_broadcastable_tensor_dict(
-            self) -> Dict[str, Union[int, torch.Tensor]]:
+        self, ) -> Dict[str, Union[int, torch.Tensor]]:
         tensor_dict = {
             "input_tokens": self.input_tokens,
             "input_positions": self.input_positions,
@@ -76,7 +77,7 @@ class ModelInputForCPU(ModelRunnerInputBase):
     def from_broadcasted_tensor_dict(
         cls: Type[TModelInputForCPU],
         tensor_dict: Dict[str, Any],
-        attn_backend: Optional["AttentionBackend"] = None
+        attn_backend: Optional["AttentionBackend"] = None,
     ) -> TModelInputForCPU:
         if attn_backend is not None:
             tensor_dict = _init_attn_metadata_from_tensor_dict(
@@ -89,6 +90,7 @@ class ModelInputForCPUWithSamplingMetadata(ModelInputForCPU):
     """
     Used by the ModelRunner.
     """
+
     sampling_metadata: Optional["SamplingMetadata"] = None
     is_prompt: Optional[bool] = None
 
@@ -142,9 +144,11 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
             self.input_mrope_positions: List[List[int]] = [[]
                                                            for _ in range(3)]
 
-    def __init__(self,
-                 runner: "CPUModelRunner",
-                 finished_requests_ids: Optional[List[str]] = None) -> None:
+    def __init__(
+        self,
+        runner: "CPUModelRunner",
+        finished_requests_ids: Optional[List[str]] = None,
+    ) -> None:
         super().__init__()
         self.runner = runner
         self.chunked_prefill = (runner.scheduler_config.chunked_prefill_enabled
@@ -186,11 +190,11 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
             if not any(input_data.input_mrope_positions) else
             input_data.input_mrope_positions,
             dtype=torch.long,
-            device="cpu")
-        token_type_ids = torch.tensor(input_data.token_type_ids,
-                                    dtype=torch.long,
-                                    device="cpu") \
-                                    if input_data.token_type_ids else None
+            device="cpu",
+        )
+        token_type_ids = (torch.tensor(
+            input_data.token_type_ids, dtype=torch.long, device="cpu")
+                          if input_data.token_type_ids else None)
 
         # For multi-modal models
         multi_modal_kwargs = None
@@ -214,15 +218,17 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
             lora_mapping = self._prepare_lora_input(
                 self.seq_group_metadata_list, is_prompt)
 
-        return self.model_input_cls(input_tokens=input_tokens,
-                                    input_positions=input_positions,
-                                    token_type_ids=token_type_ids,
-                                    seq_lens=input_data.seq_lens,
-                                    query_lens=input_data.query_lens,
-                                    attn_metadata=attn_metadata,
-                                    multi_modal_kwargs=multi_modal_kwargs,
-                                    lora_mapping=lora_mapping,
-                                    lora_requests=lora_requests)
+        return self.model_input_cls(
+            input_tokens=input_tokens,
+            input_positions=input_positions,
+            token_type_ids=token_type_ids,
+            seq_lens=input_data.seq_lens,
+            query_lens=input_data.query_lens,
+            attn_metadata=attn_metadata,
+            multi_modal_kwargs=multi_modal_kwargs,
+            lora_mapping=lora_mapping,
+            lora_requests=lora_requests,
+        )
 
     def _build_input_data(self):
         for seq_group_metadata in self.seq_group_metadata_list:
@@ -239,9 +245,13 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
                                                       seq_group_metadata,
                                                       seq_data, seq_id)
 
-    def _compute_decode_input_tokens(self, data: ModelInputData,
-                                     seq_group_metadata: SequenceGroupMetadata,
-                                     seq_data: SequenceData, seq_id: int):
+    def _compute_decode_input_tokens(
+        self,
+        data: ModelInputData,
+        seq_group_metadata: SequenceGroupMetadata,
+        seq_data: SequenceData,
+        seq_id: int,
+    ):
         """
         Compute decode input tokens, positions, block table and slot mapping.
         """
@@ -287,9 +297,13 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
         data.query_lens.append(1)
         data.seq_lens.append(seq_len)
 
-    def _compute_prompt_input_tokens(self, data: ModelInputData,
-                                     seq_group_metadata: SequenceGroupMetadata,
-                                     seq_data: SequenceData, seq_id: int):
+    def _compute_prompt_input_tokens(
+        self,
+        data: ModelInputData,
+        seq_group_metadata: SequenceGroupMetadata,
+        seq_data: SequenceData,
+        seq_id: int,
+    ):
         """
         Compute prompt input tokens, positions, block table and slot mapping.
         """
@@ -304,8 +318,7 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
         # For prefix caching
         prefix_cache_block_num = len(seq_group_metadata.computed_block_nums)
         if prefix_cache_block_num > 0:
-            prefix_cache_len = (prefix_cache_block_num *
-                                self.runner.block_size)
+            prefix_cache_len = prefix_cache_block_num * self.runner.block_size
             if prefix_cache_len <= context_len:
                 # We already passed the cache hit region,
                 # so do normal computation.
@@ -368,8 +381,8 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
 
         # special processing for mrope position deltas.
         if self.runner.model_config.uses_mrope:
-            assert not self.chunked_prefill, \
-                "MROPE on CPU does not support chunked-prefill."
+            assert not self.chunked_prefill, (
+                "MROPE on CPU does not support chunked-prefill.")
 
             image_grid_thw = mm_kwargs.get("image_grid_thw", None)
             video_grid_thw = mm_kwargs.get("video_grid_thw", None)
@@ -387,7 +400,7 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
             hf_config = self.runner.model_config.hf_config
             token_ids = seq_data.get_token_ids()
 
-            mrope_positions, mrope_position_delta = \
+            mrope_positions, mrope_position_delta = (
                 MRotaryEmbedding.get_input_positions(
                     token_ids,
                     hf_config=hf_config,
@@ -397,7 +410,7 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
                     context_len=computed_len,
                     audio_feature_lengths=audio_feature_lengths,
                     use_audio_in_video=use_audio_in_video,
-                )
+                ))
             seq_data.mrope_position_delta = mrope_position_delta
 
             for i in range(3):
@@ -410,8 +423,10 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
                 placeholder_map)
 
     def _prepare_lora_input(
-            self, seq_group_metadata_list: List[SequenceGroupMetadata],
-            is_prefill: bool) -> LoRAMapping:
+        self,
+        seq_group_metadata_list: List[SequenceGroupMetadata],
+        is_prefill: bool,
+    ) -> LoRAMapping:
         index_mapping = []
         prompt_mapping = []
         for seq in seq_group_metadata_list:
@@ -423,15 +438,18 @@ class ModelInputForCPUBuilder(ModelRunnerInputBuilderBase[ModelInputForCPU]):
                 query_len if seq.sampling_params
                 and seq.sampling_params.prompt_logprobs is not None else 1)
 
-        return LoRAMapping(index_mapping=tuple(index_mapping),
-                           prompt_mapping=tuple(prompt_mapping),
-                           is_prefill=is_prefill)
+        return LoRAMapping(
+            index_mapping=tuple(index_mapping),
+            prompt_mapping=tuple(prompt_mapping),
+            is_prefill=is_prefill,
+        )
 
 
 class CPUModelRunnerBase(ModelRunnerBase[TModelInputForCPU]):
     """
     Helper class for shared methods between CPU model runners.
     """
+
     _model_input_cls: Type[TModelInputForCPU]
     _builder_cls: Type[ModelInputForCPUBuilder]
     builder: ModelInputForCPUBuilder
@@ -462,14 +480,14 @@ class CPUModelRunnerBase(ModelRunnerBase[TModelInputForCPU]):
             self.parallel_config)
         needs_attn_backend = (num_attn_heads != 0
                               or self.model_config.is_attention_free)
-        self.attn_backend = get_attn_backend(
+        self.attn_backend = (get_attn_backend(
             self.model_config.get_head_size(),
             self.model_config.dtype,
             self.kv_cache_dtype,
             self.block_size,
             self.model_config.is_attention_free,
             use_mla=self.model_config.use_mla,
-        ) if needs_attn_backend else None
+        ) if needs_attn_backend else None)
 
         # Lazy initialization.
         self.model: nn.Module  # Set after init_Model
@@ -485,9 +503,8 @@ class CPUModelRunnerBase(ModelRunnerBase[TModelInputForCPU]):
         self.model = get_model(vllm_config=self.vllm_config)
 
         if self.lora_config:
-            assert supports_lora(
-                self.model
-            ), f"{self.model.__class__.__name__} does not support LoRA yet."
+            assert supports_lora(self.model), (
+                f"{self.model.__class__.__name__} does not support LoRA yet.")
 
             if supports_multimodal(self.model):
                 logger.warning("Regarding multimodal models, vLLM currently "
@@ -514,7 +531,7 @@ class CPUModelRunnerBase(ModelRunnerBase[TModelInputForCPU]):
     def _prepare_model_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
     ) -> TModelInputForCPU:
         """Helper method to prepare the model input based on a given sequence
         group. Prepares metadata needed for the base model forward pass but not
@@ -571,16 +588,17 @@ class CPUModelRunner(CPUModelRunnerBase[ModelInputForCPUWithSamplingMetadata]):
         self,
         tensor_dict: Dict[str, Any],
     ) -> ModelInputForCPUWithSamplingMetadata:
-        return ModelInputForCPUWithSamplingMetadata.from_broadcasted_tensor_dict(  # noqa: E501
-            tensor_dict,
-            attn_backend=self.attn_backend,
-        )
+        return (ModelInputForCPUWithSamplingMetadata.
+                from_broadcasted_tensor_dict(  # noqa: E501
+                    tensor_dict,
+                    attn_backend=self.attn_backend,
+                ))
 
     def prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
     ) -> ModelInputForCPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -590,19 +608,23 @@ class CPUModelRunner(CPUModelRunnerBase[ModelInputForCPUWithSamplingMetadata]):
             seq_group_metadata_list, finished_requests_ids)
         # Sampling metadata is only required for the final pp group
         generators = self.get_generators(finished_requests_ids)
-        sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
-                                                     model_input.seq_lens,
-                                                     model_input.query_lens,
-                                                     self.device,
-                                                     pin_memory=False,
-                                                     generators=generators)
+        sampling_metadata = SamplingMetadata.prepare(
+            seq_group_metadata_list,
+            model_input.seq_lens,
+            model_input.query_lens,
+            self.device,
+            pin_memory=False,
+            generators=generators,
+        )
 
         is_prompt = (seq_group_metadata_list[0].is_prompt
                      if seq_group_metadata_list else None)
-        return dataclasses.replace(model_input,
-                                   sampling_metadata=sampling_metadata,
-                                   virtual_engine=virtual_engine,
-                                   is_prompt=is_prompt)
+        return dataclasses.replace(
+            model_input,
+            sampling_metadata=sampling_metadata,
+            virtual_engine=virtual_engine,
+            is_prompt=is_prompt,
+        )
 
     @torch.no_grad()
     def execute_model(
@@ -634,8 +656,11 @@ class CPUModelRunner(CPUModelRunnerBase[ModelInputForCPUWithSamplingMetadata]):
             execute_model_kwargs.update(
                 {"previous_hidden_states": previous_hidden_states})
 
-        with set_forward_context(model_input.attn_metadata, self.vllm_config,
-                                 model_input.virtual_engine):
+        with set_forward_context(
+                model_input.attn_metadata,
+                self.vllm_config,
+                model_input.virtual_engine,
+        ):
             hidden_states = model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,

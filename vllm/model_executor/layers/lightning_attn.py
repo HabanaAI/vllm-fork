@@ -6,9 +6,21 @@ from vllm.triton_utils import tl, triton
 
 
 @triton.jit
-def _fwd_diag_kernel(Q, K, V, Out, S, b: tl.constexpr, h: tl.constexpr, n,
-                     d: tl.constexpr, e: tl.constexpr, BLOCK: tl.constexpr,
-                     NUM_BLOCK, CBLOCK: tl.constexpr):
+def _fwd_diag_kernel(
+    Q,
+    K,
+    V,
+    Out,
+    S,
+    b: tl.constexpr,
+    h: tl.constexpr,
+    n,
+    d: tl.constexpr,
+    e: tl.constexpr,
+    BLOCK: tl.constexpr,
+    NUM_BLOCK,
+    CBLOCK: tl.constexpr,
+):
     # This kernel computes the diagonal blocks of the attention matrix
     # Each diagonal block represents attention
     # where queries attend to keys in the same block
@@ -154,7 +166,7 @@ def _fwd_kv_parallel(
                     tl.arange(0, E_FBLOCK)[None, :])
 
     # Load the decay factors for the current head and block
-    k_decay_ptr = (K_decay + off_h * BLOCK + tl.arange(0, CBLOCK)[None, :])
+    k_decay_ptr = K_decay + off_h * BLOCK + tl.arange(0, CBLOCK)[None, :]
 
     kv_index = tl.arange(0, CBLOCK)
 
@@ -174,12 +186,16 @@ def _fwd_kv_parallel(
     for j in range(num_blocks):
         left_bound = (1 - j) * left_shift
         # Load key and value, handling boundary conditions
-        k_trans = tl.load(K_trans_block_ptr - left_shift * d,
-                          mask=kv_index[None, :] >= left_bound,
-                          other=0.0)
-        v = tl.load(V_block_ptr - left_shift * e,
-                    mask=kv_index[:, None] >= left_bound,
-                    other=0.0)
+        k_trans = tl.load(
+            K_trans_block_ptr - left_shift * d,
+            mask=kv_index[None, :] >= left_bound,
+            other=0.0,
+        )
+        v = tl.load(
+            V_block_ptr - left_shift * e,
+            mask=kv_index[:, None] >= left_bound,
+            other=0.0,
+        )
 
         # Load decay factor and compute weighted key-value outer product
         k_decay = tl.load(k_decay_ptr)
@@ -195,9 +211,20 @@ def _fwd_kv_parallel(
 
 
 @triton.jit
-def _fwd_kv_reduce(S, KV, KV_HISTORY, b: tl.constexpr, h: tl.constexpr, n,
-                   d: tl.constexpr, e: tl.constexpr, BLOCK: tl.constexpr,
-                   NUM_BLOCK, D_FBLOCK: tl.constexpr, E_FBLOCK: tl.constexpr):
+def _fwd_kv_reduce(
+    S,
+    KV,
+    KV_HISTORY,
+    b: tl.constexpr,
+    h: tl.constexpr,
+    n,
+    d: tl.constexpr,
+    e: tl.constexpr,
+    BLOCK: tl.constexpr,
+    NUM_BLOCK,
+    D_FBLOCK: tl.constexpr,
+    E_FBLOCK: tl.constexpr,
+):
     # This kernel reduces the key-value outer products
     # across blocks and updates the KV history
     off_bh = tl.program_id(0)  # batch-head index
@@ -299,7 +326,7 @@ def _fwd_none_diag_kernel(
 
     # Load query values
     q = tl.load(Q_block_ptr, mask=q_index[:, None] < n,
-                other=0.).to(tl.float32)
+                other=0.0).to(tl.float32)
 
     # Compute decay factors for the current sub-block
     q_decay = tl.exp(-s.to(tl.float32) * (off_c * CBLOCK + c_array[:, None]))
@@ -309,15 +336,17 @@ def _fwd_none_diag_kernel(
 
     # Load diagonal attention output (computed by _fwd_diag_kernel)
     qkv_diag = tl.load(O_block_ptr, mask=q_index[:, None] < n,
-                       other=0.).to(tl.float32)
+                       other=0.0).to(tl.float32)
 
     # Combine diagonal and non-diagonal attention outputs
     qkv = qkv_diag + qkv_none_diag
 
     # Store the result
-    tl.store(O_block_ptr,
-             qkv.to(O_block_ptr.dtype.element_ty),
-             mask=q_index[:, None] < n)
+    tl.store(
+        O_block_ptr,
+        qkv.to(O_block_ptr.dtype.element_ty),
+        mask=q_index[:, None] < n,
+    )
 
 
 class _attention(torch.autograd.Function):
@@ -333,8 +362,10 @@ class _attention(torch.autograd.Function):
         # Check CUDA compute capability
         capability = torch.cuda.get_device_capability()
         if capability[0] < 8:
-            raise RuntimeError("Flash attention currently only supported",
-                               "for compute capability >= 80")
+            raise RuntimeError(
+                "Flash attention currently only supported",
+                "for compute capability >= 80",
+            )
 
         # Get input dimensions
         b, h, n, d = q.shape
@@ -357,19 +388,21 @@ class _attention(torch.autograd.Function):
 
         # Step 1: Compute diagonal blocks of attention
         grid = (b * h * NUM_BLOCK, NUM_CBLOCK)
-        _fwd_diag_kernel[grid](q,
-                               k,
-                               v,
-                               o,
-                               s,
-                               b,
-                               h,
-                               n,
-                               d,
-                               e,
-                               BLOCK=BLOCK,
-                               NUM_BLOCK=NUM_BLOCK,
-                               CBLOCK=CBLOCK)
+        _fwd_diag_kernel[grid](
+            q,
+            k,
+            v,
+            o,
+            s,
+            b,
+            h,
+            n,
+            d,
+            e,
+            BLOCK=BLOCK,
+            NUM_BLOCK=NUM_BLOCK,
+            CBLOCK=CBLOCK,
+        )
 
         # Set feature block sizes
         NUM_FBLOCK = 1
@@ -409,18 +442,20 @@ class _attention(torch.autograd.Function):
         # Step 3: Reduce key-value outer products
         # across blocks and update KV history
         grid = (b * h, NUM_FBLOCK)
-        _fwd_kv_reduce[grid](s,
-                             kv,
-                             kv_history,
-                             b,
-                             h,
-                             n,
-                             d,
-                             e,
-                             BLOCK=BLOCK,
-                             NUM_BLOCK=NUM_BLOCK,
-                             D_FBLOCK=D_FBLOCK,
-                             E_FBLOCK=E_FBLOCK)
+        _fwd_kv_reduce[grid](
+            s,
+            kv,
+            kv_history,
+            b,
+            h,
+            n,
+            d,
+            e,
+            BLOCK=BLOCK,
+            NUM_BLOCK=NUM_BLOCK,
+            D_FBLOCK=D_FBLOCK,
+            E_FBLOCK=E_FBLOCK,
+        )
 
         # Step 4: Compute non-diagonal blocks of attention
         grid = (b * h, NUM_BLOCK * NUM_CBLOCK)
@@ -454,9 +489,9 @@ lightning_attention_ = _attention.apply
 
 def lightning_attention(q, k, v, ed, block_size=256, kv_history=None):
     """
-    Apply lightning attention algorithm 
+    Apply lightning attention algorithm
     to compute attention efficiently.
-    
+
     Args:
         q: Query tensor of shape [batch, heads, seq_len, dim]
         k: Key tensor of shape [batch, heads, seq_len, dim]
@@ -464,7 +499,7 @@ def lightning_attention(q, k, v, ed, block_size=256, kv_history=None):
         ed: Decay rate tensor of shape [heads]
         block_size: Size of blocks for block-sparse attention
         kv_history: Optional key-value history from previous computations
-        
+
     Returns:
         output: Attention output
         kv: Updated key-value history
@@ -523,7 +558,7 @@ def _linear_attn_decode_kernel(
 ):
     """
     Kernel for linear attention decoding with KV cache.
-    
+
     This kernel computes attention for a single token using the KV cache.
     """
     pid_b = tl.program_id(0)  # batch index
@@ -546,8 +581,8 @@ def _linear_attn_decode_kernel(
     # Calculate offsets for dimensions
     qk_d_offsets = tl.arange(0, D)
     v_d_offsets = tl.arange(0, BLOCK_SIZE) + pid_d * BLOCK_SIZE
-    cache_d_offsets = qk_d_offsets[:, None] * cache_d0_stride + v_d_offsets[
-        None, :] * cache_d1_stride
+    cache_d_offsets = (qk_d_offsets[:, None] * cache_d0_stride +
+                       v_d_offsets[None, :] * cache_d1_stride)
 
     # Calculate offsets for the current batch and head
     q_offset = batch_id * qkv_b_stride + head_id * qkv_h_stride
@@ -595,7 +630,7 @@ def linear_decode_forward_triton(
 ) -> torch.Tensor:
     """
     Perform linear attention decoding using Triton kernels.
-    
+
     Args:
         q: Query tensor of shape [B, H, 1, D]
         k: Key tensor of shape [B, H, 1, D]
@@ -604,7 +639,7 @@ def linear_decode_forward_triton(
         slope_rate: Decay rate tensor
         slot_idx: Slot indices for batches
         BLOCK_SIZE: Size of blocks for processing
-        
+
     Returns:
         output: Attention output tensor
     """

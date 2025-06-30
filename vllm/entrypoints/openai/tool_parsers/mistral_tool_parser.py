@@ -56,8 +56,8 @@ class MistralToolParser(ToolParser):
         super().__init__(tokenizer)
 
         if not isinstance(self.model_tokenizer, MistralTokenizer):
-            logger.info("Non-Mistral tokenizer detected when using a Mistral "
-                        "model...")
+            logger.info(
+                "Non-Mistral tokenizer detected when using a Mistral model...")
 
         # initialize properties used for state when parsing tool calls in
         # streaming mode
@@ -76,9 +76,8 @@ class MistralToolParser(ToolParser):
 
     def adjust_request(
             self, request: ChatCompletionRequest) -> ChatCompletionRequest:
-        if not isinstance(
-                self.model_tokenizer, MistralTokenizer
-        ) and request.tools and request.tool_choice != 'none':
+        if (not isinstance(self.model_tokenizer, MistralTokenizer)
+                and request.tools and request.tool_choice != "none"):
             # Do not skip special tokens when using chat template
             # with Mistral parser as TOOL_CALL token is needed
             # for tool detection.
@@ -108,7 +107,6 @@ class MistralToolParser(ToolParser):
         tool_content = model_output.replace(self.bot_token, "").strip()
 
         try:
-
             # we first try to directly load the json as parsing very nested
             # jsons is difficult
             try:
@@ -129,8 +127,9 @@ class MistralToolParser(ToolParser):
                         name=raw_function_call["name"],
                         # function call args are JSON but as a string
                         arguments=json.dumps(raw_function_call["arguments"],
-                                             ensure_ascii=False)))
-                for raw_function_call in function_call_arr
+                                             ensure_ascii=False),
+                    ),
+                ) for raw_function_call in function_call_arr
             ]
 
             # get any content before  the tool call
@@ -138,7 +137,8 @@ class MistralToolParser(ToolParser):
             return ExtractedToolCallInformation(
                 tools_called=True,
                 tool_calls=tool_calls,
-                content=content if len(content) > 0 else None)
+                content=content if len(content) > 0 else None,
+            )
 
         except Exception:
             logger.exception("Error in extracting tool call from response.")
@@ -157,7 +157,6 @@ class MistralToolParser(ToolParser):
         delta_token_ids: Sequence[int],
         request: ChatCompletionRequest,
     ) -> Union[DeltaMessage, None]:
-
         # if the tool call token is not in the tokens generated so far, append
         # output to contents since it's not a tool
         if self.bot_token not in current_text:
@@ -168,8 +167,7 @@ class MistralToolParser(ToolParser):
 
         # handle if we detected the BOT token which means the start of tool
         # calling
-        if (self.bot_token_id in delta_token_ids
-                and len(delta_token_ids) == 1):
+        if self.bot_token_id in delta_token_ids and len(delta_token_ids) == 1:
             # if it's the only token, return None, so we don't send a chat
             # completion any don't send a control token
             return None
@@ -178,10 +176,9 @@ class MistralToolParser(ToolParser):
         # sent yet, don't allow sending
         # an incomplete string since OpenAI only ever (as far as I have
         # seen) allows sending the entire tool/ function name at once.
-        flags = Allow.ALL if self.current_tool_name_sent \
-            else Allow.ALL & ~Allow.STR
+        flags = (Allow.ALL if self.current_tool_name_sent else Allow.ALL
+                 & ~Allow.STR)
         try:
-
             # replace BOT token with empty string, and convert single quotes
             # to double to allow parsing as JSON since mistral uses single
             # quotes instead of double for tool calls
@@ -193,13 +190,13 @@ class MistralToolParser(ToolParser):
                 tool_call_arr: list[dict] = partial_json_parser.loads(
                     parsable_arr, flags)
             except partial_json_parser.core.exceptions.MalformedJSON:
-                logger.debug('not enough tokens to parse into JSON yet')
+                logger.debug("not enough tokens to parse into JSON yet")
                 return None
 
             # select as the current tool call the one we're on the state at
 
-            current_tool_call: dict = tool_call_arr[self.current_tool_id] \
-                if len(tool_call_arr) > 0 else {}
+            current_tool_call: dict = (tool_call_arr[self.current_tool_id]
+                                       if len(tool_call_arr) > 0 else {})
 
             # case -- if no tokens have been streamed for the tool, e.g.
             #   only the array brackets, stream nothing
@@ -210,7 +207,6 @@ class MistralToolParser(ToolParser):
             #   -> array has > 0 length AND length has moved past cursor
             elif (len(tool_call_arr) > 0
                   and len(tool_call_arr) > self.current_tool_id + 1):
-
                 # if we're moving on to a new call, first make sure we
                 # haven't missed anything in the previous one that was
                 # auto-generated due to JSON completions, but wasn't
@@ -221,15 +217,18 @@ class MistralToolParser(ToolParser):
                     if diff:
                         diff = json.dumps(diff, ensure_ascii=False).replace(
                             self.streamed_args_for_tool[self.current_tool_id],
-                            "")
+                            "",
+                        )
                         delta = DeltaMessage(tool_calls=[
-                            DeltaToolCall(index=self.current_tool_id,
-                                          function=DeltaFunctionCall(
-                                              arguments=diff).model_dump(
-                                                  exclude_none=True))
+                            DeltaToolCall(
+                                index=self.current_tool_id,
+                                function=DeltaFunctionCall(
+                                    arguments=diff).model_dump(
+                                        exclude_none=True),
+                            )
                         ])
-                        self.streamed_args_for_tool[
-                            self.current_tool_id] += diff
+                        self.streamed_args_for_tool[self.current_tool_id] += (
+                            diff)
                     else:
                         delta = None
                 else:
@@ -248,14 +247,15 @@ class MistralToolParser(ToolParser):
             if not self.current_tool_name_sent:
                 function_name = current_tool_call.get("name")
                 if function_name:
-
                     delta = DeltaMessage(tool_calls=[
-                        DeltaToolCall(index=self.current_tool_id,
-                                      type="function",
-                                      id=MistralToolCall.generate_random_id(),
-                                      function=DeltaFunctionCall(
-                                          name=function_name).model_dump(
-                                              exclude_none=True))
+                        DeltaToolCall(
+                            index=self.current_tool_id,
+                            type="function",
+                            id=MistralToolCall.generate_random_id(),
+                            function=DeltaFunctionCall(
+                                name=function_name).model_dump(
+                                    exclude_none=True),
+                        )
                     ])
                     self.current_tool_name_sent = True
                 else:
@@ -264,17 +264,15 @@ class MistralToolParser(ToolParser):
             # now we know we're on the same tool call and we're streaming
             # arguments
             else:
-
                 prev_arguments = self.prev_tool_call_arr[
                     self.current_tool_id].get("arguments")
                 cur_arguments = current_tool_call.get("arguments")
 
-                new_text = delta_text.replace("\'", "\"")
-                if ('"}' in new_text):
+                new_text = delta_text.replace("'", '"')
+                if '"}' in new_text:
                     new_text = new_text[:new_text.rindex('"}')]
 
                 if not cur_arguments and not prev_arguments:
-
                     delta = None
                 elif not cur_arguments and prev_arguments:
                     logger.error(
@@ -287,41 +285,50 @@ class MistralToolParser(ToolParser):
                     logger.debug("finding %s in %s", new_text,
                                  cur_arguments_json)
 
-                    if (new_text not in cur_arguments_json):
+                    if new_text not in cur_arguments_json:
                         return None
                     arguments_delta = cur_arguments_json[:cur_arguments_json.
                                                          rindex(new_text) +
                                                          len(new_text)]
-                    logger.debug("First tokens in arguments received: %s",
-                                 arguments_delta)
+                    logger.debug(
+                        "First tokens in arguments received: %s",
+                        arguments_delta,
+                    )
                     delta = DeltaMessage(tool_calls=[
-                        DeltaToolCall(index=self.current_tool_id,
-                                      function=DeltaFunctionCall(
-                                          arguments=arguments_delta).
-                                      model_dump(exclude_none=True))
+                        DeltaToolCall(
+                            index=self.current_tool_id,
+                            function=DeltaFunctionCall(
+                                arguments=arguments_delta).model_dump(
+                                    exclude_none=True),
+                        )
                     ])
-                    self.streamed_args_for_tool[
-                        self.current_tool_id] += arguments_delta
+                    self.streamed_args_for_tool[self.current_tool_id] += (
+                        arguments_delta)
 
                 elif cur_arguments and prev_arguments:
                     cur_args_json = json.dumps(cur_arguments,
                                                ensure_ascii=False)
                     prev_args_json = json.dumps(prev_arguments,
                                                 ensure_ascii=False)
-                    logger.debug("Searching for diff between \n%s\n%s",
-                                 cur_args_json, prev_args_json)
+                    logger.debug(
+                        "Searching for diff between \n%s\n%s",
+                        cur_args_json,
+                        prev_args_json,
+                    )
 
                     argument_diff = extract_intermediate_diff(
                         cur_args_json, prev_args_json)
                     logger.debug("got arguments diff: %s", argument_diff)
                     delta = DeltaMessage(tool_calls=[
-                        DeltaToolCall(index=self.current_tool_id,
-                                      function=DeltaFunctionCall(
-                                          arguments=argument_diff).model_dump(
-                                              exclude_none=True))
+                        DeltaToolCall(
+                            index=self.current_tool_id,
+                            function=DeltaFunctionCall(
+                                arguments=argument_diff).model_dump(
+                                    exclude_none=True),
+                        )
                     ])
-                    self.streamed_args_for_tool[
-                        self.current_tool_id] += argument_diff
+                    self.streamed_args_for_tool[self.current_tool_id] += (
+                        argument_diff)
                 else:
                     # try parsing it with regular JSON - if it works we're
                     # at the end, and we need to send the difference between
@@ -337,6 +344,6 @@ class MistralToolParser(ToolParser):
         except Exception:
             logger.exception("Error trying to handle streaming tool call.")
             logger.debug(
-                "Skipping chunk as a result of tool streaming extraction "
-                "error")
+                "Skipping chunk as a result of tool streaming extraction error"
+            )
             return None
