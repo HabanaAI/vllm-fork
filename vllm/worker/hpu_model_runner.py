@@ -2648,12 +2648,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
         seqs=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-<<<<<<< HEAD
-        use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
-=======
         self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
->>>>>>> 28c32dff6 (Fix structure output (#1270))
         assert not (use_delayed_sampling and num_steps != 1), \
             'Delayed sampling is not compatible with MSS!'
         assert not (use_delayed_sampling and
