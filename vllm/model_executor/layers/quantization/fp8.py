@@ -1034,7 +1034,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                                   topk_weights_across_dp)
 
             batched_tokens = x.shape[0]
-            #selected_experts = (topk_ids.to(torch.int64) - ep_shift)
 
             if batched_tokens > self.moe_slice_length:
                 final_hidden_states_list = []
