@@ -200,13 +200,10 @@ class Gemma3Attention(nn.Module):
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v)
 
-        # In HPU, naive_attn_with_masks is no longer needed since sliding_window
-        # is supported in hpu_attn.
-        if current_platform.is_hpu():
-            output, _ = self.o_proj(attn_output)
-            return output
+        if current_platform.is_hpu() or not kwargs.get("has_images", False):
+            # In HPU, naive_attn_with_masks is no longer needed since
+            # sliding_window is supported in hpu_attn.
 
-        if not kwargs.get("has_images", False):
             # Fast path for text-only inputs. The performance for the text-only
             # inputs are not affected by the naive attention below.
             output, _ = self.o_proj(attn_output)
@@ -240,34 +237,44 @@ class Gemma3Attention(nn.Module):
         out: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-
-        s = q.shape[1]
+        # NOTE(woosuk): As described in the comment above, this code is not
+        # meant to be performant. It is only meant to be correct.
+        q = q.view(-1, self.num_heads, self.head_dim)
+        # Expand the key and value to handle GQA.
         num_queries_per_kv = self.num_heads // self.num_kv_heads
-        query = q.view(-1, s, self.num_heads, self.head_dim)
-        key = k.view(-1, s, self.num_kv_heads, self.head_dim)
-        key = key.repeat_interleave(num_queries_per_kv, dim=-2)
-        value = v.view(-1, s, self.num_kv_heads, self.head_dim)
-        value = value.repeat_interleave(num_queries_per_kv, dim=-2)
+        k = k.view(-1, self.num_kv_heads, self.head_dim)
+        k = k.repeat_interleave(num_queries_per_kv, dim=-2)
+        v = v.view(-1, self.num_kv_heads, self.head_dim)
+        v = v.repeat_interleave(num_queries_per_kv, dim=-2)
 
         if self.is_sliding:
             attn_masks = kwargs["local_attn_masks"]
         else:
             attn_masks = kwargs["global_attn_masks"]
 
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
+        seq_lens = kwargs["seq_lens"]
+        start_idx = 0
+        for seq_len, attn_mask in zip(seq_lens, attn_masks):
+            end_idx = start_idx + seq_len
+            query = q[start_idx:end_idx].unsqueeze(0)
+            key = k[start_idx:end_idx].unsqueeze(0)
+            value = v[start_idx:end_idx].unsqueeze(0)
 
-        output = F.scaled_dot_product_attention(
-            query,
-            key,
-            value,
-            attn_masks,
-            self.scaling,
-        )
+            # Transpose.
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
 
-        out = output.transpose(1, 2).flatten(-2, -1)
-
+            output = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask,
+                self.scaling,
+            )
+            output = output.transpose(1, 2).flatten(-2, -1)
+            out[start_idx:end_idx] = output
+            start_idx = end_idx
         return out
 
 
