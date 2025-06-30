@@ -2689,7 +2689,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             kv_caches=kv_caches,
             is_pt_profiler_run=False,
-            img_args=UNSET_IMG_ARGS,
+            image_args=UNSET_IMG_ARGS,
             is_lora_profile_run=True,
         )
 
@@ -3151,7 +3151,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
                         self.bucketing_ctx.prompt_buckets,
-                        True, kv_caches)
+                        True, kv_caches, graph_free_mem)
                     if mem_post_prompt < graph_free_mem \
                         and not prompt_captured_all:
                         mem_post_prompt, _, prompt_captured_all = (
