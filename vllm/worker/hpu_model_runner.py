@@ -638,10 +638,14 @@ class HpuModelAdapter(torch.nn.Module):
         if 'virtual_engine' in kwargs:
             virtual_engine = kwargs.pop('virtual_engine')
         input_ids = kwargs['input_ids']
+        global_attn_masks = kwargs.get("global_attn_masks")[0] \
+            if kwargs.get("global_attn_masks") else None
+        local_attn_masks = kwargs.get("local_attn_masks")[0] \
+            if kwargs.get("local_attn_masks") else None
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
-            input_ids.device, self.dtype, kwargs.get("global_attn_masks"),
-            kwargs.get("local_attn_masks"))
+            input_ids.device, self.dtype, global_attn_masks, local_attn_masks)
+
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self._rotary_prepare_cos_sin is not None and not self.model_is_mrope:

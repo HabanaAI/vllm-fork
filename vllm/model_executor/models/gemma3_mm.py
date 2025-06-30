@@ -721,7 +721,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
                 global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
-                global_attn_masks.append(global_attn_mask)
             else:
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0,1,3,2)
@@ -736,8 +735,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
                 img_mask[ind < img_causal] += 1
                 global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
-                global_attn_masks = global_attn_mask
-
+            global_attn_masks.append(global_attn_mask)
             if self.sliding_window is not None:
                 # Create a local causal mask with sliding window (1024).
                 local_attn_mask = torch.ones_like(global_attn_mask)
@@ -745,9 +743,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                             diagonal=-self.sliding_window)
                 local_attn_mask = torch.where(local_attn_mask == 0,
                                             global_attn_mask, float("-inf"))
-            if is_hpu:
-                local_attn_masks = local_attn_mask
-            else:
                 local_attn_masks.append(local_attn_mask)
         kwargs["global_attn_masks"] = global_attn_masks
         kwargs["local_attn_masks"] = local_attn_masks
