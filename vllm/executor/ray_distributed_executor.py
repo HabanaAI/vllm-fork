@@ -465,8 +465,8 @@ class RayDistributedExecutor(DistributedExecutorBase):
                                                  execute_model_req)
 
     def execute_model(
-            self,
-            execute_model_req: ExecuteModelRequest) -> List[SamplerOutput]:
+        self, execute_model_req: ExecuteModelRequest
+    ) -> Optional[List[SamplerOutput]]:
         if not self.use_ray_spmd_worker:
             return super().execute_model(execute_model_req)
 
@@ -551,7 +551,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
         ray.get(parallel_worker_tasks)
 
     def _check_ray_cgraph_installation(self):
-        import pkg_resources
+        import pkg_resources  # type: ignore
         from packaging import version
 
         required_version = version.parse("2.43.0")

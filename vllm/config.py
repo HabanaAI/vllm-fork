@@ -1325,7 +1325,7 @@ class ModelConfig:
         return getattr(self.hf_config, "matryoshka_dimensions", None)
 
 
-BlockSize = Literal[1, 8, 16, 32, 64, 128]
+BlockSize = Literal[1, 8, 16, 32, 64, 128, 256]
 CacheDType = Literal["auto", "fp8", "fp8_e4m3", "fp8_e5m2", "fp8_inc"]
 PrefixCachingHashAlgo = Literal["builtin", "sha256"]
 
@@ -2617,6 +2617,8 @@ class SpeculativeConfig:
             ray_workers_use_nsight=target_parallel_config.
             ray_workers_use_nsight,
             placement_group=target_parallel_config.placement_group,
+            enable_expert_parallel=target_parallel_config.
+            enable_expert_parallel,
         )
 
         return draft_parallel_config

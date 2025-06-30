@@ -19,9 +19,10 @@ import torch.distributed
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
-from vllm.config import ParallelConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
                               init_distributed_environment)
+from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
@@ -77,7 +78,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             or (speculative_config.draft_model_config.hf_config.model_type \
                 == model_config.hf_config.model_type) \
             or (speculative_config.draft_model_config.hf_config.model_type
-                not in ["medusa", "mlp_speculator", "eagle"]) \
+                not in ["medusa", "mlp_speculator", "eagle", "deepseek_mtp"]) \
                     else {"return_hidden_states": True}
 
         is_encoder_decoder_model = self._is_encoder_decoder_model()
@@ -205,7 +206,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
-            torch.hpu.set_device(self.device)
+            if envs.VLLM_DP_SIZE > 1:
+                torch.hpu.set_device(self.device)
+            else:
+                torch.hpu.set_device(self.local_rank)
         elif self.device_config.device_type == "cpu":
             self.device = torch.device("cpu")
         else:
@@ -214,7 +218,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         # Initialize the distributed environment.
         if self.model_config.quantization == 'inc':
             self._set_env_vars()
-        init_worker_distributed_environment(self.parallel_config, self.rank,
+        init_worker_distributed_environment(self.vllm_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
         # Set random seed.
@@ -255,12 +259,17 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 seq_group_metadata.is_prompt
                 for seq_group_metadata in seq_group_metadata_list
             ])
-            max_context_len = max([
-                max([
-                    len(v.prompt_token_ids) + len(v.output_token_ids)
-                    for v in seq_group_metadata.seq_data.values()
-                ]) for seq_group_metadata in seq_group_metadata_list
-            ])  # whoa, that's some spicy stuff right here
+            # for dummy run in DP, we don't have real seq,
+            # so use a dummy context_len here
+            if len(seq_group_metadata_list) == 0:
+                max_context_len = 128
+            else:
+                max_context_len = max([
+                    max([
+                        len(v.prompt_token_ids) + len(v.output_token_ids)
+                        for v in seq_group_metadata.seq_data.values()
+                    ]) for seq_group_metadata in seq_group_metadata_list
+                ])  # whoa, that's some spicy stuff right here
             max_num_blocks = (
                 (max_context_len - 1) // self.cache_config.block_size) + 1
             input_stats = (f'is_prompt: {is_prompt}, '
@@ -354,9 +363,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                              cache_block_size)
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
-
-        self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
@@ -377,6 +383,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
+        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+            num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
@@ -513,12 +521,13 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
 
 def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
+    vllm_config: VllmConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    parallel_config = vllm_config.parallel_config
     backend = hpu_backend_string()
     init_distributed_environment(parallel_config.world_size,
                                  rank,
@@ -535,11 +544,14 @@ def init_worker_distributed_environment(
         get_pp_group().all_reduce(torch.zeros(1).to('hpu'))
     if torch.distributed.is_initialized():
         torch_world_size = torch.distributed.get_world_size()
-        if torch_world_size != parallel_config.world_size:
+        expected_size = parallel_config.world_size *\
+            parallel_config.data_parallel_size
+        if torch_world_size != expected_size:
             raise RuntimeError(
                 "torch.distributed is already initialized but the torch world "
-                "size does not match parallel_config.world_size "
-                f"({torch_world_size} vs. {parallel_config.world_size}).")
+                "size does not match parallel_config.world_size * "
+                "parallel_config.data_parallel_size "
+                f"({torch_world_size} vs. {expected_size}).")
     elif not distributed_init_method:
         raise ValueError(
             "distributed_init_method must be set if torch.distributed "
@@ -557,9 +569,11 @@ def init_worker_distributed_environment(
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
     torch.distributed.all_reduce(dummy_tensor_hpu)
-    assert dummy_tensor_hpu.item() == parallel_config.world_size
+    assert dummy_tensor_hpu.item(
+    ) == parallel_config.world_size * parallel_config.data_parallel_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
+    ensure_kv_transfer_initialized(vllm_config)
 
 
 def raise_if_cache_size_invalid(num_gpu_blocks, block_size, max_model_len,
