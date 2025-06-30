@@ -858,8 +858,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.cache_config.enable_prefix_caching)
         self.bucketing_manager = HPUBucketingManager(
             self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
-            self.max_num_batched_tokens, self.use_merged_prefill,
-            self.use_prefix_caching, self.max_model_len)
+            self.max_num_batched_tokens, self.max_model_len)
         self.bucketing_manager.generate_prompt_buckets()
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
