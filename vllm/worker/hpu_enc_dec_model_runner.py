@@ -40,8 +40,8 @@ _PAD_BLOCK_ID = 0
 
 class HpuModelAdapterEncoderDecoder(HpuModelAdapter):
 
-    def __init__(self, model, vllm_config, layer_names, is_causal, sampler):
-        super().__init__(model, vllm_config, layer_names, is_causal, sampler)
+    def __init__(self, model, vllm_config, is_causal, sampler):
+        super().__init__(model, vllm_config, is_causal, sampler)
 
         # We only wrap the language model in HPU graph because some Ops in
         # vision model will fallback to CPU and cause the graph building fail.
@@ -301,7 +301,10 @@ class HPUEncoderDecoderModelRunner(
             is_single_step = \
                 self.vllm_config.scheduler_config.num_scheduler_steps == 1
             if is_prompt or is_single_step:
-                self.execute_model(inputs, kv_caches, warmup_mode=True)
+                self.execute_model(inputs,
+                                   kv_caches,
+                                   warmup_mode=True,
+                                   ctx_blocks=ctx)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
