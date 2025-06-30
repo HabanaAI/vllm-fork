@@ -133,106 +133,90 @@ def test_get_open_port(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def parser():
     parser = FlexibleArgumentParser()
-    parser.add_argument("--image-input-type",
-                        choices=["pixel_values", "image_features"])
-    parser.add_argument("--model-name")
-    parser.add_argument("--batch-size", type=int)
-    parser.add_argument("--enable-feature", action="store_true")
+    parser.add_argument('--image-input-type',
+                        choices=['pixel_values', 'image_features'])
+    parser.add_argument('--model-name')
+    parser.add_argument('--batch-size', type=int)
+    parser.add_argument('--enable-feature', action='store_true')
     return parser
 
 
 @pytest.fixture
 def parser_with_config():
     parser = FlexibleArgumentParser()
-    parser.add_argument("serve")
-    parser.add_argument("model_tag", nargs="?")
-    parser.add_argument("--model", type=str)
-    parser.add_argument("--served-model-name", type=str)
-    parser.add_argument("--config", type=str)
-    parser.add_argument("--port", type=int)
-    parser.add_argument("--tensor-parallel-size", type=int)
-    parser.add_argument("--trust-remote-code", action="store_true")
-    parser.add_argument("--multi-step-stream-outputs", action=StoreBoolean)
+    parser.add_argument('serve')
+    parser.add_argument('model_tag', nargs='?')
+    parser.add_argument('--model', type=str)
+    parser.add_argument('--served-model-name', type=str)
+    parser.add_argument('--config', type=str)
+    parser.add_argument('--port', type=int)
+    parser.add_argument('--tensor-parallel-size', type=int)
+    parser.add_argument('--trust-remote-code', action='store_true')
+    parser.add_argument('--multi-step-stream-outputs', action=StoreBoolean)
     return parser
 
 
 def test_underscore_to_dash(parser):
-    args = parser.parse_args(["--image_input_type", "pixel_values"])
-    assert args.image_input_type == "pixel_values"
+    args = parser.parse_args(['--image_input_type', 'pixel_values'])
+    assert args.image_input_type == 'pixel_values'
 
 
 def test_mixed_usage(parser):
     args = parser.parse_args([
-        "--image_input_type",
-        "image_features",
-        "--model-name",
-        "facebook/opt-125m",
+        '--image_input_type', 'image_features', '--model-name',
+        'facebook/opt-125m'
     ])
-    assert args.image_input_type == "image_features"
-    assert args.model_name == "facebook/opt-125m"
+    assert args.image_input_type == 'image_features'
+    assert args.model_name == 'facebook/opt-125m'
 
 
 def test_with_equals_sign(parser):
     args = parser.parse_args(
-        ["--image_input_type=pixel_values", "--model-name=facebook/opt-125m"])
-    assert args.image_input_type == "pixel_values"
-    assert args.model_name == "facebook/opt-125m"
+        ['--image_input_type=pixel_values', '--model-name=facebook/opt-125m'])
+    assert args.image_input_type == 'pixel_values'
+    assert args.model_name == 'facebook/opt-125m'
 
 
 def test_with_int_value(parser):
-    args = parser.parse_args(["--batch_size", "32"])
+    args = parser.parse_args(['--batch_size', '32'])
     assert args.batch_size == 32
-    args = parser.parse_args(["--batch-size", "32"])
+    args = parser.parse_args(['--batch-size', '32'])
     assert args.batch_size == 32
 
 
 def test_with_bool_flag(parser):
-    args = parser.parse_args(["--enable_feature"])
+    args = parser.parse_args(['--enable_feature'])
     assert args.enable_feature is True
-    args = parser.parse_args(["--enable-feature"])
+    args = parser.parse_args(['--enable-feature'])
     assert args.enable_feature is True
 
 
 def test_invalid_choice(parser):
     with pytest.raises(SystemExit):
-        parser.parse_args(["--image_input_type", "invalid_choice"])
+        parser.parse_args(['--image_input_type', 'invalid_choice'])
 
 
 def test_missing_required_argument(parser):
-    parser.add_argument("--required-arg", required=True)
+    parser.add_argument('--required-arg', required=True)
     with pytest.raises(SystemExit):
         parser.parse_args([])
 
 
 def test_cli_override_to_config(parser_with_config, cli_config_file):
     args = parser_with_config.parse_args([
-        "serve",
-        "mymodel",
-        "--config",
-        cli_config_file,
-        "--tensor-parallel-size",
-        "3",
+        'serve', 'mymodel', '--config', cli_config_file,
+        '--tensor-parallel-size', '3'
     ])
     assert args.tensor_parallel_size == 3
     args = parser_with_config.parse_args([
-        "serve",
-        "mymodel",
-        "--tensor-parallel-size",
-        "3",
-        "--config",
-        cli_config_file,
+        'serve', 'mymodel', '--tensor-parallel-size', '3', '--config',
+        cli_config_file
     ])
     assert args.tensor_parallel_size == 3
     assert args.port == 12312
     args = parser_with_config.parse_args([
-        "serve",
-        "mymodel",
-        "--tensor-parallel-size",
-        "3",
-        "--config",
-        cli_config_file,
-        "--port",
-        "666",
+        'serve', 'mymodel', '--tensor-parallel-size', '3', '--config',
+        cli_config_file, '--port', '666'
     ])
     assert args.tensor_parallel_size == 3
     assert args.port == 666
@@ -240,7 +224,7 @@ def test_cli_override_to_config(parser_with_config, cli_config_file):
 
 def test_config_args(parser_with_config, cli_config_file):
     args = parser_with_config.parse_args(
-        ["serve", "mymodel", "--config", cli_config_file])
+        ['serve', 'mymodel', '--config', cli_config_file])
     assert args.tensor_parallel_size == 2
     assert args.trust_remote_code
     assert not args.multi_step_stream_outputs
@@ -249,27 +233,22 @@ def test_config_args(parser_with_config, cli_config_file):
 def test_config_file(parser_with_config):
     with pytest.raises(FileNotFoundError):
         parser_with_config.parse_args(
-            ["serve", "mymodel", "--config", "test_config.yml"])
+            ['serve', 'mymodel', '--config', 'test_config.yml'])
 
     with pytest.raises(ValueError):
         parser_with_config.parse_args(
-            ["serve", "mymodel", "--config", "./data/test_config.json"])
+            ['serve', 'mymodel', '--config', './data/test_config.json'])
 
     with pytest.raises(ValueError):
         parser_with_config.parse_args([
-            "serve",
-            "mymodel",
-            "--tensor-parallel-size",
-            "3",
-            "--config",
-            "--batch-size",
-            "32",
+            'serve', 'mymodel', '--tensor-parallel-size', '3', '--config',
+            '--batch-size', '32'
         ])
 
 
 def test_no_model_tag(parser_with_config, cli_config_file):
     with pytest.raises(ValueError):
-        parser_with_config.parse_args(["serve", "--config", cli_config_file])
+        parser_with_config.parse_args(['serve', '--config', cli_config_file])
 
 
 # yapf: enable
@@ -290,21 +269,16 @@ def test_no_model_tag(parser_with_config, cli_config_file):
         (lambda foo, **kwargs: None, "something_else", False, True, True),
         (lambda foo, **kwargs: None, "kwargs", True, True, False),
         (lambda foo, **kwargs: None, "foo", True, True, False),
-    ],
-)
+    ])
 # yapf: disable
-def test_supports_kw(
-    callable, kw_name, requires_kw_only, allow_var_kwargs, is_supported
-):
-    assert (
-        supports_kw(
-            callable=callable,
-            kw_name=kw_name,
-            requires_kw_only=requires_kw_only,
-            allow_var_kwargs=allow_var_kwargs,
-        )
-        == is_supported
-    )
+def test_supports_kw(callable,kw_name,requires_kw_only,
+                     allow_var_kwargs,is_supported):
+    assert supports_kw(
+        callable=callable,
+        kw_name=kw_name,
+        requires_kw_only=requires_kw_only,
+        allow_var_kwargs=allow_var_kwargs
+    ) == is_supported
 
 
 @create_new_process_for_each_test()
@@ -313,7 +287,6 @@ def test_memory_profiling():
     # Memory used by other processes will show up as cuda usage outside of torch
     from vllm.distributed.device_communicators.cuda_wrapper import (
         CudaRTLibrary)
-
     lib = CudaRTLibrary()
     # 512 MiB allocation outside of this instance
     handle1 = lib.cudaMalloc(512 * 1024 * 1024)
@@ -322,9 +295,9 @@ def test_memory_profiling():
 
     # load weights
 
-    weights = torch.randn(128, 1024, 1024, device="cuda", dtype=torch.float32)
+    weights = torch.randn(128, 1024, 1024, device='cuda', dtype=torch.float32)
 
-    weights_memory = 128 * 1024 * 1024 * 4  # 512 MiB
+    weights_memory = 128 * 1024 * 1024 * 4 # 512 MiB
 
     def measure_current_non_torch():
         free, total = torch.cuda.mem_get_info()
@@ -333,14 +306,11 @@ def test_memory_profiling():
         current_non_torch = current_used - current_torch
         return current_non_torch
 
-    with (
-        memory_profiling(
-            baseline_snapshot=baseline_snapshot, weights_memory=weights_memory
-        ) as result,
-        monitor(measure_current_non_torch) as monitored_values,
-    ):
+    with memory_profiling(baseline_snapshot=baseline_snapshot,
+    weights_memory=weights_memory) as result, \
+        monitor(measure_current_non_torch) as monitored_values:
         # make a memory spike, 1 GiB
-        spike = torch.randn(256, 1024, 1024, device="cuda", dtype=torch.float32)
+        spike = torch.randn(256, 1024, 1024, device='cuda', dtype=torch.float32)
         del spike
 
         # Add some extra non-torch memory 256 MiB (simulate NCCL)
@@ -355,7 +325,7 @@ def test_memory_profiling():
     # 5% tolerance is caused by cuda runtime.
     # we cannot control cuda runtime in the granularity of bytes,
     # which causes a small error (<10 MiB in practice)
-    non_torch_ratio = result.non_torch_increase / (256 * 1024 * 1024)  # noqa
+    non_torch_ratio = result.non_torch_increase / (256 * 1024 * 1024) # noqa
     assert abs(non_torch_ratio - 1) <= 0.05
     assert result.torch_peak_increase == 1024 * 1024 * 1024
     del weights
@@ -367,39 +337,38 @@ def test_bind_kv_cache():
     from vllm.attention import Attention
 
     ctx = {
-        "layers.0.self_attn": Attention(32, 128, 0.1),
-        "layers.1.self_attn": Attention(32, 128, 0.1),
-        "layers.2.self_attn": Attention(32, 128, 0.1),
-        "layers.3.self_attn": Attention(32, 128, 0.1),
+        'layers.0.self_attn': Attention(32, 128, 0.1),
+        'layers.1.self_attn': Attention(32, 128, 0.1),
+        'layers.2.self_attn': Attention(32, 128, 0.1),
+        'layers.3.self_attn': Attention(32, 128, 0.1),
     }
     kv_cache = [
-        torch.zeros((1,)),
-        torch.zeros((1,)),
-        torch.zeros((1,)),
-        torch.zeros((1,)),
+        torch.zeros((1, )),
+        torch.zeros((1, )),
+        torch.zeros((1, )),
+        torch.zeros((1, )),
     ]
     bind_kv_cache(ctx, [kv_cache])
-    assert ctx["layers.0.self_attn"].kv_cache[0] is kv_cache[0]
-    assert ctx["layers.1.self_attn"].kv_cache[0] is kv_cache[1]
-    assert ctx["layers.2.self_attn"].kv_cache[0] is kv_cache[2]
-    assert ctx["layers.3.self_attn"].kv_cache[0] is kv_cache[3]
-
+    assert ctx['layers.0.self_attn'].kv_cache[0] is kv_cache[0]
+    assert ctx['layers.1.self_attn'].kv_cache[0] is kv_cache[1]
+    assert ctx['layers.2.self_attn'].kv_cache[0] is kv_cache[2]
+    assert ctx['layers.3.self_attn'].kv_cache[0] is kv_cache[3]
 
 def test_bind_kv_cache_non_attention():
     from vllm.attention import Attention
 
     # example from Jamba PP=2
     ctx = {
-        "model.layers.20.attn": Attention(32, 128, 0.1),
-        "model.layers.28.attn": Attention(32, 128, 0.1),
+        'model.layers.20.attn': Attention(32, 128, 0.1),
+        'model.layers.28.attn': Attention(32, 128, 0.1),
     }
     kv_cache = [
-        torch.zeros((1,)),
-        torch.zeros((1,)),
+        torch.zeros((1, )),
+        torch.zeros((1, )),
     ]
     bind_kv_cache(ctx, [kv_cache])
-    assert ctx["model.layers.20.attn"].kv_cache[0] is kv_cache[0]
-    assert ctx["model.layers.28.attn"].kv_cache[0] is kv_cache[1]
+    assert ctx['model.layers.20.attn'].kv_cache[0] is kv_cache[0]
+    assert ctx['model.layers.28.attn'].kv_cache[0] is kv_cache[1]
 
 
 def test_bind_kv_cache_encoder_decoder(monkeypatch: pytest.MonkeyPatch):
@@ -411,51 +380,47 @@ def test_bind_kv_cache_encoder_decoder(monkeypatch: pytest.MonkeyPatch):
 
         # example from bart
         ctx = {
-            "encoder.layers.0.self_attn.attn": Attention(
-                32, 128, 0.1, attn_type=AttentionType.ENCODER
-            ),
-            "decoder.layers.0.encoder_attn.attn": Attention(
-                32, 128, 0.1, attn_type=AttentionType.ENCODER_DECODER
-            ),
-            "decoder.layers.0.self_attn.attn": Attention(
-                32, 128, 0.1, attn_type=AttentionType.DECODER
-            ),
+            'encoder.layers.0.self_attn.attn':
+                Attention(32, 128, 0.1, attn_type=AttentionType.ENCODER),
+            'decoder.layers.0.encoder_attn.attn':
+                Attention(32, 128, 0.1, attn_type=AttentionType.ENCODER_DECODER),
+            'decoder.layers.0.self_attn.attn':
+                Attention(32, 128, 0.1, attn_type=AttentionType.DECODER),
         }
 
         kv_cache = [
-            torch.zeros((1,)),
+            torch.zeros((1, )),
         ]
-        encoder_kv_cache = ctx["encoder.layers.0.self_attn.attn"].kv_cache
+        encoder_kv_cache = ctx['encoder.layers.0.self_attn.attn'].kv_cache
 
         bind_kv_cache(ctx, [kv_cache])
-        assert (
-            ctx["encoder.layers.0.self_attn.attn"].kv_cache is encoder_kv_cache
-        )
-        assert (
-            ctx["decoder.layers.0.encoder_attn.attn"].kv_cache[0] is kv_cache[0]
-        )
-        assert ctx["decoder.layers.0.self_attn.attn"].kv_cache[0] is kv_cache[0]
+        assert ctx['encoder.layers.0.self_attn.attn'].kv_cache is encoder_kv_cache
+        assert ctx['decoder.layers.0.encoder_attn.attn'].kv_cache[0] is kv_cache[0]
+        assert ctx['decoder.layers.0.self_attn.attn'].kv_cache[0] is kv_cache[0]
 
 
 def test_bind_kv_cache_pp():
     with patch("vllm.utils.cuda_device_count_stateless", lambda: 2):
         # this test runs with 1 GPU, but we simulate 2 GPUs
         cfg = VllmConfig(
-            parallel_config=ParallelConfig(pipeline_parallel_size=2)
-        )
+            parallel_config=ParallelConfig(pipeline_parallel_size=2))
     with set_current_vllm_config(cfg):
         from vllm.attention import Attention
 
         ctx = {
-            "layers.0.self_attn": Attention(32, 128, 0.1),
+            'layers.0.self_attn': Attention(32, 128, 0.1),
         }
-        kv_cache = [[torch.zeros((1,))], [torch.zeros((1,))]]
+        kv_cache = [
+            [torch.zeros((1, ))],
+            [torch.zeros((1, ))]
+        ]
         bind_kv_cache(ctx, kv_cache)
-        assert ctx["layers.0.self_attn"].kv_cache[0] is kv_cache[0][0]
-        assert ctx["layers.0.self_attn"].kv_cache[1] is kv_cache[1][0]
+        assert ctx['layers.0.self_attn'].kv_cache[0] is kv_cache[0][0]
+        assert ctx['layers.0.self_attn'].kv_cache[1] is kv_cache[1][0]
 
 
 class TestLRUCache(LRUCache):
+
     def _on_remove(self, key, value):
         if not hasattr(self, "_remove_counter"):
             self._remove_counter = 0
@@ -581,7 +546,8 @@ def test_placeholder_module_error_handling():
     placeholder = PlaceholderModule("placeholder_1234")
 
     def build_ctx():
-        return pytest.raises(ModuleNotFoundError, match="No module named")
+        return pytest.raises(ModuleNotFoundError,
+                             match="No module named")
 
     with build_ctx():
         int(placeholder)
@@ -626,8 +592,7 @@ def test_placeholder_module_error_handling():
         ({1: "a", 2: "b"}, 1, 3),
         # Tests for both keys do not exist
         ({1: "a", 2: "b"}, 3, 4),
-    ],
-)
+    ])
 def test_swap_dict_values(obj, key1, key2):
     original_obj = obj.copy()
     swap_dict_values(obj, key1, key2)
@@ -641,30 +606,26 @@ def test_swap_dict_values(obj, key1, key2):
         assert key1 not in obj
 
 
-def test_model_specification(
-    parser_with_config, cli_config_file, cli_config_file_with_model
-):
+def test_model_specification(parser_with_config,
+                             cli_config_file,
+                             cli_config_file_with_model):
     # Test model in CLI takes precedence over config
-    args = parser_with_config.parse_args(
-        ["serve", "cli-model", "--config", cli_config_file_with_model]
-    )
-    assert args.model_tag == "cli-model"
-    assert args.served_model_name == "mymodel"
+    args = parser_with_config.parse_args([
+        'serve', 'cli-model', '--config', cli_config_file_with_model
+    ])
+    assert args.model_tag == 'cli-model'
+    assert args.served_model_name == 'mymodel'
 
     # Test model from config file works
-    args = parser_with_config.parse_args(
-        [
-            "serve",
-            "--config",
-            cli_config_file_with_model,
-        ]
-    )
-    assert args.model == "config-model"
-    assert args.served_model_name == "mymodel"
+    args = parser_with_config.parse_args([
+        'serve', '--config', cli_config_file_with_model,
+    ])
+    assert args.model == 'config-model'
+    assert args.served_model_name == 'mymodel'
 
     # Test no model specified anywhere raises error
     with pytest.raises(ValueError, match="No model specified!"):
-        parser_with_config.parse_args(["serve", "--config", cli_config_file])
+        parser_with_config.parse_args(['serve', '--config', cli_config_file])
 
     # Test using --model option raises error
     with pytest.raises(
@@ -674,26 +635,20 @@ def test_model_specification(
             "argument or in a config file instead of via the `--model` option."
         ),
     ):
-        parser_with_config.parse_args(["serve", "--model", "my-model"])
+        parser_with_config.parse_args(['serve', '--model', 'my-model'])
 
     # Test other config values are preserved
-    args = parser_with_config.parse_args(
-        [
-            "serve",
-            "cli-model",
-            "--config",
-            cli_config_file_with_model,
-        ]
-    )
+    args = parser_with_config.parse_args([
+        'serve', 'cli-model', '--config', cli_config_file_with_model,
+    ])
     assert args.tensor_parallel_size == 2
     assert args.trust_remote_code is True
     assert args.multi_step_stream_outputs is False
     assert args.port == 12312
 
 
-@pytest.mark.parametrize(
-    "input", [(), ("abc",), (None,), (None, bool, [1, 2, 3])]
-)
+@pytest.mark.parametrize("input", [(), ("abc", ), (None, ),
+                                    (None, bool, [1, 2, 3])])
 @pytest.mark.parametrize("output", [0, 1, 2])
 def test_sha256(input: tuple, output: int):
     hash = sha256(input)
@@ -702,15 +657,13 @@ def test_sha256(input: tuple, output: int):
     assert hash != 0
 
     bytes = pickle.dumps(input, protocol=pickle.HIGHEST_PROTOCOL)
-    assert hash == int.from_bytes(
-        hashlib.sha256(bytes).digest(), byteorder="big"
-    )
+    assert hash == int.from_bytes(hashlib.sha256(bytes).digest(), byteorder="big")
 
     # hashing again, returns the same value
     assert hash == sha256(input)
 
     # hashing different input, returns different value
-    assert hash != sha256(input + (1,))
+    assert hash != sha256(input + (1, ))
 
 
 @pytest.mark.parametrize(
@@ -720,7 +673,7 @@ def test_sha256(input: tuple, output: int):
         ("tcp://127.0.0.1:5555", ("tcp", "127.0.0.1", "5555")),
         ("tcp://[::1]:5555", ("tcp", "::1", "5555")),  # IPv6 address
         ("inproc://some_identifier", ("inproc", "some_identifier", "")),
-    ],
+    ]
 )
 def test_split_zmq_path(path, expected):
     assert split_zmq_path(path) == expected
@@ -733,7 +686,7 @@ def test_split_zmq_path(path, expected):
         "tcp://127.0.0.1",  # Missing port
         "tcp://[::1]",  # Missing port for IPv6
         "tcp://:5555",  # Missing host
-    ],
+    ]
 )
 def test_split_zmq_path_invalid(invalid_path):
     with pytest.raises(ValueError):
@@ -756,9 +709,7 @@ def test_make_zmq_socket_ipv6():
     zsock: zmq.Socket = make_zmq_socket(ctx, ipv6_path, socket_type)
 
     # Verify that the IPV6 option is set
-    assert zsock.getsockopt(zmq.IPV6) == 1, (
-        "IPV6 option should be enabled for IPv6 addresses"
-    )
+    assert zsock.getsockopt(zmq.IPV6) == 1, "IPV6 option should be enabled for IPv6 addresses"
 
     # Clean up
     zsock.close()

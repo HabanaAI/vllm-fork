@@ -69,26 +69,24 @@ class MQLLMEngine:
         **kwargs: Arguments for {class}`LLMEngine`.
     """
 
-    def __init__(
-        self,
-        ipc_path: str,
-        use_async_sockets: bool,
-        *args,
-        log_requests: bool = True,
-        **kwargs,
-    ) -> None:
+    def __init__(self,
+                 ipc_path: str,
+                 use_async_sockets: bool,
+                 *args,
+                 log_requests: bool = True,
+                 **kwargs) -> None:
         # For MQLLMEngine, we can use cached outputs, since each new request
         # output is immediately pickled and send over the socket, which frees
         # the python object to be reused again.
-        kwargs["use_cached_outputs"] = True
+        kwargs['use_cached_outputs'] = True
 
         self.engine = LLMEngine(*args, **kwargs)
         self.log_requests = log_requests
 
         self.use_async_sockets = use_async_sockets
         if self.use_async_sockets:
-            self.engine.process_request_outputs_callback = (
-                self._async_socket_engine_callback)
+            self.engine.process_request_outputs_callback = \
+                self._async_socket_engine_callback
 
         self.ctx = zmq.Context()  # type: ignore[attr-defined]
 
@@ -118,17 +116,12 @@ class MQLLMEngine:
             return ENGINE_DEAD_ERROR()
 
     @classmethod
-    def from_vllm_config(
-        cls,
-        vllm_config: VllmConfig,
-        usage_context: UsageContext,
-        disable_log_requests: bool,
-        disable_log_stats: bool,
-        ipc_path: str,
-    ) -> "MQLLMEngine":
+    def from_vllm_config(cls, vllm_config: VllmConfig,
+                         usage_context: UsageContext,
+                         disable_log_requests: bool, disable_log_stats: bool,
+                         ipc_path: str) -> "MQLLMEngine":
         # Setup plugins for each process
         from vllm.plugins import load_general_plugins
-
         load_general_plugins()
 
         use_async_sockets = vllm_config.model_config.use_async_output_proc
@@ -215,10 +208,10 @@ class MQLLMEngine:
         while True:
             if not self.engine.has_unfinished_requests():
                 # Poll until there is work to do.
-                if (self.engine.vllm_config.kv_transfer_config is not None
-                        and self.engine.need_to_sync_across_dp):
-                    if (self.input_socket.poll(
-                            timeout=POLLING_TIMEOUT_MS_PD_DP) == 0):
+                if self.engine.vllm_config.kv_transfer_config is not None\
+                    and self.engine.need_to_sync_across_dp:
+                    if self.input_socket.poll(
+                            timeout=POLLING_TIMEOUT_MS_PD_DP) == 0:
                         # When there's no work, check on engine health and send
                         # health status back to client
                         self._health_check()
@@ -226,8 +219,8 @@ class MQLLMEngine:
                         logger.debug(
                             "Waiting for new requests in engine loop.")
                 else:
-                    while (self.input_socket.poll(
-                            timeout=POLLING_TIMEOUT_MS) == 0):
+                    while self.input_socket.poll(
+                            timeout=POLLING_TIMEOUT_MS) == 0:
                         # When there's no work, check on engine health and send
                         # health status back to client
                         self._health_check()
@@ -254,11 +247,9 @@ class MQLLMEngine:
         except InputProcessingError as e:
             # Special case where we handle an error preparing the inputs for
             # a single request in the batch
-            rpc_err = RPCError(
-                request_id=e.request_id,
-                is_engine_errored=False,
-                exception=e.__cause__,
-            )
+            rpc_err = RPCError(request_id=e.request_id,
+                               is_engine_errored=False,
+                               exception=e.__cause__)
             self._send_outputs(rpc_err)
             return []
         except BaseException as e:
@@ -301,8 +292,8 @@ class MQLLMEngine:
                 elif isinstance(request, RPCIsSleepingRequest):
                     self._handle_is_sleeping_request(request)
                 else:
-                    raise ValueError(
-                        f"Unknown RPCRequest Type: {type(request)}")
+                    raise ValueError("Unknown RPCRequest Type: "
+                                     f"{type(request)}")
 
         except Exception as e:
             self._set_errored(e)
@@ -314,11 +305,9 @@ class MQLLMEngine:
         request_id = request.request_id
 
         if self._errored_with is not None:
-            rpc_err = RPCError(
-                request_id=request_id,
-                is_engine_errored=True,
-                exception=ENGINE_DEAD_ERROR(self._errored_with),
-            )
+            rpc_err = RPCError(request_id=request_id,
+                               is_engine_errored=True,
+                               exception=ENGINE_DEAD_ERROR(self._errored_with))
             self._send_outputs(rpc_err)
 
         try:
@@ -329,8 +318,7 @@ class MQLLMEngine:
                 lora_request=request.lora_request,
                 trace_headers=request.trace_headers,
                 prompt_adapter_request=request.prompt_adapter_request,
-                priority=request.priority,
-            )
+                priority=request.priority)
 
             if self.log_requests:
                 logger.info("Added request %s.", request.request_id)
@@ -360,11 +348,9 @@ class MQLLMEngine:
             self.engine.add_lora(request.lora_request)
         except BaseException as e:
             # Send back an error if the adater fails to load
-            rpc_err = RPCError(
-                request_id=request.request_id,
-                is_engine_errored=False,
-                exception=e,
-            )
+            rpc_err = RPCError(request_id=request.request_id,
+                               is_engine_errored=False,
+                               exception=e)
             self._send_outputs(rpc_err)
             return
         # Otherwise, send back the successful load message
@@ -400,8 +386,8 @@ class MQLLMEngine:
 
                 # RayTaskError might not pickelable here. We need to unpack the
                 # underlying exception as the real exception in the output.
-                if isinstance(outputs, RPCError) and isinstance(
-                        outputs.exception, RayTaskError):
+                if (isinstance(outputs, RPCError)
+                        and isinstance(outputs.exception, RayTaskError)):
                     outputs.exception = outputs.exception.cause
             except ImportError:
                 pass
@@ -454,14 +440,9 @@ def signal_handler(*_) -> None:
     raise KeyboardInterrupt("MQLLMEngine terminated")
 
 
-def run_mp_engine(
-    vllm_config: VllmConfig,
-    usage_context: UsageContext,
-    ipc_path: str,
-    disable_log_stats: bool,
-    disable_log_requests: bool,
-    engine_alive,
-):
+def run_mp_engine(vllm_config: VllmConfig, usage_context: UsageContext,
+                  ipc_path: str, disable_log_stats: bool,
+                  disable_log_requests: bool, engine_alive):
     try:
         # Ensure we can serialize transformer config before spawning
         maybe_register_config_serialize_by_value()
@@ -471,8 +452,7 @@ def run_mp_engine(
             usage_context=usage_context,
             disable_log_stats=disable_log_stats,
             disable_log_requests=disable_log_requests,
-            ipc_path=ipc_path,
-        )
+            ipc_path=ipc_path)
 
         signal.signal(signal.SIGTERM, signal_handler)
 

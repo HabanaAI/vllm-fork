@@ -45,7 +45,6 @@ def cleanup_fixture(should_do_global_cleanup_after_test: bool):
 @pytest.fixture
 def dist_init():
     import habana_frameworks.torch.hpu  # noqa: F401
-
     temp_file = tempfile.mkstemp()[1]
 
     backend = "nccl"
@@ -54,13 +53,11 @@ def dist_init():
     elif current_platform.is_hpu():
         backend = "hccl"
 
-    init_distributed_environment(
-        world_size=1,
-        rank=0,
-        distributed_init_method=f"file://{temp_file}",
-        local_rank=0,
-        backend=backend,
-    )
+    init_distributed_environment(world_size=1,
+                                 rank=0,
+                                 distributed_init_method=f"file://{temp_file}",
+                                 local_rank=0,
+                                 backend=backend)
     initialize_model_parallel(1, 1)
     yield
     cleanup_dist_env_and_memory(shutdown_ray=True)
@@ -105,7 +102,7 @@ def dummy_model() -> nn.Module:
             # Special handling for lm_head & sampler
             ("lm_head", ParallelLMHead(512, 10)),
             ("logits_processor", LogitsProcessor(512)),
-            ("sampler", Sampler()),
+            ("sampler", Sampler())
         ]))
     model.config = MagicMock()
     model.embedding_modules = {"lm_head": "lm_head"}
@@ -132,7 +129,7 @@ def dummy_model_gate_up() -> nn.Module:
             # Special handling for lm_head & sampler
             ("lm_head", ParallelLMHead(512, 10)),
             ("logits_processor", LogitsProcessor(512)),
-            ("sampler", Sampler()),
+            ("sampler", Sampler())
         ]))
     model.config = MagicMock()
     model.packed_modules_mapping = {
@@ -237,11 +234,9 @@ def llama_2_7b_engine_extra_embeddings():
     if current_platform.is_hpu():
         with patch("vllm.worker.hpu_model_runner.get_model",
                    get_model_patched):
-            engine = vllm.LLM(
-                "meta-llama/Llama-2-7b-hf",
-                enforce_eager=True,
-                enable_lora=False,
-            )
+            engine = vllm.LLM("meta-llama/Llama-2-7b-hf",
+                              enforce_eager=True,
+                              enable_lora=False)
     else:
         with patch("vllm.worker.model_runner.get_model", get_model_patched):
             engine = vllm.LLM("meta-llama/Llama-2-7b-hf", enable_lora=False)
@@ -267,9 +262,9 @@ def run_with_both_engines_lora(request, monkeypatch):
     if use_v1:
         if skip_v1:
             pytest.skip("Skipping test on vllm V1")
-        monkeypatch.setenv("VLLM_USE_V1", "1")
+        monkeypatch.setenv('VLLM_USE_V1', '1')
     else:
-        monkeypatch.setenv("VLLM_USE_V1", "0")
+        monkeypatch.setenv('VLLM_USE_V1', '0')
 
     yield
 
@@ -277,8 +272,8 @@ def run_with_both_engines_lora(request, monkeypatch):
 @pytest.fixture
 def reset_default_device():
     """
-    Some tests, such as `test_punica_ops.py`, explicitly set the
-    default device, which can affect subsequent tests. Adding this fixture
+    Some tests, such as `test_punica_ops.py`, explicitly set the 
+    default device, which can affect subsequent tests. Adding this fixture 
     helps avoid this problem.
     """
     original_device = torch.get_default_device()

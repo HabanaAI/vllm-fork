@@ -14,13 +14,11 @@ class DeviceCommunicatorBase:
     communication backend), the `device_group` will also be given.
     """
 
-    def __init__(
-        self,
-        cpu_group: ProcessGroup,
-        device: Optional[torch.device] = None,
-        device_group: Optional[ProcessGroup] = None,
-        unique_name: str = "",
-    ):
+    def __init__(self,
+                 cpu_group: ProcessGroup,
+                 device: Optional[torch.device] = None,
+                 device_group: Optional[ProcessGroup] = None,
+                 unique_name: str = ""):
         self.device = device or torch.device("cpu")
         self.cpu_group = cpu_group
         self.device_group = device_group

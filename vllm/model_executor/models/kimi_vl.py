@@ -154,10 +154,10 @@ class KimiVLProcessingInfo(BaseProcessingInfo):
         in_token_limit = hf_processor.image_processor.in_token_limit
         height = image_height
         width = image_width
-        assert isinstance(
-            height, int), (f"height must be int, current height {height}")
+        assert isinstance(height,
+                          int), f"height must be int, current height {height}"
         assert isinstance(width,
-                          int), (f"width must be int, current width {width}")
+                          int), f"width must be int, current width {width}"
         assert kernel_size is not None, "kernel_size must be specified"
 
         if (width // patch_size) * (height // patch_size) > in_token_limit:
@@ -203,11 +203,9 @@ class KimiVLDummyInputsBuilder(BaseDummyInputsBuilder[KimiVLProcessingInfo]):
 
         return {
             "image":
-            self._get_dummy_images(
-                width=MaxImageTokenMeta.width,
-                height=MaxImageTokenMeta.height,
-                num_images=num_images,
-            )
+            self._get_dummy_images(width=MaxImageTokenMeta.width,
+                                   height=MaxImageTokenMeta.height,
+                                   num_images=num_images)
         }
 
 
@@ -261,11 +259,9 @@ class KimiVLMultiModalProcessor(BaseMultiModalProcessor[KimiVLProcessingInfo]):
         ]
 
 
-@MULTIMODAL_REGISTRY.register_processor(
-    KimiVLMultiModalProcessor,
-    info=KimiVLProcessingInfo,
-    dummy_inputs=KimiVLDummyInputsBuilder,
-)
+@MULTIMODAL_REGISTRY.register_processor(KimiVLMultiModalProcessor,
+                                        info=KimiVLProcessingInfo,
+                                        dummy_inputs=KimiVLDummyInputsBuilder)
 class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
 
     def __init__(
@@ -287,8 +283,7 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
 
         self.quant_config = quant_config
         sub_vllm_config = copy.deepcopy(vllm_config)
-        sub_vllm_config.model_config.hf_config = (
-            sub_vllm_config.model_config.hf_config.text_config)
+        sub_vllm_config.model_config.hf_config = sub_vllm_config.model_config.hf_config.text_config
         self.language_model = DeepseekV2Model(
             vllm_config=sub_vllm_config,
             prefix=maybe_prefix(prefix, "language_model"),
@@ -298,8 +293,7 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
             self.unpadded_vocab_size,
             config.text_config.hidden_size,
             org_num_embeddings=self.config.text_config.vocab_size,
-            padding_size=DEFAULT_VOCAB_PADDING_SIZE,
-        )
+            padding_size=DEFAULT_VOCAB_PADDING_SIZE)
         logit_scale = getattr(config, "logit_scale", 1.0)
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
                                                 config.vocab_size, logit_scale)
@@ -311,8 +305,8 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
     def _validate_and_reshape_mm_tensor(self, mm_input: object,
                                         name: str) -> torch.Tensor:
         if not isinstance(mm_input, (torch.Tensor, list)):
-            raise ValueError(
-                f"Incorrect type of {name}. Got type: {type(mm_input)}")
+            raise ValueError(f"Incorrect type of {name}. "
+                             f"Got type: {type(mm_input)}")
         if isinstance(mm_input, torch.Tensor):
             if mm_input.ndim == 2:
                 return mm_input
@@ -348,8 +342,7 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
                                                 patch_size)
         pixel_values = pixel_values.to(self.vision_tower.dtype)
         # image_grid_hws.shape = (N, 2)
-        assert image_grid_hws.ndim == 2, (
-            f"unexpected shape for image_grid_hws: {image_grid_hws.shape}")
+        assert image_grid_hws.ndim == 2, f"unexpected shape for image_grid_hws: {image_grid_hws.shape}"
 
         return KimiVLImagePixelInputs(
             type="pixel_values",
@@ -395,6 +388,7 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
         input_ids: torch.Tensor,
         multimodal_embeddings: Optional[NestedTensors] = None,
     ) -> torch.Tensor:
+
         # `get_input_embeddings` should already be implemented for the language
         # model as one of the requirements of basic vLLM model implementation.
         inputs_embeds = self.language_model.get_input_embeddings(input_ids)
@@ -404,8 +398,7 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
                 input_ids=input_ids,
                 inputs_embeds=inputs_embeds,
                 multimodal_embeddings=multimodal_embeddings,
-                placeholder_token_id=self.config.media_placeholder_token_id,
-            )
+                placeholder_token_id=self.config.media_placeholder_token_id)
 
         return inputs_embeds
 
@@ -447,12 +440,9 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
 
         return hidden_states
 
-    def compute_logits(
-        self,
-        hidden_states: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
-        **kwargs,
-    ) -> torch.Tensor:
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata,
+                       **kwargs) -> torch.Tensor:
         logits = self.logits_processor(self.lm_head, hidden_states,
                                        sampling_metadata, **kwargs)
         return logits
@@ -482,8 +472,7 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
                 ckpt_gate_proj_name="gate_proj",
                 ckpt_down_proj_name="down_proj",
                 ckpt_up_proj_name="up_proj",
-                num_experts=config.n_routed_experts,
-            )
+                num_experts=config.n_routed_experts)
         else:
             expert_params_mapping = []
 
@@ -513,7 +502,8 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
                     # not vision model for now.
                     use_default_weight_loading = True
             else:
-                for param_name, weight_name, shard_id in stacked_params_mapping:
+                for (param_name, weight_name,
+                     shard_id) in stacked_params_mapping:
                     if weight_name not in name:
                         continue
                     # We have mlp.experts[0].gate_proj in the checkpoint.
@@ -522,7 +512,7 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
                     # name will be updated to mlp.experts[0].gate_up_proj, which
                     # will then be updated below in expert_params_mapping
                     # for mlp.experts[0].gate_gate_up_proj, which breaks load.
-                    if ("mlp.experts." in name) and name not in params_dict:
+                    if (("mlp.experts." in name) and name not in params_dict):
                         continue
                     name = name.replace(weight_name, param_name)
                     # Skip loading extra bias for GPTQ models.
@@ -537,12 +527,8 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
                     weight_loader(param, loaded_weight, shard_id, **kwargs)
                     break
                 else:
-                    for idx, (
-                            param_name,
-                            weight_name,
-                            expert_id,
-                            shard_id,
-                    ) in enumerate(expert_params_mapping):
+                    for idx, (param_name, weight_name, expert_id,
+                              shard_id) in enumerate(expert_params_mapping):
                         if weight_name not in name:
                             continue
                         name = name.replace(weight_name, param_name)
@@ -552,14 +538,12 @@ class KimiVLForConditionalGeneration(nn.Module, SupportsMultiModal):
 
                         param = params_dict[name]
                         weight_loader = param.weight_loader
-                        weight_loader(
-                            param,
-                            loaded_weight,
-                            name,
-                            expert_id=expert_id,
-                            shard_id=shard_id,
-                            **kwargs,
-                        )
+                        weight_loader(param,
+                                      loaded_weight,
+                                      name,
+                                      expert_id=expert_id,
+                                      shard_id=shard_id,
+                                      **kwargs)
                         break
                     else:
                         use_default_weight_loading = True
@@ -588,6 +572,6 @@ def get_spec_layer_idx_from_weight_name(config: DeepseekV2Config,
                                                 > 0):
         layer_idx = config.num_hidden_layers
         for i in range(config.num_nextn_predict_layers):
-            if weight_name.startswith(f"model.layers.{layer_idx + i}."):
+            if weight_name.startswith(f"model.layers.{layer_idx+i}."):
                 return layer_idx + i
     return None

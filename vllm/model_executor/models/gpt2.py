@@ -18,7 +18,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only GPT-2 model compatible with HuggingFace weights."""
-
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -82,14 +81,12 @@ class GPT2Attention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.c_proj",
         )
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            scale=self.scale,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.attn",
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              scale=self.scale,
+                              cache_config=cache_config,
+                              quant_config=quant_config,
+                              prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -194,19 +191,16 @@ class GPT2Model(nn.Module):
         assert not config.scale_attn_by_inverse_layer_idx
         assert not config.reorder_and_upcast_attn
         self.embed_dim = config.hidden_size
-        self.wte = VocabParallelEmbedding(
-            config.vocab_size,
-            self.embed_dim,
-            quant_config=quant_config,
-            prefix=f"{prefix}.wte",
-        )
+        self.wte = VocabParallelEmbedding(config.vocab_size,
+                                          self.embed_dim,
+                                          quant_config=quant_config,
+                                          prefix=f"{prefix}.wte")
         self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
         self.start_layer, self.end_layer, self.h = make_layers(
             config.num_hidden_layers,
             lambda prefix: GPT2Block(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.h",
-        )
+            prefix=f"{prefix}.h")
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
         self.make_empty_intermediate_tensors = (
             make_empty_intermediate_tensors_factory(["hidden_states"],
@@ -252,12 +246,10 @@ class GPT2LMHeadModel(nn.Module, SupportsPP):
         self.transformer = GPT2Model(vllm_config=vllm_config,
                                      prefix=maybe_prefix(
                                          prefix, "transformer"))
-        self.lm_head = ParallelLMHead(
-            self.config.vocab_size,
-            self.config.hidden_size,
-            quant_config=quant_config,
-            prefix=f"{prefix}.lm_head",
-        )
+        self.lm_head = ParallelLMHead(self.config.vocab_size,
+                                      self.config.hidden_size,
+                                      quant_config=quant_config,
+                                      prefix=f"{prefix}.lm_head")
         if self.config.tie_word_embeddings:
             self.lm_head = self.lm_head.tie_weights(self.transformer.wte)
 

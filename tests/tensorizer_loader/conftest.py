@@ -17,7 +17,7 @@ def use_v0_only(monkeypatch):
     """
     Tensorizer only tested on V0 so far.
     """
-    monkeypatch.setenv("VLLM_USE_V1", "0")
+    monkeypatch.setenv('VLLM_USE_V1', '0')
 
 
 @pytest.fixture(autouse=True)

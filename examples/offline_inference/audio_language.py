@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-This example shows how to use vLLM for running offline inference
+This example shows how to use vLLM for running offline inference 
 with the correct prompt format on audio language models.
 
 For most models, the prompt format should follow corresponding examples
 on HuggingFace model repository.
 """
-
 import os
 from dataclasses import asdict
 from typing import NamedTuple, Optional
@@ -23,7 +22,7 @@ audio_assets = [AudioAsset("mary_had_lamb"), AudioAsset("winning_call")]
 question_per_audio_count = {
     0: "What is 1+1?",
     1: "What is recited in the audio?",
-    2: "What sport and what nursery rhyme are referenced?",
+    2: "What sport and what nursery rhyme are referenced?"
 }
 
 
@@ -83,21 +82,19 @@ def run_minicpmo(question: str, audio_count: int) -> ModelRequestData:
         limit_mm_per_prompt={"audio": audio_count},
     )
 
-    stop_tokens = ["<|im_end|>", "<|endoftext|>"]
+    stop_tokens = ['<|im_end|>', '<|endoftext|>']
     stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
 
     audio_placeholder = "(<audio>./</audio>)" * audio_count
     audio_chat_template = "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n<|spk_bos|><|spk|><|spk_eos|><|tts_bos|>' }}{% endif %}"  # noqa: E501
     messages = [{
-        "role": "user",
-        "content": f"{audio_placeholder}\n{question}"
+        'role': 'user',
+        'content': f'{audio_placeholder}\n{question}'
     }]
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        chat_template=audio_chat_template,
-    )
+    prompt = tokenizer.apply_chat_template(messages,
+                                           tokenize=False,
+                                           add_generation_prompt=True,
+                                           chat_template=audio_chat_template)
 
     return ModelRequestData(
         engine_args=engine_args,
@@ -116,7 +113,7 @@ def run_phi4mm(question: str, audio_count: int) -> ModelRequestData:
     # Since the vision-lora and speech-lora co-exist with the base model,
     # we have to manually specify the path of the lora weights.
     speech_lora_path = os.path.join(model_path, "speech-lora")
-    placeholders = "".join([f"<|audio_{i + 1}|>" for i in range(audio_count)])
+    placeholders = "".join([f"<|audio_{i+1}|>" for i in range(audio_count)])
 
     prompts = f"<|user|>{placeholders}{question}<|end|><|assistant|>"
 
@@ -149,8 +146,8 @@ def run_qwen2_audio(question: str, audio_count: int) -> ModelRequestData:
     )
 
     audio_in_prompt = "".join([
-        f"Audio {idx + 1}: <|audio_bos|><|AUDIO|><|audio_eos|>\n"
-        for idx in range(audio_count)
+        f"Audio {idx+1}: "
+        f"<|audio_bos|><|AUDIO|><|audio_eos|>\n" for idx in range(audio_count)
     ])
 
     prompt = ("<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
@@ -200,8 +197,8 @@ def run_ultravox(question: str, audio_count: int) -> ModelRequestData:
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     messages = [{
-        "role": "user",
-        "content": "<|audio|>\n" * audio_count + question
+        'role': 'user',
+        'content': "<|audio|>\n" * audio_count + question
     }]
     prompt = tokenizer.apply_chat_template(messages,
                                            tokenize=False,
@@ -255,33 +252,27 @@ model_example_map = {
 
 def parse_args():
     parser = FlexibleArgumentParser(
-        description="Demo on using vLLM for offline inference with "
-        "audio language models")
-    parser.add_argument(
-        "--model-type",
-        "-m",
-        type=str,
-        default="ultravox",
-        choices=model_example_map.keys(),
-        help='Huggingface "model_type".',
-    )
-    parser.add_argument("--num-prompts",
+        description='Demo on using vLLM for offline inference with '
+        'audio language models')
+    parser.add_argument('--model-type',
+                        '-m',
+                        type=str,
+                        default="ultravox",
+                        choices=model_example_map.keys(),
+                        help='Huggingface "model_type".')
+    parser.add_argument('--num-prompts',
                         type=int,
                         default=1,
-                        help="Number of prompts to run.")
-    parser.add_argument(
-        "--num-audios",
-        type=int,
-        default=1,
-        choices=[0, 1, 2],
-        help="Number of audio items per prompt.",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Set the seed when initializing `vllm.LLM`.",
-    )
+                        help='Number of prompts to run.')
+    parser.add_argument("--num-audios",
+                        type=int,
+                        default=1,
+                        choices=[0, 1, 2],
+                        help="Number of audio items per prompt.")
+    parser.add_argument("--seed",
+                        type=int,
+                        default=None,
+                        help="Set the seed when initializing `vllm.LLM`.")
 
     return parser.parse_args()
 

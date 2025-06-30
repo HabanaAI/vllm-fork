@@ -38,9 +38,9 @@ class SpecializedManager(ABC):
     def find_longest_cache_hit(
             self, block_hashes: list[BlockHashType]) -> list[KVCacheBlock]:
         """
-        Get the longest cache hit prefix of the blocks. If no cache hit is
-        found, return an empty list. if eagle is enabled, drop the last matched
-        block to force recompute the last block to get the required hidden
+        Get the longest cache hit prefix of the blocks. If no cache hit is 
+        found, return an empty list. if eagle is enabled, drop the last matched 
+        block to force recompute the last block to get the required hidden 
         states for eagle drafting head.
 
         Args:
@@ -48,8 +48,8 @@ class SpecializedManager(ABC):
         Returns:
             A list of cached blocks with skipped blocks replaced by null block.
             For example, sliding window manager should return a list like
-            [NULL, NULL, KVCacheBlock(7), KVCacheBlock(8)] for block size 4 and
-            sliding window 8.
+            [NULL, NULL, KVCacheBlock(7), KVCacheBlock(8)] for block size 4 and 
+            sliding window 8. 
         """
 
         raise NotImplementedError
@@ -58,8 +58,8 @@ class SpecializedManager(ABC):
     def remove_skipped_blocks(self, blocks: list[KVCacheBlock],
                               num_computed_tokens: int) -> list[KVCacheBlock]:
         """
-        Remove the blocks that are no longer needed from `blocks`. The removed
-        blocks should be replaced by null_block. Return the removed blocks in
+        Remove the blocks that are no longer needed from `blocks`. The removed 
+        blocks should be replaced by null_block. Return the removed blocks in 
         eviction order, where the first returned block should be evicted first.
         Don't free the removed blocks in this function.
 
@@ -97,12 +97,8 @@ class FullAttentionManager(SpecializedManager):
 
 class SlidingWindowManager(SpecializedManager):
 
-    def __init__(
-        self,
-        kv_cache_spec: SlidingWindowSpec,
-        block_pool: BlockPool,
-        use_eagle: bool,
-    ):
+    def __init__(self, kv_cache_spec: SlidingWindowSpec, block_pool: BlockPool,
+                 use_eagle: bool):
         super().__init__(kv_cache_spec, block_pool, use_eagle)
         self.sliding_window = kv_cache_spec.sliding_window
         # The number of contiguous blocks needed for prefix cache hit.

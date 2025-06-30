@@ -179,18 +179,15 @@ def parse_args():
         help="Specify the demo mode: 'simple' or 'advanced'",
     )
 
-    parser.add_argument(
-        "--format",
-        choices=["mistral", "hf"],
-        default="mistral",
-        help="Specify the format of the model to load.",
-    )
+    parser.add_argument('--format',
+                        choices=["mistral", "hf"],
+                        default="mistral",
+                        help='Specify the format of the model to load.')
 
     parser.add_argument(
-        "--disable-mm-preprocessor-cache",
-        action="store_true",
-        help="If True, disables caching of multi-modal preprocessor/mapper.",
-    )
+        '--disable-mm-preprocessor-cache',
+        action='store_true',
+        help='If True, disables caching of multi-modal preprocessor/mapper.')
     return parser.parse_args()
 
 

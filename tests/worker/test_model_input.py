@@ -81,8 +81,7 @@ def test_model_runner_input():
         input_tokens=torch.ones(10),
         input_positions=torch.ones(10),
         sampling_metadata=sampling_metadata,
-        attn_metadata=attn_metadata,
-    )
+        attn_metadata=attn_metadata)
 
     assert isinstance(model_input, ModelInputForGPUWithSamplingMetadata)
 
@@ -135,8 +134,7 @@ def test_embedding_model_runner_input():
         input_tokens=torch.ones(10),
         input_positions=torch.ones(10),
         pooling_metadata=pooling_metadata,
-        attn_metadata=attn_metadata,
-    )
+        attn_metadata=attn_metadata)
 
     assert isinstance(model_input, ModelInputForGPUWithPoolingMetadata)
 
@@ -188,8 +186,7 @@ def test_multi_step_model_runner_input():
         input_tokens=torch.ones(10),
         input_positions=torch.ones(10),
         sampling_metadata=sampling_metadata,
-        attn_metadata=attn_metadata,
-    )
+        attn_metadata=attn_metadata)
 
     model_input = StatefulModelInput(
         frozen_model_input=frozen_model_input,
@@ -208,8 +205,8 @@ def test_multi_step_model_runner_input():
     # Test round trip serialization.
     tensor_dict = model_input.as_broadcastable_tensor_dict()
     attn_backend = MockAttentionBackend()
-    received_model_input = StatefulModelInput.from_broadcasted_tensor_dict(
-        tensor_dict, attn_backend=attn_backend)
+    received_model_input = (StatefulModelInput.from_broadcasted_tensor_dict(
+        tensor_dict, attn_backend=attn_backend))
 
     receieved_frozen_input = received_model_input.frozen_model_input
 

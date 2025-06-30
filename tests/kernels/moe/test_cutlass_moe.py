@@ -51,15 +51,13 @@ class MOETensors:
         c_strides1 = torch.full((e, ), 2 * n, device="cuda", dtype=torch.int64)
         ab_strides2 = torch.full((e, ), n, device="cuda", dtype=torch.int64)
         c_strides2 = torch.full((e, ), k, device="cuda", dtype=torch.int64)
-        return MOETensors(
-            a=a,
-            w1=w1,
-            w2=w2,
-            ab_strides1=ab_strides1,
-            c_strides1=c_strides1,
-            ab_strides2=ab_strides2,
-            c_strides2=c_strides2,
-        )
+        return MOETensors(a=a,
+                          w1=w1,
+                          w2=w2,
+                          ab_strides1=ab_strides1,
+                          c_strides1=c_strides1,
+                          ab_strides2=ab_strides2,
+                          c_strides2=c_strides2)
 
 
 @dataclasses.dataclass
@@ -77,14 +75,9 @@ class MOETensors8Bit(MOETensors):
     w2_d: Optional[torch.Tensor] = None  # w2 -> w2_q -> w2_d
 
     @staticmethod
-    def make_moe_tensors_8bit(
-        m: int,
-        k: int,
-        n: int,
-        e: int,
-        per_act_token: bool,
-        per_out_channel: bool,
-    ) -> "MOETensors8Bit":
+    def make_moe_tensors_8bit(m: int, k: int, n: int, e: int,
+                              per_act_token: bool,
+                              per_out_channel: bool) -> "MOETensors8Bit":
         dtype = torch.half
         q_dtype = torch.float8_e4m3fn
 
@@ -111,12 +104,10 @@ class MOETensors8Bit(MOETensors):
         for expert in range(e):
             w1_q[expert], w1_scale[expert] = ops.scaled_fp8_quant(
                 moe_tensors_fp16.w1[expert],
-                use_per_token_if_dynamic=per_out_channel,
-            )
+                use_per_token_if_dynamic=per_out_channel)
             w2_q[expert], w2_scale[expert] = ops.scaled_fp8_quant(
                 moe_tensors_fp16.w2[expert],
-                use_per_token_if_dynamic=per_out_channel,
-            )
+                use_per_token_if_dynamic=per_out_channel)
 
         # a_q -> a_d, w1_q -> w1_d, w2_q -> w2_d
         a_d = a_q.float().mul(a_scale).to(dtype)
@@ -126,24 +117,22 @@ class MOETensors8Bit(MOETensors):
             w1_d[expert] = (w1_q[expert].float() * w1_scale[expert]).half()
             w2_d[expert] = (w2_q[expert].float() * w2_scale[expert]).half()
 
-        return MOETensors8Bit(
-            a=moe_tensors_fp16.a,
-            w1=moe_tensors_fp16.w1,
-            w2=moe_tensors_fp16.w2,
-            ab_strides1=moe_tensors_fp16.ab_strides1,
-            c_strides1=moe_tensors_fp16.c_strides1,
-            ab_strides2=moe_tensors_fp16.ab_strides2,
-            c_strides2=moe_tensors_fp16.c_strides2,
-            a_q=a_q,
-            w1_q=w1_q,
-            w2_q=w2_q,
-            a_scale=a_scale,
-            w1_scale=w1_scale,
-            w2_scale=w2_scale,
-            a_d=a_d,
-            w1_d=w1_d,
-            w2_d=w2_d,
-        )
+        return MOETensors8Bit(a=moe_tensors_fp16.a,
+                              w1=moe_tensors_fp16.w1,
+                              w2=moe_tensors_fp16.w2,
+                              ab_strides1=moe_tensors_fp16.ab_strides1,
+                              c_strides1=moe_tensors_fp16.c_strides1,
+                              ab_strides2=moe_tensors_fp16.ab_strides2,
+                              c_strides2=moe_tensors_fp16.c_strides2,
+                              a_q=a_q,
+                              w1_q=w1_q,
+                              w2_q=w2_q,
+                              a_scale=a_scale,
+                              w1_scale=w1_scale,
+                              w2_scale=w2_scale,
+                              a_d=a_d,
+                              w1_d=w1_d,
+                              w2_d=w2_d)
 
 
 def run_with_expert_maps(num_experts: int, num_local_experts: int,
@@ -151,14 +140,8 @@ def run_with_expert_maps(num_experts: int, num_local_experts: int,
 
     def slice_experts():
         slice_params = [
-            "w1_q",
-            "w2_q",
-            "ab_strides1",
-            "ab_strides2",
-            "c_strides1",
-            "c_strides2",
-            "w1_scale",
-            "w2_scale",
+            "w1_q", "w2_q", "ab_strides1", "ab_strides2", "c_strides1",
+            "c_strides2", "w1_scale", "w2_scale"
         ]
         full_tensors = {
             k: v
@@ -191,35 +174,30 @@ def run_with_expert_maps(num_experts: int, num_local_experts: int,
     return out_tensor
 
 
-def run_8_bit(
-    moe_tensors: MOETensors8Bit,
-    topk_weights: torch.Tensor,
-    topk_ids: torch.Tensor,
-    num_local_experts: Optional[int] = None,
-) -> torch.Tensor:
+def run_8_bit(moe_tensors: MOETensors8Bit,
+              topk_weights: torch.Tensor,
+              topk_ids: torch.Tensor,
+              num_local_experts: Optional[int] = None) -> torch.Tensor:
     assert not any([
         t is None for t in [
-            moe_tensors.w1_q,
-            moe_tensors.w2_q,
-            moe_tensors.w1_scale,
-            moe_tensors.w2_scale,
-            moe_tensors.a_scale,
+            moe_tensors.w1_q, moe_tensors.w2_q, moe_tensors.w1_scale,
+            moe_tensors.w2_scale, moe_tensors.a_scale
         ]
     ])
 
     kwargs = {
-        "a": moe_tensors.a,
-        "w1_q": moe_tensors.w1_q.transpose(1, 2),  # type: ignore[union-attr]
-        "w2_q": moe_tensors.w2_q.transpose(1, 2),  # type: ignore[union-attr]
-        "topk_weights": topk_weights,
-        "topk_ids_": topk_ids,
-        "ab_strides1": moe_tensors.ab_strides1,
-        "c_strides1": moe_tensors.c_strides1,
-        "ab_strides2": moe_tensors.ab_strides2,
-        "c_strides2": moe_tensors.c_strides2,
-        "w1_scale": moe_tensors.w1_scale,
-        "w2_scale": moe_tensors.w2_scale,
-        "a1_scale": moe_tensors.a_scale,
+        'a': moe_tensors.a,
+        'w1_q': moe_tensors.w1_q.transpose(1, 2),  # type: ignore[union-attr]
+        'w2_q': moe_tensors.w2_q.transpose(1, 2),  # type: ignore[union-attr]
+        'topk_weights': topk_weights,
+        'topk_ids_': topk_ids,
+        'ab_strides1': moe_tensors.ab_strides1,
+        'c_strides1': moe_tensors.c_strides1,
+        'ab_strides2': moe_tensors.ab_strides2,
+        'c_strides2': moe_tensors.c_strides2,
+        'w1_scale': moe_tensors.w1_scale,
+        'w2_scale': moe_tensors.w2_scale,
+        'a1_scale': moe_tensors.a_scale
     }
 
     num_experts = moe_tensors.w1.size(0)
@@ -231,8 +209,7 @@ def run_8_bit(
     return run_with_expert_maps(
         num_experts,
         num_local_experts,  # type: ignore[arg-type]
-        **kwargs,
-    )
+        **kwargs)
 
 
 @pytest.mark.parametrize("m,n,k", MNK_FACTORS)
@@ -243,8 +220,7 @@ def run_8_bit(
 @pytest.mark.skipif(
     (lambda x: x is None or not ops.cutlass_group_gemm_supported(x.to_int()))(
         current_platform.get_device_capability()),
-    reason="Grouped gemm is not supported on this GPU type.",
-)
+    reason="Grouped gemm is not supported on this GPU type.")
 def test_cutlass_moe_8_bit_no_graph(
     m: int,
     n: int,
@@ -258,6 +234,7 @@ def test_cutlass_moe_8_bit_no_graph(
     with set_current_vllm_config(
             VllmConfig(parallel_config=ParallelConfig(
                 pipeline_parallel_size=1))):
+
         mt = MOETensors8Bit.make_moe_tensors_8bit(m, k, n, e, per_act_token,
                                                   per_out_ch)
 
@@ -288,8 +265,7 @@ def test_cutlass_moe_8_bit_no_graph(
 @pytest.mark.skipif(
     (lambda x: x is None or not ops.cutlass_group_gemm_supported(x.to_int()))(
         current_platform.get_device_capability()),
-    reason="Grouped gemm is not supported on this GPU type.",
-)
+    reason="Grouped gemm is not supported on this GPU type.")
 def test_cutlass_moe_8_bit_cuda_graph(
     m: int,
     n: int,
@@ -303,6 +279,7 @@ def test_cutlass_moe_8_bit_cuda_graph(
     with set_current_vllm_config(
             VllmConfig(parallel_config=ParallelConfig(
                 pipeline_parallel_size=1))):
+
         dtype = torch.half
 
         mt = MOETensors8Bit.make_moe_tensors_8bit(m, k, n, e, per_act_token,
@@ -345,8 +322,7 @@ def test_cutlass_moe_8_bit_cuda_graph(
 @pytest.mark.skipif(
     (lambda x: x is None or not ops.cutlass_group_gemm_supported(x.to_int()))(
         current_platform.get_device_capability()),
-    reason="Grouped gemm is not supported on this GPU type.",
-)
+    reason="Grouped gemm is not supported on this GPU type.")
 def test_cutlass_moe_8_bit_EP(
     m: int,
     n: int,
@@ -361,6 +337,7 @@ def test_cutlass_moe_8_bit_EP(
     with set_current_vllm_config(
             VllmConfig(parallel_config=ParallelConfig(
                 pipeline_parallel_size=1))):
+
         mt = MOETensors8Bit.make_moe_tensors_8bit(m, k, n, e, per_act_token,
                                                   per_out_channel)
 

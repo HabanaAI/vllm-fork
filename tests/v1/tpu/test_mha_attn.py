@@ -25,7 +25,8 @@ if not envs.VLLM_USE_V1:
 
 @pytest.fixture(autouse=True)
 def clear_cache():
-    """Clear lru cache to ensure each test case runs without caching."""
+    """Clear lru cache to ensure each test case runs without caching.
+    """
     _cached_get_attn_backend.cache_clear()
 
 

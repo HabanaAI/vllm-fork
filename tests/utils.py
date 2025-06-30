@@ -73,16 +73,14 @@ VLLM_PATH = Path(__file__).parent.parent
 class RemoteOpenAIServer:
     DUMMY_API_KEY = "token-abc123"  # vLLM's OpenAI server does not need API key
 
-    def __init__(
-        self,
-        model: str,
-        vllm_serve_args: list[str],
-        *,
-        env_dict: Optional[dict[str, str]] = None,
-        seed: Optional[int] = 0,
-        auto_port: bool = True,
-        max_wait_seconds: Optional[float] = None,
-    ) -> None:
+    def __init__(self,
+                 model: str,
+                 vllm_serve_args: list[str],
+                 *,
+                 env_dict: Optional[dict[str, str]] = None,
+                 seed: Optional[int] = 0,
+                 auto_port: bool = True,
+                 max_wait_seconds: Optional[float] = None) -> None:
         if auto_port:
             if "-p" in vllm_serve_args or "--port" in vllm_serve_args:
                 raise ValueError("You have manually specified the port "
@@ -94,9 +92,8 @@ class RemoteOpenAIServer:
             ]
         if seed is not None:
             if "--seed" in vllm_serve_args:
-                raise ValueError(
-                    f"You have manually specified the seed when `seed={seed}`."
-                )
+                raise ValueError("You have manually specified the seed "
+                                 f"when `seed={seed}`.")
 
             vllm_serve_args = vllm_serve_args + ["--seed", str(seed)]
 
@@ -104,11 +101,11 @@ class RemoteOpenAIServer:
             description="vLLM's remote OpenAI server.")
         parser = make_arg_parser(parser)
         args = parser.parse_args(["--model", model, *vllm_serve_args])
-        self.host = str(args.host or "localhost")
+        self.host = str(args.host or 'localhost')
         self.port = int(args.port)
 
-        self.show_hidden_metrics = (args.show_hidden_metrics_for_version
-                                    is not None)
+        self.show_hidden_metrics = \
+            args.show_hidden_metrics_for_version is not None
 
         # download the model before starting the server to avoid timeout
         is_local = os.path.isdir(model)
@@ -123,7 +120,7 @@ class RemoteOpenAIServer:
         env = os.environ.copy()
         # the current process might initialize cuda,
         # to be safe, we should use spawn method
-        env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+        env['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
         if env_dict is not None:
             env.update(env_dict)
         self.proc = subprocess.Popen(
@@ -188,12 +185,10 @@ class RemoteOpenAIServer:
     def get_async_client(self, **kwargs):
         if "timeout" not in kwargs:
             kwargs["timeout"] = 600
-        return openai.AsyncOpenAI(
-            base_url=self.url_for("v1"),
-            api_key=self.DUMMY_API_KEY,
-            max_retries=0,
-            **kwargs,
-        )
+        return openai.AsyncOpenAI(base_url=self.url_for("v1"),
+                                  api_key=self.DUMMY_API_KEY,
+                                  max_retries=0,
+                                  **kwargs)
 
 
 def _test_completion(
@@ -247,13 +242,11 @@ def _test_completion(
     })
 
     # test seeded random sampling with multiple prompts
-    completion = client.completions.create(
-        model=model,
-        prompt=[prompt, prompt],
-        max_tokens=5,
-        seed=33,
-        temperature=1.0,
-    )
+    completion = client.completions.create(model=model,
+                                           prompt=[prompt, prompt],
+                                           max_tokens=5,
+                                           seed=33,
+                                           temperature=1.0)
 
     results.append({
         "test":
@@ -400,14 +393,12 @@ def _test_image_text(
         ],
     }]
 
-    chat_completion = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        temperature=0.0,
-        max_tokens=1,
-        logprobs=True,
-        top_logprobs=5,
-    )
+    chat_completion = client.chat.completions.create(model=model_name,
+                                                     messages=messages,
+                                                     temperature=0.0,
+                                                     max_tokens=1,
+                                                     logprobs=True,
+                                                     top_logprobs=5)
     top_logprobs = chat_completion.choices[0].logprobs.content[0].top_logprobs
 
     for x in top_logprobs:
@@ -435,14 +426,12 @@ def _test_image_text(
         ],
     }]
 
-    chat_completion = client.chat.completions.create(
-        model=model_name,
-        messages=messages,
-        temperature=0.0,
-        max_tokens=1,
-        logprobs=True,
-        top_logprobs=5,
-    )
+    chat_completion = client.chat.completions.create(model=model_name,
+                                                     messages=messages,
+                                                     temperature=0.0,
+                                                     max_tokens=1,
+                                                     logprobs=True,
+                                                     top_logprobs=5)
     top_logprobs = chat_completion.choices[0].logprobs.content[0].top_logprobs
 
     results.append({
@@ -453,16 +442,14 @@ def _test_image_text(
     return results
 
 
-def compare_two_settings(
-    model: str,
-    arg1: list[str],
-    arg2: list[str],
-    env1: Optional[dict[str, str]] = None,
-    env2: Optional[dict[str, str]] = None,
-    *,
-    method: str = "generate",
-    max_wait_seconds: Optional[float] = None,
-) -> None:
+def compare_two_settings(model: str,
+                         arg1: list[str],
+                         arg2: list[str],
+                         env1: Optional[dict[str, str]] = None,
+                         env2: Optional[dict[str, str]] = None,
+                         *,
+                         method: str = "generate",
+                         max_wait_seconds: Optional[float] = None) -> None:
     """
     Launch API server with two different sets of arguments/environments
     and compare the results of the API calls.
@@ -484,14 +471,12 @@ def compare_two_settings(
     )
 
 
-def compare_all_settings(
-    model: str,
-    all_args: list[list[str]],
-    all_envs: list[Optional[dict[str, str]]],
-    *,
-    method: str = "generate",
-    max_wait_seconds: Optional[float] = None,
-) -> None:
+def compare_all_settings(model: str,
+                         all_args: list[list[str]],
+                         all_envs: list[Optional[dict[str, str]]],
+                         *,
+                         method: str = "generate",
+                         max_wait_seconds: Optional[float] = None) -> None:
     """
     Launch API server with several different sets of arguments/environments
     and compare the results of the API calls with the first set of arguments.
@@ -565,9 +550,8 @@ def compare_all_settings(
                 results += _test_chat(client, model, prompt)
             elif method == "generate_with_image":
                 results += _test_image_text(
-                    client,
-                    model,
-                    "https://upload.wikimedia.org/wikipedia/commons/0/0b/RGBA_comp.png",
+                    client, model,
+                    "https://upload.wikimedia.org/wikipedia/commons/0/0b/RGBA_comp.png"
                 )
             elif method == "encode":
                 results += _test_embeddings(client, model, prompt)
@@ -615,8 +599,7 @@ def init_test_distributed_environment(
         world_size=pp_size * tp_size,
         rank=rank,
         distributed_init_method=distributed_init_method,
-        local_rank=local_rank,
-    )
+        local_rank=local_rank)
     ensure_model_parallel_initialized(tp_size, pp_size)
 
 
@@ -639,13 +622,8 @@ def multi_process_parallel(
     ray.init(
         runtime_env={
             "working_dir": VLLM_PATH,
-            "excludes": [
-                "build",
-                ".git",
-                "cmake-build-*",
-                "shellcheck",
-                "dist",
-            ],
+            "excludes":
+            ["build", ".git", "cmake-build-*", "shellcheck", "dist"]
         })
 
     distributed_init_port = get_open_port()
@@ -707,22 +685,22 @@ def wait_for_gpu_memory_to_clear(devices: list[int],
                 mem_info = nvmlDeviceGetMemoryInfo(dev_handle)
                 gb_used = mem_info.used / 2**30
             output_raw[device] = gb_used
-            output[device] = f"{gb_used:.02f}"
+            output[device] = f'{gb_used:.02f}'
 
-        print("gpu memory used (GB): ", end="")
+        print('gpu memory used (GB): ', end='')
         for k, v in output.items():
-            print(f"{k}={v}; ", end="")
-        print("")
+            print(f'{k}={v}; ', end='')
+        print('')
 
         dur_s = time.time() - start_time
         if all(v <= (threshold_bytes / 2**30) for v in output_raw.values()):
-            print(f"Done waiting for free GPU memory on devices {devices=} "
-                  f"({threshold_bytes/2**30=}) {dur_s=:.02f}")
+            print(f'Done waiting for free GPU memory on devices {devices=} '
+                  f'({threshold_bytes/2**30=}) {dur_s=:.02f}')
             break
 
         if dur_s >= timeout_s:
-            raise ValueError(f"Memory of devices {devices=} not free after "
-                             f"{dur_s=:.02f} ({threshold_bytes/2**30=})")
+            raise ValueError(f'Memory of devices {devices=} not free after '
+                             f'{dur_s=:.02f} ({threshold_bytes/2**30=})')
 
         time.sleep(5)
 
@@ -742,7 +720,6 @@ def fork_new_process_for_each_test(
         # to avoid sending SIGTERM to the parent process
         os.setpgrp()
         from _pytest.outcomes import Skipped
-
         pid = os.fork()
         print(f"Fork a new process to run a test {pid}")
         if pid == 0:
@@ -754,7 +731,6 @@ def fork_new_process_for_each_test(
                 os._exit(0)
             except Exception:
                 import traceback
-
                 traceback.print_exc()
                 os._exit(1)
             else:
@@ -775,27 +751,27 @@ def fork_new_process_for_each_test(
 
 
 def spawn_new_process_for_each_test(
-    f: Callable[_P, None], ) -> Callable[_P, None]:
-    """Decorator to spawn a new process for each test function."""
+        f: Callable[_P, None]) -> Callable[_P, None]:
+    """Decorator to spawn a new process for each test function.
+    """
 
     @functools.wraps(f)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:
         # Check if we're already in a subprocess
-        if os.environ.get("RUNNING_IN_SUBPROCESS") == "1":
+        if os.environ.get('RUNNING_IN_SUBPROCESS') == '1':
             # If we are, just run the function directly
             return f(*args, **kwargs)
 
         import torch.multiprocessing as mp
-
         with suppress(RuntimeError):
-            mp.set_start_method("spawn")
+            mp.set_start_method('spawn')
 
         # Get the module
         module_name = f.__module__
 
         # Create a process with environment variable set
         env = os.environ.copy()
-        env["RUNNING_IN_SUBPROCESS"] = "1"
+        env['RUNNING_IN_SUBPROCESS'] = '1'
 
         with tempfile.TemporaryDirectory() as tempdir:
             output_filepath = os.path.join(tempdir, "new_process.tmp")
@@ -815,20 +791,19 @@ def spawn_new_process_for_each_test(
                 returned.check_returncode()
             except Exception as e:
                 # wrap raised exception to provide more information
-                raise RuntimeError(
-                    f"Error raised in subprocess:\n{returned.stderr.decode()}"
-                ) from e
+                raise RuntimeError(f"Error raised in subprocess:\n"
+                                   f"{returned.stderr.decode()}") from e
 
     return wrapper
 
 
 def create_new_process_for_each_test(
-    method: Optional[Literal["spawn", "fork"]] = None,
+    method: Optional[Literal["spawn", "fork"]] = None
 ) -> Callable[[Callable[_P, None]], Callable[_P, None]]:
     """Creates a decorator that runs each test function in a new process.
 
     Args:
-        method: The process creation method. Can be either "spawn" or "fork".
+        method: The process creation method. Can be either "spawn" or "fork". 
                If not specified,
                it defaults to "spawn" on ROCm platforms and "fork" otherwise.
 
@@ -839,7 +814,7 @@ def create_new_process_for_each_test(
         method = "spawn" if current_platform.is_rocm() else "fork"
 
     assert method in ["spawn",
-                      "fork"], ("Method must be either 'spawn' or 'fork'")
+                      "fork"], "Method must be either 'spawn' or 'fork'"
 
     if method == "fork":
         return fork_new_process_for_each_test
@@ -923,7 +898,7 @@ async def completions_with_server_args(
     max_wait_seconds: int = 240,
     max_tokens: Union[int, list] = 5,
 ) -> list[Completion]:
-    """Construct a remote OpenAI server, obtain an async client to the
+    '''Construct a remote OpenAI server, obtain an async client to the
     server & invoke the completions API to obtain completions.
 
     Args:
@@ -939,7 +914,7 @@ async def completions_with_server_args(
 
     Returns:
       OpenAI Completion instance
-    """
+    '''
 
     if isinstance(max_tokens, int):
         max_tokens = [max_tokens] * len(prompts)
@@ -951,16 +926,13 @@ async def completions_with_server_args(
                             server_cli_args,
                             max_wait_seconds=max_wait_seconds) as server:
         client = server.get_async_client()
-        outputs = [
-            client.completions.create(
-                model=model_name,
-                prompt=[p],
-                temperature=0,
-                stream=False,
-                max_tokens=max_tok,
-                logprobs=num_logprobs,
-            ) for p, max_tok in zip(prompts, max_tokens)
-        ]
+        outputs = [ client.completions.create(model=model_name,
+                                              prompt=[p],
+                                              temperature=0,
+                                              stream=False,
+                                              max_tokens=max_tok,
+                                              logprobs=num_logprobs) \
+                    for p, max_tok in zip(prompts, max_tokens) ]
         outputs = await asyncio.gather(*outputs)
 
     assert outputs is not None, "Completion API call failed."
@@ -969,23 +941,21 @@ async def completions_with_server_args(
 
 
 def get_client_text_generations(completions: list[Completion]) -> list[str]:
-    """Extract generated tokens from the output of a
+    '''Extract generated tokens from the output of a
     request made to an Open-AI-protocol completions endpoint.
-    """
+    '''
     assert all([len(x.choices) == 1 for x in completions])
     return [x.choices[0].text for x in completions]
 
 
 def get_client_text_logprob_generations(
-    completions: list[Completion], ) -> list[TextTextLogprobs]:
-    """Operates on the output of a request made to an Open-AI-protocol
+        completions: list[Completion]) -> list[TextTextLogprobs]:
+    '''Operates on the output of a request made to an Open-AI-protocol
     completions endpoint; obtains top-rank logprobs for each token in
     each {class}`SequenceGroup`
-    """
+    '''
     text_generations = get_client_text_generations(completions)
-    text = "".join(text_generations)
-    return [(
-        text_generations,
-        text,
-        (None if x.logprobs is None else x.logprobs.top_logprobs),
-    ) for completion in completions for x in completion.choices]
+    text = ''.join(text_generations)
+    return [(text_generations, text,
+             (None if x.logprobs is None else x.logprobs.top_logprobs))
+            for completion in completions for x in completion.choices]

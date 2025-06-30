@@ -34,6 +34,7 @@ class Processor:
         tokenizer: TokenizerGroup,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
+
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -50,8 +51,8 @@ class Processor:
         self.mm_input_cache_client = MirroredProcessingCache(self.model_config)
 
         # Multi-modal hasher (for images)
-        self.use_hash = (self.mm_input_cache_client.use_cache
-                         or self.cache_config.enable_prefix_caching)
+        self.use_hash = self.mm_input_cache_client.use_cache or \
+            self.cache_config.enable_prefix_caching
 
     def _validate_logprobs(
         self,
@@ -136,8 +137,8 @@ class Processor:
 
     def _validate_lora(self, lora_request: Optional[LoRARequest]) -> None:
         if lora_request is not None and not self.lora_config:
-            raise ValueError(
-                f"Got lora_request {lora_request} but LoRA is not enabled!")
+            raise ValueError(f"Got lora_request {lora_request} but LoRA is "
+                             "not enabled!")
 
     def _validate_structured_output(self, params: SamplingParams) -> None:
         if not params.guided_decoding or not self.decoding_config:
@@ -150,9 +151,9 @@ class Processor:
             # to a specific backend based on `auto` behavior in a previous
             # request. We remember that it was set as a result of `auto`
             # using the `_auto` option set on the backend in the params.
-            if params.guided_decoding.backend != engine_level_backend and not (
-                    engine_level_backend == "auto"
-                    and params.guided_decoding.backend_was_auto):
+            if (params.guided_decoding.backend != engine_level_backend
+                    and not (engine_level_backend == "auto"
+                             and params.guided_decoding.backend_was_auto)):
                 raise ValueError(
                     "Request-level structured output backend selection is no "
                     "longer supported. The request specified "
@@ -202,6 +203,7 @@ class Processor:
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         priority: int = 0,
     ) -> tuple[Optional[str], EngineCoreRequest]:
+
         # TODO(woosuk): Support pooling models.
         # TODO(woosuk): Support encoder-decoder models.
         self._validate_lora(lora_request)
@@ -229,7 +231,6 @@ class Processor:
             return_mm_hashes=self.use_hash,
         )
         from vllm.platforms import current_platform
-
         current_platform.validate_request(
             prompt=prompt,
             params=params,
@@ -250,8 +251,9 @@ class Processor:
         sampling_params = params.clone()
         # If unset max tokens, then generate up to the max_model_len.
         if sampling_params.max_tokens is None:
-            sampling_params.max_tokens = self.model_config.max_model_len - len(
-                decoder_inputs["prompt_token_ids"])
+            sampling_params.max_tokens = (
+                self.model_config.max_model_len -
+                len(decoder_inputs["prompt_token_ids"]))
         sampling_params.update_from_generation_config(
             self.generation_config_fields, eos_token_id)
         sampling_params.update_from_tokenizer(
@@ -318,11 +320,9 @@ class Processor:
             cache_salt=decoder_inputs.get("cache_salt"),
         )
 
-    def _validate_model_inputs(
-        self,
-        inputs: ProcessorInputs,
-        lora_request: Optional[LoRARequest] = None,
-    ):
+    def _validate_model_inputs(self,
+                               inputs: ProcessorInputs,
+                               lora_request: Optional[LoRARequest] = None):
         encoder_inputs, decoder_inputs = split_enc_dec_inputs(inputs)
 
         if encoder_inputs is not None:

@@ -25,7 +25,7 @@ from vllm.platforms import current_platform
 # It does not support mix precision MM and mix quantization scheme.
 ROCM_AITER_SUPPORTED_INT8_MODEL = [
     "neuralmagic/Llama-3.2-1B-quantized.w8a8",
-    "nm-testing/tinyllama-oneshot-w8a8-channel-dynamic-token-v2",
+    "nm-testing/tinyllama-oneshot-w8a8-channel-dynamic-token-v2"
 ]
 
 # TritonScaledMMLinearKernel only supports symmetric quantization.
@@ -43,7 +43,7 @@ def use_v0_only(monkeypatch):
     """
     This module relies on V0 internals, so set VLLM_USE_V1=0.
     """
-    monkeypatch.setenv("VLLM_USE_V1", "0")
+    monkeypatch.setenv('VLLM_USE_V1', '0')
 
 
 @pytest.mark.parametrize(
@@ -75,8 +75,8 @@ def use_v0_only(monkeypatch):
 def test_compressed_tensors_w8a8_static_setup(vllm_runner, model_args):
     model_path, strategy, quant_type, shape_0, is_symmetric = model_args
 
-    if (current_platform.is_rocm()
-            and model_path not in ROCM_TRITON_SCALED_MM_SUPPORTED_INT8_MODEL):
+    if current_platform.is_rocm(
+    ) and model_path not in ROCM_TRITON_SCALED_MM_SUPPORTED_INT8_MODEL:
         pytest.skip(f"Skip model {model_path} as it is not support on ROCm.")
 
     with vllm_runner(model_path, enforce_eager=True) as llm:
@@ -157,8 +157,9 @@ def test_compressed_tensors_w8a8_logprobs(
     use_aiter,
     monkeypatch,
 ):
-    if (current_platform.is_rocm()
-            and model_path not in ROCM_TRITON_SCALED_MM_SUPPORTED_INT8_MODEL):
+
+    if current_platform.is_rocm(
+    ) and model_path not in ROCM_TRITON_SCALED_MM_SUPPORTED_INT8_MODEL:
         pytest.skip(f"Skip model {model_path} as it is not support on ROCm.")
 
     if use_aiter:
@@ -227,8 +228,8 @@ def test_compressed_tensors_w8a8_dynamic_per_token(
 ):
     model_path, strategy = model_args
 
-    if (current_platform.is_rocm()
-            and model_path not in ROCM_TRITON_SCALED_MM_SUPPORTED_INT8_MODEL):
+    if current_platform.is_rocm(
+    ) and model_path not in ROCM_TRITON_SCALED_MM_SUPPORTED_INT8_MODEL:
         pytest.skip(f"Skip model {model_path} as it is not support on ROCm.")
 
     if use_aiter:
@@ -260,61 +261,21 @@ def test_compressed_tensors_w8a8_dynamic_per_token(
 
 @pytest.mark.parametrize(
     "wNa16_args",
-    [
-        (
-            "nm-testing/tinyllama-oneshot-w4a16-channel-v2",
-            "channel",
-            None,
-            8,
-            True,
-            False,
-        ),
-        (
-            "nm-testing/tinyllama-oneshot-w4a16-group128-v2",
-            "group",
-            128,
-            8,
-            True,
-            False,
-        ),
-        (
-            "nm-testing/tinyllama-oneshot-w8a16-per-channel",
-            "channel",
-            None,
-            4,
-            True,
-            False,
-        ),
-        (
-            "nm-testing/TinyLlama-1.1B-Chat-v1.0-awq-group128-asym256",
-            "group",
-            128,
-            8,
-            False,
-            False,
-        ),
-        (
-            "nm-testing/TinyLlama-1.1B-Chat-v1.0-W4A16-G128-Asym-Updated-Channel",
-            "channel",
-            None,
-            8,
-            False,
-            False,
-        ),
-        (
-            "nm-testing/TinyLlama-1.1B-Chat-v1.0-W4A16-G128-Asym-Updated-ActOrder",
-            "group",
-            128,
-            8,
-            False,
-            True,
-        ),
-    ],
+    [("nm-testing/tinyllama-oneshot-w4a16-channel-v2", "channel", None, 8,
+      True, False),
+     ("nm-testing/tinyllama-oneshot-w4a16-group128-v2", "group", 128, 8, True,
+      False),
+     ("nm-testing/tinyllama-oneshot-w8a16-per-channel", "channel", None, 4,
+      True, False),
+     ("nm-testing/TinyLlama-1.1B-Chat-v1.0-awq-group128-asym256", "group", 128,
+      8, False, False),
+     ("nm-testing/TinyLlama-1.1B-Chat-v1.0-W4A16-G128-Asym-Updated-Channel",
+      "channel", None, 8, False, False),
+     ("nm-testing/TinyLlama-1.1B-Chat-v1.0-W4A16-G128-Asym-Updated-ActOrder",
+      "group", 128, 8, False, True)],
 )
-@pytest.mark.skipif(
-    not current_platform.is_cuda(),
-    reason="The tests are skipped on non-CUDA platform.",
-)
+@pytest.mark.skipif(not current_platform.is_cuda(),
+                    reason="The tests are skipped on non-CUDA platform.")
 def test_compressed_tensors_wNa16(vllm_runner, wNa16_args):
     model, strategy, group, pack_factor, symmetric, has_g_idx = wNa16_args
     with vllm_runner(model) as llm:
@@ -341,10 +302,8 @@ def test_compressed_tensors_wNa16(vllm_runner, wNa16_args):
         assert output
 
 
-@pytest.mark.skipif(
-    not current_platform.is_cuda(),
-    reason="This test is skipped on non-CUDA platform.",
-)
+@pytest.mark.skipif(not current_platform.is_cuda(),
+                    reason="This test is skipped on non-CUDA platform.")
 def test_compressed_tensors_w4a16_marlin24(vllm_runner):
     model_path = "nm-testing/llama7b-one-shot-2_4-w4a16-marlin24-t"
     with vllm_runner(model_path) as llm:
@@ -395,10 +354,8 @@ def test_compressed_tensors_fp8(vllm_runner):
         assert output
 
 
-@pytest.mark.skipif(
-    not current_platform.is_cuda(),
-    reason="This test is skipped on non-CUDA platform.",
-)
+@pytest.mark.skipif(not current_platform.is_cuda(),
+                    reason="This test is skipped on non-CUDA platform.")
 def test_compressed_tensors_kv_cache(vllm_runner):
     model_path = "nm-testing/TinyLlama-1.1B-compressed-tensors-kv-cache-scheme"
     with vllm_runner(model_path, kv_cache_dtype="fp8") as llm:

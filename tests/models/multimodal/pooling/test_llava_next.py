@@ -23,10 +23,9 @@ from ...utils import check_embeddings_close
 #    built with LAPACK support.
 pytestmark = pytest.mark.skipif(
     not current_platform.is_cuda(),
-    reason="Llava Next model uses op that is only supported in CUDA",
-)
+    reason="Llava Next model uses op that is only supported in CUDA")
 
-llama3_template = "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n \n"  # noqa: E501
+llama3_template = '<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n \n'  # noqa: E501
 
 HF_TEXT_PROMPTS = [
     # T -> X
@@ -73,8 +72,8 @@ def _run_test(
     with hf_runner(model, dtype=dtype,
                    auto_cls=AutoModelForImageTextToText) as hf_model:
         # Patch the issue where generation_config.json is missing
-        hf_model.processor.patch_size = (
-            hf_model.model.config.vision_config.patch_size)
+        hf_model.processor.patch_size = \
+            hf_model.model.config.vision_config.patch_size
 
         # Patch the issue where image_token_id
         # exceeds the maximum allowed vocab size

@@ -315,7 +315,7 @@ class H2OVLProcessor(BaseInternVLProcessor):
         image_height: int,
         use_msac: Optional[bool] = None,
     ) -> int:
-        use_msac = self.use_msac if use_msac is None else use_msac
+        use_msac = (self.use_msac if use_msac is None else use_msac)
 
         use_thumbnail = self.use_thumbnail
 
@@ -514,8 +514,7 @@ class H2OVLMultiModalProcessor(InternVLMultiModalProcessor[H2OVLProcessingInfo]
 @MULTIMODAL_REGISTRY.register_processor(
     H2OVLMultiModalProcessor,
     info=H2OVLProcessingInfo,
-    dummy_inputs=InternVLDummyInputsBuilder,
-)
+    dummy_inputs=InternVLDummyInputsBuilder)
 class H2OVLChatModel(InternVLChatModel):
 
     def _init_vision_model(

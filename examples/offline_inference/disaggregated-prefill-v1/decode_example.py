@@ -25,8 +25,7 @@ llm = LLM(
     kv_transfer_config=KVTransferConfig.from_cli(
         '{"kv_connector":"SharedStorageConnector","kv_role":"kv_both",'
         '"kv_connector_extra_config": {"shared_storage_path": "local_storage"}}'
-    ),
-)  # , max_model_len=2048, max_num_batched_tokens=2048)
+    ))  #, max_model_len=2048, max_num_batched_tokens=2048)
 
 # 1ST generation (prefill instance)
 outputs = llm.generate(prompts, sampling_params)

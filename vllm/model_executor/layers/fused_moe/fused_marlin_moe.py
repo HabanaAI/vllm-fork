@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fused MoE utilities for GPTQ."""
-
 import functools
 from typing import Optional
 
@@ -15,28 +14,26 @@ from vllm.scalar_type import ScalarType, scalar_types
 from vllm.utils import direct_register_custom_op
 
 
-def fused_marlin_moe(
-    hidden_states: torch.Tensor,
-    w1: torch.Tensor,
-    w2: torch.Tensor,
-    w1_scale: torch.Tensor,
-    w2_scale: torch.Tensor,
-    gating_output: torch.Tensor,
-    topk_weights: torch.Tensor,
-    topk_ids: torch.Tensor,
-    quant_type_id: int,
-    global_num_experts: int = -1,
-    expert_map: Optional[torch.Tensor] = None,
-    g_idx1: Optional[torch.Tensor] = None,
-    g_idx2: Optional[torch.Tensor] = None,
-    sort_indices1: Optional[torch.Tensor] = None,
-    sort_indices2: Optional[torch.Tensor] = None,
-    w1_zeros: Optional[torch.Tensor] = None,
-    w2_zeros: Optional[torch.Tensor] = None,
-    workspace: Optional[torch.Tensor] = None,
-    is_k_full: bool = True,
-    inplace: bool = False,
-) -> torch.Tensor:
+def fused_marlin_moe(hidden_states: torch.Tensor,
+                     w1: torch.Tensor,
+                     w2: torch.Tensor,
+                     w1_scale: torch.Tensor,
+                     w2_scale: torch.Tensor,
+                     gating_output: torch.Tensor,
+                     topk_weights: torch.Tensor,
+                     topk_ids: torch.Tensor,
+                     quant_type_id: int,
+                     global_num_experts: int = -1,
+                     expert_map: Optional[torch.Tensor] = None,
+                     g_idx1: Optional[torch.Tensor] = None,
+                     g_idx2: Optional[torch.Tensor] = None,
+                     sort_indices1: Optional[torch.Tensor] = None,
+                     sort_indices2: Optional[torch.Tensor] = None,
+                     w1_zeros: Optional[torch.Tensor] = None,
+                     w2_zeros: Optional[torch.Tensor] = None,
+                     workspace: Optional[torch.Tensor] = None,
+                     is_k_full: bool = True,
+                     inplace: bool = False) -> torch.Tensor:
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of
     weights, w1 and w2, and top-k gating mechanism.
@@ -66,22 +63,20 @@ def fused_marlin_moe(
     """
     quant_type = ScalarType.from_id(quant_type_id)
     assert quant_type in [
-        scalar_types.uint4,
-        scalar_types.uint8b128,
-        scalar_types.uint4b8,
-        scalar_types.float8_e4m3fn,
+        scalar_types.uint4, scalar_types.uint8b128, scalar_types.uint4b8,
+        scalar_types.float8_e4m3fn
     ]
 
     int4_scalar_types = [scalar_types.uint4, scalar_types.uint4b8]
     num_bits = 4 if quant_type in int4_scalar_types else 8
 
     # Check constraints.
-    assert hidden_states.shape[0] == gating_output.shape[0], (
-        "Number of tokens mismatch")
+    assert hidden_states.shape[0] == gating_output.shape[
+        0], "Number of tokens mismatch"
     assert hidden_states.shape[
         1] == w1.shape[1] * 16, "Hidden size mismatch w1"
-    assert hidden_states.shape[1] == w2.shape[2] // (num_bits // 2), (
-        "Hidden size mismatch w2")
+    assert hidden_states.shape[1] == w2.shape[2] // (
+        num_bits // 2), "Hidden size mismatch w2"
     assert hidden_states.is_contiguous(), "Hidden_states must be contiguous"
     assert w1.is_contiguous(), "Expert weights1 must be contiguous"
     assert w2.is_contiguous(), "Expert weights2 must be contiguous"
@@ -107,8 +102,9 @@ def fused_marlin_moe(
 
     if global_num_experts == -1:
         global_num_experts = E
-    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-        topk_ids, block_size_m, global_num_experts, expert_map)
+    sorted_token_ids, expert_ids, num_tokens_post_padded = \
+        moe_align_block_size(topk_ids, block_size_m, global_num_experts,
+                             expert_map)
 
     if workspace is None:
         workspace = marlin_make_workspace_new(hidden_states.device, 4)
@@ -129,9 +125,8 @@ def fused_marlin_moe(
     intermediate_cache3 = intermediate_cache3.view(-1, K)
 
     maybe_warn_marlin_atomic_add(hidden_states.device, hidden_states.dtype)
-    use_atomic_add = (hidden_states.dtype == torch.half
-                      or torch.cuda.get_device_capability(
-                          hidden_states.device)[0] >= 9)
+    use_atomic_add = hidden_states.dtype == torch.half or \
+        torch.cuda.get_device_capability(hidden_states.device)[0] >= 9
 
     intermediate_cache1 = ops.moe_wna16_marlin_gemm(
         hidden_states,
@@ -157,8 +152,7 @@ def fused_marlin_moe(
         is_k_full=is_k_full,
         use_atomic_add=use_atomic_add,
         use_fp32_reduce=True,
-        is_zp_float=False,
-    )
+        is_zp_float=False)
 
     torch.ops._C.silu_and_mul(intermediate_cache2,
                               intermediate_cache1.view(-1, 2 * N))
@@ -190,8 +184,7 @@ def fused_marlin_moe(
         is_k_full=is_k_full,
         use_atomic_add=use_atomic_add,
         use_fp32_reduce=True,
-        is_zp_float=False,
-    ).view(-1, topk, K)
+        is_zp_float=False).view(-1, topk, K)
 
     output = hidden_states if inplace else torch.empty_like(hidden_states)
     return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
@@ -199,28 +192,26 @@ def fused_marlin_moe(
                      out=output)
 
 
-def fused_marlin_moe_fake(
-    hidden_states: torch.Tensor,
-    w1: torch.Tensor,
-    w2: torch.Tensor,
-    w1_scale: torch.Tensor,
-    w2_scale: torch.Tensor,
-    gating_output: torch.Tensor,
-    topk_weights: torch.Tensor,
-    topk_ids: torch.Tensor,
-    quant_type_id: int,
-    global_num_experts: int = -1,
-    expert_map: Optional[torch.Tensor] = None,
-    g_idx1: Optional[torch.Tensor] = None,
-    g_idx2: Optional[torch.Tensor] = None,
-    sort_indices1: Optional[torch.Tensor] = None,
-    sort_indices2: Optional[torch.Tensor] = None,
-    w1_zeros: Optional[torch.Tensor] = None,
-    w2_zeros: Optional[torch.Tensor] = None,
-    workspace: Optional[torch.Tensor] = None,
-    is_k_full: bool = True,
-    inplace: bool = False,
-) -> torch.Tensor:
+def fused_marlin_moe_fake(hidden_states: torch.Tensor,
+                          w1: torch.Tensor,
+                          w2: torch.Tensor,
+                          w1_scale: torch.Tensor,
+                          w2_scale: torch.Tensor,
+                          gating_output: torch.Tensor,
+                          topk_weights: torch.Tensor,
+                          topk_ids: torch.Tensor,
+                          quant_type_id: int,
+                          global_num_experts: int = -1,
+                          expert_map: Optional[torch.Tensor] = None,
+                          g_idx1: Optional[torch.Tensor] = None,
+                          g_idx2: Optional[torch.Tensor] = None,
+                          sort_indices1: Optional[torch.Tensor] = None,
+                          sort_indices2: Optional[torch.Tensor] = None,
+                          w1_zeros: Optional[torch.Tensor] = None,
+                          w2_zeros: Optional[torch.Tensor] = None,
+                          workspace: Optional[torch.Tensor] = None,
+                          is_k_full: bool = True,
+                          inplace: bool = False) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
 

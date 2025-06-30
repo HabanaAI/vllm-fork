@@ -4,7 +4,6 @@ Example online usage of Score API.
 
 Run `vllm serve <model> --task score` to start up the server in vLLM.
 """
-
 import argparse
 import pprint
 
@@ -40,8 +39,7 @@ def main(args):
 
     text_1 = "What is the capital of France?"
     text_2 = [
-        "The capital of Brazil is Brasilia.",
-        "The capital of France is Paris.",
+        "The capital of Brazil is Brasilia.", "The capital of France is Paris."
     ]
     prompt = {"model": model_name, "text_1": text_1, "text_2": text_2}
     score_response = post_http_request(prompt=prompt, api_url=api_url)
@@ -51,12 +49,10 @@ def main(args):
     pprint.pprint(score_response.json())
 
     text_1 = [
-        "What is the capital of Brazil?",
-        "What is the capital of France?",
+        "What is the capital of Brazil?", "What is the capital of France?"
     ]
     text_2 = [
-        "The capital of Brazil is Brasilia.",
-        "The capital of France is Paris.",
+        "The capital of Brazil is Brasilia.", "The capital of France is Paris."
     ]
     prompt = {"model": model_name, "text_1": text_1, "text_2": text_2}
     score_response = post_http_request(prompt=prompt, api_url=api_url)

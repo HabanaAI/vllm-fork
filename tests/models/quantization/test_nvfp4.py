@@ -3,7 +3,6 @@
 """Tests Model Optimizer nvfp4 models against ground truth generation
 Note: these tests will only pass on B200
 """
-
 import os
 from typing import List
 
@@ -21,14 +20,14 @@ MODELS = ["nvidia/Llama-3.3-70B-Instruct-FP4"]
 
 EXPECTED_STRS_MAP = {
     "nvidia/Llama-3.3-70B-Instruct-FP4": [
-        "vLLM (Vectorized Large Language Model) is indeed a high-throughput and memory-efficient inference",
-        "Here are the major milestones in the development of artificial intelligence (AI) from 1950 to ",
-        "Artificial intelligence (AI) and human intelligence (HI) are two distinct forms of intelligence that process",
-        "A neural network is a type of machine learning model inspired by the structure and function of the human brain",
-        "In the heart of a cutting-edge robotics lab, a team of engineers had been working tirelessly to push",
-        "The COVID-19 pandemic has had a profound impact on global economic structures and future business models, leading",
-        "The Mona Lisa, painted by Leonardo da Vinci in the early 16th century, is one of",
-        "Here are the translations:\n\n* Japanese: (Sasuga no tori ga miwa o ts",
+        'vLLM (Vectorized Large Language Model) is indeed a high-throughput and memory-efficient inference',
+        'Here are the major milestones in the development of artificial intelligence (AI) from 1950 to ',
+        'Artificial intelligence (AI) and human intelligence (HI) are two distinct forms of intelligence that process',
+        'A neural network is a type of machine learning model inspired by the structure and function of the human brain',
+        'In the heart of a cutting-edge robotics lab, a team of engineers had been working tirelessly to push',
+        'The COVID-19 pandemic has had a profound impact on global economic structures and future business models, leading',
+        'The Mona Lisa, painted by Leonardo da Vinci in the early 16th century, is one of',
+        'Here are the translations:\n\n* Japanese: (Sasuga no tori ga miwa o ts'
     ]
 }
 
@@ -42,10 +41,8 @@ EXPECTED_STRS_MAP = {
     reason=
     "Prevent unstable test based on golden strings from breaking the build "
     " and test input model being too large and hanging the system.")
-@pytest.mark.skipif(
-    not is_quant_method_supported("nvfp4"),
-    reason="nvfp4 is not supported on this GPU type.",
-)
+@pytest.mark.skipif(not is_quant_method_supported("nvfp4"),
+                    reason="nvfp4 is not supported on this GPU type.")
 @pytest.mark.parametrize("model_name", MODELS)
 def test_models(example_prompts, model_name) -> None:
     model = LLM(
@@ -58,14 +55,13 @@ def test_models(example_prompts, model_name) -> None:
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     formatted_prompts = [
-        tokenizer.apply_chat_template(
-            [{
-                "role": "user",
-                "content": prompt
-            }],
-            tokenize=False,
-            add_generation_prompt=True,
-        ) for prompt in example_prompts
+        tokenizer.apply_chat_template([{
+            "role": "user",
+            "content": prompt
+        }],
+                                      tokenize=False,
+                                      add_generation_prompt=True)
+        for prompt in example_prompts
     ]
     params = SamplingParams(max_tokens=20, temperature=0)
     generations: List[str] = []

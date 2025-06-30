@@ -22,15 +22,8 @@ FP8_DTYPE = current_platform.fp8_dtype()
 
 class TestModel(torch.nn.Module):
 
-    def __init__(
-        self,
-        hidden_size: int,
-        eps: float,
-        static: bool,
-        cutlass_fp8_enabled: bool,
-        *args,
-        **kwargs,
-    ):
+    def __init__(self, hidden_size: int, eps: float, static: bool,
+                 cutlass_fp8_enabled: bool, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.cutlass_fp8_enabled = cutlass_fp8_enabled
         self.norm = [RMSNorm(hidden_size, eps) for _ in range(3)]
@@ -45,8 +38,7 @@ class TestModel(torch.nn.Module):
         ]
         self.fp8_linear = Fp8LinearOp(
             cutlass_fp8_supported=cutlass_fp8_enabled,
-            use_per_token_if_dynamic=True,
-        )
+            use_per_token_if_dynamic=True)
 
     def forward(self, x):
         resid = torch.sqrt(x)
@@ -74,10 +66,8 @@ class TestModel(torch.nn.Module):
 @pytest.mark.parametrize("static", [True, False])
 @pytest.mark.parametrize("cutlass_fp8_enabled",
                          [True, False] if CUTLASS_FP8_SUPPORTED else [False])
-@pytest.mark.skipif(
-    envs.VLLM_TARGET_DEVICE not in ["cuda", "rocm"],
-    reason="Only test on CUDA and ROCm",
-)
+@pytest.mark.skipif(envs.VLLM_TARGET_DEVICE not in ["cuda", "rocm"],
+                    reason="Only test on CUDA and ROCm")
 def test_fusion_rmsnorm_quant(dtype, hidden_size, num_tokens, eps, static,
                               cutlass_fp8_enabled):
     torch.set_default_device("cuda")
@@ -87,8 +77,9 @@ def test_fusion_rmsnorm_quant(dtype, hidden_size, num_tokens, eps, static,
 
     vllm_config = VllmConfig(compilation_config=CompilationConfig(
         level=CompilationLevel.PIECEWISE, custom_ops=["+rms_norm"]))
-    vllm_config.compilation_config.pass_config = CompilationConfig.PassConfig(
-        enable_fusion=True, enable_noop=True)
+    vllm_config.compilation_config.pass_config = \
+            CompilationConfig.PassConfig(enable_fusion=True,
+                                              enable_noop=True)
     with vllm.config.set_current_vllm_config(vllm_config):
         # Reshape pass is needed for the fusion pass to work
         noop_pass = NoOpEliminationPass(vllm_config)

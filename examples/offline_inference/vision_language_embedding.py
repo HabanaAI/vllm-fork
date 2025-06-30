@@ -6,7 +6,6 @@ the correct prompt format on vision language models for multimodal embedding.
 For most models, the prompt format should follow corresponding examples
 on HuggingFace model repository.
 """
-
 from argparse import Namespace
 from dataclasses import asdict
 from typing import Literal, NamedTuple, Optional, TypedDict, Union, get_args
@@ -45,7 +44,7 @@ class ModelRequestData(NamedTuple):
 
 
 def run_e5_v(query: Query) -> ModelRequestData:
-    llama3_template = "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n \n"  # noqa: E501
+    llama3_template = '<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n \n'  # noqa: E501
 
     if query["modality"] == "text":
         text = query["text"]
@@ -57,7 +56,7 @@ def run_e5_v(query: Query) -> ModelRequestData:
             "<image>\nSummary above image in one word: ")
         image = query["image"]
     else:
-        modality = query["modality"]
+        modality = query['modality']
         raise ValueError(f"Unsupported query modality: '{modality}'")
 
     engine_args = EngineArgs(
@@ -77,9 +76,7 @@ def run_e5_v(query: Query) -> ModelRequestData:
 def run_vlm2vec(query: Query) -> ModelRequestData:
     if query["modality"] == "text":
         text = query["text"]
-        prompt = (
-            f"Find me an everyday image that matches the given caption: {text}"  # noqa: E501
-        )
+        prompt = f"Find me an everyday image that matches the given caption: {text}"  # noqa: E501
         image = None
     elif query["modality"] == "image":
         prompt = "<|image_1|> Find a day-to-day image that looks similar to the provided image."  # noqa: E501
@@ -89,7 +86,7 @@ def run_vlm2vec(query: Query) -> ModelRequestData:
         prompt = f"<|image_1|> Represent the given image with the following question: {text}"  # noqa: E501
         image = query["image"]
     else:
-        modality = query["modality"]
+        modality = query['modality']
         raise ValueError(f"Unsupported query modality: '{modality}'")
 
     engine_args = EngineArgs(
@@ -167,29 +164,23 @@ model_example_map = {
 
 def parse_args():
     parser = FlexibleArgumentParser(
-        description="Demo on using vLLM for offline inference with "
-        "vision language models for multimodal embedding")
-    parser.add_argument(
-        "--model-name",
-        "-m",
-        type=str,
-        default="vlm2vec",
-        choices=model_example_map.keys(),
-        help="The name of the embedding model.",
-    )
-    parser.add_argument(
-        "--modality",
-        type=str,
-        default="image",
-        choices=get_args(QueryModality),
-        help="Modality of the input.",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Set the seed when initializing `vllm.LLM`.",
-    )
+        description='Demo on using vLLM for offline inference with '
+        'vision language models for multimodal embedding')
+    parser.add_argument('--model-name',
+                        '-m',
+                        type=str,
+                        default="vlm2vec",
+                        choices=model_example_map.keys(),
+                        help='The name of the embedding model.')
+    parser.add_argument('--modality',
+                        type=str,
+                        default="image",
+                        choices=get_args(QueryModality),
+                        help='Modality of the input.')
+    parser.add_argument("--seed",
+                        type=int,
+                        default=None,
+                        help="Set the seed when initializing `vllm.LLM`.")
     return parser.parse_args()
 
 

@@ -5,7 +5,6 @@ The MooncakeStoreConnector transfers KV caches between prefill vLLM workers
 (KV cache producer) and decode vLLM workers (KV cache consumer) using a
 database-style KVStore.
 """
-
 import hashlib
 from typing import TYPE_CHECKING, List, Tuple, Union
 
@@ -48,8 +47,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         if self.config.kv_connector == "MooncakeStoreConnector":
             # Check if MOONCAKE_CONFIG_PATH is set
             import os
-
-            use_mooncake_store = os.getenv("MOONCAKE_CONFIG_PATH") is not None
+            use_mooncake_store = os.getenv('MOONCAKE_CONFIG_PATH') is not None
 
             if not use_mooncake_store:
                 raise ValueError(
@@ -58,11 +56,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             else:
                 from vllm.distributed.kv_transfer.kv_lookup_buffer.mooncake_store import (  # noqa: E501
                     MooncakeStore)
-
                 logger.info(
                     "Initializing KVStoreConnector under kv_transfer_config %s",
-                    self.config,
-                )
+                    self.config)
                 self.kv_store = MooncakeStore(config)
         else:
             logger.error("Can not find %s", self.config.kv_connector)
@@ -77,7 +73,7 @@ class MooncakeStoreConnector(KVConnectorBase):
 
     def close(self) -> None:
         """Close the buffer and release resources.
-        This method is responsible for cleaning up resources related to the
+        This method is responsible for cleaning up resources related to the 
         connector when it is no longer needed.
         Raises:
             NotImplementedError: This method must be implemented in subclasses.
@@ -129,15 +125,11 @@ class MooncakeStoreConnector(KVConnectorBase):
         logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
 
     def recv_kv_caches_and_hidden_states(
-        self,
-        model_executable: torch.nn.Module,
+        self, model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor],
-    ) -> Tuple[
-            Union[torch.Tensor, IntermediateTensors],
-            bool,
-            "ModelInputForGPUWithSamplingMetadata",
-    ]:
+        kv_caches: List[torch.Tensor]
+    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+               "ModelInputForGPUWithSamplingMetadata"]:
         bypass_model_exec = True
         input_tokens_tensor = model_input.input_tokens
         seq_lens = model_input.attn_metadata.seq_lens
@@ -189,38 +181,26 @@ class MooncakeStoreConnector(KVConnectorBase):
                 kv_cache = kv_caches[layer_id - start_layer]
 
                 # get remote kvcache
-                remote_k, remote_v = (
-                    remote_kv[0][layer_id],
-                    remote_kv[1][layer_id],
-                )
+                remote_k, remote_v = remote_kv[0][layer_id], remote_kv[1][
+                    layer_id]
 
-                self.kv_helper.put_kv_to_cache(
-                    model_executable,
-                    remote_k,
-                    remote_v,
-                    layer,
-                    kv_cache,
-                    slot_mapping,
-                    start_pos,
-                    end_pos,
-                )
+                self.kv_helper.put_kv_to_cache(model_executable, remote_k,
+                                               remote_v, layer, kv_cache,
+                                               slot_mapping, start_pos,
+                                               end_pos)
 
             hidden_or_intermediate_states_for_one_req.append(hidden)
 
         if not bypass_model_exec:
             logger.warning(
                 "[rank%d]: Failed to receive all KVs and hidden "
-                "states, redo model forwarding.",
-                torch.distributed.get_rank(),
-            )
+                "states, redo model forwarding.", torch.distributed.get_rank())
             hidden_or_intermediate_states = None
 
         else:
             logger.debug(
                 "[rank%d]: Successfully received all KVs and hidden "
-                "states, skip model forwarding.",
-                torch.distributed.get_rank(),
-            )
+                "states, skip model forwarding.", torch.distributed.get_rank())
             hidden_or_intermediate_states = torch.cat(
                 hidden_or_intermediate_states_for_one_req, dim=0)
 
@@ -254,8 +234,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             logger.debug("send token len: %s, token: %s", slen,
                          current_tokens_cpu)
 
-            padded_total_size = ((slen + self.block_size - 1) //
-                                 self.block_size * self.block_size)
+            padded_total_size = (slen + self.block_size -
+                                 1) // self.block_size * self.block_size
             current_slot_mapping = model_input.attn_metadata.slot_mapping[
                 idx][:padded_total_size]
             htorch.core.mark_step()
@@ -288,24 +268,18 @@ class MooncakeStoreConnector(KVConnectorBase):
             hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
             self.kv_store.put(
                 hidden_key,
-                hidden_or_intermediate_states[idx].unsqueeze(0).cpu(),
-            )
+                hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
             # ==== graph should end here ======
             htorch.core.mark_step()
 
         logger.debug("[rank%d]: KV send DONE.", torch.distributed.get_rank())
 
     def recv_kv_caches_and_hidden_states_hpu(
-        self,
-        model_executable: torch.nn.Module,
+        self, model_executable: torch.nn.Module,
         model_input: "ModelInputForHPUWithSamplingMetadata",
-        attn_metadata: AttentionMetadata,
-        kv_caches: List[torch.Tensor],
-    ) -> Tuple[
-            Union[torch.Tensor, IntermediateTensors],
-            bool,
-            "ModelInputForHPUWithSamplingMetadata",
-    ]:
+        attn_metadata: AttentionMetadata, kv_caches: List[torch.Tensor]
+    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+               "ModelInputForHPUWithSamplingMetadata"]:
         # When bypass_model_exec is set to False, it means that at least for one
         # request its corresponding KV cache or hidden state is missing.
         # In this case we need to do prefilling to recompute missing KV cache
@@ -322,8 +296,8 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         for idx, slen in enumerate(seq_lens):
             current_tokens = input_tokens_tensor_cpu[idx][:slen]
-            padded_total_size = ((slen + self.block_size - 1) //
-                                 self.block_size * self.block_size)
+            padded_total_size = (slen + self.block_size -
+                                 1) // self.block_size * self.block_size
             current_slot_mapping = slot_mapping[idx][:padded_total_size]
             num_blocks = (slen + 127) // 128
             end_block_idx = start_block_idx + num_blocks
@@ -331,10 +305,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             # we think this is a padding sequence, so we skip it.
             # but we still need write kv cache.
             if slen == 1:
-                for i in range(
-                        model_executable.model.start_layer,
-                        model_executable.model.end_layer,
-                ):
+                for i in range(model_executable.model.start_layer,
+                               model_executable.model.end_layer):
                     cur_layer_idx = i - model_executable.model.start_layer
                     kv_cache = kv_caches[cur_layer_idx]
                     key_cache, value_cache = kv_cache[0], kv_cache[1]
@@ -342,21 +314,18 @@ class MooncakeStoreConnector(KVConnectorBase):
                         padding_k_tensor = torch.zeros(
                             (self.block_size, head_size),
                             dtype=self.dtype,
-                            device="hpu",
-                        )
+                            device="hpu")
                         self.cache_k(padding_k_tensor, key_cache,
                                      current_slot_mapping)
                     else:
                         padding_k_tensor = torch.zeros(
                             (self.block_size, num_heads, head_size),
                             dtype=self.dtype,
-                            device="hpu",
-                        )
+                            device="hpu")
                         padding_v_tensor = torch.zeros(
                             (self.block_size, num_heads, head_size),
                             dtype=self.dtype,
-                            device="hpu",
-                        )
+                            device="hpu")
                         self.cache_k(padding_k_tensor, key_cache,
                                      current_slot_mapping)
                         self.cache_v(padding_v_tensor, value_cache,
@@ -377,10 +346,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             hidden = self.kv_store.get(hidden_key)
 
             if remote_kv is None or hidden is None:
-                logger.warning(
-                    "Didn't find any match, load_key_prefix: %s",
-                    load_kvcache_key,
-                )
+                logger.warning("Didn't find any match, load_key_prefix: %s",
+                               load_kvcache_key)
                 bypass_model_exec = False
                 continue
 
@@ -388,10 +355,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             torch.hpu.synchronize()
 
             # put received KV caches into paged memory layer by layer
-            for i in range(
-                    model_executable.model.start_layer,
-                    model_executable.model.end_layer,
-            ):
+            for i in range(model_executable.model.start_layer,
+                           model_executable.model.end_layer):
                 cur_layer_idx = i - model_executable.model.start_layer
                 kv_cache = kv_caches[cur_layer_idx]
                 key_cache, value_cache = kv_cache[0], kv_cache[1]
@@ -414,16 +379,12 @@ class MooncakeStoreConnector(KVConnectorBase):
             # prefilling on those tokens that are missing KV caches.
             logger.warning(
                 "[rank%d]: Failed to receive all KVs and hidden "
-                "states, redo model forwarding.",
-                torch.distributed.get_rank(),
-            )
+                "states, redo model forwarding.", torch.distributed.get_rank())
             hidden_or_intermediate_states = None
         else:
             logger.debug(
                 "[rank%d]: Successfully received all KVs and hidden "
-                "states, skip model forwarding.",
-                torch.distributed.get_rank(),
-            )
+                "states, skip model forwarding.", torch.distributed.get_rank())
             hidden_or_intermediate_states = torch.cat(
                 hidden_or_intermediate_states_for_one_req, dim=0).to("hpu")
 

@@ -97,8 +97,7 @@ class AsyncLLM(EngineClient):
         self.tokenizer = init_tokenizer_from_configs(
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
-            lora_config=vllm_config.lora_config,
-        )
+            lora_config=vllm_config.lora_config)
 
         # Processor (converts Inputs --> EngineCoreRequests).
         self.processor = Processor(
@@ -112,9 +111,9 @@ class AsyncLLM(EngineClient):
                                                 log_stats=self.log_stats)
 
         # EngineCore (starts the engine in background process).
-        core_client_class = (AsyncMPClient if
-                             (vllm_config.parallel_config.data_parallel_size
-                              == 1) else DPAsyncMPClient)
+        core_client_class = AsyncMPClient if (
+            vllm_config.parallel_config.data_parallel_size
+            == 1) else DPAsyncMPClient
 
         self.engine_core = core_client_class(
             vllm_config=vllm_config,
@@ -214,24 +213,17 @@ class AsyncLLM(EngineClient):
         if self.errored:
             raise EngineDeadError()
 
-        assert isinstance(params,
-                          SamplingParams), ("Pooling is not supported in V1")
+        assert isinstance(params, SamplingParams), \
+            "Pooling is not supported in V1"
 
         # Create a new output collector for the request.
         queue = RequestOutputCollector(output_kind=params.output_kind)
 
         # Convert Input --> Request.
         prompt_str, request = self.processor.process_inputs(
-            request_id,
-            prompt,
-            params,
-            arrival_time,
-            lora_request,
-            tokenization_kwargs,
-            trace_headers,
-            prompt_adapter_request,
-            priority,
-        )
+            request_id, prompt, params, arrival_time, lora_request,
+            tokenization_kwargs, trace_headers, prompt_adapter_request,
+            priority)
 
         if params.n == 1:
             await self._add_request(request, prompt_str, None, 0, queue)
@@ -248,14 +240,11 @@ class AsyncLLM(EngineClient):
                                     idx, queue)
         return queue
 
-    async def _add_request(
-        self,
-        request: EngineCoreRequest,
-        prompt: Optional[str],
-        parent_req: Optional[ParentRequest],
-        index: int,
-        queue: RequestOutputCollector,
-    ):
+    async def _add_request(self, request: EngineCoreRequest,
+                           prompt: Optional[str],
+                           parent_req: Optional[ParentRequest], index: int,
+                           queue: RequestOutputCollector):
+
         # Add the request to OutputProcessor (this process).
         self.output_processor.add_request(request, prompt, parent_req, index,
                                           queue)
@@ -372,8 +361,8 @@ class AsyncLLM(EngineClient):
                     outputs = await engine_core.get_output_async()
                     num_outputs = len(outputs.outputs)
 
-                    iteration_stats = (IterationStats() if
-                                       (log_stats and num_outputs) else None)
+                    iteration_stats = IterationStats() if (
+                        log_stats and num_outputs) else None
 
                     # Split outputs into chunks of at most
                     # VLLM_V1_OUTPUT_PROC_CHUNK_SIZE, so that we don't block the
@@ -383,8 +372,7 @@ class AsyncLLM(EngineClient):
                     else:
                         slices = np.array_split(
                             outputs.outputs,
-                            cdiv(num_outputs, VLLM_V1_OUTPUT_PROC_CHUNK_SIZE),
-                        )
+                            cdiv(num_outputs, VLLM_V1_OUTPUT_PROC_CHUNK_SIZE))
 
                     for i, outputs_slice in enumerate(slices):
                         # 2) Process EngineCoreOutputs.
@@ -519,13 +507,11 @@ class AsyncLLM(EngineClient):
         """Prevent an adapter from being evicted."""
         return await self.engine_core.pin_lora_async(lora_id)
 
-    async def collective_rpc(
-            self,
-            method: str,
-            timeout: Optional[float] = None,
-            args: tuple = (),
-            kwargs: Optional[dict] = None,
-    ):
+    async def collective_rpc(self,
+                             method: str,
+                             timeout: Optional[float] = None,
+                             args: tuple = (),
+                             kwargs: Optional[dict] = None):
         """
         Perform a collective RPC call to the given path.
         """

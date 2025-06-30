@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Benchmark offline inference throughput."""
-
 import argparse
 import dataclasses
 import json
@@ -40,7 +39,6 @@ def run_vllm(
     disable_detokenize: bool = False,
 ) -> tuple[float, Optional[list[RequestOutput]]]:
     from vllm import LLM, SamplingParams
-
     llm = LLM(**dataclasses.asdict(engine_args))
     assert all(
         llm.llm_engine.model_config.max_model_len >= (
@@ -53,12 +51,11 @@ def run_vllm(
     sampling_params: list[SamplingParams] = []
     for request in requests:
         prompts.append(
-            TokensPrompt(
-                prompt_token_ids=request.prompt["prompt_token_ids"],
-                multi_modal_data=request.multi_modal_data,
-            ) if "prompt_token_ids" in request.
-            prompt else TextPrompt(prompt=request.prompt,
-                                   multi_modal_data=request.multi_modal_data))
+            TokensPrompt(prompt_token_ids=request.prompt["prompt_token_ids"],
+                       multi_modal_data=request.multi_modal_data)
+            if "prompt_token_ids" in request.prompt else \
+            TextPrompt(prompt=request.prompt,
+                       multi_modal_data=request.multi_modal_data))
         sampling_params.append(
             SamplingParams(
                 n=n,
@@ -96,25 +93,22 @@ def run_vllm(
                 beam_width=n,
                 max_tokens=output_len,
                 ignore_eos=True,
-            ),
-        )
+            ))
         end = time.perf_counter()
     return end - start, outputs
 
 
 def run_vllm_chat(
-    requests: list[SampleRequest],
-    n: int,
-    engine_args: EngineArgs,
-    disable_detokenize: bool = False,
-) -> tuple[float, list[RequestOutput]]:
+        requests: list[SampleRequest],
+        n: int,
+        engine_args: EngineArgs,
+        disable_detokenize: bool = False) -> tuple[float, list[RequestOutput]]:
     """
     Run vLLM chat benchmark. This function is recommended ONLY for benchmarking
     multimodal models as it properly handles multimodal inputs and chat
     formatting. For non-multimodal models, use run_vllm() instead.
     """
     from vllm import LLM, SamplingParams
-
     llm = LLM(**dataclasses.asdict(engine_args))
 
     assert all(
@@ -168,13 +162,11 @@ async def run_vllm_async(
         lora_requests: list[Optional[LoRARequest]] = []
         for request in requests:
             prompts.append(
-                TokensPrompt(
-                    prompt_token_ids=request.prompt["prompt_token_ids"],
-                    multi_modal_data=request.multi_modal_data,
-                ) if "prompt_token_ids" in request.prompt else TextPrompt(
-                    prompt=request.prompt,
-                    multi_modal_data=request.multi_modal_data,
-                ))
+                TokensPrompt(prompt_token_ids=request.prompt["prompt_token_ids"],
+                        multi_modal_data=request.multi_modal_data)
+                if "prompt_token_ids" in request.prompt else \
+                TextPrompt(prompt=request.prompt,
+                           multi_modal_data=request.multi_modal_data))
             sampling_params.append(
                 SamplingParams(
                     n=n,
@@ -276,8 +268,7 @@ def save_to_pytorch_benchmark_format(args: argparse.Namespace,
         extra_info={
             k: results[k]
             for k in ["elapsed_time", "num_requests", "total_num_tokens"]
-        },
-    )
+        })
     if pt_records:
         # Don't use json suffix here as we don't want CI to pick it up
         pt_file = f"{os.path.splitext(args.output_json)[0]}.pytorch.json"
@@ -318,21 +309,21 @@ def get_requests(args, tokenizer):
     elif args.dataset_name == "hf":
         if args.dataset_path in VisionArenaDataset.SUPPORTED_DATASET_PATHS:
             dataset_cls = VisionArenaDataset
-            common_kwargs["dataset_subset"] = None
-            common_kwargs["dataset_split"] = "train"
+            common_kwargs['dataset_subset'] = None
+            common_kwargs['dataset_split'] = "train"
             sample_kwargs["enable_multimodal_chat"] = True
         elif args.dataset_path in InstructCoderDataset.SUPPORTED_DATASET_PATHS:
             dataset_cls = InstructCoderDataset
-            common_kwargs["dataset_split"] = "train"
+            common_kwargs['dataset_split'] = "train"
         elif args.dataset_path in ConversationDataset.SUPPORTED_DATASET_PATHS:
             dataset_cls = ConversationDataset
-            common_kwargs["dataset_subset"] = args.hf_subset
-            common_kwargs["dataset_split"] = args.hf_split
+            common_kwargs['dataset_subset'] = args.hf_subset
+            common_kwargs['dataset_split'] = args.hf_split
             sample_kwargs["enable_multimodal_chat"] = True
         elif args.dataset_path in AIMODataset.SUPPORTED_DATASET_PATHS:
             dataset_cls = AIMODataset
-            common_kwargs["dataset_subset"] = None
-            common_kwargs["dataset_split"] = "train"
+            common_kwargs['dataset_subset'] = None
+            common_kwargs['dataset_split'] = "train"
     else:
         raise ValueError(f"Unknown dataset name: {args.dataset_name}")
     # Remove None values
@@ -350,8 +341,7 @@ def validate_args(args):
         warnings.warn(
             "The '--dataset' argument will be deprecated in the next release. "
             "Please use '--dataset-name' and '--dataset-path' instead.",
-            stacklevel=2,
-        )
+            stacklevel=2)
         args.dataset_path = args.dataset
 
     if not getattr(args, "tokenizer", None):
@@ -366,7 +356,7 @@ def validate_args(args):
     if not args.dataset and not args.dataset_path:
         print(
             "When dataset path is not set, it will default to random dataset")
-        args.dataset_name = "random"
+        args.dataset_name = 'random'
         if args.input_len is None:
             raise ValueError("input_len must be provided for a random dataset")
 
@@ -376,44 +366,34 @@ def validate_args(args):
     if args.dataset_name != "hf" and (
             getattr(args, "hf_subset", None) is not None
             or getattr(args, "hf_split", None) is not None):
-        warnings.warn(
-            "--hf-subset and --hf-split will be ignored \
+        warnings.warn("--hf-subset and --hf-split will be ignored \
                 since --dataset-name is not 'hf'.",
-            stacklevel=2,
-        )
+                      stacklevel=2)
     elif args.dataset_name == "hf":
         if args.dataset_path in (
                 VisionArenaDataset.SUPPORTED_DATASET_PATHS.keys()
                 | ConversationDataset.SUPPORTED_DATASET_PATHS):
-            assert args.backend == "vllm-chat", (
-                f"{args.dataset_path} needs to use vllm-chat as the backend."
-            )  # noqa: E501
+            assert args.backend == "vllm-chat", f"{args.dataset_path} needs to use vllm-chat as the backend."  #noqa: E501
         elif args.dataset_path in (InstructCoderDataset.SUPPORTED_DATASET_PATHS
                                    | AIMODataset.SUPPORTED_DATASET_PATHS):
-            assert args.backend == "vllm", (
-                f"{args.dataset_path} needs to use vllm as the backend."
-            )  # noqa: E501
+            assert args.backend == "vllm", f"{args.dataset_path} needs to use vllm as the backend."  #noqa: E501
         else:
             raise ValueError(
                 f"{args.dataset_path} is not supported by hf dataset.")
 
     # --random-range-ratio: only used when dataset_name is 'random'
-    if args.dataset_name != "random" and args.random_range_ratio is not None:
-        warnings.warn(
-            "--random-range-ratio will be ignored since \
+    if args.dataset_name != 'random' and args.random_range_ratio is not None:
+        warnings.warn("--random-range-ratio will be ignored since \
                 --dataset-name is not 'random'.",
-            stacklevel=2,
-        )
+                      stacklevel=2)
 
     # --prefix-len: only used when dataset_name is 'random', 'sonnet', or not
     # set.
-    if (args.dataset_name not in {"random", "sonnet", None}
-            and args.prefix_len is not None):
-        warnings.warn(
-            "--prefix-len will be ignored since --dataset-name\
+    if args.dataset_name not in {"random", "sonnet", None
+                                 } and args.prefix_len is not None:
+        warnings.warn("--prefix-len will be ignored since --dataset-name\
                  is not 'random', 'sonnet', or not set.",
-            stacklevel=2,
-        )
+                      stacklevel=2)
 
     # === LoRA Settings ===
     if getattr(args, "enable_lora", False) and args.backend != "vllm":
@@ -428,8 +408,8 @@ def validate_args(args):
     if args.backend != "hf" and args.hf_max_batch_size is not None:
         raise ValueError("HF max batch size is only for HF backend.")
 
-    if (args.backend in {"hf", "mii"}
-            and getattr(args, "quantization", None) is not None):
+    if args.backend in {"hf", "mii"} and getattr(args, "quantization",
+                                                 None) is not None:
         raise ValueError("Quantization is only for vLLM backend.")
 
     if args.backend == "mii" and args.dtype != "auto":
@@ -442,19 +422,16 @@ def validate_args(args):
 
 
 def add_cli_args(parser: argparse.ArgumentParser):
-    parser.add_argument(
-        "--backend",
-        type=str,
-        choices=["vllm", "hf", "mii", "vllm-chat"],
-        default="vllm",
-    )
+    parser.add_argument("--backend",
+                        type=str,
+                        choices=["vllm", "hf", "mii", "vllm-chat"],
+                        default="vllm")
     parser.add_argument(
         "--dataset-name",
         type=str,
         choices=["sharegpt", "random", "sonnet", "burstgpt", "hf"],
         help="Name of the dataset to benchmark on.",
-        default="sharegpt",
-    )
+        default="sharegpt")
     parser.add_argument(
         "--dataset",
         type=str,
@@ -462,75 +439,57 @@ def add_cli_args(parser: argparse.ArgumentParser):
         help="Path to the ShareGPT dataset, will be deprecated in\
             the next release. The dataset is expected to "
         "be a json in form of list[dict[..., conversations: "
-        "list[dict[..., value: <prompt_or_response>]]]]",
-    )
+        "list[dict[..., value: <prompt_or_response>]]]]")
     parser.add_argument("--dataset-path",
                         type=str,
                         default=None,
                         help="Path to the dataset")
+    parser.add_argument("--input-len",
+                        type=int,
+                        default=None,
+                        help="Input prompt length for each request")
+    parser.add_argument("--output-len",
+                        type=int,
+                        default=None,
+                        help="Output length for each request. Overrides the "
+                        "output length from the dataset.")
+    parser.add_argument("--n",
+                        type=int,
+                        default=1,
+                        help="Number of generated sequences per prompt.")
+    parser.add_argument("--num-prompts",
+                        type=int,
+                        default=1000,
+                        help="Number of prompts to process.")
+    parser.add_argument("--hf-max-batch-size",
+                        type=int,
+                        default=None,
+                        help="Maximum batch size for HF backend.")
     parser.add_argument(
-        "--input-len",
-        type=int,
-        default=None,
-        help="Input prompt length for each request",
-    )
-    parser.add_argument(
-        "--output-len",
-        type=int,
-        default=None,
-        help="Output length for each request. Overrides the "
-        "output length from the dataset.",
-    )
-    parser.add_argument(
-        "--n",
-        type=int,
-        default=1,
-        help="Number of generated sequences per prompt.",
-    )
-    parser.add_argument(
-        "--num-prompts",
-        type=int,
-        default=1000,
-        help="Number of prompts to process.",
-    )
-    parser.add_argument(
-        "--hf-max-batch-size",
-        type=int,
-        default=None,
-        help="Maximum batch size for HF backend.",
-    )
-    parser.add_argument(
-        "--output-json",
+        '--output-json',
         type=str,
         default=None,
-        help="Path to save the throughput results in JSON format.",
-    )
-    parser.add_argument(
-        "--async-engine",
-        action="store_true",
-        default=False,
-        help="Use vLLM async engine rather than LLM class.",
-    )
-    parser.add_argument(
-        "--disable-frontend-multiprocessing",
-        action="store_true",
-        default=False,
-        help="Disable decoupled async engine frontend.",
-    )
+        help='Path to save the throughput results in JSON format.')
+    parser.add_argument("--async-engine",
+                        action='store_true',
+                        default=False,
+                        help="Use vLLM async engine rather than LLM class.")
+    parser.add_argument("--disable-frontend-multiprocessing",
+                        action='store_true',
+                        default=False,
+                        help="Disable decoupled async engine frontend.")
     parser.add_argument(
         "--disable-detokenize",
         action="store_true",
         help=("Do not detokenize the response (i.e. do not include "
-              "detokenization time in the measurement)"),
-    )
+              "detokenization time in the measurement)"))
     # LoRA
     parser.add_argument(
         "--lora-path",
         type=str,
         default=None,
         help="Path to the lora adapters to use. This can be an absolute path, "
-        "a relative path, or a Hugging Face model identifier.",
-    )
+        "a relative path, or a Hugging Face model identifier.")
     parser.add_argument(
         "--prefix-len",
         type=int,
@@ -589,29 +548,17 @@ def main(args: argparse.Namespace):
                 ))
         else:
             elapsed_time, request_outputs = run_vllm(
-                requests,
-                args.n,
-                EngineArgs.from_cli_args(args),
-                args.disable_detokenize,
-            )
+                requests, args.n, EngineArgs.from_cli_args(args),
+                args.disable_detokenize)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
-        elapsed_time = run_hf(
-            requests,
-            args.model,
-            tokenizer,
-            args.n,
-            args.hf_max_batch_size,
-            args.trust_remote_code,
-            args.disable_detokenize,
-        )
+        elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
+                              args.hf_max_batch_size, args.trust_remote_code,
+                              args.disable_detokenize)
     elif args.backend == "vllm-chat":
         elapsed_time, request_outputs = run_vllm_chat(
-            requests,
-            args.n,
-            EngineArgs.from_cli_args(args),
-            args.disable_detokenize,
-        )
+            requests, args.n, EngineArgs.from_cli_args(args),
+            args.disable_detokenize)
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
 
@@ -623,8 +570,8 @@ def main(args: argparse.Namespace):
         for ro in request_outputs:
             if not isinstance(ro, RequestOutput):
                 continue
-            total_prompt_tokens += (len(ro.prompt_token_ids)
-                                    if ro.prompt_token_ids else 0)
+            total_prompt_tokens += len(
+                ro.prompt_token_ids) if ro.prompt_token_ids else 0
             total_output_tokens += sum(
                 len(o.token_ids) for o in ro.outputs if o)
         total_num_tokens = total_prompt_tokens + total_output_tokens

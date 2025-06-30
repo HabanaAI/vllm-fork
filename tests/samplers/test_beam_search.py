@@ -84,7 +84,7 @@ def test_beam_search_passes_multimodal_data(
     model = "Qwen/Qwen2-Audio-7B-Instruct"
     audio_seq = "<|audio_bos|><|AUDIO|><|audio_eos|>"
     prompts = [
-        f"<|im_start|>user\n{audio_seq}Can you transcribe this?<|im_end|>\n<|im_start|>assistant\n"  # noqa: E501
+        f"<|im_start|>user\n{audio_seq}Can you transcribe this?<|im_end|>\n<|im_start|>assistant\n"  #noqa: E501
     ]
 
     with hf_runner(model, dtype=dtype,

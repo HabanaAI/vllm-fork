@@ -39,9 +39,9 @@ class ConformerEncoderLayer(nn.Module):
             if > 0, ext_pw_out_channel is a dim channel size
              for the last pointwise conv after swish activation.
         depthwise_seperable_out_channel: int
-            if set different to 0, the number of
-             depthwise_seperable_out_channel will be used as a
-             channel_out of the second conv1d layer.
+            if set different to 0, the number of 
+             depthwise_seperable_out_channel will be used as a 
+             channel_out of the second conv1d layer. 
              otherwise, it equal to 0, the second conv1d layer is skipped.
         depthwise_multiplier: int
             number of input_dim channels duplication. this value
@@ -118,10 +118,10 @@ class ConformerEncoderLayer(nn.Module):
              and allow the onnx conversion for inference.
               default False.
         use_pt_scaled_dot_product_attention: bool, optional
-            if set to True, use pytorch's scaled dot product attention
+            if set to True, use pytorch's scaled dot product attention 
             implementation in training.
         attn_group_sizes: int, optional
-            the number of groups to use for attention, default 1
+            the number of groups to use for attention, default 1 
             (Multi-Head Attention),
             1 = typical Multi-Head Attention,
             1 < attn_group_sizes < attention_heads = Grouped-Query Attention
@@ -224,7 +224,7 @@ class ConformerEncoderLayer(nn.Module):
             mask: torch.Tensor
                 mask for x (batch, max_time_in)
             relative_attention_bias: Optional[torch.Tensor]
-                bias added to attention logits w.r.t. relative positions
+                bias added to attention logits w.r.t. relative positions 
                 (1, n_head, time1, time2)
         """
         x = x + 0.5 * self.feed_forward_in(x)
@@ -298,7 +298,7 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
             (Q*K^T + B) implemented in cmb.basics.embedding.
             [T5/ALiBi]RelativeAttentionLogitBias
             usage: relative_attention_bias_args={"type": t5/alibi}
-            additional method-specific arguments can be provided (see
+            additional method-specific arguments can be provided (see 
             transformer_base.py)
         positional_dropout_rate: float, optional
             dropout rate after positional encoding. default 0.0
@@ -312,10 +312,10 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
             supraframe utts in batch.
             Default: none
         attention_group_size: int, optional
-            the number of groups to use for attention, default 1
+            the number of groups to use for attention, default 1 
             (Multi-Head Attention),
             1 = typical Multi-Head Attention,
-            1 < attention_group_size < attention_heads = Grouped-Query
+            1 < attention_group_size < attention_heads = Grouped-Query 
             Attention
             attention_group_size = attenion_heads = Multi-Query Attention
     """
@@ -368,9 +368,9 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
             if nemo_conv_settings:
                 default_nemo_conv_settings.update(nemo_conv_settings)
                 for i in ["subsampling_factor", "feat_in", "feat_out"]:
-                    assert i not in nemo_conv_settings, (
-                        "{i} should be specified outside of the NeMo dictionary"
-                    )
+                    assert (
+                        i not in nemo_conv_settings
+                    ), "{i} should be specified outside of the NeMo dictionary"
 
             self.embed = NemoConvSubsampling(**default_nemo_conv_settings, )
         else:
@@ -383,8 +383,8 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
             relative_attention_bias_args.get("type")
             if relative_attention_bias_args else None)
         if self.relative_attention_bias_type == "t5":
-            assert self.num_heads % self.attention_group_size == 0, (
-                "attention_group_size must divide n_head")
+            assert (self.num_heads % self.attention_group_size == 0
+                    ), "attention_group_size must divide n_head"
             self.relative_attention_bias_layer = T5RelativeAttentionLogitBias(
                 self.num_heads // self.attention_group_size,
                 max_distance=relative_attention_bias_args.get(
@@ -402,8 +402,8 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
         """feature_lens: int
         return updated feature lens.
 
-        This used to return a different lambda function for each case that
-        computed the right thing.  That does not work within Torchscript.
+        This used to return a different lambda function for each case that 
+        computed the right thing.  That does not work within Torchscript. 
         If you really need this to be faster, create nn.Module()-s for all
         the cases and return one of them.  Torchscript does support that.
         """
@@ -452,8 +452,9 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
                     "Since chunk_size is a list, left_chunk must be a list")
             if len(left_chunk) != len(chunk_size):
                 raise ValueError(
-                    "The length of left_chunk must be the same as length of "
-                    "chunk_size.")
+                    "The length of left_chunk must be the same as length of "\
+                        "chunk_size."
+                )
             left_chunk_train_eff = left_chunk[chunk_size_index]
         else:
             chunk_size_train_eff = chunk_size
@@ -487,8 +488,8 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
         return pos_k, pos_v
 
     def _streaming_mask(self, seq_len, batch_size, chunk_size, left_chunk):
-        chunk_size_train_eff, left_chunk_train_eff = self._chunk_size_selection(
-            chunk_size, left_chunk)
+        chunk_size_train_eff, left_chunk_train_eff = \
+            self._chunk_size_selection(chunk_size, left_chunk)
 
         # Create mask matrix for streaming
         # S stores start index. if chunksize is 18, s is [0,18,36,....]
@@ -512,7 +513,7 @@ class TransformerEncoderBase(abc.ABC, nn.Module):
                 input tensor
             masks: torch.Tensor
                 input mask
-            chunk_size_nc: (optional, default is None) chunk size for
+            chunk_size_nc: (optional, default is None) chunk size for 
                             non-causal layers
             left_chunk_nc: (optional, default is None) # of left chunks for
                             non-causal layers
@@ -606,8 +607,8 @@ class ConformerEncoder(TransformerEncoderBase):
         left_chunk: int
             number of chunks used for masking in streaming mode.
         num_lang: int
-            This parameter is used to store the number of languages in the
-            lang_dict, only used for multiseed/multilingual models.
+            This parameter is used to store the number of languages in the 
+            lang_dict, only used for multiseed/multilingual models. 
             default None.
         attention_dim: int, optional
             attention dimension. default 256.
@@ -705,16 +706,16 @@ class ConformerEncoder(TransformerEncoderBase):
         extra_layer_output_idx: int
             the layer index to be exposed.
         relative_attention_bias_args: dict, optional
-            use more efficient scalar bias-based relative multihead attention
+            use more efficient scalar bias-based relative multihead attention 
             (Q*K^T + B) implemented in cmb.basics.embedding.
             [T5/ALiBi]RelativeAttentionLogitBias
             usage: relative_attention_bias_args={"type": t5/alibi}
-            additional method-specific arguments can be provided (see
+            additional method-specific arguments can be provided (see 
             transformer_base.py)
         time_reduction: int optional
             time reduction factor
             default 4
-        use_pt_scaled_dot_product_attention: whether to use pytorch scaled
+        use_pt_scaled_dot_product_attention: whether to use pytorch scaled 
             dot product attention in training.
             Default: False
         nemo_conv_settings: dict, optional
@@ -732,12 +733,12 @@ class ConformerEncoder(TransformerEncoderBase):
             Add extra padding in conv2d subsampling layers. Choices are
             (feat, feat_time, none, True)
             Default: none
-        replication_pad_for_subsample_embedding:  For batched-streaming
+        replication_pad_for_subsample_embedding:  For batched-streaming 
             decoding, use "replication" padding for the cache at start of
             utterance.
             Default: False
         attention_group_size: int, optional
-            the number of groups to use for attention, default 1
+            the number of groups to use for attention, default 1 
             (Multi-Head Attention),
             1 = typical Multi-Head Attention,
             1 < attention_group_size < attention_heads = Grouped-Query
@@ -812,8 +813,8 @@ class ConformerEncoder(TransformerEncoderBase):
         self.kernel_size = kernel_size
         self.replication_pad_for_subsample_embedding: bool = (
             replication_pad_for_subsample_embedding)
-        assert self.num_heads % attention_group_size == 0, (
-            "attention_group_size must divide n_head")
+        assert (self.num_heads % attention_group_size == 0
+                ), "attention_group_size must divide n_head"
         self.num_heads_k = self.num_heads // attention_group_size
 
         self.encoders = MultiSequential(*[
@@ -866,8 +867,10 @@ class ConformerEncoder(TransformerEncoderBase):
 
         feature_lens = mask.sum(1)
         padding_length = feature_lens
-        pad_mask = torch.arange(0, max_audio_length, device=device).expand(
-            padding_length.size(0), -1) < padding_length.unsqueeze(1)
+        pad_mask = (torch.arange(0, max_audio_length,
+                                 device=device).expand(padding_length.size(0),
+                                                       -1)
+                    < padding_length.unsqueeze(1))
         pad_mask = pad_mask.unsqueeze(1)
         pad_mask = pad_mask & enc_streaming_mask
         return pad_mask
@@ -888,7 +891,7 @@ class ConformerEncoder(TransformerEncoderBase):
 
         unfolded = False
         ori_bz, seq_len, D = input_tensor.shape
-        max_seq_len = 500  # maximum position for absolute positional encoding
+        max_seq_len = 500  #maximum position for absolute positional encoding
         if seq_len > max_seq_len:
             # audio sequence is longer than max_seq_len, unfold it into chunks
             # of max_seq_len
@@ -913,8 +916,8 @@ class ConformerEncoder(TransformerEncoderBase):
                 extra_padded_subsamlped_pad_mask = F.pad(
                     subsampled_pad_mask, (0, chunk_pad_size), "constant",
                     False)  # extra padding to the pad mask
-                extra_padded_subsamlped_pad_mask = (
-                    extra_padded_subsamlped_pad_mask.unsqueeze(-1).float())
+                extra_padded_subsamlped_pad_mask = \
+                    extra_padded_subsamlped_pad_mask.unsqueeze(-1).float()
                 masks_unfold = unfold_tensor(
                     extra_padded_subsamlped_pad_mask, max_seq_len
                 )  # unfold the pad mask like we did to the input tensor
@@ -1063,8 +1066,8 @@ class AudioEmbedding(nn.Module):
         else:
             raise NotImplementedError("")
 
-        assert audio_dim_out is not None, (
-            "Remember to set values for audio_dim_out")
+        assert (audio_dim_out
+                is not None), "Remember to set values for audio_dim_out"
         self.audio_dim_out = audio_dim_out
         self.audio_dim_in = n_mels
 
@@ -1081,8 +1084,8 @@ class AudioEmbedding(nn.Module):
             self.qformer = None
 
         if kwargs.get("use_conv_downsample", False):
-            assert self.qformer is None, (
-                "don't support use qformer and conv downsample together")
+            assert (self.qformer is None
+                    ), "don't support use qformer and conv downsample together"
             nemo_conv_settings = kwargs.get("nemo_conv_settings", {})
             default_nemo_conv_settings = {
                 "subsampling": "dw_striding",
@@ -1098,9 +1101,9 @@ class AudioEmbedding(nn.Module):
             if nemo_conv_settings:
                 default_nemo_conv_settings.update(nemo_conv_settings)
                 for i in ["subsampling_factor", "feat_in", "feat_out"]:
-                    assert i not in nemo_conv_settings, (
-                        "{i} should be specified outside of the NeMo dictionary"
-                    )
+                    assert (
+                        i not in nemo_conv_settings
+                    ), "{i} should be specified outside of the NeMo dictionary"
 
             self.conv_ds = NemoConvSubsampling(**default_nemo_conv_settings, )
         else:
@@ -1196,14 +1199,15 @@ class AudioEmbedding(nn.Module):
                 feat_dim * self.linear_downsample_rate,
             )
 
-        if audio_projection_mode == "speech":
+        if audio_projection_mode == 'speech':
             audio_set_tensor = self.audio_projection(audio_features)
-        elif audio_projection_mode == "vision":
+        elif audio_projection_mode == 'vision':
             audio_set_tensor = self.audio_projection_for_vision(audio_features)
         else:
             raise ValueError(
-                f"audio_projection_mode = {audio_projection_mode} not "
-                "implemented")
+                f"audio_projection_mode = {audio_projection_mode} not "\
+                    "implemented"
+            )
 
         return audio_set_tensor
 
@@ -1216,7 +1220,7 @@ class AudioEmbedding(nn.Module):
         """
         arguments:
             audio_features: audio features (T, D)
-
+        
         returns:
             audio_embeds: audio embeddings (num_audio_tokens, hidden_dim)
         """

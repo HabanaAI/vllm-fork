@@ -36,7 +36,7 @@ def use_v0_only(monkeypatch: pytest.MonkeyPatch):
     all tests in the file.
     """
     with monkeypatch.context() as m:
-        m.setenv("VLLM_USE_V1", "0")
+        m.setenv('VLLM_USE_V1', '0')
         yield
 
 
@@ -159,11 +159,8 @@ def test_models_distributed(
 
 @pytest.mark.parametrize(
     "kv_cache_dtype,model",
-    [(
-        "fp8_e4m3",
-        "nm-testing/TinyLlama-1.1B-compressed-tensors-kv-cache-scheme",
-    )],
-)
+    [("fp8_e4m3",
+      "nm-testing/TinyLlama-1.1B-compressed-tensors-kv-cache-scheme")])
 # Due to low-precision numerical divergence, we only test logprob of 4 tokens
 @pytest.mark.parametrize("max_tokens", [4])
 @pytest.mark.parametrize("chunked_prefill_token_size", [4, 16])

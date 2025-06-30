@@ -22,7 +22,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only Mixtral model."""
-
 from typing import Iterable, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -120,20 +119,17 @@ class MixtralMoE(nn.Module):
                 f"Rank {self.rank} has no experts assigned to it.")
 
         self.experts = nn.ModuleList([
-            MixtralMLP(
-                self.num_total_experts,
-                config.hidden_size,
-                config.intermediate_size,
-                quant_config=quant_config,
-            ) if idx in self.expert_indicies else None
+            MixtralMLP(self.num_total_experts,
+                       config.hidden_size,
+                       config.intermediate_size,
+                       quant_config=quant_config)
+            if idx in self.expert_indicies else None
             for idx in range(self.num_total_experts)
         ])
-        self.gate = ReplicatedLinear(
-            config.hidden_size,
-            self.num_total_experts,
-            bias=False,
-            quant_config=None,
-        )
+        self.gate = ReplicatedLinear(config.hidden_size,
+                                     self.num_total_experts,
+                                     bias=False,
+                                     quant_config=None)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         num_tokens, hidden_dim = hidden_states.shape
@@ -150,7 +146,7 @@ class MixtralMoE(nn.Module):
         final_hidden_states = None
         for expert_idx in self.expert_indicies:
             expert_layer = self.experts[expert_idx]
-            expert_mask = selected_experts == expert_idx
+            expert_mask = (selected_experts == expert_idx)
             expert_weights = (routing_weights * expert_mask).sum(dim=-1,
                                                                  keepdim=True)
 
@@ -225,15 +221,13 @@ class MixtralAttention(nn.Module):
             base=int(self.rope_theta),
             is_neox_style=True,
         )
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.attn",
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads,
+                              cache_config=cache_config,
+                              quant_config=quant_config,
+                              prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -324,8 +318,7 @@ class MixtralModel(nn.Module):
             lambda prefix: MixtralDecoderLayer(
                 config, cache_config, quant_config=quant_config, prefix=prefix
             ),
-            prefix=f"{prefix}.layers",
-        )
+            prefix=f"{prefix}.layers")
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.make_empty_intermediate_tensors = (
             make_empty_intermediate_tensors_factory(
@@ -424,7 +417,7 @@ class MixtralForCausalLM(nn.Module, SupportsPP):
                 name = maybe_remap_kv_scale_name(name, params_dict)
                 if name is None:
                     continue
-            for param_name, weight_name, shard_id in stacked_params_mapping:
+            for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)

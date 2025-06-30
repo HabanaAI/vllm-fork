@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Custom input builders for edge-cases in different models."""
-
 from io import BytesIO
 from typing import Callable
 
@@ -18,7 +17,7 @@ from .types import ImageSizeWrapper, SizeType
 
 def multi_image_multi_aspect_ratio_inputs(formatter: Callable[[str], str]):
     """Builds inputs for multi-image (varied sizes/aspect ratio) testing.
-
+    
     Args:
         formatter: model-specific prompt formatter.
     """
@@ -47,17 +46,16 @@ def multi_image_multi_aspect_ratio_inputs(formatter: Callable[[str], str]):
                 stop_sign,
                 rescale_image_size(stop_sign, 0.25),
                 cherry_blossom.resize((183, 488)),
-                cherry_blossom.resize((488, 183)),
+                cherry_blossom.resize((488, 183))
             ],
             cherry_blossom,
-        ],
-    )]
+        ])]
 
 
 def multi_video_multi_aspect_ratio_inputs(formatter: Callable[[str], str],
                                           num_frames: int = 16):
     """Builds inputs for multi-video (varied sizes/aspect ratio) testing.
-
+    
     Args:
         formatter: model-specific prompt formatter.
     """
@@ -84,19 +82,15 @@ def multi_video_multi_aspect_ratio_inputs(formatter: Callable[[str], str],
                 video,
                 rescale_video_size(video, 0.25),
                 resize_video(video, (183, 488)),
-                resize_video(video, (488, 183)),
+                resize_video(video, (488, 183))
             ],
             video,
-        ],
-    )]
+        ])]
 
 
 def different_patch_input_cases_internvl():
     images = [asset.pil_image.resize((896, 896)) for asset in IMAGE_ASSETS]
-    formatter = (
-        lambda img_prompt:
-        f"<|im_start|>User\n{img_prompt}<|im_end|>\n<|im_start|>Assistant\n"
-    )  # noqa: E501
+    formatter = lambda img_prompt: f"<|im_start|>User\n{img_prompt}<|im_end|>\n<|im_start|>Assistant\n"  # noqa: E501
     single_img_prompts = [
         "<image>\nWhat's the content in the center of the image?",
         "<image>\nWhat is the season?",
@@ -116,8 +110,7 @@ def different_patch_input_cases_internvl():
 
 def windows_attention_image_qwen2_5_vl():
     # image from regression issue: https://github.com/vllm-project/vllm/issues/15122
-    image_url = (
-        "https://aomediacodec.github.io/av1-avif/testFiles/Link-U/hato.jpg")
+    image_url = "https://aomediacodec.github.io/av1-avif/testFiles/Link-U/hato.jpg"
     image = Image.open(BytesIO(requests.get(image_url).content))
 
     question = "Describe the image."

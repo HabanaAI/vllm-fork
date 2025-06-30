@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Attention layer with PagedAttention and Triton prefix prefill."""
-
 from typing import Any, Optional
 
 import torch
@@ -18,6 +17,7 @@ logger = init_logger(__name__)
 
 
 class TritonAttentionBackend(AttentionBackend):
+
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -158,8 +158,8 @@ class TritonAttentionImpl(AttentionImpl):
             layer._v_scale,
         )
 
-        use_local_attn = (self.use_irope
-                          and attn_metadata.local_attn_metadata is not None)
+        use_local_attn = \
+            (self.use_irope and attn_metadata.local_attn_metadata is not None)
 
         if use_local_attn:
             assert attn_metadata.local_attn_metadata is not None
@@ -177,24 +177,22 @@ class TritonAttentionImpl(AttentionImpl):
             block_table = attn_metadata.block_table
 
         # Compute attention and update output up to `num_actual_tokens`.
-        chunked_prefill_paged_decode(
-            query=query[:num_actual_tokens],
-            key=key[:num_actual_tokens],
-            value=value[:num_actual_tokens],
-            output=output[:num_actual_tokens],
-            kv_cache_dtype=self.kv_cache_dtype,
-            key_cache=key_cache,
-            value_cache=value_cache,
-            block_table=block_table,
-            query_start_loc=cu_seqlens_q,
-            seq_lens=sequesd_k,
-            max_seq_len=max_seqlen_k,
-            max_query_len=max_seqlen_q,
-            k_scale=layer._k_scale,
-            v_scale=layer._v_scale,
-            alibi_slopes=self.alibi_slopes,
-            sliding_window=self.sliding_window[0],
-            sm_scale=self.scale,
-        )
+        chunked_prefill_paged_decode(query=query[:num_actual_tokens],
+                                     key=key[:num_actual_tokens],
+                                     value=value[:num_actual_tokens],
+                                     output=output[:num_actual_tokens],
+                                     kv_cache_dtype=self.kv_cache_dtype,
+                                     key_cache=key_cache,
+                                     value_cache=value_cache,
+                                     block_table=block_table,
+                                     query_start_loc=cu_seqlens_q,
+                                     seq_lens=sequesd_k,
+                                     max_seq_len=max_seqlen_k,
+                                     max_query_len=max_seqlen_q,
+                                     k_scale=layer._k_scale,
+                                     v_scale=layer._v_scale,
+                                     alibi_slopes=self.alibi_slopes,
+                                     sliding_window=self.sliding_window[0],
+                                     sm_scale=self.scale)
 
         return output

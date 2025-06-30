@@ -148,7 +148,6 @@ class Request:
 
 class RequestStatus(enum.IntEnum):
     """Status of a request."""
-
     WAITING = enum.auto()
     WAITING_FOR_FSM = enum.auto()
     RUNNING = enum.auto()
@@ -166,7 +165,7 @@ class RequestStatus(enum.IntEnum):
 
     @staticmethod
     def get_finished_reason(
-        status: "RequestStatus", ) -> Union[FinishReason, None]:
+            status: "RequestStatus") -> Union[FinishReason, None]:
         return _FINISHED_REASON_MAP.get(status)
 
 

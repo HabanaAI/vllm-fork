@@ -64,8 +64,8 @@ class KVCacheManager:
         # Mapping from request ID to kv block hashes.
         # This is to avoid recomputing the block hashes for each call of
         # `get_computed_blocks` or `allocate_slots`.
-        self.req_to_block_hashes: defaultdict[str, list[BlockHashType]] = (
-            defaultdict(list))
+        self.req_to_block_hashes: defaultdict[
+            str, list[BlockHashType]] = defaultdict(list)
 
         # {req_id: The number of cached blocks for this given request}
         # This is used to track the number of cached blocks for each request.
@@ -139,8 +139,8 @@ class KVCacheManager:
         else:
             last_block_hash = None
 
-        computed_blocks = self.specialized_manager.find_longest_cache_hit(
-            block_hashes)
+        computed_blocks = (
+            self.specialized_manager.find_longest_cache_hit(block_hashes))
 
         if self.log_stats:
             assert self.prefix_cache_stats is not None
@@ -176,7 +176,7 @@ class KVCacheManager:
             new_computed_blocks: A list of new computed blocks just hitting the
                 prefix caching.
             num_lookahead_tokens: The number of speculative tokens to allocate.
-                This is used by spec decode proposers with kv-cache such
+                This is used by spec decode proposers with kv-cache such 
                 as eagle.
 
         Blocks layout:
@@ -219,8 +219,7 @@ class KVCacheManager:
                                len(new_computed_blocks) * self.block_size)
         num_required_blocks = cdiv(
             num_computed_tokens + num_tokens + num_lookahead_tokens,
-            self.block_size,
-        )
+            self.block_size)
         num_new_blocks = (num_required_blocks - len(req_blocks) -
                           len(new_computed_blocks))
 

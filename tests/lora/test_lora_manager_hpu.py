@@ -41,7 +41,7 @@ def use_v0_only(monkeypatch: pytest.MonkeyPatch):
     LoRAModelManager it is okay to just test V0.
     """
     with monkeypatch.context() as m:
-        m.setenv("VLLM_USE_V1", "0")
+        m.setenv('VLLM_USE_V1', '0')
         yield
 
 
@@ -61,8 +61,7 @@ def test_from_lora_tensors(sql_lora_files, device):
         device=device,
         embeddings=new_embeddings,
         embedding_modules=EMBEDDING_MODULES,
-        embedding_padding_modules=EMBEDDING_PADDING_MODULES,
-    )
+        embedding_padding_modules=EMBEDDING_PADDING_MODULES)
     for module_name, lora in lora_model.loras.items():
         assert lora.module_name == module_name
         assert lora.rank == 8
@@ -71,8 +70,8 @@ def test_from_lora_tensors(sql_lora_files, device):
         assert lora.lora_b is not None
         assert lora.lora_a.device == torch.device(device)
         assert lora.lora_b.device == torch.device(device)
-        assert lora.lora_a.shape[1] == lora.lora_b.shape[0], (
-            f"{lora.lora_a.shape=}, {lora.lora_b.shape=}")
+        assert (lora.lora_a.shape[1] == lora.lora_b.shape[0]
+                ), f"{lora.lora_a.shape=}, {lora.lora_b.shape=}"
         assert lora.lora_a.shape[1] == 8
         embeddings_module = next(
             (k for k in EMBEDDING_MODULES if k in module_name), None)
@@ -80,8 +79,7 @@ def test_from_lora_tensors(sql_lora_files, device):
             assert torch.equal(
                 lora.embeddings_tensor,
                 new_embeddings[EMBEDDING_MODULES[embeddings_module]].to(
-                    device=lora.embeddings_tensor.device),
-            )
+                    device=lora.embeddings_tensor.device))
         else:
             assert lora.embeddings_tensor is None
 
@@ -128,18 +126,11 @@ def create_packed_lora(
 def test_replace_submodules(dist_init, dummy_model):
     model = dummy_model
     manager = LoRAModelManager(
-        model,
-        1,
-        1,
-        1,
-        LoRAConfig(
-            max_lora_rank=8,
-            max_cpu_loras=8,
-            max_loras=8,
-            lora_dtype=DEFAULT_DTYPE,
-        ),
-        torch.device(DEVICES[0]),
-    )
+        model, 1, 1, 1,
+        LoRAConfig(max_lora_rank=8,
+                   max_cpu_loras=8,
+                   max_loras=8,
+                   lora_dtype=DEFAULT_DTYPE), torch.device(DEVICES[0]))
     model = manager.model
     assert isinstance(model.get_submodule("dense1"),
                       ColumnParallelLinearWithLoRA)
@@ -162,19 +153,15 @@ def test_lora_model_manager(dist_init, dummy_model, device):
     model_lora3 = create_lora(3,
                               model, ["dense1", "dense2", "lm_head"],
                               device=device)
-    manager = LoRAModelManager(
-        model,
-        2,
-        2,
-        2,
-        LoRAConfig(
-            max_lora_rank=8,
-            max_cpu_loras=3,
-            max_loras=2,
-            lora_dtype=DEFAULT_DTYPE,
-        ),
-        device=device,
-    )
+    manager = LoRAModelManager(model,
+                               2,
+                               2,
+                               2,
+                               LoRAConfig(max_lora_rank=8,
+                                          max_cpu_loras=3,
+                                          max_loras=2,
+                                          lora_dtype=DEFAULT_DTYPE),
+                               device=device)
     assert all(x is None for x in manager.lora_index_to_id)
     assert manager.add_adapter(model_lora1)
     assert manager.activate_adapter(1)
@@ -233,19 +220,15 @@ def test_lora_lru_cache_model_manager(dist_init, dummy_model, device):
     model_lora3 = create_lora(3,
                               model, ["dense1", "dense2", "lm_head"],
                               device=device)
-    manager = LRUCacheLoRAModelManager(
-        model,
-        2,
-        2,
-        2,
-        LoRAConfig(
-            max_lora_rank=8,
-            max_cpu_loras=3,
-            max_loras=2,
-            lora_dtype=DEFAULT_DTYPE,
-        ),
-        device=device,
-    )
+    manager = LRUCacheLoRAModelManager(model,
+                                       2,
+                                       2,
+                                       2,
+                                       LoRAConfig(max_lora_rank=8,
+                                                  max_cpu_loras=3,
+                                                  max_loras=2,
+                                                  lora_dtype=DEFAULT_DTYPE),
+                                       device=device)
     assert all(x is None for x in manager.lora_index_to_id)
     assert manager.add_adapter(model_lora1)
     assert manager.activate_adapter(1)
@@ -333,19 +316,15 @@ def test_lru_lora_model_manager(dist_init, dummy_model, device):
     model_lora4 = create_lora(4,
                               model, ["dense1", "dense2", "lm_head"],
                               device=device)
-    manager = LRUCacheLoRAModelManager(
-        model,
-        2,
-        2,
-        2,
-        LoRAConfig(
-            max_lora_rank=8,
-            max_cpu_loras=2,
-            max_loras=2,
-            lora_dtype=DEFAULT_DTYPE,
-        ),
-        device=device,
-    )
+    manager = LRUCacheLoRAModelManager(model,
+                                       2,
+                                       2,
+                                       2,
+                                       LoRAConfig(max_lora_rank=8,
+                                                  max_cpu_loras=2,
+                                                  max_loras=2,
+                                                  lora_dtype=DEFAULT_DTYPE),
+                                       device=device)
 
     assert all(x is None for x in manager.lora_index_to_id)
 
@@ -457,80 +436,59 @@ def test_lru_cache_worker_adapter_manager(llama_2_7b_model_extra_embeddings,
                              max_loras=4,
                              lora_dtype=DEFAULT_DTYPE)
     worker_adapter_manager = LRUCacheWorkerLoRAManager(
-        4,
-        2,
-        llama_2_7b_model_extra_embeddings.model.unpadded_vocab_size -
-        lora_config.lora_extra_vocab_size,
-        lora_config,
-        device,
-        EMBEDDING_MODULES,
-        EMBEDDING_PADDING_MODULES,
-    )
+        4, 2, llama_2_7b_model_extra_embeddings.model.unpadded_vocab_size -
+        lora_config.lora_extra_vocab_size, lora_config, device,
+        EMBEDDING_MODULES, EMBEDDING_PADDING_MODULES)
     worker_adapter_manager.create_lora_manager(
         llama_2_7b_model_extra_embeddings.model)
 
     mapping = LoRAMapping([], [])
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("2", 2, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("2", 2, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 2}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 2
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("3", 3, sql_lora_files),
-            LoRARequest("4", 4, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("3", 3, sql_lora_files),
+        LoRARequest("4", 4, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 2, 3, 4}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 2
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[2] == 3
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[3] == 4
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("2", 2, sql_lora_files),
-            LoRARequest("5", 5, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("2", 2, sql_lora_files),
+        LoRARequest("5", 5, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 2, 4, 5}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 2
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[2] == 5
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[3] == 4
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("1", 1, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("1", 1, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 2, 4, 5}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 2
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[2] == 5
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[3] == 4
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("6", 6, sql_lora_files),
-            LoRARequest("7", 7, sql_lora_files),
-            LoRARequest("8", 8, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("6", 6, sql_lora_files),
+        LoRARequest("7", 7, sql_lora_files),
+        LoRARequest("8", 8, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 6, 7, 8}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 7
@@ -539,16 +497,13 @@ def test_lru_cache_worker_adapter_manager(llama_2_7b_model_extra_embeddings,
 
     # Over capacity
     with pytest.raises(RuntimeError):
-        worker_adapter_manager.set_active_adapters(
-            [
-                LoRARequest("10", 10, sql_lora_files),
-                LoRARequest("11", 11, sql_lora_files),
-                LoRARequest("12", 12, sql_lora_files),
-                LoRARequest("13", 13, sql_lora_files),
-                LoRARequest("14", 14, sql_lora_files),
-            ],
-            mapping,
-        )
+        worker_adapter_manager.set_active_adapters([
+            LoRARequest("10", 10, sql_lora_files),
+            LoRARequest("11", 11, sql_lora_files),
+            LoRARequest("12", 12, sql_lora_files),
+            LoRARequest("13", 13, sql_lora_files),
+            LoRARequest("14", 14, sql_lora_files)
+        ], mapping)
 
     assert worker_adapter_manager.device == device
     assert (worker_adapter_manager._adapter_manager.punica_wrapper.device ==
@@ -564,77 +519,56 @@ def test_worker_adapter_manager(llama_2_7b_model_extra_embeddings,
                              max_loras=4,
                              lora_dtype=DEFAULT_DTYPE)
     worker_adapter_manager = WorkerLoRAManager(
-        4,
-        2,
-        llama_2_7b_model_extra_embeddings.model.unpadded_vocab_size -
-        lora_config.lora_extra_vocab_size,
-        lora_config,
-        device,
-        EMBEDDING_MODULES,
-        EMBEDDING_PADDING_MODULES,
-    )
+        4, 2, llama_2_7b_model_extra_embeddings.model.unpadded_vocab_size -
+        lora_config.lora_extra_vocab_size, lora_config, device,
+        EMBEDDING_MODULES, EMBEDDING_PADDING_MODULES)
     worker_adapter_manager.create_lora_manager(
         llama_2_7b_model_extra_embeddings.model)
 
     mapping = LoRAMapping([], [])
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("2", 2, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("2", 2, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 2}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 2
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("3", 3, sql_lora_files),
-            LoRARequest("4", 4, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("3", 3, sql_lora_files),
+        LoRARequest("4", 4, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 3, 4}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 3
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[2] == 4
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("2", 2, sql_lora_files),
-            LoRARequest("5", 5, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("2", 2, sql_lora_files),
+        LoRARequest("5", 5, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1, 2, 5}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 2
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[2] == 5
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("1", 1, sql_lora_files),
-            LoRARequest("1", 1, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("1", 1, sql_lora_files),
+        LoRARequest("1", 1, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {1}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 1
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] is None
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[2] is None
 
-    worker_adapter_manager.set_active_adapters(
-        [
-            LoRARequest("6", 6, sql_lora_files),
-            LoRARequest("7", 7, sql_lora_files),
-            LoRARequest("8", 8, sql_lora_files),
-        ],
-        mapping,
-    )
+    worker_adapter_manager.set_active_adapters([
+        LoRARequest("6", 6, sql_lora_files),
+        LoRARequest("7", 7, sql_lora_files),
+        LoRARequest("8", 8, sql_lora_files)
+    ], mapping)
     assert worker_adapter_manager.list_adapters() == {6, 7, 8}
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[0] == 8
     assert worker_adapter_manager._adapter_manager.lora_index_to_id[1] == 6
@@ -642,16 +576,13 @@ def test_worker_adapter_manager(llama_2_7b_model_extra_embeddings,
 
     # Over capacity
     with pytest.raises(RuntimeError):
-        worker_adapter_manager.set_active_adapters(
-            [
-                LoRARequest("10", 10, sql_lora_files),
-                LoRARequest("11", 11, sql_lora_files),
-                LoRARequest("12", 12, sql_lora_files),
-                LoRARequest("13", 13, sql_lora_files),
-                LoRARequest("14", 14, sql_lora_files),
-            ],
-            mapping,
-        )
+        worker_adapter_manager.set_active_adapters([
+            LoRARequest("10", 10, sql_lora_files),
+            LoRARequest("11", 11, sql_lora_files),
+            LoRARequest("12", 12, sql_lora_files),
+            LoRARequest("13", 13, sql_lora_files),
+            LoRARequest("14", 14, sql_lora_files)
+        ], mapping)
 
     assert worker_adapter_manager.device == device
     assert (worker_adapter_manager._adapter_manager.punica_wrapper.device ==
@@ -666,8 +597,7 @@ def test_packed_loras(dist_init, dummy_model_gate_up, device):
         model,
         module_name="gate_up_proj",
         replaced_module_names=["gate_proj", "up_proj"],
-        device=device,
-    )
+        device=device)
     model_lora1 = create_packed_lora(
         2,
         model,
@@ -677,19 +607,15 @@ def test_packed_loras(dist_init, dummy_model_gate_up, device):
         empty_replaced_module_name="gate_proj",
     )
 
-    manager = LoRAModelManager(
-        model,
-        2,
-        2,
-        2,
-        LoRAConfig(
-            max_lora_rank=8,
-            max_cpu_loras=2,
-            max_loras=2,
-            lora_dtype=DEFAULT_DTYPE,
-        ),
-        device=device,
-    )
+    manager = LoRAModelManager(model,
+                               2,
+                               2,
+                               2,
+                               LoRAConfig(max_lora_rank=8,
+                                          max_cpu_loras=2,
+                                          max_loras=2,
+                                          lora_dtype=DEFAULT_DTYPE),
+                               device=device)
     model = manager.model
 
     assert isinstance(model.get_submodule("gate_up_proj"),

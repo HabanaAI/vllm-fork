@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Core test implementation to be shared across modalities."""
-
 from typing import Any, Callable, Optional, Union
 
 import torch
@@ -77,18 +76,16 @@ def run_test(
     if vllm_runner_kwargs:
         vllm_runner_kwargs_.update(vllm_runner_kwargs)
 
-    with vllm_runner(
-            model,
-            max_model_len=max_model_len,
-            max_num_seqs=max_num_seqs,
-            dtype=dtype,
-            limit_mm_per_prompt=limit_mm_per_prompt,
-            tensor_parallel_size=tensor_parallel_size,
-            distributed_executor_backend=distributed_executor_backend,
-            enforce_eager=enforce_eager,
-            task=task,
-            **vllm_runner_kwargs_,
-    ) as vllm_model:
+    with vllm_runner(model,
+                     max_model_len=max_model_len,
+                     max_num_seqs=max_num_seqs,
+                     dtype=dtype,
+                     limit_mm_per_prompt=limit_mm_per_prompt,
+                     tensor_parallel_size=tensor_parallel_size,
+                     distributed_executor_backend=distributed_executor_backend,
+                     enforce_eager=enforce_eager,
+                     task=task,
+                     **vllm_runner_kwargs_) as vllm_model:
         tokenizer = vllm_model.model.get_tokenizer()
 
         vllm_kwargs: dict[str, Any] = {}
@@ -132,8 +129,7 @@ def run_test(
                 max_tokens,
                 num_logprobs=num_logprobs,
                 tokenizer=tokenizer,
-                **hf_kwargs,
-            )
+                **hf_kwargs)
             hf_outputs_per_mm.append(hf_output)
 
     # Apply output processing / sanitation to the vLLM and HF runner results

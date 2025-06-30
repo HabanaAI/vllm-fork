@@ -108,11 +108,9 @@ def moe_align_block_size_triton(
 ) -> None:
     numel = topk_ids.numel()
     grid = (num_experts, )
-    tokens_cnts = torch.zeros(
-        (num_experts + 1, num_experts),
-        dtype=torch.int32,
-        device=topk_ids.device,
-    )
+    tokens_cnts = torch.zeros((num_experts + 1, num_experts),
+                              dtype=torch.int32,
+                              device=topk_ids.device)
     cumsum = torch.zeros((num_experts + 1, ),
                          dtype=torch.int32,
                          device=topk_ids.device)
@@ -154,7 +152,7 @@ def moe_align_block_size(
     block_size: int,
     num_experts: int,
     expert_map: Optional[torch.Tensor] = None,
-    pad_sorted_ids: bool = False,
+    pad_sorted_ids: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Aligns the token distribution across experts to be compatible with block
@@ -236,14 +234,8 @@ def moe_align_block_size(
                 num_tokens_post_pad,
             )
     else:
-        ops.moe_align_block_size(
-            topk_ids,
-            num_experts,
-            block_size,
-            sorted_ids,
-            expert_ids,
-            num_tokens_post_pad,
-        )
+        ops.moe_align_block_size(topk_ids, num_experts, block_size, sorted_ids,
+                                 expert_ids, num_tokens_post_pad)
     if expert_map is not None:
         expert_ids = expert_map[expert_ids]
 

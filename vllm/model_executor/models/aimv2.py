@@ -16,13 +16,8 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.transformers_utils.configs.ovis2 import (AIMv2Config,
                                                    Aimv2VisualTokenizerConfig)
 
-IMAGE_INDICATOR_IDS = [
-    -301,
-    -302,
-    -303,
-    -304,
-    -305,
-]  # kept for vocab prefixed tokens
+IMAGE_INDICATOR_IDS = [-301, -302, -303, -304,
+                       -305]  # kept for vocab prefixed tokens
 
 
 def st_argmax(y_soft: torch.Tensor, dim: int):  # straight-through softmax
@@ -36,20 +31,17 @@ def st_argmax(y_soft: torch.Tensor, dim: int):  # straight-through softmax
 
 class Aimv2VisualTokenizer(torch.nn.Module):
 
-    def __init__(
-        self,
-        config: Aimv2VisualTokenizerConfig,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-        **kwargs,
-    ):
+    def __init__(self,
+                 config: Aimv2VisualTokenizerConfig,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = "",
+                 **kwargs):
         super().__init__()
         self.config = config
         self.backbone = AIMv2Model(
             config=config.backbone_config,  # noqa
             quant_config=quant_config,
-            prefix=f"{prefix}.visual_tokenizer",
-        )
+            prefix=f"{prefix}.visual_tokenizer")
         # reserved tokens for IMAGE_INDICATORS
         head_dim = config.vocab_size - len(IMAGE_INDICATOR_IDS)
         self.head = torch.nn.Sequential(
@@ -58,9 +50,7 @@ class Aimv2VisualTokenizer(torch.nn.Module):
                 config.hidden_stride,
                 head_dim,
                 bias=False,
-            ),
-            torch.nn.LayerNorm(head_dim),
-        )
+            ), torch.nn.LayerNorm(head_dim))
 
     @property
     def dtype(self):
@@ -71,16 +61,16 @@ class Aimv2VisualTokenizer(torch.nn.Module):
         return self.backbone.device
 
     def tokenize(self, logits):
-        if self.config.tokenize_function == "softmax":
+        if self.config.tokenize_function == 'softmax':
             tokens = softmax(logits, dim=-1)
-        elif self.config.tokenize_function == "gumbel_argmax":
+        elif self.config.tokenize_function == 'gumbel_argmax':
             tokens = gumbel_softmax(logits, tau=self.config.tau, hard=True)
-        elif self.config.tokenize_function == "st_argmax":
+        elif self.config.tokenize_function == 'st_argmax':
             tokens = st_argmax(logits, dim=-1)
         else:
             raise ValueError(
-                "Invalid `max_type`, expected softmax or gumbel_argmax "
-                f"or st_argmax, but got {self.config.tokenize_function}")
+                'Invalid `max_type`, expected softmax or gumbel_argmax '
+                f'or st_argmax, but got {self.config.tokenize_function}')
         return tokens
 
     def encode(self, pixel_values):
@@ -104,14 +94,10 @@ class Aimv2VisualTokenizer(torch.nn.Module):
                    self.config.hidden_stride)) % self.config.hidden_stride
             features = pad(features, (0, 0, 0, pl, 0, pl), "constant", 0)
             sqrt_l += pl
-            features = features.reshape(
-                n,
-                sqrt_l // self.config.hidden_stride,
-                self.config.hidden_stride,
-                sqrt_l // self.config.hidden_stride,
-                self.config.hidden_stride,
-                d,
-            )
+            features = features.reshape(n, sqrt_l // self.config.hidden_stride,
+                                        self.config.hidden_stride,
+                                        sqrt_l // self.config.hidden_stride,
+                                        self.config.hidden_stride, d)
             # [n, sqrt_l/hs, sqrt_l/hs, hs, hs, d]
             features = features.permute(0, 1, 3, 2, 4, 5)
             # [n, sqrt_l/hs, sqrt_l/hs, hs*hs*d]
@@ -134,13 +120,12 @@ class Aimv2VisualTokenizer(torch.nn.Module):
         # [BatchSize, #Token, 5], after which, tokens' shape should become
         # [BatchSize, #Token, VocabSize]
         batch_size, token_len, _ = tokens.shape
-        padding_tensor = torch.zeros(
-            size=(batch_size, token_len, len(IMAGE_INDICATOR_IDS)),
-            dtype=tokens.dtype,
-            device=tokens.device,
-            layout=tokens.layout,
-            requires_grad=False,
-        )
+        padding_tensor = torch.zeros(size=(batch_size, token_len,
+                                           len(IMAGE_INDICATOR_IDS)),
+                                     dtype=tokens.dtype,
+                                     device=tokens.device,
+                                     layout=tokens.layout,
+                                     requires_grad=False)
         tokens = torch.cat((tokens, padding_tensor), dim=2)
         return tokens
 
@@ -155,27 +140,21 @@ class AIMv2SwiGLUFFN(nn.Module):
         bias = config.use_bias
 
         # TODO(Isotr0py): investigate if we can add TP to visual tokenizer
-        self.fc1 = ReplicatedLinear(
-            in_features,
-            hidden_features,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.fc1",
-        )
-        self.fc2 = ReplicatedLinear(
-            hidden_features,
-            in_features,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.fc2",
-        )
-        self.fc3 = ReplicatedLinear(
-            in_features,
-            hidden_features,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.fc3",
-        )
+        self.fc1 = ReplicatedLinear(in_features,
+                                    hidden_features,
+                                    bias=bias,
+                                    quant_config=quant_config,
+                                    prefix=f"{prefix}.fc1")
+        self.fc2 = ReplicatedLinear(hidden_features,
+                                    in_features,
+                                    bias=bias,
+                                    quant_config=quant_config,
+                                    prefix=f"{prefix}.fc2")
+        self.fc3 = ReplicatedLinear(in_features,
+                                    hidden_features,
+                                    bias=bias,
+                                    quant_config=quant_config,
+                                    prefix=f"{prefix}.fc3")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_parallel, _ = self.fc1(x)
@@ -313,12 +292,10 @@ class AIMv2Transformer(nn.Module):
 
 class AIMv2Model(torch.nn.Module):
 
-    def __init__(
-        self,
-        config: AIMv2Config,
-        quant_config: QuantizationConfig,
-        prefix: str = "",
-    ):
+    def __init__(self,
+                 config: AIMv2Config,
+                 quant_config: QuantizationConfig,
+                 prefix: str = ""):
         super().__init__()
         self.preprocessor = AIMv2ViTPreprocessor(config)
         self.trunk = AIMv2Transformer(config,
@@ -338,6 +315,7 @@ class AIMv2Model(torch.nn.Module):
         pixel_values: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+
         x = self.preprocessor(pixel_values)
         x = self.trunk(x, mask)
 

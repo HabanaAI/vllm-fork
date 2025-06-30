@@ -13,12 +13,12 @@ logger = init_logger(__name__)
 class BaseKVCacheMethod(QuantizeMethodBase):
     """
     Quant method that adds `_k_scale` and `_v_scale` attributes to the
-    Attention layer to support loading those scaling factors from checkpoints.
+    Attention layer to support loading those scaling factors from checkpoints. 
     The k/v_scale will be used to:
         - quantize k/v_cache entries before saving them to the cache
         - dequantize k/v_cache entries before fetching them from the cache
 
-    :param quant_config: the appropriate QuantizationConfig
+    :param quant_config: the appropriate QuantizationConfig 
     """
 
     def __init__(self, quant_config: QuantizationConfig):
@@ -78,8 +78,8 @@ class BaseKVCacheMethod(QuantizeMethodBase):
 
             if not isinstance(k_scale, float) or not isinstance(
                     v_scale, float):
-                raise ValueError(
-                    "Only support per-tensor scaling factor for fp8 KV cache")
+                raise ValueError("Only support per-tensor scaling factor "
+                                 "for fp8 KV cache")
 
             if layer.q_scale < 0.0:
                 logger.warning_once(
@@ -114,13 +114,12 @@ class BaseKVCacheMethod(QuantizeMethodBase):
         else:
             prob_scale = 1.0
 
-        is_singleton_float = (lambda x: isinstance(x, float) or isinstance(
-            x, torch.Tensor) and x.numel() == 1 and x.is_floating_point())
+        is_singleton_float = lambda x: isinstance(x, float) or isinstance(
+            x, torch.Tensor) and x.numel() == 1 and x.is_floating_point()
         if not is_singleton_float(q_scale) or not is_singleton_float(
                 prob_scale):
-            raise ValueError(
-                "Only support per-tensor scaling factorfor fp8-quantized Q/prob"
-            )
+            raise ValueError("Only support per-tensor scaling factor"
+                             "for fp8-quantized Q/prob")
 
         # These are used in the final Attention.forward()
         layer._q_scale.copy_(q_scale)

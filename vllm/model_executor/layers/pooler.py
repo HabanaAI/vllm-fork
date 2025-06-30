@@ -19,7 +19,6 @@ from vllm.transformers_utils.config import (
 
 class PoolingType(IntEnum):
     """Enumeration for different types of pooling methods."""
-
     LAST = 0
     ALL = 1
     CLS = 2
@@ -62,12 +61,10 @@ class SimplePooler(nn.Module):
             assert step_tag_id is None and returned_token_ids is None
             return MeanPool(normalize=normalize, softmax=softmax)
         if pooling_type == PoolingType.STEP:
-            return StepPool(
-                normalize=normalize,
-                softmax=softmax,
-                step_tag_id=step_tag_id,
-                returned_token_ids=returned_token_ids,
-            )
+            return StepPool(normalize=normalize,
+                            softmax=softmax,
+                            step_tag_id=step_tag_id,
+                            returned_token_ids=returned_token_ids)
 
         assert_never(pooling_type)
 
@@ -135,14 +132,10 @@ class LastPool(SimplePooler):
         prompt_lens, prompt_offsets = self.get_prompt_lens(
             hidden_states, pooling_metadata)
         if prompt_offsets is not None:
-            last_token_flat_indices = (torch.sum(
-                torch.cat(
-                    (prompt_lens.unsqueeze(0), prompt_offsets.unsqueeze(0)),
-                    0,
-                ),
-                dim=0,
-                keepdim=True,
-            ) - 1).squeeze(0)
+            last_token_flat_indices = (torch.sum(torch.cat(
+                (prompt_lens.unsqueeze(0), prompt_offsets.unsqueeze(0)), 0),
+                                                 dim=0,
+                                                 keepdim=True) - 1).squeeze(0)
         else:
             last_token_flat_indices = torch.cumsum(prompt_lens, dim=0) - 1
         return hidden_states[last_token_flat_indices]
@@ -183,7 +176,7 @@ class MeanPool(SimplePooler):
         else:
             start_indices = torch.cat([
                 torch.tensor([0], device=hidden_states.device),
-                torch.cumsum(prompt_lens[:-1], dim=0),
+                torch.cumsum(prompt_lens[:-1], dim=0)
             ])
             end_indices = torch.cumsum(prompt_lens, dim=0)
         return (cumsum[end_indices - 1] - cumsum[start_indices] +
@@ -242,11 +235,9 @@ class PoolerHead(nn.Module):
         self.normalize = normalize
         self.softmax = softmax
 
-    def forward(
-        self,
-        pooled_data: Union[list[torch.Tensor], torch.Tensor],
-        pooling_metadata: PoolingMetadata,
-    ):
+    def forward(self, pooled_data: Union[list[torch.Tensor], torch.Tensor],
+                pooling_metadata: PoolingMetadata):
+
         dimensions_list = [
             pooling_param.dimensions
             for _, pooling_param in pooling_metadata.seq_groups
@@ -325,8 +316,8 @@ class CrossEncodingPooler(nn.Module):
         super().__init__()
         self.classifier = classifier
         self.pooler = pooler
-        self.default_activation_function = (
-            get_cross_encoder_activation_function(config))
+        self.default_activation_function = \
+            get_cross_encoder_activation_function(config)
 
     def forward(
         self,

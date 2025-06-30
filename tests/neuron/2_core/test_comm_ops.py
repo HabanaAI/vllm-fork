@@ -86,16 +86,15 @@ def all_reduce_test_worker(index, tp_degree, distributed_init_method):
 @reinitialize_neuron_runtime
 def test_neuron_multi_process_tensor_parallel(monkeypatch, tp_size,
                                               test_target):
-    with patch("torch_xla._XLAC._xla_runtime_is_initialized",
+
+    with patch('torch_xla._XLAC._xla_runtime_is_initialized',
                return_value=False):
         distributed_init_method = get_distributed_init_method(
             "127.0.0.1", get_open_port())
 
         monkeypatch.setenv("VLLM_USE_V1", "1")
         monkeypatch.setenv("NEURONCORE_NUM_DEVICES", str(tp_size))
-        monkeypatch.setenv(
-            "NEURON_PJRT_PROCESSES_NUM_DEVICES",
-            ",".join(["1" for _ in range(tp_size)]),
-        )
+        monkeypatch.setenv("NEURON_PJRT_PROCESSES_NUM_DEVICES",
+                           ','.join(['1' for _ in range(tp_size)]))
 
         xmp.spawn(test_target, args=(tp_size, distributed_init_method))

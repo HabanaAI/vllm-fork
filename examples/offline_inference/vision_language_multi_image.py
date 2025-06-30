@@ -4,7 +4,6 @@ This example shows how to use vLLM for running offline inference with
 multi-image input on vision language models for text generation,
 using the chat template defined by the model.
 """
-
 import os
 from argparse import Namespace
 from dataclasses import asdict
@@ -179,7 +178,7 @@ def load_h2ovl(question: str, image_urls: list[str]) -> ModelRequestData:
 
     placeholders = "\n".join(f"Image-{i}: <image>\n"
                              for i, _ in enumerate(image_urls, start=1))
-    messages = [{"role": "user", "content": f"{placeholders}\n{question}"}]
+    messages = [{'role': 'user', 'content': f"{placeholders}\n{question}"}]
 
     tokenizer = AutoTokenizer.from_pretrained(model_name,
                                               trust_remote_code=True)
@@ -268,7 +267,7 @@ def load_internvl(question: str, image_urls: list[str]) -> ModelRequestData:
 
     placeholders = "\n".join(f"Image-{i}: <image>\n"
                              for i, _ in enumerate(image_urls, start=1))
-    messages = [{"role": "user", "content": f"{placeholders}\n{question}"}]
+    messages = [{'role': 'user', 'content': f"{placeholders}\n{question}"}]
 
     tokenizer = AutoTokenizer.from_pretrained(model_name,
                                               trust_remote_code=True)
@@ -422,7 +421,7 @@ def load_nvlm_d(question: str, image_urls: list[str]) -> ModelRequestData:
 
     placeholders = "\n".join(f"Image-{i}: <image>\n"
                              for i, _ in enumerate(image_urls, start=1))
-    messages = [{"role": "user", "content": f"{placeholders}\n{question}"}]
+    messages = [{'role': 'user', 'content': f"{placeholders}\n{question}"}]
 
     tokenizer = AutoTokenizer.from_pretrained(model_name,
                                               trust_remote_code=True)
@@ -451,9 +450,8 @@ def load_ovis2(question: str, image_urls: list[str]) -> ModelRequestData:
         hf_overrides={"architectures": ["Ovis2ForConditionalGeneration"]},
     )
 
-    placeholder = (
-        "\n".join([f"Image {i + 1}: <image>"
-                   for i in range(len(image_urls))]) + "\n")
+    placeholder = '\n'.join(
+        [f'Image {i+1}: <image>' for i in range(len(image_urls))]) + '\n'
     prompt = ("<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
               f"<|im_start|>user\n{placeholder}"
               f"{question}<|im_end|>\n"
@@ -578,13 +576,11 @@ def load_qwen_vl_chat(question: str,
     # Copied from: https://huggingface.co/docs/transformers/main/en/chat_templating
     chat_template = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"  # noqa: E501
 
-    messages = [{"role": "user", "content": f"{placeholders}\n{question}"}]
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        chat_template=chat_template,
-    )
+    messages = [{'role': 'user', 'content': f"{placeholders}\n{question}"}]
+    prompt = tokenizer.apply_chat_template(messages,
+                                           tokenize=False,
+                                           add_generation_prompt=True,
+                                           chat_template=chat_template)
 
     stop_tokens = ["<|endoftext|>", "<|im_start|>", "<|im_end|>"]
     stop_token_ids = [tokenizer.convert_tokens_to_ids(i) for i in stop_tokens]
@@ -602,9 +598,9 @@ def load_qwen2_vl(question: str, image_urls: list[str]) -> ModelRequestData:
     try:
         from qwen_vl_utils import process_vision_info
     except ModuleNotFoundError:
-        print("WARNING: `qwen-vl-utils` not installed, input images will not "
-              "be automatically resized. You can enable this functionality by "
-              "`pip install qwen-vl-utils`.")
+        print('WARNING: `qwen-vl-utils` not installed, input images will not '
+              'be automatically resized. You can enable this functionality by '
+              '`pip install qwen-vl-utils`.')
         process_vision_info = None
 
     model_name = "Qwen/Qwen2-VL-7B-Instruct"
@@ -618,22 +614,20 @@ def load_qwen2_vl(question: str, image_urls: list[str]) -> ModelRequestData:
     )
 
     placeholders = [{"type": "image", "image": url} for url in image_urls]
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful assistant."
-        },
-        {
-            "role": "user",
-            "content": [
-                *placeholders,
-                {
-                    "type": "text",
-                    "text": question
-                },
-            ],
-        },
-    ]
+    messages = [{
+        "role": "system",
+        "content": "You are a helpful assistant."
+    }, {
+        "role":
+        "user",
+        "content": [
+            *placeholders,
+            {
+                "type": "text",
+                "text": question
+            },
+        ],
+    }]
 
     processor = AutoProcessor.from_pretrained(model_name)
 
@@ -657,9 +651,9 @@ def load_qwen2_5_vl(question: str, image_urls: list[str]) -> ModelRequestData:
     try:
         from qwen_vl_utils import process_vision_info
     except ModuleNotFoundError:
-        print("WARNING: `qwen-vl-utils` not installed, input images will not "
-              "be automatically resized. You can enable this functionality by "
-              "`pip install qwen-vl-utils`.")
+        print('WARNING: `qwen-vl-utils` not installed, input images will not '
+              'be automatically resized. You can enable this functionality by '
+              '`pip install qwen-vl-utils`.')
         process_vision_info = None
 
     model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
@@ -672,22 +666,20 @@ def load_qwen2_5_vl(question: str, image_urls: list[str]) -> ModelRequestData:
     )
 
     placeholders = [{"type": "image", "image": url} for url in image_urls]
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful assistant."
-        },
-        {
-            "role": "user",
-            "content": [
-                *placeholders,
-                {
-                    "type": "text",
-                    "text": question
-                },
-            ],
-        },
-    ]
+    messages = [{
+        "role": "system",
+        "content": "You are a helpful assistant."
+    }, {
+        "role":
+        "user",
+        "content": [
+            *placeholders,
+            {
+                "type": "text",
+                "text": question
+            },
+        ],
+    }]
 
     processor = AutoProcessor.from_pretrained(model_name)
 
@@ -807,30 +799,24 @@ def run_chat(model: str, question: str, image_urls: list[str],
 
 def parse_args():
     parser = FlexibleArgumentParser(
-        description="Demo on using vLLM for offline inference with "
-        "vision language models that support multi-image input for text "
-        "generation")
-    parser.add_argument(
-        "--model-type",
-        "-m",
-        type=str,
-        default="phi3_v",
-        choices=model_example_map.keys(),
-        help='Huggingface "model_type".',
-    )
-    parser.add_argument(
-        "--method",
-        type=str,
-        default="generate",
-        choices=["generate", "chat"],
-        help="The method to run in `vllm.LLM`.",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Set the seed when initializing `vllm.LLM`.",
-    )
+        description='Demo on using vLLM for offline inference with '
+        'vision language models that support multi-image input for text '
+        'generation')
+    parser.add_argument('--model-type',
+                        '-m',
+                        type=str,
+                        default="phi3_v",
+                        choices=model_example_map.keys(),
+                        help='Huggingface "model_type".')
+    parser.add_argument("--method",
+                        type=str,
+                        default="generate",
+                        choices=["generate", "chat"],
+                        help="The method to run in `vllm.LLM`.")
+    parser.add_argument("--seed",
+                        type=int,
+                        default=None,
+                        help="Set the seed when initializing `vllm.LLM`.")
     parser.add_argument(
         "--num-images",
         "-n",
@@ -838,8 +824,7 @@ def parse_args():
         choices=list(range(1,
                            len(IMAGE_URLS) + 1)),  # the max number of images
         default=2,
-        help="Number of images to use for the demo.",
-    )
+        help="Number of images to use for the demo.")
     return parser.parse_args()
 
 

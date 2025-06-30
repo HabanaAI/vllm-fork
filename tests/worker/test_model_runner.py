@@ -96,8 +96,7 @@ def test_prepare_prompt(batch_size, use_prompt_embeds, monkeypatch):
     assert attn_metadata.num_decode_tokens == 0
     torch.testing.assert_close(
         attn_metadata.seq_lens_tensor,
-        torch.tensor(seq_lens, device=device, dtype=torch.int),
-    )
+        torch.tensor(seq_lens, device=device, dtype=torch.int))
     assert attn_metadata.seq_lens == seq_lens
     assert attn_metadata.max_prefill_seq_len == max(seq_lens)
     assert attn_metadata.max_decode_seq_len == 0
@@ -110,8 +109,7 @@ def test_prepare_prompt(batch_size, use_prompt_embeds, monkeypatch):
         start_loc.append(start_idx)
     torch.testing.assert_close(
         attn_metadata.query_start_loc,
-        torch.tensor(start_loc, dtype=torch.int32, device=device),
-    )
+        torch.tensor(start_loc, dtype=torch.int32, device=device))
 
     # Test seq start locs. Note that for normal prefill it is
     # equivalent to query_start_loc.
@@ -123,22 +121,16 @@ def test_prepare_prompt(batch_size, use_prompt_embeds, monkeypatch):
 
     torch.testing.assert_close(
         attn_metadata.seq_start_loc,
-        torch.tensor(start_loc, dtype=torch.int32, device=device),
-    )
+        torch.tensor(start_loc, dtype=torch.int32, device=device))
     torch.testing.assert_close(
         attn_metadata.context_lens_tensor,
-        torch.zeros(
-            attn_metadata.context_lens_tensor.shape[0],
-            dtype=torch.int,
-            device=device,
-        ),
-    )
+        torch.zeros(attn_metadata.context_lens_tensor.shape[0],
+                    dtype=torch.int,
+                    device=device))
 
-    expected = torch.tensor(
-        [[] for _ in range(len(seq_group_metadata_list))],
-        dtype=torch.int32,
-        device=model_runner.device,
-    )
+    expected = torch.tensor([[] for _ in range(len(seq_group_metadata_list))],
+                            dtype=torch.int32,
+                            device=model_runner.device)
     torch.testing.assert_close(attn_metadata.block_tables, expected)
     # Cuda graph should not be used for prerill.
     assert attn_metadata.use_cuda_graph is False
@@ -156,25 +148,20 @@ def test_prepare_prompt(batch_size, use_prompt_embeds, monkeypatch):
         seq_lens,
         query_lens=seq_lens,
         device=model_runner.device,
-        pin_memory=model_runner.pin_memory,
-    )
+        pin_memory=model_runner.pin_memory)
     assert len(input_tokens) == sum(seq_lens)
     assert len(input_positions) == sum(seq_lens)
     actual = sampling_metadata.selected_token_indices
-    expected = torch.tensor(
-        expected_selected_token_indices,
-        device=actual.device,
-        dtype=actual.dtype,
-    )
+    expected = torch.tensor(expected_selected_token_indices,
+                            device=actual.device,
+                            dtype=actual.dtype)
     torch.testing.assert_close(actual, expected)
     torch.allclose(input_tokens, input_positions)
 
     actual = sampling_metadata.selected_token_indices
-    expected = torch.tensor(
-        expected_selected_token_indices,
-        device=actual.device,
-        dtype=actual.dtype,
-    )
+    expected = torch.tensor(expected_selected_token_indices,
+                            device=actual.device,
+                            dtype=actual.dtype)
     torch.testing.assert_close(actual, expected)
 
 
@@ -256,8 +243,7 @@ def test_prepare_decode_cuda_graph(batch_size, use_prompt_embeds, monkeypatch):
         start_loc.append(start_idx)
     torch.testing.assert_close(
         attn_metadata.query_start_loc,
-        torch.tensor(start_loc, dtype=torch.int32, device=device),
-    )
+        torch.tensor(start_loc, dtype=torch.int32, device=device))
 
     start_idx = 0
     seq_start_loc = [start_idx]
@@ -266,18 +252,15 @@ def test_prepare_decode_cuda_graph(batch_size, use_prompt_embeds, monkeypatch):
         seq_start_loc.append(start_idx)
     torch.testing.assert_close(
         attn_metadata.seq_start_loc,
-        torch.tensor(seq_start_loc, dtype=torch.int32, device=device),
-    )
+        torch.tensor(seq_start_loc, dtype=torch.int32, device=device))
 
     torch.testing.assert_close(
         attn_metadata.context_lens_tensor,
-        torch.tensor(context_lens, dtype=torch.int, device=device),
-    )
+        torch.tensor(context_lens, dtype=torch.int, device=device))
     assert attn_metadata.max_decode_seq_len == max(seq_lens)
     torch.testing.assert_close(
         attn_metadata.seq_lens_tensor[:len(seq_lens)],
-        torch.tensor(seq_lens, dtype=torch.int, device=device),
-    )
+        torch.tensor(seq_lens, dtype=torch.int, device=device))
 
     # block table's first index corresponds to each batch, meaning in
     # decoding it is each token.
@@ -307,14 +290,11 @@ def test_prepare_decode_cuda_graph(batch_size, use_prompt_embeds, monkeypatch):
         # query lens is all 1 for decode.
         query_lens=[1 for _ in range(len(context_lens))],
         device=model_runner.device,
-        pin_memory=model_runner.pin_memory,
-    )
+        pin_memory=model_runner.pin_memory)
     actual = sampling_metadata.selected_token_indices
-    expected = torch.tensor(
-        expected_selected_token_indices,
-        device=actual.device,
-        dtype=actual.dtype,
-    )
+    expected = torch.tensor(expected_selected_token_indices,
+                            device=actual.device,
+                            dtype=actual.dtype)
     torch.testing.assert_close(actual, expected)
 
 
@@ -360,14 +340,13 @@ def distributed_init():
         world_size=1,
         rank=0,
         distributed_init_method=f"tcp://127.0.0.1:{get_open_port()}",
-        local_rank=0,
-    )
+        local_rank=0)
     ensure_model_parallel_initialized(1, 1)
 
 
 @pytest.mark.parametrize("batch_size", list(range(2, 128, 3)))
 @pytest.mark.parametrize("enforce_eager", [True, False])
-@pytest.mark.parametrize("use_prompt_embeds", [True, False])
+@pytest.mark.parametrize('use_prompt_embeds', [True, False])
 def test_hybrid_batches(batch_size, enforce_eager, use_prompt_embeds,
                         distributed_init, monkeypatch):
     if use_prompt_embeds:

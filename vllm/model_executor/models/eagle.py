@@ -44,26 +44,26 @@ class DummyOutputNorm(nn.Module):
 class EAGLE(nn.Module):
     """This class implements the EAGLE draft model from the paper: https://arxiv.org/pdf/2401.15077
     Reference implementation: https://github.com/SafeAILab/EAGLE
-
+    
     Differences from reference implementation:
-    1. In reference, LlamaDecoderLayer implementation doesn't have
+    1. In reference, LlamaDecoderLayer implementation doesn't have 
        input_layernorm for 1st decoder layer (https://github.com/SafeAILab/EAGLE/blob/7d065d084443fbfd386f88839efd7193c12be869/eagle/model/cnets.py#L427).
        Following this approach, our implementation also disables
        the input_layernorm for the first decoder layer.
-    2. We allow any decoder layer to be used in EAGLE whereas in reference
+    2. We allow any decoder layer to be used in EAGLE whereas in reference 
        decoder layer is fixed to be LlamaDecoderLayer.
-    3. We have an optional token_map which reduces draft vocab to most
-       frequently used tokens to give some additional speed-up by reducing
-       sampling overhead. This is disabled unless the checkpoint file has
-       explicit token_map tensor and config has an optional attribute
+    3. We have an optional token_map which reduces draft vocab to most 
+       frequently used tokens to give some additional speed-up by reducing 
+       sampling overhead. This is disabled unless the checkpoint file has 
+       explicit token_map tensor and config has an optional attribute 
        truncated_vocab_size < vocab_size. To use this technique, one has to find
        the top-k most frequent tokens in target dataset and add that as a tensor
        in the draft checkpoint (using key token_map). Also, the draft config
        needs to have truncated_vocab_size (=k) as an attribute.
-    4. We allow an enhanced EAGLE architecture similar to the DeepSeek MTP
-       module with regards to the use of additional RMS norms. The original
-       EAGLE architecture 1) skips the pre-attention norm in its first
-       transformer block, and 2) skips the final output norm, both of which we
+    4. We allow an enhanced EAGLE architecture similar to the DeepSeek MTP 
+       module with regards to the use of additional RMS norms. The original 
+       EAGLE architecture 1) skips the pre-attention norm in its first 
+       transformer block, and 2) skips the final output norm, both of which we 
        found to be suboptimal. We also add the support for separate norms
        applying to both the token embedding and hidden states before projection
        as in DeepSeek MTP, which we found to improve performance as well.
@@ -80,29 +80,28 @@ class EAGLE(nn.Module):
         self.model = model_cls(vllm_config=vllm_config,
                                prefix=maybe_prefix(prefix, "model"))
 
-        self.fc = nn.Linear(
-            config.model.hidden_size * 2,
-            config.model.hidden_size,
-            bias=getattr(self.config, "eagle_fc_bias", False),
-        )
+        self.fc = nn.Linear(config.model.hidden_size * 2,
+                            config.model.hidden_size,
+                            bias=getattr(self.config, "eagle_fc_bias", False))
 
         # Modify layer normalization and residual connections as suggested
         # in the EAGLE framework: https://github.com/SafeAILab/EAGLE
         # While weights and biases are generally not needed,
         # they are retained here to support certain unit tests
         # (e.g., spec_decode/e2e/test_eagle_correctness.py).
-        if (not hasattr(self.config.model, "skip_prenorm")
-                or self.config.model.skip_prenorm):
+        if not hasattr(self.config.model,
+                       "skip_prenorm") or self.config.model.skip_prenorm:
             self.model.model.layers[0].input_layernorm = DummyInputLayerNorm(
                 weight=self.model.model.layers[0].input_layernorm.weight)
 
-        if (not hasattr(self.config.model, "skip_output_norm")
-                or self.config.model.skip_output_norm):
+        if not hasattr(
+                self.config.model,
+                "skip_output_norm") or self.config.model.skip_output_norm:
             self.model.model.norm = DummyOutputNorm()
 
         self.add_para_norm = False
-        if (hasattr(self.config.model, "add_para_norm")
-                and self.config.model.add_para_norm):
+        if hasattr(self.config.model,
+                   "add_para_norm") and self.config.model.add_para_norm:
             self.enorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
             self.hnorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
             self.add_para_norm = True
@@ -142,17 +141,16 @@ class EAGLE(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings(input_ids)
 
         if self.add_para_norm:
-            inputs_embeds = torch.cat(
-                [
-                    self.enorm(inputs_embeds),
-                    self.hnorm(previous_hidden_states)
-                ],
-                dim=-1,
-            )
+            inputs_embeds = torch.cat([
+                self.enorm(inputs_embeds),
+                self.hnorm(previous_hidden_states)
+            ],
+                                      dim=-1)
         else:
             inputs_embeds = torch.cat([inputs_embeds, previous_hidden_states],
                                       dim=-1)
@@ -179,8 +177,7 @@ class EAGLE(nn.Module):
             logits = -torch.inf * torch.ones(
                 size=(*_logits.shape[:-1], self.orig_vocab_size),
                 device=_logits.device,
-                dtype=_logits.dtype,
-            )
+                dtype=_logits.dtype)
 
             logits[..., self.token_map] = _logits
 
@@ -230,8 +227,9 @@ class EAGLE(nn.Module):
         if "lm_head.weight" in model_weights:
             lm_head_weight = model_weights.pop("lm_head.weight")
 
-            if (self.token_map is not None
-                    and lm_head_weight.shape[0] > self.token_map.shape[0]):
+            if self.token_map is not None and\
+                lm_head_weight.shape[0] > self.token_map.shape[0]:
+
                 lm_head_weight = lm_head_weight[self.token_map]
 
         else:

@@ -18,10 +18,8 @@ def cal_diff(x: torch.Tensor, y: torch.Tensor, name: str) -> None:
         (x * x + y * y).sum().item(), 1e-12)
     assert cos_diff < 1e-5
 
-
-FLASH_MLA_UNSUPPORTED_REASON = (is_flashmla_supported()[1]
-                                if not is_flashmla_supported()[0] else
-                                "FlashMLA is supported")
+FLASH_MLA_UNSUPPORTED_REASON = is_flashmla_supported()[1] \
+    if not is_flashmla_supported()[0] else "FlashMLA is supported"
 
 
 @pytest.mark.skipif(not is_flashmla_supported()[0],
@@ -130,5 +128,5 @@ def test_flash_mla(b, s_q, mean_sk, h_q, h_kv, d, dv, block_size, causal,
     FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
     bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d +
              b * s_q * h_q * dv) * (torch.finfo(dtype).bits // 8)
-    print(f"{t:.3f} ms, {FLOPS / 10**9 / t:.0f} "
-          f"TFLOPS, {bytes / 10**6 / t:.0f} GB/s")
+    print(f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.0f} "
+          f"TFLOPS, {bytes / 10 ** 6 / t:.0f} GB/s")

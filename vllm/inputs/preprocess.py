@@ -67,11 +67,11 @@ class InputPreprocessor:
         return self.tokenizer.get_lora_tokenizer(lora_request).eos_token_id
 
     def get_decoder_start_token_id(self) -> Optional[int]:
-        """
+        '''
         Obtain the decoder start token id employed by an encoder/decoder
         model. Returns None for non-encoder/decoder models or if the
         model config is unavailable.
-        """
+        '''
 
         if not self.model_config.is_encoder_decoder:
             logger.warning_once(
@@ -79,14 +79,14 @@ class InputPreprocessor:
                 "this is not an encoder/decoder model.")
             return None
 
-        if self.model_config is None or self.model_config.hf_config is None:
+        if (self.model_config is None or self.model_config.hf_config is None):
             logger.warning_once(
                 "Using None for decoder start token id because "
                 "model config is not available.")
             return None
 
         dec_start_token_id = getattr(self.model_config.hf_config,
-                                     "decoder_start_token_id", None)
+                                     'decoder_start_token_id', None)
         if dec_start_token_id is None:
             logger.warning_once(
                 "Falling back on <BOS> for decoder start token "
@@ -97,7 +97,7 @@ class InputPreprocessor:
         return dec_start_token_id
 
     def _get_default_enc_dec_decoder_prompt(self) -> list[int]:
-        """
+        '''
         Specifically for encoder/decoder models:
         generate a default decoder prompt for when
         the user specifies only the encoder prompt.
@@ -126,7 +126,7 @@ class InputPreprocessor:
         Returns:
 
         * prompt_token_ids
-        """
+        '''
 
         bos_token_id = self.get_bos_token_id()
         assert bos_token_id is not None
@@ -319,10 +319,8 @@ class InputPreprocessor:
             raise ValueError(
                 "prompt_embeds must be of shape (seq_len, hidden_size).")
 
-        return embeds_inputs(
-            prompt_embeds=prompt_embeds,
-            cache_salt=parsed_content.get("cache_salt"),
-        )
+        return embeds_inputs(prompt_embeds=prompt_embeds,
+                             cache_salt=parsed_content.get("cache_salt"))
 
     async def _process_embeds_async(
         self,
@@ -545,9 +543,8 @@ class InputPreprocessor:
     ) -> EncoderDecoderInputs:
         if (encoder_inputs["type"] == "embeds"
                 or decoder_inputs and decoder_inputs["type"] == "embeds"):
-            raise ValueError(
-                "Embedding inputs are not supported for encoder-decoder models"
-            )
+            raise ValueError("Embedding inputs are not supported for encoder-"
+                             "decoder models")
 
         # Needed for mypy
         encoder_inputs = cast(Union[TokenInputs, MultiModalInputs],
@@ -591,9 +588,8 @@ class InputPreprocessor:
         """
         if (inputs["type"] == "embeds" or decoder_inputs_to_override
                 and decoder_inputs_to_override["type"] == "embeds"):
-            raise ValueError(
-                "Embedding inputs are not supported for encoder-decoder models"
-            )
+            raise ValueError("Embedding inputs are not supported for encoder-"
+                             "decoder models")
 
         # Needed for mypy
         inputs = cast(
@@ -691,8 +687,9 @@ class InputPreprocessor:
             # For multimodal model, override decoder prompt from processor
             # with explicit decoder prompt.
             if self.model_config.is_multimodal_model:
-                encoder_inputs, decoder_inputs = self._split_enc_dec_mm_inputs(
-                    encoder_inputs, decoder_inputs)
+                encoder_inputs, decoder_inputs = (
+                    self._split_enc_dec_mm_inputs(encoder_inputs,
+                                                  decoder_inputs))
         else:
             inputs = self._prompt_to_llm_inputs(
                 prompt,
@@ -700,8 +697,8 @@ class InputPreprocessor:
             )
             if self.model_config.is_multimodal_model:
                 # Encoder-Decoder Multimodal model
-                encoder_inputs, decoder_inputs = self._split_enc_dec_mm_inputs(
-                    inputs)
+                encoder_inputs, decoder_inputs = (
+                    self._split_enc_dec_mm_inputs(inputs))
             else:
                 encoder_inputs = inputs
                 decoder_inputs = None
@@ -738,8 +735,9 @@ class InputPreprocessor:
             # For multimodal model, override decoder prompt from processor
             # with explicit decoder prompt.
             if self.model_config.is_multimodal_model:
-                encoder_inputs, decoder_inputs = self._split_enc_dec_mm_inputs(
-                    encoder_inputs, decoder_inputs)
+                encoder_inputs, decoder_inputs = (
+                    self._split_enc_dec_mm_inputs(encoder_inputs,
+                                                  decoder_inputs))
         else:
             inputs = await self._prompt_to_llm_inputs_async(
                 prompt,
@@ -747,8 +745,8 @@ class InputPreprocessor:
             )
             if self.model_config.is_multimodal_model:
                 # Encoder-Decoder Multimodal model
-                encoder_inputs, decoder_inputs = self._split_enc_dec_mm_inputs(
-                    inputs)
+                encoder_inputs, decoder_inputs = (
+                    self._split_enc_dec_mm_inputs(inputs))
             else:
                 encoder_inputs = inputs
                 decoder_inputs = None
@@ -839,15 +837,14 @@ class InputPreprocessor:
         if self.model_config.is_encoder_decoder:
             assert not return_mm_hashes, (
                 "Multimodal hashes for encoder-decoder models should not be ",
-                "returned until they are supported on vLLM V1.",
-            )
+                "returned until they are supported on vLLM V1.")
             # Encoder-decoder model requires special mapping of
             # input prompts to encoder & decoder
             return self._process_encoder_decoder_prompt(prompt)
 
         if is_explicit_encoder_decoder_prompt(prompt):
-            raise ValueError(
-                "Cannot pass encoder-decoder prompt to decoder-only models")
+            raise ValueError("Cannot pass encoder-decoder prompt "
+                             "to decoder-only models")
 
         # Decoder-only operation
         return self._process_decoder_only_prompt(
@@ -870,15 +867,14 @@ class InputPreprocessor:
         if self.model_config.is_encoder_decoder:
             assert not return_mm_hashes, (
                 "Multimodal hashes for encoder-decoder models should not be ",
-                "returned until they are supported on vLLM V1.",
-            )
+                "returned until they are supported on vLLM V1.")
             # Encoder-decoder model requires special mapping of
             # input prompts to encoder & decoder
             return await self._process_encoder_decoder_prompt_async(prompt)
 
         if is_explicit_encoder_decoder_prompt(prompt):
-            raise ValueError(
-                "Cannot pass encoder-decoder prompt to decoder-only models")
+            raise ValueError("Cannot pass encoder-decoder prompt "
+                             "to decoder-only models")
 
         # Decoder-only operation
         return await self._process_decoder_only_prompt_async(

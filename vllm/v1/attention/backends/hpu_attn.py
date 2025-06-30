@@ -33,7 +33,6 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
     # TODO(kwisniewski98): for now, in V1 input positions are not provided
     # which needs to be fixed in the future, as we need to support MLA
     """Metadata for HPUAttentionbackend."""
-
     is_prompt: bool
     attn_bias: Optional[torch.Tensor]
 
@@ -41,15 +40,8 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
     context_lens_tensor: Optional[torch.Tensor]
 
     @classmethod
-    def make_prefill_metadata(
-        cls,
-        attn_bias,
-        block_list,
-        context_lens_tensor,
-        seq_lens_tensor,
-        slot_mapping,
-        block_size,
-    ):
+    def make_prefill_metadata(cls, attn_bias, block_list, context_lens_tensor,
+                              seq_lens_tensor, slot_mapping, block_size):
         return cls(
             is_prompt=True,
             block_list=block_list,
@@ -67,20 +59,12 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
             input_positions=None,
             slot_mapping=slot_mapping,
             enable_kv_scales_calculation=False,
-            block_size=block_size,
-        )
+            block_size=block_size)
 
     @classmethod
-    def make_decode_metadata(
-        cls,
-        block_list,
-        block_usage,
-        block_groups,
-        input_positions,
-        num_decode_tokens,
-        slot_mapping,
-        block_size,
-    ):
+    def make_decode_metadata(cls, block_list, block_usage, block_groups,
+                             input_positions, num_decode_tokens, slot_mapping,
+                             block_size):
         return cls(
             is_prompt=False,
             block_mapping=None,
@@ -98,5 +82,4 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
             num_decode_tokens=num_decode_tokens,
             slot_mapping=slot_mapping,
             enable_kv_scales_calculation=False,
-            block_size=block_size,
-        )
+            block_size=block_size)

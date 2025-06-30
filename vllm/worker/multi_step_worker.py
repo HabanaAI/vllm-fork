@@ -56,14 +56,12 @@ class MultiStepWorker(Worker):
                 self.model_runner.prepare_model_input(
                     execute_model_req.seq_group_metadata_list,
                     execute_model_req.virtual_engine,
-                    execute_model_req.finished_requests_ids,
-                ))
+                    execute_model_req.finished_requests_ids))
 
             if execute_model_req.async_callback:
                 model_input.frozen_model_input = dataclasses.replace(  # type: ignore
                     model_input.frozen_model_input,
-                    async_callback=execute_model_req.async_callback,
-                )
+                    async_callback=execute_model_req.async_callback)
         else:
             # on subsequent steps we reuse the worker input and model input
             multi_step_state = self.multi_step_states[virtual_engine]
@@ -100,16 +98,15 @@ class MultiStepWorker(Worker):
         execute_model_req: ExecuteModelRequest,
         model_input: StatefulModelInput,
     ) -> None:
-        """
-        Prepare the last sampled token ids for TP workers. If it's the last
+        """ 
+        Prepare the last sampled token ids for TP workers. If it's the last 
         PP rank, then the last sampled token ids are already in the model_input.
         If it is NOT the last PP rank, then we need to get the last sampled
         token that is cached in the execute_model_req.
         """
         if get_pp_group().is_last_rank:
-            assert (
-                model_input.cached_outputs[-1].sampler_output.sampled_token_ids
-                is None)
+            assert model_input.cached_outputs[
+                -1].sampler_output.sampled_token_ids is None
             assert model_input.cached_outputs[-1].sampled_token_ids is not None
             model_input.last_sampled_token_ids = model_input.cached_outputs[
                 -1].sampled_token_ids
@@ -127,8 +124,7 @@ class MultiStepWorker(Worker):
                 execute_model_req.last_sampled_token_ids.cuda())
             model_input.add_sampler_output(
                 SamplerOutput(outputs=[], sampled_token_ids=None),
-                model_input.last_sampled_token_ids,
-            )
+                model_input.last_sampled_token_ids)
 
             # free sampled token ids from the previous step.
             # TODO(will) we could reuse the sampled token ids tensor from
@@ -159,8 +155,8 @@ class MultiStepWorker(Worker):
                 return None
 
             virtual_engine = execute_model_req.virtual_engine
-            (model_input, worker_input, kwargs) = (
-                self._get_driver_input_and_broadcast(execute_model_req))
+            (model_input, worker_input,
+             kwargs) = self._get_driver_input_and_broadcast(execute_model_req)
             assert isinstance(model_input, StatefulModelInput)
             if execute_model_req.is_first_multi_step:
                 # cache the worker input and model input for the next steps
@@ -193,8 +189,7 @@ class MultiStepWorker(Worker):
                 # advance_step
                 model_input.add_sampler_output(
                     SamplerOutput(outputs=[], sampled_token_ids=None),
-                    model_input.last_sampled_token_ids,
-                )
+                    model_input.last_sampled_token_ids)
 
         assert model_input is not None
         assert worker_input is not None

@@ -39,12 +39,10 @@ def model_runner():
 
     if current_platform.is_hpu():
         from vllm.v1.worker.hpu_model_runner import HPUModelRunner
-
         return HPUModelRunner(vllm_config)
     else:
         from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-
-        return GPUModelRunner(vllm_config, "cuda")
+        return GPUModelRunner(vllm_config, 'cuda')
 
 
 def _schedule_new_request(*req_ids: str) -> SchedulerOutput:

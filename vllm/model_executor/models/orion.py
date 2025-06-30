@@ -5,7 +5,6 @@
 # Copyright (c) OrionStar Inc.
 # LICENSE: https://huggingface.co/OrionStarAI/Orion-14B-Base/blob/main/LICENSE
 """Inference-only Orion-14B model compatible with HuggingFace weights."""
-
 from typing import Any, Dict, Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -46,17 +45,13 @@ class OrionMLP(nn.Module):
     ) -> None:
         super().__init__()
         self.gate_up_proj = MergedColumnParallelLinear(
-            hidden_size,
-            [intermediate_size] * 2,
+            hidden_size, [intermediate_size] * 2,
             bias=False,
-            quant_config=quant_config,
-        )
-        self.down_proj = RowParallelLinear(
-            intermediate_size,
-            hidden_size,
-            bias=False,
-            quant_config=quant_config,
-        )
+            quant_config=quant_config)
+        self.down_proj = RowParallelLinear(intermediate_size,
+                                           hidden_size,
+                                           bias=False,
+                                           quant_config=quant_config)
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
@@ -128,15 +123,13 @@ class OrionAttention(nn.Module):
             base=rope_theta,
             rope_scaling=rope_scaling,
         )
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.attn",
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads,
+                              cache_config=cache_config,
+                              quant_config=quant_config,
+                              prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -232,16 +225,12 @@ class OrionModel(nn.Module):
             config.num_hidden_layers,
             lambda prefix: OrionDecoderLayer(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.layers",
-        )
+            prefix=f"{prefix}.layers")
         self.norm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.make_empty_intermediate_tensors = (
-            make_empty_intermediate_tensors_factory(
-                [
-                    "hidden_states",
-                ],
-                config.hidden_size,
-            ))
+            make_empty_intermediate_tensors_factory([
+                "hidden_states",
+            ], config.hidden_size))
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -283,7 +272,7 @@ class OrionModel(nn.Module):
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
-            for param_name, weight_name, shard_id in stacked_params_mapping:
+            for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -361,7 +350,7 @@ class OrionForCausalLM(nn.Module, SupportsPP):
                 # Models trained using ColossalAI may include these tensors in
                 # the checkpoint. Skip them.
                 "rotary_emb.cos_cached",
-                "rotary_emb.sin_cached",
+                "rotary_emb.sin_cached"
             ]),
         )
         return loader.load_weights(weights)

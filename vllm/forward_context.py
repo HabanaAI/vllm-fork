@@ -63,13 +63,11 @@ def get_forward_context() -> ForwardContext:
 
 
 @contextmanager
-def set_forward_context(
-    attn_metadata: Any,
-    vllm_config: VllmConfig,
-    virtual_engine: int = 0,
-    num_tokens: int = 0,
-    dp_awared_padding: bool = False,
-):
+def set_forward_context(attn_metadata: Any,
+                        vllm_config: VllmConfig,
+                        virtual_engine: int = 0,
+                        num_tokens: int = 0,
+                        dp_awared_padding: bool = False):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
@@ -85,8 +83,8 @@ def set_forward_context(
         if attn_metadata is not None and hasattr(attn_metadata,
                                                  "num_prefill_tokens"):
             # for v0 attention backends
-            batchsize = (attn_metadata.num_prefill_tokens +
-                         attn_metadata.num_decode_tokens)
+            batchsize = attn_metadata.num_prefill_tokens + \
+                attn_metadata.num_decode_tokens
         elif attn_metadata is not None and hasattr(attn_metadata,
                                                    "slot_mapping"):
             batchsize = attn_metadata.slot_mapping.numel()
@@ -105,20 +103,17 @@ def set_forward_context(
                                              device="cpu",
                                              dtype=torch.int32)
             from vllm.distributed.parallel_state import get_dp_group
-
             dist.all_reduce(num_tokens_tensor, group=get_dp_group().cpu_group)
         cu_tokens_across_dp_cpu = torch.cumsum(num_tokens_tensor, dim=0)
 
         if current_platform.is_hpu():
             num_experts_per_tok = 0
             num_experts_per_tok = getattr(
-                vllm_config.model_config.hf_text_config,
-                "num_experts_per_tok",
-                0,
-            )
-            assert num_experts_per_tok > 0, (
+                vllm_config.model_config.hf_text_config, "num_experts_per_tok",
+                0)
+            assert num_experts_per_tok > 0, \
                 "No expert found in the model config.\
-                    Please check the model config.")
+                    Please check the model config."
 
             request_batch_size = attn_metadata.slot_mapping.size(0)
             padded_seq_length = attn_metadata.slot_mapping.size(1)
@@ -128,28 +123,17 @@ def set_forward_context(
             hidden_states_across_dp = torch.empty(
                 (request_batch_size * dp_size, padded_seq_length, hidden_size),
                 device=device,
-                dtype=dtype,
-            )
-            topk_ids_across_dp = torch.empty(
-                (batchsize * dp_size, num_experts_per_tok),
-                device=device,
-                dtype=torch.int64,
-            )
-            topk_weights_across_dp = torch.empty(
-                (batchsize * dp_size, num_experts_per_tok),
-                device=device,
-                dtype=dtype,
-            )
-            hidden_states = torch.empty((batchsize, hidden_size),
-                                        device=device,
-                                        dtype=dtype)
-            dp_metadata = DPMetadata(
-                cu_tokens_across_dp_cpu,
-                hidden_states_across_dp,
-                topk_ids_across_dp,
-                topk_weights_across_dp,
-                hidden_states,
-            )
+                dtype=dtype)
+            topk_ids_across_dp = torch.empty((batchsize * dp_size,\
+                num_experts_per_tok), device=device, dtype=torch.int64)
+            topk_weights_across_dp = torch.empty((batchsize * dp_size,\
+                num_experts_per_tok), device=device, dtype=dtype)
+            hidden_states = torch.empty((batchsize, hidden_size),\
+                device=device, dtype=dtype)
+            dp_metadata = DPMetadata(cu_tokens_across_dp_cpu,
+                                     hidden_states_across_dp,
+                                     topk_ids_across_dp,
+                                     topk_weights_across_dp, hidden_states)
         else:
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu)
 
@@ -160,8 +144,7 @@ def set_forward_context(
         static_forward_context,
         virtual_engine=virtual_engine,
         attn_metadata=attn_metadata,
-        dp_metadata=dp_metadata,
-    )
+        dp_metadata=dp_metadata)
 
     # KVConnector: trigger (possibly async) load before forward.
     # Each attn layer will block until the reading is complete.
@@ -180,8 +163,8 @@ def set_forward_context(
         if need_to_track_batchsize:
             if hasattr(attn_metadata, "num_prefill_tokens"):
                 # for v0 attention backends
-                batchsize = (attn_metadata.num_prefill_tokens +
-                             attn_metadata.num_decode_tokens)
+                batchsize = attn_metadata.num_prefill_tokens + \
+                    attn_metadata.num_decode_tokens
             elif hasattr(attn_metadata, "slot_mapping"):
                 batchsize = attn_metadata.slot_mapping.numel()
             else:
@@ -207,11 +190,9 @@ def set_forward_context(
                     forward_stats.append((bs, len(times), medium))
                 forward_stats.sort(key=lambda x: x[1], reverse=True)
                 if forward_stats:
-                    logger.info(
-                        ("Batchsize forward time stats "
-                         "(batchsize, count, median_time(ms)): %s"),
-                        forward_stats,
-                    )
+                    logger.info(("Batchsize forward time stats "
+                                 "(batchsize, count, median_time(ms)): %s"),
+                                forward_stats)
 
         # KVConnector: each attn layer triggers (possibly async) save.
         # Ensure all those operations complete before forward() is done.

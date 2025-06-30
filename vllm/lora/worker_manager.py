@@ -125,8 +125,7 @@ class WorkerLoRAManager(AbstractWorkerManager):
                 self.lora_config.lora_extra_vocab_size,
                 embedding_modules=self.embedding_modules,
                 embedding_padding_modules=self.embedding_padding_modules,
-                weights_mapper=hf_to_vllm_mapper,
-            )
+                weights_mapper=hf_to_vllm_mapper)
 
         except FileNotFoundError as e:
             # FileNotFoundError should be raised if both
@@ -165,30 +164,19 @@ class WorkerLoRAManager(AbstractWorkerManager):
 
     def set_active_adapters(self, requests: Set[Any],
                             mapping: Optional[Any]) -> None:
-        set_active_adapters_worker(
-            requests,
-            mapping,
-            self._apply_adapters,
-            self._adapter_manager.set_adapter_mapping,
-        )
+        set_active_adapters_worker(requests, mapping, self._apply_adapters,
+                                   self._adapter_manager.set_adapter_mapping)
 
     def _apply_adapters(self, adapter_requests: Set[Any]) -> None:
-        apply_adapters_worker(
-            adapter_requests,
-            self.list_adapters,
-            self._adapter_manager.adapter_slots,
-            self.remove_adapter,
-            self.add_adapter,
-        )
+        apply_adapters_worker(adapter_requests, self.list_adapters,
+                              self._adapter_manager.adapter_slots,
+                              self.remove_adapter, self.add_adapter)
 
     def add_adapter(self, adapter_request: Any) -> bool:
-        return add_adapter_worker(
-            adapter_request,
-            self.list_adapters,
-            self._load_adapter,
-            self._adapter_manager.add_adapter,
-            self._adapter_manager.activate_adapter,
-        )
+        return add_adapter_worker(adapter_request, self.list_adapters,
+                                  self._load_adapter,
+                                  self._adapter_manager.add_adapter,
+                                  self._adapter_manager.activate_adapter)
 
     def remove_adapter(self, adapter_id: int) -> bool:
         return self._adapter_manager.remove_adapter(adapter_id)
@@ -257,7 +245,7 @@ class LRUCacheWorkerLoRAManager(WorkerLoRAManager):
         else:
             # If the lora is already loaded, just touch it to
             # update its position in the caches
-            loaded = (self._adapter_manager.get_adapter(
-                lora_request.lora_int_id) is not None)
+            loaded = self._adapter_manager.get_adapter(
+                lora_request.lora_int_id) is not None
         self._adapter_manager.activate_adapter(lora_request.lora_int_id)
         return loaded

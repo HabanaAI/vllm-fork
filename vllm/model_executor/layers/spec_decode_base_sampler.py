@@ -14,7 +14,7 @@ is_hpu = current_platform.is_hpu()
 
 class SpecDecodeBaseSampler(nn.Module):
     """Base class for samplers used for Speculative Decoding verification
-    step.
+        step.
     """
 
     def __init__(self, strict_mode: bool = False):
@@ -49,11 +49,9 @@ class SpecDecodeBaseSampler(nn.Module):
                                                dtype=torch.long,
                                                device=device)
 
-    def init_tensors(
-        self,
-        device: Union[int, str],
-        device_type: Union[torch.device, str] = "cuda",
-    ) -> None:
+    def init_tensors(self,
+                     device: Union[int, str],
+                     device_type: Union[torch.device, str] = 'cuda') -> None:
         assert self.num_accepted_tokens is None
         if isinstance(device_type, torch.device):
             device_type = device_type.type
@@ -82,7 +80,7 @@ class SpecDecodeBaseSampler(nn.Module):
             bonus_token_ids: torch.Tensor,  # [batch_size]
     ) -> torch.Tensor:
         """Format output. Returns a matrix of token ids. When
-        a token is rejected via sampling, all subsequent token ids are
+        a token is rejected via sampling, all subsequent token ids are 
         set to -1 for the sequence.
 
         Args:
@@ -91,12 +89,12 @@ class SpecDecodeBaseSampler(nn.Module):
             substitute_token_ids: A tensor of token_ids that can be used
             as substitutes for the draft token ids if the proposed token
             is rejected.
-            draft_token_ids: A tensor of token ids speculated by the
+            draft_token_ids: A tensor of token ids speculated by the 
             draft model.
             bonus_token_ids: Token ids to use as the bonus token if
             all the draft tokens are accepted.
         Returns:
-            A tensor containing the accepted token ids. The shape of the
+            A tensor containing the accepted token ids. The shape of the 
             tensor is [batch_size, k + num_bonus_tokens]
         """
         batch_size, k = substitute_token_ids.shape
@@ -118,8 +116,7 @@ class SpecDecodeBaseSampler(nn.Module):
         output_with_bonus_tokens = -torch.ones(
             (batch_size, k + self._num_bonus_tokens),
             dtype=self.token_id_dtype,
-            device=accepted.device,
-        )
+            device=accepted.device)
         output = output_with_bonus_tokens[:, :k]
 
         # Fill in the first k columns of the output tensor using masks and data
@@ -150,24 +147,15 @@ class SpecDecodeBaseSampler(nn.Module):
         bonus_token_ids: torch.Tensor,
         draft_probs: Optional[torch.Tensor] = None,
     ) -> None:
-        self._raise_if_incorrect_shape(
-            target_with_bonus_probs,
-            draft_token_ids,
-            bonus_token_ids,
-            draft_probs,
-        )
-        self._raise_if_incorrect_dtype(
-            target_with_bonus_probs,
-            draft_token_ids,
-            bonus_token_ids,
-            draft_probs,
-        )
-        self._raise_if_inconsistent_device(
-            target_with_bonus_probs,
-            draft_token_ids,
-            bonus_token_ids,
-            draft_probs,
-        )
+        self._raise_if_incorrect_shape(target_with_bonus_probs,
+                                       draft_token_ids, bonus_token_ids,
+                                       draft_probs)
+        self._raise_if_incorrect_dtype(target_with_bonus_probs,
+                                       draft_token_ids, bonus_token_ids,
+                                       draft_probs)
+        self._raise_if_inconsistent_device(target_with_bonus_probs,
+                                           draft_token_ids, bonus_token_ids,
+                                           draft_probs)
         self._raise_if_out_of_bounds_vocab(target_with_bonus_probs.shape[-1],
                                            draft_token_ids, bonus_token_ids)
 
@@ -179,7 +167,7 @@ class SpecDecodeBaseSampler(nn.Module):
         draft_probs: Optional[torch.Tensor] = None,
     ) -> None:
         (target_batch_size, num_target_probs,
-         target_vocab_size) = (target_with_bonus_probs.shape)
+         target_vocab_size) = target_with_bonus_probs.shape
 
         # Does not count the extra token
         num_target_probs -= 1
@@ -197,11 +185,11 @@ class SpecDecodeBaseSampler(nn.Module):
         # validate the shape of draft probs if it is set
         if draft_probs is not None:
             (draft_batch_size, num_draft_probs,
-             draft_vocab_size) = (draft_probs.shape)
+             draft_vocab_size) = draft_probs.shape
             assert draft_batch_size == target_batch_size
             assert num_draft_probs == num_target_probs
-            assert draft_vocab_size == target_vocab_size, (
-                f"{draft_vocab_size=} {target_vocab_size=}")
+            assert (draft_vocab_size == target_vocab_size
+                    ), f"{draft_vocab_size=} {target_vocab_size=}"
 
     def _raise_if_incorrect_dtype(
         self,
@@ -225,10 +213,8 @@ class SpecDecodeBaseSampler(nn.Module):
     ) -> None:
         devices = [
             t.device for t in [
-                target_with_bonus_probs,
-                bonus_token_ids,
-                draft_probs,
-                draft_token_ids,
+                target_with_bonus_probs, bonus_token_ids, draft_probs,
+                draft_token_ids
             ] if t is not None
         ]
         assert all([devices[0] == device for device in devices])
@@ -247,7 +233,7 @@ class SpecDecodeBaseSampler(nn.Module):
 
 class SpecDecodeDeterministicBaseSampler(SpecDecodeBaseSampler):
     """Base class for samplers used for Speculative Decoding verification
-    step which are deterministic.
+       step which are deterministic.
     """
 
     @abstractmethod
@@ -263,7 +249,7 @@ class SpecDecodeDeterministicBaseSampler(SpecDecodeBaseSampler):
 
 class SpecDecodeStochasticBaseSampler(SpecDecodeBaseSampler):
     """Base class for samplers used for Speculative Decoding verification
-    step which are stochastic
+       step which are stochastic
     """
 
     @abstractmethod

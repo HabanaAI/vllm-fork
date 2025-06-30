@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """PyTorch MAMBA2 model."""
-
 from typing import Iterable, Optional, Set, Tuple
 
 import torch
@@ -41,28 +40,25 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 
 class Mamba2DecoderLayer(nn.Module):
 
-    def __init__(
-        self,
-        config: MambaConfig,
-        quant_config: Optional[QuantizationConfig] = None,
-    ) -> None:
+    def __init__(self,
+                 config: MambaConfig,
+                 quant_config: Optional[QuantizationConfig] = None) -> None:
         super().__init__()
         self.config = config
-        self.mixer = MambaMixer2(
-            hidden_size=config.hidden_size,
-            ssm_state_size=config.state_size,
-            conv_kernel_size=config.conv_kernel,
-            intermediate_size=getattr(config, "intermediate_size",
-                                      config.expand * config.hidden_size),
-            use_conv_bias=config.use_conv_bias,
-            use_bias=config.use_bias,
-            n_groups=config.n_groups,
-            num_heads=config.num_heads,
-            head_dim=config.head_dim,
-            rms_norm_eps=config.layer_norm_epsilon,
-            activation=config.hidden_act,
-            quant_config=quant_config,
-        )
+        self.mixer = MambaMixer2(hidden_size=config.hidden_size,
+                                 ssm_state_size=config.state_size,
+                                 conv_kernel_size=config.conv_kernel,
+                                 intermediate_size=getattr(
+                                     config, "intermediate_size",
+                                     config.expand * config.hidden_size),
+                                 use_conv_bias=config.use_conv_bias,
+                                 use_bias=config.use_bias,
+                                 n_groups=config.n_groups,
+                                 num_heads=config.num_heads,
+                                 head_dim=config.head_dim,
+                                 rms_norm_eps=config.layer_norm_epsilon,
+                                 activation=config.hidden_act,
+                                 quant_config=quant_config)
 
         self.norm = RMSNorm(config.hidden_size, eps=config.layer_norm_epsilon)
 
@@ -112,8 +108,7 @@ class Mamba2Model(nn.Module):
             config.num_hidden_layers,
             lambda prefix: Mamba2DecoderLayer(config,
                                               quant_config=quant_config),
-            prefix=f"{prefix}.layers",
-        )
+            prefix=f"{prefix}.layers")
 
         self.norm_f = RMSNorm(config.hidden_size,
                               eps=config.layer_norm_epsilon)
@@ -160,8 +155,7 @@ class Mamba2Model(nn.Module):
                 residual=residual,
                 mamba_cache_params=mamba_cache_params.at_layer_idx(
                     i - self.start_layer),
-                mamba2_metadata=mamba2_metadata,
-            )
+                mamba2_metadata=mamba2_metadata)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
@@ -182,8 +176,8 @@ class Mamba2ForCausalLM(nn.Module, HasInnerState, IsAttentionFree,
         cache_config = vllm_config.cache_config
         lora_config = vllm_config.lora_config
         scheduler_config = vllm_config.scheduler_config
-        assert not cache_config.enable_prefix_caching, (
-            "Mamba does not support prefix caching")
+        assert not cache_config.enable_prefix_caching, \
+            "Mamba does not support prefix caching"
 
         super().__init__()
         self.config = config
@@ -220,33 +214,23 @@ class Mamba2ForCausalLM(nn.Module, HasInnerState, IsAttentionFree,
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.backbone.get_input_embeddings(input_ids)
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        **kwargs,
-    ):
+    def forward(self,
+                input_ids: torch.Tensor,
+                positions: torch.Tensor,
+                intermediate_tensors: Optional[IntermediateTensors] = None,
+                inputs_embeds: Optional[torch.Tensor] = None,
+                **kwargs):
         if self.mamba_cache is None:
             num_mamba_layers = self.model_config.get_num_layers_by_block_type(
                 self.vllm_config.parallel_config, LayerBlockType.mamba)
             self.mamba_cache = MambaCacheManager(
-                self.vllm_config,
-                self.lm_head.weight.dtype,
-                num_mamba_layers,
-                *self._get_mamba_cache_shape(),
-            )
+                self.vllm_config, self.lm_head.weight.dtype, num_mamba_layers,
+                *self._get_mamba_cache_shape())
 
         mamba_cache_params = self.mamba_cache.current_run_tensors(**kwargs)
 
-        hidden_states = self.backbone(
-            input_ids,
-            positions,
-            mamba_cache_params,
-            intermediate_tensors,
-            inputs_embeds,
-        )
+        hidden_states = self.backbone(input_ids, positions, mamba_cache_params,
+                                      intermediate_tensors, inputs_embeds)
 
         return hidden_states
 
@@ -264,18 +248,17 @@ class Mamba2ForCausalLM(nn.Module, HasInnerState, IsAttentionFree,
         conv_state_shape, temporal_state_shape = None, None
 
         intermediate_size = getattr(
-            self.config,
-            "intermediate_size",
-            self.config.expand * self.config.hidden_size,
-        )
+            self.config, "intermediate_size",
+            self.config.expand * self.config.hidden_size)
 
         # if n_groups is not divisible by world_size, need to extend the shards
         # to ensure all groups needed by a head is sharded along with it
-        n_groups = self.config.n_groups + extra_groups_for_head_shards(
-            self.config.n_groups, world_size)
+        n_groups = (
+            self.config.n_groups +
+            extra_groups_for_head_shards(self.config.n_groups, world_size))
 
         # - heads and n_groups are TP-ed
-        conv_dim = intermediate_size + 2 * n_groups * self.config.state_size
+        conv_dim = (intermediate_size + 2 * n_groups * self.config.state_size)
         conv_state_shape = (
             divide(conv_dim, world_size),
             self.config.conv_kernel - 1,

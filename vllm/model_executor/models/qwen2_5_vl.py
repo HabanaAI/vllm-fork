@@ -89,9 +89,9 @@ class AttentionLongSequence:
         """
         q_len = q.size(-2)
         assert q_len % q_block_size == 0
-        q_tiles = ((q_len // q_block_size) if
-                   (q_len % q_block_size == 0) else math.ceil(q_len /
-                                                              q_block_size))
+        q_tiles = (q_len //
+                   q_block_size) if (q_len % q_block_size == 0) else math.ceil(
+                       q_len / q_block_size)
         attn_output = torch.zeros_like(q)
 
         for i in range(q_tiles):
@@ -110,9 +110,9 @@ class AttentionLongSequence:
 
 def create_block_diagonal_attention_mask_outerprod(indices):
     maxsize = indices[-1]
-    range_to_max_for_each_img = (torch.arange(
+    range_to_max_for_each_img = torch.arange(
         maxsize,
-        device=indices.device).unsqueeze(0).repeat(indices.shape[0] - 1, 1))
+        device=indices.device).unsqueeze(0).repeat(indices.shape[0] - 1, 1)
     lesser = range_to_max_for_each_img < indices[1:].unsqueeze(1)
     greater_eq = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
     range_indices = torch.logical_and(lesser, greater_eq).float()
@@ -121,10 +121,10 @@ def create_block_diagonal_attention_mask_outerprod(indices):
         log_msg = "einsum running on CPU :" + str(range_indices.shape)
         logger.info(log_msg)
         range_indices = range_indices.to("cpu")
-        res = torch.einsum("bi,bj->ij", range_indices, range_indices)
+        res = torch.einsum('bi,bj->ij', range_indices, range_indices)
         res = res.to("hpu")
     else:
-        res = torch.einsum("bi,bj->ij", range_indices, range_indices)
+        res = torch.einsum('bi,bj->ij', range_indices, range_indices)
     return res.bool()
 
 
@@ -219,37 +219,29 @@ Qwen2_5_VLVideoInputs = Union[Qwen2_5_VLVideoPixelInputs,
 
 class Qwen2_5_VisionMLP(nn.Module):
 
-    def __init__(
-        self,
-        in_features: int,
-        hidden_features: int,
-        bias: bool = False,
-        act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ):
+    def __init__(self,
+                 in_features: int,
+                 hidden_features: int,
+                 bias: bool = False,
+                 act_fn: Callable[[torch.Tensor], torch.Tensor] = F.silu,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = ""):
         super().__init__()
-        self.gate_proj = ColumnParallelLinear(
-            in_features,
-            hidden_features,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.gate_proj",
-        )
-        self.up_proj = ColumnParallelLinear(
-            in_features,
-            hidden_features,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.up_proj",
-        )
-        self.down_proj = RowParallelLinear(
-            hidden_features,
-            in_features,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.down_proj",
-        )
+        self.gate_proj = ColumnParallelLinear(in_features,
+                                              hidden_features,
+                                              bias=bias,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.gate_proj")
+        self.up_proj = ColumnParallelLinear(in_features,
+                                            hidden_features,
+                                            bias=bias,
+                                            quant_config=quant_config,
+                                            prefix=f"{prefix}.up_proj")
+        self.down_proj = RowParallelLinear(hidden_features,
+                                           in_features,
+                                           bias=bias,
+                                           quant_config=quant_config,
+                                           prefix=f"{prefix}.down_proj")
         self.act_fn = act_fn
 
     def forward(self, x: torch.Tensor):
@@ -263,13 +255,10 @@ class Qwen2_5_VisionMLP(nn.Module):
 def all_gather_interleave(local_tensor, hidden_size: int, tp_size: int):
     """All-gather the input tensor interleavely across model parallel group."""
     import torch.distributed as dist
-
     gathered_tensors = [torch.zeros_like(local_tensor) for _ in range(tp_size)]
-    dist.all_gather(
-        gathered_tensors,
-        local_tensor,
-        group=parallel_state.get_tp_group().device_group,
-    )
+    dist.all_gather(gathered_tensors,
+                    local_tensor,
+                    group=parallel_state.get_tp_group().device_group)
 
     gathered_tensors_split = [
         torch.split(tensor, hidden_size // tp_size, -1)
@@ -308,29 +297,24 @@ class Qwen2_5_VisionAttention(nn.Module):
             total_num_kv_heads=num_heads,
             bias=True,
             quant_config=quant_config,
-            prefix=f"{prefix}.qkv",
-        )
-        self.proj = RowParallelLinear(
-            input_size=projection_size,
-            output_size=embed_dim,
-            quant_config=quant_config,
-            prefix=f"{prefix}.proj",
-        )
+            prefix=f"{prefix}.qkv")
+        self.proj = RowParallelLinear(input_size=projection_size,
+                                      output_size=embed_dim,
+                                      quant_config=quant_config,
+                                      prefix=f"{prefix}.proj")
 
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
         if self.attn_backend not in {
-                _Backend.FLASH_ATTN,
-                _Backend.TORCH_SDPA,
-                _Backend.XFORMERS,
+                _Backend.FLASH_ATTN, _Backend.TORCH_SDPA, _Backend.XFORMERS
         }:
             raise RuntimeError(
                 f"Qwen2.5-VL does not support {self.attn_backend} backend now."
             )
 
-        self.softmax_mode = ("fp32" if os.environ.get(
-            "VLLM_FP32_SOFTMAX_VISION", "false").lower() in ["true", "1"] else
-                             "None")
+        self.softmax_mode = 'fp32' if os.environ.get(
+            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
+                                                             ] else 'None'
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -344,21 +328,15 @@ class Qwen2_5_VisionAttention(nn.Module):
 
         # 3 * [s, b, head * head_dim]
         if self.tp_size > 1:
-            splitter = partial(
-                dist_utils.split_tensor_along_last_dim,
-                num_partitions=self.tp_size,
-            )
+            splitter = partial(dist_utils.split_tensor_along_last_dim,
+                               num_partitions=self.tp_size)
             q = splitter(q)[self.tp_rank]
             k = splitter(k)[self.tp_rank]
             v = splitter(v)[self.tp_rank]
 
         # 3 * [s, b, head * head_dim] -> 3 * [s, b, head, head_dim]
-        new_shape = (
-            seq_len,
-            bs,
-            self.num_attention_heads_per_partition,
-            self.hidden_size_per_attention_head,
-        )
+        new_shape = (seq_len, bs, self.num_attention_heads_per_partition,
+                     self.hidden_size_per_attention_head)
         q, k, v = (x.view(*new_shape) for x in (q, k, v))
         return q, k, v
 
@@ -395,17 +373,15 @@ class Qwen2_5_VisionAttention(nn.Module):
 
             q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
 
-            output = flash_attn_varlen_func(
-                q,
-                k,
-                v,
-                cu_seqlens_q=cu_seqlens,
-                cu_seqlens_k=cu_seqlens,
-                max_seqlen_q=max_seqlen,
-                max_seqlen_k=max_seqlen,
-                dropout_p=0,
-                causal=False,
-            )
+            output = flash_attn_varlen_func(q,
+                                            k,
+                                            v,
+                                            cu_seqlens_q=cu_seqlens,
+                                            cu_seqlens_k=cu_seqlens,
+                                            max_seqlen_q=max_seqlen,
+                                            max_seqlen_k=max_seqlen,
+                                            dropout_p=0,
+                                            causal=False)
 
             context_layer = rearrange(output,
                                       "(b s) ... -> b s ...",
@@ -454,16 +430,8 @@ class Qwen2_5_VisionAttention(nn.Module):
                 assert attn_mask.shape == mask_shape
 
                 if q1.shape[2] <= 65536:  # need to investigate this crosspoint
-                    fused_out = FusedSDPA.apply(
-                        q1,
-                        k1,
-                        v1,
-                        attn_mask,
-                        0.0,
-                        False,
-                        None,
-                        self.softmax_mode,
-                    )
+                    fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0,
+                                                False, None, self.softmax_mode)
                 else:
                     fused_out = AttentionLongSequence.forward(
                         q1, k1, v1, attn_mask, 64, self.softmax_mode)
@@ -520,21 +488,17 @@ class Qwen2_5_VisionBlock(nn.Module):
             norm_layer = partial(nn.LayerNorm, eps=1e-6)
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
-        self.attn = Qwen2_5_VisionAttention(
-            embed_dim=dim,
-            num_heads=num_heads,
-            projection_size=dim,
-            quant_config=quant_config,
-            prefix=f"{prefix}.attn",
-        )
-        self.mlp = Qwen2_5_VisionMLP(
-            dim,
-            mlp_hidden_dim,
-            act_fn=act_fn,
-            bias=True,
-            quant_config=quant_config,
-            prefix=f"{prefix}.mlp",
-        )
+        self.attn = Qwen2_5_VisionAttention(embed_dim=dim,
+                                            num_heads=num_heads,
+                                            projection_size=dim,
+                                            quant_config=quant_config,
+                                            prefix=f"{prefix}.attn")
+        self.mlp = Qwen2_5_VisionMLP(dim,
+                                     mlp_hidden_dim,
+                                     act_fn=act_fn,
+                                     bias=True,
+                                     quant_config=quant_config,
+                                     prefix=f"{prefix}.mlp")
 
     def forward(
             self,
@@ -544,13 +508,11 @@ class Qwen2_5_VisionBlock(nn.Module):
             max_seqlen: Optional[int] = None,  # Only used for Flash Attention
             seqlens: Optional[list[int]] = None,  # Only used for xFormers
     ) -> torch.Tensor:
-        x = x + self.attn(
-            self.norm1(x),
-            cu_seqlens=cu_seqlens,
-            rotary_pos_emb=rotary_pos_emb,
-            max_seqlen=max_seqlen,
-            seqlens=seqlens,
-        )
+        x = x + self.attn(self.norm1(x),
+                          cu_seqlens=cu_seqlens,
+                          rotary_pos_emb=rotary_pos_emb,
+                          max_seqlen=max_seqlen,
+                          seqlens=seqlens)
 
         x = x + self.mlp(self.norm2(x))
         return x
@@ -571,13 +533,11 @@ class Qwen2_5_VisionPatchEmbed(nn.Module):
         self.hidden_size = hidden_size
 
         kernel_size = (temporal_patch_size, patch_size, patch_size)
-        self.proj = nn.Conv3d(
-            in_channels,
-            hidden_size,
-            kernel_size=kernel_size,
-            stride=kernel_size,
-            bias=False,
-        )
+        self.proj = nn.Conv3d(in_channels,
+                              hidden_size,
+                              kernel_size=kernel_size,
+                              stride=kernel_size,
+                              bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         L, C = x.shape
@@ -604,21 +564,17 @@ class Qwen2_5_VisionPatchMerger(nn.Module):
             norm_layer = partial(nn.LayerNorm, eps=1e-6)
         self.ln_q = norm_layer(context_dim)
         self.mlp = nn.ModuleList([
-            ColumnParallelLinear(
-                self.hidden_size,
-                self.hidden_size,
-                bias=True,
-                quant_config=quant_config,
-                prefix=f"{prefix}.mlp.0",
-            ),
+            ColumnParallelLinear(self.hidden_size,
+                                 self.hidden_size,
+                                 bias=True,
+                                 quant_config=quant_config,
+                                 prefix=f"{prefix}.mlp.0"),
             nn.GELU(),
-            RowParallelLinear(
-                self.hidden_size,
-                d_model,
-                bias=True,
-                quant_config=quant_config,
-                prefix=f"{prefix}.mlp.2",
-            ),
+            RowParallelLinear(self.hidden_size,
+                              d_model,
+                              bias=True,
+                              quant_config=quant_config,
+                              prefix=f"{prefix}.mlp.2"),
         ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -649,12 +605,8 @@ class Qwen2_5_VisionRotaryEmbedding(nn.Module):
             seqlen *= 2
             self._seq_len_cached = seqlen
             self.inv_freq = 1.0 / (self.theta**(torch.arange(
-                0,
-                self.dim,
-                2,
-                dtype=torch.float,
-                device=self.inv_freq.device,
-            ) / self.dim))
+                0, self.dim, 2, dtype=torch.float, device=self.inv_freq.device)
+                                                / self.dim))
             seq = torch.arange(seqlen,
                                device=self.inv_freq.device,
                                dtype=self.inv_freq.dtype)
@@ -710,8 +662,8 @@ class Qwen2_5_VisionTransformer(nn.Module):
                 act_fn=_ACTIVATION_REGISTRY[vision_config.hidden_act],
                 norm_layer=norm_layer,
                 quant_config=quant_config,
-                prefix=f"{prefix}.blocks.{layer_idx}",
-            ) for layer_idx in range(depth)
+                prefix=f"{prefix}.blocks.{layer_idx}")
+            for layer_idx in range(depth)
         ])
         self.merger = Qwen2_5_VisionPatchMerger(
             d_model=vision_config.out_hidden_size,
@@ -736,18 +688,18 @@ class Qwen2_5_VisionTransformer(nn.Module):
         for t, h, w in grid_thw:
             hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
             wpos_ids = torch.arange(w).unsqueeze(0).expand(h, -1)
-            hpos_ids = (hpos_ids.reshape(
+            hpos_ids = hpos_ids.reshape(
                 h // self.spatial_merge_size,
                 self.spatial_merge_size,
                 w // self.spatial_merge_size,
                 self.spatial_merge_size,
-            ).permute(0, 2, 1, 3).flatten())
-            wpos_ids = (wpos_ids.reshape(
+            ).permute(0, 2, 1, 3).flatten()
+            wpos_ids = wpos_ids.reshape(
                 h // self.spatial_merge_size,
                 self.spatial_merge_size,
                 w // self.spatial_merge_size,
                 self.spatial_merge_size,
-            ).permute(0, 2, 1, 3).flatten())
+            ).permute(0, 2, 1, 3).flatten()
             pos_ids.append(
                 torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1))
         pos_ids = torch.cat(pos_ids, dim=0)
@@ -768,30 +720,26 @@ class Qwen2_5_VisionTransformer(nn.Module):
             llm_grid_w = grid_w // self.spatial_merge_size
             index = torch.arange(grid_t * llm_grid_h * llm_grid_w).reshape(
                 grid_t, llm_grid_h, llm_grid_w)
-            pad_h = vit_merger_window_size - llm_grid_h % vit_merger_window_size
-            pad_w = vit_merger_window_size - llm_grid_w % vit_merger_window_size
+            pad_h = \
+                vit_merger_window_size - llm_grid_h % vit_merger_window_size
+            pad_w = \
+                vit_merger_window_size - llm_grid_w % vit_merger_window_size
             num_windows_h = (llm_grid_h + pad_h) // vit_merger_window_size
             num_windows_w = (llm_grid_w + pad_w) // vit_merger_window_size
-            index_padded = F.pad(index, (0, pad_w, 0, pad_h), "constant", -100)
-            index_padded = index_padded.reshape(
-                grid_t,
-                num_windows_h,
-                vit_merger_window_size,
-                num_windows_w,
-                vit_merger_window_size,
-            )
+            index_padded = F.pad(index, (0, pad_w, 0, pad_h), 'constant', -100)
+            index_padded = index_padded.reshape(grid_t, num_windows_h,
+                                                vit_merger_window_size,
+                                                num_windows_w,
+                                                vit_merger_window_size)
             index_padded = index_padded.permute(0, 1, 3, 2, 4).reshape(
-                grid_t,
-                num_windows_h * num_windows_w,
-                vit_merger_window_size,
-                vit_merger_window_size,
-            )
+                grid_t, num_windows_h * num_windows_w, vit_merger_window_size,
+                vit_merger_window_size)
             seqlens = (index_padded != -100).sum([2, 3]).reshape(-1)
             index_padded = index_padded.reshape(-1)
             index_new = index_padded[index_padded != -100]
             window_index.append(index_new + window_index_id)
-            cu_seqlens_tmp = (seqlens.cumsum(0) * self.spatial_merge_unit +
-                              cu_window_seqlens[-1])
+            cu_seqlens_tmp = seqlens.cumsum(
+                0) * self.spatial_merge_unit + cu_window_seqlens[-1]
             cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
             window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
         window_index = torch.cat(window_index, dim=0)
@@ -826,8 +774,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=hidden_states.device,
-            dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32,
-        )
+            dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32)
         cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = hidden_states.size()
@@ -894,7 +841,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
         loaded_params: Set[str] = set()
 
         for name, loaded_weight in weights:
-            for param_name, weight_name, shard_id in stacked_params_mapping:
+            for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -927,7 +874,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
     def pad_multimodal_data(self, pixel_values, image_grid_thw,
                             vision_buckets):
-        assert pixel_values.shape[0] % 64 == 0, "needs 64 aligned resolution"
+        assert pixel_values.shape[0] % 64 == 0, 'needs 64 aligned resolution'
 
         desired_number_of_pixels = vision_buckets.get_multimodal_bucket(
             pixel_values.shape[0])
@@ -935,26 +882,25 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         if padding_len <= 0:
             return pixel_values, image_grid_thw
 
-        logger_msg = ("Padding current number pixel " +
-                      str(pixel_values.shape[0]) + " to " +
-                      str(desired_number_of_pixels))
+        logger_msg = "Padding current number pixel " \
+            + str(pixel_values.shape[0]) \
+            + " to " \
+            + str(desired_number_of_pixels)
         logger.info(logger_msg)
 
-        assert padding_len % 64 == 0, "padding needs to be multiple of 64"
+        assert padding_len % 64 == 0, 'padding needs to be multiple of 64'
 
         constant_value = -100
         pixel_values = torch.cat([
             pixel_values,
-            torch.ones(
-                (padding_len, pixel_values.shape[1]),
-                device=pixel_values.device,
-            ) * constant_value,
+            torch.ones((padding_len, pixel_values.shape[1]),
+                       device=pixel_values.device) * constant_value
         ])
 
         image_grid_thw = torch.cat([
             image_grid_thw,
             torch.tensor([[1, 8, padding_len // 8]],
-                         device=image_grid_thw.device),
+                         device=image_grid_thw.device)
         ])
 
         assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
@@ -980,8 +926,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=hidden_states.device,
-            dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32,
-        )
+            dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32)
 
         seq_len, _ = hidden_states.size()
         hidden_states = hidden_states.reshape(
@@ -1004,12 +949,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             window_index,
         )
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        fullattn_mask: Optional[torch.Tensor],
-        rotary_pos_emb: torch.Tensor,
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, fullattn_mask: Optional[torch.Tensor],
+                rotary_pos_emb: torch.Tensor) -> torch.Tensor:
         assert_msg = ("Expect inputs to be 112x112 aligned. "
                       "Please align before sending image and "
                       "check PR #1163 description for more details")
@@ -1017,12 +958,10 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         hidden_states = x.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             htcore.mark_step()
-            hidden_states = blk(
-                hidden_states,
-                cu_seqlens=fullattn_mask
-                if layer_num in self.fullatt_block_indexes else None,
-                rotary_pos_emb=rotary_pos_emb,
-            )
+            hidden_states = blk(hidden_states,
+                                cu_seqlens=fullattn_mask if layer_num
+                                in self.fullatt_block_indexes else None,
+                                rotary_pos_emb=rotary_pos_emb)
         return hidden_states
 
     def post_attn(self, hidden_states: torch.Tensor,
@@ -1040,6 +979,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         grid_thw: torch.Tensor,
         vision_buckets,
     ) -> torch.Tensor:
+
         num_patches = pixel_values.shape[0]
         if num_patches % 64 != 0:
             assert num_patches > 64, "Image needs to be at least 112 x 112"
@@ -1074,9 +1014,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             paste_pointer = 0
             for old_img_size, new_img_size in zip(old_img_sizes,
                                                   new_img_sizes):
-                pixel_values[paste_pointer:paste_pointer +
-                             new_img_size, :] = pixel_values[
-                                 copy_pointer:copy_pointer + new_img_size, :]
+                pixel_values[paste_pointer:paste_pointer + new_img_size, :] = \
+                    pixel_values[copy_pointer:copy_pointer + new_img_size, :]
                 copy_pointer += old_img_size
                 paste_pointer += new_img_size
 
@@ -1093,34 +1032,28 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                                                  curr_img_size, :]
 
             offset += curr_img_size
-            pixel_values_curr_img_padded, img_shape_padded = (
+            pixel_values_curr_img_padded, img_shape_padded = \
                 self.pad_multimodal_data(
                     pixel_values_curr_img,
                     img_shape,
-                    vision_buckets=vision_buckets,
-                ))
+                    vision_buckets=vision_buckets
+                )
 
-            (
-                pixel_values_curr_img_padded,
-                rot_pos_emb,
-                cu_seqlens,
-                _,
-                window_index,
-            ) = self.pre_attn(pixel_values_curr_img_padded, img_shape_padded)
+            pixel_values_curr_img_padded, rot_pos_emb, \
+                cu_seqlens, _, window_index = self.pre_attn(
+                    pixel_values_curr_img_padded, img_shape_padded)
 
             # Create full attention block mask before VisionTransformer
             # to save memory/time
-            fullatt_block_attn_mask = (
-                create_block_diagonal_attention_mask_outerprod(cu_seqlens))
-            assert (pixel_values_curr_img_padded.shape[0] == cu_seqlens[-1] ==
-                    rot_pos_emb.shape[0])
+            fullatt_block_attn_mask = \
+                create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+            assert pixel_values_curr_img_padded.shape[0] == cu_seqlens[
+                -1] == rot_pos_emb.shape[0]
 
             htcore.mark_step()
-            hidden_states = self.forward(
-                pixel_values_curr_img_padded,
-                rotary_pos_emb=rot_pos_emb,
-                fullattn_mask=fullatt_block_attn_mask,
-            )
+            hidden_states = self.forward(pixel_values_curr_img_padded,
+                                         rotary_pos_emb=rot_pos_emb,
+                                         fullattn_mask=fullatt_block_attn_mask)
             htcore.mark_step()
 
             image_embeds = self.post_attn(hidden_states, window_index)
@@ -1177,8 +1110,7 @@ class Qwen2_5_VLMultiModalProcessor(Qwen2VLMultiModalProcessor):
 @MULTIMODAL_REGISTRY.register_processor(
     Qwen2_5_VLMultiModalProcessor,
     info=Qwen2_5_VLProcessingInfo,
-    dummy_inputs=Qwen2_5_VLDummyInputsBuilder,
-)
+    dummy_inputs=Qwen2_5_VLDummyInputsBuilder)
 class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                                          SupportsLoRA, SupportsPP):
     packed_modules_mapping = {
@@ -1240,8 +1172,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
     def _validate_and_reshape_mm_tensor(self, mm_input: object,
                                         name: str) -> torch.Tensor:
         if not isinstance(mm_input, (torch.Tensor, list)):
-            raise ValueError(
-                f"Incorrect type of {name}. Got type: {type(mm_input)}")
+            raise ValueError(f"Incorrect type of {name}. "
+                             f"Got type: {type(mm_input)}")
         if isinstance(mm_input, torch.Tensor):
             if mm_input.ndim == 2:
                 return mm_input
@@ -1272,11 +1204,9 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
                 raise ValueError("Incorrect type of image pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
-            return Qwen2_5_VLImagePixelInputs(
-                type="pixel_values",
-                pixel_values=pixel_values,
-                image_grid_thw=image_grid_thw,
-            )
+            return Qwen2_5_VLImagePixelInputs(type="pixel_values",
+                                              pixel_values=pixel_values,
+                                              image_grid_thw=image_grid_thw)
 
         if image_embeds is not None:
             image_embeds = self._validate_and_reshape_mm_tensor(
@@ -1290,8 +1220,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             return Qwen2_5_VLImageEmbeddingInputs(
                 type="image_embeds",
                 image_embeds=image_embeds,
-                image_grid_thw=image_grid_thw,
-            )
+                image_grid_thw=image_grid_thw)
 
     def _parse_and_validate_video_input(
             self, **kwargs: object) -> Optional[Qwen2_5_VLVideoInputs]:
@@ -1328,12 +1257,12 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             return Qwen2_5_VLVideoEmbeddingInputs(
                 type="video_embeds",
                 video_embeds=video_embeds,
-                video_grid_thw=video_grid_thw,
-            )
+                video_grid_thw=video_grid_thw)
 
     def _process_image_input(
             self,
             image_input: Qwen2_5_VLImageInputs) -> tuple[torch.Tensor, ...]:
+
         grid_thw = image_input["image_grid_thw"]
         assert grid_thw.ndim == 2
 
@@ -1361,6 +1290,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
     def _process_video_input(
             self,
             video_input: Qwen2_5_VLVideoInputs) -> tuple[torch.Tensor, ...]:
+
         grid_thw = video_input["video_grid_thw"]
         assert grid_thw.ndim == 2
 
@@ -1393,14 +1323,14 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
         for input_key in kwargs:
-            if (input_key in ("pixel_values", "image_embeds")
-                    and "image" not in mm_input_by_modality):
-                mm_input_by_modality["image"] = (
-                    self._parse_and_validate_image_input(**kwargs))
-            if (input_key in ("pixel_values_videos", "video_embeds")
-                    and "video" not in mm_input_by_modality):
-                mm_input_by_modality["video"] = (
-                    self._parse_and_validate_video_input(**kwargs))
+            if input_key in ("pixel_values", "image_embeds"
+                             ) and "image" not in mm_input_by_modality:
+                mm_input_by_modality[
+                    "image"] = self._parse_and_validate_image_input(**kwargs)
+            if input_key in ("pixel_values_videos", "video_embeds"
+                             ) and "video" not in mm_input_by_modality:
+                mm_input_by_modality[
+                    "video"] = self._parse_and_validate_video_input(**kwargs)
         return mm_input_by_modality
 
     def get_language_model(self) -> torch.nn.Module:
@@ -1408,6 +1338,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def get_multimodal_embeddings(
             self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
+
         mm_input_by_modality = self._parse_and_validate_multimodal_inputs(
             **kwargs)
         if not mm_input_by_modality:
@@ -1437,11 +1368,8 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds = self.language_model.get_input_embeddings(input_ids)
         if multimodal_embeddings is not None:
             inputs_embeds = merge_multimodal_embeddings(
-                input_ids,
-                inputs_embeds,
-                multimodal_embeddings,
-                [self.config.image_token_id, self.config.video_token_id],
-            )
+                input_ids, inputs_embeds, multimodal_embeddings,
+                [self.config.image_token_id, self.config.video_token_id])
         return inputs_embeds
 
     def get_input_embeddings_v0(
@@ -1546,6 +1474,7 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
+
         loader = AutoWeightsLoader(self)
         return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
 

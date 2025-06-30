@@ -16,11 +16,11 @@ def use_v0_only(monkeypatch):
     """
     This module relies on V0 internals, so set VLLM_USE_V1=0.
     """
-    monkeypatch.setenv("VLLM_USE_V1", "0")
+    monkeypatch.setenv('VLLM_USE_V1', '0')
 
 
-@pytest.mark.parametrize("kv_cache_dtype", ["auto", "fp8"])
-@pytest.mark.parametrize("tp", [1])
+@pytest.mark.parametrize('kv_cache_dtype', ['auto', 'fp8'])
+@pytest.mark.parametrize('tp', [1])
 def test_quark_fp8_w_per_tensor_a_per_tensor(vllm_runner, kv_cache_dtype, tp):
     model_path = "amd/Llama-3.1-8B-Instruct-FP8-KV-Quark-test"
     with vllm_runner(model_path,
@@ -46,7 +46,7 @@ def test_quark_fp8_w_per_tensor_a_per_tensor(vllm_runner, kv_cache_dtype, tp):
         assert output
 
 
-@pytest.mark.parametrize("tp", [1])
+@pytest.mark.parametrize('tp', [1])
 def test_quark_int8_w_per_tensor_a_per_tensor(vllm_runner, tp):
     model_path = "amd/Llama-3.1-8B-Instruct-w-int8-a-int8-sym-test"
     with vllm_runner(model_path, tensor_parallel_size=tp) as llm:

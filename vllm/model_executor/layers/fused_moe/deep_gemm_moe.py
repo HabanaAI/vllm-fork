@@ -19,12 +19,10 @@ logger = init_logger(__name__)
 has_deep_gemm = importlib.util.find_spec("deep_gemm") is not None
 
 
-def _valid_deep_gemm(
-    hidden_states: torch.Tensor,
-    w1: torch.Tensor,
-    w2: torch.Tensor,
-    expert_map: Optional[torch.Tensor] = None,
-) -> bool:
+def _valid_deep_gemm(hidden_states: torch.Tensor,
+                     w1: torch.Tensor,
+                     w2: torch.Tensor,
+                     expert_map: Optional[torch.Tensor] = None) -> bool:
     """
     Check if the given problem size is supported by the DeepGemm grouped
     gemm kernel.  All of M, N, K and the quantization block_shape must be
@@ -63,13 +61,8 @@ def _moe_permute(
     global_num_experts: int,
     expert_map: Optional[torch.Tensor],
     block_m: int,
-) -> Tuple[
-        torch.Tensor,
-        Optional[torch.Tensor],
-        torch.Tensor,
-        torch.Tensor,
-        Optional[torch.Tensor],
-]:
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], torch.Tensor, torch.Tensor,
+           Optional[torch.Tensor]]:
     """
     Determine the sorted_token_ids, expert_ids for the given problem size.
     Permute the hidden states and scales according to `sorted_token_ids`.
@@ -78,13 +71,12 @@ def _moe_permute(
 
     tokens_in_chunk, _ = curr_hidden_states.shape
 
-    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-        curr_topk_ids,
-        block_m,
-        global_num_experts,
-        expert_map,
-        pad_sorted_ids=True,
-    )
+    sorted_token_ids, expert_ids, num_tokens_post_padded = (
+        moe_align_block_size(curr_topk_ids,
+                             block_m,
+                             global_num_experts,
+                             expert_map,
+                             pad_sorted_ids=True))
 
     inv_perm: Optional[torch.Tensor] = None
 
@@ -100,13 +92,8 @@ def _moe_permute(
     if a1q_scale is not None:
         a1q_scale = a1q_scale[sorted_token_ids // top_k_num]
 
-    return (
-        curr_hidden_states,
-        a1q_scale,
-        sorted_token_ids,
-        expert_ids,
-        inv_perm,
-    )
+    return (curr_hidden_states, a1q_scale, sorted_token_ids, expert_ids,
+            inv_perm)
 
 
 def _moe_unpermute_and_reduce(
@@ -198,12 +185,10 @@ def deep_gemm_moe_fp8(
     assert w1.shape[0] == w2.shape[0], "Expert number mismatch"
     assert w1.shape[0] == w1_scale.shape[0], "w1 scales expert number mismatch"
     assert w1.shape[0] == w2_scale.shape[0], "w2 scales expert number mismatch"
-    assert (a1_scale is None or a1_scale.dim() == 0 or a1_scale.shape[0] == 1
-            or a1_scale.shape[0]
-            == hidden_states.shape[0]), "Input scale shape mismatch"
-    assert (a2_scale is None or a1_scale is None
-            or a2_scale.shape == a1_scale.shape
-            ), "Intermediate scale shape mismatch"  # noqa: E501
+    assert a1_scale is None or a1_scale.dim(
+    ) == 0 or a1_scale.shape[0] == 1 or a1_scale.shape[
+        0] == hidden_states.shape[0], "Input scale shape mismatch"
+    assert a2_scale is None or a1_scale is None or a2_scale.shape == a1_scale.shape, "Intermediate scale shape mismatch"  # noqa: E501
 
     num_tokens, _ = hidden_states.shape
     E, N, _ = w1.shape
@@ -241,11 +226,9 @@ def deep_gemm_moe_fp8(
 
     # We can reuse the memory between cache1 and cache3 because by the time
     # we need cache3, we're done with cache1
-    workspace13 = torch.empty(
-        M_sum * max(N, K),
-        device=hidden_states.device,
-        dtype=hidden_states.dtype,
-    )
+    workspace13 = torch.empty(M_sum * max(N, K),
+                              device=hidden_states.device,
+                              dtype=hidden_states.dtype)
 
     workspace1 = workspace13[:M_sum * N].view(M_sum, N)
     workspace2 = torch.empty((M_sum, N // 2),
@@ -254,10 +237,9 @@ def deep_gemm_moe_fp8(
     workspace3 = workspace13[:M_sum * K].view(M_sum, K)
 
     for chunk in range(num_chunks):
-        begin_chunk_idx, end_chunk_idx = (
-            chunk * CHUNK_SIZE,
-            min((chunk + 1) * CHUNK_SIZE, num_tokens),
-        )
+        begin_chunk_idx, end_chunk_idx = (chunk * CHUNK_SIZE,
+                                          min((chunk + 1) * CHUNK_SIZE,
+                                              num_tokens))
         curr_hidden_states = hidden_states[begin_chunk_idx:end_chunk_idx]
         tokens_in_chunk, _ = curr_hidden_states.shape
 
@@ -272,20 +254,10 @@ def deep_gemm_moe_fp8(
         qcurr_hidden_states, a1q_scale = _fp8_quantize(curr_hidden_states,
                                                        a1_scale, block_shape)
 
-        (
-            qcurr_hidden_states,
-            a1q_scale,
-            sorted_token_ids,
-            expert_ids,
-            inv_perm,
-        ) = _moe_permute(
-            qcurr_hidden_states,
-            a1q_scale,
-            curr_topk_ids,
-            global_num_experts,
-            expert_map,
-            block_m,
-        )
+        (qcurr_hidden_states, a1q_scale, sorted_token_ids, expert_ids,
+         inv_perm) = _moe_permute(qcurr_hidden_states, a1q_scale,
+                                  curr_topk_ids, global_num_experts,
+                                  expert_map, block_m)
 
         # Adjust the intermediate cache size and config for the last chunk.
         # Note that in most cases we only have one chunk so the cache size
@@ -297,11 +269,8 @@ def deep_gemm_moe_fp8(
             workspace3 = _resize_cache(workspace3, (curr_M, K))
 
         dg.m_grouped_gemm_fp8_fp8_bf16_nt_contiguous(
-            (qcurr_hidden_states, a1q_scale),
-            (w1, w1_scale),
-            workspace1,
-            expert_ids,
-        )
+            (qcurr_hidden_states, a1q_scale), (w1, w1_scale), workspace1,
+            expert_ids)
 
         if activation == "silu":
             torch.ops._C.silu_and_mul(workspace2, workspace1.view(-1, N))
@@ -320,9 +289,6 @@ def deep_gemm_moe_fp8(
 
         _moe_unpermute_and_reduce(
             out_hidden_states[begin_chunk_idx:end_chunk_idx],
-            workspace3.view(*workspace3.shape),
-            inv_perm,
-            curr_topk_weights,
-        )
+            workspace3.view(*workspace3.shape), inv_perm, curr_topk_weights)
 
     return out_hidden_states

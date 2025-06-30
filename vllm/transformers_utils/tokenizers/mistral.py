@@ -55,7 +55,7 @@ def maybe_serialize_tool_calls(request: "ChatCompletionRequest"):
     #   - https://github.com/pydantic/pydantic/issues/9541
     # TODO: remove when pydantic v2.11 is released
     for i, message in enumerate(request.messages):
-        if message.get("role") == "assistant":
+        if message.get("role") == 'assistant':
             tool_calls_validator = message.get("tool_calls", ().__iter__())
             validated_tool_calls = []
             while True:
@@ -71,7 +71,7 @@ def maybe_serialize_tool_calls(request: "ChatCompletionRequest"):
 def truncate_tool_call_ids(request: "ChatCompletionRequest"):
     """Truncates tool call IDs for Mistral's ID requirements."""
     for i, message in enumerate(request.messages):
-        if message.get("role") == "assistant":
+        if message.get("role") == 'assistant':
             tool_calls = message.get("tool_calls", [])
             for tool_call in tool_calls:
                 if len(tool_call["id"]) > 9:
@@ -101,17 +101,15 @@ def truncate_tool_call_ids(request: "ChatCompletionRequest"):
 def validate_request_params(request: "ChatCompletionRequest"):
     if (request.skip_special_tokens is not None
             and not request.skip_special_tokens):
-        raise ValueError(
-            "skip_special_tokens=False is not supported for Mistral tokenizers."
-        )
+        raise ValueError("skip_special_tokens=False is not supported "
+                         "for Mistral tokenizers.")
 
 
 def list_local_repo_files(repo_id: str, revision: Optional[str]) -> List[str]:
     repo_cache = os.path.join(
         huggingface_hub.constants.HF_HUB_CACHE,
         huggingface_hub.constants.REPO_ID_SEPARATOR.join(
-            ["models", *repo_id.split("/")]),
-    )
+            ["models", *repo_id.split("/")]))
 
     if revision is None:
         revision_file = os.path.join(repo_cache, "refs", "main")
@@ -147,9 +145,9 @@ def find_tokenizer_file(files: List[str]):
 
 
 def make_mistral_chat_completion_request(
-    messages: List["ChatCompletionMessageParam"],
-    tools: Optional[List[Dict[str, Any]]] = None,
-) -> "ChatCompletionRequest":
+        messages: List["ChatCompletionMessageParam"],
+        tools: Optional[List[Dict[str,
+                                  Any]]] = None) -> "ChatCompletionRequest":
     last_message = cast(Dict[str, Any], messages[-1])
     if last_message["role"] == "assistant":
         last_message["prefix"] = True
@@ -175,7 +173,6 @@ def make_mistral_chat_completion_request(
                 function["parameters"] = {}
 
     from mistral_common.protocol.instruct.request import ChatCompletionRequest
-
     return ChatCompletionRequest(messages=messages,
                                  tools=tools)  # type: ignore[type-var]
 
@@ -189,11 +186,9 @@ class MistralTokenizer(TokenizerBase):
         tokenizer_ = tokenizer.instruct_tokenizer.tokenizer
         from mistral_common.tokens.tokenizers.tekken import (
             SpecialTokenPolicy, Tekkenizer)
-
         self.is_tekken = isinstance(tokenizer_, Tekkenizer)
         from mistral_common.tokens.tokenizers.sentencepiece import (
             SentencePieceTokenizer)
-
         self.is_spm = isinstance(tokenizer_, SentencePieceTokenizer)
         if self.is_tekken:
             # Make sure special tokens will not raise
@@ -230,13 +225,12 @@ class MistralTokenizer(TokenizerBase):
                 os.listdir(path_or_repo_id))
             tokenizer_file = str(Path(path_or_repo_id) / tokenizer_file_name)
         else:
-            assert Path(path_or_repo_id).is_file(), (
-                f"Invalid path: {path_or_repo_id}")
+            assert Path(
+                path_or_repo_id).is_file(), f"Invalid path: {path_or_repo_id}"
             tokenizer_file = str(Path(path_or_repo_id))
 
         from mistral_common.tokens.tokenizers.mistral import (
             MistralTokenizer as PublicMistralTokenizer)
-
         mistral_tokenizer = PublicMistralTokenizer.from_file(tokenizer_file)
         return cls(mistral_tokenizer)
 
@@ -364,13 +358,11 @@ class MistralTokenizer(TokenizerBase):
             input_ids = input_ids[:max_length]
         return input_ids
 
-    def encode(
-        self,
-        text: str,
-        truncation: Optional[bool] = None,
-        max_length: Optional[int] = None,
-        add_special_tokens: Optional[bool] = None,
-    ) -> List[int]:
+    def encode(self,
+               text: str,
+               truncation: Optional[bool] = None,
+               max_length: Optional[int] = None,
+               add_special_tokens: Optional[bool] = None) -> List[int]:
         # `encode` should only be used for prompt completion
         # it should never be used for chat_completion.
         # For chat completion use `apply_chat_template`
@@ -381,12 +373,11 @@ class MistralTokenizer(TokenizerBase):
         else:
             return self.tokenizer.encode(text, bos=True, eos=False)
 
-    def apply_chat_template(
-        self,
-        messages: List["ChatCompletionMessageParam"],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        **kwargs,
-    ) -> List[int]:
+    def apply_chat_template(self,
+                            messages: List["ChatCompletionMessageParam"],
+                            tools: Optional[List[Dict[str, Any]]] = None,
+                            **kwargs) -> List[int]:
+
         request = make_mistral_chat_completion_request(messages, tools)
         encoded = self.mistral.encode_chat_completion(request)
 
@@ -395,7 +386,6 @@ class MistralTokenizer(TokenizerBase):
 
     def convert_tokens_to_string(self, tokens: List[str]) -> str:
         from mistral_common.tokens.tokenizers.base import SpecialTokens
-
         if self.is_tekken:
             tokens = [
                 t for t in tokens
@@ -408,18 +398,15 @@ class MistralTokenizer(TokenizerBase):
                 shift = self.tokenizer.num_special_tokens
 
                 def _token_to_id(t: str):
-                    t_bytes = (t.encode("utf-8")
-                               if not isinstance(t, bytes) else t)
+                    t_bytes = t.encode("utf-8") \
+                        if not isinstance(t, bytes) else t
                     try:
-                        return (
-                            shift +
-                            self.tokenizer._tekken_token2id_nospecial[t_bytes])
+                        return shift + \
+                            self.tokenizer._tekken_token2id_nospecial[t_bytes]
                     except KeyError:
                         logger.warning(
                             "Failed to convert token %s to id,"
-                            " replacing with <unk>",
-                            t_bytes,
-                        )
+                            " replacing with <unk>", t_bytes)
                         return self.tokenizer.unk_id
 
                 ids = [_token_to_id(t) for t in tokens]
@@ -447,7 +434,7 @@ class MistralTokenizer(TokenizerBase):
                 decoded_list.append(
                     self.tokenizer.decode(regular_tokens))  # type: ignore
 
-            decoded = "".join(decoded_list)
+            decoded = ''.join(decoded_list)
 
         return decoded
 
@@ -457,9 +444,9 @@ class MistralTokenizer(TokenizerBase):
     def decode(self,
                ids: Union[List[int], int],
                skip_special_tokens: bool = True) -> str:
-        assert skip_special_tokens, (
-            "skip_special_tokens=False is not supported for Mistral tokenizers."
-        )
+        assert (
+            skip_special_tokens
+        ), "skip_special_tokens=False is not supported for Mistral tokenizers."
 
         if isinstance(ids, int):
             ids = [ids]
@@ -473,9 +460,9 @@ class MistralTokenizer(TokenizerBase):
         from mistral_common.tokens.tokenizers.base import SpecialTokens
 
         # TODO(Patrick) - potentially allow special tokens to not be skipped
-        assert skip_special_tokens, (
-            "skip_special_tokens=False is not supported for Mistral tokenizers."
-        )
+        assert (
+            skip_special_tokens
+        ), "skip_special_tokens=False is not supported for Mistral tokenizers."
 
         assert self.is_tekken or self.is_spm, type(self.tokenizer)
 

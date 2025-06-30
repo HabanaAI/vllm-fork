@@ -29,10 +29,10 @@ EXAMPLE_TOOLS = [
                     },
                 },
                 "required": ["city"],
-                "additionalProperties": False,
+                "additionalProperties": False
             },
         },
-        "strict": True,
+        "strict": True
     },
     {
         "type": "function",
@@ -56,10 +56,10 @@ EXAMPLE_TOOLS = [
                     },
                 },
                 "required": ["city", "days"],
-                "additionalProperties": False,
+                "additionalProperties": False
             },
         },
-        "strict": True,
+        "strict": True
     },
 ]
 
@@ -72,7 +72,6 @@ def _compile_and_check(tools: list[ChatCompletionToolsParam], sample_output,
 
     # use build_regex_from_schema used in JSONLogitsProcessor to create Guide
     from outlines_core.fsm.json_schema import build_regex_from_schema
-
     regex = build_regex_from_schema(json.dumps(schema))
     compiled = re.compile(regex)
     matches = compiled.fullmatch(json.dumps(sample_output)) is not None
@@ -87,82 +86,59 @@ VALID_TOOL_OUTPUTS = [
             "city": "Vienna"
         }
     }], True),
-    (
-        [
-            {
-                "name": "get_current_weather",
-                "parameters": {
-                    "city": "Vienna"
-                }
-            },
-            {
-                "name": "get_current_weather",
-                "parameters": {
-                    "city": "Berlin"
-                }
-            },
-        ],
-        True,
-    ),
-    (
-        [{
-            "name": "get_forecast",
-            "parameters": {
-                "city": "Vienna",
-                "days": 7
-            }
-        }],
-        True,
-    ),
-    (
-        [
-            {
-                "name": "get_forecast",
-                "parameters": {
-                    "city": "Vienna",
-                    "days": 7
-                },
-            },
-            {
-                "name": "get_current_weather",
-                "parameters": {
-                    "city": "Vienna"
-                }
-            },
-        ],
-        True,
-    ),
-    (
-        [
-            {
-                "name": "get_forecast",
-                "parameters": {
-                    "city": "Vienna",
-                    "days": 7
-                },
-            },
-            {
-                "name": "get_current_weather",
-                "parameters": {
-                    "city": "Vienna"
-                }
-            },
-            {
-                "name": "get_forecast",
-                "parameters": {
-                    "city": "Berlin",
-                    "days": 7
-                },
-            },
-            {
-                "name": "get_current_weather",
-                "parameters": {
-                    "city": "Berlin"
-                }
-            },
-        ],
-        True,
-    ),
+    ([{
+        "name": "get_current_weather",
+        "parameters": {
+            "city": "Vienna"
+        }
+    }, {
+        "name": "get_current_weather",
+        "parameters": {
+            "city": "Berlin"
+        }
+    }], True),
+    ([{
+        "name": "get_forecast",
+        "parameters": {
+            "city": "Vienna",
+            "days": 7
+        }
+    }], True),
+    ([{
+        "name": "get_forecast",
+        "parameters": {
+            "city": "Vienna",
+            "days": 7
+        }
+    }, {
+        "name": "get_current_weather",
+        "parameters": {
+            "city": "Vienna"
+        }
+    }], True),
+    ([{
+        "name": "get_forecast",
+        "parameters": {
+            "city": "Vienna",
+            "days": 7
+        }
+    }, {
+        "name": "get_current_weather",
+        "parameters": {
+            "city": "Vienna"
+        }
+    }, {
+        "name": "get_forecast",
+        "parameters": {
+            "city": "Berlin",
+            "days": 7
+        }
+    }, {
+        "name": "get_current_weather",
+        "parameters": {
+            "city": "Berlin"
+        }
+    }], True),
 ]
 
 VALID_TOOLS = [t[0] for t in VALID_TOOL_OUTPUTS]
@@ -170,110 +146,92 @@ VALID_TOOLS = [t[0] for t in VALID_TOOL_OUTPUTS]
 
 @pytest.mark.parametrize(
     "sample_output, should_match",
-    VALID_TOOL_OUTPUTS
-    + [
+    VALID_TOOL_OUTPUTS + [
         (None, False),
         ([], False),  # empty list cannot be generated
         ({}, False),  # empty object cannot be generated
         ([{}], False),  # list with empty object cannot be generated
         (
-            [
-                {  # function without required parameters cannot be generated
-                    "name": "get_current_weather"
-                }
-            ],
-            False,
-        ),
+            [{  # function without required parameters cannot be generated
+                "name": "get_current_weather"
+            }],
+            False),
         (
-            [
-                {  # function without required parameters cannot be generated
-                    "name": "get_current_weather",
-                    "parameters": {},
-                }
-            ],
-            False,
-        ),
+            [{  # function without required parameters cannot be generated
+                "name": "get_current_weather",
+                "parameters": {}
+            }],
+            False),
         (
-            [
-                {  # function without required parameters cannot be generated
-                    "name": "get_current_weather",
-                    "parameters": None,
-                }
-            ],
-            False,
-        ),
+            [{  # function without required parameters cannot be generated
+                "name": "get_current_weather",
+                "parameters": None
+            }],
+            False),
         (
             {  # tool call without lists cannot be generated
                 "name": "get_current_weather",
-                "parameters": {"city": "Vienna"},
+                "parameters": {
+                    "city": "Vienna"
+                }
             },
-            False,
-        ),
+            False),
         (
-            [
-                {  # tool call with extra parameters cannot be generated
-                    "name": "get_current_weather",
-                    "parameters": {"city": "Vienna", "extra": "value"},
+            [{  # tool call with extra parameters cannot be generated
+                "name": "get_current_weather",
+                "parameters": {
+                    "city": "Vienna",
+                    "extra": "value"
                 }
-            ],
-            False,
-        ),
+            }],
+            False),
         (
-            [
-                {  # tool call where parameters are first cannot be generated
-                    "parameters": {"city": "Vienna"},
-                    "name": "get_current_weather",
-                }
-            ],
-            False,
-        ),
-        (
-            [
-                {  # tool call without all required parameters cannot be generated
-                    "name": "get_forecast",
-                    "parameters": {"city": "Vienna"},
-                }
-            ],
-            False,
-        ),
-        (  # tool call with incorrect name/parameters cannot be generated
-            [
-                {
-                    "name": "get_weather",
-                    "parameters": {"city": "Vienna", "days": 7},
-                }
-            ],
-            False,
-        ),
-        (  #  tool call with both valid and empty function cannot be generated
-            [
-                {
-                    "name": "get_current_weather",
-                    "parameters": {"city": "Vienna"},
+            [{  # tool call where parameters are first cannot be generated
+                "parameters": {
+                    "city": "Vienna"
                 },
-                {},
-            ],
-            False,
-        ),
-    ],
-)
+                "name": "get_current_weather"
+            }],
+            False),
+        (
+            [{  # tool call without all required parameters cannot be generated
+                "name": "get_forecast",
+                "parameters": {
+                    "city": "Vienna"
+                }
+            }],
+            False),
+        (  # tool call with incorrect name/parameters cannot be generated
+            [{
+                "name": "get_weather",
+                "parameters": {
+                    "city": "Vienna",
+                    "days": 7
+                }
+            }], False),
+        (  #  tool call with both valid and empty function cannot be generated
+            [{
+                "name": "get_current_weather",
+                "parameters": {
+                    "city": "Vienna"
+                }
+            }, {}], False),
+    ])
 def test_guided_json(sample_output, should_match):
-    _compile_and_check(
-        tools=TypeAdapter(
-            list[ChatCompletionToolsParam]).validate_python(EXAMPLE_TOOLS),
-        sample_output=sample_output,
-        should_match=should_match,
-    )
+    _compile_and_check(tools=TypeAdapter(
+        list[ChatCompletionToolsParam]).validate_python(EXAMPLE_TOOLS),
+                       sample_output=sample_output,
+                       should_match=should_match)
 
 
 def update_parameters_none(
-    tool: ChatCompletionToolsParam, ) -> ChatCompletionToolsParam:
+        tool: ChatCompletionToolsParam) -> ChatCompletionToolsParam:
     tool.function.parameters = None
     return tool
 
 
 def update_parameters_empty_dict(
-    tool: ChatCompletionToolsParam, ) -> ChatCompletionToolsParam:
+        tool: ChatCompletionToolsParam) -> ChatCompletionToolsParam:
     tool.function.parameters = {}
     return tool
 
@@ -286,42 +244,31 @@ def update_parameters_empty_dict(
         ({}, False),  # empty object cannot be generated
         ([{}], False),  # list with empty object cannot be generated
         (
-            [
-                {  # function without required parameters cannot be generated
-                    "name": "get_current_weather"
-                }
-            ],
-            False,
-        ),
+            [{  # function without required parameters cannot be generated
+                "name": "get_current_weather"
+            }],
+            False),
         (
-            [
-                {  # function without required parameters cannot be generated
-                    "name": "get_current_weather",
-                    "parameters": None,
-                }
-            ],
-            False,
-        ),
+            [{  # function without required parameters cannot be generated
+                "name": "get_current_weather",
+                "parameters": None
+            }],
+            False),
         (
-            [
-                {  # function with extra parameters cannot be generated
-                    "name": "get_current_weather",
-                    "parameters": {"extra": "value"},
+            [{  # function with extra parameters cannot be generated
+                "name": "get_current_weather",
+                "parameters": {
+                    "extra": "value"
                 }
-            ],
-            False,
-        ),
+            }],
+            False),
         (
-            [
-                {  # only function with empty parameters object is valid
-                    "name": "get_current_weather",
-                    "parameters": {},
-                }
-            ],
-            True,
-        ),
-    ],
-)
+            [{  # only function with empty parameters object is valid
+                "name": "get_current_weather",
+                "parameters": {}
+            }],
+            True),
+    ])
 @pytest.mark.parametrize(
     "update_parameters",
     [update_parameters_none, update_parameters_empty_dict])
@@ -364,8 +311,7 @@ def test_streaming_output_valid(output, empty_params, delta_len):
                 previous_text=previous_text,
                 current_text=current_text,
                 delta_text=delta_text,
-                function_name_returned=function_name_returned,
-            ))
+                function_name_returned=function_name_returned))
 
         if delta_message:
             messages.append(delta_message)
@@ -379,10 +325,10 @@ def test_streaming_output_valid(output, empty_params, delta_len):
             if len(combined_messages) > 1:
                 combined_messages += "},"
 
-            combined_messages += ('{"name": "' +
-                                  message.tool_calls[0].function.name +
-                                  '", "parameters": ' +
-                                  message.tool_calls[0].function.arguments)
+            combined_messages += '{"name": "' + \
+                message.tool_calls[0].function.name  + \
+                    '", "parameters": ' + \
+                        message.tool_calls[0].function.arguments
         else:
             combined_messages += message.tool_calls[0].function.arguments
     combined_messages += "}]"

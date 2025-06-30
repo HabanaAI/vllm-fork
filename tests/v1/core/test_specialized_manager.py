@@ -56,56 +56,17 @@ def test_sliding_window_possible_cached_prefix():
     run_one_case([True, True, False], 2)
     run_one_case([True, True, True], 3)
     run_one_case([True, True, True, False], 3)
-    run_one_case(
-        [
-            True,
-            True,
-            False,
-            True,
-            False,
-            False,
-            True,
-            True,
-            False,
-            True,
-            True,
-            True,
-        ],
-        12,
-    )
-    run_one_case(
-        [
-            True,
-            True,
-            False,
-            True,
-            False,
-            False,
-            True,
-            True,
-            False,
-            False,
-            False,
-        ],
-        8,
-    )
-    run_one_case(
-        [
-            True,
-            True,
-            False,
-            True,
-            False,
-            False,
-            True,
-            True,
-            False,
-            False,
-            False,
-            True,
-        ],
-        8,
-    )
+    run_one_case([
+        True, True, False, True, False, False, True, True, False, True, True,
+        True
+    ], 12)
+    run_one_case([
+        True, True, False, True, False, False, True, True, False, False, False
+    ], 8)
+    run_one_case([
+        True, True, False, True, False, False, True, True, False, False, False,
+        True
+    ], 8)
 
 
 def test_sliding_window_remove_skipped_blocks():
@@ -140,17 +101,7 @@ def test_sliding_window_remove_skipped_blocks():
                 assert block.block_id == id_
 
     original_block_ids = [
-        1000,
-        1001,
-        1002,
-        1003,
-        1004,
-        1005,
-        1006,
-        1007,
-        1008,
-        1009,
-        1010,
+        1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010
     ]
     block_table = id_to_block_table(original_block_ids)
     removed = manager.remove_skipped_blocks(block_table, 0)

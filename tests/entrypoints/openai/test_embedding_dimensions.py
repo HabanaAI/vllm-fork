@@ -16,11 +16,9 @@ from ...utils import RemoteOpenAIServer
 
 MODELS = [
     EmbedModelInfo("intfloat/multilingual-e5-small", is_matryoshka=False),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-m-v1.5",
-        is_matryoshka=True,
-        matryoshka_dimensions=[256],
-    ),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-m-v1.5",
+                   is_matryoshka=True,
+                   matryoshka_dimensions=[256]),
 ]
 
 input_texts = [
@@ -48,15 +46,14 @@ def server(model_info, dtype: str):
         dtype,
         "--enforce-eager",
         "--max-model-len",
-        "512",
+        "512"
     ]
 
     if model_info.name == "Snowflake/snowflake-arctic-embed-m-v1.5":
         # Manually enable Matryoshka Embeddings
         args.extend([
-            "--trust_remote_code",
-            "--hf_overrides",
-            '{"matryoshka_dimensions":[256]}',
+            "--trust_remote_code", "--hf_overrides",
+            '{"matryoshka_dimensions":[256]}'
         ])
 
     with RemoteOpenAIServer(model_info.name, args) as remote_server:

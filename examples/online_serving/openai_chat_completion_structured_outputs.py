@@ -19,7 +19,7 @@ def guided_choice_completion(client: OpenAI, model: str):
         model=model,
         messages=[{
             "role": "user",
-            "content": "Classify this sentiment: vLLM is wonderful!",
+            "content": "Classify this sentiment: vLLM is wonderful!"
         }],
         extra_body={"guided_choice": ["positive", "negative"]},
     )

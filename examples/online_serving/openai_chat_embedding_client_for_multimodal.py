@@ -48,18 +48,15 @@ def dse_qwen2_vl(inp: dict):
         messages = [{
             "role":
             "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": inp["image_url"],
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": "What is shown in this image?"
-                },
-            ],
+            "content": [{
+                "type": "image_url",
+                "image_url": {
+                    "url": inp["image_url"],
+                }
+            }, {
+                "type": "text",
+                "text": "What is shown in this image?"
+            }]
         }]
     # Embedding a Text Query
     else:
@@ -69,7 +66,7 @@ def dse_qwen2_vl(inp: dict):
         image_placeholder = Image.new("RGB", (56, 56))
         image_placeholder.save(buffer, "png")
         buffer.seek(0)
-        image_placeholder = base64.b64encode(buffer.read()).decode("utf-8")
+        image_placeholder = base64.b64encode(buffer.read()).decode('utf-8')
         messages = [{
             "role":
             "user",
@@ -78,13 +75,13 @@ def dse_qwen2_vl(inp: dict):
                     "type": "image_url",
                     "image_url": {
                         "url": f"data:image/jpeg;base64,{image_placeholder}",
-                    },
+                    }
                 },
                 {
                     "type": "text",
                     "text": f"Query: {inp['content']}"
                 },
-            ],
+            ]
         }]
 
     response = requests.post(
@@ -105,13 +102,11 @@ def parse_args():
     parser = argparse.ArgumentParser(
         "Script to call a specified VLM through the API. Make sure to serve "
         "the model with --task embed before running this.")
-    parser.add_argument(
-        "--model",
-        type=str,
-        choices=["vlm2vec", "dse_qwen2_vl"],
-        required=True,
-        help="Which model to call.",
-    )
+    parser.add_argument("--model",
+                        type=str,
+                        choices=["vlm2vec", "dse_qwen2_vl"],
+                        required=True,
+                        help="Which model to call.")
     return parser.parse_args()
 
 
@@ -129,6 +124,6 @@ def main(args):
         })
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     args = parse_args()
     main(args)

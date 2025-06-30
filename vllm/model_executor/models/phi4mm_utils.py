@@ -47,10 +47,10 @@ def adaptive_enc_mask(x_len, chunk_start_idx, left_window=0, right_window=0):
     The function is very important for Transformer Transducer Streaming mode
     Args:
         xs_len (int): sequence length
-        chunk_start_idx (list): first idx of each chunk, such as [0,18,36,48].
+        chunk_start_idx (list): first idx of each chunk, such as [0,18,36,48]. 
         It also supports adaptive chunk size [0,10,15,45]
         left_window (int): how many left chunks can be seen
-        right_window (int): how many right chunks can be seen. It is used for
+        right_window (int): how many right chunks can be seen. It is used for 
         chunk overlap model.
         Returns:
             mask (torch.Tensor): a mask tensor for streaming model
@@ -231,8 +231,8 @@ class GLUPointWiseConv(nn.Module):
                 x = (x[:, 0:self.output_dim, :] + self.b1) * (
                     x[:, self.output_dim:self.output_dim * 2, :] + self.b2)
             else:
-                x = ((x[:, 0:self.output_dim, :]) *
-                     (x[:, self.output_dim:self.output_dim * 2, :]))
+                x = (x[:, 0:self.output_dim, :]) * (
+                    x[:, self.output_dim:self.output_dim * 2, :])
         else:
             if self.bias_in_glu:
                 x = (x[:, 0:self.output_dim, :] + self.b1) * self.glu_act(
@@ -254,7 +254,7 @@ class DepthWiseSeperableConv1d(nn.Module):
         input_dim: int
             input channel size.
         depthwise_seperable_out_channel: int
-            if set different to 0, the number of
+            if set different to 0, the number of 
              depthwise_seperable_out_channel will be used as a channel_out
              of the second conv1d layer.
              otherwise, it equal to 0, the second conv1d layer is skipped.
@@ -325,7 +325,7 @@ class ConvModule(nn.Module):
             if > 0, ext_pw_out_channel is a dim channel size
              for the last pointwise conv after swish activation.
         depthwise_seperable_out_channel: int
-            if set different to 0, the number of
+            if set different to 0, the number of 
              depthwise_seperable_out_channel
              will be used as a channel_out of the second conv1d layer.
              otherwise, it equal to 0, the second conv1d layer is skipped.
@@ -653,7 +653,7 @@ def _pre_hook(
 
     Note:
         We saved self.pe until v.0.5.2 but we have omitted it later.
-        Therefore, we remove the item "pe" from `state_dict` for backward
+        Therefore, we remove the item "pe" from `state_dict` for backward 
         compatibility.
 
     """
@@ -664,7 +664,7 @@ def _pre_hook(
 
 class T5RelativeAttentionLogitBias(nn.Module):
     """
-    This module implements the relative position bias described in Section
+    This module implements the relative position bias described in Section 
     2.1 of the T5 paper: https://arxiv.org/pdf/1910.10683.pdf
 
     The Huggingface implementation is used as a reference
@@ -672,18 +672,18 @@ class T5RelativeAttentionLogitBias(nn.Module):
     transformers/models/t5/modeling_t5.py#L435
 
     Modifies attention as Q*K^T + B, where B is a learned scalar bias based
-    on relative position of the query and key. It is HxNxN, where H is the
+    on relative position of the query and key. It is HxNxN, where H is the 
     number of heads, N is the sequence length.
 
     I've made these modifications to the original T5 bias:
-    - Skipping of the bucketing step. Original T5 bias converted rel
-      position distances into logarithmically increasing buckets. This is
+    - Skipping of the bucketing step. Original T5 bias converted rel 
+      position distances into logarithmically increasing buckets. This is 
       supposed to help with length generalization.
-    - I just directly use rel position index as bias values, as we don't
-      need length generalization (40s max is good enough for ASR encoder),
+    - I just directly use rel position index as bias values, as we don't 
+      need length generalization (40s max is good enough for ASR encoder), 
       and it keeps ONNX export simple.
-    - I've also extended it so that biases can be asymmetric, the default
-      implementation treats L->R and R->L the same. Asymmetric was found to
+    - I've also extended it so that biases can be asymmetric, the default 
+      implementation treats L->R and R->L the same. Asymmetric was found to 
       yield better results in my experiments.
 
     Args:
@@ -691,18 +691,18 @@ class T5RelativeAttentionLogitBias(nn.Module):
             Number of attention heads
         num_buckets: int
             Number of buckets to use for relative attention bias. This is the
-            size of the learnable bias parameter. Bucketing is not yet
+            size of the learnable bias parameter. Bucketing is not yet 
             supported, so this defaults to -1 which means no bucketing is
             used (max_distance determines size of bias param).
         max_distance: int
-            Maximum distance to use for relative attention bias. With
-            num_buckets=-1, this directly controls the max size of the bias
-            parameter. When num_buckets > 0 is supported, this will control
-            the maximum distance for logarithmic bucketing after which all
+            Maximum distance to use for relative attention bias. With 
+            num_buckets=-1, this directly controls the max size of the bias 
+            parameter. When num_buckets > 0 is supported, this will control 
+            the maximum distance for logarithmic bucketing after which all 
             positions are in the same bucket.
         symmetric: bool
             Whether to use symmetric or asymmetric biases. symmetric=False uses
-            2x number of bias params to distinguish L->R from R->L. This was
+            2x number of bias params to distinguish L->R from R->L. This was 
             found to be better for the encoder.
     """
 
@@ -889,14 +889,14 @@ class CausalConv1D(nn.Conv1d):
     locations on its right or left
     All arguments are the same as nn.Conv1d except padding.
 
-    If padding is set None, then paddings are set automatically to make it a
+    If padding is set None, then paddings are set automatically to make it a 
     causal convolution where each location would not see any steps on its right.
 
-    If padding is set as a list (size of 2), then padding[0] would be used as
+    If padding is set as a list (size of 2), then padding[0] would be used as 
     left padding and padding[1] as right padding.
     It would make it possible to control the number of steps to be accessible
     on the right and left.
-    This mode is not supported when stride > 1. padding[0]+padding[1] should
+    This mode is not supported when stride > 1. padding[0]+padding[1] should 
     be equal to (kernel_size - 1).
     """
 
@@ -975,7 +975,7 @@ class CausalConv2D(nn.Conv2d):
     """
     A causal version of nn.Conv2d where each location in the 2D matrix would
     have no access to locations on its right or down
-    All arguments are the same as nn.Conv2d except padding which should be
+    All arguments are the same as nn.Conv2d except padding which should be 
     set as None
     """
 
@@ -1031,17 +1031,17 @@ class NemoConvSubsampling(torch.nn.Module):
     (https://github.com/NVIDIA/NeMo/blob/b367413645d5c72db3c2c96e46e95a
     34501479cf/nemo/collections/asr/parts/submodules/subsampling.py)
 
-    Striding Subsampling: "Speech-Transformer: A No-Recurrence
-    Sequence-to-Sequence Model for Speech Recognition" by Linhao Dong
+    Striding Subsampling: "Speech-Transformer: A No-Recurrence 
+    Sequence-to-Sequence Model for Speech Recognition" by Linhao Dong 
     et al. (https://ieeexplore.ieee.org/document/8462506)
 
 
-    Compared with the EncoderConv2D (`input_layer: custom`), this is a
+    Compared with the EncoderConv2D (`input_layer: custom`), this is a 
     much simplified approach, and uses no LayerNorm and far fewer Conv2Ds.
     Moreover, depthwise convolutions are used to reduce FLOPs, but the first
       layer is kept as a regular convolution so as not to degrade accuracy.
 
-    `Striding` and `dw_striding` are the same except that the latter uses
+    `Striding` and `dw_striding` are the same except that the latter uses 
     depthwise convolutions after the first layer, whereas the former does not.
 
     Args:
@@ -1049,11 +1049,11 @@ class NemoConvSubsampling(torch.nn.Module):
         feat_in (int): size of the input features
         feat_out (int): size of the output features
         subsampling (str): The subsampling technique, choose from
-            {"striding", "dw-striding", "striding_conv1d",
+            {"striding", "dw-striding", "striding_conv1d", 
             "dw_striding_conv1d"}
-        conv_channels (int): Number of channels for the convolution layers,
+        conv_channels (int): Number of channels for the convolution layers, 
                             default is 256.
-        subsampling_conv_chunking_factor (int): Input chunking factor which
+        subsampling_conv_chunking_factor (int): Input chunking factor which 
             can be -1 (no chunking) 1 (auto) or a power of 2. Default is 1
         activation (Module): activation function, default is nn.ReLU()
         is_causal (bool): whether to use causal Conv1/2D, where each step will
@@ -1092,9 +1092,11 @@ class NemoConvSubsampling(torch.nn.Module):
                 and subsampling_conv_chunking_factor != 1
                 and subsampling_conv_chunking_factor % 2 != 0):
             raise ValueError(
-                "subsampling_conv_chunking_factor should be -1, 1, or a "
-                "power of 2")
-        self.subsampling_conv_chunking_factor = subsampling_conv_chunking_factor
+                "subsampling_conv_chunking_factor should be -1, 1, or a "\
+                    "power of 2"
+            )
+        self.subsampling_conv_chunking_factor = \
+            subsampling_conv_chunking_factor
 
         in_channels = 1
         layers = []
@@ -1343,10 +1345,10 @@ class NemoConvSubsampling(torch.nn.Module):
 
         Returns:
             x: torch.Tensor
-                Resulting tensor from subsampling (B, T //
+                Resulting tensor from subsampling (B, T // 
                 time_reduction_factor, feat_out)
             pad_mask: torch.Tensor
-                tensor of padded hidden state sequences (B, 1, T //
+                tensor of padded hidden state sequences (B, 1, T // 
                 time_reduction_factor)
         """
         x = x.unsqueeze(1) if self.conv2d_subsampling else x.transpose(1, 2)
@@ -1458,7 +1460,7 @@ class NemoConvSubsampling(torch.nn.Module):
         )
 
     def conv_split_by_channel(self, x):
-        """For dw convs, tries to split input by time, run conv and concat
+        """For dw convs, tries to split input by time, run conv and concat 
         results"""
         x = self.conv[0](x)  # full conv2D
         x = self.conv[1](x)  # activation
@@ -1543,8 +1545,9 @@ class NemoConvSubsampling(torch.nn.Module):
                 and subsampling_conv_chunking_factor != 1
                 and subsampling_conv_chunking_factor % 2 != 0):
             raise ValueError(
-                "subsampling_conv_chunking_factor should be -1, 1, or a "
-                "power of 2")
+                "subsampling_conv_chunking_factor should be -1, 1, or a "\
+                    "power of 2"
+            )
         self.subsampling_conv_chunking_factor = subsampling_conv_chunking_factor
 
 
@@ -1555,7 +1558,7 @@ def calc_length(lengths,
                 ceil_mode,
                 repeat_num=1):
     """Calculates the output length of a Tensor passed through a convolution or
-    max pooling layer"""
+      max pooling layer"""
     add_pad: float = all_paddings - kernel_size
     one: float = 1.0
     for i in range(repeat_num):
@@ -1622,7 +1625,7 @@ def masked_softmax(
 
 
 class MultiHeadedAttention(nn.Module):
-    """Multi-Head Attention layer with optional relative position embedding
+    """Multi-Head Attention layer with optional relative position embedding 
     and GLU.
 
     Args:
@@ -1642,12 +1645,12 @@ class MultiHeadedAttention(nn.Module):
             default: -1 (equal to n_feat).
         use_pt_scaled_dot_product_attention: bool, optional
             if set True, use pytorch scaled dot product attention in training.
-            NOTE: this will NOT be used in ONNX decoding due to a lack of
-            support.  In that case, we use the original attention
+            NOTE: this will NOT be used in ONNX decoding due to a lack of 
+            support.  In that case, we use the original attention 
             implementation, which shows no regression.
             default: False.
         n_value: int, optional
-            if set to values other than -1, use a different dimension for
+            if set to values other than -1, use a different dimension for 
             value. With the default value (i.e. -1), it is backward compatible.
         group_size: int, optional. must divide `n_head`
             if group_size > 1:       GQA
@@ -1836,7 +1839,7 @@ class MultiSequential(torch.nn.Sequential):
 
 
 def get_offset(input_layer: str, time_reduction: int):
-    """Get an offset. We will use the offset for determining #frames of a
+    """Get an offset. We will use the offset for determining #frames of a 
     subsampled feature.
 
     Args:
@@ -1856,8 +1859,8 @@ def get_offset(input_layer: str, time_reduction: int):
 
 def unfold_tensor(xs_pad, max_seq_len):
     """
-    For a given tensor with shape of (N, T, D), if sequence length T is
-    longer than max_seq_len, this function unfold it to a
+    For a given tensor with shape of (N, T, D), if sequence length T is 
+    longer than max_seq_len, this function unfold it to a 
     (NT', max_seq_len, D) where T' is T // max_seq_len.
     Args:
         xs_pad: N, T, D

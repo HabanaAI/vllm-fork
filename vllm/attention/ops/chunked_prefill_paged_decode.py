@@ -65,8 +65,8 @@ def kernel_paged_attention_2d(
         cur_batch_in_all_start_index = tl.load(query_start_len_ptr + seq_idx)
         cur_batch_in_all_stop_index = tl.load(query_start_len_ptr + seq_idx +
                                               1)
-        cur_batch_query_len = (cur_batch_in_all_stop_index -
-                               cur_batch_in_all_start_index)
+        cur_batch_query_len = cur_batch_in_all_stop_index \
+            - cur_batch_in_all_start_index
         if cur_batch_query_len > 1:
             return
     else:
@@ -111,6 +111,7 @@ def kernel_paged_attention_2d(
 
     # iterate through tiles
     for j in range(0, num_blocks):
+
         physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
 
         offs_n = tl.arange(0, BLOCK_SIZE)
@@ -221,6 +222,7 @@ def chunked_prefill_paged_decode(
     sliding_window=None,
     sm_scale=None,
 ):
+
     if sm_scale is None:
         sm_scale = 1.0 / (query.shape[1]**0.5)
 
@@ -277,27 +279,19 @@ def chunked_prefill_paged_decode(
     num_queries_per_kv_padded = max(triton.next_power_of_2(num_queries_per_kv),
                                     16)
 
-    use_custom = use_rocm_custom_paged_attention(
-        query.dtype,
-        head_size,
-        block_size,
-        num_queries_per_kv,
-        max_seq_len,
-        sliding_window,
-    )
+    use_custom = use_rocm_custom_paged_attention(query.dtype, head_size,
+                                                 block_size,
+                                                 num_queries_per_kv,
+                                                 max_seq_len, sliding_window)
     if use_custom:
         _PARTITION_SIZE_ROCM = 256
-        max_num_partitions = (max_seq_len + _PARTITION_SIZE_ROCM -
-                              1) // _PARTITION_SIZE_ROCM
+        max_num_partitions = ((max_seq_len + _PARTITION_SIZE_ROCM - 1) //
+                              _PARTITION_SIZE_ROCM)
         assert _PARTITION_SIZE_ROCM % block_size == 0
         total_num_seq = block_table.shape[0]
         tmp_output = torch.empty(
-            size=(
-                total_num_seq,
-                num_query_heads,
-                max_num_partitions,
-                head_size,
-            ),
+            size=(total_num_seq, num_query_heads, max_num_partitions,
+                  head_size),
             dtype=output.dtype,
             device=output.device,
         )

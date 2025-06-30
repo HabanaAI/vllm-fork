@@ -60,6 +60,7 @@ def _test_image_prompt_replacements(
     num_imgs: int,
     image_sizes: list[ImageSize],
 ) -> None:
+
     failed_size_excs = list[tuple[ImageSize, Exception]]()
 
     for size in image_sizes:
@@ -67,8 +68,9 @@ def _test_image_prompt_replacements(
                                                 failed_size_excs, size)
 
     if failed_size_excs:
-        msg = "Found failing image sizes:" + "\n========\n".join(
-            f"[{size}]\n{exc}" for size, exc in failed_size_excs)
+        msg = "Found failing image sizes:" \
+            + "\n========\n".join(f"[{size}]\n{exc}"
+                                  for size, exc in failed_size_excs)
         raise AssertionError(msg)
 
 
@@ -82,15 +84,8 @@ def test_processor_prompt_replacements_regression(model_id, num_imgs):
     )
     processor = MULTIMODAL_REGISTRY.create_processor(ctx.model_config)
 
-    image_ratios = [
-        (171, 152),
-        (184, 161),
-        (198, 176),
-        (333, 296),
-        (369, 328),
-        (488, 183),
-        (2560, 1669),
-    ]
+    image_ratios = [(171, 152), (184, 161), (198, 176), (333, 296), (369, 328),
+                    (488, 183), (2560, 1669)]
     image_sizes = [
         size for w, h in image_ratios
         for size in [ImageSize(w, h), ImageSize(h, w)]

@@ -11,8 +11,7 @@ if TYPE_CHECKING:
 class PoolingParams(
         msgspec.Struct,
         omit_defaults=True,  # type: ignore[call-arg]
-        array_like=True,
-):  # type: ignore[call-arg]
+        array_like=True):  # type: ignore[call-arg]
     """API parameters for pooling models. This is currently a placeholder.
 
     Attributes:
@@ -34,17 +33,17 @@ class PoolingParams(
             if not model_config.is_matryoshka:
                 raise ValueError(
                     f'Model "{model_config.served_model_name}" does not '
-                    f"support matryoshka representation, "
-                    f"changing output dimensions will lead to poor results.")
+                    f'support matryoshka representation, '
+                    f'changing output dimensions will lead to poor results.')
 
             mds = model_config.matryoshka_dimensions
             if mds is not None:
                 if self.dimensions not in mds:
                     raise ValueError(
                         f'Model "{model_config.served_model_name}" '
-                        f"only supports {str(mds)} matryoshka dimensions, "
-                        f"use other output dimensions will "
-                        f"lead to poor results.")
+                        f'only supports {str(mds)} matryoshka dimensions, '
+                        f'use other output dimensions will '
+                        f'lead to poor results.')
             elif self.dimensions < 1:
                 raise ValueError("Dimensions must be greater than 0")
 

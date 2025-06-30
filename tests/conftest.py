@@ -151,9 +151,9 @@ def run_with_both_engines(request, monkeypatch):
     if use_v1:
         if skip_v1:
             pytest.skip("Skipping test on vllm V1")
-        monkeypatch.setenv("VLLM_USE_V1", "1")
+        monkeypatch.setenv('VLLM_USE_V1', '1')
     else:
-        monkeypatch.setenv("VLLM_USE_V1", "0")
+        monkeypatch.setenv('VLLM_USE_V1', '0')
 
     yield
 
@@ -219,7 +219,6 @@ def example_system_message() -> str:
 
 class DecoderPromptType(Enum):
     """For encoder/decoder models only."""
-
     CUSTOM = 1
     NONE = 2
     EMPTY_STR = 3
@@ -228,7 +227,7 @@ class DecoderPromptType(Enum):
 @pytest.fixture
 def example_encoder_decoder_prompts(
 ) -> dict[DecoderPromptType, list[ExplicitEncoderDecoderPrompt]]:
-    """
+    '''
     Returns an encoder prompt list and a decoder prompt list, wherein each pair
     of same-index entries in both lists corresponds to an (encoder prompt,
     decoder prompt) tuple.
@@ -237,7 +236,7 @@ def example_encoder_decoder_prompts(
 
     * Encoder prompt list
     * Decoder prompt list (reverse of encoder prompt list)
-    """
+    '''
 
     encoder_prompts = []
     for filename in _TEST_PROMPTS:
@@ -289,7 +288,6 @@ class HfRunner:
 
     def get_default_device(self):
         from vllm.platforms import current_platform
-
         if current_platform.is_hpu():
             return "hpu"
         elif current_platform.is_cpu():
@@ -378,7 +376,6 @@ class HfRunner:
         # don't put this import at the top level
         # it will call torch.cuda.device_count()
         from transformers import AutoProcessor  # noqa: F401
-
         self.processor = AutoProcessor.from_pretrained(
             model_name,
             torch_dtype=torch_dtype,
@@ -480,15 +477,13 @@ class HfRunner:
         audios: Optional[PromptAudioInput] = None,
         **kwargs: Any,
     ) -> list[tuple[list[int], str]]:
-        outputs = self.generate(
-            prompts,
-            do_sample=False,
-            max_new_tokens=max_tokens,
-            images=images,
-            videos=videos,
-            audios=audios,
-            **kwargs,
-        )
+        outputs = self.generate(prompts,
+                                do_sample=False,
+                                max_new_tokens=max_tokens,
+                                images=images,
+                                videos=videos,
+                                audios=audios,
+                                **kwargs)
 
         return [(output_ids[0], output_str[0])
                 for output_ids, output_str in outputs]
@@ -502,16 +497,14 @@ class HfRunner:
         videos: Optional[PromptVideoInput] = None,
         audios: Optional[PromptAudioInput] = None,
     ) -> list[tuple[list[list[int]], list[str]]]:
-        outputs = self.generate(
-            prompts,
-            do_sample=False,
-            max_new_tokens=max_tokens,
-            num_beams=beam_width,
-            num_return_sequences=beam_width,
-            images=images,
-            videos=videos,
-            audios=audios,
-        )
+        outputs = self.generate(prompts,
+                                do_sample=False,
+                                max_new_tokens=max_tokens,
+                                num_beams=beam_width,
+                                num_return_sequences=beam_width,
+                                images=images,
+                                videos=videos,
+                                audios=audios)
 
         for i in range(len(outputs)):
             output_ids, output_str = outputs[i]
@@ -658,9 +651,9 @@ class HfRunner:
         images: Optional[PromptImageInput] = None,
         **kwargs: Any,
     ) -> list[TokensTextLogprobs]:
-        """
+        '''
         Greedy logprobs generation for vLLM encoder/decoder models
-        """
+        '''
 
         all_logprobs: list[list[dict[int, float]]] = []
         all_output_ids: list[list[int]] = []
@@ -771,7 +764,6 @@ class HfHPURunner(HfRunner):
             ).eval())
 
         from habana_frameworks.torch.hpu import wrap_in_hpu_graph
-
         wrap_done = False
         if hasattr(self.model, "language_model"):
             self.model.language_model = wrap_in_hpu_graph(
@@ -793,7 +785,6 @@ class HfHPURunner(HfRunner):
         # don't put this import at the top level
         # it will call torch.cuda.device_count()
         from transformers import AutoProcessor  # noqa: F401
-
         self.processor = AutoProcessor.from_pretrained(
             model_name,
             torch_dtype=torch_dtype,
@@ -865,6 +856,7 @@ class VllmRunner:
         videos: Optional[PromptVideoInput] = None,
         audios: Optional[PromptAudioInput] = None,
     ) -> list[TextPrompt]:
+
         if any(x is not None and len(x) != len(prompts)
                for x in [images, videos, audios]):
             raise ValueError(
@@ -884,7 +876,7 @@ class VllmRunner:
             text_prompt_kwargs = {
                 ("prompt" if isinstance(prompt, str) else "prompt_embeds"):
                 prompt,
-                "multi_modal_data": multi_modal_data or None,
+                "multi_modal_data": multi_modal_data or None
             }
             inputs.append(TextPrompt(**text_prompt_kwargs))
 
@@ -933,12 +925,8 @@ class VllmRunner:
                 output_str = sample.text
                 output_ids = list(sample.token_ids)
                 output_logprobs = sample.logprobs
-            outputs.append((
-                output_ids,
-                output_str,
-                output_logprobs,
-                req_output.prompt_logprobs,
-            ))
+            outputs.append((output_ids, output_str, output_logprobs,
+                            req_output.prompt_logprobs))
         return outputs
 
     def generate_w_logprobs(
@@ -973,9 +961,9 @@ class VllmRunner:
         sampling_params: SamplingParams,
     ) -> Union[list[TokensTextLogprobs],
                list[TokensTextLogprobsPromptLogprobs]]:
-        """
+        '''
         Logprobs generation for vLLM encoder/decoder models
-        """
+        '''
 
         assert sampling_params.logprobs is not None
         req_outputs = self.model.generate(encoder_decoder_prompts,
@@ -997,14 +985,12 @@ class VllmRunner:
         **kwargs: Any,
     ) -> list[tuple[list[int], str]]:
         greedy_params = SamplingParams(temperature=0.0, max_tokens=max_tokens)
-        outputs = self.generate(
-            prompts,
-            greedy_params,
-            images=images,
-            videos=videos,
-            audios=audios,
-            **kwargs,
-        )
+        outputs = self.generate(prompts,
+                                greedy_params,
+                                images=images,
+                                videos=videos,
+                                audios=audios,
+                                **kwargs)
         return [(output_ids[0], output_str[0])
                 for output_ids, output_str in outputs]
 
@@ -1028,17 +1014,14 @@ class VllmRunner:
             logprobs=num_logprobs,
             prompt_logprobs=num_prompt_logprobs,
             stop_token_ids=stop_token_ids,
-            stop=stop,
-        )
+            stop=stop)
 
-        return self.generate_w_logprobs(
-            prompts,
-            greedy_logprobs_params,
-            images=images,
-            audios=audios,
-            videos=videos,
-            **kwargs,
-        )
+        return self.generate_w_logprobs(prompts,
+                                        greedy_logprobs_params,
+                                        images=images,
+                                        audios=audios,
+                                        videos=videos,
+                                        **kwargs)
 
     def generate_encoder_decoder_greedy_logprobs(
         self,
@@ -1056,9 +1039,9 @@ class VllmRunner:
             prompt_logprobs=(num_prompt_logprobs),
             skip_special_tokens=skip_special_tokens,
         )
-        """
+        '''
         Greedy logprobs generation for vLLM encoder/decoder models
-        """
+        '''
 
         return self.generate_encoder_decoder_w_logprobs(
             encoder_decoder_prompts, greedy_logprobs_params)
@@ -1079,8 +1062,7 @@ class VllmRunner:
 
         outputs = self.model.beam_search(
             inputs,
-            BeamSearchParams(beam_width=beam_width, max_tokens=max_tokens),
-        )
+            BeamSearchParams(beam_width=beam_width, max_tokens=max_tokens))
         returned_outputs = []
         for output in outputs:
             token_ids = [x.tokens for x in output.sequences]
@@ -1092,15 +1074,13 @@ class VllmRunner:
         req_outputs = self.model.classify(prompts)
         return [req_output.outputs.probs for req_output in req_outputs]
 
-    def encode(
-        self,
-        prompts: list[str],
-        images: Optional[PromptImageInput] = None,
-        videos: Optional[PromptVideoInput] = None,
-        audios: Optional[PromptAudioInput] = None,
-        *args,
-        **kwargs,
-    ) -> list[list[float]]:
+    def encode(self,
+               prompts: list[str],
+               images: Optional[PromptImageInput] = None,
+               videos: Optional[PromptVideoInput] = None,
+               audios: Optional[PromptAudioInput] = None,
+               *args,
+               **kwargs) -> list[list[float]]:
         inputs = self.get_inputs(prompts,
                                  images=images,
                                  videos=videos,
@@ -1137,7 +1117,6 @@ def vllm_runner():
 @pytest.fixture()
 def temporary_enable_log_propagate():
     import logging
-
     logger = logging.getLogger("vllm")
     logger.propagate = True
     yield
@@ -1153,8 +1132,7 @@ def caplog_vllm(temporary_enable_log_propagate, caplog):
 
 def is_hpu():
     from importlib import util
-
-    return util.find_spec("habana_frameworks") is not None
+    return util.find_spec('habana_frameworks') is not None
 
 
 @pytest.fixture(scope="session")
@@ -1178,17 +1156,12 @@ _dummy_gemma2_embedding_path = os.path.join(temp_dir, "dummy_gemma2_embedding")
 def dummy_opt_path():
     json_path = os.path.join(_dummy_opt_path, "config.json")
     if not os.path.exists(_dummy_opt_path):
-        snapshot_download(
-            repo_id="facebook/opt-125m",
-            local_dir=_dummy_opt_path,
-            ignore_patterns=[
-                "*.bin",
-                "*.bin.index.json",
-                "*.pt",
-                "*.h5",
-                "*.msgpack",
-            ],
-        )
+        snapshot_download(repo_id="facebook/opt-125m",
+                          local_dir=_dummy_opt_path,
+                          ignore_patterns=[
+                              "*.bin", "*.bin.index.json", "*.pt", "*.h5",
+                              "*.msgpack"
+                          ])
         assert os.path.exists(json_path)
         with open(json_path) as f:
             config = json.load(f)
@@ -1202,17 +1175,12 @@ def dummy_opt_path():
 def dummy_llava_path():
     json_path = os.path.join(_dummy_llava_path, "config.json")
     if not os.path.exists(_dummy_llava_path):
-        snapshot_download(
-            repo_id="llava-hf/llava-1.5-7b-hf",
-            local_dir=_dummy_llava_path,
-            ignore_patterns=[
-                "*.bin",
-                "*.bin.index.json",
-                "*.pt",
-                "*.h5",
-                "*.msgpack",
-            ],
-        )
+        snapshot_download(repo_id="llava-hf/llava-1.5-7b-hf",
+                          local_dir=_dummy_llava_path,
+                          ignore_patterns=[
+                              "*.bin", "*.bin.index.json", "*.pt", "*.h5",
+                              "*.msgpack"
+                          ])
         assert os.path.exists(json_path)
         with open(json_path) as f:
             config = json.load(f)
@@ -1226,17 +1194,12 @@ def dummy_llava_path():
 def dummy_gemma2_embedding_path():
     json_path = os.path.join(_dummy_gemma2_embedding_path, "config.json")
     if not os.path.exists(_dummy_gemma2_embedding_path):
-        snapshot_download(
-            repo_id="BAAI/bge-multilingual-gemma2",
-            local_dir=_dummy_gemma2_embedding_path,
-            ignore_patterns=[
-                "*.bin",
-                "*.bin.index.json",
-                "*.pt",
-                "*.h5",
-                "*.msgpack",
-            ],
-        )
+        snapshot_download(repo_id="BAAI/bge-multilingual-gemma2",
+                          local_dir=_dummy_gemma2_embedding_path,
+                          ignore_patterns=[
+                              "*.bin", "*.bin.index.json", "*.pt", "*.h5",
+                              "*.msgpack"
+                          ])
         assert os.path.exists(json_path)
         with open(json_path) as f:
             config = json.load(f)
@@ -1249,12 +1212,10 @@ def dummy_gemma2_embedding_path():
 # Add the flag `--optional` to allow run tests
 # that are marked with @pytest.mark.optional
 def pytest_addoption(parser):
-    parser.addoption(
-        "--optional",
-        action="store_true",
-        default=False,
-        help="run optional test",
-    )
+    parser.addoption("--optional",
+                     action="store_true",
+                     default=False,
+                     help="run optional test")
 
 
 def pytest_collection_modifyitems(config, items):

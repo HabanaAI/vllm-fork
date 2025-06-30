@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the SamplingParams class."""
+"""Tests for the SamplingParams class.
+"""
 
 import pytest
 
@@ -38,14 +39,14 @@ def test_sampling_params_from_request_with_no_guided_decoding_backend(
         model_config, default_max_tokens):
     # guided_decoding_backend is not present at request level
     request = ChatCompletionRequest.model_validate({
-        "messages": [{
-            "role": "user",
-            "content": "Hello"
+        'messages': [{
+            'role': 'user',
+            'content': 'Hello'
         }],
-        "model":
+        'model':
         MODEL_NAME,
-        "response_format": {
-            "type": "json_object",
+        'response_format': {
+            'type': 'json_object',
         },
     })
 
@@ -58,31 +59,25 @@ def test_sampling_params_from_request_with_no_guided_decoding_backend(
     assert sampling_params.guided_decoding.backend is None
 
 
-@pytest.mark.parametrize(
-    "request_level_guided_decoding_backend,expected",
-    [
-        ("xgrammar", "xgrammar"),
-        ("lm-format-enforcer", "lm-format-enforcer"),
-        ("outlines", "outlines"),
-    ],
-)
+@pytest.mark.parametrize("request_level_guided_decoding_backend,expected",
+                         [("xgrammar", "xgrammar"),
+                          ("lm-format-enforcer", "lm-format-enforcer"),
+                          ("outlines", "outlines")])
 def test_sampling_params_from_request_with_guided_decoding_backend(
-    request_level_guided_decoding_backend: str,
-    expected: str,
-    model_config,
-    default_max_tokens,
-):
+        request_level_guided_decoding_backend: str, expected: str,
+        model_config, default_max_tokens):
+
     request = ChatCompletionRequest.model_validate({
-        "messages": [{
-            "role": "user",
-            "content": "Hello"
+        'messages': [{
+            'role': 'user',
+            'content': 'Hello'
         }],
-        "model":
+        'model':
         MODEL_NAME,
-        "response_format": {
-            "type": "json_object",
+        'response_format': {
+            'type': 'json_object',
         },
-        "guided_decoding_backend":
+        'guided_decoding_backend':
         request_level_guided_decoding_backend,
     })
 

@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Attention layer with FlashAttention."""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -33,6 +32,7 @@ logger = init_logger(__name__)
 
 
 class FlashAttentionBackend(AttentionBackend):
+
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -184,8 +184,7 @@ def make_local_attention_virtual_batches(
     #   local_blocks = [2, 4, 2]
     q_tokens_in_first_block = np.minimum(
         attn_chunk_size - ((seq_lens_np - q_seqlens) % attn_chunk_size),
-        q_seqlens,
-    ).astype(np.int32)
+        q_seqlens).astype(np.int32)
     tokens_in_last_block = attn_chunk_size + (seq_lens_np % -attn_chunk_size)
     local_blocks = 1 + cdiv(q_seqlens - q_tokens_in_first_block,
                             attn_chunk_size)
@@ -209,8 +208,8 @@ def make_local_attention_virtual_batches(
     rarange = np.repeat(local_blocks, local_blocks) - arange - 1
     # Then we can compute the seqlens_q_local, handling the fact that the
     #  first and last blocks could be partial
-    seqlens_q_local = np.repeat(q_seqlens - q_tokens_in_first_block,
-                                local_blocks)
+    seqlens_q_local = \
+        np.repeat(q_seqlens - q_tokens_in_first_block, local_blocks)
     # set the first block since this may be a partial block
     seqlens_q_local[arange == 0] = q_tokens_in_first_block
     # set the remaining blocks
@@ -219,8 +218,8 @@ def make_local_attention_virtual_batches(
         attn_chunk_size)[arange > 0]
 
     # convert from q_seqlens to cu_seqlens_q
-    cu_seqlens_q_local = np.pad(np.cumsum(seqlens_q_local),
-                                (1, 0)).astype(np.int32)
+    cu_seqlens_q_local = np.pad(np.cumsum(seqlens_q_local), (1, 0))\
+        .astype(np.int32)
 
     # compute the seqlens_k_local,
     #  basically a full local attention block for all but the last block in each
@@ -232,16 +231,16 @@ def make_local_attention_virtual_batches(
                               dtype=np.int32)
     seqlens_k_local[cu_num_blocks - 1] = tokens_in_last_block
 
-    k_seqstarts_absolute = np.repeat(seq_lens_np, local_blocks) - (
-        rarange * attn_chunk_size +
-        np.repeat(tokens_in_last_block, local_blocks))
+    k_seqstarts_absolute = np.repeat(seq_lens_np, local_blocks) - \
+        (rarange * attn_chunk_size + \
+            np.repeat(tokens_in_last_block, local_blocks))
     # For the example the local attention blocks start at:
     #                           _b0_  _____b1_____  _b2_
     #   k_seqstarts_absolute = [0, 4, 4, 8, 12, 16, 4, 8]
     block_starts = k_seqstarts_absolute // page_size
-    assert attn_chunk_size % page_size == 0, (
-        f"attn_chunk_size {attn_chunk_size} is not "
-        f"divisible by page_size {page_size}")
+    assert attn_chunk_size % page_size == 0, \
+        f"attn_chunk_size {attn_chunk_size} is not " \
+        f"divisible by page_size {page_size}"
     pages_per_local_batch = attn_chunk_size // page_size
 
     # Create a block_table for the local attention blocks
@@ -262,28 +261,22 @@ def make_local_attention_virtual_batches(
     #     [ 22, 23 ], < local-batch 6, (batch 2, starting from k[4])
     #     [ 24, 25 ], < local-batch 7, (batch 2, starting from k[8])
     #   ]
-    block_indices = np.broadcast_to(
+    block_indices= np.broadcast_to(
         np.arange(pages_per_local_batch, dtype=np.int32),
-        (virtual_batches, pages_per_local_batch),
-    ) + np.expand_dims(block_starts, axis=1)
+        (virtual_batches, pages_per_local_batch)) \
+            + np.expand_dims(block_starts, axis=1)
     block_indices = block_indices.flatten().clip(max=block_table.shape[1] - 1)
-    batch_indices = np.repeat(
-        np.arange(actual_batch_size, dtype=np.int32),
-        local_blocks * pages_per_local_batch,
-    )
-    block_table_local = block_table[batch_indices,
-                                    block_indices].view(virtual_batches, -1)
+    batch_indices = np.repeat(np.arange(actual_batch_size, dtype=np.int32),
+                              local_blocks * pages_per_local_batch)
+    block_table_local = block_table[batch_indices, block_indices]\
+        .view(virtual_batches, -1)
 
-    return (
-        seqlens_q_local,
-        cu_seqlens_q_local,
-        seqlens_k_local,
-        block_table_local,
-    )
+    return seqlens_q_local, cu_seqlens_q_local, seqlens_k_local, \
+        block_table_local
 
 
 def _get_sliding_window_configs(
-    vllm_config: VllmConfig, ) -> set[Optional[tuple[int, int]]]:
+        vllm_config: VllmConfig) -> set[Optional[tuple[int, int]]]:
     """Get the set of all sliding window configs used in the model."""
     sliding_window_configs: set[Optional[tuple[int, int]]] = set()
     layers = get_layers_from_vllm_config(vllm_config, Attention)
@@ -306,7 +299,7 @@ class FlashAttentionMetadataBuilder:
         self.headdim = model_config.get_head_size()
         self.page_size = self.runner.block_size
 
-        self.aot_schedule = get_flash_attn_version() == 3
+        self.aot_schedule = (get_flash_attn_version() == 3)
         # Sliding window size to be used with the AOT scheduler will be
         # populated on first build() call.
         self.aot_sliding_window: Optional[tuple[int, int]] = None
@@ -315,23 +308,18 @@ class FlashAttentionMetadataBuilder:
                       scheduler_output: "SchedulerOutput") -> bool:
         return False
 
-    def build(
-        self,
-        num_reqs: int,
-        num_actual_tokens: int,
-        max_query_len: int,
-        common_prefix_len: int,
-    ):
+    def build(self, num_reqs: int, num_actual_tokens: int, max_query_len: int,
+              common_prefix_len: int):
         max_seq_len = self.runner.seq_lens_np[:num_reqs].max()
         query_start_loc_cpu = self.runner.query_start_loc_cpu[:num_reqs + 1]
         query_start_loc = query_start_loc_cpu.to(self.runner.device,
                                                  non_blocking=True)
         seq_lens_cpu = self.runner.seq_lens_cpu[:num_reqs]
         seq_lens = seq_lens_cpu.to(self.runner.device, non_blocking=True)
-        block_table = self.runner.input_batch.block_table.get_device_tensor(
-        )[:num_reqs]
-        slot_mapping = (self.runner.slot_mapping_cpu[:num_actual_tokens].to(
-            self.runner.device, non_blocking=True).long())
+        block_table = (
+            self.runner.input_batch.block_table.get_device_tensor()[:num_reqs])
+        slot_mapping = self.runner.slot_mapping_cpu[:num_actual_tokens].to(
+            self.runner.device, non_blocking=True).long()
 
         if self.aot_sliding_window is None:
             self.aot_sliding_window = (-1, -1)
@@ -349,14 +337,8 @@ class FlashAttentionMetadataBuilder:
                 elif len(sliding_window_configs) > 1:
                     self.aot_schedule = False
 
-        def schedule(
-            batch_size,
-            cu_query_lens,
-            max_query_len,
-            seqlens,
-            max_seq_len,
-            causal,
-        ):
+        def schedule(batch_size, cu_query_lens, max_query_len, seqlens,
+                     max_seq_len, causal):
             if self.aot_schedule:
                 return get_scheduler_metadata(
                     batch_size=batch_size,
@@ -376,18 +358,14 @@ class FlashAttentionMetadataBuilder:
         # for local attention
         local_attn_metadata = None
         if self.runner.attention_chunk_size is not None:
-            (
-                seqlens_q_local_np,
-                virt_q_cu_seqlens_np,
-                virt_k_seqlens_np,
-                virt_block_table,
-            ) = make_local_attention_virtual_batches(
-                self.runner.attention_chunk_size,
-                self.runner.query_start_loc_np[:num_reqs + 1],
-                self.runner.seq_lens_np[:num_reqs],
-                block_table,
-                self.runner.block_size,
-            )
+            seqlens_q_local_np, virt_q_cu_seqlens_np, virt_k_seqlens_np, \
+                virt_block_table = make_local_attention_virtual_batches(
+                    self.runner.attention_chunk_size,
+                    self.runner.query_start_loc_np[:num_reqs + 1],
+                    self.runner.seq_lens_np[:num_reqs],
+                    block_table,
+                    self.runner.block_size,
+                )
             local_query_start_loc = torch.from_numpy(virt_q_cu_seqlens_np).to(
                 self.runner.device, non_blocking=True)
             local_seqused_k = torch.from_numpy(virt_k_seqlens_np).to(
@@ -400,8 +378,7 @@ class FlashAttentionMetadataBuilder:
                 max_query_len=local_max_query_len,
                 seqlens=local_seqused_k,
                 max_seq_len=local_max_seq_len,
-                causal=True,
-            )
+                causal=True)
 
             local_attn_metadata = FlashAttentionMetadata.LocalAttentionMetadata(
                 local_query_start_loc=local_query_start_loc,
@@ -415,16 +392,12 @@ class FlashAttentionMetadataBuilder:
         use_cascade = common_prefix_len > 0
 
         if use_cascade:
-            cu_prefix_query_lens = torch.tensor(
-                [0, num_actual_tokens],
-                dtype=torch.int32,
-                device=self.runner.device,
-            )
-            prefix_kv_lens = torch.tensor(
-                [common_prefix_len],
-                dtype=torch.int32,
-                device=self.runner.device,
-            )
+            cu_prefix_query_lens = torch.tensor([0, num_actual_tokens],
+                                                dtype=torch.int32,
+                                                device=self.runner.device)
+            prefix_kv_lens = torch.tensor([common_prefix_len],
+                                          dtype=torch.int32,
+                                          device=self.runner.device)
             suffix_kv_lens = (self.runner.seq_lens_np[:num_reqs] -
                               common_prefix_len)
             suffix_kv_lens = torch.from_numpy(suffix_kv_lens).to(
@@ -435,29 +408,25 @@ class FlashAttentionMetadataBuilder:
                 max_query_len=num_actual_tokens,
                 seqlens=prefix_kv_lens,
                 max_seq_len=common_prefix_len,
-                causal=False,
-            )
-            scheduler_metadata = schedule(
-                batch_size=num_reqs,
-                cu_query_lens=query_start_loc,
-                max_query_len=max_query_len,
-                seqlens=suffix_kv_lens,
-                max_seq_len=max_seq_len - common_prefix_len,
-                causal=True,
-            )
+                causal=False)
+            scheduler_metadata = schedule(batch_size=num_reqs,
+                                          cu_query_lens=query_start_loc,
+                                          max_query_len=max_query_len,
+                                          seqlens=suffix_kv_lens,
+                                          max_seq_len=max_seq_len -
+                                          common_prefix_len,
+                                          causal=True)
         else:
             cu_prefix_query_lens = None
             prefix_kv_lens = None
             suffix_kv_lens = None
             prefix_scheduler_metadata = None
-            scheduler_metadata = schedule(
-                batch_size=num_reqs,
-                cu_query_lens=query_start_loc,
-                max_query_len=max_query_len,
-                seqlens=seq_lens,
-                max_seq_len=max_seq_len,
-                causal=True,
-            )
+            scheduler_metadata = schedule(batch_size=num_reqs,
+                                          cu_query_lens=query_start_loc,
+                                          max_query_len=max_query_len,
+                                          seqlens=seq_lens,
+                                          max_seq_len=max_seq_len,
+                                          causal=True)
 
         attn_metadata = FlashAttentionMetadata(
             num_actual_tokens=num_actual_tokens,
@@ -535,8 +504,8 @@ class FlashAttentionImpl(AttentionImpl):
                                       "FlashAttentionImpl")
         self.use_irope = use_irope
         self.vllm_flash_attn_version = get_flash_attn_version()
-        if (is_quantized_kv_cache(self.kv_cache_dtype)
-                and not flash_attn_supports_fp8()):
+        if is_quantized_kv_cache(self.kv_cache_dtype) \
+            and not flash_attn_supports_fp8():
             raise NotImplementedError(
                 "FlashAttention does not support fp8 kv-cache on this device.")
 
@@ -604,13 +573,12 @@ class FlashAttentionImpl(AttentionImpl):
             query, _ = ops.scaled_fp8_quant(
                 query.reshape(
                     (num_tokens, num_heads * head_size)).contiguous(),
-                layer._q_scale,
-            )
+                layer._q_scale)
             query = query.reshape((num_tokens, num_heads, head_size))
 
         # Compute attention and update output up to `num_actual_tokens`.
-        use_local_attn = (self.use_irope
-                          and attn_metadata.local_attn_metadata is not None)
+        use_local_attn = \
+            (self.use_irope and attn_metadata.local_attn_metadata is not None)
 
         if not attn_metadata.use_cascade or use_local_attn:
             if use_local_attn:
@@ -777,7 +745,7 @@ def cascade_attention(
     k_descale: Optional[torch.Tensor] = None,
     v_descale: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    assert alibi_slopes is None, "Cascade attention does not support ALiBi."
+    assert alibi_slopes is None, ("Cascade attention does not support ALiBi.")
     # TODO: Support sliding window.
     assert sliding_window == (-1, -1), (
         "Cascade attention does not support sliding window.")

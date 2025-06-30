@@ -39,11 +39,9 @@ class SmolVLMProcessingInfo(Idefics3ProcessingInfo):
         return image_token, fake_image_token, global_image_token
 
 
-@MULTIMODAL_REGISTRY.register_processor(
-    SmolVLMMultiModalProcessor,
-    info=SmolVLMProcessingInfo,
-    dummy_inputs=SmolVLMDummyInputsBuilder,
-)
+@MULTIMODAL_REGISTRY.register_processor(SmolVLMMultiModalProcessor,
+                                        info=SmolVLMProcessingInfo,
+                                        dummy_inputs=SmolVLMDummyInputsBuilder)
 class SmolVLMForConditionalGeneration(Idefics3ForConditionalGeneration):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):

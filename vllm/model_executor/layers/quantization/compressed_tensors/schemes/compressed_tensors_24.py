@@ -308,7 +308,7 @@ class CompressedTensors24(CompressedTensorsScheme):
         :param bitmask: The 2:4 bitmask associated with the compressed weights,
             representing the positions of non-zero elements in the compressed
             tensor.
-        :param layer: The layer whose weights need to be processed after
+        :param layer: The layer whose weights need to be processed after 
             loading.
         :return: The decompressed 2:4 sparse weight tensor.
         """

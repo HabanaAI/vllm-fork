@@ -20,7 +20,6 @@ Requirements: Linux, Python: 3.10 or higher, CUDA: 12.1
 Learn more about LMCache environment setup, please refer to:
 https://docs.lmcache.ai/getting_started/installation.html
 """
-
 import argparse
 import contextlib
 import os
@@ -103,13 +102,11 @@ def print_output(
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-v",
-        "--version",
-        choices=["v0", "v1"],
-        default="v1",
-        help="Specify vLLM version (default: v1)",
-    )
+    parser.add_argument("-v",
+                        "--version",
+                        choices=["v0", "v1"],
+                        default="v1",
+                        help="Specify vLLM version (default: v1)")
     return parser.parse_args()
 
 
@@ -126,6 +123,7 @@ def main():
     setup_environment_variables()
 
     with build_llm_with_lmcache(lmcache_connector, model, args.version) as llm:
+
         # This example script runs two requests with a shared prefix.
         # Define the shared prompt and specific prompts
         shared_prompt = "Hello, how are you?" * 1000

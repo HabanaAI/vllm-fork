@@ -17,7 +17,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only BLOOM model compatible with HuggingFace weights."""
-
 import math
 from typing import Iterable, Optional, Set, Tuple, Union
 
@@ -114,15 +113,13 @@ class BloomAttention(nn.Module):
         alibi_slopes = alibi_slopes[head_start:head_end].tolist()
 
         scaling = self.head_dim**-0.5
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            scaling,
-            alibi_slopes=alibi_slopes,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.attn",
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              scaling,
+                              alibi_slopes=alibi_slopes,
+                              cache_config=cache_config,
+                              quant_config=quant_config,
+                              prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -179,12 +176,10 @@ class BloomBlock(nn.Module):
 
         self.input_layernorm = nn.LayerNorm(hidden_size,
                                             eps=config.layer_norm_epsilon)
-        self.self_attention = BloomAttention(
-            config,
-            cache_config,
-            quant_config,
-            prefix=f"{prefix}.self_attention",
-        )
+        self.self_attention = BloomAttention(config,
+                                             cache_config,
+                                             quant_config,
+                                             prefix=f"{prefix}.self_attention")
         self.post_attention_layernorm = nn.LayerNorm(
             hidden_size, eps=config.layer_norm_epsilon)
         self.mlp = BloomMLP(config, quant_config)
@@ -249,8 +244,7 @@ class BloomModel(nn.Module):
             config.num_hidden_layers,
             lambda prefix: BloomBlock(
                 config, cache_config, quant_config, prefix=prefix),
-            prefix=f"{prefix}.h",
-        )
+            prefix=f"{prefix}.h")
 
         # Final Layer Norm
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)

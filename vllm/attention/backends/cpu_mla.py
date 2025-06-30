@@ -84,8 +84,8 @@ class CPUMLAMetadataBuilder(AttentionMetadataBuilder[CPUMLAMetadata]):
     def __init__(self, input_builder: ModelInputForCPUBuilder) -> None:
         self.chunked_prefill = input_builder.chunked_prefill
         self.input_builder = input_builder
-        assert not self.chunked_prefill, (
-            "chunked prefill is currently not supported")
+        assert not self.chunked_prefill, \
+            "chunked prefill is currently not supported"
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
@@ -112,12 +112,10 @@ class CPUMLAMetadataBuilder(AttentionMetadataBuilder[CPUMLAMetadata]):
             kv_start_loc = torch.zeros(input_data.num_prefills + 1,
                                        dtype=torch.int32,
                                        device="cpu")
-            torch.cumsum(
-                query_lens_tensor,
-                dim=0,
-                dtype=torch.int32,
-                out=query_start_loc[1:],
-            )
+            torch.cumsum(query_lens_tensor,
+                         dim=0,
+                         dtype=torch.int32,
+                         out=query_start_loc[1:])
             torch.cumsum(kv_lens_tensor,
                          dim=0,
                          dtype=torch.int32,
@@ -190,46 +188,32 @@ class CPUMLAMetadataBuilder(AttentionMetadataBuilder[CPUMLAMetadata]):
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=placeholder_index_maps,
             enable_kv_scales_calculation=False,
-            input_positions=torch.tensor([self.input_data.input_positions]),
-        )
+            input_positions=torch.tensor([self.input_data.input_positions]))
 
 
 class CPUMLAImpl(MLACommonImpl[CPUMLAMetadata]):
 
     def __init__(
-        self,
-        num_heads: int,
-        head_size: int,
-        scale: float,
-        num_kv_heads: int,
-        alibi_slopes: Optional[List[float]],
-        sliding_window: Optional[int],
-        kv_cache_dtype: str,
-        blocksparse_params: Optional[Dict[str, Any]],
-        logits_soft_cap: Optional[float],
-        attn_type: str,
-        # MLA Specific Arguments
-        **mla_args,
-    ) -> None:
-        super().__init__(
-            num_heads,
-            head_size,
-            scale,
-            num_kv_heads,
-            alibi_slopes,
-            sliding_window,
-            kv_cache_dtype,
-            blocksparse_params,
-            logits_soft_cap,
-            attn_type,
-            **mla_args,
-        )
+            self,
+            num_heads: int,
+            head_size: int,
+            scale: float,
+            num_kv_heads: int,
+            alibi_slopes: Optional[List[float]],
+            sliding_window: Optional[int],
+            kv_cache_dtype: str,
+            blocksparse_params: Optional[Dict[str, Any]],
+            logits_soft_cap: Optional[float],
+            attn_type: str,
+            # MLA Specific Arguments
+            **mla_args) -> None:
+        super().__init__(num_heads, head_size, scale, num_kv_heads,
+                         alibi_slopes, sliding_window, kv_cache_dtype,
+                         blocksparse_params, logits_soft_cap, attn_type,
+                         **mla_args)
 
         unsupported_features = [
-            alibi_slopes,
-            sliding_window,
-            blocksparse_params,
-            logits_soft_cap,
+            alibi_slopes, sliding_window, blocksparse_params, logits_soft_cap
         ]
         if any(unsupported_features):
             raise NotImplementedError(
@@ -256,13 +240,14 @@ class CPUMLAImpl(MLACommonImpl[CPUMLAMetadata]):
             kv_c_and_k_pe_cache: torch.Tensor,
             attn_metadata: CPUMLAMetadata,  # type: ignore[override]
     ) -> torch.Tensor:
+
         prefill_metadata = attn_metadata.prefill_metadata
         assert prefill_metadata is not None
 
-        kv_nope = self.kv_b_proj(kv_c_normed)[0].view(
+        kv_nope = self.kv_b_proj(kv_c_normed)[0].view(\
             -1, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
-        k_nope, v = kv_nope.split([self.qk_nope_head_dim, self.v_head_dim],
-                                  dim=-1)
+        k_nope, v = kv_nope\
+            .split([self.qk_nope_head_dim, self.v_head_dim], dim=-1)
 
         k = torch.cat((k_nope, k_pe.expand((*k_nope.shape[:-1], -1))), dim=-1)
 
@@ -314,12 +299,7 @@ class CPUMLAImpl(MLACommonImpl[CPUMLAMetadata]):
         o = q.new_empty(q.shape[0], self.num_heads, self.kv_lora_rank)
 
         # Run MQA
-        ops.mla_decode_kvcache_cpu(
-            o,
-            q,
-            kv_c_and_k_pe_cache,
-            self.scale,
-            decode_meta.block_tables,
-            decode_meta.seq_lens_tensor,
-        )
+        ops.mla_decode_kvcache_cpu(o, q, kv_c_and_k_pe_cache, self.scale,
+                                   decode_meta.block_tables,
+                                   decode_meta.seq_lens_tensor)
         return self._v_up_proj(o)

@@ -10,9 +10,9 @@ _LORA_B_PTR_DICT: Dict[Tuple[int, ...], Tuple[torch.tensor, ...]] = {}
 
 def _get_lora_a_ptr(lora_a_weights: List[torch.Tensor], device: torch.device):
     """
-    `_LORA_A_PTR_DICT` collects the required information during `profile_run`,
+    `_LORA_A_PTR_DICT` collects the required information during `profile_run`, 
     After this, it remains constant and subsequent usage is through LUT.
-    Refer to:
+    Refer to: 
     https://github.com/triton-lang/triton/blob/release/3.1.x/python/tutorials/08-grouped-gemm.py
     """
     key = tuple(lora_weight.data_ptr() for lora_weight in lora_a_weights)
@@ -55,10 +55,10 @@ def _get_lora_a_ptr(lora_a_weights: List[torch.Tensor], device: torch.device):
 
 def _get_lora_b_ptr(lora_weights: List[torch.Tensor], offset_start: int,
                     device: torch.device):
-    """
-     `_LORA_B_PTR_DICT` collects the required information during `profile_run`,
+    """ 
+     `_LORA_B_PTR_DICT` collects the required information during `profile_run`, 
     After this, it remains constant and subsequent usage is through LUT.
-    Refer to:
+    Refer to: 
     https://github.com/triton-lang/triton/blob/release/3.1.x/python/tutorials/08-grouped-gemm.py
 
     """
@@ -114,14 +114,8 @@ def _get_lora_b_ptr(lora_weights: List[torch.Tensor], offset_start: int,
         same_stride = False
     # MAX_N is the maximum hidden size among all the lora_b weights
     MAX_N = max(hidden_sizes)
-    _LORA_B_PTR_DICT[key] = (
-        slice_start_tensor,
-        lora_ptr_tensor,
-        lora_strides_d0_tensor,
-        lora_strides_d1_tensor,
-        lora_strides_d2_tensor,
-        hidden_sizes_tensor,
-        same_stride,
-        MAX_N,
-    )
+    _LORA_B_PTR_DICT[key] = (slice_start_tensor, lora_ptr_tensor,
+                             lora_strides_d0_tensor, lora_strides_d1_tensor,
+                             lora_strides_d2_tensor, hidden_sizes_tensor,
+                             same_stride, MAX_N)
     return _LORA_B_PTR_DICT.get(key)

@@ -120,8 +120,7 @@ class BitsAndBytesConfig(QuantizationConfig):
             llm_int8_enable_fp32_cpu_offload=llm_int8_enable_fp32_cpu_offload,
             llm_int8_has_fp16_weight=llm_int8_has_fp16_weight,
             llm_int8_skip_modules=llm_int8_skip_modules,
-            llm_int8_threshold=llm_int8_threshold,
-        )
+            llm_int8_threshold=llm_int8_threshold)
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["LinearMethodBase"]:
@@ -134,7 +133,7 @@ class BitsAndBytesConfig(QuantizationConfig):
 
 def is_layer_skipped_bnb(prefix: str, llm_int8_skip_modules: List[str]):
     # Split the prefix into its dot-separated components
-    components = prefix.split(".")
+    components = prefix.split('.')
 
     # Check if any of the skip modules exactly matches any component
     substr_check = any(module_name in components
@@ -159,7 +158,6 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
     def __init__(self, quant_config: BitsAndBytesConfig):
         try:
             import bitsandbytes
-
             if bitsandbytes.__version__ < "0.45.3":
                 raise ImportError("bitsandbytes version is wrong. Please "
                                   "install bitsandbytes>=0.45.3.")
@@ -170,16 +168,11 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
 
         self.quant_config = quant_config
 
-    def create_weights(
-        self,
-        layer: torch.nn.Module,
-        input_size_per_partition: int,
-        output_partition_sizes: List[int],
-        input_size: int,
-        output_size: int,
-        params_dtype: torch.dtype,
-        **extra_weight_attrs,
-    ):
+    def create_weights(self, layer: torch.nn.Module,
+                       input_size_per_partition: int,
+                       output_partition_sizes: List[int], input_size: int,
+                       output_size: int, params_dtype: torch.dtype,
+                       **extra_weight_attrs):
         from bitsandbytes.nn import Int8Params
 
         def calculate_quant_ratio(dtype):
@@ -190,24 +183,19 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
 
         def create_qweight_for_8bit():
             qweight = Int8Params(
-                data=torch.empty(
-                    sum(output_partition_sizes),
-                    input_size_per_partition,
-                    dtype=torch.int8,
-                ),
+                data=torch.empty(sum(output_partition_sizes),
+                                 input_size_per_partition,
+                                 dtype=torch.int8),
                 has_fp16_weights=self.quant_config.llm_int8_has_fp16_weight,
-                requires_grad=False,
-            )
+                requires_grad=False)
             set_weight_attrs(
-                qweight,
-                {
+                qweight, {
                     "input_dim": 0,
                     "output_dim": 0,
                     "pack_factor": 1,
                     "use_bitsandbytes_8bit": True,
-                    "generation": 0,
-                },
-            )
+                    "generation": 0
+                })
             return qweight
 
         def create_qweight_for_4bit():
@@ -219,19 +207,17 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
                     "The input size is not aligned with the quantized "
                     "weight shape.")
 
-            qweight = torch.nn.Parameter(
-                torch.empty(total_size // quant_ratio, 1, dtype=torch.uint8),
-                requires_grad=False,
-            )
+            qweight = torch.nn.Parameter(torch.empty(total_size // quant_ratio,
+                                                     1,
+                                                     dtype=torch.uint8),
+                                         requires_grad=False)
             set_weight_attrs(
-                qweight,
-                {
+                qweight, {
                     "input_dim": 0,
                     "output_dim": 0,
                     "pack_factor": quant_ratio,
-                    "use_bitsandbytes_4bit": True,
-                },
-            )
+                    "use_bitsandbytes_4bit": True
+                })
             return qweight
 
         if self.quant_config.load_in_8bit:
@@ -243,23 +229,22 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
         layer.register_parameter("weight", qweight)
         set_weight_attrs(qweight, extra_weight_attrs)
 
-    def apply(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+
         if self.quant_config.load_in_8bit:
             return self._apply_8bit_weight(layer, x, bias)
         else:
             return self._apply_4bit_weight(layer, x, bias)
 
     def _apply_8bit_weight(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+            self,
+            layer: torch.nn.Module,
+            x: torch.Tensor,
+            bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+
         # only load the bitsandbytes module when needed
         from bitsandbytes import MatmulLtState, matmul
 
@@ -295,13 +280,13 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
                 matmul_states[i] = MatmulLtState()
                 matmul_states[i].CB = qweight[offsets[i]:offsets[i + 1]]
                 matmul_states[i].SCB = quant_states[i].to(x.device)
-                matmul_states[
-                    i].threshold = self.quant_config.llm_int8_threshold
-                matmul_states[
-                    i].has_fp16_weights = self.quant_config.llm_int8_has_fp16_weight
+                matmul_states[i].threshold = (
+                    self.quant_config.llm_int8_threshold)
+                matmul_states[i].has_fp16_weights = (
+                    self.quant_config.llm_int8_has_fp16_weight)
                 matmul_states[i].is_training = False
-                if (matmul_states[i].threshold > 0.0
-                        and not matmul_states[i].has_fp16_weights):
+                if matmul_states[i].threshold > 0.0 and not matmul_states[
+                        i].has_fp16_weights:
                     matmul_states[i].use_pool = True
 
             new_x = bf_x.unsqueeze(0)
@@ -309,8 +294,7 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
             out[:, current_index:current_index + output_size] = matmul(
                 new_x,
                 qweight[offsets[i]:offsets[i + 1]],
-                state=matmul_states[i],
-            )
+                state=matmul_states[i])
 
             current_index += output_size
 
@@ -335,11 +319,11 @@ class BitsAndBytesLinearMethod(LinearMethodBase):
         return out
 
     def _apply_4bit_weight(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+            self,
+            layer: torch.nn.Module,
+            x: torch.Tensor,
+            bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+
         original_type = x.dtype
         original_shape = x.shape
         reshape_after_matmul = False
@@ -379,7 +363,6 @@ def _apply_bnb_4bit(
 ) -> None:
     # only load the bitsandbytes module when needed
     from bitsandbytes import matmul_4bit
-
     quant_states = weight.bnb_quant_state
     current_index = 0
     for i in range(len(quant_states)):
@@ -403,13 +386,11 @@ def _apply_bnb_4bit_fake(
 
 
 try:
-    direct_register_custom_op(
-        op_name="apply_bnb_4bit",
-        op_func=_apply_bnb_4bit,
-        mutates_args=["out"],
-        fake_impl=_apply_bnb_4bit_fake,
-        dispatch_key=current_platform.dispatch_key,
-    )
+    direct_register_custom_op(op_name="apply_bnb_4bit",
+                              op_func=_apply_bnb_4bit,
+                              mutates_args=["out"],
+                              fake_impl=_apply_bnb_4bit_fake,
+                              dispatch_key=current_platform.dispatch_key)
     apply_bnb_4bit = torch.ops.vllm.apply_bnb_4bit
 
 except AttributeError as error:

@@ -99,7 +99,7 @@ TIMEOUT_KEEP_ALIVE = 5  # seconds
 prometheus_multiproc_dir: tempfile.TemporaryDirectory
 
 # Cannot use __name__ (https://github.com/vllm-project/vllm/pull/4765)
-logger = init_logger("vllm.entrypoints.openai.api_server")
+logger = init_logger('vllm.entrypoints.openai.api_server')
 
 _running_tasks: set[asyncio.Task] = set()
 
@@ -112,7 +112,7 @@ async def lifespan(app: FastAPI):
 
             async def _force_log():
                 while True:
-                    await asyncio.sleep(10.0)
+                    await asyncio.sleep(10.)
                     await engine_client.do_log_stats()
 
             task = asyncio.create_task(_force_log())
@@ -137,7 +137,8 @@ async def lifespan(app: FastAPI):
 
 @asynccontextmanager
 async def build_async_engine_client(
-    args: Namespace, ) -> AsyncIterator[EngineClient]:
+        args: Namespace) -> AsyncIterator[EngineClient]:
+
     # Context manager to handle engine_client lifecycle
     # Ensures everything is shutdown and cleaned up on error/exit
     engine_args = AsyncEngineArgs.from_cli_args(args)
@@ -172,15 +173,13 @@ async def build_async_engine_client_from_engine_args(
                 "To disable frontend multiprocessing, set VLLM_USE_V1=0.")
 
         from vllm.v1.engine.async_llm import AsyncLLM
-
         async_llm: Optional[AsyncLLM] = None
         try:
             async_llm = AsyncLLM.from_vllm_config(
                 vllm_config=vllm_config,
                 usage_context=usage_context,
                 disable_log_requests=engine_args.disable_log_requests,
-                disable_log_stats=engine_args.disable_log_stats,
-            )
+                disable_log_stats=engine_args.disable_log_stats)
             yield async_llm
         finally:
             if async_llm:
@@ -189,14 +188,14 @@ async def build_async_engine_client_from_engine_args(
     # V0 AsyncLLM.
     elif (MQLLMEngineClient.is_unsupported_config(vllm_config)
           or disable_frontend_multiprocessing):
+
         engine_client: Optional[EngineClient] = None
         try:
             engine_client = AsyncLLMEngine.from_vllm_config(
                 vllm_config=vllm_config,
                 usage_context=usage_context,
                 disable_log_requests=engine_args.disable_log_requests,
-                disable_log_stats=engine_args.disable_log_stats,
-            )
+                disable_log_stats=engine_args.disable_log_stats)
             yield engine_client
         finally:
             if engine_client and hasattr(engine_client, "shutdown"):
@@ -210,8 +209,8 @@ async def build_async_engine_client_from_engine_args(
             #   cleaned up upon exit.
             global prometheus_multiproc_dir
             prometheus_multiproc_dir = tempfile.TemporaryDirectory()
-            os.environ["PROMETHEUS_MULTIPROC_DIR"] = (
-                prometheus_multiproc_dir.name)
+            os.environ[
+                "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
         else:
             logger.warning(
                 "Found PROMETHEUS_MULTIPROC_DIR was set by user. "
@@ -235,18 +234,12 @@ async def build_async_engine_client_from_engine_args(
         # The Process can raise an exception during startup, which may
         # not actually result in an exitcode being reported. As a result
         # we use a shared variable to communicate the information.
-        engine_alive = multiprocessing.Value("b", True, lock=False)
+        engine_alive = multiprocessing.Value('b', True, lock=False)
         engine_process = context.Process(
             target=run_mp_engine,
-            args=(
-                vllm_config,
-                UsageContext.OPENAI_API_SERVER,
-                ipc_path,
-                engine_args.disable_log_stats,
-                engine_args.disable_log_requests,
-                engine_alive,
-            ),
-        )
+            args=(vllm_config, UsageContext.OPENAI_API_SERVER, ipc_path,
+                  engine_args.disable_log_stats,
+                  engine_args.disable_log_requests, engine_alive))
         engine_process.start()
         engine_pid = engine_process.pid
         assert engine_pid is not None, "Engine process failed to start."
@@ -271,7 +264,8 @@ async def build_async_engine_client_from_engine_args(
                     await mq_engine_client.setup()
                     break
                 except TimeoutError:
-                    if not engine_process.is_alive() or not engine_alive.value:
+                    if (not engine_process.is_alive()
+                            or not engine_alive.value):
                         raise RuntimeError(
                             "Engine process failed to start. See stack "
                             "trace for the root cause.") from None
@@ -295,7 +289,6 @@ async def build_async_engine_client_from_engine_args(
             # before prometheus_client is imported.
             # See https://prometheus.github.io/client_python/multiprocess/
             from prometheus_client import multiprocess
-
             multiprocess.mark_process_dead(engine_process.pid)
 
 
@@ -305,7 +298,7 @@ async def validate_json_request(raw_request: Request):
     if media_type != "application/json":
         raise HTTPException(
             status_code=HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-            detail="Unsupported Media Type: Only 'application/json' is allowed",
+            detail="Unsupported Media Type: Only 'application/json' is allowed"
         )
 
 
@@ -325,10 +318,8 @@ def mount_metrics(app: FastAPI):
 
     prometheus_multiproc_dir_path = os.getenv("PROMETHEUS_MULTIPROC_DIR", None)
     if prometheus_multiproc_dir_path is not None:
-        logger.debug(
-            "vLLM to use %s as PROMETHEUS_MULTIPROC_DIR",
-            prometheus_multiproc_dir_path,
-        )
+        logger.debug("vLLM to use %s as PROMETHEUS_MULTIPROC_DIR",
+                     prometheus_multiproc_dir_path)
         registry = CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
 
@@ -419,7 +410,7 @@ async def get_server_load_metrics(request: Request):
     # - /v1/rerank
     # - /v2/rerank
     return JSONResponse(
-        content={"server_load": request.app.state.server_load_metrics})
+        content={'server_load': request.app.state.server_load_metrics})
 
 
 @router.api_route("/ping", methods=["GET", "POST"])
@@ -756,8 +747,7 @@ async def invocations(raw_request: Request):
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported task: '{task}' for '/invocations'. "
-            f"Expected one of {set(TASK_HANDLERS.keys())}",
-        )
+            f"Expected one of {set(TASK_HANDLERS.keys())}")
 
     handler_config = TASK_HANDLERS[task]
     if "messages" in body:
@@ -843,11 +833,9 @@ def build_app(args: Namespace) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_, exc):
-        err = ErrorResponse(
-            message=str(exc),
-            type="BadRequestError",
-            code=HTTPStatus.BAD_REQUEST,
-        )
+        err = ErrorResponse(message=str(exc),
+                            type="BadRequestError",
+                            code=HTTPStatus.BAD_REQUEST)
         return JSONResponse(err.model_dump(),
                             status_code=HTTPStatus.BAD_REQUEST)
 
@@ -893,10 +881,8 @@ def build_app(args: Namespace) -> FastAPI:
                 section async for section in response.body_iterator
             ]
             response.body_iterator = iterate_in_threadpool(iter(response_body))
-            logger.info(
-                "response_body={%s}",
-                response_body[0].decode() if response_body else None,
-            )
+            logger.info("response_body={%s}",
+                        response_body[0].decode() if response_body else None)
             return response
 
     for middleware in args.middleware:
@@ -953,17 +939,14 @@ async def init_app_state(
                 tokenizer,
                 chat_template=None,
                 tools=None,
-                trust_remote_code=model_config.trust_remote_code,
-            )
+                trust_remote_code=model_config.trust_remote_code)
 
             if hf_chat_template != resolved_chat_template:
                 logger.warning(
                     "Using supplied chat template: %s\n"
                     "It is different from official chat template '%s'. "
                     "This discrepancy may lead to performance degradation.",
-                    resolved_chat_template,
-                    args.model,
-                )
+                    resolved_chat_template, args.model)
 
     state.openai_serving_models = OpenAIServingModels(
         engine_client=engine_client,
@@ -973,7 +956,7 @@ async def init_app_state(
         prompt_adapters=args.prompt_adapters,
     )
     await state.openai_serving_models.init_static_loras()
-    state.openai_serving_chat = (OpenAIServingChat(
+    state.openai_serving_chat = OpenAIServingChat(
         engine_client,
         model_config,
         state.openai_serving_models,
@@ -986,42 +969,42 @@ async def init_app_state(
         tool_parser=args.tool_call_parser,
         reasoning_parser=args.reasoning_parser,
         enable_prompt_tokens_details=args.enable_prompt_tokens_details,
-    ) if model_config.runner_type == "generate" else None)
-    state.openai_serving_completion = (OpenAIServingCompletion(
+    ) if model_config.runner_type == "generate" else None
+    state.openai_serving_completion = OpenAIServingCompletion(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
         return_tokens_as_token_ids=args.return_tokens_as_token_ids,
-    ) if model_config.runner_type == "generate" else None)
-    state.openai_serving_pooling = (OpenAIServingPooling(
+    ) if model_config.runner_type == "generate" else None
+    state.openai_serving_pooling = OpenAIServingPooling(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
-    ) if model_config.runner_type == "pooling" else None)
-    state.openai_serving_embedding = (OpenAIServingEmbedding(
+    ) if model_config.runner_type == "pooling" else None
+    state.openai_serving_embedding = OpenAIServingEmbedding(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
-    ) if model_config.task == "embed" else None)
-    state.openai_serving_scores = (ServingScores(
+    ) if model_config.task == "embed" else None
+    state.openai_serving_scores = ServingScores(
         engine_client,
         model_config,
         state.openai_serving_models,
-        request_logger=request_logger,
-    ) if model_config.task in ("score", "embed", "pooling") else None)
-    state.jinaai_serving_reranking = (ServingScores(
+        request_logger=request_logger) if model_config.task in (
+            "score", "embed", "pooling") else None
+    state.jinaai_serving_reranking = ServingScores(
         engine_client,
         model_config,
         state.openai_serving_models,
-        request_logger=request_logger,
-    ) if model_config.task == "score" else None)
+        request_logger=request_logger
+    ) if model_config.task == "score" else None
     state.openai_serving_tokenization = OpenAIServingTokenization(
         engine_client,
         model_config,
@@ -1030,12 +1013,12 @@ async def init_app_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
     )
-    state.openai_serving_transcription = (OpenAIServingTranscription(
+    state.openai_serving_transcription = OpenAIServingTranscription(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
-    ) if model_config.runner_type == "transcription" else None)
+    ) if model_config.runner_type == "transcription" else None
     state.task = model_config.task
 
     state.enable_server_load_tracking = args.enable_server_load_tracking
@@ -1063,14 +1046,14 @@ async def run_server(args, **uvicorn_kwargs) -> None:
         ToolParserManager.import_tool_parser(args.tool_parser_plugin)
 
     valid_tool_parses = ToolParserManager.tool_parsers.keys()
-    if (args.enable_auto_tool_choice
-            and args.tool_call_parser not in valid_tool_parses):
+    if args.enable_auto_tool_choice \
+        and args.tool_call_parser not in valid_tool_parses:
         raise KeyError(f"invalid tool call parser: {args.tool_call_parser} "
                        f"(chose from {{ {','.join(valid_tool_parses)} }})")
 
     valid_reasoning_parses = ReasoningParserManager.reasoning_parsers.keys()
-    if (args.reasoning_parser
-            and args.reasoning_parser not in valid_reasoning_parses):
+    if args.reasoning_parser \
+        and args.reasoning_parser not in valid_reasoning_parses:
         raise KeyError(
             f"invalid reasoning parser: {args.reasoning_parser} "
             f"(chose from {{ {','.join(valid_reasoning_parses)} }})")
@@ -1099,16 +1082,13 @@ async def run_server(args, **uvicorn_kwargs) -> None:
 
         def _listen_addr(a: str) -> str:
             if is_valid_ipv6_address(a):
-                return "[" + a + "]"
+                return '[' + a + ']'
             return a or "0.0.0.0"
 
         is_ssl = args.ssl_keyfile and args.ssl_certfile
-        logger.info(
-            "Starting vLLM API server on http%s://%s:%d",
-            "s" if is_ssl else "",
-            _listen_addr(sock_addr[0]),
-            sock_addr[1],
-        )
+        logger.info("Starting vLLM API server on http%s://%s:%d",
+                    "s" if is_ssl else "", _listen_addr(sock_addr[0]),
+                    sock_addr[1])
 
         shutdown_task = await serve_http(
             app,

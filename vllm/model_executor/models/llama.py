@@ -23,7 +23,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
-
 from typing import Any, Dict, Iterable, Optional, Set, Tuple, Union
 
 import torch
@@ -85,13 +84,11 @@ class LlamaMLP(nn.Module):
                 quant_config=quant_config,
                 prefix=f"{prefix}.gate_proj",
             )
-            self.up_proj = ColumnParallelLinear(
-                input_size=hidden_size,
-                output_size=intermediate_size,
-                bias=bias,
-                quant_config=quant_config,
-                prefix=f"{prefix}.up_proj",
-            )
+            self.up_proj = ColumnParallelLinear(input_size=hidden_size,
+                                                output_size=intermediate_size,
+                                                bias=bias,
+                                                quant_config=quant_config,
+                                                prefix=f"{prefix}.up_proj")
         else:
             self.gate_up_proj = MergedColumnParallelLinear(
                 input_size=hidden_size,
@@ -128,21 +125,19 @@ class LlamaMLP(nn.Module):
 
 class LlamaAttention(nn.Module):
 
-    def __init__(
-        self,
-        config: LlamaConfig,
-        hidden_size: int,
-        num_heads: int,
-        num_kv_heads: int,
-        rope_theta: float = 10000,
-        rope_scaling: Optional[Dict[str, Any]] = None,
-        max_position_embeddings: int = 8192,
-        quant_config: Optional[QuantizationConfig] = None,
-        bias: bool = False,
-        bias_o_proj: bool = False,
-        cache_config: Optional[CacheConfig] = None,
-        prefix: str = "",
-    ) -> None:
+    def __init__(self,
+                 config: LlamaConfig,
+                 hidden_size: int,
+                 num_heads: int,
+                 num_kv_heads: int,
+                 rope_theta: float = 10000,
+                 rope_scaling: Optional[Dict[str, Any]] = None,
+                 max_position_embeddings: int = 8192,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 bias: bool = False,
+                 bias_o_proj: bool = False,
+                 cache_config: Optional[CacheConfig] = None,
+                 prefix: str = "") -> None:
         super().__init__()
         layer_idx = extract_layer_index(prefix)
         self.hidden_size = hidden_size
@@ -285,7 +280,7 @@ class LlamaDecoderLayer(nn.Module):
             config, "bias", False)
         bias_o_proj = attention_bias
         # support internlm/internlm3-8b with qkv_bias
-        if hasattr(config, "qkv_bias"):
+        if hasattr(config, 'qkv_bias'):
             attention_bias = config.qkv_bias
 
         self.self_attn = LlamaAttention(
@@ -342,13 +337,11 @@ class LlamaDecoderLayer(nn.Module):
 @support_torch_compile
 class LlamaModel(nn.Module):
 
-    def __init__(
-        self,
-        *,
-        vllm_config: VllmConfig,
-        prefix: str = "",
-        layer_type: type[nn.Module] = LlamaDecoderLayer,
-    ):
+    def __init__(self,
+                 *,
+                 vllm_config: VllmConfig,
+                 prefix: str = "",
+                 layer_type: type[nn.Module] = LlamaDecoderLayer):
         super().__init__()
 
         config = vllm_config.model_config.hf_config
@@ -358,8 +351,8 @@ class LlamaModel(nn.Module):
 
         self.config = config
         self.quant_config = quant_config
-        lora_vocab = ((lora_config.lora_extra_vocab_size *
-                       (lora_config.max_loras or 1)) if lora_config else 0)
+        lora_vocab = (lora_config.lora_extra_vocab_size *
+                      (lora_config.max_loras or 1)) if lora_config else 0
         self.vocab_size = config.vocab_size + lora_vocab
         self.org_vocab_size = config.vocab_size
         if get_pp_group().is_first_rank or (config.tie_word_embeddings
@@ -374,12 +367,10 @@ class LlamaModel(nn.Module):
             self.embed_tokens = PPMissingLayer()
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            lambda prefix: layer_type(
-                config=config,
-                cache_config=cache_config,
-                quant_config=quant_config,
-                prefix=prefix,
-            ),
+            lambda prefix: layer_type(config=config,
+                                      cache_config=cache_config,
+                                      quant_config=quant_config,
+                                      prefix=prefix),
             prefix=f"{prefix}.layers",
         )
         if get_pp_group().is_last_rank:
@@ -404,11 +395,8 @@ class LlamaModel(nn.Module):
         positions: torch.Tensor,
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
-    ) -> Union[
-            torch.Tensor,
-            IntermediateTensors,
-            tuple[torch.Tensor, list[torch.Tensor]],
-    ]:
+    ) -> Union[torch.Tensor, IntermediateTensors, tuple[torch.Tensor,
+                                                        list[torch.Tensor]]]:
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -422,7 +410,6 @@ class LlamaModel(nn.Module):
 
         if is_hpu:
             import habana_frameworks.torch as htorch
-
             htorch.core.mark_step()
 
         aux_hidden_states = []
@@ -481,8 +468,8 @@ class LlamaModel(nn.Module):
                 # Models trained using ColossalAI may include these tensors in
                 # the checkpoint. Skip them.
                 continue
-            if self.quant_config is not None and (
-                    scale_name := self.quant_config.get_cache_scale(name)):
+            if (self.quant_config is not None and
+                (scale_name := self.quant_config.get_cache_scale(name))):
                 # Loading kv cache quantization scales
                 param = params_dict[scale_name]
                 weight_loader = getattr(param, "weight_loader",
@@ -535,13 +522,13 @@ class LlamaModel(nn.Module):
 class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-        "gate_up_proj": ["gate_proj", "up_proj"],
+        "gate_up_proj": ["gate_proj", "up_proj"]
     }
 
     # LoRA specific attributes
     embedding_modules = {
         "embed_tokens": "input_embeddings",
-        "lm_head": "output_embeddings",
+        "lm_head": "output_embeddings"
     }
     embedding_padding_modules = ["lm_head"]
 
@@ -568,13 +555,11 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         "norm": "model.norm",
     }
 
-    def __init__(
-        self,
-        *,
-        vllm_config: VllmConfig,
-        prefix: str = "",
-        layer_type: type[nn.Module] = LlamaDecoderLayer,
-    ):
+    def __init__(self,
+                 *,
+                 vllm_config: VllmConfig,
+                 prefix: str = "",
+                 layer_type: type[nn.Module] = LlamaDecoderLayer):
         super().__init__()
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
@@ -582,11 +567,9 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self.config = config
         self.lora_config = lora_config
 
-        self.model = self._init_model(
-            vllm_config=vllm_config,
-            prefix=maybe_prefix(prefix, "model"),
-            layer_type=layer_type,
-        )
+        self.model = self._init_model(vllm_config=vllm_config,
+                                      prefix=maybe_prefix(prefix, "model"),
+                                      layer_type=layer_type)
 
         if get_pp_group().is_last_rank:
             self.unpadded_vocab_size = config.vocab_size
@@ -626,12 +609,10 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         num_layers = len(self.model.layers)
         return (2, num_layers // 2, num_layers - 3)
 
-    def _init_model(
-        self,
-        vllm_config: VllmConfig,
-        prefix: str = "",
-        layer_type: type[nn.Module] = LlamaDecoderLayer,
-    ):
+    def _init_model(self,
+                    vllm_config: VllmConfig,
+                    prefix: str = "",
+                    layer_type: type[nn.Module] = LlamaDecoderLayer):
         return LlamaModel(vllm_config=vllm_config,
                           prefix=prefix,
                           layer_type=layer_type)
@@ -682,9 +663,8 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
             attn_in = self.config.head_dim * n_heads
             attn_out = self.config.hidden_size
 
-            return (w.view(n_heads, attn_in // n_heads // 2, 2,
-                           attn_out).transpose(1,
-                                               2).reshape(attn_in, attn_out))
+            return w.view(n_heads, attn_in // n_heads // 2, 2,
+                          attn_out).transpose(1, 2).reshape(attn_in, attn_out)
 
         mapping = self.mistral_mapping
         modules = name.split(".")

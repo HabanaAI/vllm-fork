@@ -33,8 +33,7 @@ class Sampler(nn.Module):
             # [num_requests, 1], where each row represents one generated
             # token per request.
             sampled_token_ids=sampled.unsqueeze(-1),
-            logprobs_tensors=None,
-        )
+            logprobs_tensors=None)
         return sampler_output
 
     def apply_temperature(
@@ -71,11 +70,8 @@ class Sampler(nn.Module):
             sampling_metadata.top_p,
         )
 
-        sampled = torch.where(
-            sampling_metadata.temperature < _SAMPLING_EPS,
-            greedy_sampled,
-            random_sampled,
-        )
+        sampled = torch.where(sampling_metadata.temperature < _SAMPLING_EPS,
+                              greedy_sampled, random_sampled)
         return sampled
 
     def compute_logprobs(self, logits: torch.Tensor) -> torch.Tensor:

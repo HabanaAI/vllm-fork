@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Custom normalization layers."""
-
 from typing import Optional, Tuple, Union
 
 import torch
@@ -12,14 +11,14 @@ from vllm.platforms import current_platform
 
 
 def is_rocm_aiter_rmsnorm_enabled() -> bool:
-    return (current_platform.is_rocm() and envs.VLLM_ROCM_USE_AITER_RMSNORM
-            and envs.VLLM_ROCM_USE_AITER)
+    return current_platform.is_rocm() \
+        and envs.VLLM_ROCM_USE_AITER_RMSNORM \
+        and envs.VLLM_ROCM_USE_AITER
 
 
 def rms_norm(x: torch.Tensor, weight: torch.Tensor,
              variance_epsilon: float) -> torch.Tensor:
     from vllm import _custom_ops as ops
-
     out = torch.empty_like(x)
     ops.rms_norm(
         out,
@@ -31,13 +30,9 @@ def rms_norm(x: torch.Tensor, weight: torch.Tensor,
 
 
 def fused_add_rms_norm(
-    x: torch.Tensor,
-    residual: torch.Tensor,
-    weight: torch.Tensor,
-    variance_epsilon: float,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+        x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
+        variance_epsilon: float) -> Tuple[torch.Tensor, torch.Tensor]:
     from vllm import _custom_ops as ops
-
     ops.fused_add_rms_norm(
         x,
         residual,
@@ -49,17 +44,15 @@ def fused_add_rms_norm(
 
 def rocm_aiter_rms_norm(x: torch.Tensor, weight: torch.Tensor,
                         variance_epsilon: float) -> torch.Tensor:
-    import aiter as rocm_aiter
 
+    import aiter as rocm_aiter
     return rocm_aiter.rms_norm(x, weight, variance_epsilon)
 
 
 def rocm_aiter_fused_add_rms_norm(
-    x: torch.Tensor,
-    residual: torch.Tensor,
-    weight: torch.Tensor,
-    variance_epsilon: float,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+        x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor,
+        variance_epsilon: float) -> Tuple[torch.Tensor, torch.Tensor]:
+
     import aiter as rocm_aiter
 
     # Assuming the correct signature for rmsnorm2d_fwd_with_add
@@ -176,7 +169,6 @@ class RMSNorm(CustomOp):
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         from vllm_hpu_extension.kernels import rms_norm
-
         HPUFusedRMSNorm = rms_norm()
         if x.dim() < 3:
             # fix an known bug before synapse 1.21 release

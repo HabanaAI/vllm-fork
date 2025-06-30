@@ -234,7 +234,6 @@ class EncoderDecoderInputs(TypedDict):
 
     This specifies the required data for encoder-decoder models.
     """
-
     encoder: Union[TokenInputs, "MultiModalInputs"]
     """The inputs for the encoder portion."""
 
@@ -267,8 +266,7 @@ def build_explicit_enc_dec_prompt(
     return ExplicitEncoderDecoderPrompt(
         encoder_prompt=encoder_prompt,
         decoder_prompt=decoder_prompt,
-        mm_processor_kwargs=mm_processor_kwargs,
-    )
+        mm_processor_kwargs=mm_processor_kwargs)
 
 
 def zip_enc_dec_prompts(
@@ -290,11 +288,10 @@ def zip_enc_dec_prompts(
     if isinstance(mm_processor_kwargs, dict):
         return [
             build_explicit_enc_dec_prompt(
-                encoder_prompt,
-                decoder_prompt,
-                cast(dict[str, Any], mm_processor_kwargs),
-            ) for (encoder_prompt,
-                   decoder_prompt) in zip(enc_prompts, dec_prompts)
+                encoder_prompt, decoder_prompt,
+                cast(dict[str, Any], mm_processor_kwargs))
+            for (encoder_prompt,
+                 decoder_prompt) in zip(enc_prompts, dec_prompts)
         ]
     return [
         build_explicit_enc_dec_prompt(encoder_prompt, decoder_prompt,

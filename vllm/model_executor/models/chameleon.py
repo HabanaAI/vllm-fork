@@ -203,14 +203,11 @@ class ChameleonMLP(nn.Module):
             input_size=hidden_size,
             output_sizes=[intermediate_size] * 2,
             bias=bias,
-            quant_config=quant_config,
-        )
-        self.down_proj = RowParallelLinear(
-            input_size=intermediate_size,
-            output_size=hidden_size,
-            bias=bias,
-            quant_config=quant_config,
-        )
+            quant_config=quant_config)
+        self.down_proj = RowParallelLinear(input_size=intermediate_size,
+                                           output_size=hidden_size,
+                                           bias=bias,
+                                           quant_config=quant_config)
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
@@ -286,15 +283,13 @@ class ChameleonAttention(nn.Module):
             rope_scaling=rope_scaling,
         )
 
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.attn",
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads,
+                              cache_config=cache_config,
+                              quant_config=quant_config,
+                              prefix=f"{prefix}.attn")
 
     def _apply_qk_norm(self, q: torch.Tensor,
                        k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -373,6 +368,7 @@ class ChameleonDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+
         if residual is None:
             residual = hidden_states
             hidden_states = self.input_layernorm(hidden_states)
@@ -443,6 +439,7 @@ class ChameleonSwinDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+
         residual = hidden_states
         hidden_states = self.self_attn(
             positions=positions,
@@ -480,11 +477,9 @@ class ChameleonVQVAEVectorQuantizer(nn.Module):
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
         distances = (
             torch.sum(hidden_state_flattened**2, dim=1, keepdim=True) +
-            torch.sum(self.embedding.weight**2, dim=1) - 2 * torch.einsum(
-                "bd,dn->bn",
-                hidden_state_flattened,
-                self.embedding.weight.transpose(0, 1),
-            ))
+            torch.sum(self.embedding.weight**2, dim=1) -
+            2 * torch.einsum("bd,dn->bn", hidden_state_flattened,
+                             self.embedding.weight.transpose(0, 1)))
 
         min_encoding_indices = torch.argmin(distances, dim=1)
         hidden_state_quant = self.embedding(min_encoding_indices).view(
@@ -496,8 +491,8 @@ class ChameleonVQVAEVectorQuantizer(nn.Module):
                               (hidden_state_quant - hidden_state.detach())**2)
 
         # preserve gradients
-        hidden_state_quant = (hidden_state +
-                              (hidden_state_quant - hidden_state).detach())
+        hidden_state_quant = hidden_state + (hidden_state_quant -
+                                             hidden_state).detach()
 
         # reshape back to match original input shape
         hidden_state_quant = hidden_state_quant.permute(0, 3, 1,
@@ -539,8 +534,8 @@ class ChameleonVQVAEEncoderResnetBlock(nn.Module):
     ):
         super().__init__()
         self.in_channels = in_channels
-        self.out_channels = (in_channels
-                             if out_channels is None else out_channels)
+        self.out_channels = in_channels if out_channels is None \
+            else out_channels
         self.use_conv_shortcut = conv_shortcut
 
         self.norm1 = torch.nn.GroupNorm(num_groups=32,
@@ -564,21 +559,17 @@ class ChameleonVQVAEEncoderResnetBlock(nn.Module):
                                      padding=1)
         if self.in_channels != self.out_channels:
             if self.use_conv_shortcut:
-                self.conv_shortcut = torch.nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                )
+                self.conv_shortcut = torch.nn.Conv2d(in_channels,
+                                                     out_channels,
+                                                     kernel_size=3,
+                                                     stride=1,
+                                                     padding=1)
             else:
-                self.nin_shortcut = torch.nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    kernel_size=1,
-                    stride=1,
-                    padding=0,
-                )
+                self.nin_shortcut = torch.nn.Conv2d(in_channels,
+                                                    out_channels,
+                                                    kernel_size=1,
+                                                    stride=1,
+                                                    padding=0)
 
     def forward(self, hidden_states: torch.Tensor):
         residual = hidden_states
@@ -717,8 +708,8 @@ class ChameleonVQVAEEncoder(nn.Module):
             in_channels=block_in,
             out_channels=block_in,
         )
-        self.mid.attn_1 = (ChameleonVQVAEEncoderAttnBlock(block_in)
-                           if config.attn_type == "vanilla" else nn.Identity())
+        self.mid.attn_1 = ChameleonVQVAEEncoderAttnBlock(
+            block_in) if config.attn_type == "vanilla" else nn.Identity()
         self.mid.block_2 = ChameleonVQVAEEncoderResnetBlock(
             config=config,
             in_channels=block_in,
@@ -863,17 +854,15 @@ class ChameleonModel(nn.Module):
         )
         self.vocabulary_mapping = ChameleonImageVocabularyMapping(
             config.vocabulary_map)
-        decoder_layer = (ChameleonDecoderLayer if not self.config.swin_norm
-                         else ChameleonSwinDecoderLayer)
+        decoder_layer = ChameleonDecoderLayer if not self.config.swin_norm \
+            else ChameleonSwinDecoderLayer
 
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            lambda prefix: decoder_layer(
-                config=config,
-                cache_config=cache_config,
-                quant_config=quant_config,
-                prefix=prefix,
-            ),
+            lambda prefix: decoder_layer(config=config,
+                                         cache_config=cache_config,
+                                         quant_config=quant_config,
+                                         prefix=prefix),
             prefix=f"{prefix}.layers",
         )
 
@@ -933,13 +922,12 @@ class ChameleonModel(nn.Module):
 @MULTIMODAL_REGISTRY.register_processor(
     ChameleonMultiModalProcessor,
     info=ChameleonProcessingInfo,
-    dummy_inputs=ChameleonDummyInputsBuilder,
-)
+    dummy_inputs=ChameleonDummyInputsBuilder)
 class ChameleonForConditionalGeneration(nn.Module, SupportsMultiModal,
                                         SupportsPP, SupportsQuant):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-        "gate_up_proj": ["gate_proj", "up_proj"],
+        "gate_up_proj": ["gate_proj", "up_proj"]
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
@@ -1014,14 +1002,12 @@ class ChameleonForConditionalGeneration(nn.Module, SupportsMultiModal,
         input_ids: torch.Tensor,
         multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
     ) -> torch.Tensor:
+
         inputs_embeds = self.model.get_input_embeddings(input_ids)
         if multimodal_embeddings is not None:
             inputs_embeds = merge_multimodal_embeddings(
-                input_ids,
-                inputs_embeds,
-                multimodal_embeddings,
-                self.model.vocabulary_mapping.image_token_id,
-            )
+                input_ids, inputs_embeds, multimodal_embeddings,
+                self.model.vocabulary_mapping.image_token_id)
         return inputs_embeds
 
     def forward(
@@ -1032,6 +1018,7 @@ class ChameleonForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
+
         if intermediate_tensors is not None:
             inputs_embeds = None
 
@@ -1043,12 +1030,10 @@ class ChameleonForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                       vision_embeddings)
             input_ids = None
 
-        hidden_states = self.model(
-            input_ids,
-            positions,
-            intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-        )
+        hidden_states = self.model(input_ids,
+                                   positions,
+                                   intermediate_tensors,
+                                   inputs_embeds=inputs_embeds)
         return hidden_states
 
     def compute_logits(
@@ -1102,7 +1087,8 @@ class ChameleonForConditionalGeneration(nn.Module, SupportsMultiModal,
                     # not vqvae for now.
                     use_default_weight_loading = True
             else:
-                for param_name, weight_name, shard_id in stacked_params_mapping:
+                for (param_name, weight_name,
+                     shard_id) in stacked_params_mapping:
                     if weight_name not in name:
                         continue
                     name = name.replace(weight_name, param_name)

@@ -11,15 +11,13 @@ from ...utils import build_model_context
 @pytest.mark.parametrize("model_id", ["Qwen/Qwen2.5-VL-3B-Instruct"])
 # yapf: disable
 @pytest.mark.parametrize(
-    ("resize_shape"),
-    [
+    ("resize_shape"), [
         ((112, 112)),
         ((114, 114)),
         ((256, 221)),
         ((1024, 1080)),
         ((784, 1120)),
-    ],
-)
+    ])
 # yapf: enable
 @pytest.mark.parametrize("num_imgs", [1, 2])
 def test_processor_force_alignment_resize(
@@ -71,12 +69,10 @@ def test_processor_force_alignment_resize(
 @pytest.mark.parametrize("model_id", ["Qwen/Qwen2.5-VL-3B-Instruct"])
 # yapf: disable
 @pytest.mark.parametrize(
-    ("resize_shape"),
-    [
+    ("resize_shape"), [
         ((110, 112)),
         ((32, 32)),
-    ],
-)
+    ])
 # yapf: enable
 @pytest.mark.parametrize("num_imgs", [1])
 def test_processor_force_alignment_resize_to_min_value(

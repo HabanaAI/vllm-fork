@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Utilities for selecting and loading models."""
-
 import contextlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Type
@@ -36,8 +35,8 @@ def resolve_transformers_arch(model_config: ModelConfig,
     for i, arch in enumerate(architectures):
         if arch == "TransformersForCausalLM":
             continue
-        auto_map: dict[str, str] = (getattr(model_config.hf_config, "auto_map",
-                                            None) or dict())
+        auto_map: dict[str, str] = getattr(model_config.hf_config, "auto_map",
+                                           None) or dict()
         # Make sure that config class is always initialized before model class,
         # otherwise the model class won't be able to access the config class,
         # the expected auto_map should have correct order like:
@@ -80,25 +79,19 @@ def resolve_transformers_arch(model_config: ModelConfig,
             logger.warning(
                 "%s has no vLLM implementation, falling back to Transformers "
                 "implementation. Some features may not be supported and "
-                "performance may not be optimal.",
-                arch,
-            )
+                "performance may not be optimal.", arch)
             architectures[i] = "TransformersForCausalLM"
     return architectures
 
 
 def get_model_architecture(
-    model_config: ModelConfig, ) -> Tuple[Type[nn.Module], str]:
+        model_config: ModelConfig) -> Tuple[Type[nn.Module], str]:
     architectures = getattr(model_config.hf_config, "architectures", [])
 
     # Special handling for quantized Mixtral.
     # FIXME(woosuk): This is a temporary hack.
     mixtral_supported = [
-        "fp8",
-        "compressed-tensors",
-        "gptq_marlin",
-        "awq_marlin",
-        "inc",
+        "fp8", "compressed-tensors", "gptq_marlin", "awq_marlin", "inc"
     ]
 
     if (model_config.quantization is not None
@@ -132,10 +125,9 @@ def get_architecture_class_name(model_config: ModelConfig) -> str:
 class ParamMapping:
     """
     A class to handle parameter mapping for model weight loading.
-    It creates a bidirectional mapping between packed parameters and their
+    It creates a bidirectional mapping between packed parameters and their 
     constituent parts.
     """
-
     packed_mapping: Dict[str, List[str]]
     inverse_packed_mapping: Dict[str, Tuple[str,
                                             int]] = field(default_factory=dict)
@@ -176,6 +168,4 @@ def configure_quant_config(quant_config: QuantizationConfig,
         logger.warning(
             "The model class %s has not defined `packed_modules_mapping`, "
             "this may lead to incorrect mapping of quantized or ignored "
-            "modules",
-            model_class.__name__,
-        )
+            "modules", model_class.__name__)

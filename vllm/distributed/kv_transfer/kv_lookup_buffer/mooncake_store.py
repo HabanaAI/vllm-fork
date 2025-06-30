@@ -5,7 +5,6 @@ think of KV cache transfer operations as putting new KV cache entries
 into a remote KVStore-based lookup buffer and getting existing KV caches
 from this remote lookup buffer.
 """
-
 import json
 import os
 from dataclasses import dataclass
@@ -38,7 +37,7 @@ class MooncakeStoreConfig:
     master_server_address: str
 
     @staticmethod
-    def from_file(file_path: str) -> "MooncakeStoreConfig":
+    def from_file(file_path: str) -> 'MooncakeStoreConfig':
         """Load the config from a JSON file."""
         with open(file_path) as fin:
             config = json.load(fin)
@@ -55,9 +54,9 @@ class MooncakeStoreConfig:
         )
 
     @staticmethod
-    def load_from_env() -> "MooncakeStoreConfig":
+    def load_from_env() -> 'MooncakeStoreConfig':
         """Load config from a file specified in the environment variable."""
-        config_file_path = os.getenv("MOONCAKE_CONFIG_PATH")
+        config_file_path = os.getenv('MOONCAKE_CONFIG_PATH')
         if config_file_path is None:
             raise ValueError(
                 "The environment variable 'MOONCAKE_CONFIG_PATH' is not set.")
@@ -70,6 +69,7 @@ class MooncakeStore(KVStoreBufferBase):
         self,
         config: VllmConfig,
     ):
+
         try:
             from mooncake.store import MooncakeDistributedStore
         except ImportError as e:
@@ -83,15 +83,12 @@ class MooncakeStore(KVStoreBufferBase):
             self.config = MooncakeStoreConfig.load_from_env()
             logger.info("Mooncake Configuration loaded successfully.")
 
-            self.store.setup(
-                self.config.local_hostname,
-                self.config.metadata_server,
-                self.config.global_segment_size,
-                self.config.local_buffer_size,
-                self.config.protocol,
-                self.config.device_name,
-                self.config.master_server_address,
-            )
+            self.store.setup(self.config.local_hostname,
+                             self.config.metadata_server,
+                             self.config.global_segment_size,
+                             self.config.local_buffer_size,
+                             self.config.protocol, self.config.device_name,
+                             self.config.master_server_address)
 
         except ValueError as e:
             logger.error("Configuration loading failed: %s", e)
@@ -129,7 +126,7 @@ class MooncakeStore(KVStoreBufferBase):
         value: torch.Tensor,
     ) -> None:
         """Put KVCache to Mooncake Store"""
-        if value.device.type in ["cuda", "hpu"]:
+        if value.device.type in ['cuda', 'hpu']:
             device_id = value.device.index
         else:
             device_id = -1
@@ -166,15 +163,15 @@ class MooncakeStore(KVStoreBufferBase):
             device_id = int(device_id_tensor.item())
             if device_id >= 0:
                 if current_platform.is_hpu():
-                    device = torch.device("hpu", device_id)
+                    device = torch.device('hpu', device_id)
                 elif current_platform.is_cuda():
-                    device = torch.device("cuda", device_id)
+                    device = torch.device('cuda', device_id)
                 else:
                     raise RuntimeError(
                         "Unsupported device type. "
                         "Please ensure you are using a supported device.")
             else:
-                device = torch.device("cpu")
+                device = torch.device('cpu')
             return tensor.to(device)
 
         return None

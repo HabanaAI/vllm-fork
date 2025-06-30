@@ -7,7 +7,6 @@ from vllm.model_executor.layers.quantization.utils.bitblas_utils import (
 
 try:
     import bitblas
-
     if bitblas.__version__ < MINIMUM_BITBLAS_VERSION:
         raise ImportError("bitblas version is wrong. Please "
                           f"install bitblas>={MINIMUM_BITBLAS_VERSION}")
@@ -33,12 +32,10 @@ parser.add_argument(
     default=auto_detect_nvidia_target(),
     help="Specify the target device for benchmarking.",
 )
-parser.add_argument(
-    "--group_size",
-    type=int,
-    default=None,
-    help="Group size for grouped quantization.",
-)
+parser.add_argument("--group_size",
+                    type=int,
+                    default=None,
+                    help="Group size for grouped quantization.")
 parser.add_argument(
     "--A_dtype",
     type=str,
@@ -93,11 +90,9 @@ parser.add_argument(
     action="store_true",
     help="Include scaling factor in the quantization.",
 )
-parser.add_argument(
-    "--with_zeros",
-    action="store_true",
-    help="Include zeros in the quantization.",
-)
+parser.add_argument("--with_zeros",
+                    action="store_true",
+                    help="Include zeros in the quantization.")
 parser.add_argument(
     "--zeros_mode",
     type=str,
@@ -214,11 +209,9 @@ for config_key, values in benchmark_results.items():
     col_widths[1] = max(col_widths[1],
                         len(input_args_str) + 2,
                         len(headers[1]) + 2)
-    col_widths[2] = max(
-        col_widths[2],
-        len(f"{values['BitBLAS_top20_latency']:.3f} ms") + 2,
-        len(headers[2]) + 2,
-    )
+    col_widths[2] = max(col_widths[2],
+                        len(f"{values['BitBLAS_top20_latency']:.3f} ms") + 2,
+                        len(headers[2]) + 2)
     # break only if you want to measure widths from a single example;
     # otherwise, let it loop over all items.
 

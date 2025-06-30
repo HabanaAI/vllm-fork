@@ -29,14 +29,14 @@ def use_v0_only(monkeypatch: pytest.MonkeyPatch):
     all tests in the module.
     """
     with monkeypatch.context() as m:
-        m.setenv("VLLM_USE_V1", "0")
+        m.setenv('VLLM_USE_V1', '0')
         yield
 
 
 FAKE_TRACE_SERVER_ADDRESS = "localhost:4317"
 
-FieldName = Literal["bool_value", "string_value", "int_value", "double_value",
-                    "array_value"]
+FieldName = Literal['bool_value', 'string_value', 'int_value', 'double_value',
+                    'array_value']
 
 
 def decode_value(value: AnyValue):
@@ -112,7 +112,8 @@ def test_traces(
 
         request = trace_service.request
         assert len(request.resource_spans) == 1, (
-            f"Expected 1 resource span, but got {len(request.resource_spans)}")
+            f"Expected 1 resource span, "
+            f"but got {len(request.resource_spans)}")
         assert len(request.resource_spans[0].scope_spans) == 1, (
             f"Expected 1 scope span, "
             f"but got {len(request.resource_spans[0].scope_spans)}")
@@ -123,34 +124,33 @@ def test_traces(
         attributes = decode_attributes(
             request.resource_spans[0].scope_spans[0].spans[0].attributes)
         assert attributes.get(SpanAttributes.GEN_AI_RESPONSE_MODEL) == model
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_REQUEST_ID) == outputs[0].request_id)
-        assert (attributes.get(SpanAttributes.GEN_AI_REQUEST_TEMPERATURE) ==
-                sampling_params.temperature)
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_REQUEST_TOP_P) == sampling_params.top_p)
-        assert (attributes.get(SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS) ==
-                sampling_params.max_tokens)
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_REQUEST_N) == sampling_params.n)
+        assert attributes.get(
+            SpanAttributes.GEN_AI_REQUEST_ID) == outputs[0].request_id
+        assert attributes.get(SpanAttributes.GEN_AI_REQUEST_TEMPERATURE
+                              ) == sampling_params.temperature
+        assert attributes.get(
+            SpanAttributes.GEN_AI_REQUEST_TOP_P) == sampling_params.top_p
+        assert attributes.get(SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS
+                              ) == sampling_params.max_tokens
+        assert attributes.get(
+            SpanAttributes.GEN_AI_REQUEST_N) == sampling_params.n
         assert attributes.get(
             SpanAttributes.GEN_AI_USAGE_PROMPT_TOKENS) == len(
                 outputs[0].prompt_token_ids)
         completion_tokens = sum(len(o.token_ids) for o in outputs[0].outputs)
-        assert (attributes.get(
+        assert attributes.get(
             SpanAttributes.GEN_AI_USAGE_COMPLETION_TOKENS) == completion_tokens
-                )
         metrics = outputs[0].metrics
-        assert (attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_QUEUE) ==
-                metrics.time_in_queue)
+        assert attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_QUEUE
+                              ) == metrics.time_in_queue
         ttft = metrics.first_token_time - metrics.arrival_time
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_LATENCY_TIME_TO_FIRST_TOKEN) == ttft)
+        assert attributes.get(
+            SpanAttributes.GEN_AI_LATENCY_TIME_TO_FIRST_TOKEN) == ttft
         e2e_time = metrics.finished_time - metrics.arrival_time
         assert attributes.get(SpanAttributes.GEN_AI_LATENCY_E2E) == e2e_time
         assert metrics.scheduler_time > 0
-        assert (attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_SCHEDULER)
-                == metrics.scheduler_time)
+        assert attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_SCHEDULER
+                              ) == metrics.scheduler_time
         # Model forward and model execute should be none, since detailed traces is
         # not enabled.
         assert metrics.model_forward_time is None
@@ -186,7 +186,8 @@ def test_traces_with_detailed_steps(
 
         request = trace_service.request
         assert len(request.resource_spans) == 1, (
-            f"Expected 1 resource span, but got {len(request.resource_spans)}")
+            f"Expected 1 resource span, "
+            f"but got {len(request.resource_spans)}")
         assert len(request.resource_spans[0].scope_spans) == 1, (
             f"Expected 1 scope span, "
             f"but got {len(request.resource_spans[0].scope_spans)}")
@@ -197,40 +198,39 @@ def test_traces_with_detailed_steps(
         attributes = decode_attributes(
             request.resource_spans[0].scope_spans[0].spans[0].attributes)
         assert attributes.get(SpanAttributes.GEN_AI_RESPONSE_MODEL) == model
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_REQUEST_ID) == outputs[0].request_id)
-        assert (attributes.get(SpanAttributes.GEN_AI_REQUEST_TEMPERATURE) ==
-                sampling_params.temperature)
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_REQUEST_TOP_P) == sampling_params.top_p)
-        assert (attributes.get(SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS) ==
-                sampling_params.max_tokens)
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_REQUEST_N) == sampling_params.n)
+        assert attributes.get(
+            SpanAttributes.GEN_AI_REQUEST_ID) == outputs[0].request_id
+        assert attributes.get(SpanAttributes.GEN_AI_REQUEST_TEMPERATURE
+                              ) == sampling_params.temperature
+        assert attributes.get(
+            SpanAttributes.GEN_AI_REQUEST_TOP_P) == sampling_params.top_p
+        assert attributes.get(SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS
+                              ) == sampling_params.max_tokens
+        assert attributes.get(
+            SpanAttributes.GEN_AI_REQUEST_N) == sampling_params.n
         assert attributes.get(
             SpanAttributes.GEN_AI_USAGE_PROMPT_TOKENS) == len(
                 outputs[0].prompt_token_ids)
         completion_tokens = sum(len(o.token_ids) for o in outputs[0].outputs)
-        assert (attributes.get(
+        assert attributes.get(
             SpanAttributes.GEN_AI_USAGE_COMPLETION_TOKENS) == completion_tokens
-                )
         metrics = outputs[0].metrics
-        assert (attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_QUEUE) ==
-                metrics.time_in_queue)
+        assert attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_QUEUE
+                              ) == metrics.time_in_queue
         ttft = metrics.first_token_time - metrics.arrival_time
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_LATENCY_TIME_TO_FIRST_TOKEN) == ttft)
+        assert attributes.get(
+            SpanAttributes.GEN_AI_LATENCY_TIME_TO_FIRST_TOKEN) == ttft
         e2e_time = metrics.finished_time - metrics.arrival_time
         assert attributes.get(SpanAttributes.GEN_AI_LATENCY_E2E) == e2e_time
         assert metrics.scheduler_time > 0
-        assert (attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_SCHEDULER)
-                == metrics.scheduler_time)
+        assert attributes.get(SpanAttributes.GEN_AI_LATENCY_TIME_IN_SCHEDULER
+                              ) == metrics.scheduler_time
         assert metrics.model_forward_time > 0
         assert attributes.get(
             SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_FORWARD
         ) == pytest.approx(metrics.model_forward_time / 1000)
         assert metrics.model_execute_time > 0
-        assert (attributes.get(
-            SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_EXECUTE) ==
-                metrics.model_execute_time)
+        assert attributes.get(
+            SpanAttributes.GEN_AI_LATENCY_TIME_IN_MODEL_EXECUTE
+        ) == metrics.model_execute_time
         assert metrics.model_forward_time < 1000 * metrics.model_execute_time

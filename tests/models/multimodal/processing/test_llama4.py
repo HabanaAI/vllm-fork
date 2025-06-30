@@ -37,9 +37,9 @@ def test_processor_override(
     hf_processor = processor.info.get_hf_processor()
     vocab = tokenizer.get_vocab()
 
-    prompt = ("<|begin_of_text|><|header_start|>user<|header_end|>" +
-              "<|image|>" * num_imgs +
-              "<|eot|><|header_start|>assistant<|header_end|>")
+    prompt = "<|begin_of_text|><|header_start|>user<|header_end|>" \
+        + "<|image|>" * num_imgs \
+        + "<|eot|><|header_start|>assistant<|header_end|>"
     mm_data = {
         "image": [
             image_assets[(i % len(image_assets))].pil_image
@@ -63,24 +63,22 @@ def test_processor_override(
         if tiles_x * tiles_y > 1:
             num_x_separators += (tiles_x - 1) * tiles_y
             num_y_separators += tiles_y
-    assert (prompt_token_ids.count(
-        vocab[hf_processor.tile_token]) == num_x_separators)
-    assert (prompt_token_ids.count(
-        vocab[hf_processor.tile_global_token]) == num_y_separators)
+    assert prompt_token_ids.count(vocab[hf_processor.tile_token]) \
+        == num_x_separators
+    assert prompt_token_ids.count(vocab[hf_processor.tile_global_token]) \
+        ==  num_y_separators
 
     # image token offsets
     img_locs = processed_inputs["mm_placeholders"].get("image", [])
     assert len(img_locs) == num_imgs
-    assert [img_loc.offset for img_loc in img_locs] == [
-        i for i, v in enumerate(prompt_token_ids)
-        if v == config.boi_token_index
-    ]
+    assert [img_loc.offset for img_loc in img_locs] == \
+        [i for i, v in enumerate(prompt_token_ids) \
+        if v == config.boi_token_index]
 
     # patch sizes and masks
     num_patches_per_chunk = processor.info.get_patch_per_chunk(
         config.vision_config)
-    assert (prompt_token_ids.count(
-        config.image_token_index) == mm_kwargs["patches_per_image"].sum() *
-            num_patches_per_chunk)
-    assert (mm_kwargs["pixel_values"].shape[0] ==
-            mm_kwargs["patches_per_image"].sum())
+    assert prompt_token_ids.count(config.image_token_index) \
+        == mm_kwargs["patches_per_image"].sum() * num_patches_per_chunk
+    assert mm_kwargs["pixel_values"].shape[0] \
+        == mm_kwargs["patches_per_image"].sum()

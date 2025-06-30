@@ -197,8 +197,8 @@ class SolarDecoderLayer(nn.Module):
 
         if rope_scaling is not None and getattr(
                 config, "original_max_position_embeddings", None):
-            rope_scaling["original_max_position_embeddings"] = (
-                config.original_max_position_embeddings)
+            rope_scaling["original_max_position_embeddings"] \
+                = config.original_max_position_embeddings
         max_position_embeddings = getattr(config, "max_position_embeddings",
                                           8192)
         # Support abacusai/Smaug-72B-v0.1 with attention_bias
@@ -458,8 +458,8 @@ class SolarForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                 # Models trained using ColossalAI may include these tensors in
                 # the checkpoint. Skip them.
                 continue
-            if self.quant_config is not None and (
-                    scale_name := self.quant_config.get_cache_scale(name)):
+            if (self.quant_config is not None and
+                (scale_name := self.quant_config.get_cache_scale(name))):
                 # Loading kv cache quantization scales
                 param = params_dict[scale_name]
                 weight_loader = getattr(param, "weight_loader",

@@ -36,9 +36,9 @@ class ParentRequest:
         self.sampling_params = sampling_params
 
         self.child_requests = set()
-        self.output_aggregator = ([None] * sampling_params.n if
-                                  (sampling_params.output_kind
-                                   == RequestOutputKind.FINAL_ONLY) else [])
+        self.output_aggregator = [None] * sampling_params.n if (
+            sampling_params.output_kind
+            == RequestOutputKind.FINAL_ONLY) else []
         self.max_num_generation_tokens = 0
         self.cached_child_sampling_params = None
 
@@ -48,7 +48,7 @@ class ParentRequest:
     ) -> SamplingParams:
         """Efficiently obtain child `sampling_params`
 
-        If `sampling_params.seed` is not `None` then
+        If `sampling_params.seed` is not `None` then 
         each child request requires a unique clone of
         parent `sampling_params` with a unique seed.
 
@@ -75,10 +75,10 @@ class ParentRequest:
 
     def get_child_info(self, index: int) -> tuple[str, SamplingParams]:
         """Get child request ID and sampling params.
-
+        
         Args:
           index: index within `n` child requests.
-
+        
         Returns:
           (request ID, sampling_params) tuple
         """
@@ -115,11 +115,10 @@ class ParentRequest:
         return self.max_num_generation_tokens
 
     @staticmethod
-    def observe_finished_request(
-        parent_req: Optional["ParentRequest"],
-        iteration_stats: IterationStats,
-        num_generation_tokens: int,
-    ):
+    def observe_finished_request(parent_req: Optional['ParentRequest'],
+                                 iteration_stats: IterationStats,
+                                 num_generation_tokens: int):
+
         n_param = parent_req.n if parent_req is not None else 1
 
         if parent_req is not None:

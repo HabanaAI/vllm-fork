@@ -22,7 +22,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only MiniCPM-V model compatible with HuggingFace weights."""
-
 import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -113,26 +112,22 @@ DEFAULT_LN = partial(nn.LayerNorm, eps=1e-6)
 
 class Resampler2_5(BaseResampler):
 
-    def __init__(
-        self,
-        num_queries: int,
-        embed_dim: int,
-        num_heads: int,
-        kv_dim: Optional[int] = None,
-        norm_layer: Callable[[int], nn.LayerNorm] = DEFAULT_LN,
-        max_size: Tuple[int, int] = (70, 70),
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ) -> None:
-        super().__init__(
-            num_queries,
-            embed_dim,
-            num_heads,
-            kv_dim,
-            norm_layer,
-            quant_config=quant_config,
-            prefix=prefix,
-        )
+    def __init__(self,
+                 num_queries: int,
+                 embed_dim: int,
+                 num_heads: int,
+                 kv_dim: Optional[int] = None,
+                 norm_layer: Callable[[int], nn.LayerNorm] = DEFAULT_LN,
+                 max_size: Tuple[int, int] = (70, 70),
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = "") -> None:
+        super().__init__(num_queries,
+                         embed_dim,
+                         num_heads,
+                         kv_dim,
+                         norm_layer,
+                         quant_config=quant_config,
+                         prefix=prefix)
 
         self.max_size = max_size
         self._set_2d_pos_cache(self.max_size)
@@ -493,12 +488,12 @@ class MiniCPMVDummyInputsBuilder(BaseDummyInputsBuilder[_I]):
         num_images = mm_counts.get("image", 0)
         num_videos = mm_counts.get("video", 0)
 
-        image_width, image_height = (
-            self.info.get_image_size_with_most_features())
-        video_width, video_height = (
-            self.info.get_video_frame_size_with_most_features())
-        num_video_frames = self.info.get_num_frames_with_most_features(
-            seq_len, mm_counts)
+        image_width, image_height = \
+            self.info.get_image_size_with_most_features()
+        video_width, video_height = \
+            self.info.get_video_frame_size_with_most_features()
+        num_video_frames = \
+            self.info.get_num_frames_with_most_features(seq_len, mm_counts)
 
         return {
             "image":
@@ -506,11 +501,9 @@ class MiniCPMVDummyInputsBuilder(BaseDummyInputsBuilder[_I]):
                                    height=image_height,
                                    num_images=num_images),
             "video": [
-                self._get_dummy_images(
-                    width=video_width,
-                    height=video_height,
-                    num_images=num_video_frames,
-                )
+                self._get_dummy_images(width=video_width,
+                                       height=video_height,
+                                       num_images=num_video_frames)
             ] * num_videos,
         }
 
@@ -530,12 +523,12 @@ class MiniCPMVMultiModalProcessor(BaseMultiModalProcessor[_I]):
 
     def get_video_prompt_texts(self, image_size: ImageSize,
                                num_frames: int) -> str:
-        return (self.info.get_slice_image_placeholder(
+        return self.info.get_slice_image_placeholder(
             image_size=image_size,
             image_idx=0,
             max_slice_nums=self.info.get_video_max_slice_num(),
             use_image_id=False,
-        ) * num_frames)
+        ) * num_frames
 
     def process_images(
         self,
@@ -712,11 +705,10 @@ class MiniCPMVMultiModalProcessor(BaseMultiModalProcessor[_I]):
         }
 
         return [
-            PromptReplacement(
-                modality=modality,
-                target=placeholder[modality],
-                replacement=get_replacement[modality],
-            ) for modality in ("image", "video")
+            PromptReplacement(modality=modality,
+                              target=placeholder[modality],
+                              replacement=get_replacement[modality])
+            for modality in ("image", "video")
         ]
 
     def _get_mm_fields_config(
@@ -755,12 +747,11 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal, SupportsPP):
                            self.vpm.embeddings.embed_dim)
         self.embed_dim = self.config.hidden_size
 
-        self.resampler = self.init_resampler(
-            self.embed_dim,
-            self.vision_dim,
-            quant_config=quant_config,
-            prefix=maybe_prefix(prefix, "resampler"),
-        )
+        self.resampler = self.init_resampler(self.embed_dim,
+                                             self.vision_dim,
+                                             quant_config=quant_config,
+                                             prefix=maybe_prefix(
+                                                 prefix, "resampler"))
 
         self.mm_token_ids = set[int]()
         self.make_empty_intermediate_tensors = (
@@ -829,12 +820,12 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal, SupportsPP):
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
         for input_key in kwargs:
-            if (input_key in ("pixel_values", "image_embeds")
-                    and "images" not in modalities):
+            if input_key in ("pixel_values",
+                             "image_embeds") and "images" not in modalities:
                 modalities["images"] = self._parse_and_validate_vision_input(
                     "images", **kwargs)
-            if (input_key in ("video_pixel_values", "video_embeds")
-                    and "videos" not in modalities):
+            if input_key in ("video_pixel_values",
+                             "video_embeds") and "videos" not in modalities:
 
                 def _image_key(video_key: str):
                     if video_key == "video_token_id":
@@ -975,13 +966,11 @@ class MiniCPMVBaseModel(nn.Module, SupportsMultiModal, SupportsPP):
     ) -> nn.Module:
         raise NotImplementedError
 
-    def init_resampler(
-        self,
-        embed_dim: int,
-        vision_dim: int,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ) -> nn.Module:
+    def init_resampler(self,
+                       embed_dim: int,
+                       vision_dim: int,
+                       quant_config: Optional[QuantizationConfig] = None,
+                       prefix: str = "") -> nn.Module:
         raise NotImplementedError
 
     def get_vision_hidden_states(
@@ -1034,24 +1023,21 @@ class MiniCPMV2_0(MiniCPMVBaseModel):
 
         return model
 
-    def init_resampler(
-        self,
-        embed_dim: int,
-        vision_dim: int,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ) -> nn.Module:
+    def init_resampler(self,
+                       embed_dim: int,
+                       vision_dim: int,
+                       quant_config: Optional[QuantizationConfig] = None,
+                       prefix: str = "") -> nn.Module:
         with set_default_torch_dtype(torch.float16):
-            resampler = Resampler2(
-                embed_dim=embed_dim,
-                num_heads=embed_dim // 128,
-                grid_size=int(math.sqrt(self.config.query_num)),
-                kv_dim=vision_dim,
-                adaptive=False,
-                do_post_projection=True,
-                quant_config=quant_config,
-                prefix=prefix,
-            )
+            resampler = Resampler2(embed_dim=embed_dim,
+                                   num_heads=embed_dim // 128,
+                                   grid_size=int(
+                                       math.sqrt(self.config.query_num)),
+                                   kv_dim=vision_dim,
+                                   adaptive=False,
+                                   do_post_projection=True,
+                                   quant_config=quant_config,
+                                   prefix=prefix)
 
         return resampler.to(device=current_platform.device_type,
                             dtype=torch.get_default_dtype())
@@ -1115,22 +1101,18 @@ class MiniCPMV2_5(MiniCPMVBaseModel, SupportsLoRA):
             model.encoder.layers = model.encoder.layers[:-1]
         return model
 
-    def init_resampler(
-        self,
-        embed_dim: int,
-        vision_dim: int,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ) -> nn.Module:
+    def init_resampler(self,
+                       embed_dim: int,
+                       vision_dim: int,
+                       quant_config: Optional[QuantizationConfig] = None,
+                       prefix: str = "") -> nn.Module:
         with set_default_torch_dtype(torch.float16):
-            resampler = Resampler2_5(
-                num_queries=self.config.query_num,
-                embed_dim=embed_dim,
-                num_heads=embed_dim // 128,
-                kv_dim=vision_dim,
-                quant_config=quant_config,
-                prefix=prefix,
-            )
+            resampler = Resampler2_5(num_queries=self.config.query_num,
+                                     embed_dim=embed_dim,
+                                     num_heads=embed_dim // 128,
+                                     kv_dim=vision_dim,
+                                     quant_config=quant_config,
+                                     prefix=prefix)
 
         return resampler.to(device=current_platform.device_type,
                             dtype=torch.get_default_dtype())
@@ -1209,23 +1191,19 @@ class MiniCPMV2_6(MiniCPMVBaseModel, SupportsLoRA):
             model.encoder.layers = model.encoder.layers[:-1]
         return model
 
-    def init_resampler(
-        self,
-        embed_dim: int,
-        vision_dim: int,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ) -> nn.Module:
+    def init_resampler(self,
+                       embed_dim: int,
+                       vision_dim: int,
+                       quant_config: Optional[QuantizationConfig] = None,
+                       prefix: str = "") -> nn.Module:
         with set_default_torch_dtype(torch.float16):
             # The resampler in 2.6 remains consistent with the one in 2.5.
-            resampler = Resampler2_5(
-                num_queries=self.config.query_num,
-                embed_dim=embed_dim,
-                num_heads=embed_dim // 128,
-                kv_dim=vision_dim,
-                quant_config=quant_config,
-                prefix=prefix,
-            )
+            resampler = Resampler2_5(num_queries=self.config.query_num,
+                                     embed_dim=embed_dim,
+                                     num_heads=embed_dim // 128,
+                                     kv_dim=vision_dim,
+                                     quant_config=quant_config,
+                                     prefix=prefix)
 
         return resampler.to(device=current_platform.device_type,
                             dtype=torch.get_default_dtype())
@@ -1277,8 +1255,7 @@ _SUPPORT_VERSION = {
 @MULTIMODAL_REGISTRY.register_processor(
     MiniCPMVMultiModalProcessor,
     info=MiniCPMVProcessingInfo,
-    dummy_inputs=MiniCPMVDummyInputsBuilder,
-)
+    dummy_inputs=MiniCPMVDummyInputsBuilder)
 class MiniCPMV(MiniCPMVBaseModel, SupportsMultiModal, SupportsLoRA):
     """
     Different versions of MiniCPMV use different visual encoders and LLMs,

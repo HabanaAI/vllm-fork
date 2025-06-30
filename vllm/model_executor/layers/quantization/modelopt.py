@@ -67,14 +67,13 @@ class ModelOptFp8Config(QuantizationConfig):
                              " quantizations in vLLM. Please check the "
                              "`hf_quant_config.json` file for your model's "
                              "quant configuration.")
-        is_checkpoint_fp8_serialized = "FP8" in quant_method
+        is_checkpoint_fp8_serialized = ("FP8" in quant_method)
 
         return cls(is_checkpoint_fp8_serialized)
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["QuantizeMethodBase"]:
         from vllm.attention.layer import Attention  # Avoid circular import
-
         if isinstance(layer, LinearBase):
             return ModelOptFp8LinearMethod(self)
         elif isinstance(layer, Attention):
@@ -85,12 +84,12 @@ class ModelOptFp8Config(QuantizationConfig):
 class ModelOptFp8LinearMethod(LinearMethodBase):
     """Linear method for Model Optimizer static quantization.
     Supports loading FP8 checkpoints with static weight scale and
-    activation scale. Future support might be added for dynamic
+    activation scale. Future support might be added for dynamic 
     scales.
 
     Limitations:
     1. Only support per-tensor quantization due to torch._scaled_mm support.
-    2. Only support float8_e4m3fn datatype
+    2. Only support float8_e4m3fn datatype 
         Args: quant_config: The ModelOpt quantization config.
     """
 
@@ -117,33 +116,26 @@ class ModelOptFp8LinearMethod(LinearMethodBase):
         weight_dtype = (torch.float8_e4m3fn
                         if self.quant_config.is_checkpoint_fp8_serialized else
                         params_dtype)
-        weight = ModelWeightParameter(
-            data=torch.empty(
-                output_size_per_partition,
-                input_size_per_partition,
-                dtype=weight_dtype,
-            ),
-            input_dim=1,
-            output_dim=0,
-            weight_loader=weight_loader,
-        )
+        weight = ModelWeightParameter(data=torch.empty(
+            output_size_per_partition,
+            input_size_per_partition,
+            dtype=weight_dtype),
+                                      input_dim=1,
+                                      output_dim=0,
+                                      weight_loader=weight_loader)
         layer.register_parameter("weight", weight)
 
         if self.quant_config.is_checkpoint_fp8_serialized:
             # WEIGHT SCALE
-            weight_scale = PerTensorScaleParameter(
-                data=torch.empty(len(output_partition_sizes),
-                                 dtype=torch.float32),
-                weight_loader=weight_loader,
-            )
+            weight_scale = PerTensorScaleParameter(data=torch.empty(
+                len(output_partition_sizes), dtype=torch.float32),
+                                                   weight_loader=weight_loader)
             weight_scale[:] = torch.finfo(torch.float32).min
             layer.register_parameter("weight_scale", weight_scale)
             # INPUT SCALE
-            scale = PerTensorScaleParameter(
-                data=torch.empty(len(output_partition_sizes),
-                                 dtype=torch.float32),
-                weight_loader=weight_loader,
-            )
+            scale = PerTensorScaleParameter(data=torch.empty(
+                len(output_partition_sizes), dtype=torch.float32),
+                                            weight_loader=weight_loader)
 
             scale[:] = torch.finfo(torch.float32).min
             layer.register_parameter("input_scale", scale)
@@ -165,13 +157,11 @@ class ModelOptFp8LinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        return self.fp8_linear.apply(
-            input=x,
-            weight=layer.weight,
-            weight_scale=layer.weight_scale,
-            input_scale=layer.input_scale,
-            bias=bias,
-        )
+        return self.fp8_linear.apply(input=x,
+                                     weight=layer.weight,
+                                     weight_scale=layer.weight_scale,
+                                     input_scale=layer.input_scale,
+                                     bias=bias)
 
 
 class ModelOptNvFp4Config(QuantizationConfig):
@@ -219,7 +209,7 @@ class ModelOptNvFp4Config(QuantizationConfig):
                              " quantizations in vLLM. Please check the "
                              "`hf_quant_config.json` file for your model's "
                              "quant configuration.")
-        is_checkpoint_nvfp4_serialized = "NVFP4" in quant_method
+        is_checkpoint_nvfp4_serialized = ("NVFP4" in quant_method)
         kv_cache_quant_algo = quant_config["kv_cache_quant_algo"]
         group_size = quant_config["group_size"]
         exclude_modules = quant_config["exclude_modules"]
@@ -227,17 +217,12 @@ class ModelOptNvFp4Config(QuantizationConfig):
             raise ValueError("NVFP4 quantization requires group size and "
                              "kv_cache_quant_algo specified in "
                              "hf_quant_config.json")
-        return cls(
-            is_checkpoint_nvfp4_serialized,
-            kv_cache_quant_algo,
-            exclude_modules,
-            group_size,
-        )
+        return cls(is_checkpoint_nvfp4_serialized, kv_cache_quant_algo,
+                   exclude_modules, group_size)
 
     def get_quant_method(self, layer: torch.nn.Module,
                          prefix: str) -> Optional["QuantizeMethodBase"]:
         from vllm.attention.layer import Attention  # Avoid circular import
-
         if isinstance(layer, LinearBase):
             if is_layer_skipped(prefix, self.exclude_modules):
                 return UnquantizedLinearMethod()
@@ -268,7 +253,7 @@ class ModelOptFp8KVCacheMethod(BaseKVCacheMethod):
 class ModelOptNvFp4LinearMethod(LinearMethodBase):
     """Linear method for Model Optimizer NVFP4.
     Supports loading NVFP4 checkpoints with the following structure:
-
+    
     input_scale: torch.float32, scalar ,
     weight: NVFP4(represented as byte) Shape: [1, X, y/2]
     weight_scale: FP8-E4M3, Shape: [X, Y], aka per block scale,
@@ -303,10 +288,9 @@ class ModelOptNvFp4LinearMethod(LinearMethodBase):
         layer.input_size_per_partition = input_size_per_partition
         layer.output_size_per_partition = output_size_per_partition
 
-        if input_size_per_partition % 16 != 0:
-            raise ValueError(
-                "Unsupported model when in features size is not multiple of 16"
-            )
+        if (input_size_per_partition % 16 != 0):
+            raise ValueError("Unsupported model when in features size is "
+                             "not multiple of 16")
         # The nvfp4 weight is still represented as
         weight_dtype = (torch.float8_e4m3fn
                         if self.quant_config.is_checkpoint_nvfp4_serialized
@@ -317,44 +301,38 @@ class ModelOptNvFp4LinearMethod(LinearMethodBase):
                 # 2 fp4 items are packed in the input dimension
                 layer.output_size_per_partition,
                 layer.input_size_per_partition // 2,
-                dtype=torch.uint8,
-            ),
+                dtype=torch.uint8),
             input_dim=1,
             output_dim=0,
-            weight_loader=weight_loader,
-        )
+            weight_loader=weight_loader)
         layer.register_parameter("weight", weight)
 
         # Input Weight Scale
-        input_scale = PerTensorScaleParameter(
-            data=torch.empty(len(output_partition_sizes), dtype=torch.float32),
-            weight_loader=weight_loader,
-        )
+        input_scale = PerTensorScaleParameter(data=torch.empty(
+            len(output_partition_sizes), dtype=torch.float32),
+                                              weight_loader=weight_loader)
         layer.register_parameter("input_scale", input_scale)
 
         # Global Weight Scale
-        weight_scale_2 = PerTensorScaleParameter(
-            data=torch.empty(len(output_partition_sizes), dtype=torch.float32),
-            weight_loader=weight_loader,
-        )
+        weight_scale_2 = PerTensorScaleParameter(data=torch.empty(
+            len(output_partition_sizes), dtype=torch.float32),
+                                                 weight_loader=weight_loader)
         layer.register_parameter("weight_scale_2", weight_scale_2)
 
         # Per Block Weight Scale
-        weight_scale = ModelWeightParameter(
-            data=torch.empty(
-                output_size_per_partition,
-                input_size_per_partition // self.quant_config.group_size,
-                dtype=weight_dtype,
-            ),
-            input_dim=1,
-            output_dim=0,
-            weight_loader=weight_loader,
-        )
+        weight_scale = ModelWeightParameter(data=torch.empty(
+            output_size_per_partition,
+            input_size_per_partition // self.quant_config.group_size,
+            dtype=weight_dtype,
+        ),
+                                            input_dim=1,
+                                            output_dim=0,
+                                            weight_loader=weight_loader)
 
         layer.register_parameter("weight_scale", weight_scale)
 
     def swizzle_blockscale(self, scale: torch.tensor):
-        assert scale.dtype == torch.float8_e4m3fn
+        assert (scale.dtype == torch.float8_e4m3fn)
         # Pad and blockwise interleave weight_scale
         scale_ndim = scale.ndim
         if scale.ndim == 2:
@@ -377,6 +355,7 @@ class ModelOptNvFp4LinearMethod(LinearMethodBase):
                 if scale_ndim == 2 else swizzled_scale.reshape(B, M, K))
 
     def process_weights_after_loading(self, layer: Module) -> None:
+
         # global scales:
         input_scale_2 = layer.input_scale.max().to(torch.float32)
         layer.input_scale = Parameter(input_scale_2, requires_grad=False)
@@ -390,9 +369,9 @@ class ModelOptNvFp4LinearMethod(LinearMethodBase):
         # Swizzle the weight blockscale.
         # contracting dimension is input dimension
         # block_size = 16;
-        assert layer.weight_scale.shape[1] % 16 == 0, (
+        assert (layer.weight_scale.shape[1] % 16 == 0), (
             "Expected weight_scale.dim(1) to be divisible by 16")
-        assert layer.weight_scale.dtype == torch.float8_e4m3fn, (
+        assert (layer.weight_scale.dtype == torch.float8_e4m3fn), (
             "Weight Block scale must be represented as FP8-E4M3")
         swizzled_weight_scale = self.swizzle_blockscale(layer.weight_scale)
 
@@ -418,20 +397,15 @@ class ModelOptNvFp4LinearMethod(LinearMethodBase):
 
         # validate dtypes of quantized input, input block scale,
         # weight and weight_blockscale
-        assert x_fp4.dtype == torch.uint8
-        assert layer.weight.dtype == torch.uint8
-        assert x_blockscale.dtype == torch.float8_e4m3fn
-        assert layer.weight_scale_swizzled.dtype == torch.float8_e4m3fn
-        assert layer.alpha.dtype == torch.float32
+        assert (x_fp4.dtype == torch.uint8)
+        assert (layer.weight.dtype == torch.uint8)
+        assert (x_blockscale.dtype == torch.float8_e4m3fn)
+        assert (layer.weight_scale_swizzled.dtype == torch.float8_e4m3fn)
+        assert (layer.alpha.dtype == torch.float32)
 
-        out = cutlass_scaled_fp4_mm(
-            x_fp4,
-            layer.weight,
-            x_blockscale,
-            layer.weight_scale_swizzled,
-            layer.alpha,
-            output_dtype,
-        )
+        out = cutlass_scaled_fp4_mm(x_fp4, layer.weight, x_blockscale,
+                                    layer.weight_scale_swizzled, layer.alpha,
+                                    output_dtype)
         if bias is not None:
             out = out + bias
         return out.view(*output_shape)

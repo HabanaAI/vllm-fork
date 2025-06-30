@@ -33,9 +33,9 @@ class LocalStridedBlockSparseAttn(torch.nn.Module):
     ):
         super().__init__()
         if use_spda is None:
-            use_spda = (current_platform.is_rocm()
-                        or current_platform.is_cpu()
-                        or not IS_COMPUTE_8_OR_ABOVE)
+            use_spda = current_platform.is_rocm() or \
+                        current_platform.is_cpu() or not \
+                        IS_COMPUTE_8_OR_ABOVE
         device = device or (torch.cuda.current_device()
                             if current_platform.is_cuda_alike() else "cpu")
         device = torch.device(device)
@@ -93,7 +93,7 @@ class LocalStridedBlockSparseAttn(torch.nn.Module):
         )
         if (not self.homo_head) and (self.active_head_range is not None):
             assert isinstance(self.active_head_range, tuple)
-            assert len(self.active_head_range) == 2
+            assert (len(self.active_head_range) == 2)
             h_start, h_end = self.active_head_range
             sparse_layout = tuple(x[h_start:h_end] for x in sparse_layout)
             if self.use_spda:
@@ -123,9 +123,10 @@ class LocalStridedBlockSparseAttn(torch.nn.Module):
 
         return: tensor of shape as q.
         """
-        assert IS_COMPUTE_8_OR_ABOVE, (
-            "Requires compute capability of 8 or above (Ampere or newer) to use \
-            Triton kernel.")
+        assert (
+            IS_COMPUTE_8_OR_ABOVE
+        ), "Requires compute capability of 8 or above (Ampere or newer) to use \
+            Triton kernel."
 
         sm_scale = sm_scale or 1.0 / math.sqrt(q.size(-1))
 
@@ -175,8 +176,9 @@ class LocalStridedBlockSparseAttn(torch.nn.Module):
         NOTE: torch SPDA supports nested tensor,
         but seems extremely slow. Choose to pad instead.
         """
-        assert cu_seqlens_q is None or (cu_seqlens_q == cu_seqlens_k).all(), (
-            "Can only handle prompt with SPDA.")
+        assert (cu_seqlens_q is None or
+                (cu_seqlens_q
+                 == cu_seqlens_k).all()), "Can only handle prompt with SPDA."
         assert q.size(0) == k.size(0), "can only handle prompt with SPDA."
 
         assert q.size(1) % k.size(1) == 0

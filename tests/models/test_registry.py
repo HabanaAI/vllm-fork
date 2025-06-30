@@ -46,17 +46,14 @@ def test_registry_imports(model_arch):
 
 
 @create_new_process_for_each_test()
-@pytest.mark.parametrize(
-    "model_arch,is_mm,init_cuda,is_ce",
-    [
-        ("LlamaForCausalLM", False, False, False),
-        ("MllamaForConditionalGeneration", True, False, False),
-        ("LlavaForConditionalGeneration", True, True, False),
-        ("BertForSequenceClassification", False, False, True),
-        ("RobertaForSequenceClassification", False, False, True),
-        ("XLMRobertaForSequenceClassification", False, False, True),
-    ],
-)
+@pytest.mark.parametrize("model_arch,is_mm,init_cuda,is_ce", [
+    ("LlamaForCausalLM", False, False, False),
+    ("MllamaForConditionalGeneration", True, False, False),
+    ("LlavaForConditionalGeneration", True, True, False),
+    ("BertForSequenceClassification", False, False, True),
+    ("RobertaForSequenceClassification", False, False, True),
+    ("XLMRobertaForSequenceClassification", False, False, True),
+])
 def test_registry_model_property(model_arch, is_mm, init_cuda, is_ce):
     assert ModelRegistry.is_multimodal_model(model_arch) is is_mm
 
@@ -70,19 +67,15 @@ def test_registry_model_property(model_arch, is_mm, init_cuda, is_ce):
             warnings.warn(
                 "This model no longer initializes CUDA on import. "
                 "Please test using a different one.",
-                stacklevel=2,
-            )
+                stacklevel=2)
 
 
 @create_new_process_for_each_test()
-@pytest.mark.parametrize(
-    "model_arch,is_pp,init_cuda",
-    [
-        ("MLPSpeculatorPreTrainedModel", False, False),
-        ("DeepseekV2ForCausalLM", True, False),
-        ("Qwen2VLForConditionalGeneration", True, True),
-    ],
-)
+@pytest.mark.parametrize("model_arch,is_pp,init_cuda", [
+    ("MLPSpeculatorPreTrainedModel", False, False),
+    ("DeepseekV2ForCausalLM", True, False),
+    ("Qwen2VLForConditionalGeneration", True, True),
+])
 def test_registry_is_pp(model_arch, is_pp, init_cuda):
     assert ModelRegistry.is_pp_supported_model(model_arch) is is_pp
 
@@ -94,8 +87,7 @@ def test_registry_is_pp(model_arch, is_pp, init_cuda):
             warnings.warn(
                 "This model no longer initializes CUDA on import. "
                 "Please test using a different one.",
-                stacklevel=2,
-            )
+                stacklevel=2)
 
 
 def test_hf_registry_coverage():

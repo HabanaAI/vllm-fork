@@ -16,8 +16,8 @@ DTYPES = [torch.float32]
 
 def reference_lightning_attention(q, k, v, ed, block_size, kv_history):
     """Reference implementation of lightning attention core algorithm
-
-    The difference from the main implementation is that this processes
+    
+    The difference from the main implementation is that this processes 
     each step sequentially, instead of using parallelized triton kernels
     """
     B, H, S, D = q.shape
@@ -204,8 +204,8 @@ def test_linear_decode_forward_triton_with_padding(
     reference_output = reference_linear_decode(q, k, v, kv_caches_copy,
                                                slope_rate, slot_idx)
 
-    padding_mask = ((slot_idx
-                     != -1).unsqueeze(1).expand(-1, num_heads * head_size))
+    padding_mask = (slot_idx
+                    != -1).unsqueeze(1).expand(-1, num_heads * head_size)
 
     triton_masked = triton_output[padding_mask]
     reference_masked = reference_output[padding_mask]
@@ -272,7 +272,6 @@ def test_lightning_attention_reference(
         q, k, v, ed, 256, kv_history)
 
     from vllm.model_executor.layers.lightning_attn import lightning_attention
-
     actual_output, actual_kv_cache = lightning_attention(
         q, k, v, ed, 256, kv_history_clone)
 

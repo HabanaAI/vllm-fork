@@ -13,7 +13,6 @@ logger = init_logger(__name__)
 
 try:
     import flashinfer.sampling
-
     is_flashinfer_available = True
 except ImportError:
     is_flashinfer_available = False
@@ -271,7 +270,7 @@ def flashinfer_sample(
     Statistically, this function is equivalent to the `random_sample` function.
     However, this function is faster because it avoids sorting the logits tensor
     via rejection sampling.
-
+    
     NOTE: The outputs of this function do not necessarily match the outputs of
     the `random_sample` function. It only guarantees that the outputs are
     statistically equivalent.

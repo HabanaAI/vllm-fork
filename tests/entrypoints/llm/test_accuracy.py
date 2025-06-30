@@ -52,13 +52,12 @@ def run_test(model_name, more_args=None):
 
 
 # TODO: [AlexM] Fix it with new CI/CD tests
-TPU_TP_TEST_STR = ""  # "tensor_parallel_size=4"
+TPU_TP_TEST_STR = ""  #"tensor_parallel_size=4"
 
 
-@pytest.mark.skipif(
-    not current_platform.is_cuda() and not current_platform.is_tpu(),
-    reason="V1 is currently only supported on CUDA and TPU",
-)
+@pytest.mark.skipif(not current_platform.is_cuda()
+                    and not current_platform.is_tpu(),
+                    reason="V1 is currently only supported on CUDA and TPU")
 @pytest.mark.parametrize("model", MODEL_NAMES)
 def test_lm_eval_accuracy_v1_engine(model, monkeypatch: pytest.MonkeyPatch):
     """Run with the V1 Engine."""

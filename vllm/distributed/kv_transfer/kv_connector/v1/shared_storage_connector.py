@@ -32,20 +32,15 @@ class ReqMeta:
     is_store: bool
 
     @staticmethod
-    def make_meta(
-        token_ids: list[int],
-        block_ids: list[int],
-        block_size: int,
-        is_store: bool,
-    ) -> "ReqMeta":
+    def make_meta(token_ids: list[int], block_ids: list[int], block_size: int,
+                  is_store: bool) -> "ReqMeta":
         valid_num_tokens = align_to_block_size(len(token_ids), block_size)
         token_ids_tensor = torch.tensor(token_ids)[:valid_num_tokens]
         block_ids_tensor = torch.tensor(block_ids)
         num_blocks = block_ids_tensor.shape[0]
         block_offsets = torch.arange(0, block_size)
-        slot_mapping = (block_offsets.reshape(
-            (1, block_size)) + block_ids_tensor.reshape(
-                (num_blocks, 1)) * block_size)
+        slot_mapping = block_offsets.reshape((1, block_size)) + \
+                block_ids_tensor.reshape((num_blocks, 1)) * block_size
         slot_mapping = slot_mapping.flatten()[:valid_num_tokens]
         return ReqMeta(
             token_ids=token_ids_tensor,
@@ -90,7 +85,7 @@ class SharedStorageConnector(KVConnectorBase_V1):
 
     def start_load_kv(self, forward_context: "ForwardContext",
                       **kwargs) -> None:
-        """Start loading the KV cache from the connector buffer to vLLM's
+        """Start loading the KV cache from the connector buffer to vLLM's 
         paged KV buffer.
 
         Args:
@@ -98,7 +93,7 @@ class SharedStorageConnector(KVConnectorBase_V1):
             **kwargs: additional arguments for the load operation
 
         Note:
-            The number of elements in kv_caches and layer_names should be
+            The number of elements in kv_caches and layer_names should be 
             the same.
         """
         attn_metadata = forward_context.attn_metadata
@@ -111,13 +106,13 @@ class SharedStorageConnector(KVConnectorBase_V1):
             """Inject the KV cache into the layer.
 
             Args:
-                dst_kv_cache_layer (torch.Tensor): the destination KV cache
-                    layer. In shape [2, num_pages, page_size, xxx] if not
+                dst_kv_cache_layer (torch.Tensor): the destination KV cache 
+                    layer. In shape [2, num_pages, page_size, xxx] if not 
                     using MLA, [num_pages, page_size, xxx] otherwise.
                 src_kv_cache (torch.Tensor): the source KV cache. In shape
-                    [2, num_tokens, xxx] if not using MLA, [num_tokens, xxx]
+                    [2, num_tokens, xxx] if not using MLA, [num_tokens, xxx] 
                     otherwise.
-                slot_mapping (torch.Tensor): the slot mapping. In shape
+                slot_mapping (torch.Tensor): the slot mapping. In shape 
                     [num_tokens].
             """
             dst_kv_cache_layer_shape = dst_kv_cache_layer.shape
@@ -137,7 +132,8 @@ class SharedStorageConnector(KVConnectorBase_V1):
                 dst_kv_cache_layer.reshape(dst_kv_cache_layer_shape)
 
         # Get the metadata
-        metadata: KVConnectorMetadata = self._get_connector_metadata()
+        metadata: KVConnectorMetadata = \
+            self._get_connector_metadata()
         assert isinstance(metadata, SharedStorageConnectorMetadata)
 
         if metadata is None:
@@ -156,14 +152,12 @@ class SharedStorageConnector(KVConnectorBase_V1):
         for request in metadata.requests:
             if request.is_store:
                 continue
-            logger.info(
-                "Inject KV cache of %d tokens to the paged memory",
-                len(request.slot_mapping),
-            )
+            logger.info("Inject KV cache of %d tokens to the paged memory",
+                        len(request.slot_mapping))
             for layer_name in forward_context.no_compile_layers:
                 attn_layer = forward_context.no_compile_layers[layer_name]
-                kv_cache_layer = attn_layer.kv_cache[
-                    forward_context.virtual_engine]
+                kv_cache_layer = attn_layer.kv_cache[\
+                        forward_context.virtual_engine]
 
                 filename = self._generate_filename_debug(
                     layer_name, request.token_ids)
@@ -174,8 +168,8 @@ class SharedStorageConnector(KVConnectorBase_V1):
 
     def wait_for_layer_load(self, layer_name: str) -> None:
         """Blocking until the KV for a specific layer is loaded into vLLM's
-        paged buffer.
-
+        paged buffer. 
+        
         This interface will be useful for layer-by-layer pipelining.
 
         Args:
@@ -183,19 +177,14 @@ class SharedStorageConnector(KVConnectorBase_V1):
         """
         return
 
-    def save_kv_layer(
-        self,
-        layer_name: str,
-        kv_layer: torch.Tensor,
-        attn_metadata: "AttentionMetadata",
-        **kwargs,
-    ) -> None:
-        """Start saving the KV cache of the layer from vLLM's paged buffer
+    def save_kv_layer(self, layer_name: str, kv_layer: torch.Tensor,
+                      attn_metadata: "AttentionMetadata", **kwargs) -> None:
+        """Start saving the KV cache of the layer from vLLM's paged buffer 
         to the connector.
 
         Args:
             layer_name (str): the name of the layer.
-            kv_layer (torch.Tensor): the paged KV buffer of the current
+            kv_layer (torch.Tensor): the paged KV buffer of the current 
                 layer in vLLM.
             attn_metadata (AttentionMetadata): the attention metadata.
             **kwargs: additional arguments for the save operation.
@@ -240,14 +229,14 @@ class SharedStorageConnector(KVConnectorBase_V1):
         """
         Get number of new tokens that can be loaded from the
         external KV cache beyond the num_computed_tokens.
-
+        
         Args:
             request (Request): the request object.
             num_computed_tokens (int): the number of locally
                 computed tokens for this request
 
         Returns:
-            the number of tokens that can be loaded from the
+            the number of tokens that can be loaded from the 
             external KV cache beyond what is already computed.
         """
 
@@ -298,12 +287,10 @@ class SharedStorageConnector(KVConnectorBase_V1):
         total_need_load = 0
         for new_req in scheduler_output.scheduled_new_reqs:
             if new_req.req_id in self._requests_need_load:
-                meta.add_request(
-                    token_ids=new_req.prompt_token_ids,
-                    block_ids=new_req.block_ids,
-                    block_size=self._block_size,
-                    is_store=False,
-                )
+                meta.add_request(token_ids=new_req.prompt_token_ids,
+                                 block_ids=new_req.block_ids,
+                                 block_size=self._block_size,
+                                 is_store=False)
                 total_need_load += 1
             else:
                 # NOTE: here, we set the store and load being exclusive,
@@ -311,12 +298,10 @@ class SharedStorageConnector(KVConnectorBase_V1):
                 # NOTE(rob): for this debug implementation, we only cache
                 # the original prompt tokens.
                 if not self._found_match_for_request(new_req):
-                    meta.add_request(
-                        token_ids=new_req.prompt_token_ids,
-                        block_ids=new_req.block_ids,
-                        block_size=self._block_size,
-                        is_store=True,
-                    )
+                    meta.add_request(token_ids=new_req.prompt_token_ids,
+                                     block_ids=new_req.block_ids,
+                                     block_size=self._block_size,
+                                     is_store=True)
 
         for cached_req in scheduler_output.scheduled_cached_reqs:
             # NOTE(rob): here we rely on the resumed requests being
@@ -336,12 +321,10 @@ class SharedStorageConnector(KVConnectorBase_V1):
                 # of the block_ids for the request.
                 block_ids = cached_req.new_block_ids
 
-                meta.add_request(
-                    token_ids=token_ids,
-                    block_ids=block_ids,
-                    block_size=self._block_size,
-                    is_store=False,
-                )
+                meta.add_request(token_ids=token_ids,
+                                 block_ids=block_ids,
+                                 block_size=self._block_size,
+                                 is_store=False)
                 total_need_load += 1
 
         assert total_need_load == len(self._requests_need_load)
@@ -356,13 +339,13 @@ class SharedStorageConnector(KVConnectorBase_V1):
         self,
         request: "Request",
     ) -> bool:
-        """Check if the cache is hit for the request."""
+        """Check if the cache is hit for the request.
+        """
         num_tokens_to_check = align_to_block_size(
             len(request.prompt_token_ids) - 1, self._block_size)
-        foldername = self._generate_foldername_debug(
-            torch.tensor(request.prompt_token_ids)[:num_tokens_to_check],
-            create_folder=False,
-        )
+        foldername = self._generate_foldername_debug(torch.tensor(
+            request.prompt_token_ids)[:num_tokens_to_check],
+                                                     create_folder=False)
         return os.path.exists(foldername)
 
     def _generate_foldername_debug(
@@ -370,7 +353,7 @@ class SharedStorageConnector(KVConnectorBase_V1):
         input_ids: torch.Tensor,
         create_folder=False,
     ) -> str:
-        """Generate a folder name based on the hash of the bytes of the input
+        """Generate a folder name based on the hash of the bytes of the input 
         ids.
         """
         input_ids_bytes = input_ids.numpy().tobytes()
@@ -386,7 +369,7 @@ class SharedStorageConnector(KVConnectorBase_V1):
         layer_name: str,
         input_ids: torch.Tensor,
     ) -> str:
-        """Generate a file name based on the layer name and the hash
+        """Generate a file name based on the layer name and the hash 
         of the bytes of the input ids.
         """
         foldername = self._generate_foldername_debug(input_ids,
@@ -395,5 +378,6 @@ class SharedStorageConnector(KVConnectorBase_V1):
 
 
 def align_to_block_size(num_tokens: int, block_size) -> int:
-    """Align the number of tokens to the block size."""
+    """Align the number of tokens to the block size.
+    """
     return (num_tokens - 1) // block_size * block_size

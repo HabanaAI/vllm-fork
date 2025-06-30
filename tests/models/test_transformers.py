@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Test the functionality of the Transformers backend."""
-
 import pytest
 
 from ..conftest import HfRunner, VllmRunner
@@ -39,8 +38,7 @@ def check_implementation(
     [
         ("meta-llama/Llama-3.2-1B-Instruct", "transformers"),
         ("ArthurZ/Ilama-3.2-1B", "auto"),  # CUSTOM CODE
-    ],
-)  # trust_remote_code=True by default
+    ])  # trust_remote_code=True by default
 def test_models(
     hf_runner: type[HfRunner],
     vllm_runner: type[VllmRunner],
@@ -62,26 +60,18 @@ def test_distributed(
     example_prompts,
 ):
     kwargs = {"model_impl": "transformers", "tensor_parallel_size": 2}
-    check_implementation(
-        hf_runner,
-        vllm_runner,
-        example_prompts,
+    check_implementation(hf_runner, vllm_runner, example_prompts,
+                         "meta-llama/Llama-3.2-1B-Instruct", **kwargs)
+
+
+@pytest.mark.parametrize("model, quantization_kwargs", [
+    (
         "meta-llama/Llama-3.2-1B-Instruct",
-        **kwargs,
-    )
-
-
-@pytest.mark.parametrize(
-    "model, quantization_kwargs",
-    [
-        (
-            "meta-llama/Llama-3.2-1B-Instruct",
-            {
-                "quantization": "bitsandbytes",
-            },
-        ),
-    ],
-)
+        {
+            "quantization": "bitsandbytes",
+        },
+    ),
+])
 @pytest.mark.parametrize("max_tokens", [32])
 @pytest.mark.parametrize("num_logprobs", [5])
 def test_quantization(
@@ -102,8 +92,7 @@ def test_quantization(
             model,
             model_impl="transformers",
             enforce_eager=True,
-            **quantization_kwargs,
-    ) as vllm_model:  # type: ignore[arg-type]
+            **quantization_kwargs) as vllm_model:  # type: ignore[arg-type]
         transformers_outputs = vllm_model.generate_greedy_logprobs(
             example_prompts, max_tokens=max_tokens, num_logprobs=num_logprobs)
     check_logprobs_close(

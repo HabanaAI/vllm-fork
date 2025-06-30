@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Inference-only GraniteMoeHybrid model."""
-
 # Added by the IBM Team, 2025
 from typing import Iterable, Optional, Set, Tuple
 
@@ -41,33 +40,30 @@ from .utils import (AutoWeightsLoader, make_empty_intermediate_tensors_factory,
 
 class GraniteMoeHybridMambaDecoderLayer(nn.Module):
 
-    def __init__(
-        self,
-        config: GraniteMoeHybridConfig,
-        layer_idx: int,
-        cache_config: Optional[CacheConfig] = None,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ) -> None:
+    def __init__(self,
+                 config: GraniteMoeHybridConfig,
+                 layer_idx: int,
+                 cache_config: Optional[CacheConfig] = None,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = "") -> None:
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
         self.residual_multiplier = config.residual_multiplier
 
-        self.mamba = MambaMixer2(
-            hidden_size=config.hidden_size,
-            ssm_state_size=config.mamba_d_state,
-            conv_kernel_size=config.mamba_d_conv,
-            intermediate_size=config.mamba_expand * config.hidden_size,
-            use_conv_bias=config.mamba_conv_bias,
-            use_bias=config.mamba_proj_bias,
-            n_groups=config.mamba_n_groups,
-            num_heads=config.mamba_n_heads,
-            head_dim=config.mamba_d_head,
-            rms_norm_eps=config.rms_norm_eps,
-            activation=config.hidden_act,
-            quant_config=quant_config,
-        )
+        self.mamba = MambaMixer2(hidden_size= config.hidden_size,
+                                ssm_state_size = config.mamba_d_state,
+                                conv_kernel_size = config.mamba_d_conv,
+                                intermediate_size = config.mamba_expand *\
+                                                    config.hidden_size,
+                                use_conv_bias = config.mamba_conv_bias,
+                                use_bias = config.mamba_proj_bias,
+                                n_groups=config.mamba_n_groups,
+                                num_heads=config.mamba_n_heads,
+                                head_dim=config.mamba_d_head,
+                                rms_norm_eps=config.rms_norm_eps,
+                                activation=config.hidden_act,
+                                quant_config=quant_config)
 
         self.block_sparse_moe = GraniteMoeMoE(
             num_experts=config.num_local_experts,
@@ -75,14 +71,15 @@ class GraniteMoeHybridMambaDecoderLayer(nn.Module):
             hidden_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
             quant_config=quant_config,
-            prefix=f"{prefix}.block_sparse_moe",
-        )
+            prefix=f"{prefix}.block_sparse_moe")
 
-        self.shared_mlp = (None if getattr(config, "shared_intermediate_size",
-                                           0) == 0 else GraniteMoeSharedMLP(
-                                               config,
-                                               quant_config=quant_config,
-                                               prefix=f"{prefix}.shared_mlp"))
+        self.shared_mlp = None if \
+            getattr(config, 'shared_intermediate_size', 0) == 0 \
+            else GraniteMoeSharedMLP(
+                config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.shared_mlp"
+            )
 
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
@@ -136,8 +133,7 @@ class GraniteMoeHybridAttentionDecoderLayer(nn.Module):
             config,
             cache_config=cache_config,
             quant_config=quant_config,
-            prefix=f"{prefix}.self_attn",
-        )
+            prefix=f"{prefix}.self_attn")
 
         self.block_sparse_moe = GraniteMoeMoE(
             num_experts=config.num_local_experts,
@@ -145,14 +141,15 @@ class GraniteMoeHybridAttentionDecoderLayer(nn.Module):
             hidden_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
             quant_config=quant_config,
-            prefix=f"{prefix}.block_sparse_moe",
-        )
+            prefix=f"{prefix}.block_sparse_moe")
 
-        self.shared_mlp = (None if getattr(config, "shared_intermediate_size",
-                                           0) == 0 else GraniteMoeSharedMLP(
-                                               config,
-                                               quant_config=quant_config,
-                                               prefix=f"{prefix}.shared_mlp"))
+        self.shared_mlp = None if \
+            getattr(config, 'shared_intermediate_size', 0) == 0 \
+            else GraniteMoeSharedMLP(
+                config,
+                quant_config=quant_config,
+                prefix=f"{prefix}.shared_mlp"
+            )
 
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
@@ -209,37 +206,31 @@ class GraniteMoeHybridAttention(nn.Module):
         self.head_dim = self.hidden_size // self.num_heads
         self.num_key_value_heads = config.num_key_value_heads
 
-        self.q_proj = ReplicatedLinear(
-            self.hidden_size,
-            self.num_heads * self.head_dim,
-            bias=self.attention_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.q_proj",
-        )
+        self.q_proj = ReplicatedLinear(self.hidden_size,
+                                       self.num_heads * self.head_dim,
+                                       bias=self.attention_bias,
+                                       quant_config=quant_config,
+                                       prefix=f"{prefix}.q_proj")
 
-        self.k_proj = ReplicatedLinear(
-            self.hidden_size,
-            self.num_key_value_heads * self.head_dim,
-            bias=self.attention_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.k_proj",
-        )
+        self.k_proj = ReplicatedLinear(self.hidden_size,
+                                       self.num_key_value_heads *
+                                       self.head_dim,
+                                       bias=self.attention_bias,
+                                       quant_config=quant_config,
+                                       prefix=f"{prefix}.k_proj")
 
-        self.v_proj = ReplicatedLinear(
-            self.hidden_size,
-            self.num_key_value_heads * self.head_dim,
-            bias=self.attention_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.v_proj",
-        )
+        self.v_proj = ReplicatedLinear(self.hidden_size,
+                                       self.num_key_value_heads *
+                                       self.head_dim,
+                                       bias=self.attention_bias,
+                                       quant_config=quant_config,
+                                       prefix=f"{prefix}.v_proj")
 
-        self.o_proj = ReplicatedLinear(
-            self.hidden_size,
-            self.hidden_size,
-            bias=self.attention_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.o_proj",
-        )
+        self.o_proj = ReplicatedLinear(self.hidden_size,
+                                       self.hidden_size,
+                                       bias=self.attention_bias,
+                                       quant_config=quant_config,
+                                       prefix=f"{prefix}.o_proj")
 
         if config.position_embedding_type == "rope":
             self.rotary_emb = get_rope(
@@ -247,29 +238,28 @@ class GraniteMoeHybridAttention(nn.Module):
                 rotary_dim=self.head_dim,
                 max_position=config.max_position_embeddings,
                 base=int(config.rope_theta),
-                rope_scaling=config.rope_scaling
-                if hasattr(config, "rope_scaling")
-                and config.rope_scaling is not None else None,
+                rope_scaling=config.rope_scaling \
+                    if hasattr(config, "rope_scaling") \
+                    and config.rope_scaling is not None else None,
                 is_neox_style=True,
             )
         else:
             self.rotary_emb = None
 
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            self.attention_multiplier,
-            num_kv_heads=self.num_key_value_heads,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.attn",
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              self.attention_multiplier,
+                              num_kv_heads=self.num_key_value_heads,
+                              cache_config=cache_config,
+                              quant_config=quant_config,
+                              prefix=f"{prefix}.attn")
 
     def forward(
         self,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
+
         query = self.q_proj(hidden_states)[0]
         key = self.k_proj(hidden_states)[0]
         value = self.v_proj(hidden_states)[0]
@@ -344,6 +334,7 @@ class GraniteMoeHybridModel(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+
         attn_metadata = get_forward_context().attn_metadata
         mamba2_metadata = prepare_mamba2_metadata(
             chunk_size=self.config.mamba_chunk_size,
@@ -360,7 +351,7 @@ class GraniteMoeHybridModel(nn.Module):
             residual = None
         else:
             if intermediate_tensors is None:
-                raise RuntimeError("Intermediate tensors may not be None!")
+                raise RuntimeError('Intermediate tensors may not be None!')
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
@@ -380,8 +371,7 @@ class GraniteMoeHybridModel(nn.Module):
                 hidden_states=hidden_states,
                 residual=residual,
                 mamba_cache_params=layer_mamba_cache_params,
-                mamba2_metadata=mamba2_metadata,
-            )
+                mamba2_metadata=mamba2_metadata)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
@@ -423,50 +413,39 @@ class GraniteMoeHybridModel(nn.Module):
             # Mapping different experts' layout:
             #  from HF (input_linear, output_linear, router)
             #  to vLLM (experts_w13({e}.w1, {e}.w2), experts_w3({e}.w3), gate)
-            if n.endswith(".block_sparse_moe.input_linear.weight"):
+            if n.endswith('.block_sparse_moe.input_linear.weight'):
                 for e in range(p.size(0)):
                     w1_name = n.replace(
-                        ".block_sparse_moe.input_linear.weight",
-                        f".block_sparse_moe.experts.{e}.w1.weight",
-                    )
+                        '.block_sparse_moe.input_linear.weight',
+                        f".block_sparse_moe.experts.{e}.w1.weight")
                     w3_name = n.replace(
-                        ".block_sparse_moe.input_linear.weight",
-                        f".block_sparse_moe.experts.{e}.w3.weight",
-                    )
+                        '.block_sparse_moe.input_linear.weight',
+                        f".block_sparse_moe.experts.{e}.w3.weight")
                     w1_param, w3_param = p[e].chunk(2, dim=0)
-                    _load_expert(
-                        n.replace(".input_linear.", ".experts.w13_"),
-                        w1_param,
-                        w1_name,
-                        shard_id="w1",
-                        expert_id=e,
-                    )
-                    _load_expert(
-                        n.replace(".input_linear.", ".experts.w13_"),
-                        w3_param,
-                        w3_name,
-                        shard_id="w3",
-                        expert_id=e,
-                    )
-            elif n.endswith(".block_sparse_moe.output_linear.weight"):
+                    _load_expert(n.replace('.input_linear.', '.experts.w13_'),
+                                 w1_param,
+                                 w1_name,
+                                 shard_id='w1',
+                                 expert_id=e)
+                    _load_expert(n.replace('.input_linear.', '.experts.w13_'),
+                                 w3_param,
+                                 w3_name,
+                                 shard_id='w3',
+                                 expert_id=e)
+            elif n.endswith('.block_sparse_moe.output_linear.weight'):
                 for e in range(p.size(0)):
                     w2_name = n.replace(
-                        ".block_sparse_moe.output_linear.weight",
-                        f".block_sparse_moe.experts.{e}.w2.weight",
-                    )
+                        '.block_sparse_moe.output_linear.weight',
+                        f".block_sparse_moe.experts.{e}.w2.weight")
                     w2_param = p[e]
-                    _load_expert(
-                        n.replace(".output_linear.", ".experts.w2_"),
-                        w2_param,
-                        w2_name,
-                        shard_id="w2",
-                        expert_id=e,
-                    )
-            elif n.endswith(".block_sparse_moe.router.layer.weight"):
-                gate_name = n.replace(
-                    ".block_sparse_moe.router.layer.weight",
-                    ".block_sparse_moe.gate.weight",
-                )
+                    _load_expert(n.replace('.output_linear.', '.experts.w2_'),
+                                 w2_param,
+                                 w2_name,
+                                 shard_id='w2',
+                                 expert_id=e)
+            elif n.endswith('.block_sparse_moe.router.layer.weight'):
+                gate_name = n.replace('.block_sparse_moe.router.layer.weight',
+                                      ".block_sparse_moe.gate.weight")
                 _load(gate_name, p)
             else:
                 _load(n, p)
@@ -474,15 +453,9 @@ class GraniteMoeHybridModel(nn.Module):
         return loaded_params
 
 
-class GraniteMoeHybridForCausalLM(
-        nn.Module,
-        HasInnerState,
-        SupportsLoRA,
-        SupportsPP,
-        IsHybrid,
-        SupportsV0Only,
-        SupportsQuant,
-):
+class GraniteMoeHybridForCausalLM(nn.Module, HasInnerState, SupportsLoRA,
+                                  SupportsPP, IsHybrid, SupportsV0Only,
+                                  SupportsQuant):
     packed_modules_mapping = {}
     embedding_modules = {
         "embed_tokens": "input_embeddings",
@@ -522,15 +495,13 @@ class GraniteMoeHybridForCausalLM(
             # compatibility
             if not lora_config else lora_config.lora_vocab_padding_size,
             quant_config=self.quant_config,
-            prefix=maybe_prefix(prefix, "lm_head"),
-        )
+            prefix=maybe_prefix(prefix, "lm_head"))
         if config.tie_word_embeddings:
             self.lm_head.weight = self.model.embed_tokens.weight
-        self.logits_processor = LogitsProcessor(
-            self.unpadded_vocab_size,
-            config.vocab_size,
-            scale=1 / self.config.logits_scaling,
-        )
+        self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
+                                                config.vocab_size,
+                                                scale=1 /
+                                                self.config.logits_scaling)
 
         # Used to track and store by the Mamba cache between steps.
         self.mamba_cache: Optional[MambaCacheManager] = None
@@ -541,32 +512,22 @@ class GraniteMoeHybridForCausalLM(
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.model.get_input_embeddings(input_ids)
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        **kwargs,
-    ):
+    def forward(self,
+                input_ids: torch.Tensor,
+                positions: torch.Tensor,
+                intermediate_tensors: Optional[IntermediateTensors] = None,
+                inputs_embeds: Optional[torch.Tensor] = None,
+                **kwargs):
         if self.mamba_cache is None:
             num_mamba_layers = self.model_config.get_num_layers_by_block_type(
                 self.vllm_config.parallel_config, LayerBlockType.mamba)
             self.mamba_cache = MambaCacheManager(
-                self.vllm_config,
-                self.model_config.dtype,
-                num_mamba_layers,
-                *self._get_mamba_cache_shape(),
-            )
+                self.vllm_config, self.model_config.dtype, num_mamba_layers,
+                *self._get_mamba_cache_shape())
 
         mamba_cache_params = self.mamba_cache.current_run_tensors(**kwargs)
-        hidden_states = self.model(
-            input_ids,
-            positions,
-            mamba_cache_params,
-            intermediate_tensors,
-            inputs_embeds,
-        )
+        hidden_states = self.model(input_ids, positions, mamba_cache_params,
+                                   intermediate_tensors, inputs_embeds)
 
         return hidden_states
 
@@ -588,11 +549,12 @@ class GraniteMoeHybridForCausalLM(
 
         # if n_groups is not divisible by world_size, need to extend the shards
         # to ensure all groups needed by a head is sharded along with it
-        n_groups = self.config.mamba_n_groups + extra_groups_for_head_shards(
-            self.config.mamba_n_groups, world_size)
+        n_groups = (self.config.mamba_n_groups + extra_groups_for_head_shards(
+            self.config.mamba_n_groups, world_size))
 
         # - heads and n_groups are TP-ed
-        conv_dim = intermediate_size + 2 * n_groups * self.config.mamba_d_state
+        conv_dim = (intermediate_size +
+                    2 * n_groups * self.config.mamba_d_state)
         conv_state_shape = (
             divide(conv_dim, world_size),
             self.config.mamba_d_conv - 1,

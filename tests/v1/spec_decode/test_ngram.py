@@ -43,26 +43,23 @@ def test_ngram_proposer():
 
     def ngram_proposer(min_n: int, max_n: int, k: int) -> NgramProposer:
         # Dummy model config. Just to set max_model_len.
-        model_config = ModelConfig(
-            model="facebook/opt-125m",
-            task="generate",
-            max_model_len=100,
-            tokenizer="facebook/opt-125m",
-            tokenizer_mode="auto",
-            dtype="auto",
-            seed=None,
-            trust_remote_code=False,
-        )
-        return NgramProposer(vllm_config=VllmConfig(
-            model_config=model_config,
-            speculative_config=SpeculativeConfig.from_dict(
-                {
-                    "prompt_lookup_min": min_n,
-                    "prompt_lookup_max": max_n,
-                    "num_speculative_tokens": k,
-                    "method": "ngram",
-                }),
-        ))
+        model_config = ModelConfig(model="facebook/opt-125m",
+                                   task="generate",
+                                   max_model_len=100,
+                                   tokenizer="facebook/opt-125m",
+                                   tokenizer_mode="auto",
+                                   dtype="auto",
+                                   seed=None,
+                                   trust_remote_code=False)
+        return NgramProposer(
+            vllm_config=VllmConfig(model_config=model_config,
+                                   speculative_config=SpeculativeConfig.
+                                   from_dict({
+                                       "prompt_lookup_min": min_n,
+                                       "prompt_lookup_max": max_n,
+                                       "num_speculative_tokens": k,
+                                       "method": "ngram",
+                                   })))
 
     # No match.
     result = ngram_proposer(

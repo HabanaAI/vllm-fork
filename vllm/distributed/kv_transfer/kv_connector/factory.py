@@ -79,35 +79,29 @@ class KVConnectorFactory:
 KVConnectorFactory.register_connector(
     "PyNcclConnector",
     "vllm.distributed.kv_transfer.kv_connector.simple_connector",
-    "SimpleConnector",
-)
+    "SimpleConnector")
 
 KVConnectorFactory.register_connector(
     "MooncakeConnector",
     "vllm.distributed.kv_transfer.kv_connector.simple_connector",
-    "SimpleConnector",
-)
+    "SimpleConnector")
 
 KVConnectorFactory.register_connector(
     "LMCacheConnector",
     "vllm.distributed.kv_transfer.kv_connector.lmcache_connector",
-    "LMCacheConnector",
-)
+    "LMCacheConnector")
 
 KVConnectorFactory.register_connector(
     "MooncakeStoreConnector",
     "vllm.distributed.kv_transfer.kv_connector.mooncake_store_connector",
-    "MooncakeStoreConnector",
-)
+    "MooncakeStoreConnector")
 
 KVConnectorFactory.register_connector(
     "SharedStorageConnector",
     "vllm.distributed.kv_transfer.kv_connector.v1.shared_storage_connector",
-    "SharedStorageConnector",
-)
+    "SharedStorageConnector")
 
 KVConnectorFactory.register_connector(
     "LMCacheConnectorV1",
     "vllm.distributed.kv_transfer.kv_connector.v1.lmcache_connector",
-    "LMCacheConnectorV1",
-)
+    "LMCacheConnectorV1")

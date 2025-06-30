@@ -26,13 +26,12 @@ class TestBackend:
         self.custom_passes = list(passes)
         compile_config = get_current_vllm_config().compilation_config
         self.inductor_config = compile_config.inductor_compile_config
-        self.inductor_config["force_disable_caches"] = True
-        self.inductor_config["post_grad_custom_post_pass"] = self.post_pass
+        self.inductor_config['force_disable_caches'] = True
+        self.inductor_config['post_grad_custom_post_pass'] = self.post_pass
 
     def __call__(self, graph: fx.GraphModule, example_inputs):
         self.graph_pre_compile = deepcopy(graph)
         from torch._inductor.compile_fx import compile_fx
-
         return compile_fx(graph,
                           example_inputs,
                           config_patches=self.inductor_config)

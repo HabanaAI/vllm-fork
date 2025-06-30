@@ -43,7 +43,7 @@ class MsgpackEncoder:
     Note that unlike vanilla `msgspec` Encoders, this interface is generally
     not thread-safe when encoding tensors / numpy arrays.
 
-    By default, arrays below 256B are serialized inline Larger will get sent
+    By default, arrays below 256B are serialized inline Larger will get sent 
     via dedicated messages. Note that this is a per-tensor limit.
     """
 
@@ -62,7 +62,7 @@ class MsgpackEncoder:
 
     def encode(self, obj: Any) -> Sequence[bytestr]:
         try:
-            self.aux_buffers = bufs = [b""]
+            self.aux_buffers = bufs = [b'']
             bufs[0] = self.encoder.encode(obj)
             # This `bufs` list allows us to collect direct pointers to backing
             # buffers of tensors and np arrays, and return them along with the
@@ -86,7 +86,7 @@ class MsgpackEncoder:
             return self._encode_tensor(obj)
 
         # Fall back to pickle for object or void kind ndarrays.
-        if isinstance(obj, np.ndarray) and obj.dtype.kind not in ("O", "V"):
+        if isinstance(obj, np.ndarray) and obj.dtype.kind not in ('O', 'V'):
             return self._encode_ndarray(obj)
 
         if isinstance(obj, MultiModalKwargs):
@@ -116,10 +116,8 @@ class MsgpackEncoder:
             # problems serializing methods.
             return msgpack.Ext(CUSTOM_TYPE_CLOUDPICKLE, cloudpickle.dumps(obj))
 
-        return msgpack.Ext(
-            CUSTOM_TYPE_PICKLE,
-            pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL),
-        )
+        return msgpack.Ext(CUSTOM_TYPE_PICKLE,
+                           pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
 
     def _encode_ndarray(
         self, obj: np.ndarray
@@ -236,8 +234,8 @@ class MsgpackDecoder:
         # Copy from inline representation, to decouple the memory storage
         # of the message from the original buffer. And also make Torch
         # not complain about a readonly memoryview.
-        buffer = (self.aux_buffers[data]
-                  if isinstance(data, int) else bytearray(data))
+        buffer = self.aux_buffers[data] if isinstance(data, int) \
+            else bytearray(data)
         # Create numpy wrapper around the bytes
         arr = np.ndarray(buffer=buffer, dtype=np.uint8, shape=(len(buffer), ))
         torch_dtype = getattr(torch, dtype)

@@ -85,8 +85,8 @@ class Phi3SmallMLP(nn.Module):
     ) -> None:
         super().__init__()
         self.config = config
-        assert self.config.hidden_act == "gegelu", (
-            "Only `gegelu` is supported for the 4.7 series of models ..")
+        assert (self.config.hidden_act == "gegelu"
+                ), "Only `gegelu` is supported for the 4.7 series of models .."
         self.hidden_size = config.hidden_size
         self.gegelu_limit = config.gegelu_limit
         self.intermediate_size = config.intermediate_size
@@ -168,12 +168,10 @@ class Phi3SmallSelfAttention(nn.Module):
             quant_config=quant_config,
         )
 
-        self.dense = RowParallelLinear(
-            self.hidden_size,
-            self.hidden_size,
-            bias=True,
-            quant_config=quant_config,
-        )
+        self.dense = RowParallelLinear(self.hidden_size,
+                                       self.hidden_size,
+                                       bias=True,
+                                       quant_config=quant_config)
 
         if getattr(self.config, "rope_scaling", None) is not None:
             rope_scaling = self.config.rope_scaling
@@ -210,25 +208,23 @@ class Phi3SmallSelfAttention(nn.Module):
         bs_params = None
         if not use_dense_attn:
             bs_params = {
-                "max_seqlen": self.max_position_embeddings,
-                "num_heads": self.num_heads_per_partition,
+                'max_seqlen': self.max_position_embeddings,
+                'num_heads': self.num_heads_per_partition,
                 "num_kv_heads": self.num_kv_heads_per_partion,
                 "block_size": self.sparse_block_size,
                 "local_blocks": self.local_blocks,
                 "vert_stride": self.vert_stride,
-                "homo_head": self.homo_heads,
+                "homo_head": self.homo_heads
             }
 
-        self.attn = Attention(
-            self.num_heads_per_partition,
-            self.head_dim,
-            self.scale,
-            num_kv_heads=self.num_kv_heads_per_partion,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            blocksparse_params=bs_params,
-            prefix=f"{prefix}.attn",
-        )
+        self.attn = Attention(self.num_heads_per_partition,
+                              self.head_dim,
+                              self.scale,
+                              num_kv_heads=self.num_kv_heads_per_partion,
+                              cache_config=cache_config,
+                              quant_config=quant_config,
+                              blocksparse_params=bs_params,
+                              prefix=f"{prefix}.attn")
 
     def forward(
         self,
@@ -267,13 +263,11 @@ class Phi3SmallDecoderLayer(nn.Module):
     ):
         super().__init__()
         self.hidden_size = config.hidden_size
-        self.self_attn = Phi3SmallSelfAttention(
-            config,
-            layer_idx,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.self_attn",
-        )
+        self.self_attn = Phi3SmallSelfAttention(config,
+                                                layer_idx,
+                                                cache_config=cache_config,
+                                                quant_config=quant_config,
+                                                prefix=f"{prefix}.self_attn")
         self.mlp = Phi3SmallMLP(config, quant_config)
 
         self.input_layernorm = nn.LayerNorm(config.hidden_size,
@@ -317,15 +311,12 @@ class Phi3SmallModel(nn.Module):
         self.mup_embedding_multiplier = config.mup_embedding_multiplier
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            lambda prefix: Phi3SmallDecoderLayer(
-                config,
-                int(prefix.split(".")[-1]),
-                cache_config,
-                quant_config,
-                prefix=prefix,
-            ),
-            prefix=f"{prefix}.layers",
-        )
+            lambda prefix: Phi3SmallDecoderLayer(config,
+                                                 int(prefix.split('.')[-1]),
+                                                 cache_config,
+                                                 quant_config,
+                                                 prefix=prefix),
+            prefix=f"{prefix}.layers")
 
         self.final_layernorm = nn.LayerNorm(config.hidden_size,
                                             eps=config.layer_norm_epsilon)
@@ -408,13 +399,12 @@ class Phi3SmallForCausalLM(nn.Module, SupportsPP):
             self.model.make_empty_intermediate_tensors)
 
         # tokens in tiktoken but not used
-        if hasattr(config, "dummy_token_indices"):
+        if hasattr(config, 'dummy_token_indices'):
             device = self.lm_head.weight.device
-            self.register_buffer(
-                "dummy_token_indices",
-                torch.LongTensor(config.dummy_token_indices).to(device),
-                persistent=False,
-            )
+            self.register_buffer('dummy_token_indices',
+                                 torch.LongTensor(
+                                     config.dummy_token_indices).to(device),
+                                 persistent=False)
         else:
             self.dummy_token_indices = None
 
@@ -469,6 +459,5 @@ class Phi3SmallForCausalLM(nn.Module, SupportsPP):
         loader = AutoWeightsLoader(
             self,
             skip_prefixes=(["lm_head.weight"]
-                           if self.config.tie_word_embeddings else None),
-        )
+                           if self.config.tie_word_embeddings else None))
         return loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)

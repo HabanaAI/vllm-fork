@@ -10,8 +10,7 @@ from vllm.platforms import current_platform
 if not current_platform.has_device_capability(100):
     pytest.skip(
         reason="Cutlass MLA Requires compute capability of 10 or above.",
-        allow_module_level=True,
-    )
+        allow_module_level=True)
 
 
 def ref_mla(
@@ -49,15 +48,10 @@ def ref_mla(
 @pytest.mark.parametrize("bs", [1, 2, 4])
 @pytest.mark.parametrize("varlen", [False, True])
 @pytest.mark.parametrize("block_size", [16, 64, 128])
-def test_cutlass_mla_decode(
-    dtype: torch.dtype,
-    mean_seq_len: int,
-    bs: int,
-    varlen: bool,
-    block_size: int,
-):
+def test_cutlass_mla_decode(dtype: torch.dtype, mean_seq_len: int, bs: int,
+                            varlen: bool, block_size: int):
     torch.set_default_dtype(dtype)
-    torch.set_default_device("cuda")
+    torch.set_default_device('cuda')
     torch.manual_seed(42)
 
     d = 576

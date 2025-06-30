@@ -27,16 +27,10 @@ class XPUPlatform(Platform):
     device_control_env_var: str = "ONEAPI_DEVICE_SELECTOR"
 
     @classmethod
-    def get_attn_backend_cls(
-        cls,
-        selected_backend: _Backend,
-        head_size: int,
-        dtype: torch.dtype,
-        kv_cache_dtype: Optional[str],
-        block_size: int,
-        use_v1: bool,
-        use_mla: bool,
-    ) -> str:
+    def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
+                             dtype: torch.dtype, kv_cache_dtype: Optional[str],
+                             block_size: int, use_v1: bool,
+                             use_mla: bool) -> str:
         if selected_backend != _Backend.IPEX:
             logger.info("Cannot use %s backend on XPU.", selected_backend)
         logger.info("Using IPEX attention backend.")
@@ -81,8 +75,7 @@ class XPUPlatform(Platform):
                     "bfloat16 is only supported on Intel Data Center GPU, "
                     "Intel Arc GPU is not supported yet. Your device is %s,"
                     " which is not supported. will fallback to float16",
-                    cls.get_device_name(),
-                )
+                    cls.get_device_name())
                 model_config.dtype = torch.float16
         if not model_config.enforce_eager:
             logger.warning(
@@ -117,8 +110,7 @@ class XPUPlatform(Platform):
             logger.warning(
                 "%s is not supported on XPU, fallback to ray distributed"
                 " executor backend.",
-                parallel_config.distributed_executor_backend,
-            )
+                parallel_config.distributed_executor_backend)
             parallel_config.distributed_executor_backend = "ray"
 
     @classmethod

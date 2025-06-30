@@ -47,6 +47,7 @@ def model_name(request):
 
 @pytest.mark.parametrize("dtype", ["half"])
 def test_llm_1_to_1(vllm_runner, hf_runner, model_name, dtype: str):
+
     text_pair = [TEXTS_1[0], TEXTS_2[0]]
 
     with hf_runner(model_name, dtype=dtype, is_cross_encoder=True) as hf_model:
@@ -64,6 +65,7 @@ def test_llm_1_to_1(vllm_runner, hf_runner, model_name, dtype: str):
 
 @pytest.mark.parametrize("dtype", ["half"])
 def test_llm_1_to_N(vllm_runner, hf_runner, model_name, dtype: str):
+
     text_pairs = [[TEXTS_1[0], text] for text in TEXTS_2]
 
     with hf_runner(model_name, dtype=dtype, is_cross_encoder=True) as hf_model:
@@ -100,6 +102,7 @@ def test_embeddings(
     dtype: str,
     monkeypatch,
 ) -> None:
+
     example_prompts = EMBEDDING_PROMPTS
 
     with hf_runner(
@@ -133,6 +136,7 @@ def test_matryoshka(
     dimensions: int,
     monkeypatch,
 ) -> None:
+
     example_prompts = EMBEDDING_PROMPTS
 
     with hf_runner(
@@ -153,13 +157,11 @@ def test_matryoshka(
             with pytest.raises(ValueError):
                 vllm_model.encode(
                     example_prompts,
-                    pooling_params=PoolingParams(dimensions=dimensions),
-                )
+                    pooling_params=PoolingParams(dimensions=dimensions))
         else:
             vllm_outputs = vllm_model.encode(
                 example_prompts,
-                pooling_params=PoolingParams(dimensions=dimensions),
-            )
+                pooling_params=PoolingParams(dimensions=dimensions))
 
             check_embeddings_close(
                 embeddings_0_lst=hf_outputs,

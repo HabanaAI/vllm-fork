@@ -65,8 +65,9 @@ def test_processor_max_tokens(model_id):
     pqdm(image_sizes, validate_one, n_jobs=8, desc="Validating image sizes")
 
     if failed_size_excs:
-        msg = "Found failing image sizes:" + "\n========\n".join(
-            f"[{size}]\n{exc}" for size, exc in failed_size_excs)
+        msg = "Found failing image sizes:" \
+            + "\n========\n".join(f"[{size}]\n{exc}"
+                                  for size, exc in failed_size_excs)
         raise AssertionError(msg)
 
 
@@ -92,8 +93,8 @@ def _validate_image_prompt_replacements_one(
 
         # NOTE: There is a BOS token
         assert first_placeholder.offset == 1
-        assert (first_placeholder.length ==
-                (len(processed_inputs["prompt_token_ids"]) - 1) // num_imgs)
+        assert first_placeholder.length == (
+            len(processed_inputs["prompt_token_ids"]) - 1) // num_imgs
 
     except Exception as exc:
         failed_size_excs.append((image_size, exc))
@@ -120,8 +121,9 @@ def _test_image_prompt_replacements(
     pqdm(image_sizes, validate_one, n_jobs=8, desc="Validating image sizes")
 
     if failed_size_excs:
-        msg = "Found failing image sizes:" + "\n========\n".join(
-            f"[{size}]\n{exc}" for size, exc in failed_size_excs)
+        msg = "Found failing image sizes:" \
+            + "\n========\n".join(f"[{size}]\n{exc}"
+                                  for size, exc in failed_size_excs)
         raise AssertionError(msg)
 
 
@@ -135,15 +137,8 @@ def test_processor_prompt_replacements_regression(model_id, num_imgs):
     )
     processor = MULTIMODAL_REGISTRY.create_processor(ctx.model_config)
 
-    image_ratios = [
-        (171, 152),
-        (184, 161),
-        (198, 176),
-        (333, 296),
-        (369, 328),
-        (488, 183),
-        (2560, 1669),
-    ]
+    image_ratios = [(171, 152), (184, 161), (198, 176), (333, 296), (369, 328),
+                    (488, 183), (2560, 1669)]
     image_sizes = [
         size for w, h in image_ratios
         for size in [ImageSize(w, h), ImageSize(h, w)]

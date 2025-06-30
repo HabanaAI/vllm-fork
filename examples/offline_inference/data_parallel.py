@@ -27,7 +27,6 @@ Multi-node:
                     --master-addr=10.99.48.128 \
                     --master-port=13345
 """
-
 import os
 from time import sleep
 
@@ -37,14 +36,11 @@ from vllm.utils import get_open_port
 
 def parse_args():
     import argparse
-
     parser = argparse.ArgumentParser(description="Data Parallel Inference")
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="ibm-research/PowerMoE-3b",
-        help="Model name or path",
-    )
+    parser.add_argument("--model",
+                        type=str,
+                        default="ibm-research/PowerMoE-3b",
+                        help="Model name or path")
     parser.add_argument("--dp-size",
                         type=int,
                         default=2,
@@ -72,15 +68,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def main(
-    model,
-    dp_size,
-    local_dp_rank,
-    global_dp_rank,
-    dp_master_ip,
-    dp_master_port,
-    GPUs_per_dp_rank,
-):
+def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
+         dp_master_port, GPUs_per_dp_rank):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     os.environ["VLLM_DP_SIZE"] = str(dp_size)
@@ -120,12 +109,10 @@ def main(
                                      max_tokens=[16, 20][global_dp_rank % 2])
 
     # Create an LLM.
-    llm = LLM(
-        model=model,
-        tensor_parallel_size=GPUs_per_dp_rank,
-        enforce_eager=True,
-        enable_expert_parallel=True,
-    )
+    llm = LLM(model=model,
+              tensor_parallel_size=GPUs_per_dp_rank,
+              enforce_eager=True,
+              enable_expert_parallel=True)
     outputs = llm.generate(prompts, sampling_params)
     # Print the outputs.
     for i, output in enumerate(outputs):
@@ -142,6 +129,7 @@ def main(
 
 
 if __name__ == "__main__":
+
     args = parse_args()
 
     dp_size = args.dp_size
@@ -164,27 +152,18 @@ if __name__ == "__main__":
     procs = []
     for local_dp_rank, global_dp_rank in enumerate(
             range(node_rank * dp_per_node, (node_rank + 1) * dp_per_node)):
-        proc = Process(
-            target=main,
-            args=(
-                args.model,
-                dp_size,
-                local_dp_rank,
-                global_dp_rank,
-                dp_master_ip,
-                dp_master_port,
-                tp_size,
-            ),
-        )
+        proc = Process(target=main,
+                       args=(args.model, dp_size, local_dp_rank,
+                             global_dp_rank, dp_master_ip, dp_master_port,
+                             tp_size))
         proc.start()
         procs.append(proc)
     exit_code = 0
     for proc in procs:
         proc.join(timeout=300)
         if proc.exitcode is None:
-            print(
-                f"Killing process {proc.pid} that didn't stop within 5 minutes."
-            )
+            print(f"Killing process {proc.pid} that "
+                  f"didn't stop within 5 minutes.")
             proc.kill()
             exit_code = 1
         elif proc.exitcode:

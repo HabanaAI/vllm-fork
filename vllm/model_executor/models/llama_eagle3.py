@@ -56,6 +56,7 @@ class LlamaDecoderLayer(LlamaDecoderLayer):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+
         residual = hidden_states
         embeds = self.input_layernorm(embeds)
         hidden_states = self.hidden_norm(hidden_states)
@@ -87,8 +88,8 @@ class LlamaModel(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        self.config = (
-            vllm_config.speculative_config.draft_model_config.hf_config)
+        self.config = vllm_config. \
+            speculative_config.draft_model_config.hf_config
         self.vocab_size = self.config.vocab_size
         self.embed_tokens = VocabParallelEmbedding(
             self.config.vocab_size,
@@ -102,11 +103,9 @@ class LlamaModel(nn.Module):
             )
         ])
         if hasattr(self.config, "target_hidden_size"):
-            self.fc = torch.nn.Linear(
-                self.config.target_hidden_size * 3,
-                self.config.hidden_size,
-                bias=False,
-            )
+            self.fc = torch.nn.Linear(self.config.target_hidden_size * 3,
+                                      self.config.hidden_size,
+                                      bias=False)
         else:
             self.fc = torch.nn.Linear(self.config.hidden_size * 3,
                                       self.config.hidden_size,
@@ -149,8 +148,8 @@ class LlamaModel(nn.Module):
         params_dict = dict(self.named_parameters())
         loaded_params: Set[str] = set()
         for name, loaded_weight in weights:
-            if "midlayer." in name:
-                name = name.replace("midlayer.", "layers.0.")
+            if 'midlayer.' in name:
+                name = name.replace('midlayer.', 'layers.0.')
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -172,13 +171,11 @@ class Eagle3LlamaForCausalLM(LlamaForCausalLM):
 
     def __init__(self, *, vllm_config: VllmConfig, start_layer_id: int = 0):
         nn.Module.__init__(self)
-        self.config = (
-            vllm_config.speculative_config.draft_model_config.hf_config)
-        self.model = LlamaModel(
-            vllm_config=vllm_config,
-            start_layer_id=start_layer_id,
-            prefix="model",
-        )
+        self.config = vllm_config. \
+            speculative_config.draft_model_config.hf_config
+        self.model = LlamaModel(vllm_config=vllm_config,
+                                start_layer_id=start_layer_id,
+                                prefix="model")
 
         logit_scale = getattr(self.config, "logit_scale", 1.0)
         self.lm_head = ParallelLMHead(
@@ -186,8 +183,7 @@ class Eagle3LlamaForCausalLM(LlamaForCausalLM):
             self.config.hidden_size,
             org_num_embeddings=self.config.draft_vocab_size,
             padding_size=(DEFAULT_VOCAB_PADDING_SIZE),
-            prefix="",
-        )
+            prefix="")
         self.logits_processor = LogitsProcessor(self.config.draft_vocab_size,
                                                 scale=logit_scale)
         self.draft_id_to_target_id = nn.Parameter(
@@ -213,13 +209,10 @@ class Eagle3LlamaForCausalLM(LlamaForCausalLM):
                                        sampling_metadata)
         base = torch.arange(self.config.draft_vocab_size, device=logits.device)
         targets = base + self.draft_id_to_target_id
-        logits_new = logits.new_full(
-            (
-                logits.shape[0],
-                self.config.vocab_size,
-            ),
-            float("-inf"),
-        )
+        logits_new = logits.new_full((
+            logits.shape[0],
+            self.config.vocab_size,
+        ), float('-inf'))
         logits_new[:, targets] = logits
         return logits_new
 

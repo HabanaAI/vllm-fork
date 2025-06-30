@@ -39,7 +39,7 @@ def evil_forward(self, *args, **kwargs):
 async def test_async_llm_model_error(monkeypatch, tensor_parallel_size: int,
                                      model: str) -> None:
     """Test that AsyncLLM propagates a forward pass error and frees memory.
-
+    
     AsyncLLM always uses an MP client.
     """
     if cuda_device_count_stateless() < tensor_parallel_size:
@@ -48,19 +48,15 @@ async def test_async_llm_model_error(monkeypatch, tensor_parallel_size: int,
     # Monkeypatch an error in the model.
     monkeypatch.setattr(LlamaForCausalLM, "forward", evil_forward)
 
-    engine_args = AsyncEngineArgs(
-        model=model,
-        enforce_eager=True,
-        tensor_parallel_size=tensor_parallel_size,
-    )
+    engine_args = AsyncEngineArgs(model=model,
+                                  enforce_eager=True,
+                                  tensor_parallel_size=tensor_parallel_size)
     async_llm = AsyncLLM.from_engine_args(engine_args)
 
     async def generate(request_id: str):
-        generator = async_llm.generate(
-            "Hello my name is",
-            request_id=request_id,
-            sampling_params=SamplingParams(),
-        )
+        generator = async_llm.generate("Hello my name is",
+                                       request_id=request_id,
+                                       sampling_params=SamplingParams())
         try:
             async for _ in generator:
                 pass
@@ -80,11 +76,9 @@ async def test_async_llm_model_error(monkeypatch, tensor_parallel_size: int,
 
     # We should not be able to make another request.
     with pytest.raises(EngineDeadError):
-        async for _ in async_llm.generate(
-                "Hello my name is",
-                request_id="abc",
-                sampling_params=SamplingParams(),
-        ):
+        async for _ in async_llm.generate("Hello my name is",
+                                          request_id="abc",
+                                          sampling_params=SamplingParams()):
             raise Exception("We should not get here.")
 
     # Confirm all the processes are cleaned up.
@@ -103,12 +97,8 @@ async def test_async_llm_model_error(monkeypatch, tensor_parallel_size: int,
 @pytest.mark.parametrize("enable_multiprocessing", [True])
 @pytest.mark.parametrize("tensor_parallel_size", [2, 1])
 @pytest.mark.parametrize("model", MODELS)
-def test_llm_model_error(
-    monkeypatch,
-    tensor_parallel_size: int,
-    enable_multiprocessing: bool,
-    model: str,
-) -> None:
+def test_llm_model_error(monkeypatch, tensor_parallel_size: int,
+                         enable_multiprocessing: bool, model: str) -> None:
     """Test that LLM propagates a forward pass error and frees memory.
     TODO(andy) - LLM without multiprocessing; LLM with multiprocessing
     and >1 rank
@@ -117,17 +107,16 @@ def test_llm_model_error(
         pytest.skip(reason="Not enough CUDA devices")
 
     with monkeypatch.context() as m:
+
         MP_VALUE = "1" if enable_multiprocessing else "0"
         m.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", MP_VALUE)
 
         # Monkeypatch an error in the model.
         m.setattr(LlamaForCausalLM, "forward", evil_forward)
 
-        llm = LLM(
-            model=model,
-            enforce_eager=True,
-            tensor_parallel_size=tensor_parallel_size,
-        )
+        llm = LLM(model=model,
+                  enforce_eager=True,
+                  tensor_parallel_size=tensor_parallel_size)
 
         with pytest.raises(
                 EngineDeadError if enable_multiprocessing else Exception):

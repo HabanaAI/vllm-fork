@@ -98,8 +98,8 @@ class NVLMDummyInputsBuilder(InternVLDummyInputsBuilder[NVLMProcessingInfo]):
         seq_len: int,
         mm_counts: Mapping[str, int],
     ) -> MultiModalDataDict:
-        target_width, target_height = (
-            self.info.get_image_size_with_most_features())
+        target_width, target_height = \
+            self.info.get_image_size_with_most_features()
         num_images = mm_counts.get("image", 0)
 
         return {
@@ -163,11 +163,9 @@ class NVLMMultiModalProcessor(InternVLMultiModalProcessor[NVLMProcessingInfo]):
         ]
 
 
-@MULTIMODAL_REGISTRY.register_processor(
-    NVLMMultiModalProcessor,
-    info=NVLMProcessingInfo,
-    dummy_inputs=NVLMDummyInputsBuilder,
-)
+@MULTIMODAL_REGISTRY.register_processor(NVLMMultiModalProcessor,
+                                        info=NVLMProcessingInfo,
+                                        dummy_inputs=NVLMDummyInputsBuilder)
 class NVLM_D_Model(InternVLChatModel):
 
     def _init_mlp1(self, config: PretrainedConfig) -> nn.Sequential:
@@ -177,11 +175,9 @@ class NVLM_D_Model(InternVLChatModel):
 
         return nn.Sequential(
             nn.LayerNorm(vit_hidden_size * int(1 / self.downsample_ratio)**2),
-            nn.Linear(
-                vit_hidden_size * int(1 / self.downsample_ratio)**2,
-                llm_intermediate_size,
-                bias=False,
-            ),
+            nn.Linear(vit_hidden_size * int(1 / self.downsample_ratio)**2,
+                      llm_intermediate_size,
+                      bias=False),
             nn.GELU(),
             nn.Linear(llm_intermediate_size, llm_hidden_size, bias=False),
         )
@@ -197,8 +193,8 @@ class NVLM_D_Model(InternVLChatModel):
         if not is_mono:
             vision_feature_layer = config.select_layer
             if vision_feature_layer < 0:
-                num_hidden_layers = (config.vision_config.num_hidden_layers +
-                                     vision_feature_layer + 1)
+                num_hidden_layers = config.vision_config.num_hidden_layers \
+                    + vision_feature_layer + 1
             else:
                 num_hidden_layers = vision_feature_layer + 1
 

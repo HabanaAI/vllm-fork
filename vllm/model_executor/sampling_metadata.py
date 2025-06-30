@@ -161,14 +161,8 @@ class SamplingMetadata:
             selected_token_indices,
             categorized_sample_indices,
             num_prompts,
-        ) = _prepare_seq_groups(
-            seq_group_metadata_list,
-            seq_lens,
-            query_lens,
-            device,
-            generators,
-            cache,
-        )
+        ) = _prepare_seq_groups(seq_group_metadata_list, seq_lens, query_lens,
+                                device, generators, cache)
         selected_token_indices = async_tensor_h2d(
             selected_token_indices,
             dtype=torch.long,
@@ -283,9 +277,9 @@ def _prepare_seq_groups(
             if sampling_params.seed is not None:
                 if current_platform.is_hpu():
                     import habana_frameworks.torch.hpu.random as htrandom
-
-                    generator = htrandom.default_generators[0].manual_seed(
-                        sampling_params.seed)
+                    generator = \
+                        htrandom.default_generators[
+                        0].manual_seed(sampling_params.seed)
                 else:
                     generator = torch.Generator(device=device).manual_seed(
                         sampling_params.seed)
@@ -305,8 +299,8 @@ def _prepare_seq_groups(
         else:
             # Decode
             prompt_logprob_len = 0
-            query_len = (query_lens[i] if query_lens is not None
-                         and len(query_lens) > 0 else 1)
+            query_len = query_lens[i] if query_lens is not None and len(
+                query_lens) > 0 else 1
             sample_len = len(seq_ids) * query_len if do_sample else 0
 
             if sampling_params.seed is not None and generators is not None:
@@ -378,12 +372,8 @@ def _prepare_seq_groups(
     if cache is not None:
         cache.reset()
 
-    return (
-        seq_groups,
-        selected_token_indices,
-        categorized_sample_indices,
-        num_prompts,
-    )
+    return (seq_groups, selected_token_indices, categorized_sample_indices,
+            num_prompts)
 
 
 @dataclass
@@ -496,10 +486,10 @@ class SamplingTensors:
                         prompt_tokens.append(seq_data.prompt_token_ids_array)
                         output_tokens.append(seq_data.output_token_ids_array)
 
-        top_k_scalar = (top_ks[0] if do_top_p_top_k
-                        and all(k == top_ks[0] for k in top_ks) else None)
-        top_p_scalar = (top_ps[0] if do_top_p_top_k
-                        and all(p == top_ps[0] for p in top_ps) else None)
+        top_k_scalar = top_ks[0] if do_top_p_top_k and all(
+            k == top_ks[0] for k in top_ks) else None
+        top_p_scalar = top_ps[0] if do_top_p_top_k and all(
+            p == top_ps[0] for p in top_ps) else None
 
         sampling_tensors = SamplingTensors.from_lists(
             temperatures,
@@ -515,14 +505,8 @@ class SamplingTensors:
             device,
             dtype,
         )
-        return (
-            sampling_tensors,
-            do_penalties,
-            do_top_p_top_k,
-            do_min_p,
-            top_k_scalar,
-            top_p_scalar,
-        )
+        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
+                top_k_scalar, top_p_scalar)
 
     @classmethod
     def from_lists(

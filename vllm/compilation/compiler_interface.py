@@ -22,7 +22,6 @@ class CompilerInterface:
     """
     The interface for a compiler that can be used by vLLM.
     """
-
     # The name of the compiler, e.g. inductor.
     # This is a class-level attribute.
     name: str
@@ -51,7 +50,7 @@ class CompilerInterface:
         graph: fx.GraphModule,
         example_inputs: List[Any],
         compiler_config: Dict[str, Any],
-        runtime_shape: Optional[int] = None,
+        runtime_shape: Optional[int] = None
     ) -> Tuple[Optional[Callable], Optional[Any]]:
         """
         Compile the graph with the given example inputs and compiler config,
@@ -75,14 +74,12 @@ class CompilerInterface:
         """
         return None, None
 
-    def load(
-        self,
-        handle: Any,
-        graph: fx.GraphModule,
-        example_inputs: List[Any],
-        graph_index: int,
-        runtime_shape: Optional[int] = None,
-    ) -> Callable:
+    def load(self,
+             handle: Any,
+             graph: fx.GraphModule,
+             example_inputs: List[Any],
+             graph_index: int,
+             runtime_shape: Optional[int] = None) -> Callable:
         """
         Load the compiled function from the handle.
         Raises an error if the handle is invalid.
@@ -134,20 +131,17 @@ class InductorAdaptor(CompilerInterface):
     """
     The adaptor for the Inductor compiler, version 2.5 and 2.6.
     """
-
     name = "inductor"
 
     def compute_hash(self, vllm_config: VllmConfig) -> str:
         factors: List[Any] = []
         # summarize system state
         from torch._inductor.codecache import CacheBase
-
         system_factors = CacheBase.get_system()
         factors.append(system_factors)
 
         # summarize pytorch state
         from torch._inductor.codecache import torch_key
-
         torch_factors = torch_key()
         factors.append(torch_factors)
         hash_str = hashlib.md5(str(factors).encode(),
@@ -174,7 +168,7 @@ class InductorAdaptor(CompilerInterface):
         graph: fx.GraphModule,
         example_inputs: List[Any],
         compiler_config: Dict[str, Any],
-        runtime_shape: Optional[int] = None,
+        runtime_shape: Optional[int] = None
     ) -> Tuple[Optional[Callable], Optional[Any]]:
         current_config = {}
         from torch._inductor.compile_fx import compile_fx
@@ -204,7 +198,6 @@ class InductorAdaptor(CompilerInterface):
         hash_str, file_path = None, None
         from torch._inductor.codecache import (FxGraphCache,
                                                compiled_fx_graph_hash)
-
         if torch.__version__.startswith("2.5"):
             original_load = FxGraphCache.load
             original_load_name = "torch._inductor.codecache.FxGraphCache.load"
@@ -227,8 +220,7 @@ class InductorAdaptor(CompilerInterface):
                             break
                 return inductor_compiled_graph
 
-            hijacked_compile_fx_inner = (
-                torch._inductor.compile_fx.compile_fx_inner)  # noqa
+            hijacked_compile_fx_inner = torch._inductor.compile_fx.compile_fx_inner  # noqa
         elif torch.__version__ >= "2.6":
             # function renamed in 2.6
             original_load_name = None
@@ -282,17 +274,13 @@ class InductorAdaptor(CompilerInterface):
 
             # for hijacking the hash of the compiled graph
             stack.enter_context(
-                patch(
-                    "torch._inductor.codecache.compiled_fx_graph_hash",
-                    hijack_compiled_fx_graph_hash,
-                ))
+                patch("torch._inductor.codecache.compiled_fx_graph_hash",
+                      hijack_compiled_fx_graph_hash))
 
             # for providing a dummy shape environment
             stack.enter_context(
-                patch(
-                    "torch._inductor.codecache.FxGraphCache._get_shape_env",
-                    _get_shape_env,
-                ))
+                patch("torch._inductor.codecache.FxGraphCache._get_shape_env",
+                      _get_shape_env))
 
             from torch._functorch._aot_autograd.autograd_cache import (
                 AOTAutogradCache)
@@ -302,15 +290,13 @@ class InductorAdaptor(CompilerInterface):
                 stack.enter_context(
                     patch(
                         "torch._functorch._aot_autograd.autograd_cache.AOTAutogradCache._get_shape_env",
-                        _get_shape_env,
-                    ))
+                        _get_shape_env))
 
             # for forcing the graph to be cached
             stack.enter_context(
                 patch(
                     "torch._inductor.codecache.FxGraphCache._check_can_cache",
-                    _check_can_cache,
-                ))
+                    _check_can_cache))
 
             # Dynamo metrics context, see method for more details.
             stack.enter_context(self.metrics_context())
@@ -333,8 +319,7 @@ class InductorAdaptor(CompilerInterface):
                     graph,
                     example_inputs,
                     inner_compile=hijacked_compile_fx_inner,
-                    config_patches=current_config,
-                )
+                    config_patches=current_config)
 
         # We treat VLLM_DISABLE_COMPILE_CACHE as the overall switch for torch
         # compilation cache. So turn off the checks if we disable the
@@ -346,14 +331,12 @@ class InductorAdaptor(CompilerInterface):
                 "failed to get the file path of the compiled graph")
         return compiled_graph, (hash_str, file_path)
 
-    def load(
-        self,
-        handle: Any,
-        graph: fx.GraphModule,
-        example_inputs: List[Any],
-        graph_index: int,
-        runtime_shape: Optional[int] = None,
-    ) -> Callable:
+    def load(self,
+             handle: Any,
+             graph: fx.GraphModule,
+             example_inputs: List[Any],
+             graph_index: int,
+             runtime_shape: Optional[int] = None) -> Callable:
         assert isinstance(handle, tuple)
         assert isinstance(handle[0], str)
         assert isinstance(handle[1], str)
@@ -362,20 +345,16 @@ class InductorAdaptor(CompilerInterface):
         from torch._functorch._aot_autograd.autograd_cache import (
             AOTAutogradCache)
         from torch._inductor.codecache import FxGraphCache
-
         with ExitStack() as exit_stack:
             exit_stack.enter_context(
-                patch(
-                    "torch._inductor.codecache.FxGraphCache._get_shape_env",
-                    lambda *args, **kwargs: AlwaysHitShapeEnv(),
-                ))
+                patch("torch._inductor.codecache.FxGraphCache._get_shape_env",
+                      lambda *args, **kwargs: AlwaysHitShapeEnv()))
             # torch 2.8+ on main uses _get_shape_env in AOTAutogradCache
             if hasattr(AOTAutogradCache, "_get_shape_env"):
                 exit_stack.enter_context(
                     patch(
                         "torch._functorch._aot_autograd.autograd_cache.AOTAutogradCache._get_shape_env",
-                        lambda *args, **kwargs: AlwaysHitShapeEnv(),
-                    ))
+                        lambda *args, **kwargs: AlwaysHitShapeEnv()))
 
             # Dynamo metrics context, see method for more details.
             exit_stack.enter_context(self.metrics_context())
@@ -390,7 +369,6 @@ class InductorAdaptor(CompilerInterface):
             elif torch.__version__ >= "2.6":
                 from torch._inductor.output_code import (
                     CompiledFxGraphConstantsWithGm)
-
                 constants = CompiledFxGraphConstantsWithGm(graph)
                 inductor_compiled_graph, _ = FxGraphCache._lookup_graph(
                     hash_str, example_inputs, True, None, constants)
@@ -406,7 +384,6 @@ class InductorAdaptor(CompilerInterface):
 
         # need to know if the graph returns a tuple
         from torch._inductor.compile_fx import graph_returns_tuple
-
         returns_tuple = graph_returns_tuple(graph)
 
         # this is the callable we return to Dynamo to run
@@ -440,7 +417,6 @@ class InductorAdaptor(CompilerInterface):
         """
         if is_torch_equal_or_newer("2.6"):
             import torch._dynamo.utils
-
             return torch._dynamo.utils.get_metrics_context()
         else:
             return contextlib.nullcontext()
@@ -454,7 +430,7 @@ class EagerAdaptor(CompilerInterface):
         graph: fx.GraphModule,
         example_inputs: List[Any],
         compiler_config: Dict[str, Any],
-        runtime_shape: Optional[int] = None,
+        runtime_shape: Optional[int] = None
     ) -> Tuple[Optional[Callable], Optional[Any]]:
         # we don't need to compile the graph, just return the graph itself.
         # It does not support caching, return None for the handle.

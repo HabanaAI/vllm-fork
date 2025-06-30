@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Wrapper around `transformers` models"""
-
 import re
 from typing import Iterable, Literal, Optional, Union
 
@@ -50,18 +49,17 @@ logger = init_logger(__name__)
 
 
 def vllm_flash_attention_forward(
-    # Transformers args
-    module: torch.nn.Module,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask: torch.Tensor,
-    # Transformers kwargs
-    scaling: Optional[float] = None,
-    # vLLM kwargs
-    attention_instances: Optional[dict[Attention]] = None,
-    **kwargs,
-):
+        # Transformers args
+        module: torch.nn.Module,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attention_mask: torch.Tensor,
+        # Transformers kwargs
+        scaling: Optional[float] = None,
+        # vLLM kwargs
+        attention_instances: Optional[dict[Attention]] = None,
+        **kwargs):
     self_attn = attention_instances[module.layer_idx]
     if scaling is not None:
         self_attn.impl.scale = float(scaling)
@@ -79,9 +77,8 @@ def log_replacement(name: str, old_module: nn.Module, new_module: nn.Module):
 
 
 def replace_linear_class(
-    linear: nn.Linear,
-    style: Literal["colwise", "rowwise"],
-    quant_config: QuantizationConfig,
+    linear: nn.Linear, style: Literal["colwise", "rowwise"],
+    quant_config: QuantizationConfig
 ) -> Union[ColumnParallelLinear, RowParallelLinear]:
     """
     Replace nn.Linear with one of vLLM's tensor parallel linear classes.
@@ -275,8 +272,7 @@ class TransformersModel(nn.Module):
                 num_kv_heads=num_kv_heads,
                 cache_config=self.cache_config,
                 quant_config=self.quant_config,
-                prefix=f"{i}.attn",
-            )
+                prefix=f"{i}.attn")
             for i in range(start, end)
         }
 
@@ -354,8 +350,7 @@ class TransformersModel(nn.Module):
             use_cache=False,
             position_ids=positions[None, ...],
             attention_instances=self.attention_instances,
-            return_dict=False,
-        )[0][0, ...]  # we remove batch dimension for now
+            return_dict=False)[0][0, ...]  # we remove batch dimension for now
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({"hidden_states": hidden_states})

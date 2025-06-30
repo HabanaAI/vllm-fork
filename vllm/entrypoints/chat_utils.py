@@ -92,7 +92,6 @@ class CustomChatCompletionContentSimpleImageParam(TypedDict, total=False):
         "image_url": "https://example.com/image.jpg"
     }
     """
-
     image_url: Required[str]
 
 
@@ -104,7 +103,6 @@ class CustomChatCompletionContentSimpleAudioParam(TypedDict, total=False):
         "audio_url": "https://example.com/audio.mp3"
     }
     """
-
     audio_url: Required[str]
 
 
@@ -116,27 +114,21 @@ class CustomChatCompletionContentSimpleVideoParam(TypedDict, total=False):
         "video_url": "https://example.com/video.mp4"
     }
     """
-
     video_url: Required[str]
 
 
 ChatCompletionContentPartParam: TypeAlias = Union[
-    OpenAIChatCompletionContentPartParam,
-    ChatCompletionContentPartAudioParam,
+    OpenAIChatCompletionContentPartParam, ChatCompletionContentPartAudioParam,
     ChatCompletionContentPartInputAudioParam,
-    ChatCompletionContentPartVideoParam,
-    ChatCompletionContentPartRefusalParam,
+    ChatCompletionContentPartVideoParam, ChatCompletionContentPartRefusalParam,
     CustomChatCompletionContentSimpleImageParam,
     ChatCompletionContentPartImageEmbedsParam,
     CustomChatCompletionContentSimpleAudioParam,
-    CustomChatCompletionContentSimpleVideoParam,
-    str,
-]
+    CustomChatCompletionContentSimpleVideoParam, str]
 
 
 class CustomChatCompletionMessageParam(TypedDict, total=False):
     """Enables custom roles in the Chat Completion API."""
-
     role: Required[str]
     """The role of the message's author."""
 
@@ -211,13 +203,13 @@ def _is_var_or_elems_access(
     key: Optional[str] = None,
 ) -> bool:
     if isinstance(node, jinja2.nodes.Filter):
-        return node.node is not None and _is_var_or_elems_access(
-            node.node, varname, key)
+        return (node.node is not None
+                and _is_var_or_elems_access(node.node, varname, key))
     if isinstance(node, jinja2.nodes.Test):
         return _is_var_or_elems_access(node.node, varname, key)
 
-    if isinstance(node, jinja2.nodes.Getitem) and isinstance(
-            node.arg, jinja2.nodes.Slice):
+    if (isinstance(node, jinja2.nodes.Getitem)
+            and isinstance(node.arg, jinja2.nodes.Slice)):
         return _is_var_or_elems_access(node.node, varname, key)
 
     # yapf: disable
@@ -321,20 +313,16 @@ def resolve_mistral_chat_template(
 ) -> Optional[str]:
     if chat_template is not None:
         logger.warning_once(
-            "'chat_template' cannot be overridden for mistral tokenizer."
-        )
+            "'chat_template' cannot be overridden for mistral tokenizer.")
     if "add_generation_prompt" in kwargs:
         logger.warning_once(
             "'add_generation_prompt' is not supported for mistral tokenizer, "
-            "so it will be ignored."
-        )
+            "so it will be ignored.")
     if "continue_final_message" in kwargs:
         logger.warning_once(
             "'continue_final_message' is not supported for mistral tokenizer, "
-            "so it will be ignored."
-        )
+            "so it will be ignored.")
     return None
-
 
 def resolve_hf_chat_template(
     tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
@@ -352,34 +340,23 @@ def resolve_hf_chat_template(
         try:
             processor = cached_get_processor(
                 tokenizer.name_or_path,
-                processor_cls=(
-                    PreTrainedTokenizer,
-                    PreTrainedTokenizerFast,
-                    ProcessorMixin,
-                ),
+                processor_cls=(PreTrainedTokenizer, PreTrainedTokenizerFast,
+                               ProcessorMixin),
                 trust_remote_code=trust_remote_code,
             )
-            if (
-                isinstance(processor, ProcessorMixin)
-                and processor.chat_template is not None
-            ):
+            if isinstance(processor, ProcessorMixin) and \
+                processor.chat_template is not None:
                 return processor.chat_template
         except Exception:
-            logger.debug(
-                "Failed to load AutoProcessor chat template for %s",
-                tokenizer.name_or_path,
-                exc_info=True,
-            )
+            logger.debug("Failed to load AutoProcessor chat template for %s",
+                        tokenizer.name_or_path, exc_info=True)
 
     # 3rd priority: AutoTokenizer chat template
     try:
         return tokenizer.get_chat_template(chat_template, tools=tools)
     except Exception:
-        logger.debug(
-            "Failed to load AutoTokenizer chat template for %s",
-            tokenizer.name_or_path,
-            exc_info=True,
-        )
+        logger.debug("Failed to load AutoTokenizer chat template for %s",
+                     tokenizer.name_or_path, exc_info=True)
 
     return None
 
@@ -402,17 +379,11 @@ def _resolve_chat_template_content_format(
     else:
         hf_chat_template = None
 
-    jinja_text = (
-        hf_chat_template
-        if isinstance(hf_chat_template, str)
-        else load_chat_template(chat_template, is_literal=True)
-    )
+    jinja_text = (hf_chat_template if isinstance(hf_chat_template, str)
+                  else load_chat_template(chat_template, is_literal=True))
 
-    detected_format = (
-        "string"
-        if jinja_text is None
-        else _detect_content_format(jinja_text, default="string")
-    )
+    detected_format = ("string" if jinja_text is None else
+                       _detect_content_format(jinja_text, default="string"))
 
     return detected_format if given_format == "auto" else given_format
 
@@ -502,9 +473,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
     def _cached_token_str(tokenizer: AnyTokenizer, token_index: int) -> str:
         return tokenizer.decode(token_index)
 
-    def _placeholder_str(
-        self, modality: ModalityStr, current_count: int
-    ) -> Optional[str]:
+    def _placeholder_str(self, modality: ModalityStr,
+                         current_count: int) -> Optional[str]:
         # TODO: Let user specify how to insert image tokens into prompt
         # (similar to chat template)
         hf_config = self._model_config.hf_config
@@ -517,35 +487,19 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
                 return f"<|image_{current_count}|>"
             if model_type in ("minicpmo", "minicpmv"):
                 return "(<image>./</image>)"
-            if model_type in (
-                "blip-2",
-                "florence2",
-                "fuyu",
-                "paligemma",
-                "pixtral",
-                "mistral3",
-            ):
+            if model_type in ("blip-2", "florence2", "fuyu", "paligemma",
+                              "pixtral", "mistral3"):
                 # These models do not use image tokens in the prompt
                 return None
             if model_type == "qwen":
                 return f"Picture {current_count}: <img></img>"
             if model_type.startswith("llava"):
-                return self._cached_token_str(
-                    self._tokenizer, hf_config.image_token_index
-                )
+                return self._cached_token_str(self._tokenizer,
+                                              hf_config.image_token_index)
 
-            if model_type in (
-                "aya_vision",
-                "chameleon",
-                "deepseek_vl_v2",
-                "internvl_chat",
-                "ovis2",
-                "skywork_chat",
-                "NVLM_D",
-                "h2ovl_chat",
-                "idefics3",
-                "smolvlm",
-            ):
+            if model_type in ("aya_vision", "chameleon", "deepseek_vl_v2",
+                              "internvl_chat", "ovis2", "skywork_chat",
+                              "NVLM_D", "h2ovl_chat", "idefics3", "smolvlm"):
                 return "<image>"
             if model_type in ("mllama", "llama4"):
                 return "<|image|>"
@@ -560,7 +514,7 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
             if model_type == "gemma3":
                 return "<start_of_image>"
             if model_type == "kimi_vl":
-                return "<|media_start|>image<|media_content|><|media_pad|><|media_end|>"  # noqa: E501
+                return "<|media_start|>image<|media_content|><|media_pad|><|media_end|>" # noqa: E501
 
             raise TypeError(f"Unknown {modality} model type: {model_type}")
         elif modality == "audio":
@@ -569,10 +523,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
             if model_type == "phi4mm":
                 return f"<|audio_{current_count}|>"
             if model_type in ("qwen2_audio", "qwen2_5_omni"):
-                return (
-                    f"Audio {current_count}: "
-                    f"<|audio_bos|><|AUDIO|><|audio_eos|>"
-                )
+                return (f"Audio {current_count}: "
+                        f"<|audio_bos|><|AUDIO|><|audio_eos|>")
             if model_type == "minicpmo":
                 return "(<audio>./</audio>)"
             raise TypeError(f"Unknown model type: {model_type}")
@@ -584,9 +536,8 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
             if model_type in ("minicpmo", "minicpmv"):
                 return "(<video>./</video>)"
             if model_type.startswith("llava"):
-                return self._cached_token_str(
-                    self._tokenizer, hf_config.video_token_index
-                )
+                return self._cached_token_str(self._tokenizer,
+                                              hf_config.video_token_index)
             raise TypeError(f"Unknown {modality} model type: {model_type}")
         else:
             raise TypeError(f"Unknown modality: {modality}")
@@ -618,8 +569,7 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
             raise ValueError(
                 f"At most {allowed_count} {modality}(s) may be provided in "
                 "one request. You can set `--limit-mm-per-prompt` to "
-                "increase this limit if the model supports it."
-            )
+                "increase this limit if the model supports it.")
 
         self._items_by_modality[modality].append(item)
         try:
@@ -627,10 +577,7 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
         except TypeError as e:
             logger.warning(
                 "Skipping unsupported modality '%s' for model '%s': %s",
-                modality,
-                self._model_config.hf_config.model_type,
-                e,
-            )
+                modality, self._model_config.hf_config.model_type, e)
             return None
 
     @abstractmethod
@@ -639,29 +586,28 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
 
 
 class MultiModalItemTracker(BaseMultiModalItemTracker[object]):
+
     def all_mm_data(self) -> Optional[MultiModalDataDict]:
         if not self._items_by_modality:
             return None
         mm_inputs = {}
         items_by_modality = dict(self._items_by_modality)
         if "image" in items_by_modality and "image_embeds" in items_by_modality:
-            raise ValueError(
-                "Mixing raw image and embedding inputs is not allowed"
-            )
+            raise ValueError(\
+                "Mixing raw image and embedding inputs is not allowed")
 
         if "image_embeds" in items_by_modality:
             image_embeds_lst = items_by_modality["image_embeds"]
             if len(image_embeds_lst) > 1:
-                raise ValueError(
-                    "Only one message can have {'type': 'image_embeds'}"
-                )
+                raise ValueError(\
+                    "Only one message can have {'type': 'image_embeds'}")
             mm_inputs["image"] = image_embeds_lst[0]
         if "image" in items_by_modality:
-            mm_inputs["image"] = items_by_modality["image"]  # A list of images
+            mm_inputs["image"] = items_by_modality["image"] # A list of images
         if "audio" in items_by_modality:
-            mm_inputs["audio"] = items_by_modality["audio"]  # A list of audios
+            mm_inputs["audio"] = items_by_modality["audio"] # A list of audios
         if "video" in items_by_modality:
-            mm_inputs["video"] = items_by_modality["video"]  # A list of videos
+            mm_inputs["video"] = items_by_modality["video"] # A list of videos
         return mm_inputs
 
     def create_parser(self) -> "BaseMultiModalContentParser":
@@ -669,33 +615,32 @@ class MultiModalItemTracker(BaseMultiModalItemTracker[object]):
 
 
 class AsyncMultiModalItemTracker(BaseMultiModalItemTracker[Awaitable[object]]):
+
     async def all_mm_data(self) -> Optional[MultiModalDataDict]:
         if not self._items_by_modality:
             return None
         mm_inputs = {}
         items_by_modality = {
-            modality: await asyncio.gather(*items)
-            for modality, items in self._items_by_modality.items()
-        }
+                modality: await asyncio.gather(*items)
+                for modality, items in self._items_by_modality.items()
+            }
 
         if "image" in items_by_modality and "image_embeds" in items_by_modality:
             raise ValueError(
-                "Mixing raw image and embedding inputs is not allowed"
-            )
+                "Mixing raw image and embedding inputs is not allowed")
 
         if "image_embeds" in items_by_modality:
             image_embeds_lst = items_by_modality["image_embeds"]
             if len(image_embeds_lst) > 1:
                 raise ValueError(
-                    "Only one message can have {'type': 'image_embeds'}"
-                )
+                    "Only one message can have {'type': 'image_embeds'}")
             mm_inputs["image"] = image_embeds_lst[0]
         if "image" in items_by_modality:
-            mm_inputs["image"] = items_by_modality["image"]  # A list of images
+            mm_inputs["image"] = items_by_modality["image"] # A list of images
         if "audio" in items_by_modality:
-            mm_inputs["audio"] = items_by_modality["audio"]  # A list of audios
+            mm_inputs["audio"] = items_by_modality["audio"] # A list of audios
         if "video" in items_by_modality:
-            mm_inputs["video"] = items_by_modality["video"]  # A list of videos
+            mm_inputs["video"] = items_by_modality["video"] # A list of videos
         return mm_inputs
 
     def create_parser(self) -> "BaseMultiModalContentParser":
@@ -703,6 +648,7 @@ class AsyncMultiModalItemTracker(BaseMultiModalItemTracker[Awaitable[object]]):
 
 
 class BaseMultiModalContentParser(ABC):
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -721,9 +667,8 @@ class BaseMultiModalContentParser(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def parse_image_embeds(
-        self, image_embeds: Union[str, dict[str, str]]
-    ) -> None:
+    def parse_image_embeds(self,
+                           image_embeds: Union[str, dict[str, str]]) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -740,6 +685,7 @@ class BaseMultiModalContentParser(ABC):
 
 
 class MultiModalContentParser(BaseMultiModalContentParser):
+
     def __init__(self, tracker: MultiModalItemTracker) -> None:
         super().__init__()
 
@@ -755,9 +701,8 @@ class MultiModalContentParser(BaseMultiModalContentParser):
         placeholder = self._tracker.add("image", image)
         self._add_placeholder(placeholder)
 
-    def parse_image_embeds(
-        self, image_embeds: Union[str, dict[str, str]]
-    ) -> None:
+    def parse_image_embeds(self,
+                           image_embeds: Union[str, dict[str, str]]) -> None:
         if isinstance(image_embeds, dict):
             embeds = {
                 k: self._connector.fetch_image_embedding(v)
@@ -792,6 +737,7 @@ class MultiModalContentParser(BaseMultiModalContentParser):
 
 
 class AsyncMultiModalContentParser(BaseMultiModalContentParser):
+
     def __init__(self, tracker: AsyncMultiModalItemTracker) -> None:
         super().__init__()
 
@@ -806,9 +752,8 @@ class AsyncMultiModalContentParser(BaseMultiModalContentParser):
         placeholder = self._tracker.add("image", image_coro)
         self._add_placeholder(placeholder)
 
-    def parse_image_embeds(
-        self, image_embeds: Union[str, dict[str, str]]
-    ) -> None:
+    def parse_image_embeds(self,
+                           image_embeds: Union[str, dict[str, str]]) -> None:
         future: asyncio.Future[Union[str, dict[str, str]]] = asyncio.Future()
 
         if isinstance(image_embeds, dict):
@@ -819,7 +764,8 @@ class AsyncMultiModalContentParser(BaseMultiModalContentParser):
             future.set_result(embeds)
 
         if isinstance(image_embeds, str):
-            embedding = self._connector.fetch_image_embedding(image_embeds)
+            embedding = self._connector.\
+                fetch_image_embedding(image_embeds)
             future.set_result(embedding)
 
         placeholder = self._tracker.add("image_embeds", future)
@@ -851,23 +797,20 @@ def validate_chat_template(chat_template: Optional[Union[Path, str]]):
         return
 
     elif isinstance(chat_template, Path) and not chat_template.exists():
-        raise FileNotFoundError("the supplied chat template path doesn't exist")
+        raise FileNotFoundError(
+            "the supplied chat template path doesn't exist")
 
     elif isinstance(chat_template, str):
         JINJA_CHARS = "{}\n"
-        if (
-            not any(c in chat_template for c in JINJA_CHARS)
-            and not Path(chat_template).exists()
-        ):
+        if not any(c in chat_template
+                   for c in JINJA_CHARS) and not Path(chat_template).exists():
             raise ValueError(
                 f"The supplied chat template string ({chat_template}) "
-                f"appears path-like, but doesn't exist!"
-            )
+                f"appears path-like, but doesn't exist!")
 
     else:
         raise TypeError(
-            f"{type(chat_template)} is not a valid chat template type"
-        )
+            f"{type(chat_template)} is not a valid chat template type")
 
 
 def _load_chat_template(
@@ -880,9 +823,8 @@ def _load_chat_template(
 
     if is_literal:
         if isinstance(chat_template, Path):
-            raise TypeError(
-                "chat_template is expected to be read directly from its value"
-            )
+            raise TypeError("chat_template is expected to be read directly "
+                            "from its value")
 
         return chat_template
 
@@ -895,11 +837,9 @@ def _load_chat_template(
 
         JINJA_CHARS = "{}\n"
         if not any(c in chat_template for c in JINJA_CHARS):
-            msg = (
-                f"The supplied chat template ({chat_template}) "
-                f"looks like a file path, but it failed to be "
-                f"opened. Reason: {e}"
-            )
+            msg = (f"The supplied chat template ({chat_template}) "
+                   f"looks like a file path, but it failed to be "
+                   f"opened. Reason: {e}")
             raise ValueError(msg) from e
 
         # If opening a file fails, set chat template to be args to
@@ -920,26 +860,24 @@ def load_chat_template(
 
 # TODO: Let user specify how to insert multimodal tokens into prompt
 # (similar to chat template)
-def _get_full_multimodal_text_prompt(
-    placeholder_counts: dict[str, int], text_prompt: str
-) -> str:
+def _get_full_multimodal_text_prompt(placeholder_counts: dict[str, int],
+                                     text_prompt: str) -> str:
     """Combine multimodal prompts for a multimodal language model."""
 
     # Look through the text prompt to check for missing placeholders
     missing_placeholders: list[str] = []
     for placeholder in placeholder_counts:
+
         # For any existing placeholder in the text prompt, we leave it as is
         placeholder_counts[placeholder] -= text_prompt.count(placeholder)
 
         if placeholder_counts[placeholder] < 0:
             raise ValueError(
                 f"Found more '{placeholder}' placeholders in input prompt than "
-                "actual multimodal data items."
-            )
+                "actual multimodal data items.")
 
-        missing_placeholders.extend(
-            [placeholder] * placeholder_counts[placeholder]
-        )
+        missing_placeholders.extend([placeholder] *
+                                    placeholder_counts[placeholder])
 
     # NOTE: For now we always add missing placeholders at the front of
     # the prompt. This may change to be customizable in the future.
@@ -963,29 +901,25 @@ MM_PARSER_MAP: dict[
     str,
     Callable[[ChatCompletionContentPartParam], _ContentPart],
 ] = {
-    "text": lambda part: _TextParser(part).get("text", None),
-    "image_url": lambda part: _ImageParser(part)
-    .get("image_url", {})
-    .get("url", None),
-    "image_embeds": lambda part: _ImageEmbedsParser(part).get(
-        "image_embeds", None
-    ),
-    "audio_url": lambda part: _AudioParser(part)
-    .get("audio_url", {})
-    .get("url", None),
-    "input_audio": lambda part: _InputAudioParser(part).get(
-        "input_audio", None
-    ),
-    "refusal": lambda part: _RefusalParser(part).get("refusal", None),
-    "video_url": lambda part: _VideoParser(part)
-    .get("video_url", {})
-    .get("url", None),
+    "text":
+    lambda part: _TextParser(part).get("text", None),
+    "image_url":
+    lambda part: _ImageParser(part).get("image_url", {}).get("url", None),
+    "image_embeds":
+    lambda part: _ImageEmbedsParser(part).get("image_embeds", None),
+    "audio_url":
+    lambda part: _AudioParser(part).get("audio_url", {}).get("url", None),
+    "input_audio":
+    lambda part: _InputAudioParser(part).get("input_audio", None),
+    "refusal":
+    lambda part: _RefusalParser(part).get("refusal", None),
+    "video_url":
+    lambda part: _VideoParser(part).get("video_url", {}).get("url", None),
 }
 
 
 def _parse_chat_message_content_mm_part(
-    part: ChatCompletionContentPartParam,
-) -> tuple[str, _ContentPart]:
+        part: ChatCompletionContentPartParam) -> tuple[str, _ContentPart]:
     """
     Parses a given multi-modal content part based on its type.
 
@@ -1001,8 +935,7 @@ def _parse_chat_message_content_mm_part(
         ValueError: If the 'type' field is missing and no direct URL is found.
     """
     assert isinstance(
-        part, dict
-    )  # This is needed to avoid mypy errors: part.get() from str
+        part, dict)  # This is needed to avoid mypy errors: part.get() from str
     part_type = part.get("type", None)
 
     if isinstance(part_type, str) and part_type in MM_PARSER_MAP:
@@ -1011,10 +944,8 @@ def _parse_chat_message_content_mm_part(
         # Special case for 'image_url.detail'
         # We only support 'auto', which is the default
         if part_type == "image_url" and part.get("detail", "auto") != "auto":
-            logger.warning(
-                "'image_url.detail' is currently not supported "
-                "and will be ignored."
-            )
+            logger.warning("'image_url.detail' is currently not supported "
+                           "and will be ignored.")
 
         return part_type, content
 
@@ -1022,22 +953,19 @@ def _parse_chat_message_content_mm_part(
     # 'type' is required field by pydantic
     if part_type is None:
         if part.get("image_url") is not None:
-            image_params = cast(
-                CustomChatCompletionContentSimpleImageParam, part
-            )
+            image_params = cast(CustomChatCompletionContentSimpleImageParam,
+                                part)
             return "image_url", image_params.get("image_url", "")
         if part.get("audio_url") is not None:
-            audio_params = cast(
-                CustomChatCompletionContentSimpleAudioParam, part
-            )
+            audio_params = cast(CustomChatCompletionContentSimpleAudioParam,
+                                part)
             return "audio_url", audio_params.get("audio_url", "")
         if part.get("input_audio") is not None:
             input_audio_params = cast(dict[str, str], part)
             return "input_audio", input_audio_params
         if part.get("video_url") is not None:
-            video_params = cast(
-                CustomChatCompletionContentSimpleVideoParam, part
-            )
+            video_params = cast(CustomChatCompletionContentSimpleVideoParam,
+                                part)
             return "video_url", video_params.get("video_url", "")
         # Raise an error if no 'type' or direct URL is found.
         raise ValueError("Missing 'type' field in multimodal part.")
@@ -1047,15 +975,9 @@ def _parse_chat_message_content_mm_part(
     return part_type, "unknown part_type content"
 
 
-VALID_MESSAGE_CONTENT_MM_PART_TYPES = (
-    "text",
-    "refusal",
-    "image_url",
-    "image_embeds",
-    "audio_url",
-    "input_audio",
-    "video_url",
-)
+VALID_MESSAGE_CONTENT_MM_PART_TYPES = ("text", "refusal", "image_url",
+                                       "image_embeds",
+                                       "audio_url", "input_audio", "video_url")
 
 
 def _parse_chat_message_content_parts(
@@ -1080,14 +1002,14 @@ def _parse_chat_message_content_parts(
 
     if wrap_dicts:
         # Parsing wraps images and texts as interleaved dictionaries
-        return [ConversationMessage(role=role, content=content)]  # type: ignore
+        return [ConversationMessage(role=role,
+                                    content=content)]  # type: ignore
     texts = cast(list[str], content)
     text_prompt = "\n".join(texts)
     mm_placeholder_counts = mm_parser.mm_placeholder_counts()
     if mm_placeholder_counts:
-        text_prompt = _get_full_multimodal_text_prompt(
-            mm_placeholder_counts, text_prompt
-        )
+        text_prompt = _get_full_multimodal_text_prompt(mm_placeholder_counts,
+                                                       text_prompt)
     return [ConversationMessage(role=role, content=text_prompt)]
 
 
@@ -1115,41 +1037,38 @@ def _parse_chat_message_content_part(
     if part_type in VALID_MESSAGE_CONTENT_MM_PART_TYPES and content is None:
         logger.warning(
             "Skipping multimodal part '%s' (type: '%s') "
-            "with empty / unparsable content.",
-            part,
-            part_type,
-        )
+            "with empty / unparsable content.", part, part_type)
         return None
 
     if part_type in ("text", "refusal"):
         str_content = cast(str, content)
         if wrap_dicts:
-            return {"type": "text", "text": str_content}
+            return {'type': 'text', 'text': str_content}
         else:
             return str_content
 
     if part_type == "image_url":
         str_content = cast(str, content)
         mm_parser.parse_image(str_content)
-        return {"type": "image"} if wrap_dicts else None
+        return {'type': 'image'} if wrap_dicts else None
     if part_type == "image_embeds":
         content = cast(Union[str, dict[str, str]], content)
         mm_parser.parse_image_embeds(content)
-        return {"type": "image"} if wrap_dicts else None
+        return {'type': 'image'} if wrap_dicts else None
     if part_type == "audio_url":
         str_content = cast(str, content)
         mm_parser.parse_audio(str_content)
-        return {"type": "audio"} if wrap_dicts else None
+        return {'type': 'audio'} if wrap_dicts else None
 
     if part_type == "input_audio":
         dict_content = cast(InputAudio, content)
         mm_parser.parse_input_audio(dict_content)
-        return {"type": "audio"} if wrap_dicts else None
+        return {'type': 'audio'} if wrap_dicts else None
 
     if part_type == "video_url":
         str_content = cast(str, content)
         mm_parser.parse_video(str_content)
-        return {"type": "video"} if wrap_dicts else None
+        return {'type': 'video'} if wrap_dicts else None
 
     raise NotImplementedError(f"Unknown part type: {part_type}")
 
@@ -1181,16 +1100,14 @@ def _parse_chat_message_content(
     )
 
     for result_msg in result:
-        if role == "assistant":
+        if role == 'assistant':
             parsed_msg = _AssistantParser(message)
 
             # The 'tool_calls' is not None check ensures compatibility.
             # It's needed only if downstream code doesn't strictly
             # follow the OpenAI spec.
-            if (
-                "tool_calls" in parsed_msg
-                and parsed_msg["tool_calls"] is not None
-            ):
+            if ("tool_calls" in parsed_msg
+                and parsed_msg["tool_calls"] is not None):
                 result_msg["tool_calls"] = list(parsed_msg["tool_calls"])
         elif role == "tool":
             parsed_msg = _ToolParser(message)
@@ -1210,15 +1127,12 @@ def _postprocess_messages(messages: list[ConversationMessage]) -> None:
     # so, for messages that have tool_calls, parse the string (which we get
     # from openAI format) to dict
     for message in messages:
-        if (
-            message["role"] == "assistant"
-            and "tool_calls" in message
-            and isinstance(message["tool_calls"], list)
-        ):
+        if (message["role"] == "assistant" and "tool_calls" in message
+                and isinstance(message["tool_calls"], list)):
+
             for item in message["tool_calls"]:
                 item["function"]["arguments"] = json.loads(
-                    item["function"]["arguments"]
-                )
+                    item["function"]["arguments"])
 
 
 def parse_chat_messages(
@@ -1288,10 +1202,10 @@ def apply_hf_chat_template(
         raise ValueError(
             "As of transformers v4.44, default chat template is no longer "
             "allowed, so you must provide a chat template if the tokenizer "
-            "does not define one."
-        )
+            "does not define one.")
 
     try:
+
         return tokenizer.apply_chat_template(
             conversation=conversation,  # type: ignore[arg-type]
             tools=tools,  # type: ignore[arg-type]
@@ -1303,13 +1217,12 @@ def apply_hf_chat_template(
     # External library exceptions can sometimes occur despite the framework's
     # internal exception management capabilities.
     except Exception as e:
+
         # Log and report any library-related exceptions for further
         # investigation.
         logger.exception(
-            "An error occurred in `transformers` while applying chat template"
-        )
+            "An error occurred in `transformers` while applying chat template")
         raise ValueError from e
-
 
 def apply_mistral_chat_template(
     tokenizer: MistralTokenizer,
@@ -1343,9 +1256,10 @@ def apply_mistral_chat_template(
     # External library exceptions can sometimes occur despite the framework's
     # internal exception management capabilities.
     except Exception as e:
+
         # Log and report any library-related exceptions for further
         # investigation.
         logger.exception(
-            "An error occurred in `mistral_common` while applying chat template"
-        )
+            "An error occurred in `mistral_common` while applying chat "
+            "template")
         raise ValueError from e

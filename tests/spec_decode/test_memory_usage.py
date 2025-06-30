@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """This docstring details important information on the testing methodology.
 
-This test verifies that memory usage remains constant (or never grows) when
-we enable / disable speculation via --speculative-disable-by-batch-size.
+This test verifies that memory usage remains constant (or never grows) when 
+we enable / disable speculation via --speculative-disable-by-batch-size. 
 
 There are a lot of things we try to keep track of between batches of requests
-and if certain tensors are not freed from memory, can result in CUDA ooms.
+and if certain tensors are not freed from memory, can result in CUDA ooms. 
 
-This is particularly relevant for production situations where speculation might
+This is particularly relevant for production situations where speculation might 
 be enabled during off hours, but disabled once traffic peaks during the workday.
-Since traffic will stay high for a long period of time, verifying we do not
-increase our memory usage over time is essential to prevent possible CUDA ooms.
+Since traffic will stay high for a long period of time, verifying we do not 
+increase our memory usage over time is essential to prevent possible CUDA ooms. 
 """
 
 import torch

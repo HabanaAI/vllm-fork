@@ -11,6 +11,7 @@ VOCAB_SIZE = 128 * 1024
 
 
 def test_topk_impl_equivalance():
+
     with torch.device(DEVICE):
         generator = Generator(device=DEVICE).manual_seed(33)
 
@@ -24,9 +25,7 @@ def test_topk_impl_equivalance():
             torch.randint(0,
                           2, (BATCH_SIZE, ),
                           generator=generator,
-                          dtype=bool),
-            VOCAB_SIZE,
-        )
+                          dtype=bool), VOCAB_SIZE)
 
         # Top-k only implementation
         result1 = apply_top_k_top_p(logits=logits.clone(), k=k, p=None)

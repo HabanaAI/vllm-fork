@@ -80,14 +80,12 @@ def _test_processing_correctness(
         "image":
         partial(random_image, rng, min_wh=128, max_wh=256),
         "video":
-        partial(
-            random_video,
-            rng,
-            min_frames=2,
-            max_frames=8,
-            min_wh=128,
-            max_wh=256,
-        ),
+        partial(random_video,
+                rng,
+                min_frames=2,
+                max_frames=8,
+                min_wh=128,
+                max_wh=256),
         "audio":
         partial(random_audio, rng, min_len=512, max_len=1024, sr=16000),
     }

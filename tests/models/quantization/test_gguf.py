@@ -78,12 +78,8 @@ DOLPHIN_CONFIG = GGUFTestConfig(
 )
 
 MODELS = [
-    LLAMA_CONFIG,
-    QWEN2_CONFIG,
-    PHI3_CONFIG,
-    GPT2_CONFIG,
-    STABLELM_CONFIG,
-    DOLPHIN_CONFIG,
+    LLAMA_CONFIG, QWEN2_CONFIG, PHI3_CONFIG, GPT2_CONFIG, STABLELM_CONFIG,
+    DOLPHIN_CONFIG
     # STARCODER_CONFIG, # broken
 ]
 
@@ -100,22 +96,20 @@ def check_model_outputs(
     tokenizer = AutoTokenizer.from_pretrained(model.original_model)
     if tokenizer.chat_template is not None:
         messages = [[{
-            "role": "user",
-            "content": prompt
+            'role': 'user',
+            'content': prompt
         }] for prompt in prompts]
         prompts = tokenizer.apply_chat_template(messages,
                                                 tokenize=False,
                                                 add_generation_prompt=True)
 
     # Run gguf model.
-    with vllm_runner(
-            model_name=model.gguf_model,
-            enforce_eager=True,
-            tokenizer_name=model.original_model,
-            dtype=dtype,
-            max_model_len=MAX_MODEL_LEN,
-            tensor_parallel_size=tp_size,
-    ) as gguf_model:
+    with vllm_runner(model_name=model.gguf_model,
+                     enforce_eager=True,
+                     tokenizer_name=model.original_model,
+                     dtype=dtype,
+                     max_model_len=MAX_MODEL_LEN,
+                     tensor_parallel_size=tp_size) as gguf_model:
         gguf_outputs = gguf_model.generate_greedy_logprobs(
             prompts[:-1], max_tokens, num_logprobs)
 
@@ -127,8 +121,7 @@ def check_model_outputs(
             enforce_eager=True,  # faster tests
             dtype=dtype,
             max_model_len=MAX_MODEL_LEN,
-            tensor_parallel_size=1,
-    ) as original_model:
+            tensor_parallel_size=1) as original_model:
         original_outputs = original_model.generate_greedy_logprobs(
             prompts[:-1], max_tokens, num_logprobs)
 
@@ -140,17 +133,12 @@ def check_model_outputs(
     )
 
 
-@pytest.mark.skipif(
-    not is_quant_method_supported("gguf"),
-    reason="gguf is not supported on this GPU type.",
-)
-@pytest.mark.parametrize(
-    "model",
-    [
-        pytest.param(test_config, marks=test_config.marks)
-        for test_config in MODELS
-    ],
-)
+@pytest.mark.skipif(not is_quant_method_supported("gguf"),
+                    reason="gguf is not supported on this GPU type.")
+@pytest.mark.parametrize("model", [
+    pytest.param(test_config, marks=test_config.marks)
+    for test_config in MODELS
+])
 @pytest.mark.parametrize("dtype", ["half"])
 @pytest.mark.parametrize("max_tokens", [32])
 @pytest.mark.parametrize("num_logprobs", [5])
@@ -164,21 +152,12 @@ def test_models(
     num_logprobs: int,
     tp_size: int,
 ) -> None:
-    check_model_outputs(
-        vllm_runner,
-        example_prompts,
-        model,
-        dtype,
-        max_tokens,
-        num_logprobs,
-        tp_size,
-    )
+    check_model_outputs(vllm_runner, example_prompts, model, dtype, max_tokens,
+                        num_logprobs, tp_size)
 
 
-@pytest.mark.skipif(
-    not is_quant_method_supported("gguf"),
-    reason="gguf is not supported on this GPU type.",
-)
+@pytest.mark.skipif(not is_quant_method_supported("gguf"),
+                    reason="gguf is not supported on this GPU type.")
 @pytest.mark.parametrize("model", [LLAMA_CONFIG])
 @pytest.mark.parametrize("dtype", ["half"])
 @pytest.mark.parametrize("max_tokens", [8])
@@ -194,12 +173,5 @@ def test_distributed(
     num_logprobs: int,
     tp_size: int,
 ) -> None:
-    check_model_outputs(
-        vllm_runner,
-        example_prompts,
-        model,
-        dtype,
-        max_tokens,
-        num_logprobs,
-        tp_size,
-    )
+    check_model_outputs(vllm_runner, example_prompts, model, dtype, max_tokens,
+                        num_logprobs, tp_size)

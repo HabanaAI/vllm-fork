@@ -25,7 +25,8 @@ logger = init_logger(__name__)
 
 WeightsMapping = Mapping[str, Optional[str]]
 """If a key maps to a value of `None`, the corresponding weight is ignored."""
-"""
+
+'''
 Given a desired batchsize to process in terms of available_batchsizes
 Pick the largest available_batchsizes that can fit batchsize, and reiterate
 Fro example, if batchsize = 9, available batchsize is 4, 2
@@ -40,26 +41,22 @@ still picking largest batches greedily, because large batches tend to be more co
  
 Seems similar to a "coin change" problem, where available_batchsizes are available denominations and batchsize is amount to be paid
 but unlike traditional coin change it might not be possible to make "batchsize" exactly, and we arent gunning for least number of "coins"
-"""
-
-
+'''
 def greedy_plan(batchsize, available_batchsizes):
-    available_batchsizes_sorted = sorted(available_batchsizes,
-                                         key=lambda x: -x)  # sort descending
+    available_batchsizes_sorted = sorted(available_batchsizes, key=lambda x:-x)  # sort descending
     idx = 0
     left_to_process = batchsize
     result = []
-    while left_to_process > 0 and idx < len(available_batchsizes_sorted):
-        # print(idx, left_to_process, result)
+    while(left_to_process > 0 and idx < len(available_batchsizes_sorted)):
+        #print(idx, left_to_process, result)
         if available_batchsizes_sorted[idx] <= left_to_process:
             result += [available_batchsizes_sorted[idx]]
             left_to_process -= available_batchsizes_sorted[idx]
         else:
             idx += 1
     if left_to_process > 0:
-        result += [available_batchsizes_sorted[-1]]  # this will be padded
+        result += [available_batchsizes_sorted[-1]] # this will be padded
     return result
-
 
 @dataclass
 class WeightsMapper:
@@ -200,9 +197,7 @@ class AutoWeightsLoader:
         Add tensor names that are not in the model params that may be in the
         safetensors, e.g., batch normalization stats.
         """
-        if isinstance(
-                module,
-            (
+        if isinstance(module, (
                 nn.BatchNorm1d,
                 nn.BatchNorm2d,
                 nn.BatchNorm3d,
@@ -210,14 +205,10 @@ class AutoWeightsLoader:
                 nn.LazyBatchNorm2d,
                 nn.LazyBatchNorm3d,
                 nn.SyncBatchNorm,
-            ),
-        ):
+        )):
             module_state_dict = module.state_dict()
-            for stat_name in (
-                    "running_mean",
-                    "running_var",
-                    "num_batches_tracked",
-            ):
+            for stat_name in ("running_mean", "running_var",
+                              "num_batches_tracked"):
                 child_params[stat_name] = module_state_dict[stat_name]
 
     def _load_module(
@@ -237,9 +228,8 @@ class AutoWeightsLoader:
                 loaded_params = module_load_weights(weights)
                 if loaded_params is None:
                     logger.warning(
-                        "Unable to collect loaded parameters for module %s",
-                        module,
-                    )
+                        "Unable to collect loaded parameters "
+                        "for module %s", module)
                 else:
                     yield from map(
                         lambda x: self._get_qualname(base_prefix, x),
@@ -403,12 +393,10 @@ def _embedding_count_expression(embeddings: NestedTensors) -> str:
 
 
 def merge_multimodal_embeddings_from_map(
-    inputs_embeds: torch.Tensor,
-    multimodal_embeddings: NestedTensors,
-    placeholder_map: MultiModalPlaceholderMap.IndexMap,
-) -> torch.Tensor:
+        inputs_embeds: torch.Tensor, multimodal_embeddings: NestedTensors,
+        placeholder_map: MultiModalPlaceholderMap.IndexMap) -> torch.Tensor:
     """
-    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided
+    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided 
     placeholder map .
 
     Note:
@@ -437,7 +425,7 @@ def _merge_multimodal_embeddings(
     if current_platform.is_hpu():
         htcore.mark_step()
         flattened = _flatten_embeddings(multimodal_embeddings)
-        # TODO dynamic.. maybe torch.where? however multimodal_embeddings is a list of varying length
+        #TODO dynamic.. maybe torch.where? however multimodal_embeddings is a list of varying length
         # still.. torch.where migth be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
         return inputs_embeds
@@ -502,11 +490,11 @@ def merge_multimodal_embeddings(
     Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
     positions in ``inputs_embeds`` corresponding to placeholder tokens in
     ``input_ids``.
-
-    ``placeholder_token_id`` can be a list of token ids (e.g, token ids
-    of img_start, img_break, and img_end tokens) when needed: This means
-    the order of these tokens in the ``input_ids`` MUST MATCH the order of
-    their embeddings in ``multimodal_embeddings`` since we need to
+    
+    ``placeholder_token_id`` can be a list of token ids (e.g, token ids 
+    of img_start, img_break, and img_end tokens) when needed: This means 
+    the order of these tokens in the ``input_ids`` MUST MATCH the order of 
+    their embeddings in ``multimodal_embeddings`` since we need to 
     slice-merge instead of individually scattering.
 
     For example, if input_ids is "TTTTTSIIIBIIIBIIIETTT", where
@@ -515,9 +503,9 @@ def merge_multimodal_embeddings(
     - I is image embedding token
     - B is image break token
     - E is image end token.
-
-    Then the image embeddings (that correspond to I's) from vision encoder
-    must be padded with embeddings of S, B, and E in the same order of
+    
+    Then the image embeddings (that correspond to I's) from vision encoder 
+    must be padded with embeddings of S, B, and E in the same order of 
     input_ids for a correct embedding merge.
 
     Note:
@@ -591,8 +579,8 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
     uva_available = is_uva_available()
 
     if envs.VLLM_USE_V1:
-        assert uva_available, (
-            "V1 CPU offloading requires uva (pin memory) support")
+        assert uva_available, ("V1 CPU offloading requires"
+                               " uva (pin memory) support")
         uva_offloading = True
     else:
         uva_offloading = False
@@ -607,14 +595,12 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
             break
 
         # `torch.empty_like` does not support `pin_memory` argument
-        cpu_data = torch.empty_strided(
-            size=p.data.size(),
-            stride=p.data.stride(),
-            dtype=p.data.dtype,
-            layout=p.data.layout,
-            device="cpu",
-            pin_memory=pin_memory,
-        )
+        cpu_data = torch.empty_strided(size=p.data.size(),
+                                       stride=p.data.stride(),
+                                       dtype=p.data.dtype,
+                                       layout=p.data.layout,
+                                       device='cpu',
+                                       pin_memory=pin_memory)
         cpu_data.copy_(p.data)
         if not uva_offloading:
             p.data = cpu_data
@@ -658,12 +644,9 @@ def make_layers(
     """
     from vllm.distributed.parallel_state import get_pp_group
     from vllm.distributed.utils import get_pp_indices
-
-    start_layer, end_layer = get_pp_indices(
-        num_hidden_layers,
-        get_pp_group().rank_in_group,
-        get_pp_group().world_size,
-    )
+    start_layer, end_layer = get_pp_indices(num_hidden_layers,
+                                            get_pp_group().rank_in_group,
+                                            get_pp_group().world_size)
     modules = torch.nn.ModuleList(
         [PPMissingLayer() for _ in range(start_layer)] + [
             maybe_offload_to_cpu(layer_fn(prefix=f"{prefix}.{idx}"))
@@ -688,7 +671,7 @@ def get_pp_missing_layer_names(model: torch.nn.Module) -> List[str]:
             # NOTE: the trailing dot is used to match the prefix of the layer.
             # without the dot, we could match a layer that is not missing,
             # e.g., 'encoder.layer.1' would match 'encoder.layer.11'
-            missing_layer_names.append(name + ".")
+            missing_layer_names.append(name + '.')
     _model_to_pp_missing_layer_names[model_id] = missing_layer_names
 
     return missing_layer_names
@@ -714,11 +697,9 @@ def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
     ) -> IntermediateTensors:
         return IntermediateTensors({
             key:
-            torch.zeros(
-                (batch_size, context_size, hidden_size),
-                dtype=dtype,
-                device=device,
-            )
+            torch.zeros((batch_size, context_size, hidden_size),
+                        dtype=dtype,
+                        device=device)
             for key in keys
         })
 
@@ -754,8 +735,8 @@ def extract_layer_index(layer_name: str) -> int:
             int_vals.append(int(subname))
         except ValueError:
             continue
-    assert len(int_vals) == 1, (
-        f"layer name {layer_name} should only contain one integer")
+    assert len(int_vals) == 1, (f"layer name {layer_name} should"
+                                " only contain one integer")
     return int_vals[0]
 
 

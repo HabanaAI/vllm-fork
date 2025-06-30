@@ -6,18 +6,17 @@ from vllm.triton_utils import tl, triton
 
 
 def blocksparse_flash_attn_varlen_fwd(
-    q,
-    k,
-    v,  # (#tokens, n_heads, head_size)
-    cu_seqlens_k,
-    cu_seqlens_q,
-    sm_scale,
-    sparse_layout,
-    *,
-    block_size=64,
-    q_block_size=None,
-    max_seqlen=None,
-):
+        q,
+        k,
+        v,  # (#tokens, n_heads, head_size)
+        cu_seqlens_k,
+        cu_seqlens_q,
+        sm_scale,
+        sparse_layout,
+        *,
+        block_size=64,
+        q_block_size=None,
+        max_seqlen=None):
     # split q to blocks
 
     assert isinstance(sparse_layout, (list, tuple))
@@ -118,8 +117,7 @@ def blocksparse_flash_attn_varlen_fwd(
                          q_block_size),  # smaller for decoding
         EVEN_D=block_d == head_size,
         num_warps=1 if decoding_only else 4,
-        num_stages=3,
-    )
+        num_stages=3)
 
     return out
 
@@ -166,19 +164,17 @@ def _fwd_kernel_inner(
         else:
             k = tl.load(
                 k_ptrs + start_n * stride_kt,
-                mask=(offs_n[None, :] + start_n < k_seqlen)
-                & (offs_d[:, None] < D_HEAD),
+                mask=(offs_n[None, :] + start_n < k_seqlen) &
+                (offs_d[:, None] < D_HEAD),
                 other=0.0,
             )
     else:
         if EVEN_D:
             k = tl.load(k_ptrs + start_n * stride_kt)
         else:
-            k = tl.load(
-                k_ptrs + start_n * stride_kt,
-                mask=offs_d[:, None] < D_HEAD,
-                other=0.0,
-            )
+            k = tl.load(k_ptrs + start_n * stride_kt,
+                        mask=offs_d[:, None] < D_HEAD,
+                        other=0.0)
 
     qk = tl.zeros([BLOCK_M_LOADING, BLOCK_N], dtype=tl.float32)
     qk += tl.dot(q, k)
@@ -214,19 +210,17 @@ def _fwd_kernel_inner(
         else:
             v = tl.load(
                 v_ptrs + start_n * stride_vt,
-                mask=(offs_n[:, None] + start_n < k_seqlen)
-                & (offs_d[None, :] < D_HEAD),
+                mask=(offs_n[:, None] + start_n < k_seqlen) &
+                (offs_d[None, :] < D_HEAD),
                 other=0.0,
             )
     else:
         if EVEN_D:
             v = tl.load(v_ptrs + start_n * stride_vt)
         else:
-            v = tl.load(
-                v_ptrs + start_n * stride_vt,
-                mask=offs_d[None, :] < D_HEAD,
-                other=0.0,
-            )
+            v = tl.load(v_ptrs + start_n * stride_vt,
+                        mask=offs_d[None, :] < D_HEAD,
+                        other=0.0)
 
     acc += tl.dot(p, v)
 

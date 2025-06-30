@@ -32,12 +32,10 @@ class EmbeddingAllReduceRMSNormPattern(AllReduceRMSNormPattern):
         mul_6 = torch.tensor([[3, 7, 1, 4, 9, 2, 5, 0]],
                              device=self.device,
                              dtype=torch.long)
-        unsqueeze = (torch.rand([1, 8, 1],
-                                device=self.device,
-                                dtype=self.dtype) > 0.5)
-        full_default = torch.zeros([1, 8, 4],
-                                   device=self.device,
-                                   dtype=self.dtype)
+        unsqueeze = torch.rand([1, 8, 1], device=self.device, \
+            dtype=self.dtype) > 0.5
+        full_default = torch.zeros([1, 8, 4], device=self.device, \
+            dtype=self.dtype)
         permute = torch.empty([1, 8, 4], device=self.device, dtype=self.dtype)
         arg3_1 = torch.empty([4], device=self.device, dtype=self.dtype)
 

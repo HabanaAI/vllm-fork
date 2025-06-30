@@ -29,8 +29,8 @@ else:
 
 class RejectionSampler(SpecDecodeStochasticBaseSampler):
     """Apply modified rejection sampling as described in "Accelerating Large
-    Language Model Decoding with Speculative Sampling"
-    https://arxiv.org/pdf/2302.01318.pdf.
+        Language Model Decoding with Speculative Sampling"
+        https://arxiv.org/pdf/2302.01318.pdf.
     """
 
     def __init__(self,
@@ -79,7 +79,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         sequence.
 
         Args:
-            target_with_bonus_probs: The probability distribution
+            target_with_bonus_probs: The probability distribution 
                 over token ids given context according to the target model.
             shape = [batch_size, num_speculative_tokens + 1, vocab_size]
 
@@ -107,12 +107,9 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
         # Only perform shape/dtype/device checking in strict mode, as it adds
         # overhead.
         if self._strict_mode:
-            self._raise_if_incorrect_input(
-                target_with_bonus_probs,
-                draft_token_ids,
-                bonus_token_ids,
-                draft_probs,
-            )
+            self._raise_if_incorrect_input(target_with_bonus_probs,
+                                           draft_token_ids, bonus_token_ids,
+                                           draft_probs)
 
         batch_size, k, _ = draft_probs.shape
 
@@ -128,13 +125,10 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
             batch_size, k, _ = draft_probs.shape
             uniform_samples = self._create_uniform_samples(
                 seeded_seqs, batch_size, k, draft_probs.device)
-            output_token_ids, accepted_token_num, emitted_token_num = (
-                chain_speculative_sampling(
-                    draft_probs,
-                    draft_token_ids,
-                    uniform_samples,
-                    target_with_bonus_probs,
-                ))
+            output_token_ids, accepted_token_num, emitted_token_num \
+                = chain_speculative_sampling(
+                draft_probs, draft_token_ids, uniform_samples,
+                target_with_bonus_probs)
 
             # num_emitted_tokens returned by flashinfer
             # does not include the bonus token
@@ -199,28 +193,26 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
 
         return accepted, recovered_token_ids
 
-    def _create_uniform_samples(
-        self,
-        seeded_seqs: Optional[Dict[int, torch.Generator]],
-        batch_size: int,
-        k: int,
-        device: torch.device,
-    ) -> torch.Tensor:
+    def _create_uniform_samples(self,
+                                seeded_seqs: Optional[Dict[int,
+                                                           torch.Generator]],
+                                batch_size: int, k: int,
+                                device: torch.device) -> torch.Tensor:
         """
-        Generates a batch of uniform random samples, with optional seeding
+        Generates a batch of uniform random samples, with optional seeding 
         for specific sequences.
 
-        This method creates a tensor of shape `(batch_size, k + 1)` filled
-        with uniform random values in the range [0, 1). If `seeded_seqs`
-        is provided, the sequences corresponding to specific indices
-        will be generated using the provided `torch.Generator` for
-        reproducibility. The other sequences will be generated without
+        This method creates a tensor of shape `(batch_size, k + 1)` filled 
+        with uniform random values in the range [0, 1). If `seeded_seqs` 
+        is provided, the sequences corresponding to specific indices 
+        will be generated using the provided `torch.Generator` for 
+        reproducibility. The other sequences will be generated without 
         a seed.
 
         Args:
             seeded_seqs : Optional[Dict[int, torch.Generator]]
-                A dictionary mapping indices in the batch to
-                `torch.Generator` objects. If `None`, all samples are
+                A dictionary mapping indices in the batch to 
+                `torch.Generator` objects. If `None`, all samples are 
                 generated without a seed.
             batch_size : int
                 The number of sequences to generate.
@@ -231,7 +223,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
 
         Returns:
             uniform_rand : torch.Tensor
-                A tensor of shape `(batch_size, k + 1)` containing uniform
+                A tensor of shape `(batch_size, k + 1)` containing uniform 
                 random values in the range [0, 1).
         """
         if not seeded_seqs:
@@ -245,20 +237,17 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
             if generator is None:
                 non_seeded_indices.append(idx)
             else:
-                uniform_rand[idx, :] = torch.rand(
-                    1,
-                    k + 1,
-                    dtype=self.probs_dtype,
-                    device=device,
-                    generator=generator,
-                )
+                uniform_rand[idx, :] = torch.rand(1,
+                                                  k + 1,
+                                                  dtype=self.probs_dtype,
+                                                  device=device,
+                                                  generator=generator)
         if non_seeded_indices:
             uniform_rand[non_seeded_indices, :] = torch.rand(
                 len(non_seeded_indices),
                 k + 1,
                 dtype=self.probs_dtype,
-                device=device,
-            )
+                device=device)
         return uniform_rand
 
     def _get_accepted(
@@ -307,8 +296,7 @@ class RejectionSampler(SpecDecodeStochasticBaseSampler):
 
         capped_ratio = torch.minimum(
             selected_target_probs / selected_draft_probs,
-            torch.full((1, ), 1, device=target_probs.device),
-        )
+            torch.full((1, ), 1, device=target_probs.device))
         accepted = uniform_rand < capped_ratio
 
         return accepted
@@ -393,12 +381,13 @@ def _multinomial(
     k: int,
     seeded_seqs: Dict[int, torch.Generator],
 ) -> torch.Tensor:
+
     if num_samples > 1:
         # This is equivalent to torch.repeat_interleaved (which also
         # forces a GPU<->CPU sync).
-        probs = (probs[:, None, :].expand(probs.shape[0], num_samples,
-                                          probs.shape[1]).contiguous().view(
-                                              -1, probs.shape[1]))
+        probs = probs[:, None, :].expand(probs.shape[0], num_samples,
+                                         probs.shape[1]).contiguous().view(
+                                             -1, probs.shape[1])
     q = torch.empty_like(probs)
     if not seeded_seqs:
         q.exponential_(1.0)

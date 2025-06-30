@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fused MoE kernel."""
-
 from typing import Optional
 
 import torch
@@ -8,7 +7,7 @@ import torch
 from vllm import _custom_ops as ops
 
 
-# TODO make the grouped gemm kernel consistent with scaled gemm kernel
+#TODO make the grouped gemm kernel consistent with scaled gemm kernel
 def cutlass_moe_fp8(
     a: torch.Tensor,
     w1_q: torch.Tensor,
@@ -77,28 +76,27 @@ def cutlass_moe_fp8(
     assert a.shape[1] == w1_q.shape[1], "Hidden size mismatch w1"
     assert w1_q.shape[2] == w2_q.shape[1] * 2, "Hidden size mismatch w2"
     assert w1_q.shape[0] == w2_q.shape[0], "Expert number mismatch"
-    assert (a1_scale is None or a1_scale.dim() == 0 or a1_scale.shape[0] == 1
-            or a1_scale.shape[0] == a.shape[0]), "Input scale shape mismatch"
-    assert (w1_scale.dim() == 1 or w1_scale.shape[1] == 1
-            or w1_scale.shape[1] == w1_q.shape[2]), "W1 scale shape mismatch"
-    assert (w2_scale.dim() == 1 or w2_scale.shape[1] == 1
-            or w2_scale.shape[1] == w2_q.shape[2]), "W2 scale shape mismatch"
+    assert a1_scale is None or a1_scale.dim(
+    ) == 0 or a1_scale.shape[0] == 1 or a1_scale.shape[0] == a.shape[
+        0], "Input scale shape mismatch"
+    assert w1_scale.dim() == 1 or w1_scale.shape[1] == 1 or w1_scale.shape[
+        1] == w1_q.shape[2], "W1 scale shape mismatch"
+    assert w2_scale.dim() == 1 or w2_scale.shape[1] == 1 or w2_scale.shape[
+        1] == w2_q.shape[2], "W2 scale shape mismatch"
     assert w1_q.shape[0] == w2_q.shape[0], "Weights expert number mismatch"
-    assert w1_q.shape[0] == w1_scale.shape[0], (
-        "w1 scales expert number mismatch")
-    assert w1_q.shape[0] == w2_scale.shape[0], (
-        "w2 scales expert number mismatch")
-    assert (a2_scale is None or a1_scale is None
-            or a2_scale.shape == a1_scale.shape
-            ), "Intermediate scale shape mismatch"  # noqa: E501
-    assert ab_strides1.shape[0] == w1_q.shape[0], (
-        "AB Strides 1 expert number mismatch")
-    assert c_strides1.shape[0] == w1_q.shape[0], (
-        "C Strides 1 expert number mismatch")
-    assert ab_strides2.shape[0] == w2_q.shape[0], (
-        "AB Strides 2 expert number  mismatch")
-    assert c_strides2.shape[0] == w2_q.shape[0], (
-        "C Strides 2 expert number mismatch")
+    assert w1_q.shape[0] == w1_scale.shape[
+        0], "w1 scales expert number mismatch"
+    assert w1_q.shape[0] == w2_scale.shape[
+        0], "w2 scales expert number mismatch"
+    assert a2_scale is None or a1_scale is None or a2_scale.shape == a1_scale.shape, "Intermediate scale shape mismatch"  # noqa: E501
+    assert ab_strides1.shape[0] == w1_q.shape[
+        0], "AB Strides 1 expert number mismatch"
+    assert c_strides1.shape[0] == w1_q.shape[
+        0], "C Strides 1 expert number mismatch"
+    assert ab_strides2.shape[0] == w2_q.shape[
+        0], "AB Strides 2 expert number  mismatch"
+    assert c_strides2.shape[0] == w2_q.shape[
+        0], "C Strides 2 expert number mismatch"
     assert out_dtype in [torch.half, torch.bfloat16], "Invalid output dtype"
 
     num_experts = w1_q.size(0)
@@ -114,11 +112,11 @@ def cutlass_moe_fp8(
 
     topk = local_topk_ids.size(1)
 
-    per_act_token = (a1_scale.numel() != 1 if a1_scale is not None else (
-        a2_scale.numel() != 1 if a2_scale is not None else False))
+    per_act_token = a1_scale.numel() != 1 if a1_scale is not None else (
+        a2_scale.numel() != 1 if a2_scale is not None else False)
     if apply_router_weight_on_input:
-        assert topk == 1, (
-            "apply_router_weight_on_input is only implemented for topk=1")
+        assert topk == 1, \
+            "apply_router_weight_on_input is only implemented for topk=1"
         # TODO: this only works for topK=1, will need to update for topK>1
         a = a * topk_weights.to(out_dtype)
 
@@ -152,17 +150,9 @@ def cutlass_moe_fp8(
                         dtype=torch.int32,
                         device=device)
 
-    ops.get_cutlass_moe_mm_data(
-        local_topk_ids,
-        expert_offsets,
-        problem_sizes1,
-        problem_sizes2,
-        a_map,
-        c_map,
-        num_experts,
-        n,
-        k,
-    )
+    ops.get_cutlass_moe_mm_data(local_topk_ids, expert_offsets, problem_sizes1,
+                                problem_sizes2, a_map, c_map, num_experts, n,
+                                k)
 
     rep_a_q = a_q.view(dtype=torch.uint8)[a_map].view(dtype=a_q.dtype)
     rep_a1_scales = a1_scale[a_map] if per_act_token else a1_scale
@@ -170,18 +160,9 @@ def cutlass_moe_fp8(
     c1 = torch.empty((m * topk, n * 2), device=device, dtype=out_dtype)
     c2 = c2_initializer((m * topk, k), device=device, dtype=out_dtype)
 
-    ops.cutlass_moe_mm(
-        c1,
-        rep_a_q,
-        w1_q,
-        rep_a1_scales,
-        w1_scale,
-        expert_offsets[:-1],
-        problem_sizes1,
-        ab_strides1,
-        ab_strides1,
-        c_strides1,
-    )
+    ops.cutlass_moe_mm(c1, rep_a_q, w1_q, rep_a1_scales, w1_scale,
+                       expert_offsets[:-1], problem_sizes1, ab_strides1,
+                       ab_strides1, c_strides1)
 
     intermediate = torch.empty((m * topk, n), device=device, dtype=out_dtype)
     torch.ops._C.silu_and_mul(intermediate, c1)
@@ -189,18 +170,9 @@ def cutlass_moe_fp8(
     intemediate_q, a2_scale = ops.scaled_fp8_quant(
         intermediate, a2_scale, use_per_token_if_dynamic=per_act_token)
 
-    ops.cutlass_moe_mm(
-        c2,
-        intemediate_q,
-        w2_q,
-        a2_scale,
-        w2_scale,
-        expert_offsets[:-1],
-        problem_sizes2,
-        ab_strides2,
-        ab_strides2,
-        c_strides2,
-    )
+    ops.cutlass_moe_mm(c2, intemediate_q, w2_q, a2_scale, w2_scale,
+                       expert_offsets[:-1], problem_sizes2, ab_strides2,
+                       ab_strides2, c_strides2)
     # Gather tokens
     c2 = c2[c_map].view(m, topk, k)
     if not apply_router_weight_on_input:

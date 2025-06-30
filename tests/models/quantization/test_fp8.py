@@ -4,7 +4,6 @@
 """Tests fp8 models against ground truth generation
 Note: these tests will only pass on L4 GPU.
 """
-
 import pytest
 
 from tests.quantization.utils import is_quant_method_supported
@@ -14,33 +13,21 @@ from vllm.utils import STR_BACKEND_ENV_VAR
 from ..utils import check_logprobs_close
 
 
-@pytest.mark.skipif(
-    not is_quant_method_supported("fp8"),
-    reason="fp8 is not supported on this GPU type.",
-)
+@pytest.mark.skipif(not is_quant_method_supported("fp8"),
+                    reason="fp8 is not supported on this GPU type.")
 @pytest.mark.parametrize(
     "kv_cache_dtype,base_model,test_model",
     [
         # Test FP8 checkpoint w. fp8_e4m3 kv-cache scaling factors.
-        (
-            "fp8_e4m3",
-            "meta-llama/Llama-3.2-1B-Instruct",
-            "nm-testing/Llama-3.2-1B-Instruct-FP8-KV",
-        ),
+        ("fp8_e4m3", "meta-llama/Llama-3.2-1B-Instruct",
+         "nm-testing/Llama-3.2-1B-Instruct-FP8-KV"),
         # Test BF16 checkpoint w. fp8_e5m2 kv-cache.
-        (
-            "fp8_e5m2",
-            "meta-llama/Llama-3.2-1B-Instruct",
-            "meta-llama/Llama-3.2-1B-Instruct",
-        ),
+        ("fp8_e5m2", "meta-llama/Llama-3.2-1B-Instruct",
+         "meta-llama/Llama-3.2-1B-Instruct"),
         # Test BF16 checkpoint w. fp8_e4m3 kv-cache scaling factors in json.
-        (
-            "fp8_e4m3",
-            "meta-llama/Llama-3.2-1B-Instruct",
-            "meta-llama/Llama-3.2-1B-Instruct",
-        ),
-    ],
-)
+        ("fp8_e4m3", "meta-llama/Llama-3.2-1B-Instruct",
+         "meta-llama/Llama-3.2-1B-Instruct")
+    ])
 # Due to low-precision numerical divergence, we only test logprob of 4 tokens
 @pytest.mark.parametrize("max_tokens", [4])
 @pytest.mark.parametrize("enforce_eager", [True])
@@ -69,7 +56,7 @@ def test_models(
     numerical sensitive kernels.
     """
     with monkeypatch.context() as m:
-        m.setenv("TOKENIZERS_PARALLELISM", "true")
+        m.setenv("TOKENIZERS_PARALLELISM", 'true')
         m.setenv(STR_BACKEND_ENV_VAR, backend)
 
         MAX_MODEL_LEN = 1024
@@ -112,13 +99,9 @@ def test_models(
     "kv_cache_dtype,base_model,test_model",
     [
         # Test BF16 checkpoint w. fp8_e5m2 kv-cache.
-        (
-            "fp8_e5m2",
-            "meta-llama/Llama-3.2-1B-Instruct",
-            "meta-llama/Llama-3.2-1B-Instruct",
-        ),
-    ],
-)
+        ("fp8_e5m2", "meta-llama/Llama-3.2-1B-Instruct",
+         "meta-llama/Llama-3.2-1B-Instruct"),
+    ])
 # Due to low-precision numerical divergence, we only test logprob of 4 tokens
 @pytest.mark.parametrize("max_tokens", [4])
 # Due to low-precision numerical divergence, this test is too sensitive for
@@ -139,7 +122,7 @@ def test_cpu_models(
     numerical sensitive kernels.
     """
     with monkeypatch.context() as m:
-        m.setenv("TOKENIZERS_PARALLELISM", "true")
+        m.setenv("TOKENIZERS_PARALLELISM", 'true')
 
         MAX_MODEL_LEN = 1024
         NUM_LOG_PROBS = 8

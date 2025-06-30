@@ -246,12 +246,10 @@ class Blip2QFormerLayer(nn.Module):
 
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = Blip2QFormerAttention(
-            config,
-            quant_config=quant_config,
-            cache_config=cache_config,
-            prefix=f"{prefix}.attention",
-        )
+        self.attention = Blip2QFormerAttention(config,
+                                               quant_config=quant_config,
+                                               cache_config=cache_config,
+                                               prefix=f"{prefix}.attention")
 
         self.layer_idx = layer_idx
 
@@ -261,8 +259,7 @@ class Blip2QFormerLayer(nn.Module):
                 quant_config=quant_config,
                 cache_config=cache_config,
                 is_cross_attention=True,
-                prefix=f"{prefix}.crossattention",
-            )
+                prefix=f"{prefix}.crossattention")
             self.has_cross_attention = True
         else:
             self.has_cross_attention = False
@@ -343,13 +340,12 @@ class Blip2QFormerEncoder(nn.Module):
         self.config = config
 
         self.layer = nn.ModuleList([
-            Blip2QFormerLayer(
-                config,
-                quant_config=quant_config,
-                cache_config=cache_config,
-                layer_idx=layer_idx,
-                prefix=f"{prefix}.layer.{layer_idx}",
-            ) for layer_idx in range(config.num_hidden_layers)
+            Blip2QFormerLayer(config,
+                              quant_config=quant_config,
+                              cache_config=cache_config,
+                              layer_idx=layer_idx,
+                              prefix=f"{prefix}.layer.{layer_idx}")
+            for layer_idx in range(config.num_hidden_layers)
         ])
 
     def forward(
@@ -389,12 +385,10 @@ class Blip2QFormerModel(nn.Module):
                                       eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-        self.encoder = Blip2QFormerEncoder(
-            config,
-            quant_config=quant_config,
-            cache_config=cache_config,
-            prefix=f"{prefix}.encoder",
-        )
+        self.encoder = Blip2QFormerEncoder(config,
+                                           quant_config=quant_config,
+                                           cache_config=cache_config,
+                                           prefix=f"{prefix}.encoder")
 
     def forward(
         self,
@@ -446,11 +440,9 @@ class Blip2DummyInputsBuilder(BaseDummyInputsBuilder[Blip2ProcessingInfo]):
 
         return {
             "image":
-            self._get_dummy_images(
-                width=max_image_size,
-                height=max_image_size,
-                num_images=num_images,
-            )
+            self._get_dummy_images(width=max_image_size,
+                                   height=max_image_size,
+                                   num_images=num_images)
         }
 
 
@@ -506,15 +498,14 @@ class Blip2MultiModalProcessor(BaseMultiModalProcessor[Blip2ProcessingInfo]):
         ]
 
 
-@MULTIMODAL_REGISTRY.register_processor(
-    Blip2MultiModalProcessor,
-    info=Blip2ProcessingInfo,
-    dummy_inputs=Blip2DummyInputsBuilder,
-)
+@MULTIMODAL_REGISTRY.register_processor(Blip2MultiModalProcessor,
+                                        info=Blip2ProcessingInfo,
+                                        dummy_inputs=Blip2DummyInputsBuilder)
 class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                     SupportsQuant):
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+
         super().__init__()
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config
@@ -530,12 +521,10 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             torch.zeros(1, config.num_query_tokens,
                         config.qformer_config.hidden_size))
 
-        self.qformer = Blip2QFormerModel(
-            config.qformer_config,
-            cache_config=cache_config,
-            quant_config=quant_config,
-            prefix=f"{prefix}.qformer",
-        )
+        self.qformer = Blip2QFormerModel(config.qformer_config,
+                                         cache_config=cache_config,
+                                         quant_config=quant_config,
+                                         prefix=f"{prefix}.qformer")
 
         self.language_projection = nn.Linear(
             config.qformer_config.hidden_size,
@@ -601,6 +590,7 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
     def _image_pixels_to_features(self, vision_model: BlipVisionModel,
                                   pixel_values: torch.Tensor) -> torch.Tensor:
+
         # NOTE: we skip the step to select the vision feature layer since
         # this is already done inside the vision tower
         image_features = vision_model(pixel_values)
@@ -617,6 +607,7 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
     def _process_image_input(self,
                              image_input: Blip2ImageInputs) -> torch.Tensor:
+
         if image_input["type"] == "image_embeds":
             return image_input["data"]
 
@@ -675,7 +666,7 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         `[2, 45641, 35, 653, 18, 5, 1383, 9, 5, 2274, 116, 31652, 35]`.
 
         To reserve space in KV cache, we have to insert placeholder tokens
-        before they are inputted to the model, so the input processor prepends
+        before they are inputted to the model, so the input processor prepends 
         dummy tokens (denoted as `50265`), resulting in:
         `[50265, ..., 50265, 2, 45641, 35, ..., 31652, 35]`.
 
@@ -689,7 +680,7 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             input_ids: Flattened (concatenated) input_ids corresponding to a
                 batch.
             pixel_values: The pixels in each input image.
-
+        
         :::{seealso}
         {class}`Blip2ImageInputs`
         :::
@@ -706,12 +697,10 @@ class Blip2ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                                       vision_embeddings)
             input_ids = None
 
-        hidden_states = self.language_model.model(
-            input_ids,
-            positions,
-            intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-        )
+        hidden_states = self.language_model.model(input_ids,
+                                                  positions,
+                                                  intermediate_tensors,
+                                                  inputs_embeds=inputs_embeds)
 
         return hidden_states
 

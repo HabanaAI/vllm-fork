@@ -12,7 +12,6 @@ inference instance. In practice, there could be multiple training instances
 and multiple inference instances. For the full implementation, please refer
 to the OpenRLHF framework.
 """
-
 import os
 
 import ray
@@ -90,7 +89,8 @@ print("-" * 50)
 for output in outputs:
     prompt = output.prompt
     generated_text = output.outputs[0].text
-    print(f"Prompt: {prompt!r}\nGenerated text: {generated_text!r}")
+    print(f"Prompt: {prompt!r}\n"
+          f"Generated text: {generated_text!r}")
     print("-" * 50)
 
 # set up the communication between the training process
@@ -126,5 +126,6 @@ print("-" * 50)
 for output in outputs_updated:
     prompt = output.prompt
     generated_text = output.outputs[0].text
-    print(f"Prompt: {prompt!r}\nGenerated text: {generated_text!r}")
+    print(f"Prompt: {prompt!r}\n"
+          f"Generated text: {generated_text!r}")
     print("-" * 50)

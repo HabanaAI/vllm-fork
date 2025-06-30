@@ -112,30 +112,28 @@ def run_test(
     ) as vllm_model:
         lora_request = LoRARequest("vision", 1, vision_lora_path)
         vllm_outputs_per_case = [
-            vllm_model.generate_greedy_logprobs(
-                prompts,
-                max_tokens,
-                num_logprobs=num_logprobs,
-                images=images,
-                audios=audios,
-                lora_request=lora_request,
-            ) for prompts, images, audios in inputs
+            vllm_model.generate_greedy_logprobs(prompts,
+                                                max_tokens,
+                                                num_logprobs=num_logprobs,
+                                                images=images,
+                                                audios=audios,
+                                                lora_request=lora_request)
+            for prompts, images, audios in inputs
         ]
 
     hf_model_kwargs = {"_attn_implementation": "sdpa"}
     with hf_runner(model, dtype=dtype,
                    model_kwargs=hf_model_kwargs) as hf_model:
+
         hf_processor = hf_model.processor
         eos_token_id = hf_processor.tokenizer.eos_token_id
 
-        def patch_hf_processor(
-            *args,
-            text="",
-            images=None,
-            audio=None,
-            sampling_rate=None,
-            **kwargs,
-        ):
+        def patch_hf_processor(*args,
+                               text="",
+                               images=None,
+                               audio=None,
+                               sampling_rate=None,
+                               **kwargs):
             audios = None
             if audio is not None and sampling_rate is not None:
                 audios = [(audio, sampling_rate)]
@@ -148,15 +146,14 @@ def run_test(
         hf_model.processor = patch_hf_processor
 
         hf_outputs_per_case = [
-            hf_model.generate_greedy_logprobs_limit(
-                prompts,
-                max_tokens,
-                num_logprobs=num_logprobs,
-                images=images,
-                audios=audios,
-                eos_token_id=eos_token_id,
-                num_logits_to_keep=0,
-            ) for prompts, images, audios in inputs
+            hf_model.generate_greedy_logprobs_limit(prompts,
+                                                    max_tokens,
+                                                    num_logprobs=num_logprobs,
+                                                    images=images,
+                                                    audios=audios,
+                                                    eos_token_id=eos_token_id,
+                                                    num_logits_to_keep=0)
+            for prompts, images, audios in inputs
         ]
 
     for hf_outputs, vllm_outputs in zip(hf_outputs_per_case,
@@ -187,17 +184,9 @@ def run_test(
 @pytest.mark.parametrize("max_model_len", [12800])
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [10])
-def test_models(
-    hf_runner,
-    vllm_runner,
-    image_assets,
-    model,
-    size_factors,
-    dtype: str,
-    max_model_len: int,
-    max_tokens: int,
-    num_logprobs: int,
-) -> None:
+def test_models(hf_runner, vllm_runner, image_assets, model, size_factors,
+                dtype: str, max_model_len: int, max_tokens: int,
+                num_logprobs: int) -> None:
     images = [asset.pil_image for asset in image_assets]
 
     inputs_per_image = [(
@@ -239,17 +228,9 @@ def test_models(
 @pytest.mark.parametrize("max_model_len", [25600])
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [10])
-def test_multi_images_models(
-    hf_runner,
-    vllm_runner,
-    image_assets,
-    model,
-    size_factors,
-    dtype: str,
-    max_model_len: int,
-    max_tokens: int,
-    num_logprobs: int,
-) -> None:
+def test_multi_images_models(hf_runner, vllm_runner, image_assets, model,
+                             size_factors, dtype: str, max_model_len: int,
+                             max_tokens: int, num_logprobs: int) -> None:
     images = [asset.pil_image for asset in image_assets]
 
     inputs_per_case = [
@@ -280,15 +261,10 @@ def test_multi_images_models(
 @pytest.mark.parametrize("max_model_len", [12800])
 @pytest.mark.parametrize("max_tokens", [128])
 @pytest.mark.parametrize("num_logprobs", [10])
-def test_vision_speech_models(
-    hf_runner,
-    vllm_runner,
-    model,
-    dtype: str,
-    max_model_len: int,
-    max_tokens: int,
-    num_logprobs: int,
-) -> None:
+def test_vision_speech_models(hf_runner, vllm_runner, model, dtype: str,
+                              max_model_len: int, max_tokens: int,
+                              num_logprobs: int) -> None:
+
     # use the example speech question so that the model outputs are reasonable
     audio = librosa.load(speech_question, sr=None)
     image = ImageAsset("cherry_blossom").pil_image.convert("RGB")

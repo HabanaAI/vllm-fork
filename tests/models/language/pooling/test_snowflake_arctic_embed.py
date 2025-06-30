@@ -4,61 +4,43 @@ import pytest
 from ...utils import EmbedModelInfo, check_embeddings_close
 
 EMBEDDING_PROMPTS = [
-    "what is snowflake?",
-    "Where can I get the best tacos?",
-    "The Data Cloud!",
-    "Mexico City of Course!",
+    'what is snowflake?', 'Where can I get the best tacos?', 'The Data Cloud!',
+    'Mexico City of Course!'
 ]
 
 MODELS = [
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-xs",
-        is_matryoshka=False,
-        architecture="BertModel",
-        enable_test=True,
-    ),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-s",
-        is_matryoshka=False,
-        architecture="BertModel",
-        enable_test=False,
-    ),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-m",
-        is_matryoshka=False,
-        architecture="BertModel",
-        enable_test=False,
-    ),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-m-long",
-        is_matryoshka=False,
-        architecture="NomicBertModel",
-        enable_test=True,
-    ),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-l",
-        is_matryoshka=False,
-        architecture="BertModel",
-        enable_test=False,
-    ),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-m-v1.5",
-        is_matryoshka=True,
-        architecture="BertModel",
-        enable_test=True,
-    ),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-l-v2.0",
-        is_matryoshka=True,
-        architecture="XLMRobertaModel",
-        enable_test=True,
-    ),
-    EmbedModelInfo(
-        "Snowflake/snowflake-arctic-embed-m-v2.0",
-        is_matryoshka=True,
-        architecture="GteModel",
-        enable_test=True,
-    ),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-xs",
+                   is_matryoshka=False,
+                   architecture="BertModel",
+                   enable_test=True),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-s",
+                   is_matryoshka=False,
+                   architecture="BertModel",
+                   enable_test=False),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-m",
+                   is_matryoshka=False,
+                   architecture="BertModel",
+                   enable_test=False),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-m-long",
+                   is_matryoshka=False,
+                   architecture="NomicBertModel",
+                   enable_test=True),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-l",
+                   is_matryoshka=False,
+                   architecture="BertModel",
+                   enable_test=False),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-m-v1.5",
+                   is_matryoshka=True,
+                   architecture="BertModel",
+                   enable_test=True),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-l-v2.0",
+                   is_matryoshka=True,
+                   architecture="XLMRobertaModel",
+                   enable_test=True),
+    EmbedModelInfo("Snowflake/snowflake-arctic-embed-m-v2.0",
+                   is_matryoshka=True,
+                   architecture="GteModel",
+                   enable_test=True),
 ]
 
 
@@ -89,13 +71,12 @@ def test_models(
                    is_sentence_transformer=True) as hf_model:
         hf_outputs = hf_model.encode(example_prompts)
 
-    with vllm_runner(
-            model_info.name,
-            task="embed",
-            dtype=dtype,
-            max_model_len=None,
-            **vllm_extra_kwargs,
-    ) as vllm_model:
+    with vllm_runner(model_info.name,
+                     task="embed",
+                     dtype=dtype,
+                     max_model_len=None,
+                     **vllm_extra_kwargs) as vllm_model:
+
         assert (vllm_model.model.llm_engine.model_config.is_matryoshka ==
                 model_info.is_matryoshka)
 

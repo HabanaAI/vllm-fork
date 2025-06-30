@@ -25,7 +25,7 @@ class Phi4MiniJsonToolParser(ToolParser):
     Tool call parser for phi-4-mini models intended for use with the
     examples/tool_chat_template_llama.jinja template.
 
-    Used when --enable-auto-tool-choice --tool-call-parser phi4_mini_json
+    Used when --enable-auto-tool-choice --tool-call-parser phi4_mini_json  
     are all set
     """
 
@@ -49,7 +49,7 @@ class Phi4MiniJsonToolParser(ToolParser):
         """
         logger.debug("Model output: %s", model_output)
 
-        pattern = r"functools\[(.*?)\]"
+        pattern = r'functools\[(.*?)\]'
         matches = re.search(pattern, model_output, re.DOTALL)
 
         if not matches:
@@ -61,20 +61,15 @@ class Phi4MiniJsonToolParser(ToolParser):
         try:
             function_call_arr: list[dict[str, Any]] = []
             try:
-                json_content = "[" + matches.group(1) + "]"
+                json_content = '[' + matches.group(1) + ']'
 
                 function_call_arr = json.loads(json_content)
-                logger.debug(
-                    "Successfully extracted %d function calls",
-                    len(function_call_arr),
-                )
+                logger.debug("Successfully extracted %d function calls",
+                             len(function_call_arr))
             except json.JSONDecodeError as e:
                 logger.error(
                     "Failed to parse function calls from model output: %s. "
-                    "Error: %s",
-                    model_output,
-                    str(e),
-                )
+                    "Error: %s", model_output, str(e))
 
             tool_calls: list[ToolCall] = [
                 ToolCall(
@@ -86,9 +81,8 @@ class Phi4MiniJsonToolParser(ToolParser):
                         arguments=json.dumps(
                             raw_function_call["arguments"] if "arguments" in
                             raw_function_call else
-                            raw_function_call["parameters"]),
-                    ),
-                ) for raw_function_call in function_call_arr
+                            raw_function_call["parameters"])))
+                for raw_function_call in function_call_arr
             ]
 
             # get any content before the tool call
@@ -112,4 +106,5 @@ class Phi4MiniJsonToolParser(ToolParser):
         delta_token_ids: Sequence[int],
         request: ChatCompletionRequest,
     ) -> Optional[DeltaMessage]:
+
         return None

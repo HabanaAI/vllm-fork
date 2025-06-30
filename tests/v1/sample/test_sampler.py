@@ -27,12 +27,10 @@ def _create_fake_logits(batch_size: int, vocab_size: int) -> torch.Tensor:
 
 def _create_penalty_tensor(batch_size: int, penalty_value: float,
                            device: torch.device) -> torch.Tensor:
-    return torch.full(
-        (batch_size, ),
-        fill_value=penalty_value,
-        dtype=torch.float,
-        device=device,
-    )
+    return torch.full((batch_size, ),
+                      fill_value=penalty_value,
+                      dtype=torch.float,
+                      device=device)
 
 
 def _create_prompt_tokens_tensor(
@@ -165,10 +163,8 @@ def _create_default_sampling_metadata(
 
 
 def _generate_min_token_penalties_and_stop_tokens(
-    num_output_tokens: int,
-    batch_size: int,
-    vocab_size: int,
-    batch_indices_for_min_token_penalty: list[int],
+    num_output_tokens: int, batch_size: int, vocab_size: int,
+    batch_indices_for_min_token_penalty: list[int]
 ) -> dict[int, tuple[int, set[int]]]:
     """
     Generates and returns a dict of minimum token penalties and
@@ -188,8 +184,7 @@ def _generate_min_token_penalties_and_stop_tokens(
                                   2 * num_output_tokens),
                 set(
                     np.random.randint(0, vocab_size - 1)
-                    for _ in range(np.random.randint(0, vocab_size))),
-            )
+                    for _ in range(np.random.randint(0, vocab_size))))
         else:
             min_tokens[index] = (np.random.randint(0,
                                                    num_output_tokens), set())
@@ -246,11 +241,8 @@ def test_sampler_min_tokens_penalty(device: str, batch_size: int):
     batch_indices_for_min_token_penalty = np.random.randint(
         0, batch_size - 1, size=np.random.randint(0, batch_size)).tolist()
     min_tokens = _generate_min_token_penalties_and_stop_tokens(
-        NUM_OUTPUT_TOKENS,
-        batch_size,
-        VOCAB_SIZE,
-        batch_indices_for_min_token_penalty,
-    )
+        NUM_OUTPUT_TOKENS, batch_size, VOCAB_SIZE,
+        batch_indices_for_min_token_penalty)
     sampling_metadata.min_tokens = min_tokens
     sampler = Sampler()
     logits = sampler.apply_penalties(fake_logits, sampling_metadata)
@@ -326,11 +318,11 @@ def test_sampler_frequency_penalty(device: str, batch_size: int,
         NUM_OUTPUT_TOKENS, batch_size, VOCAB_SIZE, torch.device(device))
     sampling_metadata.frequency_penalties = _create_penalty_tensor(
         batch_size, frequency_penalty, torch.device(device))
-    output_token_ids, sorted_token_ids_in_output = (
+    output_token_ids, sorted_token_ids_in_output = \
         _create_weighted_output_token_list(
             batch_size,
             VOCAB_SIZE,
-        ))
+        )
     sampling_metadata.output_token_ids = output_token_ids
     sampling_metadata.no_penalties = False
     sampler = Sampler()
@@ -413,7 +405,7 @@ def test_sampler_repetition_penalty(device: str, batch_size: int,
 @pytest.mark.parametrize("min_p", [0.0, 0.1])
 def test_sampler_min_p(device: str, batch_size: int, min_p: float):
     """
-    Tests that when min_p is applied, tokens with probability below
+    Tests that when min_p is applied, tokens with probability below 
     min_p * max_prob are masked with -inf.
     """
     torch.set_default_device(device)
@@ -517,8 +509,8 @@ def test_sampler_allowed_token_ids(device: str, batch_size: int,
             start = min(batch_idx, VOCAB_SIZE - 1)
             end = min(batch_idx + num_allowed_token_ids, VOCAB_SIZE - 1)
             if token_id >= start and token_id < end:
-                assert logits_for_req[token_id] == -float("inf"), (
-                    f"{batch_idx}, {token_id}")
+                assert logits_for_req[token_id] == -float(
+                    "inf"), f"{batch_idx}, {token_id}"
             else:
                 assert logits_for_req[token_id] != -float("inf")
 

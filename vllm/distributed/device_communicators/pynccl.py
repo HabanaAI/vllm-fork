@@ -123,23 +123,18 @@ class PyNcclCommunicator:
 
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclAllReduce(
-            buffer_type(in_tensor.data_ptr()),
-            buffer_type(out_tensor.data_ptr()),
-            in_tensor.numel(),
-            ncclDataTypeEnum.from_torch(in_tensor.dtype),
-            ncclRedOpTypeEnum.from_torch(op),
-            self.comm,
-            cudaStream_t(stream.cuda_stream),
-        )
+        self.nccl.ncclAllReduce(buffer_type(in_tensor.data_ptr()),
+                                buffer_type(out_tensor.data_ptr()),
+                                in_tensor.numel(),
+                                ncclDataTypeEnum.from_torch(in_tensor.dtype),
+                                ncclRedOpTypeEnum.from_torch(op), self.comm,
+                                cudaStream_t(stream.cuda_stream))
         return out_tensor
 
-    def all_gather(
-        self,
-        output_tensor: torch.Tensor,
-        input_tensor: torch.Tensor,
-        stream=None,
-    ):
+    def all_gather(self,
+                   output_tensor: torch.Tensor,
+                   input_tensor: torch.Tensor,
+                   stream=None):
         if self.disabled:
             return
         # nccl communicator created on a specific device
@@ -152,20 +147,15 @@ class PyNcclCommunicator:
             stream = current_stream()
         self.nccl.ncclAllGather(
             buffer_type(input_tensor.data_ptr()),
-            buffer_type(output_tensor.data_ptr()),
-            input_tensor.numel(),
-            ncclDataTypeEnum.from_torch(input_tensor.dtype),
-            self.comm,
-            cudaStream_t(stream.cuda_stream),
-        )
+            buffer_type(output_tensor.data_ptr()), input_tensor.numel(),
+            ncclDataTypeEnum.from_torch(input_tensor.dtype), self.comm,
+            cudaStream_t(stream.cuda_stream))
 
-    def reduce_scatter(
-        self,
-        output_tensor: torch.Tensor,
-        input_tensor: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,
-        stream=None,
-    ):
+    def reduce_scatter(self,
+                       output_tensor: torch.Tensor,
+                       input_tensor: torch.Tensor,
+                       op: ReduceOp = ReduceOp.SUM,
+                       stream=None):
         if self.disabled:
             return
         # nccl communicator created on a specific device
@@ -178,13 +168,10 @@ class PyNcclCommunicator:
             stream = current_stream()
         self.nccl.ncclReduceScatter(
             buffer_type(input_tensor.data_ptr()),
-            buffer_type(output_tensor.data_ptr()),
-            output_tensor.numel(),
+            buffer_type(output_tensor.data_ptr()), output_tensor.numel(),
             ncclDataTypeEnum.from_torch(input_tensor.dtype),
-            ncclRedOpTypeEnum.from_torch(op),
-            self.comm,
-            cudaStream_t(stream.cuda_stream),
-        )
+            ncclRedOpTypeEnum.from_torch(op), self.comm,
+            cudaStream_t(stream.cuda_stream))
 
     def send(self, tensor: torch.Tensor, dst: int, stream=None):
         if self.disabled:
@@ -194,14 +181,9 @@ class PyNcclCommunicator:
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclSend(
-            buffer_type(tensor.data_ptr()),
-            tensor.numel(),
-            ncclDataTypeEnum.from_torch(tensor.dtype),
-            dst,
-            self.comm,
-            cudaStream_t(stream.cuda_stream),
-        )
+        self.nccl.ncclSend(buffer_type(tensor.data_ptr()), tensor.numel(),
+                           ncclDataTypeEnum.from_torch(tensor.dtype), dst,
+                           self.comm, cudaStream_t(stream.cuda_stream))
 
     def recv(self, tensor: torch.Tensor, src: int, stream=None):
         if self.disabled:
@@ -211,14 +193,9 @@ class PyNcclCommunicator:
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclRecv(
-            buffer_type(tensor.data_ptr()),
-            tensor.numel(),
-            ncclDataTypeEnum.from_torch(tensor.dtype),
-            src,
-            self.comm,
-            cudaStream_t(stream.cuda_stream),
-        )
+        self.nccl.ncclRecv(buffer_type(tensor.data_ptr()), tensor.numel(),
+                           ncclDataTypeEnum.from_torch(tensor.dtype), src,
+                           self.comm, cudaStream_t(stream.cuda_stream))
 
     def broadcast(self, tensor: torch.Tensor, src: int, stream=None):
         if self.disabled:
@@ -235,12 +212,6 @@ class PyNcclCommunicator:
         else:
             sendbuff = buffer_type()
             recvbuff = buffer_type(tensor.data_ptr())
-        self.nccl.ncclBroadcast(
-            sendbuff,
-            recvbuff,
-            tensor.numel(),
-            ncclDataTypeEnum.from_torch(tensor.dtype),
-            src,
-            self.comm,
-            cudaStream_t(stream.cuda_stream),
-        )
+        self.nccl.ncclBroadcast(sendbuff, recvbuff, tensor.numel(),
+                                ncclDataTypeEnum.from_torch(tensor.dtype), src,
+                                self.comm, cudaStream_t(stream.cuda_stream))

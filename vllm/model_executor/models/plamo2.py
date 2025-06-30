@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Inference-only PLaMo2 model."""
-
 import math
 from typing import Iterable, Optional, Tuple
 
@@ -119,15 +118,13 @@ def _swiglu(h: torch.Tensor) -> torch.Tensor:
 class Plamo2MambaMixer(nn.Module):
     # TODO(Shinichi): Rebase on Mamba2 implementation.
 
-    def __init__(
-        self,
-        config: Plamo2Config,
-        cache_config: CacheConfig,
-        quant_config: QuantizationConfig,
-        max_model_len: int,
-        prefix: str = "",
-        **kwargs,
-    ) -> None:
+    def __init__(self,
+                 config: Plamo2Config,
+                 cache_config: CacheConfig,
+                 quant_config: QuantizationConfig,
+                 max_model_len: int,
+                 prefix: str = "",
+                 **kwargs) -> None:
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -209,6 +206,7 @@ class Plamo2MambaMixer(nn.Module):
         mamba_cache_params: MambaCacheParams,
         **kwargs,
     ) -> torch.Tensor:
+
         attn_metadata: AttentionMetadata = get_forward_context().attn_metadata
 
         # 1. Gated MLP's linear projection
@@ -219,8 +217,7 @@ class Plamo2MambaMixer(nn.Module):
         gate, hidden_states = torch.split(
             projected_states,
             [self.hidden_size_per_head, self.hidden_size_per_head],
-            dim=-1,
-        )
+            dim=-1)
         hidden_states = hidden_states.reshape(length, -1).transpose(0, 1)
         gate = gate.reshape(length, -1).transpose(0, 1)
 
@@ -228,8 +225,8 @@ class Plamo2MambaMixer(nn.Module):
         conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0),
                                                self.conv1d.weight.size(2))
 
-        if (attn_metadata.query_start_loc is not None
-                and attn_metadata.context_lens_tensor is not None):
+        if attn_metadata.query_start_loc is not None \
+            and attn_metadata.context_lens_tensor is not None:
             # |---------- N-1 iteration --------|
             # |---------------- N iteration ---------------------|
             # |- tokenA -|......................|-- newTokens ---|
@@ -244,8 +241,7 @@ class Plamo2MambaMixer(nn.Module):
                 conv_states=mamba_cache_params.conv_state,
                 has_initial_state=attn_metadata.context_lens_tensor > 0,
                 cache_indices=mamba_cache_params.state_indices_tensor,
-                query_start_loc=attn_metadata.query_start_loc,
-            )
+                query_start_loc=attn_metadata.query_start_loc)
         else:
             hidden_states = causal_conv1d_update(
                 hidden_states.transpose(0, 1),
@@ -253,8 +249,7 @@ class Plamo2MambaMixer(nn.Module):
                 conv_weights,
                 self.conv1d.bias,
                 self.activation,
-                conv_state_indices=mamba_cache_params.state_indices_tensor,
-            )
+                conv_state_indices=mamba_cache_params.state_indices_tensor)
             hidden_states = hidden_states.transpose(0, 1)
 
         # 3. State Space Model sequence transformation
@@ -286,8 +281,8 @@ class Plamo2MambaMixer(nn.Module):
                                                      self.hidden_size_per_head)
         time_proj_bias = time_proj_bias.reshape(self.intermediate_size)
 
-        if (attn_metadata.query_start_loc is not None
-                and attn_metadata.context_lens_tensor is not None):
+        if attn_metadata.query_start_loc is not None \
+            and attn_metadata.context_lens_tensor is not None:
             scan_outputs = selective_scan_fn(
                 hidden_states,
                 mamba_cache_params.ssm_state,
@@ -301,8 +296,7 @@ class Plamo2MambaMixer(nn.Module):
                 delta_softplus=True,
                 cache_indices=mamba_cache_params.state_indices_tensor,
                 has_initial_state=attn_metadata.context_lens_tensor > 0,
-                query_start_loc=attn_metadata.query_start_loc,
-            )
+                query_start_loc=attn_metadata.query_start_loc)
         else:
             scan_outputs = selective_state_update(
                 mamba_cache_params.ssm_state,
@@ -315,8 +309,7 @@ class Plamo2MambaMixer(nn.Module):
                 gate.transpose(0, 1),
                 time_proj_bias,
                 dt_softplus=True,
-                state_batch_indices=mamba_cache_params.state_indices_tensor,
-            )
+                state_batch_indices=mamba_cache_params.state_indices_tensor)
             scan_outputs = scan_outputs.transpose(0, 1)
 
         # 4. Final linear projection
@@ -337,19 +330,15 @@ class DenseMLP(nn.Module):
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
         self.gate_up_proj = MergedColumnParallelLinear(
-            self.hidden_size,
-            [self.intermediate_size] * 2,
+            self.hidden_size, [self.intermediate_size] * 2,
             bias=False,
             prefix=f"{prefix}.gate_up_proj",
-            quant_config=quant_config,
-        )
-        self.down_proj = RowParallelLinear(
-            self.intermediate_size,
-            self.hidden_size,
-            bias=False,
-            prefix=f"{prefix}.down_proj",
-            quant_config=quant_config,
-        )
+            quant_config=quant_config)
+        self.down_proj = RowParallelLinear(self.intermediate_size,
+                                           self.hidden_size,
+                                           bias=False,
+                                           prefix=f"{prefix}.down_proj",
+                                           quant_config=quant_config)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         h = self.gate_up_proj(hidden_states)[0]
@@ -360,15 +349,13 @@ class DenseMLP(nn.Module):
 
 class Plamo2AttentionMixer(nn.Module):
 
-    def __init__(
-        self,
-        config: Plamo2Config,
-        cache_config: CacheConfig,
-        quant_config: QuantizationConfig,
-        max_model_len: int | None = None,
-        prefix: str = "",
-        **kwargs,
-    ) -> None:
+    def __init__(self,
+                 config: Plamo2Config,
+                 cache_config: CacheConfig,
+                 quant_config: QuantizationConfig,
+                 max_model_len: int | None = None,
+                 prefix: str = "",
+                 **kwargs) -> None:
         super().__init__()
         self.hidden_size = config.hidden_size
         tp_size = get_tensor_model_parallel_world_size()
@@ -398,17 +385,15 @@ class Plamo2AttentionMixer(nn.Module):
             bias=False,
             quant_config=quant_config,
         )
-        self.o_proj = RowParallelLinear(
-            self.total_num_heads * self.head_dim,
-            config.hidden_size,
-            bias=False,
-            quant_config=quant_config,
-        )
+        self.o_proj = RowParallelLinear(self.total_num_heads * self.head_dim,
+                                        config.hidden_size,
+                                        bias=False,
+                                        quant_config=quant_config)
 
-        self.rope_theta = (config.rope_theta
-                           if hasattr(config, "rope_theta") else 10000)
-        self.rope_scaling = (config.rope_scaling if hasattr(
-            config, "rope_scaling") else None)
+        self.rope_theta = config.rope_theta if hasattr(config,
+                                                       "rope_theta") else 10000
+        self.rope_scaling = config.rope_scaling if hasattr(
+            config, "rope_scaling") else None
 
         assert max_model_len is not None, "max_model_len must be provided"
         self.rotary_emb = get_rope(
@@ -451,14 +436,12 @@ class Plamo2AttentionMixer(nn.Module):
 
 class Plamo2DecoderLayer(nn.Module):
 
-    def __init__(
-        self,
-        vllm_config: VllmConfig,
-        layer_idx: int,
-        max_model_len: int | None = None,
-        prefix: str = "",
-        **kwargs,
-    ) -> None:
+    def __init__(self,
+                 vllm_config: VllmConfig,
+                 layer_idx: int,
+                 max_model_len: int | None = None,
+                 prefix: str = "",
+                 **kwargs) -> None:
         super().__init__()
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config
@@ -467,21 +450,17 @@ class Plamo2DecoderLayer(nn.Module):
 
         self.is_mamba = is_mamba(config, layer_idx)
         if self.is_mamba:
-            self.mixer = Plamo2MambaMixer(
-                config=config,
-                cache_config=cache_config,
-                quant_config=quant_config,
-                max_model_len=max_model_len,
-                prefix=f"{prefix}.mixer",
-            )
+            self.mixer = Plamo2MambaMixer(config=config,
+                                          cache_config=cache_config,
+                                          quant_config=quant_config,
+                                          max_model_len=max_model_len,
+                                          prefix=f"{prefix}.mixer")
         else:
-            self.mixer = Plamo2AttentionMixer(
-                config=config,
-                cache_config=cache_config,
-                quant_config=quant_config,
-                max_model_len=max_model_len,
-                prefix=f"{prefix}.mixer",
-            )
+            self.mixer = Plamo2AttentionMixer(config=config,
+                                              cache_config=cache_config,
+                                              quant_config=quant_config,
+                                              max_model_len=max_model_len,
+                                              prefix=f"{prefix}.mixer")
 
         self.mlp = DenseMLP(config=config,
                             quant_config=quant_config,
@@ -510,12 +489,10 @@ class Plamo2DecoderLayer(nn.Module):
             hidden_states, residual = self.pre_mixer_norm(
                 hidden_states, residual)
 
-        hidden_states = self.mixer(
-            positions=positions,
-            hidden_states=hidden_states,
-            residual=residual,
-            mamba_cache_params=mamba_cache_params,
-        )
+        hidden_states = self.mixer(positions=positions,
+                                   hidden_states=hidden_states,
+                                   residual=residual,
+                                   mamba_cache_params=mamba_cache_params)
         hidden_states = self.post_mixer_norm(hidden_states)
         # Fully Connected
         hidden_states, residual = self.pre_mlp_norm(hidden_states, residual)
@@ -531,11 +508,10 @@ class Plamo2Decoder(torch.nn.Module):
         num_hidden_layers = vllm_config.model_config.hf_config.num_hidden_layers
 
         self.layers = nn.ModuleList([
-            Plamo2DecoderLayer(
-                vllm_config=vllm_config,
-                layer_idx=i,
-                prefix=f"{prefix}.layers.{i}",
-            ) for i in range(num_hidden_layers)
+            Plamo2DecoderLayer(vllm_config=vllm_config,
+                               layer_idx=i,
+                               prefix=f"{prefix}.layers.{i}")
+            for i in range(num_hidden_layers)
         ])
 
     def forward(
@@ -557,8 +533,7 @@ class Plamo2Decoder(torch.nn.Module):
                 positions=positions,
                 hidden_states=hidden_states,
                 residual=residual,
-                mamba_cache_params=layer_mamba_cache_params,
-            )
+                mamba_cache_params=layer_mamba_cache_params)
         return hidden_states, residual
 
 
@@ -600,8 +575,7 @@ class Plamo2Model(Plamo2PreTrainedModel):
             positions=positions,
             hidden_states=hidden_states,
             residual=residual,
-            mamba_cache_params=mamba_cache_params,
-        )
+            mamba_cache_params=mamba_cache_params)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
@@ -619,8 +593,8 @@ class Plamo2ForCausalLM(Plamo2PreTrainedModel, HasInnerState, IsHybrid,
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         config = vllm_config.model_config.hf_config
         scheduler_config = vllm_config.scheduler_config
-        assert not vllm_config.cache_config.enable_prefix_caching, (
-            "PLaMo2 currently does not support prefix caching")
+        assert not vllm_config.cache_config.enable_prefix_caching, \
+            "PLaMo2 currently does not support prefix caching"
 
         super().__init__(config)
         self.config = config
@@ -657,34 +631,24 @@ class Plamo2ForCausalLM(Plamo2PreTrainedModel, HasInnerState, IsHybrid,
         # Initialize weights and apply final processing
         self.post_init()
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        **kwargs,
-    ):
+    def forward(self,
+                input_ids: torch.Tensor,
+                positions: torch.Tensor,
+                intermediate_tensors: Optional[IntermediateTensors] = None,
+                inputs_embeds: Optional[torch.Tensor] = None,
+                **kwargs):
         if self.mamba_cache is None:
             num_mamba_layers = self.model_config.get_num_layers_by_block_type(
                 self.vllm_config.parallel_config, LayerBlockType.mamba)
 
             self.mamba_cache = MambaCacheManager(
-                self.vllm_config,
-                self.lm_head.weight.dtype,
-                num_mamba_layers,
-                *self._get_mamba_cache_shape(),
-            )
+                self.vllm_config, self.lm_head.weight.dtype, num_mamba_layers,
+                *self._get_mamba_cache_shape())
 
         mamba_cache_params = self.mamba_cache.current_run_tensors(**kwargs)
 
-        hidden_states = self.model(
-            input_ids,
-            positions,
-            mamba_cache_params,
-            intermediate_tensors,
-            inputs_embeds,
-        )
+        hidden_states = self.model(input_ids, positions, mamba_cache_params,
+                                   intermediate_tensors, inputs_embeds)
         return hidden_states
 
     def copy_inputs_before_cuda_graphs(self, input_buffers, **kwargs):
@@ -721,6 +685,7 @@ class Plamo2ForCausalLM(Plamo2PreTrainedModel, HasInnerState, IsHybrid,
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in weights:
+
             # Both tie_word_embeddings=True and lm_head.weight in the safetensor
             # at the same time causes dict key access error.
             if name == "lm_head.weight" and self.config.tie_word_embeddings:
@@ -745,10 +710,8 @@ class Plamo2ForCausalLM(Plamo2PreTrainedModel, HasInnerState, IsHybrid,
             # Broadcast the loaded weight to match the model's parameter shape.
             if ".A" in name:
                 loaded_weight = loaded_weight[:, None, None].expand(
-                    -1,
-                    self.config.hidden_size_per_head,
-                    self.config.mamba_d_state,
-                )
+                    -1, self.config.hidden_size_per_head,
+                    self.config.mamba_d_state)
                 loaded_weight = loaded_weight.reshape(
                     -1, self.config.mamba_d_state)
             elif ".D" in name:

@@ -68,32 +68,27 @@ def test_oot_registration_multimodal(
 ):
     with monkeypatch.context() as m:
         m.setenv("VLLM_PLUGINS", "register_dummy_model")
-        prompts = [
-            {
-                "prompt": "What's in the image?<image>",
-                "multi_modal_data": {
-                    "image": image
-                },
+        prompts = [{
+            "prompt": "What's in the image?<image>",
+            "multi_modal_data": {
+                "image": image
             },
-            {
-                "prompt": "Describe the image<image>",
-                "multi_modal_data": {
-                    "image": image
-                },
+        }, {
+            "prompt": "Describe the image<image>",
+            "multi_modal_data": {
+                "image": image
             },
-        ]
+        }]
 
         sampling_params = SamplingParams(temperature=0)
-        llm = LLM(
-            model=dummy_llava_path,
-            load_format="dummy",
-            max_num_seqs=1,
-            trust_remote_code=True,
-            gpu_memory_utilization=0.98,
-            max_model_len=4096,
-            enforce_eager=True,
-            limit_mm_per_prompt={"image": 1},
-        )
+        llm = LLM(model=dummy_llava_path,
+                  load_format="dummy",
+                  max_num_seqs=1,
+                  trust_remote_code=True,
+                  gpu_memory_utilization=0.98,
+                  max_model_len=4096,
+                  enforce_eager=True,
+                  limit_mm_per_prompt={"image": 1})
 
         first_token = llm.get_tokenizer().decode(0)
         outputs = llm.generate(prompts, sampling_params)

@@ -55,32 +55,26 @@ MiniMaxVL01ImageInputs = Union[MiniMaxVL01ImagePixelInputs,
 
 class MiniMaxVL01MultiModalProjector(nn.Module):
 
-    def __init__(
-        self,
-        vision_hidden_size: int,
-        text_hidden_size: int,
-        projector_hidden_act: str,
-        multimodal_projector_bias: bool,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-    ):
+    def __init__(self,
+                 vision_hidden_size: int,
+                 text_hidden_size: int,
+                 projector_hidden_act: str,
+                 multimodal_projector_bias: bool,
+                 quant_config: Optional[QuantizationConfig] = None,
+                 prefix: str = ""):
         super().__init__()
 
-        self.linear_1 = ColumnParallelLinear(
-            vision_hidden_size,
-            text_hidden_size,
-            bias=multimodal_projector_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.linear_1",
-        )
+        self.linear_1 = ColumnParallelLinear(vision_hidden_size,
+                                             text_hidden_size,
+                                             bias=multimodal_projector_bias,
+                                             quant_config=quant_config,
+                                             prefix=f"{prefix}.linear_1")
         self.act = get_act_fn(projector_hidden_act)
-        self.linear_2 = RowParallelLinear(
-            text_hidden_size,
-            text_hidden_size,
-            bias=multimodal_projector_bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.linear_2",
-        )
+        self.linear_2 = RowParallelLinear(text_hidden_size,
+                                          text_hidden_size,
+                                          bias=multimodal_projector_bias,
+                                          quant_config=quant_config,
+                                          prefix=f"{prefix}.linear_2")
 
     def forward(self, image_features: torch.Tensor) -> torch.Tensor:
         hidden_states, _ = self.linear_1(image_features)
@@ -152,13 +146,13 @@ class MiniMaxVL01MultiModalProcessor(
 @MULTIMODAL_REGISTRY.register_processor(
     MiniMaxVL01MultiModalProcessor,
     info=MiniMaxVL01ProcessingInfo,
-    dummy_inputs=MiniMaxVL01DummyInputsBuilder,
-)
+    dummy_inputs=MiniMaxVL01DummyInputsBuilder)
 class MiniMaxVL01ForConditionalGeneration(nn.Module, SupportsMultiModal,
                                           SupportsPP):
+
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-        "gate_up_proj": ["gate_proj", "up_proj"],
+        "gate_up_proj": ["gate_proj", "up_proj"]
     }
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
@@ -176,16 +170,14 @@ class MiniMaxVL01ForConditionalGeneration(nn.Module, SupportsMultiModal,
             config,
             quant_config,
             require_post_norm=False,
-            prefix=maybe_prefix(prefix, "vision_tower"),
-        )
+            prefix=maybe_prefix(prefix, "vision_tower"))
         self.multi_modal_projector = MiniMaxVL01MultiModalProjector(
             vision_hidden_size=config.vision_config.hidden_size,
             text_hidden_size=config.text_config.hidden_size,
             projector_hidden_act=config.projector_hidden_act,
             multimodal_projector_bias=True,
             quant_config=quant_config,
-            prefix=maybe_prefix(prefix, "multi_modal_projector"),
-        )
+            prefix=maybe_prefix(prefix, "multi_modal_projector"))
         self.image_newline = nn.Parameter(
             torch.empty(config.text_config.hidden_size))
         self.language_model = init_vllm_registered_model(
@@ -341,6 +333,7 @@ class MiniMaxVL01ForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors]:
+
         if intermediate_tensors is not None:
             inputs_embeds = None
         elif inputs_embeds is None:
@@ -349,12 +342,10 @@ class MiniMaxVL01ForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                       vision_embeddings)
             input_ids = None
 
-        hidden_states = self.language_model.model(
-            input_ids,
-            positions,
-            intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-        )
+        hidden_states = self.language_model.model(input_ids,
+                                                  positions,
+                                                  intermediate_tensors,
+                                                  inputs_embeds=inputs_embeds)
 
         return hidden_states
 

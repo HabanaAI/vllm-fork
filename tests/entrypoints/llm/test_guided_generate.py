@@ -39,28 +39,20 @@ def llm():
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend,disable_any_whitespace",
                          GUIDED_DECODING_BACKENDS)
-def test_guided_regex(
-    sample_regex,
-    llm,
-    guided_decoding_backend: str,
-    disable_any_whitespace: bool,
-):
+def test_guided_regex(sample_regex, llm, guided_decoding_backend: str,
+                      disable_any_whitespace: bool):
     sampling_params = SamplingParams(
         temperature=0.8,
         top_p=0.95,
         guided_decoding=GuidedDecodingParams(
             regex=sample_regex,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
-    outputs = llm.generate(
-        prompts=[
-            f"Give an example IPv4 address with this regex: {sample_regex}"
-        ] * 2,
-        sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+            disable_any_whitespace=disable_any_whitespace))
+    outputs = llm.generate(prompts=[
+        f"Give an example IPv4 address with this regex: {sample_regex}"
+    ] * 2,
+                           sampling_params=sampling_params,
+                           use_tqdm=True)
 
     assert outputs is not None
     for output in outputs:
@@ -77,29 +69,22 @@ def test_guided_regex(
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend,disable_any_whitespace",
                          GUIDED_DECODING_BACKENDS)
-def test_guided_json_completion(
-    sample_json_schema,
-    llm,
-    guided_decoding_backend: str,
-    disable_any_whitespace: bool,
-):
+def test_guided_json_completion(sample_json_schema, llm,
+                                guided_decoding_backend: str,
+                                disable_any_whitespace: bool):
     sampling_params = SamplingParams(
         temperature=1.0,
         max_tokens=1000,
         guided_decoding=GuidedDecodingParams(
             json=sample_json_schema,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
-    outputs = llm.generate(
-        prompts=[
-            f"Give an example JSON for an employee profile "
-            f"that fits this schema: {sample_json_schema}"
-        ] * 2,
-        sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+            disable_any_whitespace=disable_any_whitespace))
+    outputs = llm.generate(prompts=[
+        f"Give an example JSON for an employee profile "
+        f"that fits this schema: {sample_json_schema}"
+    ] * 2,
+                           sampling_params=sampling_params,
+                           use_tqdm=True)
 
     assert outputs is not None
 
@@ -118,29 +103,22 @@ def test_guided_json_completion(
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend,disable_any_whitespace",
                          GUIDED_DECODING_BACKENDS)
-def test_guided_complex_json_completion(
-    sample_complex_json_schema,
-    llm,
-    guided_decoding_backend: str,
-    disable_any_whitespace: bool,
-):
+def test_guided_complex_json_completion(sample_complex_json_schema, llm,
+                                        guided_decoding_backend: str,
+                                        disable_any_whitespace: bool):
     sampling_params = SamplingParams(
         temperature=1.0,
         max_tokens=1000,
         guided_decoding=GuidedDecodingParams(
             json=sample_complex_json_schema,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
-    outputs = llm.generate(
-        prompts=[
-            f"Give an example JSON for an assignment grade "
-            f"that fits this schema: {sample_complex_json_schema}"
-        ] * 2,
-        sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+            disable_any_whitespace=disable_any_whitespace))
+    outputs = llm.generate(prompts=[
+        f"Give an example JSON for an assignment grade "
+        f"that fits this schema: {sample_complex_json_schema}"
+    ] * 2,
+                           sampling_params=sampling_params,
+                           use_tqdm=True)
 
     assert outputs is not None
 
@@ -160,29 +138,22 @@ def test_guided_complex_json_completion(
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend,disable_any_whitespace",
                          GUIDED_DECODING_BACKENDS)
-def test_guided_definition_json_completion(
-    sample_definition_json_schema,
-    llm,
-    guided_decoding_backend: str,
-    disable_any_whitespace: bool,
-):
+def test_guided_definition_json_completion(sample_definition_json_schema, llm,
+                                           guided_decoding_backend: str,
+                                           disable_any_whitespace: bool):
     sampling_params = SamplingParams(
         temperature=1.0,
         max_tokens=1000,
         guided_decoding=GuidedDecodingParams(
             json=sample_definition_json_schema,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
-    outputs = llm.generate(
-        prompts=[
-            f"Give an example JSON for solving 8x + 7 = -23 "
-            f"that fits this schema: {sample_definition_json_schema}"
-        ] * 2,
-        sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+            disable_any_whitespace=disable_any_whitespace))
+    outputs = llm.generate(prompts=[
+        f"Give an example JSON for solving 8x + 7 = -23 "
+        f"that fits this schema: {sample_definition_json_schema}"
+    ] * 2,
+                           sampling_params=sampling_params,
+                           use_tqdm=True)
 
     assert outputs is not None
 
@@ -202,29 +173,22 @@ def test_guided_definition_json_completion(
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend,disable_any_whitespace",
                          GUIDED_DECODING_BACKENDS)
-def test_guided_enum_json_completion(
-    sample_enum_json_schema,
-    llm,
-    guided_decoding_backend: str,
-    disable_any_whitespace: bool,
-):
+def test_guided_enum_json_completion(sample_enum_json_schema, llm,
+                                     guided_decoding_backend: str,
+                                     disable_any_whitespace: bool):
     sampling_params = SamplingParams(
         temperature=1.0,
         max_tokens=1000,
         guided_decoding=GuidedDecodingParams(
             json=sample_enum_json_schema,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
-    outputs = llm.generate(
-        prompts=[
-            "Create a bug report JSON that fits this schema: "
-            f"{sample_enum_json_schema}. Make it for a high priority critical bug."
-        ] * 2,
-        sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+            disable_any_whitespace=disable_any_whitespace))
+    outputs = llm.generate(prompts=[
+        "Create a bug report JSON that fits this schema: "
+        f"{sample_enum_json_schema}. Make it for a high priority critical bug."
+    ] * 2,
+                           sampling_params=sampling_params,
+                           use_tqdm=True)
 
     assert outputs is not None
 
@@ -244,9 +208,7 @@ def test_guided_enum_json_completion(
         assert output_json["status"] in ["active", "inactive", "pending"]
         assert output_json["priority"] in ["low", "medium", "high", "critical"]
         assert output_json["category"]["type"] in [
-            "bug",
-            "feature",
-            "improvement",
+            "bug", "feature", "improvement"
         ]
         assert output_json["category"]["severity"] in [1, 2, 3, 4, 5]
         for flag in output_json["flags"]:
@@ -256,26 +218,20 @@ def test_guided_enum_json_completion(
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend,disable_any_whitespace",
                          GUIDED_DECODING_BACKENDS)
-def test_guided_choice_completion(
-    sample_guided_choice,
-    llm,
-    guided_decoding_backend: str,
-    disable_any_whitespace: bool,
-):
+def test_guided_choice_completion(sample_guided_choice, llm,
+                                  guided_decoding_backend: str,
+                                  disable_any_whitespace: bool):
     sampling_params = SamplingParams(
         temperature=0.8,
         top_p=0.95,
         guided_decoding=GuidedDecodingParams(
             choice=sample_guided_choice,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
+            disable_any_whitespace=disable_any_whitespace))
     outputs = llm.generate(
         prompts="The best language for type-safe systems programming is ",
         sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+        use_tqdm=True)
 
     assert outputs is not None
     for output in outputs:
@@ -292,12 +248,9 @@ def test_guided_choice_completion(
 @pytest.mark.skip_global_cleanup
 @pytest.mark.parametrize("guided_decoding_backend,disable_any_whitespace",
                          GUIDED_DECODING_BACKENDS)
-def test_guided_grammar(
-    sample_sql_statements,
-    llm,
-    guided_decoding_backend: str,
-    disable_any_whitespace: bool,
-):
+def test_guided_grammar(sample_sql_statements, llm,
+                        guided_decoding_backend: str,
+                        disable_any_whitespace: bool):
     sampling_params = SamplingParams(
         temperature=0.8,
         top_p=0.95,
@@ -305,9 +258,7 @@ def test_guided_grammar(
         guided_decoding=GuidedDecodingParams(
             grammar=sample_sql_statements,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
+            disable_any_whitespace=disable_any_whitespace))
     outputs = llm.generate(
         prompts=("Generate a sql state that select col_1 from "
                  "table_1 where it is equals to 1"),
@@ -325,7 +276,6 @@ def test_guided_grammar(
         assert generated_text is not None
         # use Lark to parse the output, and make sure it's a valid parse tree
         from lark import Lark
-
         parser = Lark(sample_sql_statements)
         parser.parse(generated_text)
 
@@ -343,12 +293,10 @@ def test_guided_options_request_deprecation_warning(sample_regex, llm):
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
 
     with pytest.warns(DeprecationWarning, match="guided_options_request"):
-        llm.generate(
-            prompts="This should fail",
-            sampling_params=sampling_params,
-            use_tqdm=True,
-            guided_options_request=dict(guided_regex=sample_regex),
-        )
+        llm.generate(prompts="This should fail",
+                     sampling_params=sampling_params,
+                     use_tqdm=True,
+                     guided_options_request=dict(guided_regex=sample_regex))
 
 
 @pytest.mark.skip_global_cleanup
@@ -356,16 +304,13 @@ def test_validation_against_both_guided_decoding_options(sample_regex, llm):
     sampling_params = SamplingParams(
         temperature=0.8,
         top_p=0.95,
-        guided_decoding=GuidedDecodingParams(regex=sample_regex),
-    )
+        guided_decoding=GuidedDecodingParams(regex=sample_regex))
 
     with pytest.raises(ValueError, match="Cannot set both"):
-        llm.generate(
-            prompts="This should fail",
-            sampling_params=sampling_params,
-            use_tqdm=True,
-            guided_options_request=dict(guided_regex=sample_regex),
-        )
+        llm.generate(prompts="This should fail",
+                     sampling_params=sampling_params,
+                     use_tqdm=True,
+                     guided_options_request=dict(guided_regex=sample_regex))
 
 
 @pytest.mark.skip_global_cleanup
@@ -376,28 +321,24 @@ def test_disable_guided_decoding_fallback(sample_regex, llm):
         "properties": {
             "example": {
                 "type": "string",
-                "minLength": 5,  # unsupported by xgrammar
+                "minLength": 5  # unsupported by xgrammar
             }
-        },
+        }
     }
-    sampling_params = SamplingParams(
-        temperature=0.8,
-        top_p=0.95,
-        guided_decoding=GuidedDecodingParams(json=unsupported_json,
-                                             backend="xgrammar",
-                                             disable_fallback=True),
-    )
+    sampling_params = SamplingParams(temperature=0.8,
+                                     top_p=0.95,
+                                     guided_decoding=GuidedDecodingParams(
+                                         json=unsupported_json,
+                                         backend="xgrammar",
+                                         disable_fallback=True))
 
     with pytest.raises(
             ValueError,
             match="xgrammar does not support advanced JSON schema features "
-            "like string length, item limits, or property bounds.",
-    ):
-        llm.generate(
-            prompts="This should fail",
-            sampling_params=sampling_params,
-            use_tqdm=True,
-        )
+            "like string length, item limits, or property bounds."):
+        llm.generate(prompts="This should fail",
+                     sampling_params=sampling_params,
+                     use_tqdm=True)
 
 
 @pytest.mark.skip_global_cleanup
@@ -412,16 +353,13 @@ def test_guided_json_object(llm, guided_decoding_backend: str,
         guided_decoding=GuidedDecodingParams(
             json_object=True,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
+            disable_any_whitespace=disable_any_whitespace))
 
     outputs = llm.generate(
         prompts=("Generate a JSON object with curly braces for a person with "
                  "name and age fields for John Smith who is 31 years old."),
         sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+        use_tqdm=True)
 
     assert outputs is not None
     for output in outputs:
@@ -466,15 +404,12 @@ def test_guided_json_completion_with_enum(llm, guided_decoding_backend: str,
         guided_decoding=GuidedDecodingParams(
             json=json_schema,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
-    )
+            disable_any_whitespace=disable_any_whitespace))
     outputs = llm.generate(
         prompts="Generate a JSON with the brand, model and car_type of"
         "the most iconic car from the 90's",
         sampling_params=sampling_params,
-        use_tqdm=True,
-    )
+        use_tqdm=True)
 
     assert outputs is not None
     for output in outputs:
@@ -520,8 +455,7 @@ def test_guided_number_range_json_completion(llm, guided_decoding_backend: str,
         guided_decoding=GuidedDecodingParams(
             json=sample_output_schema,
             backend=guided_decoding_backend,
-            disable_any_whitespace=disable_any_whitespace,
-        ),
+            disable_any_whitespace=disable_any_whitespace),
     )
     outputs = llm.generate(
         prompts=[
@@ -552,19 +486,19 @@ def test_guided_number_range_json_completion(llm, guided_decoding_backend: str,
 @pytest.mark.skip_global_cleanup
 def test_guidance_no_additional_properties(llm):
     schema = {
-        "type": "object",
-        "properties": {
-            "a1": {
-                "type": "string"
+        'type': 'object',
+        'properties': {
+            'a1': {
+                'type': 'string'
             },
-            "a2": {
-                "type": "string"
+            'a2': {
+                'type': 'string'
             },
-            "a3": {
-                "type": "string"
-            },
+            'a3': {
+                'type': 'string'
+            }
         },
-        "required": ["a1", "a2", "a3"],
+        'required': ['a1', 'a2', 'a3'],
     }
 
     prompt = (
@@ -578,8 +512,7 @@ def test_guidance_no_additional_properties(llm):
             json=schema,
             backend=backend,
             disable_any_whitespace=True,
-            disable_additional_properties=disable_additional_properties,
-        )
+            disable_additional_properties=disable_additional_properties)
         sampling_params = SamplingParams(temperature=0,
                                          max_tokens=256,
                                          guided_decoding=guided_params)

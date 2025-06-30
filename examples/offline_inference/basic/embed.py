@@ -10,11 +10,9 @@ def parse_args():
     parser = FlexibleArgumentParser()
     parser = EngineArgs.add_cli_args(parser)
     # Set example specific arguments
-    parser.set_defaults(
-        model="intfloat/e5-mistral-7b-instruct",
-        task="embed",
-        enforce_eager=True,
-    )
+    parser.set_defaults(model="intfloat/e5-mistral-7b-instruct",
+                        task="embed",
+                        enforce_eager=True)
     return parser.parse_args()
 
 

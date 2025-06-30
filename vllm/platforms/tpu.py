@@ -35,21 +35,14 @@ class TpuPlatform(Platform):
     supported_quantization: list[str] = ["tpu_int8", "compressed-tensors"]
 
     additional_env_vars: list[str] = [
-        "TPU_CHIPS_PER_HOST_BOUNDS",
-        "TPU_HOST_BOUNDS",
+        "TPU_CHIPS_PER_HOST_BOUNDS", "TPU_HOST_BOUNDS"
     ]
 
     @classmethod
-    def get_attn_backend_cls(
-        cls,
-        selected_backend: _Backend,
-        head_size: int,
-        dtype: torch.dtype,
-        kv_cache_dtype: Optional[str],
-        block_size: int,
-        use_v1: bool,
-        use_mla: bool,
-    ) -> str:
+    def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
+                             dtype: torch.dtype, kv_cache_dtype: Optional[str],
+                             block_size: int, use_v1: bool,
+                             use_mla: bool) -> str:
         if (selected_backend != _Backend.PALLAS
                 and selected_backend != _Backend.PALLAS_VLLM_V1):
             logger.info("Cannot use %s backend on TPU.", selected_backend)
@@ -96,21 +89,18 @@ class TpuPlatform(Platform):
         if compilation_config.backend == "":
             compilation_config.backend = "openxla"
 
-        assert vllm_config.speculative_config is None, (
-            "TPU does not support speculative decoding")
+        assert vllm_config.speculative_config is None, \
+            "TPU does not support speculative decoding"
 
         if vllm_config.model_config.dtype in (torch.float16, torch.float32):
             logger.warning(
                 "The TPU backend currently does not support %s. "
-                "Using bfloat16 instead.",
-                vllm_config.model_config.dtype,
-            )
+                "Using bfloat16 instead.", vllm_config.model_config.dtype)
             vllm_config.model_config.dtype = torch.bfloat16
 
         if envs.VLLM_USE_V1:
             from vllm.v1.attention.backends.pallas import (
                 PallasAttentionBackend)
-
             min_page_size = PallasAttentionBackend.get_min_page_size(
                 vllm_config)
             if min_page_size > vllm_config.cache_config.block_size:
@@ -132,24 +122,24 @@ class TpuPlatform(Platform):
                         "needed) on vLLM V1. Please launch without "
                         "--num-scheduler-steps.")
                 else:
-                    parallel_config.worker_cls = (
-                        "vllm.worker.multi_step_tpu_worker.MultiStepTPUWorker")
+                    parallel_config.worker_cls = \
+                        "vllm.worker.multi_step_tpu_worker.MultiStepTPUWorker"
             else:
                 if envs.VLLM_USE_V1:
-                    parallel_config.worker_cls = (
-                        "vllm.v1.worker.tpu_worker.TPUWorker")
+                    parallel_config.worker_cls = \
+                        "vllm.v1.worker.tpu_worker.TPUWorker"
                 else:
-                    parallel_config.worker_cls = (
-                        "vllm.worker.tpu_worker.TPUWorker")
+                    parallel_config.worker_cls = \
+                        "vllm.worker.tpu_worker.TPUWorker"
 
         assert not vllm_config.speculative_config, (
             "Speculative decoding is not yet supported for TPU backend")
 
-        if (scheduler_config.is_multimodal_model
-                and not scheduler_config.disable_chunked_mm_input):
-            logger.warning("TPU does not support running Multimodal models"
-                           " without setting `--disable_chunked_mm_input`. "
-                           "Forcing --disable_chunked_mm_input.")
+        if scheduler_config.is_multimodal_model and not \
+            scheduler_config.disable_chunked_mm_input:
+            logger.warning("TPU does not support running Multimodal models"\
+            " without setting `--disable_chunked_mm_input`. " \
+            "Forcing --disable_chunked_mm_input.")
             scheduler_config.disable_chunked_mm_input = True
 
     @classmethod

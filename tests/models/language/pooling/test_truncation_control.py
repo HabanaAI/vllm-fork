@@ -22,6 +22,7 @@ field."""
 def test_smaller_truncation_size(vllm_runner,
                                  model_name=MODEL_NAME,
                                  input_str=input_str):
+
     truncate_prompt_tokens = 10
 
     with vllm_runner(model_name, task="embed",
@@ -52,17 +53,17 @@ def test_max_truncation_size(vllm_runner,
 def test_bigger_truncation_size(vllm_runner,
                                 model_name=MODEL_NAME,
                                 input_str=input_str):
+
     truncate_prompt_tokens = max_model_len + 1
 
-    with (
-            pytest.raises(ValueError),
-            vllm_runner(model_name, task="embed", max_model_len=max_model_len)
-            as vllm_model,
-    ):
+    with pytest.raises(ValueError), vllm_runner(
+            model_name, task="embed",
+            max_model_len=max_model_len) as vllm_model:
+
         llm_output = vllm_model.model.encode(
             input_str, truncate_prompt_tokens=truncate_prompt_tokens)
 
-        assert (llm_output == f"""truncate_prompt_tokens value 
+        assert llm_output == f"""truncate_prompt_tokens value 
                 ({truncate_prompt_tokens}) is greater than 
                 max_model_len ({max_model_len}). Please, select 
-                a smaller truncation size.""")
+                a smaller truncation size."""

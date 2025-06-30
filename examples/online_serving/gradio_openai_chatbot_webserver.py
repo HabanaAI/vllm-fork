@@ -17,7 +17,6 @@ you can install it manually by following these steps:
 2. Rename the downloaded file to: frpc_linux_amd64_v0.3
 3. Move the file to this location: /home/user/.cache/huggingface/gradio/frpc
 """
-
 import argparse
 
 import gradio as gr
@@ -50,18 +49,17 @@ def predict(message, history, client, model_name, temp, stop_token_ids):
         temperature=temp,
         stream=True,
         extra_body={
-            "repetition_penalty":
+            'repetition_penalty':
             1,
-            "stop_token_ids":
+            'stop_token_ids':
             [int(id.strip())
-             for id in stop_token_ids.split(",")] if stop_token_ids else [],
-        },
-    )
+             for id in stop_token_ids.split(',')] if stop_token_ids else []
+        })
 
     # Collect all chunks and concatenate them into a full message
     full_message = ""
     for chunk in stream:
-        full_message += chunk.choices[0].delta.content or ""
+        full_message += (chunk.choices[0].delta.content or "")
 
     # Return the full message as a single response
     return full_message
@@ -69,32 +67,24 @@ def predict(message, history, client, model_name, temp, stop_token_ids):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Chatbot Interface with Customizable Parameters")
-    parser.add_argument(
-        "--model-url",
-        type=str,
-        default="http://localhost:8000/v1",
-        help="Model URL",
-    )
-    parser.add_argument(
-        "-m",
-        "--model",
-        type=str,
-        required=True,
-        help="Model name for the chatbot",
-    )
-    parser.add_argument(
-        "--temp",
-        type=float,
-        default=0.8,
-        help="Temperature for text generation",
-    )
-    parser.add_argument(
-        "--stop-token-ids",
-        type=str,
-        default="",
-        help="Comma-separated stop token IDs",
-    )
+        description='Chatbot Interface with Customizable Parameters')
+    parser.add_argument('--model-url',
+                        type=str,
+                        default='http://localhost:8000/v1',
+                        help='Model URL')
+    parser.add_argument('-m',
+                        '--model',
+                        type=str,
+                        required=True,
+                        help='Model name for the chatbot')
+    parser.add_argument('--temp',
+                        type=float,
+                        default=0.8,
+                        help='Temperature for text generation')
+    parser.add_argument('--stop-token-ids',
+                        type=str,
+                        default='',
+                        help='Comma-separated stop token IDs')
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=int, default=8001)
     return parser.parse_args()
@@ -106,11 +96,9 @@ def build_gradio_interface(client, model_name, temp, stop_token_ids):
         return predict(message, history, client, model_name, temp,
                        stop_token_ids)
 
-    return gr.ChatInterface(
-        fn=chat_predict,
-        title="Chatbot Interface",
-        description="A simple chatbot powered by vLLM",
-    )
+    return gr.ChatInterface(fn=chat_predict,
+                            title="Chatbot Interface",
+                            description="A simple chatbot powered by vLLM")
 
 
 def main():

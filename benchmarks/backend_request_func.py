@@ -199,6 +199,7 @@ async def async_request_deepspeed_mii(
 ) -> RequestFuncOutput:
     async with aiohttp.ClientSession(trust_env=True,
                                      timeout=AIOHTTP_TIMEOUT) as session:
+
         payload = {
             "model": request_func_input.model,
             "prompt": request_func_input.prompt,
@@ -249,27 +250,21 @@ async def async_request_openai_completions(
     pbar: Optional[tqdm] = None,
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
-    assert api_url.endswith(("completions", "profile")), (
-        "OpenAI Completions API URL must end with 'completions' or 'profile'.")
+    assert api_url.endswith(
+        ("completions", "profile")
+    ), "OpenAI Completions API URL must end with 'completions' or 'profile'."
 
     async with aiohttp.ClientSession(trust_env=True,
                                      timeout=AIOHTTP_TIMEOUT) as session:
         payload = {
-            "model":
-            request_func_input.model_name
-            if request_func_input.model_name else request_func_input.model,
-            "prompt":
-            request_func_input.prompt,
-            "temperature":
-            0.0,
-            "repetition_penalty":
-            1.0,
-            "max_tokens":
-            request_func_input.output_len,
-            "logprobs":
-            request_func_input.logprobs,
-            "stream":
-            True,
+            "model": request_func_input.model_name \
+                if request_func_input.model_name else request_func_input.model,
+            "prompt": request_func_input.prompt,
+            "temperature": 0.0,
+            "repetition_penalty": 1.0,
+            "max_tokens": request_func_input.output_len,
+            "logprobs": request_func_input.logprobs,
+            "stream": True,
             "stream_options": {
                 "include_usage": True,
             },
@@ -354,8 +349,9 @@ async def async_request_openai_chat_completions(
     pbar: Optional[tqdm] = None,
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
-    assert api_url.endswith(("chat/completions", "profile")), (
-        "OpenAI Chat Completions API URL must end with 'chat/completions'.")
+    assert api_url.endswith(
+        ("chat/completions", "profile")
+    ), "OpenAI Chat Completions API URL must end with 'chat/completions'."
 
     async with aiohttp.ClientSession(trust_env=True,
                                      timeout=AIOHTTP_TIMEOUT) as session:
@@ -363,21 +359,17 @@ async def async_request_openai_chat_completions(
         if request_func_input.multi_modal_content:
             content.append(request_func_input.multi_modal_content)
         payload = {
-            "model":
-            request_func_input.model_name
-            if request_func_input.model_name else request_func_input.model,
+            "model": request_func_input.model_name \
+                if request_func_input.model_name else request_func_input.model,
             "messages": [
                 {
                     "role": "user",
                     "content": content
                 },
             ],
-            "temperature":
-            0.0,
-            "max_completion_tokens":
-            request_func_input.output_len,
-            "stream":
-            True,
+            "temperature": 0.0,
+            "max_completion_tokens": request_func_input.output_len,
+            "stream": True,
             "stream_options": {
                 "include_usage": True,
             },
@@ -454,32 +446,25 @@ async def async_request_openai_audio(
 ) -> RequestFuncOutput:
     # Lazy import without PlaceholderModule to avoid vllm dep.
     import soundfile
-
     api_url = request_func_input.api_url
-    assert api_url.endswith(("transcriptions", "translations")), (
-        "OpenAI Chat Completions API URL must end with 'transcriptions' ")
+    assert api_url.endswith(
+        ("transcriptions", "translations"
+         )), "OpenAI Chat Completions API URL must end with 'transcriptions' "
     "or `translations`."
 
     async with aiohttp.ClientSession(trust_env=True,
                                      timeout=AIOHTTP_TIMEOUT) as session:
         content = [{"type": "text", "text": request_func_input.prompt}]
         payload = {
-            "model":
-            request_func_input.model_name
-            if request_func_input.model_name else request_func_input.model,
-            "temperature":
-            0.0,
-            "max_completion_tokens":
-            request_func_input.output_len,
-            "stream":
-            True,
-            "language":
-            "en",
+            "model": request_func_input.model_name \
+                if request_func_input.model_name else request_func_input.model,
+            "temperature": 0.0,
+            "max_completion_tokens": request_func_input.output_len,
+            "stream": True,
+            "language": "en",
             # Flattened due to multipart/form-data
-            "stream_include_usage":
-            True,
-            "stream_continuous_usage_stats":
-            True,
+            "stream_include_usage": True,
+            "stream_continuous_usage_stats": True
         }
         if request_func_input.extra_body:
             payload.update(request_func_input.extra_body)
@@ -494,9 +479,9 @@ async def async_request_openai_audio(
             buffer.seek(0)
             return buffer
 
-        with to_bytes(*request_func_input.multi_modal_content["audio"]) as f:
+        with to_bytes(*request_func_input.multi_modal_content['audio']) as f:
             form = aiohttp.FormData()
-            form.add_field("file", f, content_type="audio/wav")
+            form.add_field('file', f, content_type='audio/wav')
             for key, value in payload.items():
                 form.add_field(key, str(value))
 
@@ -560,7 +545,7 @@ async def async_request_openai_audio(
 
 
 def get_model(pretrained_model_name_or_path: str) -> str:
-    if os.getenv("VLLM_USE_MODELSCOPE", "False").lower() == "true":
+    if os.getenv('VLLM_USE_MODELSCOPE', 'False').lower() == 'true':
         from modelscope import snapshot_download
 
         from vllm.model_executor.model_loader.weight_utils import get_lock
@@ -571,8 +556,7 @@ def get_model(pretrained_model_name_or_path: str) -> str:
             model_path = snapshot_download(
                 model_id=pretrained_model_name_or_path,
                 local_files_only=huggingface_hub.constants.HF_HUB_OFFLINE,
-                ignore_file_pattern=[".*.pt", ".*.safetensors", ".*.bin"],
-            )
+                ignore_file_pattern=[".*.pt", ".*.safetensors", ".*.bin"])
 
             return model_path
     return pretrained_model_name_or_path

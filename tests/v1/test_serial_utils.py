@@ -105,8 +105,7 @@ def test_multimodal_kwargs():
             [
                 torch.rand((1, 12), dtype=torch.float32),
                 torch.rand((3, 5, 7), dtype=torch.float64),
-            ],
-            [torch.rand((4, 4), dtype=torch.float16)],
+            ], [torch.rand((4, 4), dtype=torch.float16)]
         ],
     }
 
@@ -129,30 +128,21 @@ def test_multimodal_kwargs():
 
 
 def test_multimodal_items_by_modality():
-    e1 = MultiModalFieldElem(
-        "audio",
-        "a0",
-        torch.zeros(1000, dtype=torch.bfloat16),
-        MultiModalBatchedField(),
-    )
+    e1 = MultiModalFieldElem("audio", "a0",
+                             torch.zeros(1000, dtype=torch.bfloat16),
+                             MultiModalBatchedField())
     e2 = MultiModalFieldElem(
         "video",
         "v0",
         [torch.zeros(1000, dtype=torch.int8) for _ in range(4)],
         MultiModalBatchedField(),
     )
-    e3 = MultiModalFieldElem(
-        "image",
-        "i0",
-        torch.zeros(1000, dtype=torch.int32),
-        MultiModalSharedField(4),
-    )
-    e4 = MultiModalFieldElem(
-        "image",
-        "i1",
-        torch.zeros(1000, dtype=torch.int32),
-        MultiModalBatchedField(),
-    )
+    e3 = MultiModalFieldElem("image", "i0", torch.zeros(1000,
+                                                        dtype=torch.int32),
+                             MultiModalSharedField(4))
+    e4 = MultiModalFieldElem("image", "i1", torch.zeros(1000,
+                                                        dtype=torch.int32),
+                             MultiModalBatchedField())
     audio = MultiModalKwargsItem.from_elems([e1])
     video = MultiModalKwargsItem.from_elems([e2])
     image = MultiModalKwargsItem.from_elems([e3, e4])
@@ -245,8 +235,7 @@ def test_tensor_serialization(allow_pickle: bool):
 
     # Verify the decoded tensor matches the original
     assert torch.allclose(
-        tensor,
-        decoded), ("Decoded tensor does not match the original tensor.")
+        tensor, decoded), "Decoded tensor does not match the original tensor."
 
 
 @pytest.mark.parametrize("allow_pickle", [True, False])
@@ -267,7 +256,7 @@ def test_numpy_array_serialization(allow_pickle: bool):
     # Verify the decoded array matches the original
     assert np.allclose(
         array,
-        decoded), ("Decoded numpy array does not match the original array.")
+        decoded), "Decoded numpy array does not match the original array."
 
 
 class CustomClass:

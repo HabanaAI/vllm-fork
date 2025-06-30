@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 import math
-import os
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Optional, Set, Tuple, TypedDict
 
+import os
 import torch
 from torch import nn
 from transformers import BatchFeature, Gemma3Config, Gemma3Processor
@@ -12,6 +12,7 @@ from transformers.models.gemma3.processing_gemma3 import Gemma3ProcessorKwargs
 import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
+
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.models.module_mapping import MultiModelKeys
 from vllm.model_executor.sampling_metadata import SamplingMetadata
@@ -36,18 +37,15 @@ from vllm.sequence import IntermediateTensors
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
 from .siglip import SiglipVisionModel
-from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
-                    init_vllm_registered_model, maybe_prefix,
-                    merge_multimodal_embeddings)
+from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
+                    maybe_prefix, merge_multimodal_embeddings, greedy_plan)
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 if is_hpu:
-    is_lazy = os.environ.get("PT_HPU_LAZY_MODE", "0") == "1"
+    is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
 else:
     is_lazy = False
-
-
 class Gemma3ImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     pixel_values: torch.Tensor
@@ -109,14 +107,11 @@ class Gemma3ProcessingInfo(BaseProcessingInfo):
             processor = self.get_hf_processor()
 
         images_kwargs = self._resolve_image_kwargs(
-            processor,
-            {
-                "do_pan_and_scan",
-                "pan_and_scan_min_crop_size",
+            processor, {
+                "do_pan_and_scan", "pan_and_scan_min_crop_size",
                 "pan_and_scan_max_num_crops",
-                "pan_and_scan_min_ratio_to_activate",
-            },
-        )
+                "pan_and_scan_min_ratio_to_activate"
+            })
 
         do_pan_and_scan = images_kwargs["do_pan_and_scan"]
         pan_and_scan_min_crop_size = images_kwargs[
@@ -250,8 +245,8 @@ class Gemma3DummyInputsBuilder(BaseDummyInputsBuilder[Gemma3ProcessingInfo]):
     ) -> MultiModalDataDict:
         num_images = mm_counts.get("image", 0)
 
-        target_width, target_height = (
-            self.info.get_image_size_with_most_features())
+        target_width, target_height = \
+            self.info.get_image_size_with_most_features()
 
         return {
             "image":
@@ -288,11 +283,10 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             hf_processor = self.info.get_hf_processor(**mm_kwargs)
 
             num_crops = [
-                self.info.get_num_crops(
-                    image_width=size.width,
-                    image_height=size.height,
-                    processor=hf_processor,
-                ) for size in image_sizes
+                self.info.get_num_crops(image_width=size.width,
+                                        image_height=size.height,
+                                        processor=hf_processor)
+                for size in image_sizes
             ]
             processed_outputs["num_crops"] = torch.tensor(num_crops)
 
@@ -436,8 +430,7 @@ class Gemma3MultiModalProjector(nn.Module):
 
         self.mm_soft_emb_norm = GemmaRMSNorm(
             config.vision_config.hidden_size,
-            eps=config.vision_config.layer_norm_eps,
-        )
+            eps=config.vision_config.layer_norm_eps)
 
         self.patches_per_image = int(config.vision_config.image_size //
                                      config.vision_config.patch_size)
@@ -451,11 +444,8 @@ class Gemma3MultiModalProjector(nn.Module):
 
         reshaped_vision_outputs = vision_outputs.transpose(1, 2)
         reshaped_vision_outputs = reshaped_vision_outputs.reshape(
-            batch_size,
-            seq_length,
-            self.patches_per_image,
-            self.patches_per_image,
-        )
+            batch_size, seq_length, self.patches_per_image,
+            self.patches_per_image)
         reshaped_vision_outputs = reshaped_vision_outputs.contiguous()
 
         pooled_vision_outputs = self.avg_pool(reshaped_vision_outputs)
@@ -469,11 +459,9 @@ class Gemma3MultiModalProjector(nn.Module):
         return projected_vision_outputs.type_as(vision_outputs)
 
 
-@MULTIMODAL_REGISTRY.register_processor(
-    Gemma3MultiModalProcessor,
-    info=Gemma3ProcessingInfo,
-    dummy_inputs=Gemma3DummyInputsBuilder,
-)
+@MULTIMODAL_REGISTRY.register_processor(Gemma3MultiModalProcessor,
+                                        info=Gemma3ProcessingInfo,
+                                        dummy_inputs=Gemma3DummyInputsBuilder)
 class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                      SupportsLoRA):
     packed_modules_mapping = {
@@ -499,11 +487,10 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         self.sliding_window = getattr(config.text_config,
                                       "interleaved_sliding_window", None)
 
-        self.vision_tower = SiglipVisionModel(
-            config.vision_config,
-            quant_config,
-            prefix=maybe_prefix(prefix, "vision_tower"),
-        )
+        self.vision_tower = SiglipVisionModel(config.vision_config,
+                                              quant_config,
+                                              prefix=maybe_prefix(
+                                                  prefix, "vision_tower"))
         self.multi_modal_projector = Gemma3MultiModalProjector(config)
 
         self.language_model = init_vllm_registered_model(
@@ -551,8 +538,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                              f"Got type: {type(pixel_values)}")
 
         if not isinstance(num_crops, (torch.Tensor, list)):
-            raise ValueError(
-                f"Incorrect type of num_crops. Got type: {type(num_crops)}")
+            raise ValueError("Incorrect type of num_crops. "
+                             f"Got type: {type(num_crops)}")
 
         pixel_values = flatten_bn(pixel_values, concat=True)
         num_crops = flatten_bn(num_crops, concat=True)
@@ -560,58 +547,51 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         return Gemma3ImagePixelInputs(
             type="pixel_values",
             pixel_values=self._validate_pixel_values(pixel_values),
-            # TODO.. some bug in adding 1 here to num_crops..
+            # TODO.. some bug in adding 1 here to num_crops.. 
             # currently assuming no panscan so just passing in torch.ones
             # seeing 0 + 1 = 0 here sometimes!! hence wrapping in torch.tensor
-            num_patches=num_crops + 1 if not is_hpu else torch.ones(
-                num_crops.shape, dtype=num_crops.dtype).to(
-                    pixel_values.device),
-        )
+            num_patches=num_crops + 1 if not is_hpu else \
+                torch.ones(num_crops.shape, dtype=num_crops.dtype).to(pixel_values.device))
 
     def _image_pixels_to_features(
         self,
         vision_tower: SiglipVisionModel,
         pixel_values: torch.Tensor,
-        graphed_multimodal_buckets=[],
+        graphed_multimodal_buckets = []
     ) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
         image_features = vision_tower(pixel_values.to(dtype=target_dtype))
         return image_features
 
     def _process_image_input(
-            self,
-            image_input: Gemma3ImageInputs,
-            graphed_multimodal_buckets=[]) -> list[torch.Tensor]:
+        self,
+        image_input: Gemma3ImageInputs,
+        graphed_multimodal_buckets = []
+    ) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
         pixel_values = image_input["pixel_values"]
         num_patches = image_input["num_patches"]
 
         image_features = self._image_pixels_to_features(
-            self.vision_tower, pixel_values, graphed_multimodal_buckets)
+            self.vision_tower,
+            pixel_values,
+            graphed_multimodal_buckets
+        )
         image_embeds = self.multi_modal_projector(image_features)
         if len(graphed_multimodal_buckets) > 1:
-            batch_breakdown = greedy_plan(
-                pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
+            batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
             start_idx = 0
             image_embeds_multibatches = []
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
-                batch_sliced_image_features = image_features[start_idx:end_idx,
-                                                             ...]
+                batch_sliced_image_features = image_features[start_idx:end_idx, ...]
                 if is_lazy:
-                    image_embeds_multibatches += [
-                        self.multi_modal_projector(
-                            batch_sliced_image_features,
-                            bypass_hpu_graphs=i
-                            not in graphed_multimodal_buckets,
-                        )
-                    ]
+                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, \
+                        bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
                 else:
-                    image_embeds_multibatches += [
-                        self.multi_modal_projector(batch_sliced_image_features)
-                    ]
+                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features)]
                 start_idx = end_idx
             image_embeds = torch.cat(image_embeds_multibatches, dim=0)
 
@@ -628,8 +608,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         if image_input is None:
             return None
 
-        return self._process_image_input(
-            image_input, kwargs.get("graphed_multimodal_buckets", []))
+        return self._process_image_input(image_input, kwargs.get('graphed_multimodal_buckets', []))
 
     def get_input_embeddings(
         self,
@@ -646,14 +625,12 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             )
         return inputs_embeds
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        **kwargs: object,
-    ) -> IntermediateTensors:
+    def forward(self,
+                input_ids: torch.Tensor,
+                positions: torch.Tensor,
+                intermediate_tensors: Optional[IntermediateTensors] = None,
+                inputs_embeds: Optional[torch.Tensor] = None,
+                **kwargs: object) -> IntermediateTensors:
         if intermediate_tensors is not None:
             inputs_embeds = None
 
@@ -661,8 +638,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
             if is_hpu:
-                assert False, (
-                    "hpu_model_runner should be computing inputs_embeds")
+                assert False, "hpu_model_runner should be computing inputs_embeds"
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
             inputs_embeds = self.get_input_embeddings(input_ids,
@@ -676,13 +652,11 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 )
             input_ids = None
 
-        hidden_states = self.language_model.model(
-            input_ids,
-            positions,
-            intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-            **kwargs,
-        )
+        hidden_states = self.language_model.model(input_ids,
+                                                  positions,
+                                                  intermediate_tensors,
+                                                  inputs_embeds=inputs_embeds,
+                                                  **kwargs)
 
         return hidden_states
 
@@ -715,6 +689,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 seq_lens.append(end_idx - start_idx)
                 kwargs["seq_lens"] = seq_lens
 
+
         global_attn_masks = []
         local_attn_masks = []
         start_idx = 0
@@ -741,41 +716,33 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             # Consider the bidirectional attention between image tokens.
             img_mask = torch.zeros_like(global_attn_mask)
-            img_pos = input_token_ids == self.config.image_token_index
+            img_pos = (input_token_ids == self.config.image_token_index)
             if not is_hpu:
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
-                global_attn_mask = torch.where(img_mask == 2, 0,
-                                               global_attn_mask)
+                global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
             else:
                 img_mask[img_pos.unsqueeze(1)] += 1
-                img_mask = img_mask.permute(0, 1, 3, 2)
+                img_mask = img_mask.permute(0,1,3,2)
                 img_mask[img_pos.unsqueeze(1)] += 1
-                img_mask = img_mask.permute(0, 1, 3, 2)
+                img_mask = img_mask.permute(0,1,3,2)
 
                 img_pos_cum = torch.cumsum(img_pos, 1)
-                img_causal = (torch.arange(
-                    seq_len, device=input_ids.device).unsqueeze(0) -
-                              img_pos_cum +
-                              (img_pos_cum // IMG_TOKENS + 1) * IMG_TOKENS + 1)
-                img_causal = torch.cat(
-                    (img_causal[:, 0:1] - 1, img_causal[:, :-1]), dim=1)
-                img_causal = (img_causal.clamp_(min=0, max=seq_len -
-                                                1).unsqueeze(1).unsqueeze(3))
-                ind = (torch.arange(seq_len,
-                                    device=input_ids.device).unsqueeze(
-                                        0).unsqueeze(1).unsqueeze(2))
+                img_causal = torch.arange(seq_len, device = input_ids.device).unsqueeze(0) - \
+                    img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
+                img_causal = torch.cat((img_causal[:,0:1]-1, img_causal[:,:-1]), dim=1)
+                img_causal = img_causal.clamp_(min=0, max=seq_len-1).unsqueeze(1).unsqueeze(3)
+                ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
                 img_mask[ind < img_causal] += 1
-                global_attn_mask = torch.where(img_mask == 3, 0,
-                                               global_attn_mask)
+                global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
             global_attn_masks.append(global_attn_mask)
             if self.sliding_window is not None:
                 # Create a local causal mask with sliding window (1024).
                 local_attn_mask = torch.ones_like(global_attn_mask)
                 local_attn_mask = torch.tril(local_attn_mask,
-                                             diagonal=-self.sliding_window)
+                                            diagonal=-self.sliding_window)
                 local_attn_mask = torch.where(local_attn_mask == 0,
-                                              global_attn_mask, float("-inf"))
+                                            global_attn_mask, float("-inf"))
                 local_attn_masks.append(local_attn_mask)
         kwargs["global_attn_masks"] = global_attn_masks
         kwargs["local_attn_masks"] = local_attn_masks
@@ -801,5 +768,4 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         return MultiModelKeys.from_string_field(
             language_model="language_model",
             connector="multi_modal_projector",
-            tower_model="vision_tower",
-        )
+            tower_model="vision_tower")

@@ -2,7 +2,6 @@
 """
 KV cache helper for store.
 """
-
 import torch
 
 import vllm.envs as envs
@@ -24,6 +23,7 @@ class model_aware_kv_ops_helper:
         return self.is_deepseek_mla and self.use_mla_opt
 
     def get_model_args(self, model_executable: torch.nn.Module):
+
         model_config = model_executable.model.config
         self.model_executable = model_executable
         num_heads = int(model_config.num_key_value_heads / self.tp_size)
@@ -40,12 +40,12 @@ class model_aware_kv_ops_helper:
         # num_key_value_heads / tp, qk_nope_head_dim + qk_rope_head_dim].
         # For more details, see vllm/attention/backends/mla/common.py.
         if self.is_deepseek_mla and self.use_mla_opt:
-            head_size = (model_config.kv_lora_rank +
-                         model_config.qk_rope_head_dim)
+            head_size = model_config.kv_lora_rank + \
+                model_config.qk_rope_head_dim
             num_heads = 1
         elif self.is_deepseek_mla and not self.use_mla_opt:
-            head_size = (model_config.qk_nope_head_dim +
-                         model_config.qk_rope_head_dim)
+            head_size = model_config.qk_nope_head_dim + \
+                model_config.qk_rope_head_dim
         else:
             head_size = getattr(model_config, "head_dim", None)
             if head_size is None:
@@ -62,17 +62,9 @@ class model_aware_kv_ops_helper:
             value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
         return key_cache, value_cache
 
-    def put_kv_to_cache(
-        self,
-        model_executable: torch.nn.Module,
-        keys,
-        values,
-        layer,
-        kv_cache,
-        slot_mapping,
-        start_pos,
-        end_pos,
-    ):
+    def put_kv_to_cache(self, model_executable: torch.nn.Module, keys, values,
+                        layer, kv_cache, slot_mapping, start_pos, end_pos):
+
         model_config = model_executable.model.config
 
         if self.is_deepseek_mla and self.use_mla_opt:

@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for mllama's multimodal preprocessing and profiling."""
-
 import pytest
 from transformers import MllamaConfig
 

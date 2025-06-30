@@ -65,8 +65,8 @@ class AttentionSpec(KVCacheSpec):
     def page_size_bytes(self) -> int:
         # For MLA we only store a single latent vector
         coef = 1 if self.use_mla else 2
-        return (coef * self.block_size * self.num_kv_heads * self.head_size *
-                get_dtype_size(self.dtype))
+        return coef * self.block_size * self.num_kv_heads * self.head_size \
+                * get_dtype_size(self.dtype)
 
 
 @dataclass
@@ -118,7 +118,6 @@ class KVCacheTensor:
     for a layer. Only contains the size of KV cache for that layer for now. Will
     be extended to support multiple layers sharing the same memory pool.
     """
-
     size: int  # The size of KV cache Tensor in bytes
 
 
@@ -128,7 +127,6 @@ class KVCacheGroupSpec:
     Represents a group of model layers that share the same KV cache block table.
     These layers are regarded as one layer in the KV cache manager.
     """
-
     # The names of model layers in this group
     layer_names: list[str]
     # The KV cache spec of this manager layer

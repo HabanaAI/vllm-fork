@@ -15,12 +15,10 @@ def pytest_addoption(parser):
     parser.addoption("--models",
                      nargs="+",
                      help="Specify one or more models to test")
-    parser.addoption(
-        "--extended",
-        action="store_true",
-        default=False,
-        help="invoke extended tests requiring large GPUs",
-    )
+    parser.addoption("--extended",
+                     action="store_true",
+                     default=False,
+                     help="invoke extended tests requiring large GPUs")
 
 
 # for each server config, download the model and return the config

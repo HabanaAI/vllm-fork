@@ -9,7 +9,7 @@ from vllm.attention.backends.utils import PAD_SLOT_ID
 
 class ConstantSizeCache(ABC):
     """
-    Abstract base class for managing constant size caches
+    Abstract base class for managing constant size caches 
     like Mamba and Minimax.
     """
 
@@ -56,7 +56,7 @@ class ConstantSizeCache(ABC):
 
     def copy_inputs_before_cuda_graphs(self, input_buffers, **kwargs):
         """
-        Copy the relevant state_indices into the CUDA graph input buffer
+        Copy the relevant state_indices into the CUDA graph input buffer 
         """
         assert all(
             key in kwargs
@@ -117,10 +117,8 @@ class ConstantSizeCache(ABC):
             return self.cache_indices_mapping[cur_rid][seq_id]
 
     def _prepare_current_run_cache(
-        self,
-        request_ids_to_seq_ids: Dict[str, list[int]],
-        finished_requests_ids: List[str],
-    ) -> List[int]:
+            self, request_ids_to_seq_ids: Dict[str, list[int]],
+            finished_requests_ids: List[str]) -> List[int]:
         return [
             self._assign_seq_id_to_cache_index(req_id, seq_id,
                                                finished_requests_ids)

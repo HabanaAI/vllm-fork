@@ -101,10 +101,8 @@ TOP_KS = [2, 6]
 SEEDS = [0]
 
 
-@pytest.mark.parametrize(
-    "M, N, K, E, topk, dtype, seed",
-    itertools.product(M, N, K, E, TOP_KS, DTYPES, SEEDS),
-)
+@pytest.mark.parametrize("M, N, K, E, topk, dtype, seed",
+                         itertools.product(M, N, K, E, TOP_KS, DTYPES, SEEDS))
 @torch.inference_mode()
 def test_w8a8_fp8_fused_moe(M, N, K, E, topk, dtype, seed):
     torch.manual_seed(seed)
@@ -145,8 +143,7 @@ def test_w8a8_fp8_fused_moe(M, N, K, E, topk, dtype, seed):
     )
 
     # Check results
-    rel_diff = torch.mean(
-        torch.abs(out.to(torch.float32) -
-                  ref_out.to(torch.float32))) / torch.mean(
-                      torch.abs(ref_out.to(torch.float32)))
+    rel_diff = (torch.mean(
+        torch.abs(out.to(torch.float32) - ref_out.to(torch.float32))) /
+                torch.mean(torch.abs(ref_out.to(torch.float32))))
     assert rel_diff < 0.05

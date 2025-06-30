@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """Attention layer with FlashInfer."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,6 +30,7 @@ logger = init_logger(__name__)
 
 
 class FlashInferBackend(AttentionBackend):
+
     accept_output_buffer: bool = True
 
     @staticmethod
@@ -76,7 +76,7 @@ class PerLayerParameters:
 
 
 def get_per_layer_parameters(
-    vllm_config: VllmConfig, ) -> dict[str, PerLayerParameters]:
+        vllm_config: VllmConfig) -> dict[str, PerLayerParameters]:
     """
     Scan all attention layers and determine some hyperparameters
     to use during `plan`.
@@ -102,7 +102,7 @@ def get_per_layer_parameters(
 
 
 def infer_global_hyperparameters(
-    per_layer_params: dict[str, PerLayerParameters], ) -> PerLayerParameters:
+        per_layer_params: dict[str, PerLayerParameters]) -> PerLayerParameters:
     """
     Currently, FlashInfer backend only support models in which all layers share
     the same values for the following hyperparameters:
@@ -129,6 +129,7 @@ def infer_global_hyperparameters(
 
 @dataclass
 class FlashInferMetadata:
+
     num_actual_tokens: int  # Number of tokens excluding padding.
 
     # (batch_size + 1,). The cumulative subquery lengths of the sequences in
@@ -191,12 +192,11 @@ class FlashInferMetadata:
         # Refer to
         # https://github.com/flashinfer-ai/flashinfer/blob/3d55c71a62052c590c130897d3a3db49b14fcc34/include/flashinfer/utils.cuh#L157
         supported_head_sizes = FlashInferBackend.get_supported_head_sizes()
-        if (self.head_dim is not None
-                and self.head_dim not in supported_head_sizes):
+        if self.head_dim is not None and self.head_dim \
+                not in supported_head_sizes:
             raise ValueError(
                 f"Only {supported_head_sizes} are supported for head_dim,",
-                f" received {self.head_dim}.",
-            )
+                f" received {self.head_dim}.")
 
 
 class FlashInferMetadataBuilder:
@@ -277,8 +277,7 @@ class FlashInferMetadataBuilder:
             self._workspace_buffer = torch.empty(
                 FLASHINFER_WORKSPACE_BUFFER_SIZE,
                 dtype=torch.uint8,
-                device=self.runner.device,
-            )
+                device=self.runner.device)
         return self._workspace_buffer
 
     def _get_prefill_wrapper(self):
@@ -289,8 +288,8 @@ class FlashInferMetadataBuilder:
 
     def _get_decode_wrapper(self):
         if self._decode_wrapper is None:
-            num_qo_heads = self.runner.model_config.get_num_attention_heads(
-                self.runner.parallel_config)
+            num_qo_heads = (self.runner.model_config.get_num_attention_heads(
+                self.runner.parallel_config))
             num_kv_heads = self.runner.model_config.get_num_kv_heads(
                 self.runner.parallel_config)
             use_tensor_cores = envs.VLLM_FLASHINFER_FORCE_TENSOR_CORES or (
@@ -298,8 +297,7 @@ class FlashInferMetadataBuilder:
             self._decode_wrapper = BatchDecodeWithPagedKVCacheWrapper(
                 self._get_workspace_buffer(),
                 "NHD",
-                use_tensor_cores=use_tensor_cores,
-            )
+                use_tensor_cores=use_tensor_cores)
         return self._decode_wrapper
 
     def _get_cascade_wrapper(self):
@@ -318,15 +316,15 @@ class FlashInferMetadataBuilder:
                 [attn_metadata.shared_qo_indptr, attn_metadata.qo_indptr],
                 [
                     attn_metadata.shared_kv_page_indptr,
-                    attn_metadata.paged_kv_indptr,
+                    attn_metadata.paged_kv_indptr
                 ],
                 [
                     attn_metadata.shared_kv_page_indices,
-                    attn_metadata.paged_kv_indices,
+                    attn_metadata.paged_kv_indices
                 ],
                 [
                     attn_metadata.shared_kv_last_page_len,
-                    attn_metadata.paged_kv_last_page_len,
+                    attn_metadata.paged_kv_last_page_len
                 ],
                 attn_metadata.num_qo_heads,
                 attn_metadata.num_kv_heads,
@@ -346,17 +344,17 @@ class FlashInferMetadataBuilder:
                 # Decodes are first so prefills start after the last decode
                 prefill_start = self._num_decodes
                 attn_metadata.prefill_wrapper = self._get_prefill_wrapper()
-                assert (attn_metadata.qo_indptr[prefill_start:].shape[0] ==
-                        self._num_prefills + 1)
-                assert (attn_metadata.paged_kv_indptr[prefill_start:].shape[0]
-                        == self._num_prefills + 1)
-                assert (attn_metadata.paged_kv_last_page_len[prefill_start:].
-                        shape[0] == self._num_prefills)
+                assert attn_metadata.qo_indptr[prefill_start:].shape[
+                    0] == self._num_prefills + 1
+                assert attn_metadata.paged_kv_indptr[prefill_start:].shape[
+                    0] == self._num_prefills + 1
+                assert attn_metadata.paged_kv_last_page_len[
+                    prefill_start:].shape[0] == self._num_prefills
                 # Since prefill_wrapper.run() will be called with
                 # query[num_decode_tokens:] we need to adjust the qo_indptr
                 # to be relative to the start of the prefill queries.
-                qo_indptr = (attn_metadata.qo_indptr[prefill_start:] -
-                             attn_metadata.qo_indptr[prefill_start])
+                qo_indptr = attn_metadata.qo_indptr[
+                    prefill_start:] - attn_metadata.qo_indptr[prefill_start]
                 attn_metadata.prefill_wrapper.plan(
                     qo_indptr,
                     attn_metadata.paged_kv_indptr[prefill_start:],
@@ -395,13 +393,8 @@ class FlashInferMetadataBuilder:
                     kv_data_type=attn_metadata.data_type,
                 )
 
-    def build(
-        self,
-        num_reqs: int,
-        num_actual_tokens: int,
-        max_query_len: int,
-        common_prefix_len: int,
-    ):
+    def build(self, num_reqs: int, num_actual_tokens: int, max_query_len: int,
+              common_prefix_len: int):
         assert self._num_decodes + self._num_prefills == num_reqs
         assert (self._num_decode_tokens +
                 self._num_prefill_tokens == num_actual_tokens)
@@ -411,10 +404,10 @@ class FlashInferMetadataBuilder:
             self.runner.device, non_blocking=True)
         seq_lens = self.runner.seq_lens_cpu[:num_reqs].to(self.runner.device,
                                                           non_blocking=True)
-        block_table = self.runner.input_batch.block_table.get_device_tensor(
-        )[:num_reqs]
-        slot_mapping = (self.runner.slot_mapping_cpu[:num_actual_tokens].to(
-            self.runner.device, non_blocking=True).long())
+        block_table = (
+            self.runner.input_batch.block_table.get_device_tensor()[:num_reqs])
+        slot_mapping = self.runner.slot_mapping_cpu[:num_actual_tokens].to(
+            self.runner.device, non_blocking=True).long()
 
         block_table_bounds = (seq_lens + page_size - 1) // page_size
 
@@ -442,20 +435,17 @@ class FlashInferMetadataBuilder:
             shared_kv_page_indices = None
             shared_kv_last_page_len = None
 
-        mask = torch.arange(
-            block_table.size(1),
-            dtype=block_table.dtype,
-            device=block_table.device,
-        ).unsqueeze(0) < block_table_bounds.unsqueeze(1)
+        mask = (torch.arange(block_table.size(1),
+                             dtype=block_table.dtype,
+                             device=block_table.device).unsqueeze(0)
+                < block_table_bounds.unsqueeze(1))
         paged_kv_indices = block_table[mask]
 
         paged_kv_indptr = torch.cat([
-            torch.zeros(
-                1,
-                dtype=block_table_bounds.dtype,
-                device=block_table_bounds.device,
-            ),
-            block_table_bounds.cumsum(dim=0, dtype=torch.int32),
+            torch.zeros(1,
+                        dtype=block_table_bounds.dtype,
+                        device=block_table_bounds.device),
+            block_table_bounds.cumsum(dim=0, dtype=torch.int32)
         ])
 
         paged_kv_last_page_len = seq_lens % page_size

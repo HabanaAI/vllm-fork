@@ -31,16 +31,10 @@ class CpuPlatform(Platform):
         return "cpu"
 
     @classmethod
-    def get_attn_backend_cls(
-        cls,
-        selected_backend: _Backend,
-        head_size: int,
-        dtype: torch.dtype,
-        kv_cache_dtype: Optional[str],
-        block_size: int,
-        use_v1: bool,
-        use_mla: bool,
-    ) -> str:
+    def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
+                             dtype: torch.dtype, kv_cache_dtype: Optional[str],
+                             block_size: int, use_v1: bool,
+                             use_mla: bool) -> str:
         if selected_backend and selected_backend != _Backend.TORCH_SDPA:
             logger.info("Cannot use %s backend on CPU.", selected_backend)
         if use_mla:
@@ -65,7 +59,6 @@ class CpuPlatform(Platform):
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
         import vllm.envs as envs
         from vllm.utils import GiB_bytes
-
         model_config = vllm_config.model_config
         # Reminder: Please update docs/source/features/compatibility_matrix.md
         # If the feature combo become valid
@@ -85,9 +78,9 @@ class CpuPlatform(Platform):
                 " intel_extension_for_pytorch")
 
         scheduler_config = vllm_config.scheduler_config
-        if (scheduler_config.chunked_prefill_enabled
-                or cache_config.enable_prefix_caching
-            ) and cache_config.cache_dtype != "auto":
+        if ((scheduler_config.chunked_prefill_enabled
+             or cache_config.enable_prefix_caching)
+                and cache_config.cache_dtype != "auto"):
             raise RuntimeError("Chunked-prefill and prefix-cache on the CPU "
                                "backend is not compatible with FP8 KV cache.")
 
@@ -112,8 +105,7 @@ class CpuPlatform(Platform):
                     "Environment variable VLLM_CPU_KVCACHE_SPACE (GiB) "
                     "for CPU backend is not set, using 4 by default.")
             else:
-                cache_config.cpu_kvcache_space_bytes = (
-                    kv_cache_space * GiB_bytes)  # type: ignore # noqa
+                cache_config.cpu_kvcache_space_bytes = kv_cache_space * GiB_bytes  # type: ignore # noqa
         else:
             raise RuntimeError(
                 "Invalid environment variable VLLM_CPU_KVCACHE_SPACE"
@@ -122,18 +114,16 @@ class CpuPlatform(Platform):
         parallel_config = vllm_config.parallel_config
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
-            logger.warning(
-                ("%s is not supported on CPU, fallback to mp "
-                 "distributed executor backend."),
-                parallel_config.distributed_executor_backend,
-            )
+            logger.warning(("%s is not supported on CPU, fallback to mp "
+                            "distributed executor backend."),
+                           parallel_config.distributed_executor_backend)
             parallel_config.distributed_executor_backend = "mp"
         if parallel_config.worker_cls == "auto":
             if vllm_config.speculative_config:
-                parallel_config.worker_cls = (
-                    "vllm.spec_decode.spec_decode_worker.create_spec_worker")
-                parallel_config.sd_worker_cls = (
-                    "vllm.worker.cpu_worker.CPUWorker")
+                parallel_config.worker_cls = \
+                    "vllm.spec_decode.spec_decode_worker.create_spec_worker"
+                parallel_config.sd_worker_cls = \
+                    "vllm.worker.cpu_worker.CPUWorker"
             else:
                 parallel_config.worker_cls = "vllm.worker.cpu_worker.CPUWorker"
 
@@ -154,24 +144,24 @@ class CpuPlatform(Platform):
         if "libiomp5.so" in ld_prealod_str:
             # The time(milliseconds) that a thread should wait after
             # completing the execution of a parallel region, before sleeping.
-            os.environ["KMP_BLOCKTIME"] = "1"
+            os.environ['KMP_BLOCKTIME'] = "1"
             # Prevents the CPU to run into low performance state
-            os.environ["KMP_TPAUSE"] = "0"
+            os.environ['KMP_TPAUSE'] = "0"
             # Provides fine granularity parallelism
-            os.environ["KMP_FORKJOIN_BARRIER_PATTERN"] = "dist,dist"
-            os.environ["KMP_PLAIN_BARRIER_PATTERN"] = "dist,dist"
-            os.environ["KMP_REDUCTION_BARRIER_PATTERN"] = "dist,dist"
+            os.environ['KMP_FORKJOIN_BARRIER_PATTERN'] = "dist,dist"
+            os.environ['KMP_PLAIN_BARRIER_PATTERN'] = "dist,dist"
+            os.environ['KMP_REDUCTION_BARRIER_PATTERN'] = "dist,dist"
 
         # To hint IPEX uses shared memory based AllReduce
         os.environ["LOCAL_WORLD_SIZE"] = str(
             vllm_config.parallel_config.tensor_parallel_size)
-        if (sys.platform == "darwin"
-                and envs.VLLM_WORKER_MULTIPROC_METHOD == "fork"):
-            if os.environ.get("VLLM_WORKER_MULTIPROC_METHOD", None) is None:
+        if sys.platform == "darwin" and \
+                envs.VLLM_WORKER_MULTIPROC_METHOD == "fork":
+            if os.environ.get('VLLM_WORKER_MULTIPROC_METHOD', None) is None:
                 logger.warning(
                     "Default to spawn method on MacOS. If this is not desired,"
                     " set VLLM_WORKER_MULTIPROC_METHOD to fork explicitly.")
-                os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+                os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 
     @classmethod
     def is_pin_memory_available(cls) -> bool:
