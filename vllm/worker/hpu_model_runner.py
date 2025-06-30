@@ -2689,7 +2689,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              is_prompt=False,
                              kv_caches=None,
                              is_pt_profiler_run=False,
-                             image_args=UNSET_IMAGE_ARGS,
+                             image_args=UNSET_IMG_ARGS,
                              is_lora_profile_run=True,
                              num_iters=1,
                              align_worker=True,
@@ -3684,7 +3684,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and self.is_mm_optimized:
                             execute_model_kwargs['graphed_multimodal_buckets'] = \
-                                list(self.graphed_multimodal_buckets) # set is unhasable and causes friction with hpu graphs, hence turning it to a list
+                                list(self.graphed_multimodal_buckets) 
+                                # set is unhasable and causes friction with 
+                                # hpu graphs, hence turning it to a list
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs

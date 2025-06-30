@@ -42,10 +42,7 @@ from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
-if is_hpu:
-    is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
-else:
-    is_lazy = False
+is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
 class Gemma3ImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     pixel_values: torch.Tensor
@@ -551,13 +548,14 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             # currently assuming no panscan so just passing in torch.ones
             # seeing 0 + 1 = 0 here sometimes!! hence wrapping in torch.tensor
             num_patches=num_crops + 1 if not is_hpu else \
-                torch.ones(num_crops.shape, dtype=num_crops.dtype).to(pixel_values.device))
+                torch.ones(num_crops.shape, \
+                dtype=num_crops.dtype).to(pixel_values.device))
 
     def _image_pixels_to_features(
         self,
         vision_tower: SiglipVisionModel,
         pixel_values: torch.Tensor,
-        graphed_multimodal_buckets = []
+        graphed_multimodal_buckets = None 
     ) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
         image_features = vision_tower(pixel_values.to(dtype=target_dtype))
@@ -566,7 +564,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
     def _process_image_input(
         self,
         image_input: Gemma3ImageInputs,
-        graphed_multimodal_buckets = []
+        graphed_multimodal_buckets = None
     ) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
@@ -591,7 +589,9 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                     image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, \
                         bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
                 else:
-                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features)]
+                    image_embeds_multibatches += \
+                            [self.multi_modal_projector( \
+                                batch_sliced_image_features)]
                 start_idx = end_idx
             image_embeds = torch.cat(image_embeds_multibatches, dim=0)
 
@@ -638,7 +638,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
             if is_hpu:
-                assert False, "hpu_model_runner should be computing inputs_embeds"
+                raise AssertionError("hpu_model_runner should be computing
+                        inputs_embeds")
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
             inputs_embeds = self.get_input_embeddings(input_ids,
@@ -676,7 +677,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             kwargs["seq_lens"] = [seq_len] * bs
             seq_lens.append(seq_len)
         else:
-            # NOTE(woosuk): Here, we distinguish the sequences by the position id 0.
+            # NOTE(woosuk): Here, we distinguish the sequences by the
+            # position id 0.
             # This is a HACK. Fix this.
             start_idices = (positions == 0).cpu().nonzero()
             num_seqs = len(start_idices)
@@ -728,7 +730,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask = img_mask.permute(0,1,3,2)
 
                 img_pos_cum = torch.cumsum(img_pos, 1)
-                img_causal = torch.arange(seq_len, device = input_ids.device).unsqueeze(0) - \
+                img_causal = torch.arange(seq_len, device = \
+                        input_ids.device).unsqueeze(0) - \
                     img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
                 img_causal = torch.cat((img_causal[:,0:1]-1, img_causal[:,:-1]), dim=1)
                 img_causal = img_causal.clamp_(min=0, max=seq_len-1).unsqueeze(1).unsqueeze(3)

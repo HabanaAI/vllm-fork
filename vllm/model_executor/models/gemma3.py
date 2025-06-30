@@ -201,7 +201,8 @@ class Gemma3Attention(nn.Module):
         attn_output = self.attn(q, k, v)
 
         # In HPU, naive_attn_with_masks is no longer needed since sliding_window
-        # is supported in hpu_attn, we don't set "has_images" for img and let it return
+        # is supported in hpu_attn, we don't set "has_images" for img and let
+        # it return
         if current_platform.is_hpu() or not kwargs.get("has_images", False):
             output, _ = self.o_proj(attn_output)
             return output
