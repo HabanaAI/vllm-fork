@@ -2,8 +2,20 @@
 
 import itertools
 from dataclasses import dataclass, field
-from typing import (Callable, Dict, Iterable, List, Literal, Mapping, Optional,
-                    Protocol, Set, Tuple, Union, overload)
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    Union,
+    overload,
+)
 
 import habana_frameworks.torch.core as htcore
 import torch
@@ -18,15 +30,18 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.multimodal import MultiModalPlaceholderMap, NestedTensors
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
-from vllm.utils import (get_cuda_view_from_cpu_tensor, is_pin_memory_available,
-                        is_uva_available)
+from vllm.utils import (
+    get_cuda_view_from_cpu_tensor,
+    is_pin_memory_available,
+    is_uva_available,
+)
 
 logger = init_logger(__name__)
 
 WeightsMapping = Mapping[str, Optional[str]]
 """If a key maps to a value of `None`, the corresponding weight is ignored."""
 
-'''
+"""
 Given a desired batchsize to process in terms of available_batchsizes
 Pick the largest available_batchsizes that can fit batchsize, and reiterate
 Fro example, if batchsize = 9, available batchsize is 4, 2
@@ -41,22 +56,27 @@ still picking largest batches greedily, because large batches tend to be more co
  
 Seems similar to a "coin change" problem, where available_batchsizes are available denominations and batchsize is amount to be paid
 but unlike traditional coin change it might not be possible to make "batchsize" exactly, and we arent gunning for least number of "coins"
-'''
+"""
+
+
 def greedy_plan(batchsize, available_batchsizes):
-    available_batchsizes_sorted = sorted(available_batchsizes, key=lambda x:-x)  # sort descending
+    available_batchsizes_sorted = sorted(
+        available_batchsizes, key=lambda x: -x
+    )  # sort descending
     idx = 0
     left_to_process = batchsize
     result = []
-    while(left_to_process > 0 and idx < len(available_batchsizes_sorted)):
-        #print(idx, left_to_process, result)
+    while left_to_process > 0 and idx < len(available_batchsizes_sorted):
+        # print(idx, left_to_process, result)
         if available_batchsizes_sorted[idx] <= left_to_process:
             result += [available_batchsizes_sorted[idx]]
             left_to_process -= available_batchsizes_sorted[idx]
         else:
             idx += 1
     if left_to_process > 0:
-        result += [available_batchsizes_sorted[-1]] # this will be padded
+        result += [available_batchsizes_sorted[-1]]  # this will be padded
     return result
+
 
 @dataclass
 class WeightsMapper:
@@ -93,8 +113,11 @@ class WeightsMapper:
     def apply(
         self, weights: Iterable[Tuple[str, torch.Tensor]]
     ) -> Iterable[Tuple[str, torch.Tensor]]:
-        return ((out_name, data) for name, data in weights
-                if (out_name := self._map_name(name)) is not None)
+        return (
+            (out_name, data)
+            for name, data in weights
+            if (out_name := self._map_name(name)) is not None
+        )
 
 
 class AutoWeightsLoader:
@@ -130,17 +153,22 @@ class AutoWeightsLoader:
         self,
         weights: Iterable[Tuple[str, torch.Tensor]],
     ) -> Iterable[Tuple[str, Iterable[Tuple[str, torch.Tensor]]]]:
-        weights_by_parts = ((weight_name.split(".", 1), weight_data)
-                            for weight_name, weight_data in weights)
+        weights_by_parts = (
+            (weight_name.split(".", 1), weight_data)
+            for weight_name, weight_data in weights
+        )
 
-        for prefix, group in itertools.groupby(weights_by_parts,
-                                               key=lambda x: x[0][0]):
+        for prefix, group in itertools.groupby(
+            weights_by_parts, key=lambda x: x[0][0]
+        ):
             yield (
                 prefix,
                 # Because maxsplit=1 in weight_name.split(...),
                 # the length of `parts` must either be 1 or 2
-                (("" if len(parts) == 1 else parts[1], weights_data)
-                 for parts, weights_data in group),
+                (
+                    ("" if len(parts) == 1 else parts[1], weights_data)
+                    for parts, weights_data in group
+                ),
             )
 
     def _get_qualname(self, prefix: str, rest: str) -> str:
@@ -156,7 +184,8 @@ class AutoWeightsLoader:
 
     def _can_ignore_unexpected(self, qualname: str) -> bool:
         return any(
-            qualname.startswith(p) for p in self.ignore_unexpected_prefixes)
+            qualname.startswith(p) for p in self.ignore_unexpected_prefixes
+        )
 
     def _load_param(
         self,
@@ -180,24 +209,30 @@ class AutoWeightsLoader:
 
                 raise ValueError(
                     f"Attempted to load nested weight '{weight_qualname}' "
-                    f"into a single parameter '{base_prefix}'")
+                    f"into a single parameter '{base_prefix}'"
+                )
 
-            weight_loader = getattr(param, "weight_loader",
-                                    default_weight_loader)
+            weight_loader = getattr(
+                param, "weight_loader", default_weight_loader
+            )
             weight_loader(param, weight_data)
 
-            logger.debug("Loaded weight %s with shape %s", weight_qualname,
-                         param.shape)
+            logger.debug(
+                "Loaded weight %s with shape %s", weight_qualname, param.shape
+            )
 
             yield weight_qualname
 
-    def _add_loadable_non_param_tensors(self, module: nn.Module,
-                                        child_params: Dict[str, torch.Tensor]):
+    def _add_loadable_non_param_tensors(
+        self, module: nn.Module, child_params: Dict[str, torch.Tensor]
+    ):
         """
         Add tensor names that are not in the model params that may be in the
         safetensors, e.g., batch normalization stats.
         """
-        if isinstance(module, (
+        if isinstance(
+            module,
+            (
                 nn.BatchNorm1d,
                 nn.BatchNorm2d,
                 nn.BatchNorm3d,
@@ -205,10 +240,14 @@ class AutoWeightsLoader:
                 nn.LazyBatchNorm2d,
                 nn.LazyBatchNorm3d,
                 nn.SyncBatchNorm,
-        )):
+            ),
+        ):
             module_state_dict = module.state_dict()
-            for stat_name in ("running_mean", "running_var",
-                              "num_batches_tracked"):
+            for stat_name in (
+                "running_mean",
+                "running_var",
+                "num_batches_tracked",
+            ):
                 child_params[stat_name] = module_state_dict[stat_name]
 
     def _load_module(
@@ -228,8 +267,9 @@ class AutoWeightsLoader:
                 loaded_params = module_load_weights(weights)
                 if loaded_params is None:
                     logger.warning(
-                        "Unable to collect loaded parameters "
-                        "for module %s", module)
+                        "Unable to collect loaded parameters " "for module %s",
+                        module,
+                    )
                 else:
                     yield from map(
                         lambda x: self._get_qualname(base_prefix, x),
@@ -252,17 +292,18 @@ class AutoWeightsLoader:
 
                     continue
 
-                yield from self._load_module(prefix,
-                                             child_modules[child_prefix],
-                                             child_weights)
+                yield from self._load_module(
+                    prefix, child_modules[child_prefix], child_weights
+                )
             elif child_prefix in child_params:
                 if self._can_skip(prefix):
                     logger.debug("Skipping param %s", prefix)
 
                     continue
 
-                yield from self._load_param(prefix, child_params[child_prefix],
-                                            child_weights)
+                yield from self._load_param(
+                    prefix, child_params[child_prefix], child_weights
+                )
             else:
                 can_skip_module = self._can_skip(prefix + ".")
                 can_skip_param = self._can_skip(prefix)
@@ -278,8 +319,10 @@ class AutoWeightsLoader:
 
                     continue
 
-                msg = (f"There is no module or parameter named '{prefix}' "
-                       f"in {type(self.module).__name__}")
+                msg = (
+                    f"There is no module or parameter named '{prefix}' "
+                    f"in {type(self.module).__name__}"
+                )
                 raise ValueError(msg)
 
     def load_weights(
@@ -313,20 +356,19 @@ def init_vllm_registered_model(
         hf_config = vllm_config.model_config.hf_config
 
     if hf_config is not None:
-        vllm_config = vllm_config.with_hf_config(hf_config,
-                                                 architectures=architectures)
+        vllm_config = vllm_config.with_hf_config(
+            hf_config, architectures=architectures
+        )
 
     return _initialize_model(vllm_config=vllm_config, prefix=prefix)
 
 
 @overload
-def flatten_bn(x: torch.Tensor) -> torch.Tensor:
-    ...
+def flatten_bn(x: torch.Tensor) -> torch.Tensor: ...
 
 
 @overload
-def flatten_bn(x: List[torch.Tensor]) -> List[torch.Tensor]:
-    ...
+def flatten_bn(x: List[torch.Tensor]) -> List[torch.Tensor]: ...
 
 
 @overload
@@ -334,8 +376,7 @@ def flatten_bn(
     x: Union[List[torch.Tensor], torch.Tensor],
     *,
     concat: Literal[True],
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 @overload
@@ -343,8 +384,7 @@ def flatten_bn(
     x: Union[List[torch.Tensor], torch.Tensor],
     *,
     concat: bool = False,
-) -> Union[List[torch.Tensor], torch.Tensor]:
-    ...
+) -> Union[List[torch.Tensor], torch.Tensor]: ...
 
 
 def flatten_bn(
@@ -389,14 +429,17 @@ def _embedding_count_expression(embeddings: NestedTensors) -> str:
         return " x ".join([str(dim) for dim in embeddings.shape[:-1]])
 
     return " + ".join(
-        _embedding_count_expression(inner) for inner in embeddings)
+        _embedding_count_expression(inner) for inner in embeddings
+    )
 
 
 def merge_multimodal_embeddings_from_map(
-        inputs_embeds: torch.Tensor, multimodal_embeddings: NestedTensors,
-        placeholder_map: MultiModalPlaceholderMap.IndexMap) -> torch.Tensor:
+    inputs_embeds: torch.Tensor,
+    multimodal_embeddings: NestedTensors,
+    placeholder_map: MultiModalPlaceholderMap.IndexMap,
+) -> torch.Tensor:
     """
-    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided 
+    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided
     placeholder map .
 
     Note:
@@ -404,7 +447,8 @@ def merge_multimodal_embeddings_from_map(
     """
     flattened_embeddings = _flatten_embeddings(multimodal_embeddings)
     inputs_embeds[placeholder_map.dest] = flattened_embeddings[
-        placeholder_map.src]
+        placeholder_map.src
+    ]
     return inputs_embeds
 
 
@@ -425,7 +469,7 @@ def _merge_multimodal_embeddings(
     if current_platform.is_hpu():
         htcore.mark_step()
         flattened = _flatten_embeddings(multimodal_embeddings)
-        #TODO dynamic.. maybe torch.where? however multimodal_embeddings is a list of varying length
+        # TODO dynamic.. maybe torch.where? however multimodal_embeddings is a list of varying length
         # still.. torch.where migth be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
         return inputs_embeds
@@ -438,7 +482,8 @@ def _merge_multimodal_embeddings(
         expr = _embedding_count_expression(multimodal_embeddings)
         raise ValueError(
             f"Attempted to assign {expr} = {flattened.shape[0]} "
-            f"multimodal tokens to {num_expected_tokens} placeholders")
+            f"multimodal tokens to {num_expected_tokens} placeholders"
+        )
 
     inputs_embeds[is_multimodal] = flattened
     return inputs_embeds
@@ -490,11 +535,11 @@ def merge_multimodal_embeddings(
     Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
     positions in ``inputs_embeds`` corresponding to placeholder tokens in
     ``input_ids``.
-    
-    ``placeholder_token_id`` can be a list of token ids (e.g, token ids 
-    of img_start, img_break, and img_end tokens) when needed: This means 
-    the order of these tokens in the ``input_ids`` MUST MATCH the order of 
-    their embeddings in ``multimodal_embeddings`` since we need to 
+
+    ``placeholder_token_id`` can be a list of token ids (e.g, token ids
+    of img_start, img_break, and img_end tokens) when needed: This means
+    the order of these tokens in the ``input_ids`` MUST MATCH the order of
+    their embeddings in ``multimodal_embeddings`` since we need to
     slice-merge instead of individually scattering.
 
     For example, if input_ids is "TTTTTSIIIBIIIBIIIETTT", where
@@ -503,17 +548,18 @@ def merge_multimodal_embeddings(
     - I is image embedding token
     - B is image break token
     - E is image end token.
-    
-    Then the image embeddings (that correspond to I's) from vision encoder 
-    must be padded with embeddings of S, B, and E in the same order of 
+
+    Then the image embeddings (that correspond to I's) from vision encoder
+    must be padded with embeddings of S, B, and E in the same order of
     input_ids for a correct embedding merge.
 
     Note:
         This updates ``inputs_embeds`` in place.
     """
     if isinstance(placeholder_token_id, list):
-        placeholder_token_id = torch.tensor(placeholder_token_id,
-                                            device=input_ids.device)
+        placeholder_token_id = torch.tensor(
+            placeholder_token_id, device=input_ids.device
+        )
         return _merge_multimodal_embeddings(
             inputs_embeds,
             torch.isin(input_ids, placeholder_token_id),
@@ -528,9 +574,7 @@ def merge_multimodal_embeddings(
 
 
 class LayerFn(Protocol):
-
-    def __call__(self, prefix: str) -> torch.nn.Module:
-        ...
+    def __call__(self, prefix: str) -> torch.nn.Module: ...
 
 
 class PPMissingLayer(torch.nn.Identity):
@@ -549,7 +593,7 @@ class PPMissingLayer(torch.nn.Identity):
         Wraps the input in a tuple if `self.return_tuple` is True.
         """
         input = args[0] if args else next(iter(kwargs.values()))
-        return (input, ) if self.return_tuple else input
+        return (input,) if self.return_tuple else input
 
 
 _CPU_OFFLOAD_BYTES = 0
@@ -579,8 +623,9 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
     uva_available = is_uva_available()
 
     if envs.VLLM_USE_V1:
-        assert uva_available, ("V1 CPU offloading requires"
-                               " uva (pin memory) support")
+        assert uva_available, (
+            "V1 CPU offloading requires" " uva (pin memory) support"
+        )
         uva_offloading = True
     else:
         uva_offloading = False
@@ -595,12 +640,14 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
             break
 
         # `torch.empty_like` does not support `pin_memory` argument
-        cpu_data = torch.empty_strided(size=p.data.size(),
-                                       stride=p.data.stride(),
-                                       dtype=p.data.dtype,
-                                       layout=p.data.layout,
-                                       device='cpu',
-                                       pin_memory=pin_memory)
+        cpu_data = torch.empty_strided(
+            size=p.data.size(),
+            stride=p.data.stride(),
+            dtype=p.data.dtype,
+            layout=p.data.layout,
+            device="cpu",
+            pin_memory=pin_memory,
+        )
         cpu_data.copy_(p.data)
         if not uva_offloading:
             p.data = cpu_data
@@ -622,10 +669,9 @@ def maybe_offload_to_cpu(module: torch.nn.Module) -> torch.nn.Module:
                 k: v.to(device, non_blocking=True)
                 for k, v in module.state_dict().items()
             }
-            output = functional_call(module,
-                                     device_state,
-                                     args=args,
-                                     kwargs=kwargs)
+            output = functional_call(
+                module, device_state, args=args, kwargs=kwargs
+            )
             module.forward = forward
             return output
 
@@ -644,14 +690,20 @@ def make_layers(
     """
     from vllm.distributed.parallel_state import get_pp_group
     from vllm.distributed.utils import get_pp_indices
-    start_layer, end_layer = get_pp_indices(num_hidden_layers,
-                                            get_pp_group().rank_in_group,
-                                            get_pp_group().world_size)
+
+    start_layer, end_layer = get_pp_indices(
+        num_hidden_layers,
+        get_pp_group().rank_in_group,
+        get_pp_group().world_size,
+    )
     modules = torch.nn.ModuleList(
-        [PPMissingLayer() for _ in range(start_layer)] + [
+        [PPMissingLayer() for _ in range(start_layer)]
+        + [
             maybe_offload_to_cpu(layer_fn(prefix=f"{prefix}.{idx}"))
             for idx in range(start_layer, end_layer)
-        ] + [PPMissingLayer() for _ in range(end_layer, num_hidden_layers)])
+        ]
+        + [PPMissingLayer() for _ in range(end_layer, num_hidden_layers)]
+    )
     return start_layer, end_layer, modules
 
 
@@ -671,7 +723,7 @@ def get_pp_missing_layer_names(model: torch.nn.Module) -> List[str]:
             # NOTE: the trailing dot is used to match the prefix of the layer.
             # without the dot, we could match a layer that is not missing,
             # e.g., 'encoder.layer.1' would match 'encoder.layer.11'
-            missing_layer_names.append(name + '.')
+            missing_layer_names.append(name + ".")
     _model_to_pp_missing_layer_names[model_id] = missing_layer_names
 
     return missing_layer_names
@@ -684,24 +736,27 @@ def is_pp_missing_parameter(name: str, model: torch.nn.Module) -> bool:
 
     return any(
         name.startswith(missing_layer_name)
-        for missing_layer_name in get_pp_missing_layer_names(model))
+        for missing_layer_name in get_pp_missing_layer_names(model)
+    )
 
 
 def make_empty_intermediate_tensors_factory(keys: List[str], hidden_size: int):
-
     def make_empty_intermediate_tensors(
         batch_size: int,
         context_size: int,
         dtype: torch.dtype,
         device: torch.device,
     ) -> IntermediateTensors:
-        return IntermediateTensors({
-            key:
-            torch.zeros((batch_size, context_size, hidden_size),
-                        dtype=dtype,
-                        device=device)
-            for key in keys
-        })
+        return IntermediateTensors(
+            {
+                key: torch.zeros(
+                    (batch_size, context_size, hidden_size),
+                    dtype=dtype,
+                    device=device,
+                )
+                for key in keys
+            }
+        )
 
     return make_empty_intermediate_tensors
 
@@ -735,8 +790,9 @@ def extract_layer_index(layer_name: str) -> int:
             int_vals.append(int(subname))
         except ValueError:
             continue
-    assert len(int_vals) == 1, (f"layer name {layer_name} should"
-                                " only contain one integer")
+    assert len(int_vals) == 1, (
+        f"layer name {layer_name} should" " only contain one integer"
+    )
     return int_vals[0]
 
 
