@@ -3850,4 +3850,3 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # need to do that manually.
                     sg.seq_group.prompt_logprobs = [None] + real_logprobs
         self.has_patched_prev_output = True
-
