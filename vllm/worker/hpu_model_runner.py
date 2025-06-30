@@ -2111,11 +2111,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
             encoder_seq_lens_tensor =
                 encoder_seq_lens_tensor.to(  # type: ignore
-                self.device, non_blocking=True)
+                    self.device, non_blocking=True)
 
 
         if self.interleaved_sliding_window is not None:
-            window_block_list = torch.tensor(window_block_list, dtype=torch.int, device='cpu')
+            window_block_list = torch.tensor(window_block_list,
+                                        dtype=torch.int, device='cpu')
             window_block_groups = torch.tensor(window_block_groups,
                                         dtype=torch.int,
                                         device='cpu')
@@ -3697,7 +3698,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
-                            execute_model_kwargs[\
+                            execute_model_kwargs[
                                     'graphed_multimodal_buckets'] =
                                 list(self.graphed_multimodal_buckets) 
                                 # set is unhasable and causes friction with
@@ -4075,7 +4076,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 logprobs has {len(delayed_prompt_logprobs)} entries!'''
             for sg, real_logprobs in zip(seq_groups, delayed_prompt_logprobs):
                 if real_logprobs is not None:
-                    # Prepending None just like in vllm.engine.output_processor\
+                    # Prepending None just like in vllm.engine.output_processor
                     # .single_step.single_step_process_prompt_logprob, but
                     # hence we are not going through async output processor
                     # with data from prompt in delayed sampling scenario we
