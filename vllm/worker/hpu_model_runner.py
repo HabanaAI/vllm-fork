@@ -2109,7 +2109,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
             cross_block_usage = cross_block_usage.to(  # type: ignore
                 self.device, non_blocking=True)
-            encoder_seq_lens_tensor =
+            encoder_seq_lens_tensor = \
                 encoder_seq_lens_tensor.to(  # type: ignore
                     self.device, non_blocking=True)
 
@@ -3699,7 +3699,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             execute_model_kwargs[
-                                    'graphed_multimodal_buckets'] =
+                                    'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets) 
                                 # set is unhasable and causes friction with
                                 # hpu graphs, hence turning it to a list
