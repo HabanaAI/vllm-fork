@@ -433,7 +433,9 @@ class HpuModelAdapter(torch.nn.Module):
         attn_meta = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
-        with set_forward_context(attn_meta, self.vllm_config, is_warmup):
+        with set_forward_context(attn_meta,
+                                 self.vllm_config,
+                                 is_warmup=is_warmup):
             if 'is_warmup' in kwargs:
                 kwargs.pop('is_warmup')
             hidden_states = self.model(*args, **kwargs)
