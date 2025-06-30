@@ -578,16 +578,21 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         )
         image_embeds = self.multi_modal_projector(image_features)
         if len(graphed_multimodal_buckets) > 1:
-            batch_breakdown = greedy_plan(pixel_values.shape[0], self.vision_buckets.multimodal_buckets)
+            batch_breakdown = greedy_plan(pixel_values.shape[0], \
+                    self.vision_buckets.multimodal_buckets)
             start_idx = 0
             image_embeds_multibatches = []
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
-                batch_sliced_image_features = image_features[start_idx:end_idx, ...]
+                batch_sliced_image_features = \
+                        image_features[start_idx:end_idx, ...]
                 if is_lazy:
-                    image_embeds_multibatches += [self.multi_modal_projector(batch_sliced_image_features, \
-                        bypass_hpu_graphs=i not in graphed_multimodal_buckets)]
+                    image_embeds_multibatches += \
+                            [self.multi_modal_projector(
+                                batch_sliced_image_features,
+                                bypass_hpu_graphs=i
+                                not in graphed_multimodal_buckets)]
                 else:
                     image_embeds_multibatches += \
                             [self.multi_modal_projector( \
@@ -608,7 +613,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         if image_input is None:
             return None
 
-        return self._process_image_input(image_input, kwargs.get('graphed_multimodal_buckets', []))
+        return self._process_image_input(image_input,
+                kwargs.get('graphed_multimodal_buckets', []))
 
     def get_input_embeddings(
         self,
@@ -722,7 +728,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             if not is_hpu:
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
-                global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
+                global_attn_mask = torch.where(img_mask == 2, 0,
+                        global_attn_mask)
             else:
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0,1,3,2)
@@ -733,11 +740,16 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_causal = torch.arange(seq_len, device = \
                         input_ids.device).unsqueeze(0) - \
                     img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
-                img_causal = torch.cat((img_causal[:,0:1]-1, img_causal[:,:-1]), dim=1)
-                img_causal = img_causal.clamp_(min=0, max=seq_len-1).unsqueeze(1).unsqueeze(3)
-                ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
+                img_causal = torch.cat((img_causal[:,0:1]-1, \
+                    img_causal[:,:-1]), dim=1)
+                img_causal = img_causal.clamp_(min=0, \
+                        max=seq_len-1).unsqueeze(1).unsqueeze(3)
+                ind = torch.arange(seq_len, \
+                        device=input_ids.device \
+                        ).unsqueeze(0).unsqueeze(1).unsqueeze(2)
                 img_mask[ind < img_causal] += 1
-                global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
+                global_attn_mask = torch.where(img_mask == 3, 0, \
+                        global_attn_mask)
             global_attn_masks.append(global_attn_mask)
             if self.sliding_window is not None:
                 # Create a local causal mask with sliding window (1024).

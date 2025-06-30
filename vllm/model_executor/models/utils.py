@@ -47,7 +47,8 @@ but unlike traditional coin change it might not be possible to make
 "batchsize" exactly, and we arent gunning for least number of "coins"
 '''
 def greedy_plan(batchsize, available_batchsizes):
-    available_batchsizes_sorted = sorted(available_batchsizes, key=lambda x:-x)  # sort descending
+    # sort descending
+    available_batchsizes_sorted = sorted(available_batchsizes, key=lambda x:-x)
     idx = 0
     left_to_process = batchsize
     result = []

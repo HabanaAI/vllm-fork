@@ -342,8 +342,10 @@ class HpuModelAdapter(torch.nn.Module):
                     self.model.vision_tower = htorch.hpu.wrap_in_hpu_graph(
                         self.model.vision_tower, disable_tensor_cache=True)
                 if hasattr(self.model, 'multi_modal_projector'):
-                    self.model.multi_modal_projector = htorch.hpu.wrap_in_hpu_graph(
-                        self.model.multi_modal_projector, disable_tensor_cache=True)
+                    self.model.multi_modal_projector = \
+                            htorch.hpu.wrap_in_hpu_graph( \
+                            self.model.multi_modal_projector, \
+                            disable_tensor_cache=True)
 
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
@@ -564,7 +566,8 @@ class HpuModelAdapter(torch.nn.Module):
                                                     device, dtype, False)
 
         if attn_metadata.window_block_list is not None:
-                attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
+                attn_metadata = self._set_block_mapping(attn_metadata,
+                                                    batch_size,
                                                     device, dtype,
                                                     True)
         return attn_metadata
@@ -613,10 +616,13 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
             if self.model_is_mrope:
-                image_input = self.model._parse_and_validate_image_input(**kwargs)
-                video_input = self.model._parse_and_validate_video_input(**kwargs)
+                image_input = self.model._parse_and_validate_image_input(
+                        **kwargs)
+                video_input = self.model._parse_and_validate_video_input(
+                        **kwargs)
                 inputs_embeds = self.model.get_input_embeddings_v0(
-                    input_ids, image_input=image_input, video_input=video_input)
+                    input_ids, image_input=image_input,
+                    video_input=video_input)
                 input_ids = None
                 kwargs.update({
                     'inputs_embeds': inputs_embeds,
@@ -1923,7 +1929,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
         if self.interleaved_sliding_window is not None:
-            window_block_groups = [[i] * len(bt) for i, bt in enumerate(window_block_tables)]
+            window_block_groups = [[i] * len(bt) for i, bt in \
+                    enumerate(window_block_tables)]
             window_block_usage = [[self.block_size] * (len(bt) - 1) + [lbu]
                         for bt, lbu in zip(block_tables, last_block_usage)
                         if bt]
@@ -2006,10 +2013,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = padding_fn(block_usage, 1)
 
         if self.interleaved_sliding_window is not None:
-            window_block_list = window_padding_fn(window_block_list, _PAD_BLOCK_ID)
+            window_block_list = window_padding_fn(window_block_list,
+                    _PAD_BLOCK_ID)
             window_block_groups = window_padding_fn(window_block_groups, -1)
             #window_block_usage = window_padding_fn(window_block_usage, 1)
-            window_block_usage = [1 if i == 0 else block_usage[idx] for idx, (i, j) in enumerate(zip(window_block_list, block_usage))]
+            window_block_usage = [1 if i == 0 else block_usage[idx] \
+                    for idx, (i, j) in \
+                    enumerate(zip(window_block_list, block_usage))]
 
         if is_enc_dec_model:
             if self.use_contiguous_pa:
@@ -2099,7 +2109,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
             cross_block_usage = cross_block_usage.to(  # type: ignore
                 self.device, non_blocking=True)
-            encoder_seq_lens_tensor = encoder_seq_lens_tensor.to(  # type: ignore
+            encoder_seq_lens_tensor =
+                encoder_seq_lens_tensor.to(  # type: ignore
                 self.device, non_blocking=True)
 
 
@@ -2549,7 +2560,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 raise ValueError("Expect mrope model to have vision_config")
             vision_config = self.get_model().config.vision_config
             if not hasattr(vision_config, "spatial_merge_size"):
-                raise ValueError("Expect mrope model to have spatial_merge_size")
+                raise ValueError(
+                        "Expect mrope model to have spatial_merge_size")
 
             spatial_merge_unit = vision_config.spatial_merge_size**2
             num_image_tokens = img_args // spatial_merge_unit
@@ -2572,7 +2584,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             s =  self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
-            num_image_tokens = self.model.model.config.mm_tokens_per_image * img_args
+            num_image_tokens = self.model.model.config.mm_tokens_per_image \
+                    * img_args
             multi_modal_data = {
             "pixel_values": pixel_values,
             "num_crops": torch.zeros([img_args], dtype=torch.int32)
@@ -3682,10 +3695,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 }
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
-                        if 'pixel_values' in execute_model_kwargs and self.is_mm_optimized:
-                            execute_model_kwargs['graphed_multimodal_buckets'] = \
+                        if 'pixel_values' in execute_model_kwargs and \
+                                self.is_mm_optimized:
+                            execute_model_kwargs[\
+                                    'graphed_multimodal_buckets'] =
                                 list(self.graphed_multimodal_buckets) 
-                                # set is unhasable and causes friction with 
+                                # set is unhasable and causes friction with
                                 # hpu graphs, hence turning it to a list
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
