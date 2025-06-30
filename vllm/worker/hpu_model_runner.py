@@ -22,7 +22,6 @@ import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 import vllm_hpu_extension.environment as environment
-import vllm_hpu_extension.kernels as kernels
 from attr import dataclass
 from vllm_hpu_extension.bucketing.common import get_bucketing_context
 from vllm_hpu_extension.ops import LoraMask as LoraMask
@@ -306,8 +305,6 @@ class HpuModelAdapter(torch.nn.Module):
         self.model = model
         self.prefill_use_fusedsdpa = get_config(
         ).prompt_attn_impl == 'fsdpa_impl'
-        HPUFusedSDPA = kernels.fsdpa()
-
         self.recompute_cos_sin = os.getenv('VLLM_COS_SIN_RECOMPUTE',
                                            'false').lower() in ['1', 'true']
         self.sampler = sampler
@@ -572,38 +569,6 @@ class HpuModelAdapter(torch.nn.Module):
                                                     True)
         return attn_metadata
 
-    def _prepare_cos_sin(self, positions):
-        """Navigate through the model using the provided path and call
-        the prepare_cos_sin method on the 'RotaryEmbedding' layer."""
-
-        current_module = self.model  # Start from the top level of the model
-
-        for layer in self.layer_names:
-            if layer.isdigit():  # Check if the layer is an index
-                layer = int(layer)
-
-            # Check if the current layer is a name in a module
-            if isinstance(
-                    layer,
-                    str) and not isinstance(layer, int):  # Name-based access
-                current_module = getattr(current_module, layer)
-            elif isinstance(layer,
-                            int):  # Indexed-based access (like ModuleList)
-                module_list = list(current_module._modules.values())
-                if layer >= len(module_list):
-                    # for MTP models, last layer is MTP layer
-                    layer = -1
-                current_module = module_list[layer]
-
-        # At the end, we should be at the RotaryEmbedding layer.
-        if hasattr(current_module, 'prepare_cos_sin'):
-            current_module.prepare_cos_sin(
-                positions, recompute_cos_sin=self.recompute_cos_sin)
-        else:
-            raise AttributeError(
-                "The module at the end of the path does not have \
-               a 'prepare_cos_sin' method.")
-
     def compute_input_embeddings_for_mm_optimized(self, **kwargs):
         input_ids = kwargs['input_ids']
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
@@ -679,10 +644,7 @@ class HpuModelAdapter(torch.nn.Module):
             kwargs.get("local_attn_masks"))
         if 'lora_mask' in kwargs:
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
-        if self.layer_names is not None and not self.model_is_mrope:
-            self._prepare_cos_sin(kwargs['positions'])
-        if self._rotary_prepare_cos_sin is not None and not \
-            self.model_is_mrope or self.is_mm_optimized:
+        if self._rotary_prepare_cos_sin is not None and not self.model_is_mrope:
             self._rotary_prepare_cos_sin(
                 kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
         if self.model_is_mrope or self.is_mm_optimized:
@@ -2723,7 +2685,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              is_prompt=False,
                              kv_caches=None,
                              is_pt_profiler_run=False,
-                             num_patches=UNSET_NUM_PATCHES,
+                             image_args=UNSET_IMAGE_ARGS,
                              is_lora_profile_run=True,
                              num_iters=1,
                              align_worker=True,
@@ -2758,7 +2720,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         align_worker=False,
                         is_dummy_run=False) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = is_dummy_run or self._use_graphs(num_patches)
+        use_graphs = is_dummy_run or self._use_graphs(img_args)
 
         scenario_name = ("warmup_"
                          f"{phase}_"
@@ -2996,7 +2958,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             #attribute for now.
             mm_outputs = self._warmup_multimodal_graph(
                 kv_caches=kv_caches,
-                available_mem=graph_free_mem,
                 starting_mem=0
                 if not hasattr(self, "mm_total_mem") \
                     else self.mm_total_mem, # type: ignore
@@ -3023,20 +2984,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         phase = 'Graph/Multimodal'
         num_candidates = len(self.multimodal_buckets)
         captured_all = True
-        multimodal_prompt_graph_mem_ratio = float(
-                os.environ.get('VLLM_GRAPH_MULTIMODAL_PROMPT_RATIO', '0.3'))
-        multimodal_avail_mem = (available_mem * multimodal_prompt_graph_mem_ratio)
 
         for idx, img_args in enumerate(self.multimodal_buckets):
             batch_size = 1  # Note: Multimodal buckets do not change with bs
             _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
             seq_len = max_seq_len
             batch_seq = 1 * img_args
-            # Graph memory usage is proportional to seq dimension in a batch
-            mem_estimate = batch_seq / total_batch_seq * total_mem
-            if mem_estimate >= multimodal_avail_mem:
-                captured_all = False
-                continue
             graphed_multimodal_bucket = img_args
             if graphed_multimodal_bucket in self.graphed_multimodal_buckets:
                 continue
