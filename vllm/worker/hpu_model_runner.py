@@ -644,10 +644,14 @@ class HpuModelAdapter(torch.nn.Module):
         if 'virtual_engine' in kwargs:
             virtual_engine = kwargs.pop('virtual_engine')
         input_ids = kwargs['input_ids']
-        global_attn_masks = kwargs.get("global_attn_masks")[0] \
-            if kwargs.get("global_attn_masks") else None
-        local_attn_masks = kwargs.get("local_attn_masks")[0] \
-            if kwargs.get("local_attn_masks") else None
+        global_attn_masks_list: Optional[List[torch.Tensor]] = \
+                kwargs.get("global_attn_masks")
+        global_attn_masks = global_attn_masks_list[0] \
+            if global_attn_masks_list else None
+        local_attn_masks_list: Optional[List[torch.Tensor]] = \
+                kwargs.get("local_attn_masks")
+        local_attn_masks = local_attn_masks_list[0] \
+            if local_attn_masks_list else None
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype, global_attn_masks, local_attn_masks)
@@ -2017,8 +2021,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     _PAD_BLOCK_ID)
             window_block_groups = window_padding_fn(window_block_groups, -1)
             #window_block_usage = window_padding_fn(window_block_usage, 1)
-            window_block_usage = [1 if i == 0 else block_usage[idx] \
-                    for idx, (i, j) in \
+            window_block_usage : List[int] = [1 if i == 0 else \
+                    block_usage[idx] for idx, (i, j) in \
                     enumerate(zip(window_block_list, block_usage))]
 
         if is_enc_dec_model:
@@ -2689,7 +2693,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             kv_caches=kv_caches,
             is_pt_profiler_run=False,
-            image_args=UNSET_IMG_ARGS,
+            img_args=UNSET_IMG_ARGS,
             is_lora_profile_run=True,
         )
 
@@ -2703,7 +2707,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              is_prompt=False,
                              kv_caches=None,
                              is_pt_profiler_run=False,
-                             image_args=UNSET_IMG_ARGS,
+                             img_args=UNSET_IMG_ARGS,
                              is_lora_profile_run=True,
                              num_iters=1,
                              align_worker=True,
