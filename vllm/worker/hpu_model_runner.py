@@ -1074,17 +1074,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = len(seq_group_metadata_list)
         ctx = seq_group_metadata_list[0].computed_block_nums
         ctx = 0 if ctx is None else sum(ctx)
+        batch_size_padded = real_batch_size
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
             seq_len = len(seq_group_metadata_list[0].seq_data[first_key].
                           prompt_token_ids)
             query_len = seq_len - ctx * self.block_size
+            batch_size_padded = self.bucketing_manager.find_prompt_bucket(
+                real_batch_size, query_len, ctx)[0]
         else:
-            query_len = 1
             ctx = 1  # TODO ctx is not importnat here?
-        closest_bucket = self.bucketing_manager.find_bucket(
-            real_batch_size, query_len, ctx, is_prompt)
-        batch_size_padded = closest_bucket[0]
+            batch_size_padded = self.bucketing_manager.find_decode_bucket(
+                real_batch_size, ctx)[0]
         if self.dp_awared_padding and (self.vllm_config.kv_transfer_config
                                        is None or not is_prompt):
             if self.is_driver_worker:
@@ -1468,8 +1469,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if is_enc_dec_model:
             real_batch_size = len(seq_group_metadata_list)
-            batch_size_padded = self.bucketing_manager.find_bucket(
-                real_batch_size, target_query_len, ctx, True)[0]
+            batch_size_padded = self.bucketing_manager.find_prompt_bucket(
+                real_batch_size, target_query_len, ctx)[0]
             batch_size_padding = batch_size_padded - real_batch_size
             if batch_size_padding > 0:
                 encoder_seq_lens.extend(encoder_seq_lens[0]
@@ -1477,8 +1478,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         real_num_seqs = len(query_lens)
         max_prompt_len = max(
-            self.bucketing_manager.find_bucket(len(seq_group_metadata_list),
-                                               target_query_len, ctx, True)[1],
+            self.bucketing_manager.find_prompt_bucket(
+                                       len(seq_group_metadata_list),
+                                       target_query_len, ctx)[1],
             self.block_size)
 
         if self.dp_awared_padding and\
@@ -1798,8 +1800,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         padding_fn = None
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
-            block_bucket_size = self.bucketing_manager.find_bucket(
-                len(seq_group_metadata_list), 1, block_bucket_size, False)[2]
+            block_bucket_size = self.bucketing_manager.find_decode_bucket(
+                len(seq_group_metadata_list), block_bucket_size)[2]
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     block_bucket_size = align_dp_groups(
@@ -1814,8 +1816,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
         else:
-            block_bucket_size = self.bucketing_manager.find_bucket(
-                len(seq_group_metadata_list), 1, len(block_list), False)[2]
+            block_bucket_size = self.bucketing_manager.find_decode_bucket(
+                len(seq_group_metadata_list), len(block_list))[2]
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     block_bucket_size = align_dp_groups(
@@ -1836,9 +1838,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     max(cross_block_list) +
                     1, len(cross_block_list)) if cross_block_list else 0
                 cross_block_bucket_size = \
-                    self.bucketing_manager.find_bucket(
-                        len(seq_group_metadata_list), 1,
-                        cross_block_bucket_size, False)[2]
+                    self.bucketing_manager.find_decode_bucket(
+                        len(seq_group_metadata_list),
+                        cross_block_bucket_size)[2]
                 indices = [None] * cross_block_bucket_size
                 for i, bid in enumerate(cross_block_list):
                     indices[bid] = i
@@ -1846,17 +1848,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     tensor, indices, pad_value)
             else:
                 cross_block_bucket_size = \
-                    self.bucketing_manager.find_bucket(
-                        len(seq_group_metadata_list), 1,
-                        len(cross_block_list), False)[2]
+                    self.bucketing_manager.find_decode_bucket(
+                        len(seq_group_metadata_list),
+                        len(cross_block_list))[2]
                 padding_fn = lambda tensor, pad_value: pad_list(
                     tensor, cross_block_bucket_size, pad_value)
 
             real_batch_size = len(seq_group_metadata_list)
             batch_size_padded = \
-                self.bucketing_manager.find_bucket(
-                        real_batch_size, 1,
-                        cross_block_bucket_size, False)[0]
+                self.bucketing_manager.find_decode_bucket(
+                        real_batch_size,
+                        cross_block_bucket_size)[0]
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     batch_size_padded = align_dp_groups(

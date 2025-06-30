@@ -917,7 +917,7 @@ class HPUModelRunner:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
             if self.enable_bucketing:
                 block_bucket_size = \
-                self.bucketing_manager.find_bucket(1, 1, block_bucket_size)[2]
+                self.bucketing_manager.find_decode_bucket(batch_size, block_bucket_size)[2]
             indices: list[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -927,8 +927,8 @@ class HPUModelRunner:
         else:
             if self.enable_bucketing:
                 block_bucket_size = \
-                    self.bucketing_manager.find_bucket(batch_size,
-                                            1, len(block_list), False)[2]
+                    self.bucketing_manager.find_decode_bucket(batch_size,
+                                                          len(block_list))[2]
             else:
                 block_bucket_size = len(block_list)
             padding_fn = lambda tensor, pad_value: pad_list(
@@ -961,8 +961,8 @@ class HPUModelRunner:
         seq = sum(seq_lens)
         num_blocks = sum(num_blocks)
         if self.enable_bucketing:
-            seq = self.bucketing_manager.find_bucket(1, seq, num_blocks,
-                                                     True)[1]
+            seq = self.bucketing_manager.find_prompt_bucket(1,
+                                             seq, num_blocks)[1]
             num_blocks = round_up(num_blocks, 32)
         return (1, seq, num_blocks)
 
@@ -972,10 +972,10 @@ class HPUModelRunner:
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
         if self.enable_bucketing:
             if bs <= self.max_prefill_batch_size:
-                bs = self.bucketing_manager.find_bucket(
-                    bs, seq, num_blocks, True)[0]
-            seq = self.bucketing_manager.find_bucket(bs, seq, num_blocks,
-                                                     True)[1]
+                bs = self.bucketing_manager.find_prompt_bucket(
+                    bs, seq, num_blocks)[0]
+            seq = self.bucketing_manager.find_prompt_bucket(bs, 
+                                             seq, num_blocks)[1]
             num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
 
@@ -1208,8 +1208,8 @@ class HPUModelRunner:
         # PAD FOR STATIC SHAPES.
         padded_batch_size: int
         if self.enable_bucketing:
-            padded_batch_size = self.bucketing_manager.find_bucket(
-                num_decodes, 1, sum(num_blocks), False)[0]
+            padded_batch_size = self.bucketing_manager.find_decode_bucket(
+                                num_decodes, sum(num_blocks))[0]
         else:
             padded_batch_size = num_decodes
 
@@ -1765,16 +1765,10 @@ class HPUModelRunner:
         return not self.model_config.enforce_eager
 
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
-        num_candidates = len(buckets)
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
-        graphed = list(c[:3] for c in self.graphed_buckets
-                       if c[3] == is_prompt)
-        if num_candidates == 0:
-            num_candidates = 1
-        msg = (f'{phase} captured:{len(graphed)} '
-               f'({100 * len(graphed) / num_candidates:.1f}%) '
+        msg = (f'{phase} captured:{len(buckets)} '
                f'used_mem:{format_bytes(total_mem)} '
-               f'buckets:{sorted(list(graphed))}')
+               f'buckets:{sorted(list(buckets))}')
         logger.info(msg)
 
     def warmup_scenario(self,
