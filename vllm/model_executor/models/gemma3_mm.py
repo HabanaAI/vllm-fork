@@ -547,10 +547,11 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         return Gemma3ImagePixelInputs(
             type="pixel_values",
             pixel_values=self._validate_pixel_values(pixel_values),
-            # TODO.. some bug in adding 1 here to num_crops.. currently assuming no panscan so just passing in torch.ones
+            # TODO.. some bug in adding 1 here to num_crops.. 
+            # currently assuming no panscan so just passing in torch.ones
             # seeing 0 + 1 = 0 here sometimes!! hence wrapping in torch.tensor
-            # num_patches=num_crops + 1,
-            num_patches= torch.ones(num_crops.shape, dtype=num_crops.dtype).to(pixel_values.device))
+            num_patches=num_crops + 1 if not is_hpu else \
+                torch.ones(num_crops.shape, dtype=num_crops.dtype).to(pixel_values.device))
 
     def _image_pixels_to_features(
         self,
@@ -636,7 +637,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
-            assert False, "hpu_model_runner should be computing inputs_embeds"
+            if is_hpu:
+                assert False, "hpu_model_runner should be computing inputs_embeds"
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
             inputs_embeds = self.get_input_embeddings(input_ids,
@@ -715,8 +717,12 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             # Consider the bidirectional attention between image tokens.
             img_mask = torch.zeros_like(global_attn_mask)
             img_pos = (input_token_ids == self.config.image_token_index)
-
-            if is_hpu:
+            if not is_hpu:
+                img_mask[:, :, :, img_pos] += 1
+                img_mask[:, :, img_pos, :] += 1
+                global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
+                global_attn_masks.append(global_attn_mask)
+            else:
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0,1,3,2)
                 img_mask[img_pos.unsqueeze(1)] += 1
@@ -730,12 +736,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).unsqueeze(1).unsqueeze(2)
                 img_mask[ind < img_causal] += 1
                 global_attn_mask = torch.where(img_mask == 3, 0, global_attn_mask)
-            else:
-                img_mask[:, :, :, img_pos] += 1
-                img_mask[:, :, img_pos, :] += 1
-                global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
-
-            global_attn_masks.append(global_attn_mask)
+                global_attn_masks = global_attn_mask
 
             if self.sliding_window is not None:
                 # Create a local causal mask with sliding window (1024).
@@ -745,10 +746,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 local_attn_mask = torch.where(local_attn_mask == 0,
                                             global_attn_mask, float("-inf"))
             if is_hpu:
-                global_attn_masks = global_attn_mask
                 local_attn_masks = local_attn_mask
             else:
-                global_attn_masks.append(global_attn_masks)
                 local_attn_masks.append(local_attn_mask)
         kwargs["global_attn_masks"] = global_attn_masks
         kwargs["local_attn_masks"] = local_attn_masks

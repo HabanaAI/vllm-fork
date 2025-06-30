@@ -404,9 +404,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         self.prefill_impl = get_config().prompt_attn_impl
 
-        self.fusedsdpa_ws_opt = 'window_size' in HPUFusedSDPA.forward.__code__.co_varnames \
-            if HPUFusedSDPA and self.fused_scaled_dot_product_attention is not None else False
-
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
             assert self.prefill_impl != 'flex_impl', \
@@ -551,12 +548,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
-            window_size = self.sliding_window
 
             if self.sliding_window:
                 attn_bias = attn_metadata.window_attn_bias
-                if not self.fusedsdpa_ws_opt:
-                    window_size = None
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
@@ -566,7 +560,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 attn_bias=attn_bias,
                 position_bias=position_bias,
                 valid_seq_lengths=attn_metadata.seq_lens_tensor,
-                #window_size=window_size,
                 **self.common_attention_args(block_list, key_cache,
                                              value_cache,
                                              attn_metadata.block_size))
