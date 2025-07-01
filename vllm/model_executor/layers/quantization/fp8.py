@@ -306,13 +306,15 @@ class Fp8LinearMethod(LinearMethodBase):
 
     def _gaudi_weight_wrapper(self, weight_loader):
         """Wrapper for Gaudi weight conversion."""
+
         def wrapper(*args, **kwargs):
             # args[0] is parameter, args[1] is loaded_weight
             # weights will be always in fp8, but scales will be in fp32,
-            # so we can detect it by dtype 
+            # so we can detect it by dtype
             loaded_weight = args[1]
             if loaded_weight.dtype == torch.float8_e4m3fn:
-                loaded_weight = (loaded_weight.float() * 0.5).to(torch.float8_e4m3fn)
+                loaded_weight = (loaded_weight.float() * 0.5).to(
+                    torch.float8_e4m3fn)
             else:
                 loaded_weight = (loaded_weight.data * 2.0)
             args = (args[0], loaded_weight) + args[2:]
@@ -320,7 +322,7 @@ class Fp8LinearMethod(LinearMethodBase):
             weight_loader(*args, **kwargs)
 
         return wrapper
-    
+
     def _maybe_pad_weight(self, weight: torch.Tensor) -> torch.Tensor:
         # Pad the weight tensor. This is an optimization on ROCm platform, which
         # can benefit from tensors located far enough from one another in memory
@@ -651,16 +653,17 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             layer.w13_input_scale = None
             layer.w2_input_scale = None
 
-
     def _gaudi_weight_wrapper(self, weight_loader):
         """Wrapper for Gaudi weight conversion."""
+
         def wrapper(*args, **kwargs):
             # args[0] is parameter, args[1] is loaded_weight
             # weights will be always in fp8, but scales will be in fp32,
-            # so we can detect it by dtype 
+            # so we can detect it by dtype
             loaded_weight = args[1]
             if loaded_weight.dtype == torch.float8_e4m3fn:
-                loaded_weight.data = (loaded_weight.data.float() * 0.5 ).to(torch.float8_e4m3fn)
+                loaded_weight.data = (loaded_weight.data.float() * 0.5).to(
+                    torch.float8_e4m3fn)
             else:
                 loaded_weight.data = (loaded_weight.data * 2.0)
             args = (args[0], loaded_weight) + args[2:]
