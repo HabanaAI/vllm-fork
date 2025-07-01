@@ -250,9 +250,13 @@ def add_forward_cache(module):
         fwd_key_cache.prepare()
         fwd_value_cache.prepare()
 
+    def break_graph(_module, _args, _output):
+        htorch.core.mark_step()
+
     modules = find_modules(module, ['MLP'])
     for m in modules:
         m.register_forward_pre_hook(trigger_fwd_cache)
+        m.register_forward_hook(break_graph)
 
 
 def modify_model_layers(module: torch.nn.Module,
