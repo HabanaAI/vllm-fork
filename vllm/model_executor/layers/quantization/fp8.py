@@ -308,7 +308,8 @@ class Fp8LinearMethod(LinearMethodBase):
         """Wrapper for Gaudi weight conversion."""
         def wrapper(*args, **kwargs):
             # args[0] is parameter, args[1] is loaded_weight
-            # weights will be always in fp8, but scales will be in fp32, so we can detect it by dtype 
+            # weights will be always in fp8, but scales will be in fp32,
+            # so we can detect it by dtype 
             loaded_weight = args[1]
             if loaded_weight.dtype == torch.float8_e4m3fn:
                 loaded_weight = (loaded_weight.float() * 0.5).to(torch.float8_e4m3fn)
@@ -655,7 +656,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         """Wrapper for Gaudi weight conversion."""
         def wrapper(*args, **kwargs):
             # args[0] is parameter, args[1] is loaded_weight
-            # weights will be always in fp8, but scales will be in fp32, so we can detect it by dtype 
+            # weights will be always in fp8, but scales will be in fp32,
+            # so we can detect it by dtype 
             loaded_weight = args[1]
             if loaded_weight.dtype == torch.float8_e4m3fn:
                 loaded_weight.data = (loaded_weight.data.float() * 0.5 ).to(torch.float8_e4m3fn)
