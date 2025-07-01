@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 ###############################################################################
 # Copyright (C) 2024-2025 Habana Labs, Ltd. an Intel Company
@@ -104,14 +105,14 @@ class HPUMLAAttentionBackend(AttentionBackend):
         dst_kv_cache: torch.Tensor,
         src_to_dst: torch.Tensor,
     ) -> None:
-        HPUPagedAttention.swap_blocks(src_kv_cache, dst_kv_cache, src_to_dst)
+        HPUPagedAttention.swap_blocks(src_kv_cache, dst_kv_cache, src_to_dsts)
 
     @staticmethod
     def copy_blocks(
         kv_caches: List[torch.Tensor],
-        src_to_dists: torch.Tensor,
+        src_to_dsts: torch.Tensor,
     ) -> None:
-        HPUPagedAttention.copy_blocks(kv_caches, src_to_dists)
+        HPUPagedAttention.copy_blocks(kv_caches, src_to_dsts)
 
 
 @dataclass
@@ -156,13 +157,14 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             blocksparse_params: Optional[Dict[str, Any]],
             logits_soft_cap: Optional[float],
             attn_type: str,
+            kv_sharing_target_layer_name: Optional[str] = None,
             # MLA Specific Arguments
             **kwargs) -> None:
         torch.nn.Module.__init__(self)
         MLACommonImpl.__init__(self, num_heads, head_size, scale, num_kv_heads,
                                alibi_slopes, sliding_window, kv_cache_dtype,
                                blocksparse_params, logits_soft_cap, attn_type,
-                               **kwargs)
+                               kv_sharing_target_layer_name, **kwargs)
         self.enable_fp8_attn = kv_cache_dtype == 'fp8_inc' and os.environ.get(
             'QUANT_CONFIG', None) is None
         self.matmul_qk = Matmul() if not self.enable_fp8_attn \
@@ -366,9 +368,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         blocksparse_params: Optional[Dict[str, Any]] = None,
         logits_soft_cap: Optional[float] = None,
         attn_type: str = AttentionType.DECODER,
+        kv_sharing_target_layer_name: Optional[str] = None,
         use_irope: bool = False,
     ) -> None:
         super(AttentionImpl, self).__init__()
+        if kv_sharing_target_layer_name is not None:
+            raise NotImplementedError("KV sharing is not supported in V0.")
         if use_irope:
             logger.warning_once(
                 "Using irope in HPU is not supported yet, it will fall back "
