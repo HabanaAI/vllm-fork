@@ -343,7 +343,7 @@ class HpuModelAdapter(torch.nn.Module):
     def _get_rotary_embedding_module(self, model: torch.nn.Module):
         """
         Dynamically get the RotaryEmbedding layer in the model.
-        This function will recursively search through the module
+        This function will recursively search through the module 
         hierarchy to find and return a RotaryEmbedding layer.
         If no such layer is found, it returns None.
         """
@@ -478,24 +478,7 @@ class HpuModelAdapter(torch.nn.Module):
         mask = torch.tril(tensor, diagonal=shift)
         mask = torch.triu(mask, diagonal=shift - window_size + 1)
         attn_bias = torch.log(mask)
-        '''
-        #TODO:causal + window size + q_len : accuracy and perf issue.
-        #Further need to be optimized when custom kernel is available.
-        query_lens_t = prefill_metadata.seq_lens_tensor
-        query_lens_t = query_lens_t.reshape(batch_size, 1)
 
-        tensor = torch.full((batch_size, 1, seq_len, seq_len), device=device,
-            dtype=dtype, fill_value=1)
-        mask = torch.tril(tensor, diagonal=shift)
-        len_mask = torch.arange(0, seq_len, device=device,
-            dtype=torch.int32).view(seq_len,1)
-        len_mask = len_mask.ge(query_lens_t.unsqueeze(-1)).view(batch_size,
-            1, seq_len, 1)
-        len_mask = torch.where(len_mask == False, 1, 0)
-        mask = mask.logical_and(len_mask)
-        mask = torch.triu(mask, diagonal=shift - window_size + 1)
-        attn_bias =torch.where(mask,0, -math.inf)
-        '''
         attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
 
         return attn_metadata
@@ -503,12 +486,12 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
                            is_window_block):
 
-        if not is_window_block:
-            block_usage = metadata.block_usage
-            block_groups = metadata.block_groups
-        else:
+        if is_window_block:
             block_usage = metadata.window_block_usage
             block_groups = metadata.window_block_groups
+        else:
+            block_usage = metadata.block_usage
+            block_groups = metadata.block_groups
 
         mask = torch.arange(0,
                             self.block_size,
@@ -532,27 +515,26 @@ class HpuModelAdapter(torch.nn.Module):
             oob_values = block_groups.lt(0)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
             block_groups.masked_fill_(oob_values, batch_size)
-            if not is_window_block:
-                metadata = custom_tuple_replace(metadata,
-                                                "TrimmedAttentionMetadata",
-                                                block_groups=block_groups)
-            else:
+            if is_window_block:
                 metadata = custom_tuple_replace(
                     metadata,
                     "TrimmedAttentionMetadata",
                     window_block_groups=block_groups)
-
+            else:
+                metadata = custom_tuple_replace(metadata,
+                                                "TrimmedAttentionMetadata",
+                                                block_groups=block_groups)
         block_mapping = block_mapping.to(dtype)
-        if not is_window_block:
-            metadata = custom_tuple_replace(metadata,
-                                            "TrimmedAttentionMetadata",
-                                            block_mapping=block_mapping,
-                                            attn_bias=attn_bias)
-        else:
+        if is_window_block:
             metadata = custom_tuple_replace(metadata,
                                             "TrimmedAttentionMetadata",
                                             window_block_mapping=block_mapping,
                                             window_attn_bias=attn_bias)
+        else:
+            metadata = custom_tuple_replace(metadata,
+                                            "TrimmedAttentionMetadata",
+                                            block_mapping=block_mapping,
+                                            attn_bias=attn_bias)
         return metadata
 
     def forward_update_meta_only(self, *args, **kwargs):

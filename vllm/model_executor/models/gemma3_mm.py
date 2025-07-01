@@ -573,7 +573,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             self.vision_tower,
             pixel_values,
         )
-
         image_embeds = self.multi_modal_projector(image_features)
 
         return [
@@ -667,7 +666,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 else:
                     end_idx = len(input_ids)
                 seq_lens.append(end_idx - start_idx)
-                kwargs["seq_lens"] = seq_lens
+            kwargs["seq_lens"] = seq_lens
 
         global_attn_masks = []
         local_attn_masks = []
