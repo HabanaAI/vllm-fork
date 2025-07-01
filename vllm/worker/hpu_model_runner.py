@@ -626,20 +626,24 @@ class PreparePromptMetadata(NamedTuple):
     multi_modal_kwargs: Optional[Dict[str, BatchedTensorInputs]]
     slot_mapping: List[List[int]]
     lora_ids: List[int]
+    token_types: torch.Tensor
 
     @classmethod
     def empty(cls):
-        return PreparePromptMetadata(input_tokens=[],
-                                     input_positions=[],
-                                     attn_metadata=None,
-                                     seq_lens=[],
-                                     query_lens=[],
-                                     lora_index_mapping=[],
-                                     lora_prompt_mapping=[],
-                                     lora_requests=set(),
-                                     multi_modal_kwargs=None,
-                                     slot_mapping=[],
-                                     lora_ids=[])
+        return PreparePromptMetadata(
+            input_tokens=[],
+            input_positions=[],
+            attn_metadata=None,
+            seq_lens=[],
+            query_lens=[],
+            lora_index_mapping=[],
+            lora_prompt_mapping=[],
+            lora_requests=set(),
+            multi_modal_kwargs=None,
+            slot_mapping=[],
+            lora_ids=[],
+            token_types=[],
+        )
 
 
 class PrepareDecodeMetadata(NamedTuple):
@@ -701,6 +705,7 @@ class ModelInputForHPU(ModelRunnerInputBase):
     is_first_multi_step: bool = True
     is_last_step: bool = True
     previous_hidden_states: Optional[torch.Tensor] = None
+    token_types: Optional[torch.Tensor] = None
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
@@ -1299,7 +1304,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         multi_modal_placeholder_maps: Dict[
             str, MultiModalPlaceholderMap] = collections.defaultdict(
                 MultiModalPlaceholderMap)
-
+        token_types: List[List[int]] = []
         if len(seq_group_metadata_list) == 0:
             return PreparePromptMetadata.empty()
 
@@ -1359,6 +1364,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
+
+            token_types_ids = seq_group_metadata.token_type_ids
+            token_types.append(token_types_ids) if token_types_ids else []
 
             seq_data_mrope_positions: Optional[List[List[int]]] = None
             if seq_group_metadata.multi_modal_data:
@@ -1483,6 +1491,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               pad=0,
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
+        token_types_tensor = make_cpu_tensor(
+            token_types,
+            max_len=max_prompt_len,
+            pad=0,
+            dtype=torch.long,
+            flat=self.use_merged_prefill) if token_types else None
         if self.model_is_mrope:
             input_positions = \
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
@@ -1541,7 +1555,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         slot_mapping = self.move_to_device(slot_mapping)
         context_lens_tensor = self.move_to_device(context_lens_tensor)
         attn_bias = self.move_to_device(attn_bias)
-
+        token_types_tensor = self.move_to_device(token_types_tensor)
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             block_list=prefix_block_list_tensor,
@@ -1566,17 +1580,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
                                                         device=self.device)
 
-        return PreparePromptMetadata(input_tokens=input_tokens_tensor,
-                                     input_positions=input_positions,
-                                     attn_metadata=attn_metadata,
-                                     seq_lens=seq_lens,
-                                     query_lens=query_lens,
-                                     lora_index_mapping=lora_index_mapping,
-                                     lora_prompt_mapping=lora_prompt_mapping,
-                                     lora_requests=lora_requests,
-                                     multi_modal_kwargs=multi_modal_kwargs,
-                                     slot_mapping=slot_mapping,
-                                     lora_ids=lora_ids)
+        return PreparePromptMetadata(
+            input_tokens=input_tokens_tensor,
+            input_positions=input_positions,
+            attn_metadata=attn_metadata,
+            seq_lens=seq_lens,
+            query_lens=query_lens,
+            lora_index_mapping=lora_index_mapping,
+            lora_prompt_mapping=lora_prompt_mapping,
+            lora_requests=lora_requests,
+            multi_modal_kwargs=multi_modal_kwargs,
+            slot_mapping=slot_mapping,
+            lora_ids=lora_ids,
+            token_types=token_types_tensor,
+        )
 
     def _prepare_decode(
         self,
@@ -1904,6 +1921,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_kwargs,
             slot_mapping,
             lora_ids,
+            token_types,
         ) = self._prepare_prompt(prefill_reqs)
         (
             decode_input_tokens,
@@ -2026,7 +2044,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             "num_prefills": num_prefills,
             "batch_type": batch_type,
             "seq_lens": seq_lens,
-            "query_lens": query_lens
+            "query_lens": query_lens,
+            "token_types": token_types
         }
         if prefill_attn_metadata is not None:
             metadata_dict.update(prefill_attn_metadata.asdict_zerocopy())
@@ -2047,7 +2066,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      multi_modal_kwargs=multi_modal_kwargs,
                                      real_batch_size=real_batch_size,
                                      batch_size_padded=batch_size_padded,
-                                     lora_ids=lora_ids), \
+                                     lora_ids=lora_ids,
+                                     token_types=token_types
+                                     ), \
                                      sampling_metadata
 
     def create_lora_mask(self, input_tokens: torch.Tensor, lora_ids: List[int],
@@ -2287,7 +2308,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_lora_profile_run=True,
         )
 
-        logger.info(f"profiling run with {max_batch_size=}, {max_seq_len=}")
+        msg = (f"profiling run with {max_batch_size=}, {max_seq_len=}")
+        logger.info(msg)
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
         return
@@ -3108,6 +3130,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             sampling_metadata = model_input.sampling_metadata
             real_batch_size = model_input.real_batch_size
             batch_size_padded = model_input.batch_size_padded
+            tensor_types = model_input.tensor_types
             assert input_tokens is not None
             assert input_positions is not None
             assert sampling_metadata is not None
@@ -3170,6 +3193,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 "intermediate_tensors": intermediate_tensors,
                 "lora_mask": lora_mask,
                 "virtual_engine": model_input.virtual_engine,
+                "tensor_types": tensor_types,
                 **(model_input.multi_modal_kwargs or {}),
             }
             if previous_hidden_states is not None:

@@ -92,6 +92,9 @@ class HPUPoolingModelRunner(
             "intermediate_tensors": intermediate_tensors,
             "lora_mask": lora_mask,
         }
+        if model_input.token_types is not None:
+            execute_model_kwargs.update(
+                {"token_type_ids": model_input.token_types})
 
         if htorch.utils.internal.is_lazy():
             execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
