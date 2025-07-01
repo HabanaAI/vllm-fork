@@ -463,6 +463,7 @@ class MPClient(EngineCoreClient):
         start_index = parallel_config.data_parallel_rank
         host = parallel_config.data_parallel_master_ip
 
+        if True: # TODO: the following lines hit indent error
             eng_id_bytes, data = sync_input_socket.recv_multipart()
             eng_id = int.from_bytes(eng_id_bytes, byteorder="little")
             if eng_id not in identities:
