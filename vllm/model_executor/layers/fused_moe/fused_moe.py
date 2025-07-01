@@ -976,14 +976,16 @@ def grouped_topk(hidden_states: torch.Tensor,
                  scoring_func: str = "softmax",
                  e_score_correction_bias: Optional[torch.Tensor] = None):
 
+    gating_output = gating_output.float()
+    if e_score_correction_bias is not None:
+        e_score_correction_bias = e_score_correction_bias.float()
+
     if scoring_func == "softmax":
         scores = torch.softmax(gating_output, dim=-1)
     elif scoring_func == "sigmoid":
         scores = gating_output.sigmoid()
     else:
         raise ValueError(f"Unsupported scoring function: {scoring_func}")
-    if current_platform.is_hpu():
-        htorch.core.mark_step()
 
     num_token = scores.shape[0]
     if e_score_correction_bias is not None:
@@ -991,8 +993,12 @@ def grouped_topk(hidden_states: torch.Tensor,
         # scores for expert selection but original scores for routing weights
         original_scores = scores
         scores = scores + e_score_correction_bias.unsqueeze(0)
-        group_scores = (scores.view(num_token, num_expert_group,
-                                    -1).topk(2, dim=-1)[0].sum(dim=-1))
+        
+        group_scores = scores.clone().reshape(num_token, num_expert_group, -1)
+        top1_val, top1_idx = torch.max(group_scores, dim=-1)
+        group_scores.scatter_(-1, top1_idx.unsqueeze(-1), torch.finfo(scores.dtype).min)
+        top2_val, top2_idx = torch.max(group_scores, dim=-1)
+        group_scores = top1_val + top2_val
     else:
         group_scores = scores.view(num_token, num_expert_group,
                                    -1).max(dim=-1).values  # [n, n_group]
