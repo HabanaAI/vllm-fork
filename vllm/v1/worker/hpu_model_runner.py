@@ -317,6 +317,105 @@ def get_path_to_rope(model: torch.nn.Module):
     return path_to_rope
 
 
+class OnlineDefragmenter:
+
+    def __init__(self):
+        self.threshold = 32
+
+    def _update_index(self, cur, is_free, block_usage):
+        if is_free:
+            change = 1
+            skip_value = False
+        else:
+            change = -1
+            skip_value = True
+        while block_usage[cur] == skip_value:
+            cur += change
+        return cur
+
+    def initialize(self, max_blocks, block_size):
+        self.block_translation = list(range(max_blocks))
+        self.block_size = block_size
+
+    def visualize_fragmentation(self, block_list):
+        num_blocks = len(self.block_translation)
+        used_blocks = set(block_list)
+        last_is_used = False
+        last_size = 1
+        regions = []
+        for i in range(1, num_blocks):
+            cur_is_used = i in used_blocks
+            if cur_is_used != last_is_used:
+                regions.append((last_is_used, last_size))
+                last_size = 1
+                last_is_used = cur_is_used
+            else:
+                last_size += 1
+        regions.append((last_is_used, last_size))
+        print(regions)
+
+    def swap_blocks(self, to_swap, kv_caches):
+        for src, dst in to_swap.items():
+            self.block_translation[src] = dst
+            self.block_translation[dst] = src
+        srcs, dsts = zip(*to_swap.items())
+        srcs = pad_list(list(srcs), self.threshold, itertools.repeat(-1))
+        dsts = pad_list(list(dsts), self.threshold, itertools.repeat(-1))
+        srcs = torch.tensor(srcs, dtype=torch.long, device='hpu')
+        dsts = torch.tensor(dsts, dtype=torch.long, device='hpu')
+
+        htorch.core.mark_step()
+        for cache in kv_caches:
+            for c in cache:
+                c = c.unflatten(0, (-1, self.block_size))
+                tmp = c.index_select(0, dsts)
+                c.index_copy_(0, dsts, c.index_select(0, srcs))
+                c.index_copy_(0, srcs, tmp)
+        htorch.core.mark_step()
+
+    def remap_blocks(self, block_tables_list, translation_fn=None):
+        if translation_fn is None:
+            translation_fn = lambda b: self.block_translation[b]
+        return [[translation_fn(b) for b in bl] for bl in block_tables_list]
+
+    def defragment(self, block_tables_list, kv_caches):
+        block_tables_list = self.remap_blocks(block_tables_list)
+        block_list = list(itertools.chain(*block_tables_list))
+        last_used = max(block_list)
+        fragmentation = last_used - len(block_list)
+        if fragmentation <= self.threshold:
+            print('skip')
+            return block_tables_list
+        block_usage = [False] * (last_used + 2)
+        block_usage[0] = True
+        for b in block_list:
+            block_usage[b] = True
+        first_free = 1
+        to_swap = {}
+        while True:
+            while block_usage[first_free]:
+                first_free += 1
+            while not block_usage[last_used]:
+                last_used -= 1
+            if first_free >= last_used:
+                break
+            to_swap[last_used] = first_free
+            first_free += 1
+            last_used -= 1
+            if len(to_swap) >= self.threshold:
+                break
+        if True:
+            msg = ', '.join(f'{s}<->{d}' for s, d in to_swap.items())
+            print(f'defrag[{len(to_swap)}]:', msg)
+            self.swap_blocks(to_swap, kv_caches)
+            block_tables_list = self.remap_blocks(block_tables_list,
+                                                  lambda b: to_swap.get(b, b))
+        return block_tables_list
+
+
+defragmenter = OnlineDefragmenter()
+
+
 class HpuModelAdapter(torch.nn.Module):
 
     def __init__(self, model, vllm_config, layer_names):
@@ -1329,6 +1428,9 @@ class HPUModelRunner:
             assert len(seq_block_table) == n
             block_tables_list.append(seq_block_table)
 
+        block_tables_list = defragmenter.defragment(block_tables_list,
+                                                    self.kv_caches)
+
         # CONTEXT_LENS [batch_size]
         block_list, block_groups, block_usage = \
             self.get_habana_paged_attn_buffers(
@@ -1591,6 +1693,17 @@ class HPUModelRunner:
         # Transfer [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] to CPU
         # On CPU, sanitize [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] -> [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2] # noqa
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
+
+        new = [req.block_ids for req in scheduler_output.scheduled_new_reqs]
+        cached = [
+            req.new_block_ids for req in scheduler_output.scheduled_cached_reqs
+        ]
+        new = list(itertools.chain(*new))
+        cached = list(itertools.chain(*cached))
+        if new:
+            print('NEW', new)
+        if cached:
+            print('CACHED', cached)
 
         batch_changed = self._update_states(scheduler_output)
         if not scheduler_output.total_num_scheduled_tokens:
@@ -2188,6 +2301,9 @@ class HPUModelRunner:
 
     @torch.inference_mode()
     def warmup_model(self) -> None:
+        kv_caches = self.kv_caches
+        max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
+        defragmenter.initialize(max_blocks, self.block_size)
         if not self.enable_bucketing:
             return
         prompt_profile_cfg, decode_profile_cfg = self._read_profiling_cfg()
@@ -2195,8 +2311,6 @@ class HPUModelRunner:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
         self.bucketing_ctx.generate_prompt_buckets()
-        kv_caches = self.kv_caches
-        max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
         self.bucketing_ctx.generate_decode_buckets(max_blocks)
 
         if not htorch.utils.internal.is_lazy(
