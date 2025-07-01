@@ -335,8 +335,8 @@ class HpuModelAdapter(torch.nn.Module):
         # This is to ensure that we keeps
         # the static and dynamic parts distinct.
         if htorch.utils.internal.is_lazy():
-            logger.info("[Multimodal] Wrapping Visual Model")
             if self.model_is_mrope and hasattr(self.model, 'visual'):
+                logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
 
@@ -2689,7 +2689,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             kv_caches=kv_caches,
             is_pt_profiler_run=False,
-            img_args=UNSET_IMG_ARGS,
+            img_args=UNSET_IMG_ARGS if self.is_mm_optimized or self.model_is_mrope else None,
             is_lora_profile_run=True,
         )
 
