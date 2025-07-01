@@ -662,10 +662,6 @@ class HPUModelRunner:
         # High-level profiler
         self.profiler = HabanaHighLevelProfiler()
 
-        # Delayed sampling
-        self.cached_step_outputs = []
-        self.cached_step_inputs = []
-
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
         Generates the KVCacheSpec by parsing the kv cache format from each
@@ -1643,7 +1639,6 @@ class HPUModelRunner:
                 sampler_output.sampled_token_ids.flatten())
             decode_sampled_requests.extend(
                 self.input_batch.req_ids[:num_decodes])
-            w
             htorch.core.mark_step()
         # From this point onward, all operations are done on CPU.
         # We already have tokens. Let's copy the data to
