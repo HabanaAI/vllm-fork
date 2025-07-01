@@ -303,9 +303,8 @@ class Fp8LinearMethod(LinearMethodBase):
                 layer.register_parameter("input_scale", scale)
             else:
                 layer.register_parameter("input_scale", None)
-                layer.register_parameter("input_scale", None)
 
-    def _gaudi_weight_wrapper(self, weight_loader: Callable):
+    def _gaudi_weight_wrapper(self, weight_loader):
         """Wrapper for Gaudi weight conversion."""
         def wrapper(*args, **kwargs):
             # args[0] is parameter, args[1] is loaded_weight
@@ -652,7 +651,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             layer.w2_input_scale = None
 
 
-    def _gaudi_weight_wrapper(self, weight_loader: Callable):
+    def _gaudi_weight_wrapper(self, weight_loader):
         """Wrapper for Gaudi weight conversion."""
         def wrapper(*args, **kwargs):
             # args[0] is parameter, args[1] is loaded_weight
