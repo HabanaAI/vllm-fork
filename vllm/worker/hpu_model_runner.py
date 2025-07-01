@@ -2704,8 +2704,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              is_prompt=False,
                              kv_caches=None,
                              is_pt_profiler_run=False,
-                             img_args=UNSET_IMG_ARGS
-                             if self.is_mm_optimized or self.model_is_mrope else None,
+                             img_args=UNSET_IMG_ARGS if self.is_mm_optimized
+                             or self.model_is_mrope else None,
                              is_lora_profile_run=True,
                              num_iters=1,
                              align_worker=True,
