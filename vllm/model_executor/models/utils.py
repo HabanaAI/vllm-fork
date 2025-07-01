@@ -28,7 +28,7 @@ WeightsMapping = Mapping[str, Optional[str]]
 '''
 Given a desired batchsize to process in terms of available_batchsizes
 Pick the largest available_batchsizes that can fit batchsize, and reiterate
-Fro example, if batchsize = 9, available batchsize is 4, 2
+For example, if batchsize = 9, available batchsize is 4, 2
 then: 4, 4, 2 will be used
  
 Note this is not optimal padding wastage wise
@@ -43,7 +43,7 @@ reduce the amount of total time)
 Seems similar to a "coin change" problem, where available_batchsizes are
 available denominations and batchsize is amount to be paid
 but unlike traditional coin change it might not be possible to make
-"batchsize" exactly, and we arent gunning for least number of "coins"
+"batchsize" exactly, and we aren't gunning for least number of "coins"
 '''
 
 
@@ -434,7 +434,7 @@ def _merge_multimodal_embeddings(
         htcore.mark_step()
         flattened = _flatten_embeddings(multimodal_embeddings)
         #TODO dynamic? is a list of varying length
-        # still.. torch.where migth be faster than boolean indexing?
+        # still.. torch.where might be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
         return inputs_embeds
 
