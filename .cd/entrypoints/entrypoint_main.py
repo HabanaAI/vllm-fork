@@ -33,6 +33,15 @@ class EntrypointMain:
         try:
             with open(self.config_file) as f:
                 config = yaml.safe_load(f)
+                # Load defaults if present, but it's optional
+                defaults = config.get("default", {})
+                if defaults is not None and not isinstance(defaults, dict):
+                    print(
+                        f"[ERROR] Section 'default' is not a dictionary in "
+                        f"'{self.config_file}'.",
+                        file=sys.stderr)
+                    sys.exit(1)
+                # Load the requested section
                 section = config.get(self.config_name)
                 if section is None:
                     print(
@@ -46,7 +55,10 @@ class EntrypointMain:
                         f"dictionary in '{self.config_file}'.",
                         file=sys.stderr)
                     sys.exit(1)
-                self.config_envs = section
+                # Merge defaults and section, section values take precedence
+                merged = dict(defaults) if defaults else {}
+                merged.update(section)
+                self.config_envs = merged
                 print(f"[INFO] Loaded configuration from file: "
                       f"{self.config_file}, section: {self.config_name}")
                 print("[INFO] The following parameters and values were loaded "
