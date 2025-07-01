@@ -403,7 +403,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             else ModuleFusedSDPA(HPUFusedSDPA)
 
         self.prefill_impl = get_config().prompt_attn_impl
-
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
             assert self.prefill_impl != 'flex_impl', \
@@ -567,16 +566,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
-            if not self.sliding_window:
-                block_list = attn_metadata.block_list
-                block_groups = attn_metadata.block_groups
-                block_mapping = attn_metadata.block_mapping
-                attn_bias = attn_metadata.attn_bias
-            else:
+            if self.sliding_window:
                 block_list = attn_metadata.window_block_list
                 block_groups = attn_metadata.window_block_groups
                 block_mapping = attn_metadata.window_block_mapping
                 attn_bias = attn_metadata.window_attn_bias
+            else:
+                block_list = attn_metadata.block_list
+                block_groups = attn_metadata.block_groups
+                block_mapping = attn_metadata.block_mapping
+                attn_bias = attn_metadata.attn_bias
 
             self.position_bias = None
             alibi_blocks = getattr(attn_metadata, 'alibi_blocks', None)
