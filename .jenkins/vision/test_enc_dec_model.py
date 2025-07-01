@@ -68,7 +68,7 @@ def get_input():
     img_question = "What is the content of this image?"
 
     return {
-        "image": image,
+        "image": [image],
         "question": img_question,
     }
 

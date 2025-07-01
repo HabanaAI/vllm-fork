@@ -579,7 +579,8 @@ class HpuModelAdapter(torch.nn.Module):
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
-        if attn_metadata.window_block_list is not None:
+        if hasattr(attn_metadata, 'window_block_list'
+                   ) and attn_metadata.window_block_list is not None:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, True)
         return attn_metadata
