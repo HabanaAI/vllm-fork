@@ -2935,7 +2935,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                       buckets,
                       is_prompt,
                       kv_caches,
-                      graph_free_mem,
                       starting_mem=0,
                       total_batch_seq=0.001):
         total_mem = starting_mem
@@ -3136,12 +3135,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
                         self.bucketing_ctx.prompt_buckets,
-                        True, kv_caches, graph_free_mem)
+                        True, kv_caches)
 
                     mem_post_decode, decode_batch_seq, decode_captured_all = \
                         self.warmup_graphs(
                         self.bucketing_ctx.decode_buckets,
-                        False, kv_caches, graph_free_mem)
+                        False, kv_caches)
                 else:
                     msg = (f"Using {format_bytes(graph_free_mem)}"
                            f"/{format_bytes(free_mem)} "
@@ -3151,13 +3150,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
                         self.bucketing_ctx.prompt_buckets,
-                        True, kv_caches, graph_free_mem)
+                        True, kv_caches)
                     if mem_post_prompt < graph_free_mem \
                         and not prompt_captured_all:
                         mem_post_prompt, _, prompt_captured_all = (
                             self.warmup_graphs(
                                 self.bucketing_ctx.prompt_buckets, True,
-                                kv_caches, graph_free_mem))
+                                kv_caches))
 
                 self.log_graph_warmup_summary(
                     self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
