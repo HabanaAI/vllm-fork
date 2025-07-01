@@ -12,7 +12,6 @@ from transformers.models.gemma3.processing_gemma3 import Gemma3ProcessorKwargs
 import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.models.module_mapping import MultiModelKeys
 from vllm.model_executor.sampling_metadata import SamplingMetadata
@@ -44,6 +43,8 @@ from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
+
+
 class Gemma3ImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     pixel_values: torch.Tensor
@@ -692,7 +693,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                     end_idx = len(input_ids)
                 seq_lens.append(end_idx - start_idx)
                 kwargs["seq_lens"] = seq_lens
-
 
         global_attn_masks = []
         local_attn_masks = []
