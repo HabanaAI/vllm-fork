@@ -101,9 +101,11 @@ class VisionBuckets:
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
             if is_batch_based:
-                multimodal_buckets = [1, 2, 4, 8] # batch sizes for gemma3
+                multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
             else:
-                multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544]
+                multimodal_buckets = [
+                    1600, 3136, 4096, 6400, 7744, 9216, 12544
+                ]
         else:
             multimodal_buckets = [int(i) for i in envvar.split(',')]
         self.multimodal_buckets = self._process_buckets(multimodal_buckets)
@@ -499,9 +501,10 @@ class HpuModelAdapter(torch.nn.Module):
             block_groups.masked_fill_(oob_values, batch_size)
 
             if not is_window_block:
-                metadata = custom_tuple_replace(metadata,
-                                                "TrimmedAttentionMetadata",
-                                                block_groups=block_groups)
+                metadata = custom_tuple_replace(
+                    metadata,
+                    "TrimmedAttentionMetadata",
+                    block_groups=block_groups)
             else:
                 metadata = custom_tuple_replace(metadata,
                                                 "TrimmedAttentionMetadata",
@@ -515,9 +518,9 @@ class HpuModelAdapter(torch.nn.Module):
                                             attn_bias=attn_bias)
         else:
             metadata = custom_tuple_replace(metadata,
-                                "TrimmedAttentionMetadata",
-                                window_block_mapping=block_mapping,
-                                window_attn_bias=attn_bias)
+                                            "TrimmedAttentionMetadata",
+                                            window_block_mapping=block_mapping,
+                                            window_attn_bias=attn_bias)
         return metadata
 
     def forward_update_meta_only(self, *args, **kwargs):
@@ -532,7 +535,10 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
-    def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
+    def _update_metadata(self,
+                         attn_metadata,
+                         batch_size,
+                         seq_len, device,
                          dtype,
                          global_attn_masks=None,
                          local_attn_masks=None):
@@ -566,17 +572,15 @@ class HpuModelAdapter(torch.nn.Module):
                                                     device, dtype, False)
 
         if attn_metadata.window_block_list is not None:
-                attn_metadata = self._set_block_mapping(attn_metadata,
-                                                    batch_size,
-                                                    device, dtype,
-                                                    True)
+                attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
+                                                        device, dtype, True)
         return attn_metadata
 
     def compute_input_embeddings_for_mm_optimized(self, **kwargs):
         input_ids = kwargs['input_ids']
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
-        inputs_embeds = self.model.get_input_embeddings(input_ids,
-                                                      vision_embeddings)
+        inputs_embeds = self.model.get_input_embeddings(
+            input_ids, vision_embeddings)
 
         if vision_embeddings is not None:
             input_ids = kwargs['input_ids']
@@ -617,11 +621,12 @@ class HpuModelAdapter(torch.nn.Module):
         with compile_only_mode_context_false():
             if self.model_is_mrope:
                 image_input = self.model._parse_and_validate_image_input(
-                        **kwargs)
+                    **kwargs)
                 video_input = self.model._parse_and_validate_video_input(
-                        **kwargs)
+                    **kwargs)
                 inputs_embeds = self.model.get_input_embeddings_v0(
-                    input_ids, image_input=image_input,
+                    input_ids,
+                    image_input=image_input,
                     video_input=video_input)
                 input_ids = None
                 kwargs.update({
@@ -1896,7 +1901,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_tables.append(block_table)
 
                 if self.interleaved_sliding_window is not None:
-                    sliding_window_blocks = (self.interleaved_sliding_window//
+                    sliding_window_blocks = (self.interleaved_sliding_window //
                                             self.block_size)
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
@@ -2533,36 +2538,22 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'attn_bias',
-            'seq_lens_tensor',
-            'context_lens_tensor',
-            'block_list',
-            'block_mapping',
-            'block_usage',
-            'slot_mapping',
-            'is_prompt',
-            'block_size',
-            'block_groups',
-            'input_positions',
-            'alibi_blocks',
-            'window_block_list',
-            'window_block_mapping',
-            'window_block_usage',
-            'window_block_groups',
-            'window_attn_bias'
+            'attn_bias', 'seq_lens_tensor', 'context_lens_tensor',
+            'block_list', 'block_mapping', 'block_usage', 'slot_mapping',
+            'is_prompt', 'block_size', 'block_groups', 'input_positions',
+            'alibi_blocks', 'window_block_list', 'window_block_mapping',
+            'window_block_usage', 'window_block_groups', 'window_attn_bias'
         ])
         return attention_metadata
 
-    def create_dummy_multi_modal_seq_group_metadata(self, group_id,
-                                                    img_args,
+    def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
                                                     lora_request):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
-            img_args = self.get_model(
-            ).vision_buckets.multimodal_buckets[-1]
+            img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
 
         if self.model_is_mrope:
             if not hasattr(self.get_model().config, "vision_config"):
@@ -2570,7 +2561,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             vision_config = self.get_model().config.vision_config
             if not hasattr(vision_config, "spatial_merge_size"):
                 raise ValueError(
-                        "Expect mrope model to have spatial_merge_size")
+                    "Expect mrope model to have spatial_merge_size")
 
             spatial_merge_unit = vision_config.spatial_merge_size**2
             num_image_tokens = img_args // spatial_merge_unit
@@ -2579,8 +2570,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             image_h = img_args // 8
             image_grid_thw = torch.tensor(
                 [[1, image_h, int(img_args / image_h)]])
-            pixel_values = torch.randn(image_grid_thw[0].prod(),
-                                    1176)  # TODO: figure out the variable name
+            pixel_values = torch.randn(
+                image_grid_thw[0].prod(),
+                1176)  # TODO: figure out the variable name
 
             assert pixel_values.shape[0] % 64 == 0, (
                 f"pixel_values must be sliced in 64 chunks, "
@@ -2591,14 +2583,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "image_grid_thw": image_grid_thw,
             }
         else:
-            s =  self.model.model.config.vision_config.image_size
+            s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
             num_image_tokens = self.model.model.config.mm_tokens_per_image \
                     * img_args
             multi_modal_data = {
-            "pixel_values": pixel_values,
-            "num_crops": torch.zeros([img_args], dtype=torch.int32)
-        }
+                "pixel_values": pixel_values,
+                "num_crops": torch.zeros([img_args], dtype=torch.int32)
+            }
 
         image_token_id = self.get_model().config.image_token_id
         prompt_token_ids = [image_token_id] * num_image_tokens
@@ -3709,8 +3701,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets) 
-                                # set is unhasable and causes friction with
-                                # hpu graphs, hence turning it to a list
+                            # set is unhasable and causes friction with
+                            # hpu graphs, hence turning it to a list
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs

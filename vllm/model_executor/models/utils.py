@@ -48,11 +48,12 @@ but unlike traditional coin change it might not be possible to make
 '''
 def greedy_plan(batchsize, available_batchsizes):
     # sort descending
-    available_batchsizes_sorted = sorted(available_batchsizes, key=lambda x:-x)
+    available_batchsizes_sorted = sorted(available_batchsizes,
+                                         key=lambda x:-x)
     idx = 0
     left_to_process = batchsize
     result = []
-    while(left_to_process > 0 and idx < len(available_batchsizes_sorted)):
+    while (left_to_process > 0 and idx < len(available_batchsizes_sorted)):
         #print(idx, left_to_process, result)
         if available_batchsizes_sorted[idx] <= left_to_process:
             result += [available_batchsizes_sorted[idx]]
@@ -60,7 +61,7 @@ def greedy_plan(batchsize, available_batchsizes):
         else:
             idx += 1
     if left_to_process > 0:
-        result += [available_batchsizes_sorted[-1]] # this will be padded
+        result += [available_batchsizes_sorted[-1]]  # this will be padded
     return result
 
 @dataclass
