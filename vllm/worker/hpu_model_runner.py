@@ -110,7 +110,6 @@ class VisionBuckets:
             multimodal_buckets = [int(i) for i in envvar.split(',')]
         self.multimodal_buckets = self._process_buckets(multimodal_buckets)
 
-
     def _process_buckets(self, buckets):
         if not self.is_batch_based:
             for bucket in buckets:
@@ -136,10 +135,12 @@ class Singleton(type):
             cls._instances[cls] = super().__call__(*args, **kwargs)
         return cls._instances[cls]
 
+
 def is_mm_optimized(model):
     return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
         if hasattr(model, 'model') else \
         'Gemma3ForConditionalGeneration' in str(type(model))
+
 
 def pad_flat_tensor(tensor, desired_size):
     assert tensor.dim() == 1, 'Only flat tensors are supported'
@@ -505,9 +506,10 @@ class HpuModelAdapter(torch.nn.Module):
                                                 "TrimmedAttentionMetadata",
                                                 block_groups=block_groups)
             else:
-                metadata = custom_tuple_replace(metadata,
-                                                "TrimmedAttentionMetadata",
-                                                window_block_groups=block_groups)
+                metadata = custom_tuple_replace(
+                    metadata,
+                    "TrimmedAttentionMetadata",
+                    window_block_groups=block_groups)
 
         block_mapping = block_mapping.to(dtype)
         if not is_window_block:
@@ -638,7 +640,6 @@ class HpuModelAdapter(torch.nn.Module):
                 return kwargs
             else:
                 return self.compute_input_embeddings_for_mm_optimized(**kwargs)
-
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -1936,7 +1937,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         assert len(block_list) == len(block_groups)
         assert len(block_list) == len(block_usage)
 
-
         if self.interleaved_sliding_window is not None:
             window_block_groups = [[i] * len(bt)
                                    for i, bt in enumerate(window_block_tables)]
@@ -2602,7 +2602,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
         multi_modal_data = MultiModalKwargs(multi_modal_data)
- 
+
         seq_group = SequenceGroupMetadata(
             request_id=str(group_id),
             is_prompt=True,
@@ -3700,7 +3700,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 self.is_mm_optimized:
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
-                                list(self.graphed_multimodal_buckets) 
+                                list(self.graphed_multimodal_buckets)
                             # set is unhasable and causes friction with
                             # hpu graphs, hence turning it to a list
                         execute_model_kwargs = \

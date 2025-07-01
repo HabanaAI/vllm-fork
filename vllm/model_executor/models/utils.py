@@ -25,7 +25,6 @@ logger = init_logger(__name__)
 
 WeightsMapping = Mapping[str, Optional[str]]
 """If a key maps to a value of `None`, the corresponding weight is ignored."""
-
 '''
 Given a desired batchsize to process in terms of available_batchsizes
 Pick the largest available_batchsizes that can fit batchsize, and reiterate
@@ -46,6 +45,8 @@ available denominations and batchsize is amount to be paid
 but unlike traditional coin change it might not be possible to make
 "batchsize" exactly, and we arent gunning for least number of "coins"
 '''
+
+
 def greedy_plan(batchsize, available_batchsizes):
     # sort descending
     available_batchsizes_sorted = sorted(available_batchsizes,
@@ -63,6 +64,7 @@ def greedy_plan(batchsize, available_batchsizes):
     if left_to_process > 0:
         result += [available_batchsizes_sorted[-1]]  # this will be padded
     return result
+
 
 @dataclass
 class WeightsMapper:
