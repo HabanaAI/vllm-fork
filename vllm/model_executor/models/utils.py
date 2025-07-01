@@ -49,7 +49,7 @@ but unlike traditional coin change it might not be possible to make
 def greedy_plan(batchsize, available_batchsizes):
     # sort descending
     available_batchsizes_sorted = sorted(available_batchsizes,
-                                         key=lambda x:-x)
+                                         key=lambda x: -x)
     idx = 0
     left_to_process = batchsize
     result = []
@@ -431,8 +431,7 @@ def _merge_multimodal_embeddings(
     if current_platform.is_hpu():
         htcore.mark_step()
         flattened = _flatten_embeddings(multimodal_embeddings)
-        #TODO dynamic.. maybe torch.where? however multimodal_embeddings 
-        # is a list of varying length
+        #TODO dynamic? is a list of varying length
         # still.. torch.where migth be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
         return inputs_embeds

@@ -562,10 +562,9 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         return image_features
 
     def _process_image_input(
-        self,
-        image_input: Gemma3ImageInputs,
-        graphed_multimodal_buckets = None
-    ) -> list[torch.Tensor]:
+            self,
+            image_input: Gemma3ImageInputs,
+            graphed_multimodal_buckets = None) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
         pixel_values = image_input["pixel_values"]
@@ -726,7 +725,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
                 global_attn_mask = torch.where(img_mask == 2, 0,
-                                                global_attn_mask)
+                                               global_attn_mask)
             else:
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0, 1, 3, 2)

@@ -501,10 +501,9 @@ class HpuModelAdapter(torch.nn.Module):
             block_groups.masked_fill_(oob_values, batch_size)
 
             if not is_window_block:
-                metadata = custom_tuple_replace(
-                    metadata,
-                    "TrimmedAttentionMetadata",
-                    block_groups=block_groups)
+                metadata = custom_tuple_replace(metadata,
+                                                "TrimmedAttentionMetadata",
+                                                block_groups=block_groups)
             else:
                 metadata = custom_tuple_replace(metadata,
                                                 "TrimmedAttentionMetadata",
@@ -538,7 +537,8 @@ class HpuModelAdapter(torch.nn.Module):
     def _update_metadata(self,
                          attn_metadata,
                          batch_size,
-                         seq_len, device,
+                         seq_len,
+                         device,
                          dtype,
                          global_attn_masks=None,
                          local_attn_masks=None):
@@ -572,8 +572,8 @@ class HpuModelAdapter(torch.nn.Module):
                                                     device, dtype, False)
 
         if attn_metadata.window_block_list is not None:
-                attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
-                                                        device, dtype, True)
+            attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
+                                                    device, dtype, True)
         return attn_metadata
 
     def compute_input_embeddings_for_mm_optimized(self, **kwargs):
@@ -1902,7 +1902,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 if self.interleaved_sliding_window is not None:
                     sliding_window_blocks = (self.interleaved_sliding_window //
-                                            self.block_size)
+                                             self.block_size)
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
 
