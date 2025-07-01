@@ -88,7 +88,8 @@ def get_input_long(num_image):
     return {
         "image": [fetch_image(IMAGE_URLS[i]) for i in range(num_image)],
         "question":
-        "What is the content of each image? Once done, write a story that combines them all.",
+        "What is the content of each image? "
+        "Once done, write a story that combines them all.",
     }
 
 
@@ -128,10 +129,7 @@ def test_enc_dec_model(record_xml_attribute, record_property):
         record_xml_attribute("name", testname)
 
         num_image = config.get('limit_mm_per_prompt_image', 1)
-        if num_image == 1:
-            mm_input = get_input()
-        else:
-            mm_input = get_input_long(num_image)
+        mm_input = get_input() if num_image == 1 else get_input_long(num_image)
         image = mm_input["image"]
         question = mm_input["question"]
         llm, prompt = launch_enc_dec_model(config, question, image)
