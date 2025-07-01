@@ -1933,11 +1933,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
         if self.interleaved_sliding_window is not None:
-            window_block_groups = [[i] * len(bt) for i, bt in \
-                    enumerate(window_block_tables)]
-            window_block_usage = [[self.block_size] * (len(bt) - 1) + [lbu]
-                        for bt, lbu in zip(block_tables, last_block_usage)
-                        if bt]
+            window_block_groups = [[i] * len(bt)
+                                   for i, bt in enumerate(window_block_tables)]
+            window_block_usage = [
+                [self.block_size] * (len(bt) - 1) + [lbu]
+                for bt, lbu in zip(block_tables, last_block_usage) if bt
+            ]
 
             window_block_list = flatten(window_block_tables)
             window_block_groups = flatten(window_block_groups)
@@ -1992,6 +1993,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
+
             if self.interleaved_sliding_window is not None:
                 window_indices: List[Any]
                 window_indices = [None] * block_bucket_size
@@ -2018,12 +2020,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if self.interleaved_sliding_window is not None:
             window_block_list = window_padding_fn(window_block_list,
-                    _PAD_BLOCK_ID)
+                                                  _PAD_BLOCK_ID)
             window_block_groups = window_padding_fn(window_block_groups, -1)
             #window_block_usage = window_padding_fn(window_block_usage, 1)
-            window_block_usage : List[int] = [1 if i == 0 else \
-                    block_usage[idx] for idx, (i, j) in \
-                    enumerate(zip(window_block_list, block_usage))]
+            window_block_usage = [
+                [1] if i == 0 else [block_usage[idx]]
+                for idx, (i,
+                          j) in enumerate(zip(window_block_list, block_usage))
+            ]
 
         if is_enc_dec_model:
             if self.use_contiguous_pa:
@@ -2117,19 +2121,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 encoder_seq_lens_tensor.to(  # type: ignore
                     self.device, non_blocking=True)
 
-
         if self.interleaved_sliding_window is not None:
             window_block_list = torch.tensor(window_block_list,
-                                        dtype=torch.int, device='cpu')
+                                             dtype=torch.int,
+                                             device='cpu')
             window_block_groups = torch.tensor(window_block_groups,
-                                        dtype=torch.int,
-                                        device='cpu')
+                                               dtype=torch.int,
+                                               device='cpu')
             window_block_usage = torch.tensor(window_block_usage,
-                                    dtype=self.model_config.dtype,
-                                    device='cpu')
+                                              dtype=self.model_config.dtype,
+                                              device='cpu')
 
             window_block_list = window_block_list.to(  # type: ignore
-            self.device, non_blocking=True)
+                self.device, non_blocking=True)
             window_block_groups = window_block_groups.to(  # type: ignore
                 self.device, non_blocking=True)
             window_block_usage = window_block_usage.to(  # type: ignore
