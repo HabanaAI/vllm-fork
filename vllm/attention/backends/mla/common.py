@@ -1165,7 +1165,7 @@ class MLACommonImpl(MLAAttentionImpl[T], Generic[T]):
                         return layer.weight_scale
 
                     scales = get_scales(layer)
-                    if len(scales.shape) == 1:
+                    if len(scales.shape) < 2:
                         ret = (layer.weight.to(act_dtype) *
                                scales.unsqueeze(1)).to(act_dtype)
                         return ret
