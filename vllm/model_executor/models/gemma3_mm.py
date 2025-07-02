@@ -555,19 +555,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 torch.ones(num_crops.shape, \
                 dtype=num_crops.dtype).to(pixel_values.device))
 
-    def _image_pixels_to_features(
-            self,
-            vision_tower: SiglipVisionModel,
-            pixel_values: torch.Tensor
-    ) -> torch.Tensor:
+    def _image_pixels_to_features(self, vision_tower: SiglipVisionModel,
+                                  pixel_values: torch.Tensor) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
         image_features = vision_tower(pixel_values.to(dtype=target_dtype))
         return image_features
 
-    def _process_image_input(
-            self,
-            image_input: Gemma3ImageInputs
-    ) -> list[torch.Tensor]:
+    def _process_image_input(self, image_input: Gemma3ImageInputs) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
         pixel_values = image_input["pixel_values"]
