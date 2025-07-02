@@ -2,10 +2,10 @@
 """A GPU worker class."""
 import contextlib
 import gc
+import gzip
+import json
 import os
 import queue
-import json
-import gzip
 import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Optional
@@ -95,7 +95,7 @@ class HPUWorker:
         self.gc_track_recompiles = bool(
             "PT_HPU_METRICS_GC_DETAILS" in os.environ
             and bool_helper(os.getenv("PT_HPU_METRICS_GC_DETAILS")))
-    
+
     def full_trace_handler(self, dir_name, use_gzip=False):
 
         def handler_fn(prof) -> None:
@@ -168,8 +168,9 @@ class HPUWorker:
                                             self.local_rank)
         # Set random seed.
         set_random_seed(self.model_config.seed)
-        self.model_runner = HPUModelRunner(vllm_config=self.vllm_config, 
-                                           is_driver_worker=self.is_driver_worker)
+        self.model_runner = HPUModelRunner(
+            vllm_config=self.vllm_config,
+            is_driver_worker=self.is_driver_worker)
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
@@ -301,7 +302,7 @@ class HPUWorker:
             output = self.model_runner.execute_model(scheduler_output)
         # TODO(woosuk): Send the output to the engine process.
         return output if self.rank == 0 else None
-    
+
     def profile(self, is_start: bool = True):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
