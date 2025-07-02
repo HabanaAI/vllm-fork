@@ -70,6 +70,9 @@ class SchedulingBudget:
         # been cached.
         assert num_new_tokens >= 0
         assert num_new_seqs != 0
+        # can schedule the first sequence if the budget is empty
+        if self.num_batched_tokens == 0 and self.num_curr_seqs == 0:
+            return num_new_seqs <= self.max_num_seqs
         return (self.num_batched_tokens + num_new_tokens <= self.token_budget
                 and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs)
 
@@ -193,7 +196,11 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         new_max_seq_len = max(max(self._max_seq_len, max_seq_len), 1)
         padding_fn = self._padding_fn_selector()
         num_new_padded_tokens = padding_fn(new_batch_size, new_max_seq_len)
-        result = num_new_padded_tokens <= self.token_budget
+        if self.num_batched_tokens == 0 and self.num_curr_seqs == 0:
+            # can schedule the first sequence if the budget is empty
+            result = True
+        else:
+            result = num_new_padded_tokens <= self.token_budget
         if self.max_num_prefill_seqs is not None and result:
             result = self._num_curr_prefill_seqs + num_new_seqs \
                 <= self.max_num_prefill_seqs
@@ -1032,7 +1039,13 @@ class Scheduler:
                 num_prompt_tokens = waiting_seqs[0].get_len()
                 assert num_new_tokens == num_prompt_tokens
 
-            prompt_limit = self._get_prompt_limit(seq_group)
+            max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
+            max_model_len = self.scheduler_config.max_model_len
+            if seq_group.lora_request and seq_group.lora_request.long_lora_max_len:
+                assert max_model_len <= seq_group.lora_request.long_lora_max_len
+                prompt_limit = seq_group.lora_request.long_lora_max_len
+            else:
+                prompt_limit = max_model_len
             if num_new_tokens > prompt_limit:
                 logger.warning(
                     "Input prompt (%d tokens) is too long"
@@ -1040,6 +1053,12 @@ class Scheduler:
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 ignored_seq_groups.append(seq_group)
+                waiting_queue.popleft()
+                continue
+
+            # skip long sequence if the scheduled sequence group is not empty
+            if num_new_tokens > max_num_batched_tokens and seq_groups:
+                leftover_waiting_sequences.appendleft(seq_group)
                 waiting_queue.popleft()
                 continue
 
@@ -1206,8 +1225,6 @@ class Scheduler:
                     running_scheduled.swapped_out) == 0:
                 swapped_in = self._schedule_swapped(budget, curr_loras)
 
-        assert (budget.num_batched_tokens
-                <= self.scheduler_config.max_num_batched_tokens)
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
 
         # Update waiting requests.
