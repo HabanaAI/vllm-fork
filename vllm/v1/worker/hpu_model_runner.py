@@ -580,7 +580,8 @@ class HabanaProfilerCounterHelper:
         # KV cache might not be created yet (e.g. for profiling run)
         if cache_config.num_gpu_blocks is not None and \
             cache_config.num_gpu_blocks != 0:
-            seq_lens = self.prompt_real_seq_lens[prompt_batch_idx] if is_prompt \
+            seq_lens = self.prompt_real_seq_lens[prompt_batch_idx] \
+                if is_prompt \
                 else self.decode_real_seq_lens
             cache_num_blocks_used = [
                 math.ceil(sl / cache_config.block_size) for sl in seq_lens
@@ -957,7 +958,7 @@ class HPUModelRunner:
 
         if self.profiler.enabled:
             self.profiler_counter_helper.capture_decode_seq_stats(
-              num_computed_tokens_decode)
+                num_computed_tokens_decode)
 
         # Traverse prompts
         prompt_req_ids = []
@@ -1735,7 +1736,7 @@ class HPUModelRunner:
                     cache_config=self.cache_config,
                     duration=event_end - self.event_start,
                     seq_len=self._seq_len(decode_data.attn_metadata),
-                    batch_size_padded=decode_data.token_ids.size(0),
+                    batch_size_padded=decode_data.token_ids.size(0),  # type: ignore
                     real_batch_size=decode_data.num_decodes,
                     prompt_batch_idx=None,
                     is_prompt=False)
@@ -1752,7 +1753,7 @@ class HPUModelRunner:
                 for tensor in decode_sampled_token_ids
             ]
             sampled_token_ids_list = torch.cat(
-              decode_sampled_token_ids + prefill_sampled_token_ids).tolist()
+                decode_sampled_token_ids + prefill_sampled_token_ids).tolist()
             sampled_token_requests = \
                 decode_sampled_requests + prefill_sampled_requests
             max_req_index = max(self.input_batch.req_id_to_index.values())
@@ -1968,7 +1969,7 @@ class HPUModelRunner:
                          f"seq{query_seq_len}_"
                          f"ctx{num_blocks}_"
                          f"graphs{'T' if use_graphs else 'F'}")
-    
+
         input_ids = torch.zeros((batch_size, query_seq_len),
                                 dtype=torch.int32,
                                 device='cpu')
