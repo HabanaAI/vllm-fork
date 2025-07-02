@@ -561,7 +561,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         image_features = vision_tower(pixel_values.to(dtype=target_dtype))
         return image_features
 
-    def _process_image_input(self, image_input: Gemma3ImageInputs) -> list[torch.Tensor]:
+    def _process_image_input(
+            self, image_input: Gemma3ImageInputs) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
         pixel_values = image_input["pixel_values"]
