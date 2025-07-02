@@ -15,7 +15,7 @@ from vllm.model_executor.pooling_metadata import (PoolingMetadata,
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
 from vllm.transformers_utils.config import (
     get_cross_encoder_activation_function)
-
+from vllm.model_executor.custom_op import CustomOp
 
 class PoolingType(IntEnum):
     """Enumeration for different types of pooling methods."""
@@ -238,6 +238,13 @@ class PoolerHead(nn.Module):
     def forward(self, pooled_data: Union[list[torch.Tensor], torch.Tensor],
                 pooling_metadata: PoolingMetadata):
 
+        # Using float32 in PoolerHead
+        if isinstance(pooled_data, list):
+            for i in range(len(pooled_data)):
+                pooled_data[i] = pooled_data[i].to(torch.float32)
+        else:
+            pooled_data = pooled_data.to(torch.float32)
+
         dimensions_list = [
             pooling_param.dimensions if pooling_param is not None else None
             for _, pooling_param in pooling_metadata.seq_groups
@@ -301,8 +308,9 @@ class Pooler(nn.Module):
         )
 
 
-class ClassifierPooler(nn.Module):
-    """A pooling layer for classification tasks.
+@CustomOp.register("classifier_pooler")
+class ClassifierPooler(CustomOp):
+    """A layer that pools specific information from hidden states.
 
     This layer does the following:
     1. Applies a classification layer to the hidden states.
@@ -333,13 +341,12 @@ class ClassifierPooler(nn.Module):
             raise NotImplementedError(f"task={config.task!r} is not supported"
                                       " with the classification pooler")
 
-    def forward(
+    def forward_native(
         self,
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> PoolerOutput:
         """Pools sentence pair scores from the hidden_states."""
-
         prompt_lens = PoolingTensors.from_pooling_metadata(
             pooling_metadata, hidden_states.device).prompt_lens
 
@@ -361,6 +368,34 @@ class ClassifierPooler(nn.Module):
         if self.pooler is not None:
             # apply classifier once on the full batch if possible
             pooled_output = self.classifier(pooled_output)
+
+        scores = self.default_activation_function(pooled_output).squeeze(-1)
+
+        pooled_outputs = [PoolingSequenceGroupOutput(data) for data in scores]
+        return PoolerOutput(outputs=pooled_outputs)
+
+    def forward_hpu(
+        self,
+        hidden_states: torch.Tensor,
+        pooling_metadata: PoolingMetadata,
+    ) -> PoolerOutput:
+        """Pools sentence pair scores from the hidden_states."""
+
+        prompt_lens = PoolingTensors.from_pooling_metadata(
+            pooling_metadata, hidden_states.device).prompt_lens
+
+        #hidden_states [batch_size*seq_len,hidden_size] =>
+        # [batch_size, seq_len,hidden_size]
+        hidden_states = hidden_states.view(len(prompt_lens), -1,
+                                           hidden_states.shape[-1])
+        if self.pooler is not None:
+            pooled_output = self.pooler(hidden_states)
+        else:
+            pooled_output = self.classifier(hidden_states)  #for Robert
+
+        if self.pooler is not None:
+            # apply classifier once on the full batch if possible
+            pooled_output = self.classifier(pooled_output)  #for Robert
 
         scores = self.default_activation_function(pooled_output).squeeze(-1)
 
