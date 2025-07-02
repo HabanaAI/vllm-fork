@@ -54,13 +54,6 @@ class ForwardContext:
 _forward_context: Optional[ForwardContext] = None
 
 
-def is_hpu_warmup(attn_metadata) -> bool:
-    if not current_platform.is_hpu():
-        return False
-    else:
-        return hasattr(attn_metadata, 'is_warmup') and attn_metadata.is_warmup
-
-
 def get_forward_context() -> ForwardContext:
     """Get the current forward context."""
     assert _forward_context is not None, (
@@ -156,9 +149,10 @@ def set_forward_context(attn_metadata: Any,
     # KVConnector: trigger (possibly async) load before forward.
     # Each attn layer will block until the reading is complete.
     trigger_kv_transfer = (attn_metadata is not None
-                           and not is_hpu_warmup(attn_metadata)
                            and has_kv_transfer_group()
-                           and is_v1_kv_transfer_group())
+                           and is_v1_kv_transfer_group()
+                           and not (hasattr(attn_metadata, 'is_warmup')
+                                    and attn_metadata.is_warmup))
     if trigger_kv_transfer:
         kv_connector = get_kv_transfer_group()
         assert isinstance(kv_connector, KVConnectorBase_V1)
