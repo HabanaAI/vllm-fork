@@ -55,6 +55,8 @@ _TYPE_CACHE: dict[str, dict[str, Any]] = {}
 
 VLLM_PREFETCH_CACHE = os.environ.get('VLLM_PREFETCH_CACHE',
                                      'f').lower()[0] in ['t', '1']
+VLLM_DEFRAGMENT_CACHE = os.environ.get('VLLM_DEFRAGMENT_CACHE',
+                                       'f').lower()[0] in ['t', '1']
 
 
 def setup_profiler(warmup, active):
@@ -321,96 +323,108 @@ class OnlineDefragmenter:
 
     def __init__(self):
         self.threshold = 32
+        self.used_blocks = set()
+        self.req_blocks = {}
+        self.fwd_mapping_table = []
+        self.bwd_mapping_table = []
+        self.kv_caches = None
+        self.block_size = None
+        self.enabled = VLLM_DEFRAGMENT_CACHE
 
-    def _update_index(self, cur, is_free, block_usage):
-        if is_free:
-            change = 1
-            skip_value = False
-        else:
-            change = -1
-            skip_value = True
-        while block_usage[cur] == skip_value:
-            cur += change
-        return cur
-
-    def initialize(self, max_blocks, block_size):
-        self.block_translation = list(range(max_blocks))
+    def initialize(self, kv_caches, block_size):
+        self.kv_caches = kv_caches
         self.block_size = block_size
 
-    def visualize_fragmentation(self, block_list):
-        num_blocks = len(self.block_translation)
-        used_blocks = set(block_list)
-        last_is_used = False
-        last_size = 1
-        regions = []
-        for i in range(1, num_blocks):
-            cur_is_used = i in used_blocks
-            if cur_is_used != last_is_used:
-                regions.append((last_is_used, last_size))
-                last_size = 1
-                last_is_used = cur_is_used
-            else:
-                last_size += 1
-        regions.append((last_is_used, last_size))
-        print(regions)
+    def extend_mapping_table(self, block_id):
+        if len(self.fwd_mapping_table) <= block_id:
+            self.fwd_mapping_table.extend(
+                range(len(self.fwd_mapping_table), block_id + 1))
+            self.bwd_mapping_table.extend(
+                range(len(self.bwd_mapping_table), block_id + 1))
 
-    def swap_blocks(self, to_swap, kv_caches):
-        for src, dst in to_swap.items():
-            self.block_translation[src] = dst
-            self.block_translation[dst] = src
-        srcs, dsts = zip(*to_swap.items())
+    def map(self, block_id):
+        if not self.enabled:
+            return block_id
+        return self.fwd_mapping_table[block_id]
+
+    def map_all(self, block_table_list):
+        return [[self.map(b) for b in bl] for bl in block_table_list]
+
+    def unmap(self, block_id):
+        return self.bwd_mapping_table[block_id]
+
+    def update_mapping(self, orig_block, new_block):
+        self.fwd_mapping_table[orig_block] = new_block
+        self.bwd_mapping_table[new_block] = orig_block
+
+    def update(self, new_blocks, finished_reqs):
+        if not self.enabled:
+            return
+        if len(finished_reqs) == 0 and len(new_blocks) == 0:
+            return
+        for req_id, blocks in new_blocks.items():
+            self.req_blocks.setdefault(req_id, []).extend(blocks)
+            self.extend_mapping_table(max(blocks))
+            for b in blocks:
+                self.used_blocks.add(self.map(b))
+        for req_id in finished_reqs:
+            for b in self.req_blocks[req_id]:
+                self.used_blocks.remove(self.map(b))
+            del self.req_blocks[req_id]
+
+    def free_blocks(self):
+        last = 1
+        for used_b in sorted(self.used_blocks):
+            for candidate in range(last, used_b):
+                yield candidate
+            last = used_b + 1
+        for candidate in itertools.count(last):
+            yield candidate
+
+    def defragment(self):
+        if not self.enabled:
+            return
+        if len(self.used_blocks) == 0:
+            return
+        max_used = max(self.used_blocks)
+        num_used = len(self.used_blocks)
+        if max_used - self.threshold <= num_used:
+            #print('skip', max_used, num_used, self.threshold)
+            return
+        free = self.free_blocks()
+        used = sorted(self.used_blocks, reverse=True)
+        self.to_swap: list[tuple[int, int]] = []
+        for used_block, free_block in zip(used, free):
+            if len(self.to_swap) == self.threshold or free_block > used_block:
+                break
+            self.to_swap.append((used_block, free_block))
+        for used_block, free_block in self.to_swap:
+            self.used_blocks.remove(used_block)
+            self.used_blocks.add(free_block)
+            orig_used_block = self.unmap(used_block)
+            orig_free_block = self.unmap(free_block)
+            self.update_mapping(orig_used_block, free_block)
+            self.update_mapping(orig_free_block, used_block)
+        print('defrag done', max_used, '->', max(self.used_blocks), '|',
+              num_used, len(self.to_swap), self.threshold)
+        self.swap_blocks()
+
+    def swap_blocks(self):
+        assert self.kv_caches is not None
+        assert self.block_size is not None
+        htorch.core.mark_step()
+        srcs, dsts = zip(*self.to_swap)
         srcs = pad_list(list(srcs), self.threshold, itertools.repeat(-1))
         dsts = pad_list(list(dsts), self.threshold, itertools.repeat(-1))
         srcs = torch.tensor(srcs, dtype=torch.long, device='hpu')
         dsts = torch.tensor(dsts, dtype=torch.long, device='hpu')
-
-        htorch.core.mark_step()
-        for cache in kv_caches:
+        for cache in self.kv_caches:
             for c in cache:
                 c = c.unflatten(0, (-1, self.block_size))
                 tmp = c.index_select(0, dsts)
                 c.index_copy_(0, dsts, c.index_select(0, srcs))
                 c.index_copy_(0, srcs, tmp)
         htorch.core.mark_step()
-
-    def remap_blocks(self, block_tables_list, translation_fn=None):
-        if translation_fn is None:
-            translation_fn = lambda b: self.block_translation[b]
-        return [[translation_fn(b) for b in bl] for bl in block_tables_list]
-
-    def defragment(self, block_tables_list, kv_caches):
-        block_tables_list = self.remap_blocks(block_tables_list)
-        block_list = list(itertools.chain(*block_tables_list))
-        last_used = max(block_list)
-        fragmentation = last_used - len(block_list)
-        if fragmentation <= self.threshold:
-            print('skip')
-            return block_tables_list
-        block_usage = [False] * (last_used + 2)
-        block_usage[0] = True
-        for b in block_list:
-            block_usage[b] = True
-        first_free = 1
-        to_swap = {}
-        while True:
-            while block_usage[first_free]:
-                first_free += 1
-            while not block_usage[last_used]:
-                last_used -= 1
-            if first_free >= last_used:
-                break
-            to_swap[last_used] = first_free
-            first_free += 1
-            last_used -= 1
-            if len(to_swap) >= self.threshold:
-                break
-        if True:
-            msg = ', '.join(f'{s}<->{d}' for s, d in to_swap.items())
-            print(f'defrag[{len(to_swap)}]:', msg)
-            self.swap_blocks(to_swap, kv_caches)
-            block_tables_list = self.remap_blocks(block_tables_list,
-                                                  lambda b: to_swap.get(b, b))
-        return block_tables_list
 
 
 defragmenter = OnlineDefragmenter()
@@ -1184,6 +1198,7 @@ class HPUModelRunner:
             num_blocks = round_up(context_len + query_len,
                                   self.block_size) // self.block_size
             blocks = block_table_cpu_tensor[batch_idx, :num_blocks].tolist()
+            blocks = [defragmenter.map(b) for b in blocks]
 
             prompt_tokens = self.input_batch.num_prompt_tokens[batch_idx]
             #TODO: Fix non-prompt case
@@ -1428,8 +1443,7 @@ class HPUModelRunner:
             assert len(seq_block_table) == n
             block_tables_list.append(seq_block_table)
 
-        block_tables_list = defragmenter.defragment(block_tables_list,
-                                                    self.kv_caches)
+        block_tables_list = defragmenter.map_all(block_tables_list)
 
         # CONTEXT_LENS [batch_size]
         block_list, block_groups, block_usage = \
@@ -1694,16 +1708,19 @@ class HPUModelRunner:
         # On CPU, sanitize [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] -> [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2] # noqa
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
 
-        new = [req.block_ids for req in scheduler_output.scheduled_new_reqs]
-        cached = [
-            req.new_block_ids for req in scheduler_output.scheduled_cached_reqs
-        ]
-        new = list(itertools.chain(*new))
-        cached = list(itertools.chain(*cached))
-        if new:
-            print('NEW', new)
-        if cached:
-            print('CACHED', cached)
+        if self.kv_caches:
+            new = {
+                req.req_id: req.block_ids
+                for req in scheduler_output.scheduled_new_reqs if req.block_ids
+            }
+            cached = {
+                req.req_id: req.new_block_ids
+                for req in scheduler_output.scheduled_cached_reqs
+                if req.new_block_ids
+            }
+            defragmenter.update(new | cached,
+                                scheduler_output.finished_req_ids)
+            defragmenter.defragment()
 
         batch_changed = self._update_states(scheduler_output)
         if not scheduler_output.total_num_scheduled_tokens:
@@ -2303,7 +2320,7 @@ class HPUModelRunner:
     def warmup_model(self) -> None:
         kv_caches = self.kv_caches
         max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
-        defragmenter.initialize(max_blocks, self.block_size)
+        defragmenter.initialize(kv_caches, self.block_size)
         if not self.enable_bucketing:
             return
         prompt_profile_cfg, decode_profile_cfg = self._read_profiling_cfg()
