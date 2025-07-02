@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
-from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler, 
+from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
 from vllm_hpu_extension.runtime import get_config
 
@@ -536,7 +536,8 @@ class HabanaProfilerCounterHelper:
         self.prompt_real_seq_lens = []
 
     def get_counter_dict(self, cache_config, duration, seq_len,
-                         batch_size_padded, real_batch_size, prompt_batch_idx, is_prompt):
+                         batch_size_padded, real_batch_size, prompt_batch_idx,
+                         is_prompt):
         throughput = batch_size_padded / (duration / 1e6)
         throughput_effective = real_batch_size / (duration / 1e6)
         if is_prompt:
@@ -582,8 +583,7 @@ class HabanaProfilerCounterHelper:
             seq_lens = self.prompt_real_seq_lens[prompt_batch_idx] if is_prompt \
                 else self.decode_real_seq_lens
             cache_num_blocks_used = [
-                math.ceil(sl / cache_config.block_size)
-                for sl in seq_lens
+                math.ceil(sl / cache_config.block_size) for sl in seq_lens
             ]
             cache_total_num_blocks_used = sum(cache_num_blocks_used)
             num_cache_blocks = cache_config.num_gpu_blocks
@@ -956,7 +956,8 @@ class HPUModelRunner:
             num_computed_tokens_decode.append(int(num_computed_tokens + 1))
 
         if self.profiler.enabled:
-            self.profiler_counter_helper.capture_decode_seq_stats(num_computed_tokens_decode)
+            self.profiler_counter_helper.capture_decode_seq_stats(
+              num_computed_tokens_decode)
 
         # Traverse prompts
         prompt_req_ids = []
@@ -1488,12 +1489,12 @@ class HPUModelRunner:
                                 f"graphs{'T' if use_graphs else 'F'}")
         else:
             model_event_name = 'model_executable'
-        with self.profiler.record_event('internal',
-                                        model_event_name):
-            hidden_states = self.model.forward(input_ids=token_ids,
-                                            positions=position_ids,
-                                            attn_metadata=trimmed_attn_metadata,
-                                            kv_caches=kv_caches)
+        with self.profiler.record_event('internal', model_event_name):
+            hidden_states = self.model.forward(
+                input_ids=token_ids,
+                positions=position_ids,
+                attn_metadata=trimmed_attn_metadata,
+                kv_caches=kv_caches)
         # NOTE(kzawora): returning hidden_states is required in prompt logprobs
         # scenarios, as they will do logit processing on their own
         non_flattened_hidden_states = hidden_states
@@ -1676,8 +1677,7 @@ class HPUModelRunner:
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches)
                 htorch.core.mark_step()
-                with self.profiler.record_event('internal',
-                                                "sampler"):
+                with self.profiler.record_event('internal', "sampler"):
                     sampling_metadata = self._prepare_sampling(
                         batch_changed, req_id, pad_to=logits_device.shape[0])
                     sampler_output = self.sampler(
@@ -1688,7 +1688,7 @@ class HPUModelRunner:
                     prefill_sampled_requests.extend(logits_requests)
                 htorch.core.mark_step()
                 if self.is_driver_worker and self.profiler.enabled:
-                # Stop recording 'execute_model' event
+                    # Stop recording 'execute_model_generic' event
                     self.profiler.end()
                     event_end = self.profiler.get_timestamp_us()
                     counters = self.profiler_counter_helper.get_counter_dict(
@@ -1715,14 +1715,13 @@ class HPUModelRunner:
                 decode_data.attn_metadata, decode_data.logits_indices,
                 self.kv_caches)
             htorch.core.mark_step()
-            with self.profiler.record_event('internal',
-                                            "sampler"):
+            with self.profiler.record_event('internal', "sampler"):
                 sampling_metadata = self._prepare_sampling(
                     batch_changed,
                     pd_info.decode_req_ids,
                     pad_to=logits_device.shape[0])
-                sampler_output = self.sampler(logits=logits_device,
-                                            sampling_metadata=sampling_metadata)
+                sampler_output = self.sampler(
+                    logits=logits_device, sampling_metadata=sampling_metadata)
                 decode_sampled_token_ids.append(
                     sampler_output.sampled_token_ids.flatten())
                 decode_sampled_requests.extend(
@@ -1744,24 +1743,25 @@ class HPUModelRunner:
         # From this point onward, all operations are done on CPU.
         # We already have tokens. Let's copy the data to
         # CPU as is, and then discard padded tokens.
-        with self.profiler.record_event('internal',
-                                "sampler_postprocessing"):
+        with self.profiler.record_event('internal', "sampler_postprocessing"):
             prefill_sampled_token_ids = [
                 tensor.cpu() for tensor in prefill_sampled_token_ids
             ]
             decode_sampled_token_ids = [
-                tensor.cpu()[:num_decodes] for tensor in decode_sampled_token_ids
+                tensor.cpu()[:num_decodes]
+                for tensor in decode_sampled_token_ids
             ]
-            sampled_token_ids_list = torch.cat(decode_sampled_token_ids +
-                                            prefill_sampled_token_ids).tolist()
+            sampled_token_ids_list = torch.cat(
+              decode_sampled_token_ids + prefill_sampled_token_ids).tolist()
             sampled_token_requests = \
                 decode_sampled_requests + prefill_sampled_requests
             max_req_index = max(self.input_batch.req_id_to_index.values())
             postprocessed_sampled_token_ids: list[list]
             postprocessed_sampled_token_ids = [[]
-                                            for _ in range(max_req_index + 1)]
+                                               for _ in range(max_req_index +
+                                                              1)]
             for tok_id, req_id in zip(sampled_token_ids_list,
-                                    sampled_token_requests):
+                                      sampled_token_requests):
                 postprocessed_sampled_token_ids[
                     self.input_batch.req_id_to_index[req_id]].append(tok_id)
 
@@ -1963,7 +1963,7 @@ class HPUModelRunner:
         use_graphs = self._use_graphs()
         phase = "prompt" if is_prompt else "decode"
         scenario_name = ("warmup_"
-                        f"{phase}_"
+                         f"{phase}_"
                          f"bs{batch_size}_"
                          f"seq{query_seq_len}_"
                          f"ctx{num_blocks}_"
