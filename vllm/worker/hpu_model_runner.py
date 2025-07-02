@@ -831,9 +831,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.use_prefix_caching = (
             self.vllm_config.cache_config.enable_prefix_caching)
         self.bucketing_manager = HPUBucketingManager()
-        self.bucketing_manager.initialize(
-            self.max_num_seqs, self.max_num_prefill_seqs, self.block_size,
-            self.max_num_batched_tokens, self.max_model_len)
+        self.bucketing_manager.initialize(self.max_num_seqs,
+                                          self.max_num_prefill_seqs,
+                                          self.block_size,
+                                          self.max_num_batched_tokens,
+                                          self.max_model_len)
         self.bucketing_manager.generate_prompt_buckets()
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
@@ -1480,8 +1482,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_num_seqs = len(query_lens)
         max_prompt_len = max(
             self.bucketing_manager.find_prompt_bucket(
-                                       len(seq_group_metadata_list),
-                                       target_query_len, ctx)[1],
+                len(seq_group_metadata_list), target_query_len, ctx)[1],
             self.block_size)
 
         if self.dp_awared_padding and\

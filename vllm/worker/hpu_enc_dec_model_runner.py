@@ -459,17 +459,18 @@ class HPUEncoderDecoderModelRunner(
         real_batch_size = len(seq_group_metadata_list)
         ctx = seq_group_metadata_list[0].computed_block_nums
         ctx = 0 if ctx is None else sum(ctx)
+        batch_size_padded = real_batch_size
         if is_prompt:
             first_key = next(iter(seq_group_metadata_list[0].seq_data))
             seq_len = len(seq_group_metadata_list[0].seq_data[first_key].
                           prompt_token_ids)
             query_len = seq_len - ctx * self.block_size
+            batch_size_padded = self.bucketing_manager.find_prompt_bucket(
+                real_batch_size, query_len, ctx)[0]
         else:
-            query_len = 1
             ctx = 1  # TODO ctx is not importnat here?
-        closest_bucket = self.bucketing_manager.find_bucket(
-            real_batch_size, query_len, ctx, is_prompt)
-        batch_size_padded = closest_bucket[0]
+            batch_size_padded = self.bucketing_manager.find_decode_bucket(
+                real_batch_size, ctx)[0]
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         if batch_size_padding > 0:

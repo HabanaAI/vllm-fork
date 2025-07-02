@@ -613,10 +613,11 @@ class HPUModelRunner:
         self.bucketing_manager = HPUBucketingManager()
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
-            self.bucketing_manager.initialize(
-                self.max_num_seqs, self.max_prefill_batch_size,
-                self.block_size, self.max_num_batched_tokens,
-                self.max_model_len)
+            self.bucketing_manager.initialize(self.max_num_seqs,
+                                              self.max_prefill_batch_size,
+                                              self.block_size,
+                                              self.max_num_batched_tokens,
+                                              self.max_model_len)
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
@@ -917,7 +918,8 @@ class HPUModelRunner:
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
             block_bucket_size = \
-                self.bucketing_manager.find_decode_bucket(batch_size, block_bucket_size)[2]
+                self.bucketing_manager.find_decode_bucket(batch_size,
+                                                          block_bucket_size)[2]
             indices: list[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -957,8 +959,7 @@ class HPUModelRunner:
     def _bucketize_merged_prompt(self, seq_lens, num_blocks):
         seq = sum(seq_lens)
         num_blocks = sum(num_blocks)
-        seq = self.bucketing_manager.find_prompt_bucket(1,
-                                         seq, num_blocks)[1]
+        seq = self.bucketing_manager.find_prompt_bucket(1, seq, num_blocks)[1]
         num_blocks = round_up(num_blocks, 32)
         return (1, seq, num_blocks)
 
@@ -969,8 +970,7 @@ class HPUModelRunner:
         if bs <= self.max_prefill_batch_size:
             bs = self.bucketing_manager.find_prompt_bucket(
                 bs, seq, num_blocks)[0]
-        seq = self.bucketing_manager.find_prompt_bucket(bs, 
-                                         seq, num_blocks)[1]
+        seq = self.bucketing_manager.find_prompt_bucket(bs, seq, num_blocks)[1]
         num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
 
@@ -1203,7 +1203,7 @@ class HPUModelRunner:
         # PAD FOR STATIC SHAPES.
         padded_batch_size: int
         padded_batch_size = self.bucketing_manager.find_decode_bucket(
-                                num_decodes, sum(num_blocks))[0]
+            num_decodes, sum(num_blocks))[0]
 
         # POSITIONS. [batch, 1]
         # We slice at the end, since we use the positions for gathering.
