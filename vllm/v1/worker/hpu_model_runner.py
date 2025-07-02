@@ -1767,7 +1767,7 @@ class HPUModelRunner:
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
         num_candidates = len(buckets)
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
-        graphed = list(c[:2] for c in self.graphed_buckets
+        graphed = list(c[:3] for c in self.graphed_buckets
                        if c[3] == is_prompt)
         if num_candidates == 0:
             num_candidates = 1
