@@ -13,7 +13,7 @@ echo "vLLM server is ready. Starting benchmark..."
 SONNET_ARGS=""
 HF_ARGS=""
 if [[ "$DATASET_NAME" == "sonnet" ]]; then
-    SONNET_ARGS="--sonnet-prefix-len 100 --sonnet-input-len $INPUT_TOK --sonnet-output-len $OUTPUT_TOK"
+    SONNET_ARGS="--sonnet-prefix-len $PREFIX_LEN --sonnet-input-len $INPUT_TOK --sonnet-output-len $OUTPUT_TOK"
 fi
 if [[ "$DATASET_NAME" == "hf" ]]; then
     HF_ARGS="--hf-split train"

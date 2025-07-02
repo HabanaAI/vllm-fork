@@ -5,7 +5,6 @@ deepSeek-R1-Distill-Llama-70B:
 llama31_8b_instruct:
   MODEL: meta-llama/Llama-3.1-8B-Instruct
   TENSOR_PARALLEL_SIZE: 1
-  VLLM_SKIP_WARMUP: true
 
 llama31_70b_instruct:
   MODEL: meta-llama/Llama-3.1-70B-Instruct

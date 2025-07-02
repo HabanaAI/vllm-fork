@@ -1,14 +1,3 @@
-default:
-  DATASET: /workspace/vllm/benchmarks/sonnet.txt
-  DATASET_NAME: sonnet
-  BACKEND: vllm
-  INPUT_TOK: 2048
-  OUTPUT_TOK: 2048
-  CONCURRENT_REQ: 64
-  NUM_PROMPTS: 640
-  TOTAL_TOK: 4096
-  # MAX_MODEL_LEN: 4352
-
 deepSeek-R1-Distill-Llama-70B:
   MODEL: deepseek-ai/DeepSeek-R1-Distill-Llama-70B
 
