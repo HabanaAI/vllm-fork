@@ -1768,7 +1768,7 @@ class HPUModelRunner:
         num_candidates = len(buckets)
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
         graphed = list(c[:2] for c in self.graphed_buckets
-                       if c[2] == is_prompt)
+                       if c[3] == is_prompt)
         if num_candidates == 0:
             num_candidates = 1
         msg = (f'{phase} captured:{len(graphed)} '
@@ -2172,7 +2172,6 @@ class HPUModelRunner:
                     self.warmup_graphs(
                     self.bucketing_ctx.prompt_buckets,
                     True, kv_caches)
-                mem_post_prompt = 0
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
                     self.bucketing_ctx.decode_buckets,
