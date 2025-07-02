@@ -33,12 +33,13 @@ class HPUAttentionMetadataV1(HPUAttentionMetadata):
     # TODO(kwisniewski98): for now, in V1 input positions are not provided
     # which needs to be fixed in the future, as we need to support MLA
     """Metadata for HPUAttentionbackend."""
-    is_warmup: bool
     is_prompt: bool
     attn_bias: Optional[torch.Tensor]
 
     seq_lens_tensor: Optional[torch.Tensor]
     context_lens_tensor: Optional[torch.Tensor]
+
+    is_warmup: bool = False
 
     @classmethod
     def make_prefill_metadata(cls, attn_bias, block_list, context_lens_tensor,
