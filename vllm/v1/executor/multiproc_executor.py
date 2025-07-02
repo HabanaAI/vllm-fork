@@ -39,7 +39,7 @@ logger = init_logger(__name__)
 POLLING_TIMEOUT_MS = 5000
 POLLING_TIMEOUT_S = POLLING_TIMEOUT_MS // 1000
 
-EXECUTE_MODEL_TIMEOUT_S = 80 if current_platform.is_hpu() else 40
+EXECUTE_MODEL_TIMEOUT_S = 800000000000000000000000
 
 
 class MultiprocExecutor(Executor):
