@@ -558,21 +558,25 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
     def _image_pixels_to_features(
             self,
             vision_tower: SiglipVisionModel,
-            pixel_values: torch.Tensor) -> torch.Tensor:
+            pixel_values: torch.Tensor
+    ) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
         image_features = vision_tower(pixel_values.to(dtype=target_dtype))
         return image_features
 
     def _process_image_input(
             self,
-            image_input: Gemma3ImageInputs) -> list[torch.Tensor]:
+            image_input: Gemma3ImageInputs
+    ) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
         pixel_values = image_input["pixel_values"]
         num_patches = image_input["num_patches"]
 
         image_features = self._image_pixels_to_features(
-            self.vision_tower, pixel_values)
+            self.vision_tower,
+            pixel_values,
+        )
 
         if is_hpu and len(self.graphed_multimodal_buckets) > 1:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
@@ -608,7 +612,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
     def get_multimodal_embeddings(
             self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
         if is_hpu:
-            self.graphed_multimodal_buckets = kwargs.pop('graphed_multimodal_buckets', [])
+            self.graphed_multimodal_buckets = kwargs.pop(
+                'graphed_multimodal_buckets', [])
         image_input = self._parse_and_validate_image_input(**kwargs)
         if image_input is None:
             return None
@@ -647,7 +652,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                         inputs_embeds")
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
-            inputs_embeds = self.get_input_embeddings(input_ids, \
+            inputs_embeds = self.get_input_embeddings(input_ids,
                                                       vision_embeddings)
             if vision_embeddings is not None:
                 kwargs = self.prepare_attn_masks(
