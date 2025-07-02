@@ -503,6 +503,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
+        if is_hpu:
+            self.graphed_multimodal_buckets = None
 
     @property
     def dtype(self):
@@ -556,25 +558,23 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
     def _image_pixels_to_features(
             self,
             vision_tower: SiglipVisionModel,
-            pixel_values: torch.Tensor,
-            graphed_multimodal_buckets=None) -> torch.Tensor:
+            pixel_values: torch.Tensor) -> torch.Tensor:
         target_dtype = vision_tower.get_input_embeddings().weight.dtype
         image_features = vision_tower(pixel_values.to(dtype=target_dtype))
         return image_features
 
     def _process_image_input(
             self,
-            image_input: Gemma3ImageInputs,
-            graphed_multimodal_buckets=None) -> list[torch.Tensor]:
+            image_input: Gemma3ImageInputs) -> list[torch.Tensor]:
         assert self.vision_tower is not None
 
         pixel_values = image_input["pixel_values"]
         num_patches = image_input["num_patches"]
 
         image_features = self._image_pixels_to_features(
-            self.vision_tower, pixel_values, graphed_multimodal_buckets)
+            self.vision_tower, pixel_values)
 
-        if is_hpu and len(graphed_multimodal_buckets) > 1:
+        if is_hpu and len(self.graphed_multimodal_buckets) > 1:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
                     self.vision_buckets.multimodal_buckets)
             start_idx = 0
@@ -589,7 +589,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                             [self.multi_modal_projector(
                                 batch_sliced_image_features,
                                 bypass_hpu_graphs=i
-                                not in graphed_multimodal_buckets)]
+                                not in self.graphed_multimodal_buckets)]
                 else:
                     image_embeds_multibatches += \
                             [self.multi_modal_projector( \
@@ -598,7 +598,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             image_embeds = torch.cat(image_embeds_multibatches, dim=0)
         else:
             image_embeds = self.multi_modal_projector(image_features)
-
         return [
             e.flatten(0, 1) for e in image_embeds.split(num_patches.tolist())
         ]
@@ -608,12 +607,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
     def get_multimodal_embeddings(
             self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
+        if is_hpu:
+            self.graphed_multimodal_buckets = kwargs.pop('graphed_multimodal_buckets', [])
         image_input = self._parse_and_validate_image_input(**kwargs)
         if image_input is None:
             return None
 
-        return self._process_image_input(
-            image_input, kwargs.get('graphed_multimodal_buckets', []))
+        return self._process_image_input(image_input)
 
     def get_input_embeddings(
         self,
