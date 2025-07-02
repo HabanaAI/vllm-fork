@@ -1923,7 +1923,7 @@ class HPUModelRunner:
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
                f"query_len:{seq_len} "
-               f"num_ctx_blocks:{num_blocks} "
+               f"num_blocks:{num_blocks} "
                f"free_mem:{free_mem}")
         logger.info(msg)
 
