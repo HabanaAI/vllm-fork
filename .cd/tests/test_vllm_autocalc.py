@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import pytest
-from vllm_autocalc import VarsGenerator
+from server_autoconfig.vllm_autocalc import VarsGenerator
 
 
 @pytest.fixture
