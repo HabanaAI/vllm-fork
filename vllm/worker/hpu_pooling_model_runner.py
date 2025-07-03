@@ -92,7 +92,8 @@ class HPUPoolingModelRunner(
             "intermediate_tensors": intermediate_tensors,
             "lora_mask": lora_mask,
         }
-        if model_input.token_types is not None:
+        if hasattr(model_input,
+                   "token_types") and model_input.token_types is not None:
             execute_model_kwargs.update(
                 {"token_type_ids": model_input.token_types})
 
