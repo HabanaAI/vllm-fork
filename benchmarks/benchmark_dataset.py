@@ -95,9 +95,15 @@ class BenchmarkDataset(ABC):
         This method is used for chat models that expect a specific conversation
         format.
         """
+        import benchmark_utils
+        images = benchmark_utils.image_per_prompt
         content = [{"text": prompt, "type": "text"}]
         if mm_content is not None:
-            content.append(mm_content)
+            if images > 1:
+                for i in range(images):
+                    content.append(mm_content)
+            else:
+                content.append(mm_content)
         return [{"role": "user", "content": content}]
 
     def load_data(self) -> None:
