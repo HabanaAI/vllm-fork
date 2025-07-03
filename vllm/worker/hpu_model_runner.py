@@ -559,16 +559,10 @@ class HpuModelAdapter(torch.nn.Module):
                 if local_attn_masks is not None:
                     attn_metadata = attn_metadata._replace(
                         window_attn_bias=local_attn_masks)
-
-                # TODO:Remove this mask creation due to excessive memory usage
-                # Without this long prompt text-only input bigger than
-                # slidding_window will have accuracy issue.
-                '''
-                else:
+                elif global_attn_masks is None:
                     attn_metadata = self._set_attn_bias_for_sliding_window(
                         attn_metadata, batch_size, seq_len,
                         self.interleaved_sliding_window, device, dtype)
-                '''
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
