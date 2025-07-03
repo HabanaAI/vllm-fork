@@ -1086,7 +1086,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             batch_size_padded = self.bucketing_manager.find_prompt_bucket(
                 real_batch_size, query_len, ctx)[0]
         else:
-            ctx = 1  # TODO ctx is not importnat here?
             batch_size_padded = self.bucketing_manager.find_decode_bucket(
                 real_batch_size, ctx)[0]
         if self.dp_awared_padding and (self.vllm_config.kv_transfer_config
@@ -2429,6 +2428,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             input_len = seq_len - 1
             output_len = 1
             block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
+            computed_block_nums = ([1] * ctx)
         prompt_token_ids = [0] * input_len
         output_token_ids = [1] * output_len
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
