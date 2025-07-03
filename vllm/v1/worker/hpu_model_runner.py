@@ -2104,9 +2104,8 @@ class HPUModelRunner:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
         kv_caches = self.kv_caches
-        max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
         self.bucketing_manager.generate_prompt_buckets()
-        self.bucketing_manager.generate_decode_buckets(max_blocks)
+        self.bucketing_manager.generate_decode_buckets()
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
