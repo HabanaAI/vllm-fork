@@ -3130,7 +3130,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             sampling_metadata = model_input.sampling_metadata
             real_batch_size = model_input.real_batch_size
             batch_size_padded = model_input.batch_size_padded
-            tensor_types = model_input.tensor_types
             assert input_tokens is not None
             assert input_positions is not None
             assert sampling_metadata is not None
@@ -3193,7 +3192,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 "intermediate_tensors": intermediate_tensors,
                 "lora_mask": lora_mask,
                 "virtual_engine": model_input.virtual_engine,
-                "tensor_types": tensor_types,
                 **(model_input.multi_modal_kwargs or {}),
             }
             if previous_hidden_states is not None:
