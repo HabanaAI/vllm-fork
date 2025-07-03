@@ -831,11 +831,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.use_prefix_caching = (
             self.vllm_config.cache_config.enable_prefix_caching)
         self.bucketing_manager = HPUBucketingManager()
-        self.bucketing_manager.initialize(self.max_num_seqs,
-                                          self.max_num_prefill_seqs,
-                                          self.block_size,
-                                          self.max_num_batched_tokens,
-                                          self.max_model_len)
+        self.bucketing_manager.initialize(max_num_seqs = self.max_num_seqs,
+                    max_num_prefill_seqs = self.max_num_prefill_seqs,
+                    block_size = self.block_size,
+                    max_num_batched_tokens = self.max_num_batched_tokens,
+                    max_model_len = self.max_model_len)
         self.bucketing_manager.generate_prompt_buckets()
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
@@ -2810,8 +2810,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_candidates = 1
         msg = (f'{phase} captured:{len(graphed)} '
                f'({100 * len(graphed) / num_candidates:.1f}%) '
-               f'used_mem:{format_bytes(total_mem)} '
-               f'buckets:{sorted(list(graphed))}')
+               f'used_mem:{format_bytes(total_mem)}')
         logger.info(msg)
         if "Prompt" in phase and len(self.multimodal_buckets) > 0:
             phase = "Graph/Multimodal"
