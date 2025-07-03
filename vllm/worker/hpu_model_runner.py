@@ -2826,7 +2826,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
         prompt_buckets = len(self.bucketing_manager.prompt_buckets)
         if not self.is_pooler:
-            self.bucketing_manager.generate_decode_buckets(max_blocks)
             decode_buckets = len(self.bucketing_manager.decode_buckets)
         else:
             # When pooling we're not using decode phase
