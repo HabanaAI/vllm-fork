@@ -109,7 +109,7 @@ class BertPooler(CustomOp):
     def forward_hpu(self, hidden_states: torch.Tensor) -> torch.Tensor:
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token.
-        # input hidden_states[batch_size,seq_length, hidden_states]
+        # input hidden_states[batch_size,seq_length, hidden_size]
         hidden_states = hidden_states.permute(1, 0, 2)
         first_token_tensor = hidden_states[0, :]
         pooled_output = self.dense(first_token_tensor)
