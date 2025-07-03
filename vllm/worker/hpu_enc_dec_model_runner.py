@@ -367,6 +367,7 @@ class HPUEncoderDecoderModelRunner(
         else:
             output_len = 1
             block_tables = {group_id: [_PAD_BLOCK_ID] * num_blocks}
+            computed_block_nums = ([1] * ctx)
             # limit cross blocks to the number of available blocks
             num_cross_blocks = min(self.bucketing_manager.num_hpu_blocks,
                                    max_mm_tokens) // self.block_size
@@ -468,7 +469,6 @@ class HPUEncoderDecoderModelRunner(
             batch_size_padded = self.bucketing_manager.find_prompt_bucket(
                 real_batch_size, query_len, ctx)[0]
         else:
-            ctx = 1  # TODO ctx is not importnat here?
             batch_size_padded = self.bucketing_manager.find_decode_bucket(
                 real_batch_size, ctx)[0]
         batch_size_padding = batch_size_padded - real_batch_size
