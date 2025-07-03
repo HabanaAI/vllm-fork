@@ -201,10 +201,12 @@ class Gemma3Attention(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         if self.split_qkv:
+            print('SPLIT QKV FWD')
             q, k, v, _ = self.qkv_proj(hidden_states)
         else:
             qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
+                                dim=-1)
 
         q = q.unflatten(-1, (self.num_heads, self.head_dim))
         q = self.q_norm(q)
@@ -478,8 +480,9 @@ class Gemma3Model(nn.Module):
                     continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
-               if self.split_qkv and (shard_id == "q" or shard_id == "v"
+                if self.split_qkv and (shard_id == "q" or shard_id == "v"
                                        or shard_id == "k"):
+                    print("QKV SPLIT")
                     weight_loader(param, loaded_weight)
                 else:
                     weight_loader(param, loaded_weight, shard_id)
