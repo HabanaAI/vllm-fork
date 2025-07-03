@@ -836,7 +836,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_size = self.block_size,
                     max_num_batched_tokens = self.max_num_batched_tokens,
                     max_model_len = self.max_model_len)
-        self.bucketing_manager.generate_prompt_buckets()
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
         ]  #TODO: Move to HPUBucketingContext

@@ -1202,6 +1202,12 @@ class HPUModelRunner:
         padded_batch_size = self.bucketing_manager.find_decode_bucket(
             num_decodes, sum(num_blocks))[0]
 
+        block_tables_list = []
+        for i, n in enumerate(num_blocks):
+            seq_block_table = block_table_cpu_tensor[i, :n].tolist()
+            assert len(seq_block_table) == n
+            block_tables_list.append(seq_block_table)
+
         # POSITIONS. [batch, 1]
         # We slice at the end, since we use the positions for gathering.
         positions = torch.zeros((padded_batch_size, 1), dtype=torch.int32)
@@ -1239,12 +1245,6 @@ class HPUModelRunner:
         dummy_slots = itertools.cycle(
             range(self._PAD_SLOT_ID, self._PAD_SLOT_ID + self.block_size))
         slot_mapping[num_decodes:].apply_(lambda _, ds=dummy_slots: next(ds))
-
-        block_tables_list = []
-        for i, n in enumerate(num_blocks):
-            seq_block_table = block_table_cpu_tensor[i, :n].tolist()
-            assert len(seq_block_table) == n
-            block_tables_list.append(seq_block_table)
 
         # CONTEXT_LENS [batch_size]
         block_list, block_groups, block_usage = \

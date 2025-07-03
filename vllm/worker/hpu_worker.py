@@ -386,6 +386,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self.cache_config.num_cpu_blocks = num_cpu_blocks
         self.model_runner.bucketing_manager.num_hpu_blocks = (
             num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
+        self.model_runner.bucketing_manager.generate_prompt_buckets()
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
