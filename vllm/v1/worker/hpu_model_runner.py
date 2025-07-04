@@ -396,6 +396,7 @@ class HpuModelAdapter(torch.nn.Module):
         #        selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
+        is_warmup = kwargs.get('is_warmup', False)
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
@@ -406,7 +407,11 @@ class HpuModelAdapter(torch.nn.Module):
         attn_meta = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
-        with set_forward_context(attn_meta, self.vllm_config):
+        with set_forward_context(attn_meta,
+                                 self.vllm_config,
+                                 is_warmup=is_warmup):
+            if 'is_warmup' in kwargs:
+                kwargs.pop('is_warmup')
             hidden_states = self.model(*args, **kwargs)
             if self._rotary_prepare_cos_sin is not None:
                 self._reset_rotary_cos_sin()
@@ -494,7 +499,7 @@ def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
     attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
         'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
         'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt',
-        'block_size', 'block_groups', 'is_warmup'
+        'block_size', 'block_groups'
     ])
     return attention_metadata
 
@@ -1184,8 +1189,7 @@ class HPUModelRunner:
             slot_mapping=token_slots,
             block_list=context_blocks_t,
             attn_bias=attn_bias,
-            block_size=self.block_size,
-            is_warmup=False)
+            block_size=self.block_size)
 
         return PrefillInputData(request_ids=[req_ids],
                                 prompt_lens=[query_lens],
@@ -1322,7 +1326,7 @@ class HPUModelRunner:
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
                 block_size=self.block_size,
-                is_warmup=False))
+            ))
 
     def _prepare_inputs(
         self,
@@ -1867,8 +1871,7 @@ class HPUModelRunner:
                         context_lens_tensor=seq_lens_device,
                         slot_mapping=slot_mapping_device,
                         block_list=block_list_device,
-                        block_size=self.block_size,
-                        is_warmup=True)
+                        block_size=self.block_size)
             else:
                 block_tables = [
                     x.tolist()
@@ -1891,8 +1894,7 @@ class HPUModelRunner:
                     num_decode_tokens=batch_size,
                     input_positions=None,
                     slot_mapping=slot_mapping_device,
-                    block_size=self.block_size,
-                    is_warmup=True)
+                    block_size=self.block_size)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
         logits_indices_device = _async_h2d_tensor_copy(logits_indices,
