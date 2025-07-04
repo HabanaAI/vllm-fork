@@ -1732,11 +1732,11 @@ class HPUModelRunner:
                 # Stop recording 'execute_model' event
                 self.profiler.end()
                 event_end = self.profiler.get_timestamp_us()
-                counters = self.profiler_counter_helper.get_counter_dict(
+                counters = self.profiler_counter_helper.get_counter_dict(  # type: ignore
                     cache_config=self.cache_config,
                     duration=event_end - self.event_start,
                     seq_len=self._seq_len(decode_data.attn_metadata),
-                    batch_size_padded=decode_data.token_ids.size(0),  # type: ignore  # noqa
+                    batch_size_padded=decode_data.token_ids.size(0),
                     real_batch_size=decode_data.num_decodes,
                     prompt_batch_idx=None,
                     is_prompt=False)
