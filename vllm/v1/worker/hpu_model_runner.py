@@ -322,7 +322,7 @@ def get_path_to_rope(model: torch.nn.Module):
 class OnlineDefragmenter:
 
     def __init__(self):
-        self.threshold = 8
+        self.threshold = 32
         self.used_blocks = {}
         self.req_blocks = {}
         self.fwd_mapping_table = []
