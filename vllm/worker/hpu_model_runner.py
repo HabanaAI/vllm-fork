@@ -354,6 +354,9 @@ class HpuModelAdapter(torch.nn.Module):
             self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                 self.model.visual, disable_tensor_cache=True)
 
+    def load_weights(self, weights):
+        return self.model.load_weights(weights)
+
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
         if (attn_metadata is None
