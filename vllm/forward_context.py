@@ -150,7 +150,9 @@ def set_forward_context(attn_metadata: Any,
     # Each attn layer will block until the reading is complete.
     trigger_kv_transfer = (attn_metadata is not None
                            and has_kv_transfer_group()
-                           and is_v1_kv_transfer_group())
+                           and is_v1_kv_transfer_group()
+                           and not (hasattr(attn_metadata, 'is_warmup')
+                                    and attn_metadata.is_warmup))
     if trigger_kv_transfer:
         kv_connector = get_kv_transfer_group()
         assert isinstance(kv_connector, KVConnectorBase_V1)

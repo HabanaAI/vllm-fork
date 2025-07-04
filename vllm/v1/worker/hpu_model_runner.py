@@ -22,6 +22,8 @@ from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import get_attn_backend
 from vllm.config import VllmConfig
+from vllm.distributed.kv_transfer import (get_kv_transfer_group,
+                                          has_kv_transfer_group)
 from vllm.forward_context import set_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
@@ -492,7 +494,7 @@ def trim_attn_metadata(metadata: HPUAttentionMetadataV1) -> object:
     attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
         'attn_bias', 'seq_lens_tensor', 'context_lens_tensor', 'block_list',
         'block_mapping', 'block_usage', 'slot_mapping', 'is_prompt',
-        'block_size', 'block_groups'
+        'block_size', 'block_groups', 'is_warmup'
     ])
     return attention_metadata
 
@@ -696,6 +698,8 @@ class HPUModelRunner:
             req_index = self.input_batch.remove_request(req_id)
             if req_index is not None:
                 removed_req_indices.append(req_index)
+            if req_id in self.input_batch.req_type:
+                del self.input_batch.req_type[req_id]
 
         # Remove the unscheduled requests from the persistent batch.
         # NOTE(woosuk): The unscheduled requests are either preempted requests
@@ -826,6 +830,10 @@ class HPUModelRunner:
         assert self.model is not None
         return self.model
 
+    def is_decoder_only(self, req_id) -> bool:
+        return bool(req_id in self.input_batch.req_type and \
+            self.input_batch.req_type[req_id] == "decode")
+
     def _get_prompts_and_decodes(
         self,
         scheduler_output: "SchedulerOutput",
@@ -835,23 +843,36 @@ class HPUModelRunner:
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
 
+        if scheduler_output.kv_connector_metadata:
+            requests = scheduler_output.kv_connector_metadata.requests
+        else:
+            requests = None
+
         # Traverse decodes first
         decode_req_ids = []
         for i in range(num_reqs):
             req_id = self.input_batch.req_ids[i]
             assert req_id is not None
 
+            if requests is not None and req_id not in self.input_batch.req_type:
+                for request in requests:
+                    if request.req_id == req_id:
+                        self.input_batch.req_type[req_id] = "prefill" \
+                            if request.load_spec is None else "decode"
+                        break
+
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
             num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
                 req_id]
-
-            if num_computed_tokens < num_prompt_tokens:
+            if num_computed_tokens < num_prompt_tokens and \
+                not self.is_decoder_only(req_id):
                 # This is prompt
                 break
 
             # This is decode
-            assert num_scheduled_tokens == 1
+            if not self.is_decoder_only(req_id):
+                assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
 
         # Traverse prompts
@@ -1163,7 +1184,8 @@ class HPUModelRunner:
             slot_mapping=token_slots,
             block_list=context_blocks_t,
             attn_bias=attn_bias,
-            block_size=self.block_size)
+            block_size=self.block_size,
+            is_warmup=False)
 
         return PrefillInputData(request_ids=[req_ids],
                                 prompt_lens=[query_lens],
@@ -1300,7 +1322,7 @@ class HPUModelRunner:
                 num_decode_tokens=num_decode_tokens_device,
                 slot_mapping=slot_mapping_device,
                 block_size=self.block_size,
-            ))
+                is_warmup=False))
 
     def _prepare_inputs(
         self,
@@ -1326,7 +1348,7 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            if idx < num_decodes:
+            if idx < num_decodes and not self.is_decoder_only(req_id):
                 assert seq_num_scheduled_tokens == 1
         return (self._prepare_prefill_inputs(num_prefills, num_decodes,
                                              num_scheduled_tokens),
@@ -1348,8 +1370,8 @@ class HPUModelRunner:
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
             logger.warning(
-                "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
-                batch_size, seq_len, num_blocks)
+                "Configuration: rank (%s, %s, %s, %s, %s) was not warmed-up!",
+                os.getenv('RANK', '0'), phase, batch_size, seq_len, num_blocks)
 
     def _execute_model_generic(self,
                                token_ids,
@@ -1520,6 +1542,10 @@ class HPUModelRunner:
         # On CPU, sanitize [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] -> [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2] # noqa
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
 
+        # Update KVConnector with the KVConnector metadata forward().
+        if has_kv_transfer_group():
+            get_kv_transfer_group().bind_connector_metadata(
+                scheduler_output.kv_connector_metadata)
         batch_changed = self._update_states(scheduler_output)
         if not scheduler_output.total_num_scheduled_tokens:
             # Return empty ModelRunnerOuptut if there's no work to do.
@@ -1639,6 +1665,9 @@ class HPUModelRunner:
             spec_token_ids=None,
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
         )
+        # Clear KVConnector state after all KVs are generated.
+        if has_kv_transfer_group():
+            get_kv_transfer_group().clear_connector_metadata()
         return model_runner_output
 
     def load_model(self) -> None:
@@ -1838,7 +1867,8 @@ class HPUModelRunner:
                         context_lens_tensor=seq_lens_device,
                         slot_mapping=slot_mapping_device,
                         block_list=block_list_device,
-                        block_size=self.block_size)
+                        block_size=self.block_size,
+                        is_warmup=True)
             else:
                 block_tables = [
                     x.tolist()
@@ -1861,7 +1891,8 @@ class HPUModelRunner:
                     num_decode_tokens=batch_size,
                     input_positions=None,
                     slot_mapping=slot_mapping_device,
-                    block_size=self.block_size)
+                    block_size=self.block_size,
+                    is_warmup=True)
 
         logits_indices = torch.arange(0, batch_size, device='cpu')
         logits_indices_device = _async_h2d_tensor_copy(logits_indices,
