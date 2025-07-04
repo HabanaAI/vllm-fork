@@ -539,7 +539,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
-            if self.sliding_window:
+            if self.sliding_window \
+               and attn_metadata.window_attn_bias is not None:
                 attn_bias = attn_metadata.window_attn_bias
 
             out = ops.prompt_attention(
