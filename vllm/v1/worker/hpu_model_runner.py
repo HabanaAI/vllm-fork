@@ -613,11 +613,12 @@ class HPUModelRunner:
         self.bucketing_manager = HPUBucketingManager()
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
-            self.bucketing_manager.initialize(max_num_seqs = self.max_num_seqs,
-                        max_num_prefill_seqs =self.max_prefill_batch_size,
-                        block_size = self.block_size,
-                        max_num_batched_tokens = self.max_num_batched_tokens,
-                        max_model_len = self.max_model_len)
+            self.bucketing_manager.initialize(
+                max_num_seqs=self.max_num_seqs,
+                max_num_prefill_seqs=self.max_prefill_batch_size,
+                block_size=self.block_size,
+                max_num_batched_tokens=self.max_num_batched_tokens,
+                max_model_len=self.max_model_len)
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
@@ -967,7 +968,8 @@ class HPUModelRunner:
         bs = len(seq_lens)
         seq = max(seq_lens)
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
-        bs, seq, _ = self.bucketing_manager.find_prompt_bucket(bs, seq, num_blocks)
+        bs, seq, _ = self.bucketing_manager.find_prompt_bucket(
+            bs, seq, num_blocks)
         num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
 

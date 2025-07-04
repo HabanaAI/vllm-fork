@@ -831,11 +831,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.use_prefix_caching = (
             self.vllm_config.cache_config.enable_prefix_caching)
         self.bucketing_manager = HPUBucketingManager()
-        self.bucketing_manager.initialize(max_num_seqs = self.max_num_seqs,
-                    max_num_prefill_seqs = self.max_num_prefill_seqs,
-                    block_size = self.block_size,
-                    max_num_batched_tokens = self.max_num_batched_tokens,
-                    max_model_len = self.max_model_len)
+        self.bucketing_manager.initialize(
+            max_num_seqs=self.max_num_seqs,
+            max_num_prefill_seqs=self.max_num_prefill_seqs,
+            block_size=self.block_size,
+            max_num_batched_tokens=self.max_num_batched_tokens,
+            max_model_len=self.max_model_len)
         self.graphed_buckets: Set[Any] = set()
         self.multimodal_buckets: List[int] = [
         ]  #TODO: Move to HPUBucketingContext
@@ -2822,8 +2823,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        if not self.is_pooler:
-            max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
         prompt_buckets = len(self.bucketing_manager.prompt_buckets)
         if not self.is_pooler:
             decode_buckets = len(self.bucketing_manager.decode_buckets)
