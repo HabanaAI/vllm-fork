@@ -322,14 +322,15 @@ def get_path_to_rope(model: torch.nn.Module):
 class OnlineDefragmenter:
 
     def __init__(self):
-        self.threshold = 32
-        self.used_blocks = set()
+        self.threshold = 8
+        self.used_blocks = {}
         self.req_blocks = {}
         self.fwd_mapping_table = []
         self.bwd_mapping_table = []
         self.kv_caches = None
         self.block_size = None
         self.enabled = VLLM_DEFRAGMENT_CACHE
+        self.to_swap: list[tuple[int, int]] = []
 
     def initialize(self, kv_caches, block_size):
         self.kv_caches = kv_caches
@@ -342,10 +343,22 @@ class OnlineDefragmenter:
             self.bwd_mapping_table.extend(
                 range(len(self.bwd_mapping_table), block_id + 1))
 
+    def use_block(self, block_id):
+        num_refs = self.used_blocks.get(block_id, 0) + 1
+        self.used_blocks[block_id] = num_refs
+
+    def free_block(self, block_id):
+        num_refs = self.used_blocks[block_id] - 1
+        if num_refs <= 0:
+            del self.used_blocks[block_id]
+        else:
+            self.used_blocks[block_id] = num_refs
+
     def map(self, block_id):
-        if not self.enabled:
+        if not self.enabled or block_id >= len(self.fwd_mapping_table):
             return block_id
-        return self.fwd_mapping_table[block_id]
+        result = self.fwd_mapping_table[block_id]
+        return result
 
     def map_all(self, block_table_list):
         return [[self.map(b) for b in bl] for bl in block_table_list]
@@ -366,15 +379,15 @@ class OnlineDefragmenter:
             self.req_blocks.setdefault(req_id, []).extend(blocks)
             self.extend_mapping_table(max(blocks))
             for b in blocks:
-                self.used_blocks.add(self.map(b))
+                self.use_block(self.map(b))
         for req_id in finished_reqs:
             for b in self.req_blocks[req_id]:
-                self.used_blocks.remove(self.map(b))
+                self.free_block(self.map(b))
             del self.req_blocks[req_id]
 
     def free_blocks(self):
         last = 1
-        for used_b in sorted(self.used_blocks):
+        for used_b in sorted(self.used_blocks.keys()):
             for candidate in range(last, used_b):
                 yield candidate
             last = used_b + 1
@@ -386,27 +399,27 @@ class OnlineDefragmenter:
             return
         if len(self.used_blocks) == 0:
             return
-        max_used = max(self.used_blocks)
+        max_used = max(self.used_blocks.keys())
         num_used = len(self.used_blocks)
         if max_used - self.threshold <= num_used:
-            #print('skip', max_used, num_used, self.threshold)
             return
         free = self.free_blocks()
-        used = sorted(self.used_blocks, reverse=True)
-        self.to_swap: list[tuple[int, int]] = []
+        used = sorted(self.used_blocks.keys(), reverse=True)
+        assert len(self.to_swap) == 0
         for used_block, free_block in zip(used, free):
             if len(self.to_swap) == self.threshold or free_block > used_block:
                 break
+            assert used_block in self.used_blocks
+            assert free_block not in self.used_blocks
             self.to_swap.append((used_block, free_block))
+
         for used_block, free_block in self.to_swap:
-            self.used_blocks.remove(used_block)
-            self.used_blocks.add(free_block)
+            self.free_block(used_block)
+            self.use_block(free_block)
             orig_used_block = self.unmap(used_block)
             orig_free_block = self.unmap(free_block)
             self.update_mapping(orig_used_block, free_block)
             self.update_mapping(orig_free_block, used_block)
-        print('defrag done', max_used, '->', max(self.used_blocks), '|',
-              num_used, len(self.to_swap), self.threshold)
         self.swap_blocks()
 
     def swap_blocks(self):
@@ -425,6 +438,7 @@ class OnlineDefragmenter:
                 c.index_copy_(0, dsts, c.index_select(0, srcs))
                 c.index_copy_(0, srcs, tmp)
         htorch.core.mark_step()
+        self.to_swap.clear()
 
 
 defragmenter = OnlineDefragmenter()
@@ -1421,6 +1435,8 @@ class HPUModelRunner:
                                                   dim=1,
                                                   index=(index //
                                                          self.block_size))
+        block_number.apply_(defragmenter.map)
+
         block_offsets = padded_index % self.block_size
         slot_mapping = block_number * self.block_size + block_offsets
         # set an out of range value for the padding tokens so that they
