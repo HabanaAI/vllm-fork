@@ -99,16 +99,20 @@ class VisionBuckets:
     def __init__(self, is_batch_based):
         self.is_batch_based = is_batch_based
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
-        if envvar == "":
-            if is_batch_based:
-                multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
-            else:
-                multimodal_buckets = [
-                    1600, 3136, 4096, 6400, 7744, 9216, 12544
-                ]
+        if envvar == 'None':
+            self.multimodal_buckets = None
         else:
-            multimodal_buckets = [int(i) for i in envvar.split(',')]
-        self.multimodal_buckets = self._process_buckets(multimodal_buckets)
+            if envvar == "":
+                if is_batch_based:
+                    multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
+                else:
+                    multimodal_buckets = [
+                        1600, 3136, 4096, 6400, 7744, 9216, 12544
+                    ]
+            else:
+                multimodal_buckets = [int(i) for i in envvar.split(',')]
+            self.multimodal_buckets = self._process_buckets(multimodal_buckets)
+
 
     def _process_buckets(self, buckets):
         if not self.is_batch_based:
@@ -548,7 +552,6 @@ class HpuModelAdapter(torch.nn.Module):
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
-
             #For Gemma3, we need to override attn_mask with these sliding_window
             #mask which are updated during prepare_attn_mask()
             if global_attn_masks is not None:
@@ -2625,7 +2628,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_len = max(seq_len, 1)
         computed_block_nums = None
         if is_prompt:
-            if img_args is not None:
+            if self.is_mm_run() and img_args is not None:
                 return self.create_dummy_multi_modal_seq_group_metadata(
                     group_id=group_id,
                     img_args=img_args,
@@ -2658,6 +2661,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      block_tables=block_tables,
                                      lora_request=lora_request)
 
+    def is_mm_run(self) -> None:
+        return  (self.is_mm_optimized or self.model_is_mrope) and \
+            (self.multimodal_buckets is not None)
+
     def profile_run(self) -> None:
         # Skip profile run on decode instances
         if self.vllm_config.kv_transfer_config is not None and\
@@ -2676,6 +2683,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Using batch_size 1 is profile multimodal models
         max_batch_size = max_batch_size if self.mm_registry is None else 1
 
+        if self.model_is_mrope or self.is_mm_optimized:
+            model = self.get_model()
+            self.multimodal_buckets = model.vision_buckets.multimodal_buckets
+            logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
+            logger.info(logger_msg)
+
         self.warmup_scenario(
             batch_size=max_batch_size,
             seq_len=max_seq_len,
@@ -2683,8 +2696,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             kv_caches=kv_caches,
             is_pt_profiler_run=False,
-            img_args=UNSET_IMG_ARGS
-            if self.is_mm_optimized or self.model_is_mrope else None,
+            img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
             is_lora_profile_run=True,
         )
 
@@ -2698,8 +2710,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              is_prompt=False,
                              kv_caches=None,
                              is_pt_profiler_run=False,
-                             img_args=UNSET_IMG_ARGS if self.is_mm_optimized
-                             or self.model_is_mrope else None,
+                             img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
                              is_lora_profile_run=True,
                              num_iters=1,
                              align_worker=True,
@@ -2906,27 +2917,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f"free_mem:{free_mem}")
         logger.info(msg)
 
-    def _warmup_multimodal(self, kv_caches):
-        if not self.model_is_mrope and not self.is_mm_optimized:
-            return
-        _, max_seq_len = self.bucketing_ctx.get_max_prompt_shape()
-        seq_len = max_seq_len
-        batch_size = 1
-        phase = 'Multimodal'
-        num_candidates = len(self.multimodal_buckets)
-
-        for i, img_args in enumerate(self.multimodal_buckets):
-            self.log_warmup_multimodal(phase, i, num_candidates, batch_size,
-                                       seq_len, img_args)
-            self.warmup_scenario(batch_size=batch_size,
-                                 seq_len=seq_len,
-                                 ctx=0,
-                                 is_prompt=True,
-                                 kv_caches=kv_caches,
-                                 is_pt_profiler_run=False,
-                                 is_lora_profile_run=True,
-                                 img_args=img_args)
-
     def warmup_graphs(self,
                       buckets,
                       is_prompt,
@@ -2959,14 +2949,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      is_prompt,
                                      kv_caches,
                                      temperature=1.0 if batch_size
-                                     not in warmed_random_sampler_bs else 0)
+                                     not in warmed_random_sampler_bs else 0,
+                                     )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
             total_mem += used_mem
             total_batch_seq += batch_seq
 
-        if is_prompt and (self.model_is_mrope or self.is_mm_optimized):
+        if is_prompt and self.is_mm_run():
             #For multimodal total_batch_seq and total_mem, we store it in the
             #attribute for now.
             mm_outputs = self._warmup_multimodal_graph(
@@ -3057,12 +3048,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             # When pooling we're not using decode phase
             decode_buckets = 0
-
-        if self.model_is_mrope or self.is_mm_optimized:
-            model = self.get_model()
-            self.multimodal_buckets = model.vision_buckets.multimodal_buckets
-            logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
-            logger.info(logger_msg)
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
@@ -3419,22 +3404,25 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         ])
 
     def _get_img_args_from_model_input(self, model_input):
-        if not self.model_is_mrope or \
+        if (not self.model_is_mrope and not self.is_mm_optimized) or \
             not model_input.multi_modal_kwargs or \
             'pixel_values' not in model_input.multi_modal_kwargs:
             return None
-        pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
-        if isinstance(pixel_values_list, torch.Tensor):
-            pixel_values_list = [pixel_values_list]
-        assert isinstance(pixel_values_list, list)
-        model = self.get_model()
-        max_bucket_size = 0
-        for pixel_values in pixel_values_list:
-            assert isinstance(pixel_values, torch.Tensor)
-            curr_num_pixels = pixel_values.shape[-2]
-            bucket_size = model.vision_buckets.get_multimodal_bucket(
-                curr_num_pixels)
-            max_bucket_size = max(max_bucket_size, bucket_size)
+        if self.model_is_mrope:
+            pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
+            if isinstance(pixel_values_list, torch.Tensor):
+                pixel_values_list = [pixel_values_list]
+            assert isinstance(pixel_values_list, list)
+            model = self.get_model()
+            max_bucket_size = 0
+            for pixel_values in pixel_values_list:
+                assert isinstance(pixel_values, torch.Tensor)
+                curr_num_pixels = pixel_values.shape[-2]
+                bucket_size = model.vision_buckets.get_multimodal_bucket(
+                    curr_num_pixels)
+                max_bucket_size = max(max_bucket_size, bucket_size)
+        else:
+            max_bucket_size = self.get_model().vision_buckets.multimodal_buckets[-1]
         return max_bucket_size
 
     def _pad_to_max_num_seqs(self, tensor, value):
