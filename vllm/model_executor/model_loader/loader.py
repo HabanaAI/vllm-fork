@@ -13,9 +13,9 @@ import os
 import time
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
-from typing import (Any, Callable, Dict, Generator, Iterable, List, Optional,
-                    Tuple, cast)
+from typing import Any, Callable, Optional, cast
 
 import gguf
 import huggingface_hub
@@ -45,8 +45,8 @@ from vllm.model_executor.layers.linear import (LinearBase,
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizeMethodBase)
 from vllm.model_executor.model_loader.tensorizer import (
-    TensorizerConfig, is_vllm_tensorized, load_with_tensorizer,
-    serialize_vllm_model, tensorizer_weights_iterator)
+    TensorizerConfig, is_vllm_tensorized, serialize_vllm_model,
+    tensorizer_weights_iterator)
 from vllm.model_executor.model_loader.utils import (ParamMapping,
                                                     configure_quant_config,
                                                     get_model_architecture,
@@ -73,7 +73,7 @@ def device_loading_context(module: torch.nn.Module,
         yield module
         return
 
-    original_device_states: Dict[str, torch.device] = {}
+    original_device_states: dict[str, torch.device] = {}
 
     # Store original device states and move parameters to GPU if they're on CPU
     for name, p in module.named_parameters():
@@ -273,7 +273,7 @@ class DefaultModelLoader(BaseModelLoader):
         revision: Optional[str],
         fall_back_to_pt: bool,
         allow_patterns_overrides: Optional[list[str]],
-    ) -> Tuple[str, List[str], bool]:
+    ) -> tuple[str, list[str], bool]:
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
@@ -319,7 +319,7 @@ class DefaultModelLoader(BaseModelLoader):
         else:
             hf_folder = model_name_or_path
 
-        hf_weights_files: List[str] = []
+        hf_weights_files: list[str] = []
         for pattern in allow_patterns:
             hf_weights_files += glob.glob(os.path.join(hf_folder, pattern))
             if len(hf_weights_files) > 0:
@@ -354,7 +354,7 @@ class DefaultModelLoader(BaseModelLoader):
 
     def _get_weights_iterator(
             self, source: "Source"
-    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+    ) -> Generator[tuple[str, torch.Tensor], None, None]:
         """Get an iterator for the model weights based on the load format."""
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
             source.model_or_path, source.revision, source.fall_back_to_pt,
@@ -419,7 +419,7 @@ class DefaultModelLoader(BaseModelLoader):
         self,
         model_config: ModelConfig,
         model: nn.Module,
-    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+    ) -> Generator[tuple[str, torch.Tensor], None, None]:
         primary_weights = DefaultModelLoader.Source(
             model_config.model,
             model_config.revision,
@@ -524,7 +524,7 @@ class TensorizerLoader(BaseModelLoader):
         self.tensorizer_config.verify_with_parallel_config(parallel_config)
 
     def _get_weights_iterator(
-        self, ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+        self, ) -> Generator[tuple[str, torch.Tensor], None, None]:
         tensorizer_args = self.tensorizer_config._construct_tensorizer_args()
         return tensorizer_weights_iterator(tensorizer_args)
 
@@ -548,32 +548,6 @@ class TensorizerLoader(BaseModelLoader):
             model.load_weights(self._get_weights_iterator())
         return model.eval()
 
-    def _load_model_serialized(
-        self,
-        vllm_config: VllmConfig,
-    ) -> nn.Module:
-        """Load a serialized model with tensorizer.
-
-        Expects a vLLM-tensorized model. See the
-        examples/other/tensorize_vllm_model.py example script
-        for serializing vLLM models."""
-
-        device_config = vllm_config.device_config
-        model_config = vllm_config.model_config
-
-        with set_default_torch_dtype(model_config.dtype):
-            with torch.device(device_config.device):
-                model_class = get_model_architecture(model_config)[0]
-
-                tensorizer_config = copy.copy(self.tensorizer_config)
-                tensorizer_config.model_class = model_class
-                tensorizer_config.hf_config = model_config.hf_config
-                tensorizer_config.dtype = model_config.dtype
-
-                model = load_with_tensorizer(tensorizer_config,
-                                             vllm_config=vllm_config)
-        return model.eval()
-
     def download_model(self, model_config: ModelConfig) -> None:
         self.tensorizer_config.verify_with_model_config(model_config)
 
@@ -593,7 +567,11 @@ class TensorizerLoader(BaseModelLoader):
                 get_tensor_model_parallel_rank())
 
         if is_vllm_tensorized(self.tensorizer_config):
-            return self._load_model_serialized(vllm_config=vllm_config)
+            tensorizer_config = self._patch_tensorizer_config(model_config)
+            model = init_tensorizer_model(tensorizer_config=tensorizer_config,
+                                          vllm_config=vllm_config)
+            self.load_weights(model, model_config)
+            return model
         return self._load_model_serialized_cpu(vllm_config=vllm_config)
 
     @staticmethod
@@ -634,12 +612,12 @@ class ShardedStateLoader(BaseModelLoader):
 
     @staticmethod
     def _filter_subtensors(
-        tensors: Dict[str, torch.Tensor], ) -> Dict[str, torch.Tensor]:
+        tensors: dict[str, torch.Tensor], ) -> dict[str, torch.Tensor]:
         """
         Filter out all tensors that share the same memory or a subset of the
         memory of another tensor.
         """
-        same_storage_groups: Dict[Any, List[Tuple[str, torch.Tensor]]] = (
+        same_storage_groups: dict[Any, list[tuple[str, torch.Tensor]]] = (
             collections.defaultdict(list))
         for key, tensor in tensors.items():
             if tensor.numel():
@@ -649,7 +627,7 @@ class ShardedStateLoader(BaseModelLoader):
         def get_end_ptr(tensor: torch.Tensor) -> int:
             return tensor.view(-1)[-1].data_ptr() + tensor.element_size()
 
-        result: Dict[str, torch.Tensor] = {}
+        result: dict[str, torch.Tensor] = {}
         for group in same_storage_groups.values():
             for k, t in group:
                 a, b = t.data_ptr(), get_end_ptr(t)
@@ -746,7 +724,7 @@ class ShardedStateLoader(BaseModelLoader):
         return model.eval()
 
     def iterate_over_files(
-            self, paths) -> Generator[Tuple[str, torch.Tensor], None, None]:
+            self, paths) -> Generator[tuple[str, torch.Tensor], None, None]:
         if self.runai_model_streamer:
             yield from runai_safetensors_weights_iterator(paths, True)
         else:
@@ -774,7 +752,7 @@ class ShardedStateLoader(BaseModelLoader):
         part_idx = 0
         total_size = 0
         state_dict = ShardedStateLoader._filter_subtensors(model.state_dict())
-        state_dict_part: Dict[str, torch.Tensor] = {}
+        state_dict_part: dict[str, torch.Tensor] = {}
         for key, tensor in state_dict.items():
             param_size = tensor.nelement() * tensor.element_size()
             if max_size is not None and total_size + param_size > max_size:
@@ -805,21 +783,21 @@ class BitsAndBytesModelLoader(BaseModelLoader):
         super().__init__(load_config)
 
         # Save the module names without sharding.
-        self.unsharded_weights_modules: List[str] = []
+        self.unsharded_weights_modules: list[str] = []
         # Save the module names that are sharded by column.
-        self.column_sharded_weights_modules: List[str] = []
+        self.column_sharded_weights_modules: list[str] = []
         # Store all module names (from transformers) that support
         # BNB quantization.
-        self.target_modules: List[str] = []
+        self.target_modules: list[str] = []
         # mapping weight names from transformers to vllm.
         self.weight_mapper: Callable = lambda name: name
 
     def _get_weight_files(
         self,
         model_name_or_path: str,
-        allowed_patterns: List[str],
+        allowed_patterns: list[str],
         revision: Optional[str] = None,
-    ) -> Tuple[str, List[str], str]:
+    ) -> tuple[str, list[str], str]:
         """Retrieve weight files. Download the files if necessary.
 
         Return the weight files and the file pattern."""
@@ -851,7 +829,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
             f"No model weights found in: `{model_name_or_path}`")
 
     def _prepare_weights(self, model_name_or_path: str,
-                         revision: Optional[str]) -> Tuple[List[str], bool]:
+                         revision: Optional[str]) -> tuple[list[str], bool]:
         """Prepare weight files for the model."""
 
         allowed_patterns = ["*.safetensors", "*.bin", "*.pt"]
@@ -911,7 +889,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
         revision: Optional[str],
         pre_quant: bool,
         load_8bit: bool,
-    ) -> Tuple[Generator[Tuple[str, torch.Tensor], None, None], Dict[str,
+    ) -> tuple[Generator[tuple[str, torch.Tensor], None, None], dict[str,
                                                                      Any]]:
         """Get an iterator to the model weights with bitsandbytes quantization,
         as well as the quantization state dictionary."""
@@ -931,7 +909,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
         hf_weights_files, use_safetensors = self._prepare_weights(
             model_name_or_path, revision)
 
-        quant_state_dict: Dict[str, Any] = {}
+        quant_state_dict: dict[str, Any] = {}
 
         if pre_quant:
             if load_8bit:
@@ -1013,7 +991,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
 
         # Closure to parse quant_state for each prequant weight
         def _parse_quant_state(param_name: str,
-                               temp_state_dict: Dict) -> QuantState:
+                               temp_state_dict: dict) -> QuantState:
             quant_state = {}
             for k in temp_state_dict:
                 if param_name + "." in k:
@@ -1172,7 +1150,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
 
         # Modules whose weights might have fused on disk
         # we need their output_sizes to make shard in flight correctly with TP
-        self.maybe_fused_weights_modules: Dict[str, List[int]] = {}
+        self.maybe_fused_weights_modules: dict[str, list[int]] = {}
         self._get_bnb_target_modules(model)
         for name, module in model.named_modules():
             # Some modules like `ReplicatedLinear` should not have their weights
@@ -1237,7 +1215,7 @@ class BitsAndBytesModelLoader(BaseModelLoader):
         torch.cuda.empty_cache()
 
         param_dict = dict(model.named_parameters())
-        stacked_quant_state_dict: Dict[str, Dict[int, Any]] = {}
+        stacked_quant_state_dict: dict[str, dict[int, Any]] = {}
         # TODO: Change this lazy import to normal import
         # after the checks are updated to run on a new version
         from vllm.model_executor.models.utils import is_pp_missing_parameter
@@ -1392,8 +1370,8 @@ class GGUFModelLoader(BaseModelLoader):
         return gguf_to_hf_name_map
 
     def _get_weights_iterator(
-        self, model_name_or_path: str, gguf_to_hf_name_map: Dict[str, str]
-    ) -> Generator[Tuple[str, torch.Tensor], None, None]:
+        self, model_name_or_path: str, gguf_to_hf_name_map: dict[str, str]
+    ) -> Generator[tuple[str, torch.Tensor], None, None]:
         return gguf_quant_weights_iterator(model_name_or_path,
                                            gguf_to_hf_name_map)
 
@@ -1450,7 +1428,7 @@ class RunaiModelStreamerLoader(BaseModelLoader):
                 os.environ["RUNAI_STREAMER_S3_ENDPOINT"] = aws_endpoint_url
 
     def _prepare_weights(self, model_name_or_path: str,
-                         revision: Optional[str]) -> List[str]:
+                         revision: Optional[str]) -> list[str]:
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
@@ -1489,7 +1467,7 @@ class RunaiModelStreamerLoader(BaseModelLoader):
 
     def _get_weights_iterator(
             self, model_or_path: str,
-            revision: str) -> Generator[Tuple[str, torch.Tensor], None, None]:
+            revision: str) -> Generator[tuple[str, torch.Tensor], None, None]:
         """Get an iterator for the model weights based on the load format."""
         hf_weights_files = self._prepare_weights(model_or_path, revision)
         return runai_safetensors_weights_iterator(
