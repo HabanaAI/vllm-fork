@@ -548,7 +548,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             # seeing 0 + 1 = 0 here sometimes!! hence wrapping in torch.tensor
             num_patches=num_crops + 1 if not is_hpu else \
                 torch.ones(num_crops.shape, \
-                dtype=num_crops.dtype).to(pixel_values.device))
+                dtype=num_crops.dtype).to(pixel_values.device)
         )
 
     def _image_pixels_to_features(
