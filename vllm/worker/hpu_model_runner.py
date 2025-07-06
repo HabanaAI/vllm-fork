@@ -2728,17 +2728,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _dummy_run(self, max_num_batched_tokens: int) -> None:
         assert max_num_batched_tokens == 1
-        self.warmup_scenario(batch_size=max_num_batched_tokens,
-                             seq_len=1,
-                             ctx=1,
-                             is_prompt=False,
-                             kv_caches=None,
-                             is_pt_profiler_run=False,
-                             img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
-                             is_lora_profile_run=True,
-                             num_iters=1,
-                             align_worker=True,
-                             is_dummy_run=True)
+        self.warmup_scenario(
+            batch_size=max_num_batched_tokens,
+            seq_len=1,
+            ctx=1,
+            is_prompt=False,
+            kv_caches=None,
+            is_pt_profiler_run=False,
+            img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
+            is_lora_profile_run=True,
+            num_iters=1,
+            align_worker=True,
+            is_dummy_run=True)
         return
 
     def _remove_duplicate_submodules(self):
@@ -2967,14 +2968,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.log_warmup(phase, idx, num_candidates, batch_size, query_len,
                             ctx)
             with HabanaMemoryProfiler() as mem_prof:
-                self.warmup_scenario(batch_size,
-                                     query_len,
-                                     ctx,
-                                     is_prompt,
-                                     kv_caches,
-                                     temperature=1.0 if batch_size
-                                     not in warmed_random_sampler_bs else 0,
-                                     )
+                self.warmup_scenario(
+                    batch_size,
+                    query_len,
+                    ctx,
+                    is_prompt,
+                    kv_caches,
+                    temperature=1.0 if batch_size
+                    not in warmed_random_sampler_bs else 0,
+                    )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
@@ -3556,7 +3558,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     curr_num_pixels)
                 max_bucket_size = max(max_bucket_size, bucket_size)
         else:
-            max_bucket_size = self.get_model().vision_buckets.multimodal_buckets[-1]
+            max_bucket_size = self.get_model(
+            ).vision_buckets.multimodal_buckets[-1]
         return max_bucket_size
 
     def _pad_to_max_num_seqs(self, tensor, value):
