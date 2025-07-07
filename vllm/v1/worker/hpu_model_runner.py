@@ -57,6 +57,8 @@ VLLM_PREFETCH_CACHE = os.environ.get('VLLM_PREFETCH_CACHE',
                                      'f').lower()[0] in ['t', '1']
 VLLM_DEFRAGMENT_CACHE = os.environ.get('VLLM_DEFRAGMENT_CACHE',
                                        'f').lower()[0] in ['t', '1']
+VLLM_PROFILE_DEFRAG = os.environ.get('VLLM_PROFILE_DEFRAG',
+                                     'f').lower()[0] in ['t', '1']
 
 
 def setup_profiler(warmup, active):
@@ -258,7 +260,8 @@ def add_forward_cache(module):
     modules = find_modules(module, ['MLP'])
     for m in modules:
         m.register_forward_pre_hook(trigger_fwd_cache)
-        m.register_forward_hook(break_graph)
+        if get_config().hw == 'g2':
+            m.register_forward_hook(break_graph)
 
 
 def modify_model_layers(module: torch.nn.Module,
@@ -319,6 +322,29 @@ def get_path_to_rope(model: torch.nn.Module):
     return path_to_rope
 
 
+class CacheUtils(torch.nn.Module):
+
+    def __init__(self, kv_caches, block_size):
+        super().__init__()
+        self.kv_caches = tuple(kv_caches)
+        self.block_size = block_size
+
+    def forward(self, srcs, dsts, caches):
+        htorch.core.mark_step()
+        for cache in caches:
+            cache = cache.unflatten(0, (-1, self.block_size))
+            tmp = cache.index_select(0, dsts)
+            cache.index_copy_(0, dsts, cache.index_select(0, srcs))
+            cache.index_copy_(0, srcs, tmp)
+        htorch.core.mark_step()
+
+    def swap(self, srcs, dsts):
+        assert self.kv_caches is not None
+        assert self.block_size is not None
+        for cache in self.kv_caches:
+            self(srcs, dsts, cache)
+
+
 class OnlineDefragmenter:
 
     def __init__(self):
@@ -327,14 +353,23 @@ class OnlineDefragmenter:
         self.req_blocks = {}
         self.fwd_mapping_table = []
         self.bwd_mapping_table = []
-        self.kv_caches = None
-        self.block_size = None
         self.enabled = VLLM_DEFRAGMENT_CACHE
         self.to_swap: list[tuple[int, int]] = []
+        self.profiler = None
+        self.profiling_countdown = 4
+        self.cache_utils = None
 
     def initialize(self, kv_caches, block_size):
-        self.kv_caches = kv_caches
-        self.block_size = block_size
+        self.cache_utils = CacheUtils(kv_caches, block_size)
+        if False and get_config().bridge_mode == 'lazy':
+            assert False
+            self.cache_utils = htorch.hpu.wrap_in_hpu_graph(
+                self.cache_utils, disable_tensor_cache=True)
+        if False and get_config().bridge_mode == 'eager':
+            self.cache_utils.forward = torch.compile(self.cache_utils.forward,
+                                                     backend='hpu_backend',
+                                                     fullgraph=True,
+                                                     dynamic=False)
 
     def extend_mapping_table(self, block_id):
         if len(self.fwd_mapping_table) <= block_id:
@@ -394,6 +429,12 @@ class OnlineDefragmenter:
         for candidate in itertools.count(last):
             yield candidate
 
+    def cleanup(self):
+        if self.profiler:
+            self.profiler.step()
+            self.profiler.stop()
+            self.profiler = None
+
     def defragment(self):
         if not self.enabled:
             return
@@ -403,6 +444,11 @@ class OnlineDefragmenter:
         num_used = len(self.used_blocks)
         if max_used - self.threshold <= num_used:
             return
+        if VLLM_PROFILE_DEFRAG:
+            self.profiling_countdown -= 1
+            if self.profiling_countdown == 0:
+                self.profiler = setup_profiler(0, 1)
+                self.profiler.start()
         free = self.free_blocks()
         used = sorted(self.used_blocks.keys(), reverse=True)
         assert len(self.to_swap) == 0
@@ -420,24 +466,13 @@ class OnlineDefragmenter:
             orig_free_block = self.unmap(free_block)
             self.update_mapping(orig_used_block, free_block)
             self.update_mapping(orig_free_block, used_block)
-        self.swap_blocks()
-
-    def swap_blocks(self):
-        assert self.kv_caches is not None
-        assert self.block_size is not None
-        htorch.core.mark_step()
         srcs, dsts = zip(*self.to_swap)
         srcs = pad_list(list(srcs), self.threshold, itertools.repeat(-1))
         dsts = pad_list(list(dsts), self.threshold, itertools.repeat(-1))
         srcs = torch.tensor(srcs, dtype=torch.long, device='hpu')
         dsts = torch.tensor(dsts, dtype=torch.long, device='hpu')
-        for cache in self.kv_caches:
-            for c in cache:
-                c = c.unflatten(0, (-1, self.block_size))
-                tmp = c.index_select(0, dsts)
-                c.index_copy_(0, dsts, c.index_select(0, srcs))
-                c.index_copy_(0, srcs, tmp)
-        htorch.core.mark_step()
+        assert self.cache_utils is not None
+        self.cache_utils.swap(srcs, dsts)
         self.to_swap.clear()
 
 
@@ -1857,6 +1892,7 @@ class HPUModelRunner:
             spec_token_ids=None,
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
         )
+        defragmenter.cleanup()
         return model_runner_output
 
     def load_model(self) -> None:
@@ -2408,9 +2444,10 @@ class HPUModelRunner:
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
         if os.getenv('VLLM_FULL_WARMUP',
                      'false').strip().lower() in ("1", "true"):
+            pass
             # Since the model is warmed up for all possible tensor sizes,
             # Dynamo can skip checking the guards
-            torch.compiler.set_stance(skip_guard_eval_unsafe=True)
+            #torch.compiler.set_stance(skip_guard_eval_unsafe=True)
         elapsed_time = end_time - start_time
         msg = (
             f"Warmup finished in {elapsed_time:.0f} secs, "
@@ -2479,6 +2516,8 @@ class HPUModelRunner:
                 tensor_config = kv_cache_config.tensors[layer_name]
                 assert tensor_config.size % kv_cache_spec.page_size_bytes == 0
                 num_blocks = tensor_config.size // kv_cache_spec.page_size_bytes
+                print(layer_name, num_blocks, tensor_config.size,
+                      kv_cache_spec.page_size_bytes)
                 # `num_blocks` is the number of blocks the model runner can use.
                 # `kv_cache_config.num_blocks` is the number of blocks that
                 # KVCacheManager may allocate.
