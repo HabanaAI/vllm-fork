@@ -5,24 +5,24 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
 ## Supported Models
 
-| Model Name                                 | Validated TP Size |
-|--------------------------------------------|-------------------|
-| deepseek-ai/DeepSeek-R1-Distill-Llama-70B  | 8                 |
-| meta-llama/Llama-3.1-70B-Instruct          | 4                 |
-| meta-llama/Llama-3.1-405B-Instruct         | 8                 |
-| meta-llama/Llama-3.1-8B-Instruct           | 1                 |
-| meta-llama/Llama-3.2-1B-Instruct           | 1                 |
-| meta-llama/Llama-3.2-3B-Instruct           | 1                 |
-| meta-llama/Llama-3.3-70B-Instruct          | 4                 |
-| mistralai/Mistral-7B-Instruct-v0.2         | 1                 |
-| mistralai/Mixtral-8x22B-Instruct-v0.1      | 4                 |
-| mistralai/Mixtral-8x7B-Instruct-v0.1       | 2                 |
-| Qwen/Qwen2.5-14B-Instruct                  | 1                 |
-| Qwen/Qwen2.5-32B-Instruct                  | 1                 |
-| Qwen/Qwen2.5-72B-Instruct                  | 4                 |
-| Qwen/Qwen2.5-7B-Instruct                   | 1                 |
-| meta-llama/Llama-3.2-11B-Vision-Instruct   | 1                 |
-| meta-llama/Llama-3.2-90B-Vision-Instruct   | 4                 |
+| Model Name | Validated TP Size |
+|--|--|
+| deepseek-ai/DeepSeek-R1-Distill-Llama-70B | 8 |
+| meta-llama/Llama-3.1-70B-Instruct         | 4 |
+| meta-llama/Llama-3.1-405B-Instruct        | 8 |
+| meta-llama/Llama-3.1-8B-Instruct          | 1 |
+| meta-llama/Llama-3.2-1B-Instruct          | 1 |
+| meta-llama/Llama-3.2-3B-Instruct          | 1 |
+| meta-llama/Llama-3.3-70B-Instruct         | 4 |
+| mistralai/Mistral-7B-Instruct-v0.2        | 1 |
+| mistralai/Mixtral-8x22B-Instruct-v0.1     | 4 |
+| mistralai/Mixtral-8x7B-Instruct-v0.1      | 2 |
+| Qwen/Qwen2.5-14B-Instruct                 | 1 |
+| Qwen/Qwen2.5-32B-Instruct                 | 1 |
+| Qwen/Qwen2.5-72B-Instruct                 | 4 |
+| Qwen/Qwen2.5-7B-Instruct                  | 1 |
+| meta-llama/Llama-3.2-11B-Vision-Instruct  | 1 |
+| meta-llama/Llama-3.2-90B-Vision-Instruct  | 4 |
 
 ## How to Use
 
@@ -46,7 +46,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
 ### 2. **Running the Server with a Benchmark**
 
-   To easly initate benchmark dedicated for a specific model using default parameters, use the `--profile benchmark up` option with Docker Compose:
+   To easily initiate benchmark dedicated for a specific model using default parameters, use the `--profile benchmark up` option with Docker Compose:
 
    ```bash
    cd vllm-fork/.cd/
@@ -177,4 +177,4 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
      <docker image name>
    ```
 
-   This method gives you full flexibility over Docker runtime options.
+   This method gives you full flexibility over Docker runtime options.\
