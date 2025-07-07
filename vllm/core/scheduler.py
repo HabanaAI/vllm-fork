@@ -71,8 +71,8 @@ class SchedulingBudget:
         assert num_new_tokens >= 0
         assert num_new_seqs != 0
         # can schedule the first sequence if the budget is empty
-        if self.num_batched_tokens == 0 and self.num_curr_seqs == 0:
-            return num_new_seqs <= self.max_num_seqs
+        if self.num_batched_tokens == 0:
+            return self.num_curr_seqs + num_new_seqs <= self.max_num_seqs
         return (self.num_batched_tokens + num_new_tokens <= self.token_budget
                 and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs)
 
@@ -196,7 +196,7 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         new_max_seq_len = max(max(self._max_seq_len, max_seq_len), 1)
         padding_fn = self._padding_fn_selector()
         num_new_padded_tokens = padding_fn(new_batch_size, new_max_seq_len)
-        if self.num_batched_tokens == 0 and self.num_curr_seqs == 0:
+        if self.num_batched_tokens == 0:
             # can schedule the first sequence if the budget is empty
             result = True
         else:
