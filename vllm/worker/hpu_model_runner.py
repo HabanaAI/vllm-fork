@@ -136,7 +136,6 @@ class VisionBuckets:
         else:
             return 0
 
-
     def __repr__(self):
         return str(self.multimodal_buckets)
 
