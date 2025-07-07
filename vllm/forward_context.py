@@ -238,6 +238,6 @@ def set_forward_context(attn_metadata: Any,
                 if forward_stats:
                     logger.info(("Batchsize forward time stats "
                                  "(batchsize, count, median_time(ms)): %s"),
-                              forward_stats)
+                                forward_stats)
 
         _forward_context = prev_context
