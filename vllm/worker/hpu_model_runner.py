@@ -120,7 +120,6 @@ class VisionBuckets:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
             self.multimodal_buckets = self._process_buckets(multimodal_buckets)
 
-
     def _process_buckets(self, buckets):
         if not self.is_batch_based:
             for bucket in buckets:
@@ -2980,7 +2979,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     kv_caches,
                     temperature=1.0
                     if batch_size not in warmed_random_sampler_bs else 0,
-                    )
+                )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
                                      torch.distributed.ReduceOp.MAX)
