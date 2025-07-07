@@ -198,23 +198,68 @@ Intel Gaudi accelerators perform best when operating on models with fixed tensor
 generates optimized binary code that implements the given model topology on Gaudi. In its default configuration, the produced binary code may be highly dependent on input and output tensor shapes, requiring graph recompilation
 when encountering tensors with different shapes within the same topology. While these binaries efficiently utilize Gaudi, the compilation process itself can introduce noticeable overhead in end-to-end execution.
 In dynamic inference serving scenarios, minimizing the number of graph compilations and reducing the risk of graph compilation occurring during server runtime is important. Currently, this is achieved by
-"bucketing" the model's forward pass across two dimensions: `batch_size`, `query_length` and `num_ctx_blocks`.
+"bucketing" the model's forward pass across three dimensions: `batch_size`, `query_length` (seqence length without context tokens) and `num_blocks` (context length counted in blocks).
 
 > [!NOTE]
-> Bucketing helps significantly reduce the number of required graphs, but does not handle graph compilation or device code generation. These tasks are performed during the warmup and HPUGraph capture phase.
+> Bucketing helps significantly reduce the number of required graphs, but does not handle graph compilation or device code generation. These tasks are performed during the warmup in HPUGraph capture phase.
 
-Bucketing ranges are determined with 3 parameters - `min`, `step`, and `max`. They can be set separately for the prompt and decode phase, and batch size and sequence length dimensions. These parameters
-can be observed in logs during vLLM startup:
+Bucketing ranges are generated based on 4 parameters - `min`, `step`, `max` and `limit`, separately for the prompt and decode phase, and batch size and sequence length dimensions. These parameters can be observed in logs during vLLM startup:
 
 ```{.}
-INFO 07-01 16:36:17 [exponential.py:88] Prompt bucket config (min, step, max_warmup, limit) bs:[1, 1, 32, 6], seq:[128, 128, 2048, 12]
-INFO 07-01 16:36:30 [exponential.py:108] Generated 37 prompt buckets [bs, query, ctx]: [(1, 128, 0), (1, 256, 0), (1, 384, 0), (1, 512, 0), (1, 640, 0), (1, 768, 0), (1, 896, 0), (1, 1024, 0), (1, 1152, 0), (1, 1280, 0), (1, 1664, 0), (1, 2048, 0), (2, 128, 0), (2, 256, 0), (2, 384, 0), (2, 512, 0), (2, 640, 0), (2, 768, 0), (2, 896, 0), (2, 1024, 0), (2, 1152, 0), (2, 1280, 0), (2, 1664, 0), (2, 2048, 0), (4, 128, 0), (4, 256, 0), (4, 384, 0), (4, 512, 0), (4, 640, 0), (4, 768, 0), (4, 896, 0), (4, 1024, 0), (9, 128, 0), (9, 256, 0), (9, 384, 0), (17, 128, 0), (32, 128, 0)]
-INFO 07-01 16:36:17 [exponential.py:93] Decode bucket config (min, step, max_warmup, limit) bs:[1, 1, 32, 6], block:[128, 128, 512, 10]
-INFO 07-01 16:36:30 [exponential.py:119] Generated 60 decode buckets [bs, query, total_blocks]: [(1, 1, 128), (1, 1, 256), (1, 1, 384), (1, 1, 512), (1, 1, 640), (1, 1, 896), (1, 1, 1408), (1, 1, 1920), (1, 1, 2816), (1, 1, 4103), (2, 1, 128), (2, 1, 256), (2, 1, 384), (2, 1, 512), (2, 1, 640), (2, 1, 896), (2, 1, 1408), (2, 1, 1920), (2, 1, 2816), (2, 1, 4103), (4, 1, 128), (4, 1, 256), (4, 1, 384), (4, 1, 512), (4, 1, 640), (4, 1, 896), (4, 1, 1408), (4, 1, 1920), (4, 1, 2816), (4, 1, 4103), (9, 1, 128), (9, 1, 256), (9, 1, 384), (9, 1, 512), (9, 1, 640), (9, 1, 896), (9, 1, 1408), (9, 1, 1920), (9, 1, 2816), (9, 1, 4103), (17, 1, 128), (17, 1, 256), (17, 1, 384), (17, 1, 512), (17, 1, 640), (17, 1, 896), (17, 1, 1408), (17, 1, 1920), (17, 1, 2816), (17, 1, 4103), (32, 1, 128), (32, 1, 256), (32, 1, 384), (32, 1, 512), (32, 1, 640), (32, 1, 896), (32, 1, 1408), (32, 1, 1920), (32, 1, 2816), (32, 1, 4103)]
+INFO 07-07 19:15:36 [exponential.py:36] Prompt bucket config (min, step, max_warmup, limit) bs:[1, 1, 4, 3], seq:[128, 128, 4096, 13]
+INFO 07-07 19:15:36 [common.py:85] Generated 36 prompt buckets [bs, query, num_blocks]: [(1, 128, 0), (1, 256, 0), (1, 384, 0), (1, 512, 0), (1, 640, 0), (1, 768, 0), (1, 896, 0), (1, 1024, 0), (1, 1408, 0), (1, 1792, 0), (1, 2304, 0), (1, 3072, 0), (1, 4096, 0), (2, 128, 0), (2, 256, 0), (2, 384, 0), (2, 512, 0), (2, 640, 0), (2, 768, 0), (2, 896, 0), (2, 1024, 0), (2, 1408, 0), (2, 1792, 0), (2, 2304, 0), (2, 3072, 0), (2, 4096, 0), (4, 128, 0), (4, 256, 0), (4, 384, 0), (4, 512, 0), (4, 640, 0), (4, 768, 0), (4, 896, 0), (4, 1024, 0), (4, 1408, 0), (4, 1792, 0)]
+INFO 07-07 19:15:36 [common.py:85] Generated 42 decode buckets [bs, query, num_blocks]: [(1, 1, 128), (1, 1, 256), (1, 1, 384), (1, 1, 512), (1, 1, 640), (1, 1, 768), (1, 1, 896), (1, 1, 1024), (1, 1, 1408), (1, 1, 1792), (1, 1, 2432), (1, 1, 3328), (1, 1, 4352), (1, 1, 5746), (2, 1, 128), (2, 1, 256), (2, 1, 384), (2, 1, 512), (2, 1, 640), (2, 1, 768), (2, 1, 896), (2, 1, 1024), (2, 1, 1408), (2, 1, 1792), (2, 1, 2432), (2, 1, 3328), (2, 1, 4352), (2, 1, 5746), (4, 1, 128), (4, 1, 256), (4, 1, 384), (4, 1, 512), (4, 1, 640), (4, 1, 768), (4, 1, 896), (4, 1, 1024), (4, 1, 1408), (4, 1, 1792), (4, 1, 2432), (4, 1, 3328), (4, 1, 4352), (4, 1, 5746)]
 ```
 
-`min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, the interval between `min` and `step` has special handling - `min` gets multiplied by consecutive powers of two, until the multiplier is less than or equal to `step`. We call this the ramp-up phase, and it is used for handling lower batch sizes with minimum wastage,
-while allowing larger padding on larger batch sizes.
+In the logged scenario, 36 buckets were generated for prompt (prefill) runs, and 42 buckets for decode runs. Each bucket corresponds to a separate optimized device binary for a given model with specified tensor
+shapes. Whenever a batch of requests is processed, it is padded across batch and sequence length dimension to the smallest possible bucket.
+
+Prompt bucktes can also be generated with context blocks while using Automatic Prefix Caching (default in vLLM V1). Example logs with Automatic Prefix Caching enabled using V1:
+```{.}
+INFO 07-07 19:27:37 [exponential.py:36] Prompt bucket config (min, step, max_warmup, limit) bs:[1, 1, 1, 1], seq:[128, 128, 1024, 11]
+INFO 07-07 19:27:37 [common.py:85] Generated 36 prompt buckets [bs, query, num_blocks]: [(1, 128, 0), (1, 128, 1), (1, 128, 2), (1, 128, 3), (1, 128, 4), (1, 128, 5), (1, 128, 6), (1, 128, 7), (1, 256, 0), (1, 256, 1), (1, 256, 2), (1, 256, 3), (1, 256, 4), (1, 256, 5), (1, 256, 6), (1, 384, 0), (1, 384, 1), (1, 384, 2), (1, 384, 3), (1, 384, 4), (1, 384, 5), (1, 512, 0), (1, 512, 1), (1, 512, 2), (1, 512, 3), (1, 512, 4), (1, 640, 0), (1, 640, 1), (1, 640, 2), (1, 640, 3), (1, 768, 0), (1, 768, 1), (1, 768, 2), (1, 896, 0), (1, 896, 1), (1, 1024, 0)]
+INFO 07-07 19:27:37 [common.py:85] Generated 42 decode buckets [bs, query, num_blocks]: [(1, 1, 128), (1, 1, 256), (1, 1, 384), (1, 1, 512), (1, 1, 640), (1, 1, 768), (1, 1, 896), (1, 1, 1024), (1, 1, 1408), (1, 1, 1792), (1, 1, 2432), (1, 1, 3328), (1, 1, 4352), (1, 1, 5888), (2, 1, 128), (2, 1, 256), (2, 1, 384), (2, 1, 512), (2, 1, 640), (2, 1, 768), (2, 1, 896), (2, 1, 1024), (2, 1, 1408), (2, 1, 1792), (2, 1, 2432), (2, 1, 3328), (2, 1, 4352), (2, 1, 5888), (4, 1, 128), (4, 1, 256), (4, 1, 384), (4, 1, 512), (4, 1, 640), (4, 1, 768), (4, 1, 896), (4, 1, 1024), (4, 1, 1408), (4, 1, 1792), (4, 1, 2432), (4, 1, 3328), (4, 1, 4352), (4, 1, 5888)]
+```
+
+> [!WARNING]
+> If a request exceeds the maximum bucket size in any dimension, it will be processed without padding, and its processing may require a graph compilation, potentially significantly increasing end-to-end latency.
+The boundaries of the buckets are user-configurable via environment variables, and upper bucket boundaries can be increased to avoid such scenario.
+
+For example, if a request with 3 sequences, each having a maximum sequence length of 412, is sent to an idle vLLM server, it will be padded and executed as a `(4, 512, 0)` prefill bucket, WHERE 4=bs, 512 .... This is because the `batch_size`
+(number of sequences) will be padded to 4 (the nearest batch size dimension higher than 3), and the maximum sequence length will be padded to 512 (the nearest sequence length dimension higher than 412). After the
+prefill stage, it will be executed as a `(4, 1, 512)` decode bucket and will remain in this bucket until either the batch dimension changes (e.g., due to a request being completed), in which case it will become
+a `(2, 1, 512)` bucket, or the context length increases beyond 512 tokens. It will become a `(4, 1, 640)` bucket at that point.
+
+
+> [!NOTE]
+> Bucketing is transparent to the user – padding in the sequence length dimension is never returned, and padding in the batch dimension does not create new requests.
+
+### Exponential Strategy
+
+Exponantial startegy is default warm-up mechanism. It is based on 4 parameters:
+- `min`: the smallest value
+- `step`: the rounding value for bucket boundaries
+- `max`: the largest value
+- `limit`: the number of buckets
+> [!WARNING] These parameters are not configurable by the user. 
+
+The exponential bucketing strategy applies exponential spacing between buckets. The `min` and `max` values are always included in warm up, and the intermediate values are calculated using an exponent. The base remains unchanged. If duplicate values are generated, they are removed to ensure the warmup process is as efficient as possible. All generated in this way ranges for batch size and query length will be warmed up with each other.
+
+Example distribution is shown below:
+```{.}
+min = 128, step = 128, max = 4096, limit = 13
+```
+![exponential bucketing distribution for 4096 max query length](./docs/source/assets/hpu/exponential_bucketing_example.png)
+
+This strategy creates more buckets with smaller values closer to `min`. As the values increase toward `max`, the buckets become less frequent, meaning the distance between them gets larger. This helps prioritize warming up the smaller values more precisely, while still covering the full range.
+
+### Linear Strategy
+
+> [!NOTE] From 1.22 Linear strategy is no longer default warm-up mechanism.
+
+Linear strategy is determined with 3 parameters only - `min`, `step` and `max`. They can be set separately for the prompt and decode phase, and batch size and sequence length dimensions, by user. 
+
+`min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, the interval between `min` and `step` has special handling - `min` gets multiplied by consecutive powers of two, until the multiplier is less than or equal to `step`. We call this the ramp-up phase, and it is used for handling lower batch sizes with minimum wastage, while allowing larger padding on larger batch sizes.
 
 **Example with ramp-up**
 
@@ -234,42 +279,27 @@ min = 128, step = 128, max = 512
 => buckets = ramp_up + stable => (128, 256, 384, 512)
 ```
 
-In the logged scenario, 37 buckets were generated for prompt (prefill) runs, and 60 buckets for decode runs. Each bucket corresponds to a separate optimized device binary for a given model with specified tensor
-shapes. Whenever a batch of requests is processed, it is padded across batch and sequence length dimension to the smallest possible bucket.
-
-> [!WARNING]
-> If a request exceeds the maximum bucket size in any dimension, it will be processed without padding, and its processing may require a graph compilation, potentially significantly increasing end-to-end latency.
-The boundaries of the buckets are user-configurable via environment variables, and upper bucket boundaries can be increased to avoid such scenario.
-
-For example, if a request with 3 sequences, each having a maximum sequence length of 412, is sent to an idle vLLM server, it will be padded and executed as a `(4, 512, 0)` prefill bucket. This is because the `batch_size`
-(number of sequences) will be padded to 4 (the nearest batch size dimension higher than 3), and the maximum sequence length will be padded to 512 (the nearest sequence length dimension higher than 412). After the
-prefill stage, it will be executed as a `(4, 1, 512)` decode bucket and will remain in this bucket until either the batch dimension changes (e.g., due to a request being completed), in which case it will become
-a `(2, 1, 512)` bucket, or the context length increases beyond 512 tokens. It will become a `(4, 1, 640)` bucket at that point.
-
-
-> [!NOTE]
-> Bucketing is transparent to the user – padding in the sequence length dimension is never returned, and padding in the batch dimension does not create new requests.
-
 ## Warmup
 
-Warmup is an optional but highly recommended step that occurs before the vLLM server starts listening. It executes a forward pass for each bucket using dummy data. The goal is to pre-compile all graphs
+Warmup is highly recommended step that occurs before the vLLM server starts listening to achieve the best performance results. It executes a forward pass for each bucket using dummy data. The goal is to pre-compile all graphs
 and avoid any graph compilation overhead within bucket boundaries during server runtime. Each warmup step is logged during vLLM startup.
 
 This example uses the same buckets as those in the Bucketing Mechanism section. Each output line corresponds to the execution of a single bucket. When a bucket is executed for the first time, its graph
 is compiled and can be reused later, avoiding further graph compilations.
 
 ```{.}
-INFO 07-01 16:36:30 [hpu_model_runner.py:2653] [Warmup][Graph/prompt][1/37] batch_size:2 query_len:2048 num_blocks:0 free_mem:15.04 GiB
-INFO 07-01 16:36:32 [hpu_model_runner.py:2653] [Warmup][Graph/prompt][2/37] batch_size:4 query_len:1024 num_blocks:0 free_mem:15.04 GiB
-INFO 07-01 16:36:34 [hpu_model_runner.py:2653] [Warmup][Graph/prompt][3/37] batch_size:32 query_len:128 num_blocks:0 free_mem:15.04 GiB
+INFO 07-07 19:15:38 [hpu_model_runner.py:2679] [Warmup][Graph/prompt][1/36] batch_size:4 query_len:1792 num_blocks:0 free_mem:21.06 GiB
+INFO 07-07 19:15:40 [hpu_model_runner.py:2679] [Warmup][Graph/prompt][2/36] batch_size:4 query_len:1408 num_blocks:0 free_mem:21.06 GiB
+INFO 07-07 19:15:41 [hpu_model_runner.py:2679] [Warmup][Graph/prompt][3/36] batch_size:4 query_len:1024 num_blocks:0 free_mem:21.06 GiB
 ...
-INFO 07-01 16:37:40 [hpu_model_runner.py:2653] [Warmup][Graph/prompt][37/37] batch_size:1 query_len:128 num_blocks:0 free_mem:15.03 GiB
-INFO 07-01 16:37:42 [hpu_model_runner.py:2653] [Warmup][Graph/decode][1/60] batch_size:32 query_len:1 num_blocks:1408 free_mem:15.03 GiB
-INFO 07-01 16:37:45 [hpu_model_runner.py:2653] [Warmup][Graph/decode][2/60] batch_size:32 query_len:1 num_blocks:896 free_mem:15.03 GiB
-INFO 07-01 16:37:48 [hpu_model_runner.py:2653] [Warmup][Graph/decode][3/60] batch_size:32 query_len:1 num_blocks:640 free_mem:15.03 GiB
+INFO 07-07 19:16:40 [hpu_model_runner.py:2679] [Warmup][Graph/prompt][35/36] batch_size:1 query_len:256 num_blocks:0 free_mem:21.06 GiB
+INFO 07-07 19:16:42 [hpu_model_runner.py:2679] [Warmup][Graph/prompt][36/36] batch_size:1 query_len:128 num_blocks:0 free_mem:21.06 GiB
+INFO 07-07 19:16:44 [hpu_model_runner.py:2679] [Warmup][Graph/decode][1/42] batch_size:4 query_len:1 num_blocks:5746 free_mem:21.06 GiB
+INFO 07-07 19:16:46 [hpu_model_runner.py:2679] [Warmup][Graph/decode][2/42] batch_size:4 query_len:1 num_blocks:4352 free_mem:10.45 GiB
+INFO 07-07 19:16:48 [hpu_model_runner.py:2679] [Warmup][Graph/decode][3/42] batch_size:4 query_len:1 num_blocks:3328 free_mem:10.45 GiB
 ...
-INFO 07-01 16:40:44 [hpu_model_runner.py:2653] [Warmup][Graph/decode][59/60] batch_size:1 query_len:1 num_blocks:128 free_mem:1.476 GiB
-INFO 07-01 16:40:48 [hpu_model_runner.py:2653] [Warmup][Graph/decode][60/60] batch_size:1 query_len:1 num_blocks:2816 free_mem:1.476 GiB
+INFO 07-07 19:18:28 [hpu_model_runner.py:2679] [Warmup][Graph/decode][41/42] batch_size:1 query_len:1 num_blocks:256 free_mem:10.45 GiB
+INFO 07-07 19:18:31 [hpu_model_runner.py:2679] [Warmup][Graph/decode][42/42] batch_size:1 query_len:1 num_blocks:128 free_mem:10.45 GiB
 ```
 
 > [!TIP]
@@ -298,7 +328,7 @@ regardless of the total device memory.
 
 When many requests are pending, the vLLM scheduler attempts to fill the maximum batch size for decoding as quickly as possible. Once a request is finished, the decode batch size decreases.
 When this happens, vLLM attempts to schedule a prefill iteration for requests in the waiting queue to restore the decode batch size to its previous state. In a fully loaded scenario, the decode
-batch size is often at its maximum, making large-batch HPU graphs critical to capture. Conversely, prefill iterations will typically be executed with very low batch sizes (1-4).
+batch size is often at its maximum, making large-batch HPU graphs critical to capture. On the other hand prompt iterations will typically be executed with very low batch sizes (1-4).
 
 ## Recommended vLLM Parameters
 
@@ -321,11 +351,21 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
 - `VLLM_T_COMPILE_DYNAMIC_SHAPES`: if `true` - PyTorch compiles graph with dynamic options set to None. It causes using dynamic shapes when needed.
 - `VLLM_FULL_WARMUP`: if `true` - PyTorch assumes that warmup fully cover all possible tensor sizes and no compilation will occur afterwards. If compilation occurs after warmup, PyTorch will crash (with message like this: `Recompilation triggered with skip_guard_eval_unsafe stance. This usually means that you have not warmed up your model with enough inputs such that you can guarantee no more recompilations.`). If this happens, disable it. `false` by default.
 
-**Performance Tuning Knobs:**
+<br/>**Performance Tuning Knobs:**
 
-- `VLLM_SKIP_WARMUP`: if `true`, warmup is skipped. The default is `false`.
 - `VLLM_GRAPH_RESERVED_MEM`: percentage of memory dedicated to HPUGraph capture. The default is `0.1`.
 - `VLLM_EXPONENTIAL_BUCKETING`: if `true`, enables exponential bucket spacing instead of linear. The default is `true`.
+- `VLLM_HANDLE_TOPK_DUPLICATES`: if ``true`` - handles duplicates outside top-k. The default is `false`.
+- `VLLM_CONFIG_HIDDEN_LAYERS`: configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. It helps to improve throughput by reducing inter-token latency limitations in some models. The default is `1`.
+- `VLLM_SKIP_WARMUP`: if `true`, warmup is skipped. The default is `false`.
+
+> [!TIP]
+> When a deployed workload does not utilize the full context that a model can handle, it is good practice to limit the maximum values upfront based on the input and output token lengths that will be generated after serving the vLLM server.
+<br><br>**Example:**<br>Let's assume that we want to deploy text generation model Qwen2.5-1.5B, which has a defined `max_position_embeddings` of 131072 (our `max_model_len`). At the same time, we know that our workload pattern will not use the full context length because we expect a maximum input token size of 1K and predict generating a maximum of 2K tokens as output. In this case, starting the vLLM server to be ready for the full context length is unnecessary. Instead, we should limit it upfront to achieve faster service preparation and decrease warmup time. The recommended values in this example should be:
+> - `--max_model_len`: `3072` - the sum of input and output sequences (1+2)*1024.  
+> - `VLLM_PROMPT_SEQ_BUCKET_MAX`: `1024` - the maximum input token size that we expect to handle.
+
+<br/>**Additional Performance Tuning Knobs - Linear Bucketing Strategy only:**
 - `VLLM_{phase}_{dim}_BUCKET_{param}`: collection of 12 environment variables configuring ranges of bucketing mechanism (linear bucketing only).
   - `{phase}` is either `PROMPT` or `DECODE`
   - `{dim}` is either `BS`, `SEQ` or `BLOCK`
@@ -338,7 +378,7 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
       - batch size max (`VLLM_PROMPT_BS_BUCKET_MAX`): `min(max_num_seqs, 64)`
       - sequence length min (`VLLM_PROMPT_SEQ_BUCKET_MIN`): `block_size`
       - sequence length step (`VLLM_PROMPT_SEQ_BUCKET_STEP`): `block_size`
-      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `1024`
+      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `max_model_len`
 
     - Decode:
 
@@ -351,29 +391,19 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
   - Recommended Values:
     - Prompt:
 
-      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `max_model_len`
+      - sequence length max (`VLLM_PROMPT_SEQ_BUCKET_MAX`): `input_tokens + output_tokens` rounded up to a multiple of `block_size` (especially recommended for models with high max_model_len)
     - Decode:
 
       - block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`): `max(128, (max_num_seqs*max_model_len/block_size)`
 
-> [!NOTE]
-> If the model config reports a high `max_model_len`, set it to max `input_tokens+output_tokens` rounded up to a multiple of `block_size` as per actual requirements.
-
-> [!TIP]
-> When a deployed workload does not utilize the full context that a model can handle, it is good practice to limit the maximum values upfront based on the input and output token lengths that will be generated after serving the vLLM server.<br><br>**Example:**<br><br>Let's assume that we want to deploy text generation model Qwen2.5-1.5B, which has a defined `max_position_embeddings` of 131072 (our `max_model_len`). At the same time, we know that our workload pattern will not use the full context length because we expect a maximum input token size of 1K and predict generating a maximum of 2K tokens as output. In this case, starting the vLLM server to be ready for the full context length is unnecessary. Instead, we should limit it upfront to achieve faster service preparation and decrease warmup time. The recommended values in this example should be:
-> - `--max_model_len`: `3072` - the sum of input and output sequences (1+2)*1024.  
-> - `VLLM_PROMPT_SEQ_BUCKET_MAX`: `1024` - the maximum input token size that we expect to handle.
-
-- `VLLM_HANDLE_TOPK_DUPLICATES`: if ``true`` - handles duplicates outside top-k. The default is `false`.
-- `VLLM_CONFIG_HIDDEN_LAYERS`: configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1.
-    It helps to improve throughput by reducing inter-token latency limitations in some models. The default is `1`.
+<br/>**HPU PyTorch Bridge Knobs:**
 
 Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM execution:
 
 - `PT_HPU_LAZY_MODE`: if `0`, PyTorch Eager backend for Gaudi will be used. If `1`, PyTorch Lazy backend for Gaudi will be used. The default is `0`.
 
 - `PT_HPU_ENABLE_LAZY_COLLECTIVES`: must be set to `true` for tensor parallel inference with HPU Graphs. The default is `true`.
-- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE`: must be set to `false` for LLaVA, qwen, and RoBERTa models. The default is `false`.
+- `PT_HPUGRAPH_DISABLE_TENSOR_CACHE`: must be set to `false` for Qwen and RoBERTa models. The default is `true`.
 - `VLLM_PROMPT_USE_FLEX_ATTENTION`: enabled only for the Llama model, allowing usage of `torch.nn.attention.flex_attention` instead of FusedSDPA. Requires `VLLM_PROMPT_USE_FUSEDSDPA=0`. The default is `false`.
 
 # Quantization, FP8 Inference and Model Calibration Process
