@@ -108,6 +108,8 @@ if [ "$model_path" = "" ]; then
 fi
 
 model_name=$(basename "$model_path")
+model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+
 input_min=${input_range[0]}
 input_max=${input_range[1]}
 output_min=${output_range[0]}
@@ -153,8 +155,10 @@ case "$dtype" in
         export PT_HPU_WEIGHT_SHARING=0
         export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
-        if [ "${model_name}" == "Qwen3-235B-A22B" ] || [ "${model_name}" == "Qwen3-30B-A3B" ]; then
+        if [[ "${model_name_lower}" == *"qwen3"* ]]; then
             QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
+        elif [[ $model_name_lower == *"deepseek-r1-distill-qwen-7b"* || $model_name_lower == *"qwen2-7b-instruct"* ]]; then
+            QUANT_FLAGS=(--quantization inc)
         fi
         dtype="bfloat16"
         ;;
@@ -217,6 +221,13 @@ set_bucketing
 gpu_memory_utilization=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
 max_seq_len_to_capture=${VLLM_MAX_SEQ_LEN_TO_CAPTURE:-"8192"}
 
+if [[ "$model_name_lower" == *"llama-4-scout-17b-16e-instruct"* ]]; then
+    # disable expert parallel for Llama-4-Scout-17B-16E-Instruct
+    ENABLE_EXPERT_PARALLEL=""
+else
+    ENABLE_EXPERT_PARALLEL="--enable-expert-parallel"
+fi
+
 ${NUMA_CTL} \
 python3 -m vllm.entrypoints.openai.api_server \
     --host "${host}" --port "${port}" \
@@ -224,7 +235,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --model  "${model_path}" \
     --trust-remote-code \
     --tensor-parallel-size "${num_hpu}" \
-    --enable-expert-parallel \
+    "${ENABLE_EXPERT_PARALLEL}" \
     --dtype "${dtype}" \
     "${QUANT_FLAGS[@]}" \
     --block-size "${block_size}" \
