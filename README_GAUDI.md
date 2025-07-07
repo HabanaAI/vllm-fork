@@ -241,7 +241,8 @@ Exponantial startegy is default warm-up mechanism. It is based on 4 parameters:
 - `step`: the rounding value for bucket boundaries
 - `max`: the largest value
 - `limit`: the number of buckets
-> [!WARNING] These parameters are not configurable by the user. 
+> [!WARNING] 
+> These parameters are not configurable by the user. 
 
 The exponential bucketing strategy applies exponential spacing between buckets. The `min` and `max` values are always included in warm up, and the intermediate values are calculated using an exponent. The base remains unchanged. If duplicate values are generated, they are removed to ensure the warmup process is as efficient as possible. All generated in this way ranges for batch size and query length will be warmed up with each other.
 
@@ -255,7 +256,8 @@ This strategy creates more buckets with smaller values closer to `min`. As the v
 
 ### Linear Strategy
 
-> [!NOTE] From 1.22 Linear strategy is no longer default warm-up mechanism.
+> [!NOTE] 
+> From 1.22 Linear strategy is no longer default warm-up mechanism.
 
 Linear strategy is determined with 3 parameters only - `min`, `step` and `max`. They can be set separately for the prompt and decode phase, and batch size and sequence length dimensions, by user. 
 
