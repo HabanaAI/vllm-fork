@@ -2298,6 +2298,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # Using batch_size 1 is profile multimodal models
         max_batch_size = max_batch_size if not self.model_is_mrope else 1
+
+        msg = (f"profiling run with {max_batch_size=}, {max_seq_len=}")
+        logger.info(msg)
+
         self.warmup_scenario(
             batch_size=max_batch_size,
             seq_len=max_seq_len,
@@ -2308,10 +2312,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_lora_profile_run=True,
         )
 
-        msg = (f"profiling run with {max_batch_size=}, {max_seq_len=}")
-        logger.info(msg)
-        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
-                             False, True)
         return
 
     def warmup_scenario(self,
@@ -3283,6 +3283,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
                         selected_token_indices)
+                    if warmup_mode:
+                        torch.hpu.synchronize()
+                        import torch.distributed as dist
+                        if dist.is_initialized():
+                            dist.barrier()
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
