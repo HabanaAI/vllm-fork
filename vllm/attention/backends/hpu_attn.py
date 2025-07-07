@@ -542,7 +542,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             if self.sliding_window \
                and attn_metadata.window_attn_bias is not None:
                 attn_bias = attn_metadata.window_attn_bias
- 
+
+
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
@@ -569,7 +570,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_groups = attn_metadata.window_block_groups
                 block_mapping = attn_metadata.window_block_mapping
                 attn_bias = attn_metadata.window_attn_bias
-     
+
+
             self.position_bias = None
             alibi_blocks = getattr(attn_metadata, 'alibi_blocks', None)
             if self.alibi_slopes is not None and alibi_blocks is not None:
