@@ -129,10 +129,14 @@ class VisionBuckets:
         return sorted(buckets)
 
     def get_multimodal_bucket(self, curr_num_image_patches):
-        for mm_bucket in self.multimodal_buckets:
-            if curr_num_image_patches <= mm_bucket:
-                return mm_bucket
-        return curr_num_image_patches
+        if self.multimodal_buckets is not None:
+            for mm_bucket in self.multimodal_buckets:
+                if curr_num_image_patches <= mm_bucket:
+                    return mm_bucket
+            return curr_num_image_patches
+        else:
+            return 0
+
 
     def __repr__(self):
         return str(self.multimodal_buckets)
@@ -2686,8 +2690,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      block_tables=block_tables,
                                      lora_request=lora_request)
 
-    def is_mm_run(self) -> None:
-        return  (self.is_mm_optimized or self.model_is_mrope) and \
+    def is_mm_run(self) -> bool:
+        return (self.is_mm_optimized or self.model_is_mrope) and \
             (self.multimodal_buckets is not None)
 
     def profile_run(self) -> None:
@@ -2974,8 +2978,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     ctx,
                     is_prompt,
                     kv_caches,
-                    temperature=1.0 if batch_size
-                    not in warmed_random_sampler_bs else 0,
+                    temperature=1.0
+                    if batch_size not in warmed_random_sampler_bs else 0,
                     )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
