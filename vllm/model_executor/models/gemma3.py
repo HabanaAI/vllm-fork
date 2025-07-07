@@ -203,7 +203,6 @@ class Gemma3Attention(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         if self.split_qkv:
-            print('SPLIT QKV FWD')
             q, k, v, _ = self.qkv_proj(hidden_states)
         else:
             qkv, _ = self.qkv_proj(hidden_states)
@@ -437,8 +436,8 @@ class Gemma3Model(nn.Module):
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 
-    def load_weights(self, weights: Iterable[Tuple[str,
-                                                   torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[tuple[str,
+                                                   torch.Tensor]]) -> set[str]:
         if not self.split_qkv:
             stacked_params_mapping = [
                 # (param_name, shard_name, shard_id)
@@ -484,7 +483,6 @@ class Gemma3Model(nn.Module):
                 weight_loader = param.weight_loader
                 if self.split_qkv and (shard_id == "q" or shard_id == "v"
                                        or shard_id == "k"):
-                    print("QKV SPLIT")
                     weight_loader(param, loaded_weight)
                 else:
                     weight_loader(param, loaded_weight, shard_id)
