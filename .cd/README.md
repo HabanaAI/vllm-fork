@@ -26,7 +26,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
 ## How to Use
 
-### 1. Run the server using Docker Compose
+1. Run the server using Docker Compose
 
    The recommended and easiest way to start the vLLM server is with Docker Compose. At a minimum, set the following environment variables:
 
@@ -34,7 +34,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    - `HF_TOKEN` - Your Hugging Face token (generate one at <https://huggingface.co>).
    - `DOCKER_IMAGE` - The vLLM Docker image URL from Gaudi or local repository.
 
-   ***Example usage:***
+   **Example usage:**
 
    ```bash
    cd vllm-fork/.cd/
@@ -44,7 +44,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    docker compose up
    ```
 
-### 2. Running the Server with a Benchmark
+2. Running the Server with a Benchmark
 
    To easily initiate benchmark dedicated for a specific model using default parameters, use the `--profile benchmark up` option with Docker Compose:
 
@@ -58,7 +58,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
    This launches the vLLM server and runs the benchmark suite automatically.
 
-### 3. Run the server using Docker Compose with custom parameters
+3. Run the server using Docker Compose with custom parameters
 
    To override default settings, you can provide additional parameters when starting the server. This is a more advanced approach:
 
@@ -73,7 +73,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    - `VLLM_PROMPT_BS_BUCKET_STEP` - Sets the batch size step for prompt processing, impacting how prompt batches are handled.
    - `VLLM_PROMPT_SEQ_BUCKET_STEP` - Controls the step size for prompt sequence allocation, affecting how sequences are bucketed for processing.
 
-   ***Example usage:***
+   **Example usage:**
 
    ```bash
    cd vllm-fork/.cd/
@@ -85,7 +85,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    docker compose up
    ```
 
-### 4. Running the Server and Benchmark with Custom Parameters
+4. Running the Server and Benchmark with Custom Parameters
 
    You can customize benchmark parameters using:
 
@@ -94,7 +94,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    - `CON_REQ` – Number of concurrent requests to send during benchmarking.
    - `NUM_PROMPTS` – Total number of prompts to use in the benchmark.
 
-   ***Example usage:***
+   **Example usage:**
 
    ```bash
    cd vllm-fork/.cd/
@@ -110,11 +110,11 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
    This will launch the vLLM server and run the benchmark suite using your specified parameters.
 
-### 5. Running the Server and Benchmark, both with Custom Parameters
+5. Running the Server and Benchmark, both with Custom Parameters
 
    You can launch the vLLM server and benchmark together, specifying any combination of optional parameters for both the server and the benchmark. Set the desired environment variables before running Docker Compose.
 
-   ***Example usage:***
+   **Example usage:**
 
    ```bash
    cd vllm-fork/.cd/
@@ -132,7 +132,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
    This command will start the vLLM server and run the benchmark suite using your specified custom parameters.
 
-### 6. Running the Server and Benchmark Using Configuration Files
+6. Running the Server and Benchmark Using Configuration Files
 
    You can also configure the server and benchmark by specifying parameters in configuration files. To do this, set the following environment variables:
 
@@ -141,7 +141,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    - `VLLM_BENCHMARK_CONFIG_FILE` – Path to the benchmark configuration file inside the Docker container.
    - `VLLM_BENCHMARK_CONFIG_NAME` – Name of the benchmark configuration section.
 
-   ***Example:***
+   **Example:**
 
    ```bash
    HF_TOKEN=<your huggingface token> \
@@ -155,11 +155,11 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    > [!NOTE]
    > When using configuration files, you do not need to set the `MODEL` environment variable, as the model name is specified within the configuration file. However, you must still provide your `HF_TOKEN`.
 
-### 7. Running the Server Directly with Docker
+7. Running the Server Directly with Docker
 
    For full control, you can run the server using the `docker run` command. This approach allows you to specify any native Docker parameters as needed.
 
-   ***Example:***
+   **Example:**
 
    ```bash
    docker run -it --rm \
