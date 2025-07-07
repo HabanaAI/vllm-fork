@@ -148,10 +148,12 @@ class Singleton(type):
             cls._instances[cls] = super().__call__(*args, **kwargs)
         return cls._instances[cls]
 
+
 def is_mm_optimized(model):
     return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
         if hasattr(model, 'model') else \
         'Gemma3ForConditionalGeneration' in str(type(model))
+
 
 def pad_flat_tensor(tensor, desired_size):
     assert tensor.dim() == 1, 'Only flat tensors are supported'
@@ -597,7 +599,6 @@ class HpuModelAdapter(torch.nn.Module):
                 attn_metadata = attn_metadata._replace(
                     attn_bias=global_attn_masks[0])
 
-
             if self.interleaved_sliding_window:
                 if local_attn_masks is not None:
                     attn_metadata = attn_metadata._replace(
@@ -1020,7 +1021,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
         self.seen_configs: set = set()
         self._mem_margin: Optional[int] = None
-
         self.use_prefix_caching = (
             self.vllm_config.cache_config.enable_prefix_caching)
         self.bucketing_manager = HPUBucketingManager()
@@ -1497,17 +1497,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if self.model_is_mrope or self.is_mm_optimized:
                 model.vision_buckets = VisionBuckets(is_mm_optimized)
 
-    def _get_position_pad(self) -> int:
-        """
-        For gemma3 models,
-        due to the Hack in Gemma3ForConditionalGeneration::prepare_attn_masks,
-        '0' can't be used as pad for input position tensor.
-        In case, it might have '0's for bucketing, those '0' will be counted as
-        new sequence in the prepare_attn_masks() which is wrong.
-        """
-        model_type = getattr(self.model_config.hf_config, 'model_type', '')
-        return -1 if model_type == 'gemma3' else 0
-
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -1556,7 +1545,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             context_len = seq_data.get_num_computed_tokens()
             # We should use get_len here because in case of preemption
             # it contains output tokens.
-
             seq_len = min(seq_data.get_len(), context_len + token_chunk_size)
             prompt_tokens = seq_data.get_token_ids()[context_len:seq_len]
             seq_lens.append(seq_len)
@@ -1798,7 +1786,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                           pad=0,
                                           dtype=torch.long,
                                           flat=True).flatten()
-
         context_lens_tensor = make_cpu_tensor([context_lens],
                                               max_len=num_seqs,
                                               pad=0,
@@ -2187,6 +2174,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.device, non_blocking=True)
             cross_block_usage = cross_block_usage.to(  # type: ignore
                 self.device, non_blocking=True)
+
             encoder_seq_lens_tensor = \
                 encoder_seq_lens_tensor.to(  # type: ignore
                     self.device, non_blocking=True)
