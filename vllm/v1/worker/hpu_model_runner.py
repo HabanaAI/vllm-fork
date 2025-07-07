@@ -15,9 +15,9 @@ import numpy as np
 import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
+from vllm_hpu_extension.bucketing.common import HPUBucketingManager
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler, format_bytes)
-from vllm_hpu_extension.bucketing.common import HPUBucketingManager
 from vllm_hpu_extension.runtime import get_config
 
 from vllm.attention.backends.abstract import AttentionType
