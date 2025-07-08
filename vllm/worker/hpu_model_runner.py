@@ -1304,20 +1304,34 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             fullgraph = os.getenv('VLLM_T_COMPILE_FULLGRAPH',
                                   'false').strip().lower() in ("1", "true")
             dynamic = os.getenv('VLLM_T_COMPILE_DYNAMIC_SHAPES',
-                                'false').strip().lower() in ("1", "true")
+                                'false').strip().lower()
             self._compile_config = {'fullgraph': fullgraph, 'dynamic': dynamic}
         fullgraph = self._compile_config['fullgraph']
         dynamic = self._compile_config['dynamic']
-        if dynamic:
-            return torch.compile(module,
-                                 backend='hpu_backend',
-                                 fullgraph=fullgraph,
-                                 options={"force_static_compile": True})
-        else:
+        if dynamic == 'false':
             return torch.compile(module,
                                  backend='hpu_backend',
                                  fullgraph=fullgraph,
                                  dynamic=False)
+        elif dynamic == 'true':
+            return torch.compile(module,
+                                 backend='hpu_backend',
+                                 fullgraph=fullgraph)
+        elif dynamic == 'true_static':
+            return torch.compile(module,
+                                 backend='hpu_backend',
+                                 fullgraph=fullgraph,
+                                 options={"force_static_compile": True})
+
+        elif dynamic == 'true_eager':
+            return torch.compile(module,
+                                 backend='hpu_backend',
+                                 fullgraph=fullgraph,
+                                 options={"fallback_dynamic_to_eager": True})
+        else:
+            raise ValueError(
+                f"Invalid VLLM_T_COMPILE_DYNAMIC_SHAPES value: {dynamic}. "
+                "Valid options are 'false', 'true_static', and 'true_eager'.")
 
     def get_model(self) -> torch.nn.Module:
         if isinstance(self.model, HpuModelAdapter):
