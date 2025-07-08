@@ -26,7 +26,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
 ## How to Use
 
-### 1. Run the server using Docker Compose
+1. Run the server using Docker Compose
 
    The recommended and easiest way to start the vLLM server is with Docker Compose. At a minimum, set the following environment variables:
 
@@ -44,7 +44,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    docker compose up
    ```
 
-### 2. Running the Server with a Benchmark
+2. Running the Server with a Benchmark
 
    To easily initiate benchmark dedicated for a specific model using default parameters, use the `--profile benchmark up` option with Docker Compose:
 
@@ -58,7 +58,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
    This launches the vLLM server and runs the benchmark suite automatically.
 
-### 3. Run the server using Docker Compose with custom parameters
+3. Run the server using Docker Compose with custom parameters
 
    To override default settings, you can provide additional parameters when starting the server. This is a more advanced approach:
 
@@ -85,7 +85,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    docker compose up
    ```
 
-### 4. Running the Server and Benchmark with Custom Parameters
+4. Running the Server and Benchmark with Custom Parameters
 
    You can customize benchmark parameters using:
 
@@ -110,7 +110,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
    This will launch the vLLM server and run the benchmark suite using your specified parameters.
 
-### 5. Running the Server and Benchmark, both with Custom Parameters
+5. Running the Server and Benchmark, both with Custom Parameters
 
    You can launch the vLLM server and benchmark together, specifying any combination of optional parameters for both the server and the benchmark. Set the desired environment variables before running Docker Compose.
 
@@ -132,7 +132,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
 
    This command will start the vLLM server and run the benchmark suite using your specified custom parameters.
 
-### 6. Running the Server and Benchmark Using Configuration Files
+6. Running the Server and Benchmark Using Configuration Files
 
    You can also configure the server and benchmark by specifying parameters in configuration files. To do this, set the following environment variables:
 
@@ -155,7 +155,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
    > [!NOTE]
    > When using configuration files, you do not need to set the `MODEL` environment variable, as the model name is specified within the configuration file. However, you must still provide your `HF_TOKEN`.
 
-### 7. Running the Server Directly with Docker
+7. Running the Server Directly with Docker
 
    For full control, you can run the server using the `docker run` command. This approach allows you to specify any native Docker parameters as needed.
 
