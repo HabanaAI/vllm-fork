@@ -1495,7 +1495,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             model = self.get_model()
             self.is_mm_optimized = is_mm_optimized(model)
             if self.model_is_mrope or self.is_mm_optimized:
-                model.vision_buckets = VisionBuckets(is_mm_optimized)
+                model.vision_buckets = VisionBuckets(self.is_mm_optimized)
 
     def _prepare_prompt(
         self,
