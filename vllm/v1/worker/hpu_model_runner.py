@@ -59,6 +59,8 @@ VLLM_DEFRAGMENT_CACHE = os.environ.get('VLLM_DEFRAGMENT_CACHE',
                                        'f').lower()[0] in ['t', '1']
 VLLM_PROFILE_DEFRAG = os.environ.get('VLLM_PROFILE_DEFRAG',
                                      'f').lower()[0] in ['t', '1']
+VLLM_COMBINED_KV = os.environ.get('VLLM_COMBINED_KV',
+                                  'f').lower()[0] in ['t', '1']
 
 
 def setup_profiler(warmup, active):
@@ -326,23 +328,42 @@ class CacheUtils(torch.nn.Module):
 
     def __init__(self, kv_caches, block_size):
         super().__init__()
-        self.kv_caches = tuple(kv_caches)
         self.block_size = block_size
+        self.combined_kv = torch.is_tensor(kv_caches[0])
+        self.kv_caches = tuple(kv_caches)
 
     def forward(self, srcs, dsts, caches):
         htorch.core.mark_step()
         for cache in caches:
+            if self.combined_kv:
+                cache = cache.flatten(0, 1)
             cache = cache.unflatten(0, (-1, self.block_size))
-            tmp = cache.index_select(0, dsts)
-            cache.index_copy_(0, dsts, cache.index_select(0, srcs))
-            cache.index_copy_(0, srcs, tmp)
+            prev_srcs = cache.index_select(0, srcs)
+            prev_dsts = cache.index_select(0, dsts)
+            cache.index_copy_(0, dsts, prev_srcs)
+            cache.index_copy_(0, srcs, prev_dsts)
         htorch.core.mark_step()
 
     def swap(self, srcs, dsts):
         assert self.kv_caches is not None
         assert self.block_size is not None
-        for cache in self.kv_caches:
-            self(srcs, dsts, cache)
+        if self.combined_kv:
+            num_layers = self.kv_caches[0].size(0)
+            num_blocks = self.kv_caches[0].size(1) // self.block_size
+            srcs = list(
+                itertools.chain(*[[layer * num_blocks + s for s in srcs]
+                                  for layer in range(num_layers)]))
+            dsts = list(
+                itertools.chain(*[[layer * num_blocks + s for s in dsts]
+                                  for layer in range(num_layers)]))
+        srcs = torch.tensor(srcs, dtype=torch.long, device='hpu')
+        dsts = torch.tensor(dsts, dtype=torch.long, device='hpu')
+        if self.combined_kv:
+            for cache in self.kv_caches:
+                self(srcs, dsts, [cache])
+        else:
+            for cache in self.kv_caches:
+                self(srcs, dsts, cache)
 
 
 class OnlineDefragmenter:
@@ -469,8 +490,6 @@ class OnlineDefragmenter:
         srcs, dsts = zip(*self.to_swap)
         srcs = pad_list(list(srcs), self.threshold, itertools.repeat(-1))
         dsts = pad_list(list(dsts), self.threshold, itertools.repeat(-1))
-        srcs = torch.tensor(srcs, dtype=torch.long, device='hpu')
-        dsts = torch.tensor(dsts, dtype=torch.long, device='hpu')
         assert self.cache_utils is not None
         self.cache_utils.swap(srcs, dsts)
         self.to_swap.clear()
@@ -2372,7 +2391,10 @@ class HPUModelRunner:
     def warmup_model(self) -> None:
         kv_caches = self.kv_caches
         max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
-        defragmenter.initialize(kv_caches, self.block_size)
+        if self.combined_kv_cache is not None:
+            defragmenter.initialize(self.combined_kv_cache, self.block_size)
+        else:
+            defragmenter.initialize(kv_caches, self.block_size)
         if not self.enable_bucketing:
             return
         prompt_profile_cfg, decode_profile_cfg = self._read_profiling_cfg()
@@ -2509,37 +2531,55 @@ class HPUModelRunner:
                 "supported yet.")
 
         kv_caches: dict[str, torch.Tensor] = {}
+        num_blocks: int = 0
+
+        combined_kv = VLLM_COMBINED_KV
+        print('Using a merged tensor for key and value!')
 
         for kv_cache_group in kv_cache_config.kv_cache_groups:
             kv_cache_spec = kv_cache_group.kv_cache_spec
+            if not isinstance(kv_cache_spec, FullAttentionSpec):
+                # TODO: add new branches when introducing more types of
+                # KV cache specs.
+                raise ValueError("Unknown KV cache spec type.")
+            all_num_blocks = []
             for layer_name in kv_cache_group.layer_names:
                 tensor_config = kv_cache_config.tensors[layer_name]
                 assert tensor_config.size % kv_cache_spec.page_size_bytes == 0
-                num_blocks = tensor_config.size // kv_cache_spec.page_size_bytes
-                print(layer_name, num_blocks, tensor_config.size,
-                      kv_cache_spec.page_size_bytes)
-                # `num_blocks` is the number of blocks the model runner can use.
-                # `kv_cache_config.num_blocks` is the number of blocks that
-                # KVCacheManager may allocate.
-                # Since different GPUs may have different number of layers and
-                # different memory capacities, `num_blocks` can be different on
-                # different GPUs, and `kv_cache_config.num_blocks` is set to
-                # the min of all `num_blocks`. Verify it here.
-                assert num_blocks >= kv_cache_config.num_blocks
-                if isinstance(kv_cache_spec, FullAttentionSpec):
-                    kv_cache_shape = self.attn_backend.get_kv_cache_shape(
-                        num_blocks + 1, kv_cache_spec.block_size,
-                        kv_cache_spec.num_kv_heads, kv_cache_spec.head_size)
-                    dtype = kv_cache_spec.dtype
+                all_num_blocks.append(tensor_config.size //
+                                      kv_cache_spec.page_size_bytes)
+            num_blocks = min(all_num_blocks)
+            # `num_blocks` is the number of blocks the model runner can use.
+            # `kv_cache_config.num_blocks` is the number of blocks that
+            # KVCacheManager may allocate.
+            # Since different GPUs may have different number of layers and
+            # different memory capacities, `num_blocks` can be different on
+            # different GPUs, and `kv_cache_config.num_blocks` is set to
+            # the min of all `num_blocks`. Verify it here.
+            assert num_blocks >= kv_cache_config.num_blocks
+            kv_cache_shape = self.attn_backend.get_kv_cache_shape(
+                num_blocks + 1, kv_cache_spec.block_size,
+                kv_cache_spec.num_kv_heads, kv_cache_spec.head_size)
+            dtype = kv_cache_spec.dtype
+            if combined_kv:
+                num_layers = len(kv_cache_group.layer_names)
+                key_cache = torch.zeros((num_layers, ) + kv_cache_shape,
+                                        dtype=dtype,
+                                        device=self.device)
+                value_cache = torch.zeros_like(key_cache)
+                for layer_id, layer_name in enumerate(
+                        kv_cache_group.layer_names):
+                    kv_caches[layer_name] = (key_cache[layer_id],
+                                             value_cache[layer_id])
+                self.combined_kv_cache = (key_cache, value_cache)
+            else:
+                for layer_name in kv_cache_group.layer_names:
                     key_cache = torch.zeros(kv_cache_shape,
                                             dtype=dtype,
                                             device=self.device)
                     value_cache = torch.zeros_like(key_cache)
                     kv_caches[layer_name] = (key_cache, value_cache)
-                else:
-                    # TODO: add new branches when introducing more types of
-                    # KV cache specs.
-                    raise ValueError("Unknown KV cache spec type.")
+                self.combined_kv_cache = None
 
         bind_kv_cache(
             kv_caches,
