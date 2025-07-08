@@ -198,7 +198,7 @@ Intel Gaudi accelerators perform best when operating on models with fixed tensor
 generates optimized binary code that implements the given model topology on Gaudi. In its default configuration, the produced binary code may be highly dependent on input and output tensor shapes, requiring graph recompilation
 when encountering tensors with different shapes within the same topology. While these binaries efficiently utilize Gaudi, the compilation process itself can introduce noticeable overhead in end-to-end execution.
 In dynamic inference serving scenarios, minimizing the number of graph compilations and reducing the risk of graph compilation occurring during server runtime is important. Currently, this is achieved by
-"bucketing" the model's forward pass across three dimensions: `batch_size`, `query_length` (seqence length without context tokens) and `num_blocks` (context length counted in blocks).
+"bucketing" the model's forward pass across three dimensions: `batch_size`, `query_length` (sequence length without context tokens) and `num_blocks` (context length counted in blocks).
 
 > [!NOTE]
 > Bucketing helps significantly reduce the number of required graphs, but does not handle graph compilation or device code generation. These tasks are performed during the warmup in HPUGraph capture phase.
@@ -215,6 +215,7 @@ In the logged scenario, 36 buckets were generated for prompt (prefill) runs, and
 shapes. Whenever a batch of requests is processed, it is padded across batch and sequence length dimension to the smallest possible bucket.
 
 Prompt bucktes can also be generated with context blocks while using Automatic Prefix Caching (default in vLLM V1). Example logs with Automatic Prefix Caching enabled using V1:
+
 ```{.}
 INFO 07-07 19:27:37 [exponential.py:36] Prompt bucket config (min, step, max_warmup, limit) bs:[1, 1, 1, 1], seq:[128, 128, 1024, 11]
 INFO 07-07 19:27:37 [common.py:85] Generated 36 prompt buckets [bs, query, num_blocks]: [(1, 128, 0), (1, 128, 1), (1, 128, 2), (1, 128, 3), (1, 128, 4), (1, 128, 5), (1, 128, 6), (1, 128, 7), (1, 256, 0), (1, 256, 1), (1, 256, 2), (1, 256, 3), (1, 256, 4), (1, 256, 5), (1, 256, 6), (1, 384, 0), (1, 384, 1), (1, 384, 2), (1, 384, 3), (1, 384, 4), (1, 384, 5), (1, 512, 0), (1, 512, 1), (1, 512, 2), (1, 512, 3), (1, 512, 4), (1, 640, 0), (1, 640, 1), (1, 640, 2), (1, 640, 3), (1, 768, 0), (1, 768, 1), (1, 768, 2), (1, 896, 0), (1, 896, 1), (1, 1024, 0)]
@@ -230,36 +231,37 @@ For example, if a request with 3 sequences, each having a maximum sequence lengt
 prefill stage, it will be executed as a `(4, 1, 512)` decode bucket and will remain in this bucket until either the batch dimension changes (e.g., due to a request being completed), in which case it will become
 a `(2, 1, 512)` bucket, or the context length increases beyond 512 tokens. It will become a `(4, 1, 640)` bucket at that point.
 
-
 > [!NOTE]
 > Bucketing is transparent to the user – padding in the sequence length dimension is never returned, and padding in the batch dimension does not create new requests.
 
 ### Exponential Strategy
 
-Exponantial startegy is default warm-up mechanism. It is based on 4 parameters:
+Exponantial strategy is default warm-up mechanism. It is based on 4 parameters:
 - `min`: the smallest value
 - `step`: the rounding value for bucket boundaries
 - `max`: the largest value
 - `limit`: the number of buckets
-> [!WARNING] 
-> These parameters are not configurable by the user. 
+> [!WARNING]
+> These parameters are not configurable by the user.
 
 The exponential bucketing strategy applies exponential spacing between buckets. The `min` and `max` values are always included in warm up, and the intermediate values are calculated using an exponent. The base remains unchanged. If duplicate values are generated, they are removed to ensure the warmup process is as efficient as possible. All generated in this way ranges for batch size and query length will be warmed up with each other.
 
 Example distribution is shown below:
+
 ```{.}
 min = 128, step = 128, max = 4096, limit = 13
 ```
+
 ![exponential bucketing distribution for 4096 max query length](./docs/source/assets/hpu/exponential_bucketing_example.png)
 
 This strategy creates more buckets with smaller values closer to `min`. As the values increase toward `max`, the buckets become less frequent, meaning the distance between them gets larger. This helps prioritize warming up the smaller values more precisely, while still covering the full range.
 
 ### Linear Strategy
 
-> [!NOTE] 
+> [!NOTE]
 > From 1.22 Linear strategy is no longer default warm-up mechanism.
 
-Linear strategy is determined with 3 parameters only - `min`, `step` and `max`. They can be set separately for the prompt and decode phase, and batch size and sequence length dimensions, by user. 
+Linear strategy is determined with 3 parameters only - `min`, `step` and `max`. They can be set separately for the prompt and decode phase, and batch size and sequence length dimensions, by user.
 
 `min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, the interval between `min` and `step` has special handling - `min` gets multiplied by consecutive powers of two, until the multiplier is less than or equal to `step`. We call this the ramp-up phase, and it is used for handling lower batch sizes with minimum wastage, while allowing larger padding on larger batch sizes.
 
