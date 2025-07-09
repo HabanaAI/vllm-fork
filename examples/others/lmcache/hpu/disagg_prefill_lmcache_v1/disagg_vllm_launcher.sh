@@ -9,7 +9,7 @@ fi
 
 SERVER="lm"
 TP_SIZE=1
-MODEL="/root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
+MODEL="llama3.1/Meta-Llama-3.1-8B-Instruct"
 
 if [[ $# -eq 1 ]]; then
     echo "Using default server: $SERVER"
@@ -41,8 +41,6 @@ if [[ $1 == "prefiller" ]]; then
     LMCACHE_CONFIG_FILE=$prefill_config_file \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        LMCACHE_REMOTE_SERDE=naive \
-        LMCACHE_CHUNK_SIZE=256 \
         RANK=0 \
         vllm serve $MODEL \
         --port 1100 \
@@ -69,8 +67,6 @@ elif [[ $1 == "decoder" ]]; then
     LMCACHE_CONFIG_FILE=$decode_config_file \
         VLLM_ENABLE_V1_MULTIPROCESSING=1 \
         VLLM_WORKER_MULTIPROC_METHOD=spawn \
-        LMCACHE_REMOTE_SERDE=naive \
-        LMCACHE_CHUNK_SIZE=256 \
         RANK=1 \
         vllm serve $MODEL \
         --port 1200 \

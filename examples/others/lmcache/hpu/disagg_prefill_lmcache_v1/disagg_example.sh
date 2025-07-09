@@ -92,7 +92,7 @@ wait_for_server() {
 
 SERVER="lm"
 TP_SIZE=1
-MODEL="/root/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/"
+MODEL="llama3.1/Meta-Llama-3.1-8B-Instruct"
 
 main() {
     while [[ "$#" -gt 0 ]]; do
@@ -145,7 +145,7 @@ main() {
     decoder_pid=$!
     PIDS+=($decoder_pid)
 
-    python3 disagg_proxy_server.py \
+    python3 ../../disagg_prefill_lmcache_v1/disagg_proxy_server.py \
         --host localhost \
         --port 1000 \
         --prefiller-host localhost \
@@ -164,7 +164,7 @@ main() {
 
     # begin benchmark
     cd ../../../../../benchmarks/
-    python benchmark_serving.py  --port 1000 --seed $(date +%s) \
+    python benchmark_serving.py  --port 1000 --seed 12345 \
         --model $MODEL \
         --dataset-name random --random-input-len 8000 --random-output-len 200 \
         --num-prompts 100 --burstiness 100 --request-rate 3.6 | tee benchmark.log
