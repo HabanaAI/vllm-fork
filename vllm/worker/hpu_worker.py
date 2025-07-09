@@ -207,10 +207,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
-            if envs.VLLM_DP_SIZE > 1:
-                torch.hpu.set_device(self.device)
-            else:
+            if self.vllm_config.parallel_config.pipeline_parallel_size > 1:
                 torch.hpu.set_device(self.local_rank)
+            else:
+                torch.hpu.set_device(self.device)
         elif self.device_config.device_type == "cpu":
             self.device = torch.device("cpu")
         else:
