@@ -1655,7 +1655,7 @@ class ParallelConfig:
     """IP of the data parallel master."""
     data_parallel_master_port: int = 29500
     """Port of the data parallel master."""
-    enable_expert_parallel: bool = True
+    enable_expert_parallel: bool = False
     """Use expert parallelism instead of tensor parallelism for MoE layers."""
 
     max_parallel_loading_workers: Optional[int] = None
