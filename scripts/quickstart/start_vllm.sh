@@ -82,8 +82,8 @@ elif hl-smi 2>/dev/null | grep -q HL-288; then
     echo "Gaudi2 PCIe platform"
     default_decode_bs_step=2
 else
-    echo "Unknown platform and exit..."
-    exit 1
+    echo "Use the default decode bs step setting"
+    default_decode_bs_step=8
 fi
 
 # DO NOT change unless you fully undersand its purpose
