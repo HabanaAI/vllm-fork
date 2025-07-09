@@ -949,8 +949,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
     def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor,
                  vision_buckets):
         seq_len = x.shape[0]
-        rot_pos_emb, cu_window_seqlens, window_index, attention_mask, _ = self.prepare_for_attn_cpu(
-            seq_len, grid_thw, vision_buckets)
+        rot_pos_emb, cu_window_seqlens, window_index, attention_mask = \
+            self.prepare_for_attn_cpu(seq_len, grid_thw, vision_buckets)
         hidden_states, rot_pos_emb, attention_mask = self.pre_attn_hpu(
             x, rot_pos_emb, attention_mask, window_index, grid_thw,
             vision_buckets)
@@ -972,8 +972,13 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                                      vision_buckets,
                                      -100)
 
-        attention_mask, padded_grid_thw_cpu =\
-            self.pad_multimodal_data(attention_mask, grid_thw_cpu, vision_buckets, 0)
+        attention_mask, padded_grid_thw_cpu = \
+            self.pad_multimodal_data(
+                attention_mask,
+                grid_thw_cpu,
+                vision_buckets,
+                0
+            )
 
         # windows attention
         window_index, cu_window_seqlens = self.get_window_index(
@@ -988,7 +993,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                                            dtype=self.dtype)
         attention_mask = attention_mask.bool().to(device=self.device)
 
-        return rotary_pos_emb, cu_window_seqlens, window_index, attention_mask, grid_thw
+        return rotary_pos_emb, cu_window_seqlens, window_index, attention_mask
 
     def pre_attn_hpu(self, x: torch.Tensor, rotary_pos_emb, attention_mask,
                      window_index, grid_thw, vision_buckets):
@@ -1101,7 +1106,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                         vision_buckets)
 
                 fullatt_block_attn_mask = \
-                    attention_mask[0,0,:,:] * attention_mask[0,0,0,:].unsqueeze(1)
+                    attention_mask[0,0,:,:] * \
+                        attention_mask[0,0,0,:].unsqueeze(1)
 
                 htcore.mark_step()
                 hidden_states = self.forward(

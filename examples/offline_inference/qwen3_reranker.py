@@ -67,10 +67,13 @@ if __name__ == "__main__":
     ]
 
     queries = [
-        query_template.format(prefix=prefix, instruction=instruction, query=query)
-        for query in queries
+        query_template.format(prefix=prefix,
+                              instruction=instruction,
+                              query=query) for query in queries
     ]
-    documents = [document_template.format(doc=doc, suffix=suffix) for doc in documents]
+    documents = [
+        document_template.format(doc=doc, suffix=suffix) for doc in documents
+    ]
 
     outputs = model.score(queries, documents)
 

@@ -2,7 +2,7 @@
 
 # set -x
 
-# set up commen environment variables for vllm
+# set up common environment variables for vllm
 set_env(){
     # pytorch bridge
     export PT_HPU_WEIGHT_SHARING=${PT_HPU_WEIGHT_SHARING:-"0"}
@@ -18,7 +18,7 @@ set_env(){
     export VLLM_DELAYED_SAMPLING=${VLLM_DELAYED_SAMPLING:-"true"}
     export VLLM_ZERO_PADDING=${VLLM_ZERO_PADDING:-"true"}
 
-    # MoE sepcific
+    # MoE specific
     export VLLM_EP_SIZE=${VLLM_EP_SIZE:-"${num_hpu}"}
     export VLLM_DYNAMIC_MOE_MIN_TOKENS=${VLLM_DYNAMIC_MOE_MIN_TOKENS:-"256"}
     export VLLM_DYNAMIC_MOE_MIN_EXPERTS_SINGLEHPU=${VLLM_DYNAMIC_MOE_MIN_EXPERTS_SINGLEHPU:-"32"}

@@ -2296,7 +2296,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
-
         msg = (f"profiling run with {max_batch_size=}, {max_seq_len=}")
         logger.info(msg)
 
@@ -2312,7 +2311,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 num_patches=UNSET_NUM_PATCHES,
                 is_lora_profile_run=True,
             )
-        
+
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
 

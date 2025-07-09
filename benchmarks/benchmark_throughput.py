@@ -8,7 +8,7 @@ import random
 import time
 import warnings
 from functools import cache
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import uvloop
@@ -22,7 +22,6 @@ from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 
-from vllm import RequestOutput
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.entrypoints.openai.api_server import (
     build_async_engine_client_from_engine_args)
@@ -36,7 +35,7 @@ from vllm.transformers_utils.tokenizer import AnyTokenizer, get_lora_tokenizer
 from vllm.utils import FlexibleArgumentParser, merge_async_iterators
 
 
-def save_prompt_response(json_path: str, outputs: List[RequestOutput]):
+def save_prompt_response(json_path: str, outputs: list[RequestOutput]):
     if not json_path:
         return
     print("saving results ...")
