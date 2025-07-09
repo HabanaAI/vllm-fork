@@ -29,6 +29,10 @@ huggingface-cli download Yi30/DeepSeek-R1-Distill-Qwen-32B-pile-512-g2-tp1-0707-
 cd vllm-fork/scripts
 export MODEL=/mnt/disk9/yiliu7/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
 export QUANT_CONFIG=inc_quant_post.json
+PT_HPU_LAZY_MODE=1 \
+VLLM_SKIP_WARMUP=true \
+PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
+PT_HPU_WEIGHT_SHARING=0 \
 python ./run_example_tp_qwen.py \
     --model $MODEL \
     --tokenizer $MODEL \
