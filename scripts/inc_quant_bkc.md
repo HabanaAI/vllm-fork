@@ -1,15 +1,14 @@
 ## 0. Prerequisites
 
-- Docker 1.21, vault.habana.ai/gaudi-docker/1.21.0/ubuntu24.04/habanalabs/pytorch-installer-2.6.0:latest
+- Docker Synapse 1.21, vault.habana.ai/gaudi-docker/1.21.0/ubuntu24.04/habanalabs/pytorch-installer-2.6.0:latest
 
 ## 1. Installation
 
 - vLLM
 
 ```bash
-git clone -b deepseek_r1 https://github.com/HabanaAI/vllm-fork.git
+git clone -b aice-121-qwen https://github.com/HabanaAI/vllm-fork.git
 cd vllm-fork
-git checkout aice-121-qwen
 pip install -r requirements-hpu.txt
 VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation
 ```
@@ -20,6 +19,7 @@ VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation
 
 ```bash
 cd vllm-fork/scripts
+pip install -U "huggingface_hub[cli]"
 huggingface-cli download Yi30/DeepSeek-R1-Distill-Qwen-32B-pile-512-g2-tp1-0707-post  --local-dir nc_workspace_measure_kvache_post
 ```
 
