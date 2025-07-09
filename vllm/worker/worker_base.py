@@ -256,6 +256,46 @@ class WorkerInput:
         return tensor_dict
 
 
+VLLM_UPDATE_MEM = os.environ.get("VLLM_UPDATE_MEM", "0").lower() in ["1", "true", "yes", "on"]
+def update_mem(shape=None):
+    import torch
+
+    import habana_frameworks.torch as htorch 
+    from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
+    memory_stats = torch.hpu.memory.memory_stats()
+    local_rank = torch.distributed.get_rank()
+    csv_file = f"vllm_memory_stats_pp_rank_{local_rank}.csv"
+
+    # Define the field names (header)
+    fieldnames = [
+        "Timestamp", "Shape",
+        "Limit", "InUse", "MaxInUse", "NumAllocs", "NumFrees",
+        "ActiveAllocs", "MaxAllocSize", "TotalSystemAllocs",
+        "TotalSystemFrees", "TotalActiveAllocs",
+        "FreeMem",
+    ]
+
+    # Check if the file exists to decide if the header needs to be written
+    import os
+    import csv
+    write_header = not os.path.exists(csv_file)
+
+    # Append the row to the CSV
+    with open(csv_file, mode='a', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        import time
+        memory_stats['Timestamp'] = time.strftime("%Y-%m-%d-%H:%M:%S")
+        memory_stats['Shape'] = str(shape)
+        memory_stats["FreeMem"] = memory_stats["MaxInUse"] - memory_stats["InUse"]
+        writer.writerow({key: memory_stats[key] for key in fieldnames})
+        # logger.warning(f"<<<<<<<<<<<<<<<<< Update mem >>>>>>>>>>>>>>>>>")
+        # msg = f"Memory stats: "
+        # for key in fieldnames:
+        #     msg += f"{key}: {str(memory_stats[key])}, "
+        # logger.warning(msg)
+
 class LocalOrDistributedWorkerBase(WorkerBase):
     """
     Partial implementation of WorkerBase that has a default `execute_model`
@@ -442,6 +482,19 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
                     "model_execute_time", torch.tensor(0)).item()
 
+        _input_shape = None
+        try:
+            if intermediate_tensors is None:
+                _input_tokens = model_input.input_tokens
+                _input_shape = _input_tokens.shape
+            else:
+                _hidden_states = intermediate_tensors.tensors.get("hidden_states", None)
+                if _hidden_states is not None:
+                    _input_shape = _hidden_states.shape
+            _input_shape = [x for x in _input_shape]
+        except:
+            _input_shape = "unknown"
+
         output = self.model_runner.execute_model(
             model_input=model_input,
             kv_caches=self.kv_cache[worker_input.virtual_engine]
@@ -450,6 +503,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             num_steps=num_steps,
             **kwargs,
         )
+        if VLLM_UPDATE_MEM:
+            update_mem(_input_shape)
 
         model_execute_time = time.perf_counter() - start_time
         if not get_pp_group().is_last_rank:

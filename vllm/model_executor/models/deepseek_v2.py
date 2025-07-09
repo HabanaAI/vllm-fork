@@ -634,7 +634,7 @@ class DeepseekV2Model(nn.Module):
                 prefix=f"{prefix}.embed_tokens")
         else:
             self.embed_tokens = PPMissingLayer()
-        # config.num_hidden_layers = 4
+        config.num_hidden_layers = 6
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
             lambda prefix: DeepseekV2DecoderLayer(
@@ -794,10 +794,8 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
                 if is_pp_missing_parameter(name, self):
                     continue
-
                 if name not in params_dict:
-                        continue
-
+                    continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
@@ -811,10 +809,8 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
                     if is_pp_missing_parameter(name, self):
                         continue
-
                     if name not in params_dict:
                         continue
-
                     param = params_dict[name]
                     weight_loader = param.weight_loader
                     weight_loader(param,
@@ -835,10 +831,8 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
 
                     if is_pp_missing_parameter(name, self):
                         continue
-
                     if name not in params_dict:
                         continue
-
                     param = params_dict[name]
                     weight_loader = getattr(param, "weight_loader",
                                             default_weight_loader)

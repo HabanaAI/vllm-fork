@@ -121,13 +121,28 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             else:
                 fn = torch.profiler.tensorboard_trace_handler
                 with_stack = True
+            warmup = int(os.getenv("VLLM_ENGINE_PROFILER_WARMUP_STEPS", "0"))
+            steps = int(os.getenv("VLLM_ENGINE_PROFILER_STEPS", "1"))
+            repeat = int(os.getenv("VLLM_ENGINE_PROFILER_REPEAT", "1"))
+            from torch.profiler import schedule
+
+            schedule = torch.profiler.schedule(wait=0,
+                                            warmup=warmup,
+                                            active=steps,
+                                            repeat=repeat)
+
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
                     torch.profiler.ProfilerActivity.HPU,
                 ],
-                with_stack=with_stack,
-                on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
+                schedule=schedule,
+                on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True),
+                record_shapes=False,
+                with_modules=False,
+                profile_memory=False,
+                with_stack=True,
+            )
         else:
             self.profiler = None
 
@@ -182,6 +197,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         return self.model_config.is_encoder_decoder
 
     def start_profile(self):
+        
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
         high_level_profiler = self.model_runner.profiler
@@ -193,10 +209,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 except queue.Empty:
                     break
             self.profiler.start()
+            self._profiler_started = True
 
     def stop_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
+        logger.info(f"start stopping profiler for worker {self.rank}")
         self.profiler.stop()
 
     def _set_env_vars(self):
@@ -308,6 +326,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         output = LocalOrDistributedWorkerBase.execute_model(
             self, execute_model_req)
+        if self.profiler is not None and getattr(self, '_profiler_started', False):
+            self.profiler.step()
         return output
 
     def align_dp_groups(self, value, op) -> int:
