@@ -19,36 +19,36 @@ sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_
 ## Install vLLM
 1. Start a container with the latest base image:
 
-``` bash
-docker run -it --runtime=habana \
-    -e HABANA_VISIBLE_DEVICES=all \
-    -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
-    --cap-add=sys_nice --net=host --ipc=host \
-    vault.habana.ai/gaudi-docker/1.21.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
- ```
+    ``` bash
+    docker run -it --runtime=habana \
+        -e HABANA_VISIBLE_DEVICES=all \
+        -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+        --cap-add=sys_nice --net=host --ipc=host \
+        vault.habana.ai/gaudi-docker/1.21.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+    ```
 
-1. Install vLLM：
+2. Install vLLM：
 
-``` bash
-git clone -b aice/v1.21.0 https://github.com/HabanaAI/vllm-fork
-VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork
-```
+    ``` bash
+    git clone -b aice/v1.21.0 https://github.com/HabanaAI/vllm-fork
+    VLLM_TARGET_DEVICE=hpu pip install -e vllm-fork
+    ```
 
-1. If you need use multimodal models like Qwen-VL, GLM-4V, we recommend using Pillow-SIMD instead of Pillow to improve the image processing performance.
+3. If you need use multimodal models like Qwen-VL, GLM-4V, we recommend using Pillow-SIMD instead of Pillow to improve the image processing performance.
 To install Pillow-SIMD, run the following:
 
-``` bash
-pip uninstall pillow
-CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-``` 
+    ``` bash
+    pip uninstall pillow
+    CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+    ``` 
 
-> We also provide HPU MediaPipe for the image processing for Qwen-VL. Enable it by exporting `USE_HPU_MEDIA=true`. You may enable your models with this feature via referring to the changes in qwen.py.
+    > We also provide HPU MediaPipe for the image processing for Qwen-VL. Enable it by exporting `USE_HPU_MEDIA=true`. You may enable your models with this feature via referring to the changes in qwen.py.
 
-1. Enter the scripts folder
+4. Enter the scripts folder
 
-``` bash
-cd scripts
-```
+    ``` bash
+    cd scripts
+    ```
 
 ## Steps to host vLLM service
 
