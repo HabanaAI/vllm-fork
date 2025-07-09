@@ -96,7 +96,10 @@ LORA_WARMUP_RANK = 8
 
 DUMMY_TOKEN_ID = -1
 UNSET_IMG_ARGS = 9999999
+<<<<<<< HEAD
 shutdown_inc_called = False
+=======
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
 
 
 class PhaseType(Enum):
@@ -349,6 +352,7 @@ class HpuModelAdapter(torch.nn.Module):
             text_config, "interleaved_sliding_window",
             None) if text_config else None
 
+<<<<<<< HEAD
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
@@ -366,6 +370,12 @@ class HpuModelAdapter(torch.nn.Module):
                 f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
                 f'not supported due to not a multiplier of '\
                 f'PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
+=======
+        text_config = vllm_config.model_config.hf_config.get_text_config()
+        self.interleaved_sliding_window = getattr(
+            text_config, "interleaved_sliding_window",
+            None) if text_config else None
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -423,6 +433,34 @@ class HpuModelAdapter(torch.nn.Module):
             delattr(self._rotary_embed_module, "cos")
         if hasattr(self._rotary_embed_module, "sin"):
             delattr(self._rotary_embed_module, "sin")
+
+    # copying from PR 1163
+    # needs cleanup/unified approach later
+    def compute_input_embeddings_for_gemma(self, **kwargs):
+
+        if 'inputs_embeds' in kwargs:
+            print('do nothing')
+            return kwargs
+
+        input_ids = kwargs['input_ids']
+
+        vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
+        inputs_embeds = self.model.get_input_embeddings(
+            input_ids, vision_embeddings)
+
+        if vision_embeddings is not None:
+            input_ids = kwargs['input_ids']
+            positions = kwargs['positions']
+            kwargs = self.model.prepare_attn_masks(
+                mask_dtype=self.dtype,
+                **kwargs,
+            )
+            kwargs['input_ids'] = input_ids
+            kwargs['positions'] = positions
+
+        kwargs.update({'inputs_embeds': inputs_embeds})
+        kwargs.pop('pixel_values', None)
+        return kwargs
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -487,15 +525,24 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
+<<<<<<< HEAD
         if (seq_len <= window_size) or (not attn_metadata.is_prompt) or (
                 attn_metadata.use_window_sdpa):
             # no need to set sliding window mask, just use built-in sdpa
+=======
+        if seq_len <= window_size:
+            #no need to set sliding window mask, just use causal mask
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
             return attn_metadata
 
         prefill_metadata = attn_metadata
         shift = 0
 
+<<<<<<< HEAD
         #causal + window size
+=======
+        #causal + window size : accuracy good
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
         tensor = torch.full((batch_size, 1, seq_len, seq_len),
                             device=device,
                             dtype=dtype,
@@ -505,6 +552,10 @@ class HpuModelAdapter(torch.nn.Module):
         attn_bias = torch.log(mask)
 
         attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
@@ -572,6 +623,7 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
+<<<<<<< HEAD
     def _update_use_window_sdpa(self, attn_metadata, seq_len):
         use_window_sdpa = False
         if self.use_window_sdpa and self.prefill_use_fusedsdpa:
@@ -589,6 +641,8 @@ class HpuModelAdapter(torch.nn.Module):
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
         return attn_metadata
 
+=======
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
     def _update_metadata(self,
                          attn_metadata,
                          batch_size,
@@ -616,7 +670,10 @@ class HpuModelAdapter(torch.nn.Module):
                     attn_metadata = self._set_attn_bias_for_sliding_window(
                         attn_metadata, batch_size, seq_len,
                         self.interleaved_sliding_window, device, dtype)
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
@@ -1489,6 +1546,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
 
+<<<<<<< HEAD
+=======
+    def _get_position_pad(self) -> int:
+        """
+        For gemma3 models,
+        due to the Hack in Gemma3ForConditionalGeneration::prepare_attn_masks,
+        '0' can't be used as pad for input position tensor.
+        In case, it might have '0's for bucketing, those '0' will be counted as
+        new sequence in the prepare_attn_masks() which is wrong.
+        """
+        model_type = getattr(self.model_config.hf_config, 'model_type', '')
+        return -1 if model_type == 'gemma3' else 0
+
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
     def add_vision_buckets_to_mrope_mm_optimized(self):
         if self.mm_registry is not None:
             model = self.get_model()
@@ -1744,11 +1815,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
                                                      input_mrope_positions=input_mrope_positions,
                                                      max_prompt_len=max_prompt_len,
-                                                     pad=0)
+                                                     pad=self._get_position_pad())
         else:
             input_positions = make_cpu_tensor(input_positions,
                                               max_len=max_prompt_len,
-                                              pad=0,
+                                              pad=self._get_position_pad(),
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
@@ -2657,8 +2728,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_usage',
             'window_block_groups',
             'window_attn_bias',
+<<<<<<< HEAD
             'use_window_sdpa',
             'sliding_window_right',
+=======
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
         ])
         return attention_metadata
 
@@ -3888,6 +3962,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
+<<<<<<< HEAD
 
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
@@ -3895,12 +3970,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         execute_model_kwargs['attn_metadata'], seq_len)
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
+=======
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
+<<<<<<< HEAD
                             if warmup_mode:
                                 bypass_model_exec = True
+=======
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets)
@@ -3910,8 +3990,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs
                             )
+<<<<<<< HEAD
                         if warmup_mode and bypass_model_exec:
                             return []
+=======
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
 
                     with self.profiler.record_event('internal',
                                                     model_event_name,

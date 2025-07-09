@@ -56,6 +56,10 @@ def greedy_plan(batchsize, available_batchsizes):
     left_to_process = batchsize
     result = []
     while (left_to_process > 0 and idx < len(available_batchsizes_sorted)):
+<<<<<<< HEAD
+=======
+        #print(idx, left_to_process, result)
+>>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
         if available_batchsizes_sorted[idx] <= left_to_process:
             result += [available_batchsizes_sorted[idx]]
             left_to_process -= available_batchsizes_sorted[idx]
