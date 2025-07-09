@@ -13,7 +13,7 @@ pip install -r requirements-hpu.txt
 VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation
 ```
 
-### 2 FP8 KV + Per-Channel Quantization
+### 2. FP8 KV + Per-Channel Quantization
 
 - Get calibration files
 
