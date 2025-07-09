@@ -29,7 +29,8 @@ from vllm.utils import get_ip, get_open_port
 from vllm.worker.hpu_worker import HPUWorker
 
 
-def stateless_init_process_group(master_address, master_port, rank, world_size):
+def stateless_init_process_group(master_address, master_port, rank,
+                                 world_size):
     """
     vLLM provides `StatelessProcessGroup` to create a process group
     without considering the global process group in torch.distributed.
@@ -69,8 +70,7 @@ class MyWorker(HPUWorker):
 
     def update_weight(self, name, dtype, shape):
         weight = torch.empty(shape, dtype=dtype, device="hpu")
-        self.model_update_group.broadcast(weight,
-                                          src=0)
+        self.model_update_group.broadcast(weight, src=0)
         torch.hpu.synchronize()
         weight = weight.to("cpu")
 

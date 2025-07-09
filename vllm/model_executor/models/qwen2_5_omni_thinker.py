@@ -34,8 +34,6 @@ import torch.nn.functional as F
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
     Qwen2_5OmniAudioEncoderConfig, Qwen2_5OmniConfig, Qwen2_5OmniThinkerConfig)
-from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import (
-    Qwen2_5OmniAudioEncoder)
 from transformers.models.qwen2_5_omni.processing_qwen2_5_omni import (
     Qwen2_5OmniProcessor)
 from transformers.models.whisper import WhisperFeatureExtractor
@@ -449,8 +447,9 @@ class Qwen2_5OmniAudioEncoder(nn.Module):
                                  padding_value=0,
                                  padding_side="right"):
         """
-        Pads a sequence of tensors to their maximum length on indicated `padding_side`.
-        Then prepares a mask so that pad tokens are not attended to.
+        Pads a sequence of tensors to their maximum length on indicated
+        `padding_side`. Then prepares a mask so that pad tokens are not
+        attended to.
         """
         max_len = tensor_len.max()
         dim = tensor_list[0].shape[0]
@@ -520,7 +519,10 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
         chunk_list = input_features.split(chunk_lengths.tolist(), dim=1)
         padded_feature, padded_mask, padded_mask_after_cnn = \
           self.padded_and_mask_function(
-              chunk_list, chunk_lengths, padding_value=0, audio_buckets=audio_buckets,
+              chunk_list,
+              chunk_lengths,
+              padding_value=0,
+              audio_buckets=audio_buckets,
           )
 
         cu_seqlens = torch.cat((

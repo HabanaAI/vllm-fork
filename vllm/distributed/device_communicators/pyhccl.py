@@ -1,15 +1,14 @@
-from typing import Optional, Union
-
-import torch
-import torch.distributed as dist
-from torch.distributed import ProcessGroup, ReduceOp
+# SPDX-License-Identifier: Apache-2.0
+from typing import Optional
 
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.utils as htutils
+import torch
+from torch.distributed import ReduceOp
 
 from vllm.distributed.device_communicators.pyhccl_wrapper import (
-    HCCLLibrary, buffer_type, hpuStream_t, hcclComm_t, hcclDataTypeEnum,
-    hcclRedOpTypeEnum, hcclUniqueId)
+    HCCLLibrary, buffer_type, hcclComm_t, hcclDataTypeEnum, hcclRedOpTypeEnum,
+    hcclUniqueId, hpuStream_t)
 from vllm.distributed.utils import StatelessProcessGroup
 from vllm.logger import init_logger
 
@@ -72,7 +71,7 @@ class PyHcclCommunicator:
 
         # A small all_reduce for warmup.
         data = torch.ones(1, device="hpu")
-        out = self.all_reduce(data)
+        _ = self.all_reduce(data)
         del data
         torch.hpu.synchronize()
 
@@ -81,33 +80,35 @@ class PyHcclCommunicator:
                    op: ReduceOp = ReduceOp.SUM) -> torch.Tensor:
         if self.disabled:
             return None
-        assert in_tensor.device.type == "hpu", f"the input tensor should be on hpu"
+        assert in_tensor.device.type == "hpu", \
+            "the input tensor should be on hpu"
 
         out_tensor = torch.empty_like(in_tensor)
 
         htorch.core.mark_step()
         torch.hpu.synchronize()
 
-        self.hccl.hcclAllReduce(buffer_type(htutils.experimental._data_ptr(in_tensor)),
-                                buffer_type(htutils.experimental._data_ptr(out_tensor)),
-                                in_tensor.numel(),
-                                hcclDataTypeEnum.from_torch(in_tensor.dtype),
-                                hcclRedOpTypeEnum.from_torch(op), self.comm,
-                                hpuStream_t(htutils.experimental._compute_stream()))
+        self.hccl.hcclAllReduce(
+            buffer_type(htutils.experimental._data_ptr(in_tensor)),
+            buffer_type(htutils.experimental._data_ptr(out_tensor)),
+            in_tensor.numel(), hcclDataTypeEnum.from_torch(in_tensor.dtype),
+            hcclRedOpTypeEnum.from_torch(op), self.comm,
+            hpuStream_t(htutils.experimental._compute_stream()))
         return out_tensor
 
-    def all_gather(self,
-                   output_tensor: torch.Tensor,
+    def all_gather(self, output_tensor: torch.Tensor,
                    input_tensor: torch.Tensor):
         if self.disabled:
             return
-        assert input_tensor.device.type == "hpu", f"the input tensor should be on hpu"
+        assert input_tensor.device.type == "hpu", \
+            "the input tensor should be on hpu"
 
         htorch.core.mark_step()
         torch.hpu.synchronize()
         self.hccl.hcclAllGather(
             buffer_type(htutils.experimental._data_ptr(input_tensor)),
-            buffer_type(htutils.experimental._data_ptr(output_tensor)), input_tensor.numel(),
+            buffer_type(htutils.experimental._data_ptr(output_tensor)),
+            input_tensor.numel(),
             hcclDataTypeEnum.from_torch(input_tensor.dtype), self.comm,
             hpuStream_t(htutils.experimental._compute_stream()))
 
@@ -117,14 +118,17 @@ class PyHcclCommunicator:
                        op: ReduceOp = ReduceOp.SUM):
         if self.disabled:
             return
-        assert input_tensor.device.type == "hpu", f"the input tensor should be on hpu"
-        assert output_tensor.device.type == "hpu", f"the output tensor should be on hpu"
+        assert input_tensor.device.type == "hpu", \
+            "the input tensor should be on hpu"
+        assert output_tensor.device.type == "hpu", \
+            "the output tensor should be on hpu"
 
         htorch.core.mark_step()
         torch.hpu.synchronize()
         self.hccl.hcclReduceScatter(
             buffer_type(htutils.experimental._data_ptr(input_tensor)),
-            buffer_type(htutils.experimental._data_ptr(output_tensor)), output_tensor.numel(),
+            buffer_type(htutils.experimental._data_ptr(output_tensor)),
+            output_tensor.numel(),
             hcclDataTypeEnum.from_torch(input_tensor.dtype),
             hcclRedOpTypeEnum.from_torch(op), self.comm,
             hpuStream_t(htutils.experimental._compute_stream()))
@@ -132,34 +136,42 @@ class PyHcclCommunicator:
     def send(self, tensor: torch.Tensor, dst: int):
         if self.disabled:
             return
-        assert tensor.device.type == "hpu", f"the input tensor should be on hpu"
+        assert tensor.device.type == "hpu", \
+            "the input tensor should be on hpu"
 
         htorch.core.mark_step()
         torch.hpu.synchronize()
-        self.hccl.hcclSend(buffer_type(htutils.experimental._data_ptr(tensor)), tensor.numel(),
+        self.hccl.hcclSend(buffer_type(htutils.experimental._data_ptr(tensor)),
+                           tensor.numel(),
                            hcclDataTypeEnum.from_torch(tensor.dtype), dst,
-                           self.comm, hpuStream_t(htutils.experimental._compute_stream()))
+                           self.comm,
+                           hpuStream_t(htutils.experimental._compute_stream()))
 
     def recv(self, tensor: torch.Tensor, src: int):
         if self.disabled:
             return
-        assert tensor.device.type == "hpu", f"the input tensor should be on hpu"
+        assert tensor.device.type == "hpu", \
+            "the input tensor should be on hpu"
 
         htorch.core.mark_step()
         torch.hpu.synchronize()
-        self.hccl.hcclRecv(buffer_type(htutils.experimental._data_ptr(tensor)), tensor.numel(),
+        self.hccl.hcclRecv(buffer_type(htutils.experimental._data_ptr(tensor)),
+                           tensor.numel(),
                            hcclDataTypeEnum.from_torch(tensor.dtype), src,
-                           self.comm, hpuStream_t(htutils.experimental._compute_stream()))
+                           self.comm,
+                           hpuStream_t(htutils.experimental._compute_stream()))
 
     def broadcast(self, tensor: torch.Tensor, src: int):
         if self.disabled:
             return
-        assert tensor.device.type == "hpu", f"the input tensor should be on hpu"
+        assert tensor.device.type == "hpu", \
+            "the input tensor should be on hpu"
         sendbuff = buffer_type(htutils.experimental._data_ptr(tensor))
         recvbuff = buffer_type(htutils.experimental._data_ptr(tensor))
 
         htorch.core.mark_step()
         torch.hpu.synchronize()
-        self.hccl.hcclBroadcast(sendbuff, recvbuff, tensor.numel(),
-                                hcclDataTypeEnum.from_torch(tensor.dtype), src,
-                                self.comm, hpuStream_t(htutils.experimental._compute_stream()))
+        self.hccl.hcclBroadcast(
+            sendbuff, recvbuff, tensor.numel(),
+            hcclDataTypeEnum.from_torch(tensor.dtype), src, self.comm,
+            hpuStream_t(htutils.experimental._compute_stream()))

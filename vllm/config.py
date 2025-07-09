@@ -974,10 +974,10 @@ class ModelConfig:
                 " must be divisible by tensor parallel size "
                 f"({tensor_parallel_size}).")
 
-        if parallel_config.enable_expert_parallel:
-            if not self._verify_with_expert_parallelism():
-                logger.warning_once("Disabling expert parallelism.")
-                parallel_config.enable_expert_parallel = False
+        if parallel_config.enable_expert_parallel \
+                and not self._verify_with_expert_parallelism():
+            logger.warning_once("Disabling expert parallelism.")
+            parallel_config.enable_expert_parallel = False
 
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         if pipeline_parallel_size > 1:
@@ -1655,7 +1655,7 @@ class ParallelConfig:
     """IP of the data parallel master."""
     data_parallel_master_port: int = 29500
     """Port of the data parallel master."""
-    enable_expert_parallel: bool = False
+    enable_expert_parallel: bool = True
     """Use expert parallelism instead of tensor parallelism for MoE layers."""
 
     max_parallel_loading_workers: Optional[int] = None
