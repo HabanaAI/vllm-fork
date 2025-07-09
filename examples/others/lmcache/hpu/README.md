@@ -19,10 +19,18 @@ Run
 to get into `disagg_prefill_lmcache_v1` folder, and then run
 
 ```bash
-bash disagg_example_nixl.sh
+PT_HPU_GPU_MIGRATION=1 VLLM_USE_V1=1 VLLM_SKIP_WARMUP=True PT_HPU_ENABLE_LAZY_COLLECTIVES=true bash disagg_example.sh
 ```
 
 to run disaggregated prefill and benchmark the performance.
+
+lmserver is default and it's configurable as well as tensor_parallel_size and model name.
+
+Example) redis server, tensor_parallel_size 4 and Llama-3.1-70B-Instruct model
+
+```
+PT_HPU_GPU_MIGRATION=1 VLLM_USE_V1=1 VLLM_SKIP_WARMUP=True PT_HPU_ENABLE_LAZY_COLLECTIVES=true bash disagg_example.sh -s redis -t 4 -m meta-llama/Llama-3.1-70B-Instruct
+```
 
 ### Components
 
@@ -41,14 +49,26 @@ The main script generates several log files:
 - `decoder.log` - Logs from the decode server
 - `proxy.log` - Logs from the proxy server
 
-## 2. CPU Offload Examples
-
-- `python cpu_offload_lmcache.py -v v1` - CPU offloading implementation for vLLM v1
-
-## 3. KV Cache Sharing
+## 2. KV Cache Sharing
 
 The `kv_cache_sharing_lmcache_v1.py` example demonstrates how to share KV caches between vLLM v1 instances.
 
-## 4. Disaggregated Prefill in vLLM v0
+### Usage
 
-The `disaggregated_prefill_lmcache_v0.py` provides an example of how to run disaggregated prefill in vLLM v0.
+```bash
+PT_HPU_GPU_MIGRATION=1 VLLM_USE_V1=1 VLLM_SKIP_WARMUP=True PT_HPU_ENABLE_LAZY_COLLECTIVES=true python kv_cache_sharing_lmcache_v1.py
+```
+
+lmserver is default and it's configurable as well as tensor_parallel_size.
+
+Example 1) redis server with port 6380
+
+```bash
+PT_HPU_GPU_MIGRATION=1 VLLM_USE_V1=1 VLLM_SKIP_WARMUP=True PT_HPU_ENABLE_LAZY_COLLECTIVES=true python kv_cache_sharing_lmcache_v1.py --remote_server redis --redis_port 6380
+```
+
+Example 2) lmserver with port 8108 and tensor_parallel_size 2
+
+```bash
+PT_HPU_GPU_MIGRATION=1 VLLM_USE_V1=1 VLLM_SKIP_WARMUP=True PT_HPU_ENABLE_LAZY_COLLECTIVES=true python kv_cache_sharing_lmcache_v1.py --lm_port 8108 --tp_size 2
+```
