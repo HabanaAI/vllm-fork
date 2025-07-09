@@ -165,9 +165,74 @@ s  Skip warmup or not, bool, default=false
 h  Help info
 ```
 
+#### INC FP8 Quantization
+
+To run DeepSeek-R1 with INC FP8 quantization in single-node case, you need to follow:
+
+1. Download corresponding measurement files according to target model and tp-size.
+
+|Model|TP-Size|Measurement Files|
+|---|---|---|
+|DeepSeek-R1-0528|8|Yi30/ds-r1-0528-default-pile-g2-0529|
+|DeepSeek-R1|8|Yi30/inc-woq-2282samples-514-g2|
+
+For example, if you want to run DeepSeek-R1-0528, with tp-size 8, you can download measurement files with:
+```bash
+cd vllm-fork
+huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scripts/nc_workspace_measure_kvache
+```
+
+2. Configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX`
+
+After downloading measurement files, you need to configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vallm.sh
+
+- QUANT_CONFIG
+
+Depends on kv-cache-dtype to use, you should use quantization configuration file accordingly.
+
+These quantization config is located in vllm-fork/scripts/quant_configs.
+
+|KV-Cache-Dtype|QUANT_CONFIG|
+|---|---|
+|BF16|inc_quant_per_channel_bf16kv.json|
+|FP8|inc_quant_per_channel_with_fp8kv_config.json|
+
+For example, if you want to use BF16 kv cache, you should set QUANT_CONFIG with:
+```
+export QUANT_CONFIG=/path/to/vllm-fork/scripts/quant_configs/inc_quant_per_channel_bf16kv.json
+```
+
+- INC_MEASUREMENT_DUMP_PATH_PREFIX
+
+The environment variable `INC_MEASUREMENT_DUMP_PATH_PREFIX` specifies the root directory where measurement statistics were saved.
+The final path is constructed by joining this root directory with the `dump_stats_path` defined in the quantization JSON file specified by the `QUANT_CONFIG` environment variable.
+
+If we download the measurements to `/path/to/vllm-fork/scripts/nc_workspace_measure_kvache`, we got below files:
+
+```bash
+user:vllm-fork$ pwd
+/path/to/vllm-fork
+user:vllm-fork$ ls -l  ./scripts/nc_workspace_measure_kvache
+-rw-r--r-- 1 user Software-SG 1949230 May 15 08:05 inc_measure_output_hooks_maxabs_0_8.json
+-rw-r--r-- 1 user Software-SG  254451 May 15 08:05 inc_measure_output_hooks_maxabs_0_8_mod_list.json
+-rw-r--r-- 1 user Software-SG 1044888 May 15 08:05 inc_measure_output_hooks_maxabs_0_8.npz
+...
+```
+
+Then, we export `INC_MEASUREMENT_DUMP_PATH_PREFIX=/path/to/vllm-fork`, and INC will parse the full as below:
+
+```
+dump_stats_path (from config): "scripts/nc_workspace_measure_kvache/inc_measure_output"
+Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvache/inc_measure_output_hooks_maxabs_0_8.npz"
+```
+
+##### Check if INC quantization enabled successfully
+
+If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
+
 ### Launch vLLM Serving with TP=8
 ```bash
-bash single_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
+bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
@@ -276,6 +341,71 @@ input_max=20480
 output_max=16896
 ```
 
+#### INC FP8 Quantization
+
+To run DeepSeek-R1 with INC FP8 quantization in multi-nodes case, you need to follow:
+
+1. Download corresponding measurement files to both head and worker node according to target model and tp-size.
+
+|Model|TP-Size|Measurement Files|
+|---|---|---|
+|DeepSeek-R1-0528|16|Yi30/ds-r1-0528-default-pile-g2-ep16-0610|
+|DeepSeek-R1|16|Yi30/ds-r1-default-pile-g2-ep16-0610|
+
+For example, if you want to run DeepSeek-R1-0528, with tp-size 16, you can download measurement files with:
+```bash
+cd vllm-fork
+huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-ep16-0610  --local-dir ./scripts/nc_workspace_measure_kvache
+```
+
+2. Configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX`
+
+After downloading measurement files, you need to configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in set_head_node.sh and set_worker_node.sh
+
+- QUANT_CONFIG
+
+Depends on kv-cache-dtype to use, you should use quantization configuration file accordingly.
+
+These quantization config is located in vllm-fork/scripts/quant_configs.
+
+|KV-Cache-Dtype|QUANT_CONFIG|
+|---|---|
+|BF16|inc_quant_per_channel_bf16kv.json|
+|FP8|inc_quant_per_channel_with_fp8kv_config.json|
+
+For example, if you want to use BF16 kv cache, you should set QUANT_CONFIG with:
+```
+export QUANT_CONFIG=/path/to/vllm-fork/scripts/quant_configs/inc_quant_per_channel_bf16kv.json
+```
+
+- INC_MEASUREMENT_DUMP_PATH_PREFIX
+
+The environment variable `INC_MEASUREMENT_DUMP_PATH_PREFIX` specifies the root directory where measurement statistics were saved.
+The final path is constructed by joining this root directory with the `dump_stats_path` defined in the quantization JSON file specified by the `QUANT_CONFIG` environment variable.
+
+If we download the measurements to `/path/to/vllm-fork/scripts/nc_workspace_measure_kvache`, we got below files:
+
+```bash
+user:vllm-fork$ pwd
+/path/to/vllm-fork
+user:vllm-fork$ ls -l  ./scripts/nc_workspace_measure_kvache
+-rw-r--r-- 1 root root    1136822 Jul  4 13:30 inc_measure_output_hooks_maxabs_0_16.json
+-rw-r--r-- 1 root root     611732 Jul  4 13:30 inc_measure_output_hooks_maxabs_0_16.npz
+-rw-r--r-- 1 root root     155379 Jul  4 13:30 inc_measure_output_hooks_maxabs_0_16_mod_list.json
+...
+```
+
+Then, we export `INC_MEASUREMENT_DUMP_PATH_PREFIX=/path/to/vllm-fork`, and INC will parse the full as below:
+
+```
+dump_stats_path (from config): "scripts/nc_workspace_measure_kvache/inc_measure_output"
+Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvache/inc_measure_output_hooks_maxabs_0_16.npz"
+```
+
+##### Check if INC quantization enabled successfully
+
+If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
+
 #### Apply Configuration on Both Nodes
 Run the following command on both head and worker nodes:
 header node
@@ -327,7 +457,7 @@ python -m vllm.entrypoints.openai.api_server \
     --max-num-batched-tokens $max_num_batched_tokens \
     --disable-log-requests \
     --dtype bfloat16 \
-    --kv-cache-dtype fp8_inc \
+    --kv-cache-dtype $KV_CACHE_DTYPE \
     --use-v2-block-manager \
     --num_scheduler_steps 1\
     --block-size $block_size \
