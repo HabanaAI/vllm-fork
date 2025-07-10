@@ -96,6 +96,8 @@ LORA_WARMUP_RANK = 8
 
 DUMMY_TOKEN_ID = -1
 UNSET_IMG_ARGS = 9999999
+shutdown_inc_called = False
+
 
 
 class PhaseType(Enum):
@@ -3286,14 +3288,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         from neural_compressor.torch.quantization import finalize_calibration
         finalize_calibration(self.model.model)
 
-    def shutdown_inc(self,
-                     suppress=suppress,
-                     finalize_calibration=finalize_calibration):
+    def shutdown_inc(self):
         global shutdown_inc_called
         if shutdown_inc_called:
             return
         shutdown_inc_called = True
         can_finalize_inc = False
+        from contextlib import suppress
         with suppress(AttributeError):
             can_finalize_inc = (self._is_quant_with_inc()
                                 and (self.model.model is not None)
@@ -4181,6 +4182,27 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 CompletionSequenceGroupOutput(seq_outputs, None))
         return SamplerOutput(sampler_outputs)
 
+<<<<<<< HEAD
+=======
+    def shutdown_inc(self):
+        global shutdown_inc_called
+        if shutdown_inc_called:
+            return
+        shutdown_inc_called = True
+        can_finalize_inc = False
+        from contextlib import suppress
+        with suppress(AttributeError):
+            can_finalize_inc = (self._is_quant_with_inc()
+                                and (self.model.model is not None)
+                                and self.inc_initialized_successfully and
+                                not getattr(self, "_is_inc_finalized", False))
+        if can_finalize_inc:
+            from neural_compressor.torch.quantization import (
+                finalize_calibration)
+            finalize_calibration(self.model.model)
+            self._is_inc_finalized = True
+
+>>>>>>> 833053673 (Fix AttributeError: 'NoneType' object has no attribute 'getenv' (#1554))
     def __del__(self):
         self.shutdown_inc()
 
