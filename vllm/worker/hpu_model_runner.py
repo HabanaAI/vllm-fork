@@ -3280,10 +3280,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         finalize_calibration(self.model.model)
 
     def shutdown_inc(self):
-        can_finalize_inc = self._is_quant_with_inc() and \
-            (self.model.model is not None) and \
-            self.inc_initialized_successfully and \
-            not getattr(self, "_is_inc_finalized", False)
+        can_finalize_inc = False
+        from contextlib import suppress
+        with suppress(AttributeError):
+            can_finalize_inc = (self._is_quant_with_inc()
+                                and (self.model.model is not None)
+                                and self.inc_initialized_successfully and
+                                not getattr(self, "_is_inc_finalized", False))
         if can_finalize_inc:
             from neural_compressor.torch.quantization import (
                 finalize_calibration)
@@ -4181,9 +4184,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 finalize_calibration)
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
-
-    def __del__(self):
-        self.shutdown_inc()
 
     def _patch_prev_output(self):
         if self.has_patched_prev_output:
