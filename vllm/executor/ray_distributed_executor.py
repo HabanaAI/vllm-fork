@@ -72,6 +72,8 @@ class RayDistributedExecutor(DistributedExecutorBase):
     uses_ray: bool = True
 
     def _init_executor(self) -> None:
+        # Store logger reference to prevent it from being destroyed before calling self.shutdown()
+        self._logger = logger
         self.forward_dag: Optional[ray.dag.CompiledDAG] = None
         if envs.VLLM_USE_V1:
             # V1 uses SPMD worker and compiled DAG
@@ -128,10 +130,11 @@ class RayDistributedExecutor(DistributedExecutorBase):
         self.terminate_ray = True
 
     def shutdown(self) -> None:
-        logger.info(
-            "Shutting down Ray distributed executor. If you see error log "
-            "from logging.cc regarding SIGTERM received, please ignore because "
-            "this is the expected termination process in Ray.")
+        if hasattr(self, '_logger') and self._logger is not None:
+            self._logger.info(
+                "Shutting down Ray distributed executor. If you see error log "
+                "from logging.cc regarding SIGTERM received, please ignore because "
+                "this is the expected termination process in Ray.")
         if getattr(self, 'shutdown_workers', False):
             self._run_workers("shutdown")
             self.shutdown_workers = False
