@@ -8,9 +8,8 @@ This folder demonstrates how to use LMCache for disaggregated prefilling, CPU of
 This example demonstrates how to run LMCache with disaggregated prefill using lm or redis on a single node.
 
 ### Prerequisites
-- HPU implementation to be upstreamed
-- At least 2 HPUs
-- Valid Hugging Face token (HF_TOKEN) for Llama 3.1 8B Instruct.
+- At least 2 HPU cards
+- Valid Hugging Face token (HF_TOKEN) for Llama 3.1 8B Instruct
 
 ### Usage
 
