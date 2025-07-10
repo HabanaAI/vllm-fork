@@ -89,7 +89,7 @@ tokenizer=$model
 
 # Hardware Configuration
 moe_n_slice=1         # MoE groups
-gpu_utils=0.65        # GPU memory utilization
+gpu_utils=0.85        # GPU memory utilization
 
 # Request Configuration
 max_model_len=9216    # Max model len
@@ -123,7 +123,7 @@ fi
 #===========================================================
 
 tp_parallel=$tp_size
-req_in_out_list=(32_1024_1024 )
+req_in_out_list=(256_1024_1024 )
 #req_in_out_list=(192_5120_1024)
 
 for req_in_out in "${req_in_out_list[@]}"; do
