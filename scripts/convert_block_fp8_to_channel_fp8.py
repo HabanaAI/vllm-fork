@@ -21,6 +21,8 @@ def get_device_and_range():
     device = os.popen("hl-smi -Q name -f csv | tail -n 1").read().strip()
     if 'HL-225' in device:
         return device, 240.0
+    elif 'HL-288' in device:
+        return device, 240.0
     elif 'HL-328' in device:
         return device, 448.0
     elif 'HL-325' in device:
