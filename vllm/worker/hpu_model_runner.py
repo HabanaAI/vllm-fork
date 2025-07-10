@@ -2977,9 +2977,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
 
-    def __del__(self):
-        self.shutdown_inc()
-
     @property
     def vocab_size(self) -> int:
         return self.model_config.get_vocab_size()
@@ -3905,6 +3902,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 finalize_calibration)
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
+
+    def __del__(self):
+        self.shutdown_inc()
 
     def _patch_prev_output(self):
         if self.has_patched_prev_output:
