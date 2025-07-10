@@ -53,11 +53,11 @@ DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
 DBASE_PORT=8200
 DECODE_ARGS=""
 
-for ((i=0; i<D_INSTANCE_NUMBER; i++)); do
-    IP=${DECODE_IPS[$i]}
-    for ((j=0; j<NUM_DECODE; j++)); do
-        PORT=$((DBASE_PORT + j))
-        DECODE_ARGS="$DECODE_ARGS ${IP}:${PORT}"
+for ((i=0; i<$NUM_DECODE; i++)); do
+    PORT=$((DBASE_PORT + i))
+    for ((j=0; j<D_INSTANCE_NUMBER; j++)); do
+	IP=${DECODE_IPS[$j]}
+	DECODE_ARGS="$DECODE_ARGS ${IP}:${PORT}"
     done
 done
 
