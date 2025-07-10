@@ -3281,6 +3281,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         finalize_calibration(self.model.model)
 
     def shutdown_inc(self):
+        if shutdown_inc_called:
+            return
+        shutdown_inc_called = True
         can_finalize_inc = False
         from contextlib import suppress
         with suppress(AttributeError):
