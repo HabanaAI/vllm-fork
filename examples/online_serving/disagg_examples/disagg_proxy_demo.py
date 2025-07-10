@@ -18,7 +18,10 @@ from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
 from fastapi.responses import JSONResponse, StreamingResponse
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60,
+                                        connect=60,
+                                        sock_read=1200,
+                                        sock_connect=30)
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
@@ -317,7 +320,7 @@ class Proxy:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
             final_generator = self.generator(generator_p, generator_d, self, prefill_instance, decode_instance)    
-            response = StreamingResponse(final_generator)
+            response = StreamingResponse(final_generator, media_type="application/json")
             return response
         except Exception:
             import sys
@@ -365,7 +368,7 @@ class Proxy:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
             final_generator = self.generator(generator_p, generator_d, self, prefill_instance, decode_instance)
-            response = StreamingResponse(final_generator)
+            response = StreamingResponse(final_generator, media_type="application/json")
             return response
         except Exception:
             exc_info = sys.exc_info()
@@ -373,7 +376,7 @@ class Proxy:
             print("Error occurred in disagg proxy server")
             print(error_messages)
             return StreamingResponse(content=iter(error_messages),
-                                     media_type="text/event-stream")
+                                     media_type="application/json")
 
     def remove_instance_endpoint(self, instance_type, instance):
         with self.scheduling_policy.lock:
