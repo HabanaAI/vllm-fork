@@ -117,7 +117,7 @@ def set_forward_context(attn_metadata: Any,
                         vllm_config: VllmConfig,
                         virtual_engine: int = 0,
                         num_tokens: int = 0,
-                        dp_awared_padding: bool = False):
+                        dp_awared_padding: bool = False)
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
