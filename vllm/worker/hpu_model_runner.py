@@ -90,6 +90,7 @@ LORA_WARMUP_RANK = 8
 
 DUMMY_TOKEN_ID = -1
 UNSET_NUM_PATCHES = 9999999
+shutdown_inc_called = False
 
 
 class PhaseType(Enum):
@@ -2959,6 +2960,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         finalize_calibration(self.model.model)
 
     def shutdown_inc(self):
+        global shutdown_inc_called
+        if shutdown_inc_called:
+            return
+        shutdown_inc_called = True
         can_finalize_inc = False
         from contextlib import suppress
         with suppress(AttributeError):
@@ -3881,6 +3886,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return SamplerOutput(sampler_outputs)
 
     def shutdown_inc(self):
+        global shutdown_inc_called
+        if shutdown_inc_called:
+            return
+        shutdown_inc_called = True
         can_finalize_inc = False
         from contextlib import suppress
         with suppress(AttributeError):
