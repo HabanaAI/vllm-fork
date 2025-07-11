@@ -502,14 +502,16 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
-        if seq_len <= window_size:
+        if (seq_len <= window_size
+                or (self.prefill_use_fusedsdpa and self.is_causal)
+                or not attn_metadata.is_prompt):
             #no need to set sliding window mask, just use causal mask
             return attn_metadata
 
         prefill_metadata = attn_metadata
         shift = 0
 
-        #causal + window size : accuracy good
+        #causal + window size
         tensor = torch.full((batch_size, 1, seq_len, seq_len),
                             device=device,
                             dtype=dtype,
@@ -614,6 +616,7 @@ class HpuModelAdapter(torch.nn.Module):
                     attn_metadata = self._set_attn_bias_for_sliding_window(
                         attn_metadata, batch_size, seq_len,
                         self.interleaved_sliding_window, device, dtype)
+
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
