@@ -446,25 +446,19 @@ def _merge_multimodal_embeddings(
     Note:
         This updates ``inputs_embeds`` in place.
     """
-    # skip check for HPU, the number of tokens is a cpu fallback during HPU lazy
+    flattened = _flatten_embeddings(multimodal_embeddings)
+    expected = is_multimodal.sum().item()
+    assert flattened.shape[0] == expected, (
+        f"Expected {expected} multimodal tokens, got {flattened.shape[0]}"
+    )
+
     if current_platform.is_hpu():
         htcore.mark_step()
-        flattened = _flatten_embeddings(multimodal_embeddings)
-        #TODO dynamic? is a list of varying length
-        # still.. torch.where might be faster than boolean indexing?
-        inputs_embeds[is_multimodal] = flattened
-        return inputs_embeds
+        merged_embeds = inputs_embeds.clone()
+        merged_embeds[is_multimodal] = flattened
+        return merged_embeds
 
-    num_expected_tokens = is_multimodal.sum().item()
-    assert isinstance(num_expected_tokens, int)
-
-    flattened = _flatten_embeddings(multimodal_embeddings)
-    if flattened.shape[0] != num_expected_tokens:
-        expr = _embedding_count_expression(multimodal_embeddings)
-        raise ValueError(
-            f"Attempted to assign {expr} = {flattened.shape[0]} "
-            f"multimodal tokens to {num_expected_tokens} placeholders")
-
+    # Non-HPU fallback (can still be in-place)
     inputs_embeds[is_multimodal] = flattened
     return inputs_embeds
 
