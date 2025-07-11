@@ -502,8 +502,15 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
+        # FusedSDPA causal+window works only when seq_len is multiple of
+        # SLICE_SIZE.
+        is_slice_kernel = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+                                    "false").strip().lower() in ("1", "true")
+        slice_size = int(os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
+
         if (seq_len <= window_size
-                or (self.prefill_use_fusedsdpa and self.is_causal)
+                or (is_slice_kernel and self.prefill_use_fusedsdpa
+                    and self.is_causal and seq_len % slice_size == 0)
                 or not attn_metadata.is_prompt):
             #no need to set sliding window mask, just use causal mask
             return attn_metadata
