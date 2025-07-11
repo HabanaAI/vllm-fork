@@ -3,7 +3,7 @@
 #@VARS
 
 # Wait for vLLM server to be ready
-until curl -s http://localhost:8000/${ENDPOINT_PATH} > /dev/null; do
+until curl -s http://localhost:8000${ENDPOINT} > /dev/null; do
     echo "Waiting for vLLM server to be ready..."
     sleep 15
 done
