@@ -430,7 +430,44 @@ class HpuModelAdapter(torch.nn.Module):
                                              attn_bias=attn_bias)
         return attn_metadata
 
+<<<<<<< HEAD
     def _set_block_mapping(self, metadata, batch_size, device, dtype):
+=======
+    def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
+                                          seq_len, window_size, device, dtype):
+
+        if (seq_len <= window_size
+                or (self.prefill_use_fusedsdpa and self.is_causal)
+                or not attn_metadata.is_prompt):
+            #no need to set sliding window mask, just use causal mask
+            return attn_metadata
+
+        prefill_metadata = attn_metadata
+        shift = 0
+
+        #causal + window size
+        tensor = torch.full((batch_size, 1, seq_len, seq_len),
+                            device=device,
+                            dtype=dtype,
+                            fill_value=1)
+        mask = torch.tril(tensor, diagonal=shift)
+        mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        attn_bias = torch.log(mask)
+
+        attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
+
+        return attn_metadata
+
+    def _set_block_mapping(self, metadata, batch_size, device, dtype,
+                           is_window_block):
+        if is_window_block:
+            block_usage = metadata.window_block_usage
+            block_groups = metadata.window_block_groups
+        else:
+            block_usage = metadata.block_usage
+            block_groups = metadata.block_groups
+
+>>>>>>> 9df8d17b3 (Added support for FusedSDPA with window_size)
         mask = torch.arange(0,
                             self.block_size,
                             device=device,
@@ -481,6 +518,25 @@ class HpuModelAdapter(torch.nn.Module):
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
+<<<<<<< HEAD
+=======
+
+            #For Gemma3, we need to override attn_mask with these sliding_window
+            #mask which are updated during prepare_attn_mask()
+            if global_attn_masks is not None:
+                attn_metadata = attn_metadata._replace(
+                    attn_bias=global_attn_masks[0])
+
+            if self.interleaved_sliding_window:
+                if local_attn_masks is not None:
+                    attn_metadata = attn_metadata._replace(
+                        window_attn_bias=local_attn_masks[0])
+                elif global_attn_masks is None:
+                    attn_metadata = self._set_attn_bias_for_sliding_window(
+                        attn_metadata, batch_size, seq_len,
+                        self.interleaved_sliding_window, device, dtype)
+
+>>>>>>> 9df8d17b3 (Added support for FusedSDPA with window_size)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
