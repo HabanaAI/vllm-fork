@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
 from typing import TYPE_CHECKING, Optional
@@ -7,7 +8,7 @@ import torch
 
 from vllm import envs
 from vllm.logger import init_logger
-from vllm.utils import is_fake_hpu
+from vllm.utils import DEFAULT_MAX_NUM_BATCHED_TOKENS, is_fake_hpu
 
 from .interface import Platform, PlatformEnum, _Backend
 
@@ -30,7 +31,8 @@ class HpuPlatform(Platform):
     simple_compile_backend: str = "hpu_backend" if not is_fake_hpu(
     ) else "inductor"
     supported_quantization: list[str] = [
-        "compressed-tensors", "fp8", "inc", "awq_hpu", "gptq_hpu"
+        "compressed-tensors", "fp8", "inc", "awq_hpu", "gptq_hpu",
+        "bitsandbytes"
     ]
 
     @classmethod
@@ -54,6 +56,10 @@ class HpuPlatform(Platform):
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
         return cls.device_name
+
+    @classmethod
+    def inference_mode(cls):
+        return torch.no_grad()
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
@@ -86,7 +92,7 @@ class HpuPlatform(Platform):
         cache_config = vllm_config.cache_config
         if cache_config and cache_config.block_size is None:
             cache_config.block_size = 128
-        if (parallel_config.distributed_executor_backend == 'mp'
+        if (parallel_config.distributed_executor_backend in ['mp', 'uni']
                 and envs.VLLM_WORKER_MULTIPROC_METHOD == 'fork'):
             if os.environ.get("VLLM_WORKER_MULTIPROC_METHOD",
                               None) is not None:
@@ -102,6 +108,16 @@ class HpuPlatform(Platform):
                     "To override that behavior, please set "
                     "VLLM_WORKER_MULTIPROC_METHOD=fork explicitly.")
                 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+        if vllm_config.model_config and vllm_config.model_config.use_mla:
+            logger.info(
+                "MLA is enabled on a non-GPU platform; forcing chunked "
+                "prefill and prefix caching to be disabled.")
+            vllm_config.scheduler_config.enable_chunked_prefill = False
+            vllm_config.scheduler_config.chunked_prefill_enabled = False
+            vllm_config.scheduler_config.max_num_batched_tokens = max(
+                vllm_config.scheduler_config.max_model_len,
+                DEFAULT_MAX_NUM_BATCHED_TOKENS)
 
     @classmethod
     def is_pin_memory_available(cls):

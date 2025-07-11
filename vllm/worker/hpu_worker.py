@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 ###############################################################################
 # Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
@@ -206,7 +207,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
     def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
-            torch.hpu.set_device(self.device)
+            if envs.VLLM_DP_SIZE > 1:
+                torch.hpu.set_device(self.device)
+            else:
+                torch.hpu.set_device(self.local_rank)
         elif self.device_config.device_type == "cpu":
             self.device = torch.device("cpu")
         else:
@@ -256,12 +260,17 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 seq_group_metadata.is_prompt
                 for seq_group_metadata in seq_group_metadata_list
             ])
-            max_context_len = max([
-                max([
-                    len(v.prompt_token_ids) + len(v.output_token_ids)
-                    for v in seq_group_metadata.seq_data.values()
-                ]) for seq_group_metadata in seq_group_metadata_list
-            ])  # whoa, that's some spicy stuff right here
+            # for dummy run in DP, we don't have real seq,
+            # so use a dummy context_len here
+            if len(seq_group_metadata_list) == 0:
+                max_context_len = 128
+            else:
+                max_context_len = max([
+                    max([
+                        len(v.prompt_token_ids) + len(v.output_token_ids)
+                        for v in seq_group_metadata.seq_data.values()
+                    ]) for seq_group_metadata in seq_group_metadata_list
+                ])  # whoa, that's some spicy stuff right here
             max_num_blocks = (
                 (max_context_len - 1) // self.cache_config.block_size) + 1
             input_stats = (f'is_prompt: {is_prompt}, '
@@ -304,10 +313,9 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         Then, it calculate the maximum possible number of GPU and CPU blocks
         that can be allocated with the remaining free memory.
 
-        :::{tip}
-        You may limit the usage of GPU memory
-        by adjusting the `gpu_memory_utilization` parameter.
-        :::
+        Tip:
+            You may limit the usage of GPU memory
+            by adjusting the `gpu_memory_utilization` parameter.
         """
         # Profile the memory usage of the model and get the maximum number of
         # cache blocks that can be allocated with the remaining free memory.
@@ -318,7 +326,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             cache_block_size = self.get_cache_block_size_bytes()
             fake_hpu_cache_alloc = 4 * 2**30  # take 4 GiB flat on fake hpu
             num_fake_hpu_blocks = fake_hpu_cache_alloc // cache_block_size
-            self.model_runner.bucketing_ctx.num_hpu_blocks = num_fake_hpu_blocks
+            self.model_runner.bucketing_manager.num_hpu_blocks = \
+                    num_fake_hpu_blocks
             return num_fake_hpu_blocks, 0
         with HabanaMemoryProfiler() as m:
             self.model_runner.profile_run()
@@ -375,8 +384,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
-        self.model_runner.bucketing_ctx.num_hpu_blocks = (
+        self.model_runner.bucketing_manager.num_hpu_blocks = (
             num_gpu_blocks // self.parallel_config.pipeline_parallel_size)
+        self.model_runner.bucketing_manager.generate_prompt_buckets()
+        if not self.model_runner.is_pooler:
+            self.model_runner.bucketing_manager.generate_decode_buckets()
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
@@ -494,7 +506,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
             "Prompt Adapter is not implemented for HPU backend.")
 
     def shutdown(self):
-        self.model_runner.shutdown_inc()
+        getattr(self.model_runner, 'shutdown_inc', lambda: None)()
 
     @property
     def max_model_len(self) -> int:
@@ -536,11 +548,14 @@ def init_worker_distributed_environment(
         get_pp_group().all_reduce(torch.zeros(1).to('hpu'))
     if torch.distributed.is_initialized():
         torch_world_size = torch.distributed.get_world_size()
-        if torch_world_size != parallel_config.world_size:
+        expected_size = parallel_config.world_size *\
+            parallel_config.data_parallel_size
+        if torch_world_size != expected_size:
             raise RuntimeError(
                 "torch.distributed is already initialized but the torch world "
-                "size does not match parallel_config.world_size "
-                f"({torch_world_size} vs. {parallel_config.world_size}).")
+                "size does not match parallel_config.world_size * "
+                "parallel_config.data_parallel_size "
+                f"({torch_world_size} vs. {expected_size}).")
     elif not distributed_init_method:
         raise ValueError(
             "distributed_init_method must be set if torch.distributed "
@@ -558,7 +573,8 @@ def init_worker_distributed_environment(
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
     torch.distributed.all_reduce(dummy_tensor_hpu)
-    assert dummy_tensor_hpu.item() == parallel_config.world_size
+    assert dummy_tensor_hpu.item(
+    ) == parallel_config.world_size * parallel_config.data_parallel_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
     ensure_kv_transfer_initialized(vllm_config)

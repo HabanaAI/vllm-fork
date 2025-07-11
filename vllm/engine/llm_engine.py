@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import copy
 import time
@@ -130,26 +131,16 @@ class LLMEngine:
     iteration-level scheduling and efficient memory management to maximize the
     serving throughput.
 
-    The {class}`~vllm.LLM` class wraps this class for offline batched inference
-    and the {class}`AsyncLLMEngine` class wraps this class for online serving.
+    The [`LLM`][vllm.LLM] class wraps this class for offline batched inference
+    and the [`AsyncLLMEngine`][vllm.engine.async_llm_engine.AsyncLLMEngine]
+    class wraps this class for online serving.
 
-    The config arguments are derived from {class}`~vllm.EngineArgs`. (See
-    {ref}`engine-args`)
+    The config arguments are derived from [`EngineArgs`][vllm.EngineArgs].
 
     Args:
-        model_config: The configuration related to the LLM model.
-        cache_config: The configuration related to the KV cache memory
-            management.
-        parallel_config: The configuration related to distributed execution.
-        scheduler_config: The configuration related to the request scheduler.
-        device_config: The configuration related to the device.
-        lora_config (Optional): The configuration related to serving multi-LoRA.
-        speculative_config (Optional): The configuration related to speculative
-            decoding.
+        vllm_config: The configuration for initializing and running vLLM.
         executor_class: The model executor class for managing distributed
             execution.
-        prompt_adapter_config (Optional): The configuration related to serving
-            prompt adapters.
         log_stats: Whether to log statistics.
         usage_context: Specified entry point, used for usage info collection.
     """
@@ -236,6 +227,14 @@ class LLMEngine:
         self.prompt_adapter_config = vllm_config.prompt_adapter_config  # noqa
         self.observability_config = vllm_config.observability_config or ObservabilityConfig(  # noqa
         )
+
+        # Data Parallel Group
+        self.need_to_sync_across_dp = self.parallel_config.data_parallel_size > 1  # noqa
+        if self.need_to_sync_across_dp:
+            self.dp_group = self.parallel_config.stateless_init_dp_group()
+        # Data Parallel Ranks should execute the dummy batch if no real batch
+        # is scheduled.
+        self.should_execute_dummy_batch = False
 
         logger.info(
             "Initializing a V0 LLM engine (v%s) with config: %s, "
@@ -393,10 +392,8 @@ class LLMEngine:
                 self.scheduler,
                 self.seq_counter,
                 get_tokenizer_for_seq,
-                stop_checker=StopChecker(
-                    self.scheduler_config.max_model_len,
-                    get_tokenizer_for_seq,
-                ),
+                stop_checker=StopChecker(self.scheduler_config.max_model_len,
+                                         get_tokenizer_for_seq),
             ))
 
         self.seq_id_to_seq_group: Dict[str, SequenceGroupBase] = {}
@@ -404,6 +401,9 @@ class LLMEngine:
         # Flag to set when an input fails to process and the engine should run
         # the next step without re-scheduling.
         self._skip_scheduling_next_step = False
+
+        # Don't keep the dummy data in memory
+        self.reset_mm_cache()
 
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
@@ -688,11 +688,12 @@ class LLMEngine:
 
         Args:
             request_id: The unique ID of the request.
-            prompt: The prompt to the LLM. See {class}`~vllm.inputs.PromptType`
+            prompt: The prompt to the LLM. See
+                [PromptType][vllm.inputs.PromptType]
                 for more details about the format of each input.
             params: Parameters for sampling or pooling.
-                {class}`~vllm.SamplingParams` for text generation.
-                {class}`~vllm.PoolingParams` for pooling.
+                [SamplingParams][vllm.SamplingParams] for text generation.
+                [PoolingParams][vllm.PoolingParams] for pooling.
             arrival_time: The arrival time of the request. If None, we use
                 the current monotonic time.
             lora_request: The LoRA request to add.
@@ -704,10 +705,11 @@ class LLMEngine:
         Details:
             - Set arrival_time to the current time if it is None.
             - Set prompt_token_ids to the encoded prompt if it is None.
-            - Create `n` number of {class}`~vllm.Sequence` objects.
-            - Create a {class}`~vllm.SequenceGroup` object
-              from the list of {class}`~vllm.Sequence`.
-            - Add the {class}`~vllm.SequenceGroup` object to the scheduler.
+            - Create `n` number of [Sequence][vllm.Sequence] objects.
+            - Create a [SequenceGroup][vllm.SequenceGroup] object
+              from the list of [Sequence][vllm.Sequence].
+            - Add the [SequenceGroup][vllm.SequenceGroup] object to the
+              scheduler.
 
         Example:
             >>> # initialize engine
@@ -854,9 +856,7 @@ class LLMEngine:
             request_id: The ID(s) of the request to abort.
 
         Details:
-            - Refer to the
-              {meth}`~vllm.core.scheduler.Scheduler.abort_seq_group`
-              from class {class}`~vllm.core.scheduler.Scheduler`.
+            - Refer to [vllm.core.scheduler.Scheduler.abort_seq_group][].
 
         Example:
             >>> # initialize engine and add a request with request_id
@@ -897,17 +897,39 @@ class LLMEngine:
         return sum(scheduler.get_num_unfinished_seq_groups()
                    for scheduler in self.scheduler)
 
-    def has_unfinished_requests(self) -> bool:
+    def has_unfinished_requests(self,
+                                virtual_engine: Optional[int] = None) -> bool:
         """Returns True if there are unfinished requests."""
-        return any(scheduler.has_unfinished_seqs()
-                   for scheduler in self.scheduler)
+        # Skip DP sync if PD disaggregation is enabled
+        if self.vllm_config.kv_transfer_config is not None:
+            return any(scheduler.has_unfinished_seqs()
+                       for scheduler in self.scheduler)
+        if virtual_engine is not None:
+            schedulers = [self.scheduler[virtual_engine]]
+        else:
+            schedulers = self.scheduler
+        has_unfinished = any(scheduler.has_unfinished_seqs()
+                             for scheduler in schedulers)
+        if not self.need_to_sync_across_dp:
+            return has_unfinished
+        aggregated_has_unfinished = ParallelConfig.\
+            has_unfinished_dp(self.dp_group, has_unfinished)
+        if not has_unfinished and aggregated_has_unfinished:
+            # current rank has no unfinished seqs, but other ranks do,
+            # so we should execute a dummy batch to sync across ranks
+            self.should_execute_dummy_batch = True
+        return aggregated_has_unfinished
 
     def has_unfinished_requests_for_virtual_engine(
             self, virtual_engine: int) -> bool:
         """
         Returns True if there are unfinished requests for the virtual engine.
         """
-        return self.scheduler[virtual_engine].has_unfinished_seqs()
+        return self.has_unfinished_requests(virtual_engine)
+
+    def reset_mm_cache(self) -> bool:
+        """Reset the multi-modal cache."""
+        return self.input_preprocessor.mm_registry.reset_processor_cache()
 
     def reset_prefix_cache(self, device: Optional[Device] = None) -> bool:
         """Reset prefix cache for all devices."""
@@ -1252,12 +1274,10 @@ class LLMEngine:
     def step(self) -> List[Union[RequestOutput, PoolingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
-        :::{figure} https://i.imgur.com/sv2HssD.png
-        :alt: Overview of the step function
-        :align: center
-
-        Overview of the step function.
-        :::
+        <figure markdown="span">
+        ![Overview of the step function](https://i.imgur.com/sv2HssD.png)
+        <figcaption>Overview of the step function</figcaption>
+        </figure>
 
         Details:
         - Step 1: Schedules the sequences to be executed in the next
@@ -1307,6 +1327,23 @@ class LLMEngine:
             raise NotImplementedError(
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
+
+        if self.vllm_config.kv_transfer_config is None\
+            and self.should_execute_dummy_batch:
+            self.should_execute_dummy_batch = False
+            outputs = self.model_executor.execute_model(
+                execute_model_req=ExecuteModelRequest(
+                    seq_group_metadata_list=[], is_dummy_batch=True))
+            if not self.has_unfinished_requests():
+                # Stop the execute model loop in parallel workers until there
+                # are more requests to process. This avoids waiting indefinitely
+                # in torch.distributed ops which may otherwise timeout, and
+                # unblocks the RPC thread in the workers so that they can
+                # process any other queued control plane messages, such as
+                # add/remove lora adapters.
+                logger.debug("Stopping remote worker execution loop.")
+                self.model_executor.stop_remote_worker_execution_loop()
+            return []
 
         # For llm_engine, there is no pipeline parallel support, so the engine
         # used is always 0.
@@ -1415,6 +1452,11 @@ class LLMEngine:
         else:
             # Nothing scheduled => If there is pending async postprocessor,
             # then finish it here.
+            if self.vllm_config.kv_transfer_config is not None\
+                and self.need_to_sync_across_dp:
+                self.model_executor.execute_model(
+                    execute_model_req=ExecuteModelRequest(
+                        seq_group_metadata_list=[], is_dummy_batch=True))
             if len(ctx.output_queue) > 0:
                 self._process_model_outputs(ctx=ctx)
             # No outputs in this case
@@ -1651,6 +1693,20 @@ class LLMEngine:
         gpu_prefix_cache_hit_rate = self.scheduler[
             0].get_prefix_cache_hit_rate(Device.GPU)
 
+        # Exchange the uasge and cache hit stats between gpu and cpu when
+        # running on cpu because the cpu_worker.py intentionally reports the
+        # number of cpu blocks as gpu blocks in favor of cache management.
+        if self.device_config.device_type == "cpu":
+            num_total_gpu, num_total_cpu = num_total_cpu, num_total_gpu
+            gpu_cache_usage_sys, cpu_cache_usage_sys = (
+                cpu_cache_usage_sys,
+                gpu_cache_usage_sys,
+            )
+            gpu_prefix_cache_hit_rate, cpu_prefix_cache_hit_rate = (
+                cpu_prefix_cache_hit_rate,
+                gpu_prefix_cache_hit_rate,
+            )
+
         # Iteration stats
         num_prompt_tokens_iter = 0
         num_generation_tokens_iter = 0
@@ -1667,9 +1723,6 @@ class LLMEngine:
         time_inference_requests: List[float] = []
         time_prefill_requests: List[float] = []
         time_decode_requests: List[float] = []
-        time_in_queue_requests: List[float] = []
-        model_forward_time_requests: List[float] = []
-        model_execute_time_requests: List[float] = []
         #   Metadata
         num_prompt_tokens_requests: List[int] = []
         num_generation_tokens_requests: List[int] = []
@@ -1777,15 +1830,6 @@ class LLMEngine:
                             now - seq_group.metrics.first_token_time)
                         time_inference_requests.append(
                             now - seq_group.metrics.first_scheduled_time)
-                    if seq_group.metrics.time_in_queue is not None:
-                        time_in_queue_requests.append(
-                            seq_group.metrics.time_in_queue)
-                    if seq_group.metrics.model_forward_time is not None:
-                        model_forward_time_requests.append(
-                            seq_group.metrics.model_forward_time)
-                    if seq_group.metrics.model_execute_time is not None:
-                        model_execute_time_requests.append(
-                            seq_group.metrics.model_execute_time * 1000)
                     # Metadata
                     num_prompt_tokens_requests.append(
                         len(seq_group.prompt_token_ids))
@@ -1854,9 +1898,6 @@ class LLMEngine:
             time_inference_requests=time_inference_requests,
             time_prefill_requests=time_prefill_requests,
             time_decode_requests=time_decode_requests,
-            time_in_queue_requests=time_in_queue_requests,
-            model_forward_time_requests=model_forward_time_requests,
-            model_execute_time_requests=model_execute_time_requests,
             #   Metadata
             num_prompt_tokens_requests=num_prompt_tokens_requests,
             num_generation_tokens_requests=num_generation_tokens_requests,
