@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
 MooncakeStore Connector for Distributed Machine Learning Inference
 The MooncakeStoreConnector transfers KV caches between prefill vLLM workers
@@ -6,7 +7,7 @@ The MooncakeStoreConnector transfers KV caches between prefill vLLM workers
 database-style KVStore.
 """
 import hashlib
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, Union
 
 import torch
 
@@ -38,13 +39,13 @@ class MooncakeStoreConnector(KVConnectorBase):
         local_rank: int,
         config: VllmConfig,
     ):
-        self.config = config.kv_transfer_config
+        self.kv_transfer_config = config.kv_transfer_config
         self.kv_helper = kv_helper(config)
         self.local_tp_rank = local_rank
         self.rank = rank
         self.block_size = config.cache_config.block_size
         # Init kv_store
-        if self.config.kv_connector == "MooncakeStoreConnector":
+        if self.kv_transfer_config.kv_connector == "MooncakeStoreConnector":
             # Check if MOONCAKE_CONFIG_PATH is set
             import os
             use_mooncake_store = os.getenv('MOONCAKE_CONFIG_PATH') is not None
@@ -58,10 +59,11 @@ class MooncakeStoreConnector(KVConnectorBase):
                     MooncakeStore)
                 logger.info(
                     "Initializing KVStoreConnector under kv_transfer_config %s",
-                    self.config)
+                    self.kv_transfer_config)
                 self.kv_store = MooncakeStore(config)
         else:
-            logger.error("Can not find %s", self.config.kv_connector)
+            logger.error("Can not find %s",
+                         self.kv_transfer_config.kv_connector)
 
         assert self.kv_store is not None
         if config.cache_config.cache_dtype == "fp8_inc":
@@ -84,7 +86,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         self,
         model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor],
+        kv_caches: list[torch.Tensor],
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
@@ -127,8 +129,8 @@ class MooncakeStoreConnector(KVConnectorBase):
     def recv_kv_caches_and_hidden_states(
         self, model_executable: torch.nn.Module,
         model_input: "ModelInputForGPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor]
-    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+        kv_caches: list[torch.Tensor]
+    ) -> tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForGPUWithSamplingMetadata"]:
         bypass_model_exec = True
         input_tokens_tensor = model_input.input_tokens
@@ -210,12 +212,12 @@ class MooncakeStoreConnector(KVConnectorBase):
         self,
         model_executable: torch.nn.Module,
         model_input: "ModelInputForHPUWithSamplingMetadata",
-        kv_caches: List[torch.Tensor],
+        kv_caches: list[torch.Tensor],
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
-        if self.rank != 0:
-            # only the first rank will send kv cache
+        if self.rank != 0 and self.kv_helper.use_mla():
+            # only the first rank will send kv cache when using MLA.
             return
         input_tokens_tensor_cpu = model_input.input_tokens.to(
             "cpu")  # shape: [batch_size, seq_len_padding_to_128]
@@ -258,14 +260,17 @@ class MooncakeStoreConnector(KVConnectorBase):
             if self.kv_helper.use_mla():
                 # we pack kv together, only need send one tensor
                 kvcache_to_sent = keys
+                store_kvcache_key = f"{store_key_prefix}_{self.rank}"
+                hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
             else:
                 values = torch.cat(values, dim=0)
                 kvcache_to_sent = torch.stack((keys, values), dim=0)
-            store_kvcache_key = f"{store_key_prefix}_{self.rank}"
+                store_kvcache_key = f"{store_key_prefix}_{self.local_tp_rank}"
+                hidden_key = f"{store_key_prefix}_hidden_{self.local_tp_rank}"
+
             self.kv_store.put(store_kvcache_key, kvcache_to_sent)
             logger.debug("put kv cache key: %s", store_kvcache_key)
 
-            hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
             self.kv_store.put(
                 hidden_key,
                 hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
@@ -277,8 +282,8 @@ class MooncakeStoreConnector(KVConnectorBase):
     def recv_kv_caches_and_hidden_states_hpu(
         self, model_executable: torch.nn.Module,
         model_input: "ModelInputForHPUWithSamplingMetadata",
-        attn_metadata: AttentionMetadata, kv_caches: List[torch.Tensor]
-    ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
+        attn_metadata: AttentionMetadata, kv_caches: list[torch.Tensor]
+    ) -> tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForHPUWithSamplingMetadata"]:
         # When bypass_model_exec is set to False, it means that at least for one
         # request its corresponding KV cache or hidden state is missing.
@@ -339,10 +344,15 @@ class MooncakeStoreConnector(KVConnectorBase):
 
             # get roi for current seq
             load_key_prefix = self.tensor_hash(current_tokens)
-            # For deepseek, we only need recv first rank
-            load_kvcache_key = f"{load_key_prefix}_0"
+            if self.kv_helper.use_mla():
+                # For deepseek, we only need recv first rank
+                load_kvcache_key = f"{load_key_prefix}_0"
+                hidden_key = f"{load_key_prefix}_hidden_0"
+            else:
+                load_kvcache_key = f"{load_key_prefix}_{self.local_tp_rank}"
+                hidden_key = f"{load_key_prefix}_hidden_{self.local_tp_rank}"
+
             remote_kv = self.kv_store.get(load_kvcache_key)
-            hidden_key = f"{load_key_prefix}_hidden_0"
             hidden = self.kv_store.get(hidden_key)
 
             if remote_kv is None or hidden is None:
