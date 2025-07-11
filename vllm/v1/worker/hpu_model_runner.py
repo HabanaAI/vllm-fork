@@ -20,6 +20,7 @@ from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 from vllm_hpu_extension.runtime import get_config
 from vllm_hpu_extension.utils import pad_list
 from vllm_hpu_extension.defragmentation import OnlineDefragmenter
+from vllm_hpu_extension.profiler import setup_profiler
 
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
@@ -52,25 +53,6 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 _TYPE_CACHE: dict[str, dict[str, Any]] = {}
-
-
-def setup_profiler(warmup, active):
-    schedule = torch.profiler.schedule(wait=0,
-                                       warmup=warmup,
-                                       active=active,
-                                       repeat=1)
-    activities = [
-        torch.profiler.ProfilerActivity.CPU,
-        torch.profiler.ProfilerActivity.HPU
-    ]
-    profiler = torch.profiler.profile(
-        schedule=schedule,
-        activities=activities,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('.',
-                                                                use_gzip=True),
-        record_shapes=False,
-        with_stack=True)
-    return profiler
 
 
 @dataclass
@@ -1517,13 +1499,12 @@ class HPUModelRunner:
 
         if self.kv_caches:
             new = {
-                req.req_id: req.block_ids
+                req.req_id: flatten(req.block_ids)
                 for req in scheduler_output.scheduled_new_reqs if req.block_ids
             }
             cached = {
-                req.req_id: req.new_block_ids
+                req.req_id: flatten(req.new_block_ids)
                 for req in scheduler_output.scheduled_cached_reqs
-                if req.new_block_ids
             }
             self.defragmenter.update(new | cached,
                                 scheduler_output.finished_req_ids)
@@ -2301,6 +2282,7 @@ class HPUModelRunner:
                     kv_caches[layer_name] = (key_cache[layer_id],
                                              value_cache[layer_id])
                 self.combined_kv_cache = (key_cache, value_cache)
+                print('combined kv_cache', self.combined_kv_cache[0].shape, kv_cache_shape)
             else:
                 for layer_name in kv_cache_group.layer_names:
                     key_cache = torch.zeros(kv_cache_shape,
@@ -2309,6 +2291,7 @@ class HPUModelRunner:
                     value_cache = torch.zeros_like(key_cache)
                     kv_caches[layer_name] = (key_cache, value_cache)
                 self.combined_kv_cache = None
+                print('orig kv_cache', kv_cache_shape)
 
         bind_kv_cache(
             kv_caches,
