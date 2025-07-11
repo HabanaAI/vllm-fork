@@ -17,7 +17,9 @@ import time
 from array import array
 from contextlib import suppress
 from enum import Enum, IntEnum
-from neural_compressor.torch.quantization import finalize_calibration
+
+if os.getenv("QUANT_CONFIG", None) is not None:
+    from neural_compressor.torch.quantization import finalize_calibration
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
