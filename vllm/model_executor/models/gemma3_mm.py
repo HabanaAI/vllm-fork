@@ -696,40 +696,34 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         local_attn_masks = []
         start_idx = 0
         for seq_len in seq_lens:
-            if not is_hpu:
+            if is_hpu:
+                global_attn_mask = self.hpu_build_mask(input_ids, mask_dtype)
+            else:
                 end_idx = start_idx + seq_len
                 input_token_ids = input_ids[start_idx:end_idx]
                 start_idx = end_idx
                 bs = 1
-            else:
-                input_token_ids = input_ids
-            # Create a global causal mask.
-            global_attn_mask = torch.empty(
-                bs,
-                1,
-                seq_len,
-                seq_len,
-                dtype=mask_dtype,
-                device=input_ids.device,
-            )
-            global_attn_mask.fill_(float("-inf"))
-            # Fill the lower triangle with 0.
-            global_attn_mask = global_attn_mask.triu(diagonal=1)
+                # Create a global causal mask.
+                global_attn_mask = torch.empty(
+                    bs,
+                    1,
+                    seq_len,
+                    seq_len,
+                    dtype=mask_dtype,
+                    device=input_ids.device,
+                )
+                global_attn_mask.fill_(float("-inf"))
+                # Fill the lower triangle with 0.
+                global_attn_mask = global_attn_mask.triu(diagonal=1)
 
-            # Consider the bidirectional attention between image tokens.
-            img_mask = torch.zeros_like(global_attn_mask)
-            img_pos = (input_token_ids == self.config.image_token_index)
+                # Consider the bidirectional attention between image tokens.
+                img_mask = torch.zeros_like(global_attn_mask)
+                img_pos = (input_token_ids == self.config.image_token_index)
 
-            if not is_hpu:
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
-            else:
-                img_mask[img_pos.unsqueeze(1)] += 1
-                img_mask = img_mask.permute(0, 1, 3, 2)
-                img_mask[img_pos.unsqueeze(1)] += 1
-                img_mask = img_mask.permute(0, 1, 3, 2)
-
-            global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
+                global_attn_mask = torch.where(img_mask == 2, 0,
+                                               global_attn_mask)
             global_attn_masks.append(global_attn_mask)
 
             if self.sliding_window is not None:
