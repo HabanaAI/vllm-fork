@@ -30,5 +30,5 @@ source "$BASH_DIR"/dp_p_env.sh
 #unset VLLM_SKIP_WARMUP
 #export PT_HPU_RECIPE_CACHE_CONFIG=./_prefill_cache,false,16384
 
-python3 -m vllm.entrypoints.openai.api_server --model $model_path --port 8100 --max-model-len $model_len --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION -tp 8  --max-num-seqs $max_num_seqs --trust-remote-code --disable-async-output-proc --disable-log-requests --max-num-batched-tokens $max_num_batched_tokens --use-padding-aware-scheduling --use-v2-block-manager --distributed_executor_backend mp --kv-cache-dtype fp8_inc --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
+python3 -m vllm.entrypoints.openai.api_server --model $model_path --port 8100 --max-model-len $model_len --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION -tp 8  --max-num-seqs $max_num_seqs --trust-remote-code --disable-async-output-proc --disable-log-requests --max-num-batched-tokens $max_num_batched_tokens --use-padding-aware-scheduling --use-v2-block-manager --distributed_executor_backend mp --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
 
