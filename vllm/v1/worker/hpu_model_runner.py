@@ -804,31 +804,33 @@ class HPUModelRunner:
 
             req_ids_to_add.append(req_id)
         # Update the states of the running/resumed requests.
-        for req_data in scheduler_output.scheduled_cached_reqs:
-            req_id = req_data.req_id
+        req_data = scheduler_output.scheduled_cached_reqs
+        for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
-            # Update the cached states.
-            num_computed_tokens = req_data.num_computed_tokens
+            new_tokens = req_data.new_token_ids[i]
+            num_computed_tokens = req_data.num_computed_tokens[i]
+
             req_state.num_computed_tokens = num_computed_tokens
-            # Add the sampled token(s) from the previous step (if any).
-            # This doesn't include "unverified" tokens like spec decode tokens.
+
             num_new_tokens = (num_computed_tokens +
-                              len(req_data.new_token_ids) -
+                              len(new_tokens) -
                               req_state.num_tokens)
             if num_new_tokens == 1:
                 # Avoid slicing list in most common case.
-                req_state.output_token_ids.append(req_data.new_token_ids[-1])
+                req_state.output_token_ids.append(new_tokens[-1])
             elif num_new_tokens > 0:
-                req_state.output_token_ids.extend(
-                    req_data.new_token_ids[-num_new_tokens:])
+                req_state.output_token_ids.extend(new_tokens[-num_new_tokens:])
+
             # Update the block IDs.
-            if not req_data.resumed_from_preemption:
+            new_block_ids = req_data.new_block_ids[i]
+            resumed_from_preemption = req_data.resumed_from_preemption[i]
+            if not resumed_from_preemption:
                 # Append the new blocks to the existing block IDs.
-                req_state.block_ids.extend(req_data.new_block_ids)
+                req_state.block_ids.extend(new_block_ids)
             else:
                 # The request is resumed from preemption.
                 # Replace the existing block IDs with the new ones.
-                req_state.block_ids = req_data.new_block_ids
+                req_state.block_ids = new_block_ids
 
             req_index = self.input_batch.req_id_to_index.get(req_id)
             if req_index is None:
@@ -841,14 +843,14 @@ class HPUModelRunner:
             # Update the persistent batch.
             self.input_batch.num_computed_tokens_cpu[req_index] = (
                 num_computed_tokens)
-            self.input_batch.block_table.append_row(req_data.new_block_ids,
-                                                    req_index)
+            self.input_batch.block_table.append_row(new_block_ids, req_index)
+
             # Add new_token_ids to token_ids_cpu.
             start_token_index = num_computed_tokens
-            end_token_index = num_computed_tokens + len(req_data.new_token_ids)
+            end_token_index = num_computed_tokens + len(new_tokens)
             self.input_batch.token_ids_cpu[
                 req_index,
-                start_token_index:end_token_index] = req_data.new_token_ids
+                start_token_index:end_token_index] = new_tokens
             self.input_batch.num_tokens_no_spec[req_index] = end_token_index
             # Add spec_token_ids to token_ids_cpu.
             spec_token_ids = scheduler_output.scheduled_spec_decode_tokens.get(
