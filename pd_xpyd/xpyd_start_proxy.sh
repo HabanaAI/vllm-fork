@@ -62,7 +62,7 @@ for ((i=0; i<D_INSTANCE_NUMBER; i++)); do
 done
 
 
-PREFILL_IPS=("10.239.129.9" "10.239.129.24" "10.239.129.67" "10.239.129.21")
+PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
 PBASE_PORT=8100
 PREFILL_ARGS=""
 
@@ -79,7 +79,7 @@ if [ "$DEBUG_MODE" == "1" ]; then
         --decode $DECODE_ARGS \
         --port 8868 \
         --repeat_p_request 1 \
-        --repeat_d_times 100 \
+        --repeat_d_times 639 \
         --debug_mode"
 
 else
