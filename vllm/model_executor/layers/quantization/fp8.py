@@ -1034,7 +1034,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                                   topk_weights_across_dp)
 
             batched_tokens = x.shape[0]
-
+            chunk_size = int(os.environ.get("PT_HPU_MOE_THRESHOLD", 256))
+            kwargs = {
+                "chunk_size": chunk_size,
+                "total_experts": 256,
+            }
             if batched_tokens > self.moe_slice_length:
                 final_hidden_states_list = []
                 n_slice = (batched_tokens + self.moe_slice_length -
@@ -1057,6 +1061,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         activation="silu",
                         experts_min=ep_shift,
                         experts_max=(num_experts + ep_shift - 1),
+                        **kwargs,
                     )
                     final_hidden_states_list.append(current_hidden_states)
                 final_hidden_states = torch.cat(final_hidden_states_list, dim=0)
@@ -1075,6 +1080,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     activation="silu",
                     experts_min=ep_shift,
                     experts_max=(num_experts + ep_shift - 1),
+                    **kwargs,
                 )
             return final_hidden_states.view(-1, x.shape[1])
 
