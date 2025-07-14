@@ -236,7 +236,7 @@ a `(2, 1, 512)` bucket, or the context length increases beyond 512 tokens. It wi
 
 ### Exponential Strategy
 
-Exponantial strategy is default warm-up mechanism. It is based on 4 parameters:
+Exponential strategy is the default warm-up mechanism. It is based on 4 parameters:
 - `min`: the smallest value
 - `step`: the rounding value for bucket boundaries
 - `max`: the largest value
@@ -244,7 +244,7 @@ Exponantial strategy is default warm-up mechanism. It is based on 4 parameters:
 > [!WARNING]
 > These parameters are not configurable by the user.
 
-The exponential bucketing strategy applies exponential spacing between buckets. The `min` and `max` values are always included in warm up, and the intermediate values are calculated using an exponent. The base remains unchanged. If duplicate values are generated, they are removed to ensure the warmup process is as efficient as possible. All generated in this way ranges for batch size and query length will be warmed up with each other.
+The exponential bucketing strategy applies exponential spacing between buckets. The `min` and `max` values are always included in the warm-up, and the intermediate values are calculated using an exponent. The base remains unchanged. If duplicate values are generated, they are removed to ensure the warm-up process is as efficient as possible. All the values generated in this way, ranging from batch size and query length, will be warmed up with each other.
 
 Example distribution is shown below:
 
@@ -259,11 +259,11 @@ This strategy creates more buckets with smaller values closer to `min`. As the v
 ### Linear Strategy
 
 > [!NOTE]
-> From 1.22 Linear strategy is no longer default warm-up mechanism.
+> Starting from v1.22.0 Intel Gaudi Software release, Linear strategy is no longer the default warm-up mechanism.
 
 Linear strategy is determined with 3 parameters only - `min`, `step` and `max`. They can be set separately for the prompt and decode phase, and batch size and sequence length dimensions, by user.
 
-`min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, the interval between `min` and `step` has special handling - `min` gets multiplied by consecutive powers of two, until the multiplier is less than or equal to `step`. We call this the ramp-up phase, and it is used for handling lower batch sizes with minimum wastage, while allowing larger padding on larger batch sizes.
+`min` determines the lowest value of the bucket. `step` determines the interval between buckets, and `max` determines the upper bound of the bucket. Furthermore, the interval between `min` and `step` has special handling: `min` is multiplied by consecutive powers of two until the multiplier is less than or equal to `step`. We refer to this as the ramp-up phase, which is used for handling lower batch sizes with minimal wastage, while allowing for larger padding on larger batch sizes. 
 
 **Example with ramp-up**
 
@@ -283,10 +283,10 @@ min = 128, step = 128, max = 512
 => buckets = ramp_up + stable => (128, 256, 384, 512)
 ```
 
-## Warmup
+## Warm-up
 
-Warmup is highly recommended step that occurs before the vLLM server starts listening to achieve the best performance results. It executes a forward pass for each bucket using dummy data. The goal is to pre-compile all graphs
-and avoid any graph compilation overhead within bucket boundaries during server runtime. Each warmup step is logged during vLLM startup.
+Warm-up is highly recommended step that occurs before the vLLM server starts listening to achieve the best performance results. It executes a forward pass for each bucket using dummy data. The goal is to pre-compile all graphs
+and avoid any graph compilation overhead within bucket boundaries during server runtime. Each warm-up step is logged during vLLM startup.
 
 This example uses the same buckets as those in the Bucketing Mechanism section. Each output line corresponds to the execution of a single bucket. When a bucket is executed for the first time, its graph
 is compiled and can be reused later, avoiding further graph compilations.
@@ -311,12 +311,12 @@ INFO 07-07 19:18:31 [hpu_model_runner.py:2679] [Warmup][Graph/decode][42/42] bat
 when executing a given bucket for the first time.
 
 > [!WARNING]
-> Disabling warmup is fine for development, but it is highly recommended to enable it in deployment.
+> Disabling warm-up is fine for development, but it is highly recommended to enable it in deployment.
 
 ## HPU Graph Capture
 
 [HPU Graphs](https://docs.habana.ai/en/latest/PyTorch/Inference_on_PyTorch/Inference_Using_HPU_Graphs.html) are currently the most performant execution method of vLLM on Intel Gaudi. When HPU Graphs are enabled,
-execution graphs will be traced (recorded) ahead of time (after performing warmup), to be later replayed during inference, significantly reducing host overheads. Recording can take large amounts of memory, which
+execution graphs will be traced (recorded) ahead of time (after performing warm-up), to be later replayed during inference, significantly reducing host overheads. Recording can take large amounts of memory, which
 needs to be taken into account when allocating KV cache. Enabling HPU Graphs will impact the number of available KV cache blocks, but vLLM provides user-configurable variables to control memory management.
 
 When HPU Graphs are used, they share the common memory pool ("usable memory") with the KV cache, as determined by the `gpu_memory_utilization` flag (default value is `0.9`). Before the KV cache is allocated,
@@ -353,7 +353,7 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
 - `VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL`: if `true` - logs CPU fallbacks for each vLLM engine step, even if no fallback occur. Disabled by default.
 - `VLLM_T_COMPILE_FULLGRAPH`: if `true` - PyTorch compile function raises an error if any graph breaks happen during compilation. This allows for the easy detection of existing graph breaks, which usually reduce performance. Disabled by default.
 - `VLLM_T_COMPILE_DYNAMIC_SHAPES`: if `true` - PyTorch compiles graph with dynamic options set to None. It causes using dynamic shapes when needed.
-- `VLLM_FULL_WARMUP`: if `true` - PyTorch assumes that warmup fully cover all possible tensor sizes and no compilation will occur afterwards. If compilation occurs after warmup, PyTorch will crash (with message like this: `Recompilation triggered with skip_guard_eval_unsafe stance. This usually means that you have not warmed up your model with enough inputs such that you can guarantee no more recompilations.`). If this happens, disable it. `false` by default.
+- `VLLM_FULL_WARMUP`: if `true` - PyTorch assumes that warm-up fully cover all possible tensor sizes and no compilation will occur afterwards. If compilation occurs after warm-up, PyTorch will crash (with message like this: `Recompilation triggered with skip_guard_eval_unsafe stance. This usually means that you have not warmed up your model with enough inputs such that you can guarantee no more recompilations.`). If this happens, disable it. `false` by default.
 
 <br/>**Performance Tuning Knobs:**
 
@@ -361,11 +361,11 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
 - `VLLM_EXPONENTIAL_BUCKETING`: if `true`, enables exponential bucket spacing instead of linear. The default is `true`.
 - `VLLM_HANDLE_TOPK_DUPLICATES`: if ``true`` - handles duplicates outside top-k. The default is `false`.
 - `VLLM_CONFIG_HIDDEN_LAYERS`: configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. It helps to improve throughput by reducing inter-token latency limitations in some models. The default is `1`.
-- `VLLM_SKIP_WARMUP`: if `true`, warmup is skipped. The default is `false`.
+- `VLLM_SKIP_WARMUP`: if `true`, warm-up is skipped. The default is `false`.
 
 > [!TIP]
 > When a deployed workload does not utilize the full context that a model can handle, it is good practice to limit the maximum values upfront based on the input and output token lengths that will be generated after serving the vLLM server.
-<br><br>**Example:**<br>Let's assume that we want to deploy text generation model Qwen2.5-1.5B, which has a defined `max_position_embeddings` of 131072 (our `max_model_len`). At the same time, we know that our workload pattern will not use the full context length because we expect a maximum input token size of 1K and predict generating a maximum of 2K tokens as output. In this case, starting the vLLM server to be ready for the full context length is unnecessary. Instead, we should limit it upfront to achieve faster service preparation and decrease warmup time. The recommended values in this example should be:
+<br><br>**Example:**<br>Let's assume that we want to deploy text generation model Qwen2.5-1.5B, which has a defined `max_position_embeddings` of 131072 (our `max_model_len`). At the same time, we know that our workload pattern will not use the full context length because we expect a maximum input token size of 1K and predict generating a maximum of 2K tokens as output. In this case, starting the vLLM server to be ready for the full context length is unnecessary. Instead, we should limit it upfront to achieve faster service preparation and decrease warm-up time. The recommended values in this example should be:
 > - `--max_model_len`: `3072` - the sum of input and output sequences (1+2)*1024.  
 > - `VLLM_PROMPT_SEQ_BUCKET_MAX`: `1024` - the maximum input token size that we expect to handle.
 
@@ -427,11 +427,11 @@ vllm serve meta-llama/Llama-3.1-405B-Instruct --dtype bfloat16 --max-model-len  
 measurements for a given model. The quantization configuration is used during inference.
 
 > [!TIP]
-> If you are prototyping or testing your model with FP8, you can use the `VLLM_SKIP_WARMUP=true` environment variable to disable the warmup stage, which is time-consuming.
+> If you are prototyping or testing your model with FP8, you can use the `VLLM_SKIP_WARMUP=true` environment variable to disable the warm-up stage, which is time-consuming.
 However, disabling this feature in production environments is not recommended, as it can lead to a significant performance decrease.
 
 > [!TIP]
-> If you are benchmarking an FP8 model with `scale_format=const`, setting `VLLM_DISABLE_MARK_SCALES_AS_CONST=true` can help speed up the warmup stage.
+> If you are benchmarking an FP8 model with `scale_format=const`, setting `VLLM_DISABLE_MARK_SCALES_AS_CONST=true` can help speed up the warm-up stage.
 
 > [!TIP]
 > When using FP8 models, you may experience timeouts caused by the long compilation time of FP8 operations. To mitigate this, set the following environment variables:
