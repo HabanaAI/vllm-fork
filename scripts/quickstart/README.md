@@ -184,7 +184,7 @@ huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scr
 
 2. Configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX`
 
-After downloading measurement files, you need to configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vallm.sh
+After downloading measurement files, you need to configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vllm.sh
 
 - QUANT_CONFIG
 
