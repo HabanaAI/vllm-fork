@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
+from vllm_hpu_extension.bucketing.common import HPUBucketingManager
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 from vllm_hpu_extension.runtime import get_config
 
@@ -45,8 +46,6 @@ from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 
 if TYPE_CHECKING:
     from vllm.v1.core.scheduler import SchedulerOutput
-
-from vllm_hpu_extension.bucketing.common import get_bucketing_context
 
 logger = init_logger(__name__)
 
@@ -252,42 +251,9 @@ def modify_model_layers(module: torch.nn.Module,
             modify_model_layers(child_module, suffix_list, n, counter)
 
 
-def get_path_to_rope(model: torch.nn.Module):
-    """Dynamically get the path to the RotaryEmbedding layer in the model.
-    This function will recursively search through the module hierarchy to find
-    a RotaryEmbedding layer and return the full path to that layer as a list
-    of names.
-    If no such layer is found, it returns None.
-    """
-
-    def find_rope_layer(parent, path):
-        # Base case: check if this parent is None
-        if parent is None:
-            return None
-
-        # Check if the current layer is a RotaryEmbedding
-        if hasattr(parent, 'named_children'):
-            for child_name, child_module in parent.named_children():
-                # If the current child is of type RotaryEmbedding,
-                # return the full path
-                if child_module.__class__.__name__.endswith("RotaryEmbedding"):
-                    return path + [child_name]
-                # Otherwise, recurse into this child to check its children
-                result = find_rope_layer(child_module, path + [child_name])
-                if result is not None:
-                    return result
-        return None
-
-    # Start the search from the top level model
-    path_to_rope = find_rope_layer(model, [])
-
-    # Return the result if found, otherwise None
-    return path_to_rope
-
-
 class HpuModelAdapter(torch.nn.Module):
 
-    def __init__(self, model, vllm_config, layer_names):
+    def __init__(self, model, vllm_config):
         super().__init__()
         self.model = model
         self.prefill_use_fusedsdpa = get_config(
@@ -297,7 +263,41 @@ class HpuModelAdapter(torch.nn.Module):
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
         self.dtype = vllm_config.model_config.dtype
-        self.layer_names = layer_names
+        self._rotary_embed_module = self._get_rotary_embedding_module(
+            self.model)
+        self._rotary_prepare_cos_sin = self._get_prepare_cos_sin()
+
+    def _get_rotary_embedding_module(self, model: torch.nn.Module):
+        """
+        Dynamically get the RotaryEmbedding layer in the model.
+        This function will recursively search through the module 
+        hierarchy to find and return a RotaryEmbedding layer.
+        If no such layer is found, it returns None.
+        """
+        if model is None:
+            return None
+
+        if model.__class__.__name__.endswith("RotaryEmbedding"):
+            return model
+
+        if hasattr(model, 'children'):
+            for child in model.children():
+                result = self._get_rotary_embedding_module(child)
+                if result is not None:
+                    return result
+        return None
+
+    def _get_prepare_cos_sin(self):
+        if self._rotary_embed_module is not None and hasattr(
+                self._rotary_embed_module, 'prepare_cos_sin'):
+            return self._rotary_embed_module.prepare_cos_sin
+        return None
+
+    def _reset_rotary_cos_sin(self):
+        if hasattr(self._rotary_embed_module, "cos"):
+            delattr(self._rotary_embed_module, "cos")
+        if hasattr(self._rotary_embed_module, "sin"):
+            delattr(self._rotary_embed_module, "sin")
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -386,34 +386,6 @@ class HpuModelAdapter(torch.nn.Module):
                                                     device, dtype)
         return attn_metadata
 
-    def _prepare_cos_sin(self, positions):
-        """Navigate through the model using the provided path and call
-        the prepare_cos_sin method on the 'RotaryEmbedding' layer."""
-
-        current_module = self.model  # Start from the top level of the model
-
-        for layer in self.layer_names:
-            if layer.isdigit():  # Check if the layer is an index
-                layer = int(layer)
-
-            # Check if the current layer is a name in a module
-            if isinstance(
-                    layer,
-                    str) and not isinstance(layer, int):  # Name-based access
-                current_module = getattr(current_module, layer)
-            elif isinstance(layer,
-                            int):  # Indexed-based access (like Modulelist)
-                current_module = list(current_module._modules.values())[layer]
-
-        # At the end, we should be at the RotaryEmbedding layer.
-        if hasattr(current_module, 'prepare_cos_sin'):
-            current_module.prepare_cos_sin(
-                positions, recompute_cos_sin=self.recompute_cos_sin)
-        else:
-            raise AttributeError(
-                "The module at the end of the path does not have \
-                a 'prepare_cos_sin' method.")
-
     def forward(self, *args, **kwargs):
         # TODO(kzawora): something goes VERY WRONG when operating on
         # kwargs['attn_metadata'].slot_mapping, compared to untrimmed metadata
@@ -425,13 +397,16 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
             input_ids.device, self.dtype)
-        if self.layer_names is not None:
-            self._prepare_cos_sin(kwargs['positions'])
+        if self._rotary_prepare_cos_sin is not None:
+            self._rotary_prepare_cos_sin(
+                kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
         attn_meta = kwargs.pop('attn_metadata')
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config):
             hidden_states = self.model(*args, **kwargs)
+            if self._rotary_prepare_cos_sin is not None:
+                self._reset_rotary_cos_sin()
         return hidden_states
 
     def compute_logits(self, *args, **kwargs):
@@ -618,11 +593,11 @@ class HPUModelRunner:
         self.input_batch = InputBatch(
             max_num_reqs=self.scheduler_config.max_num_seqs,
             max_model_len=self.max_model_len,
-            max_num_blocks_per_req=self.max_num_blocks_per_req,
+            max_num_batched_tokens=self.max_num_tokens,
             device=self.device,
             pin_memory=self.pin_memory,
             vocab_size=self.model_config.get_vocab_size(),
-        )
+            block_sizes=[self.block_size])
         self.mem_margin = None
 
         self.use_hpu_graph = not self.model_config.enforce_eager
@@ -635,14 +610,15 @@ class HPUModelRunner:
         self.use_merged_prefill = get_config().merged_prefill
         self.use_prefix_caching = (
             self.vllm_config.cache_config.enable_prefix_caching)
+        self.bucketing_manager = HPUBucketingManager()
         if self.enable_bucketing:
             logger.info("Bucketing is ON.")
-            HPUBucketingContext = get_bucketing_context()
-            self.bucketing_ctx = HPUBucketingContext(
-                self.max_num_seqs, self.max_prefill_batch_size,
-                self.block_size, self.max_num_batched_tokens,
-                self.use_merged_prefill, self.use_prefix_caching,
-                self.max_model_len)
+            self.bucketing_manager.initialize(
+                max_num_seqs=self.max_num_seqs,
+                max_num_prefill_seqs=self.max_prefill_batch_size,
+                block_size=self.block_size,
+                max_num_batched_tokens=self.max_num_batched_tokens,
+                max_model_len=self.max_model_len)
             self.graphed_buckets: set[Any] = set()
         else:
             logger.info("Bucketing is OFF.")
@@ -923,8 +899,8 @@ class HPUModelRunner:
             req_id_output_token_ids_lst, skip_copy=not batch_changed)
         return sampling_metadata
 
-    def get_habana_paged_attn_buffers(self, block_tables, slot_mapping):
-
+    def get_habana_paged_attn_buffers(self, block_tables, slot_mapping,
+                                      batch_size):
         last_block_usage = [
             slot[0] % self.block_size + 1 for slot in slot_mapping
         ]
@@ -942,10 +918,9 @@ class HPUModelRunner:
         block_bucket_size: int
         if self.use_contiguous_pa:
             block_bucket_size = max(max(block_list) + 1, len(block_list))
-            if self.enable_bucketing:
-                block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                    block_bucket_size)
+            block_bucket_size = \
+                self.bucketing_manager.find_decode_bucket(batch_size,
+                                                          block_bucket_size)[2]
             indices: list[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):
@@ -953,12 +928,9 @@ class HPUModelRunner:
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
         else:
-            if self.enable_bucketing:
-                block_bucket_size = \
-                    self.bucketing_ctx.get_padded_decode_num_blocks(
-                        len(block_list))
-            else:
-                block_bucket_size = len(block_list)
+            block_bucket_size = \
+                self.bucketing_manager.find_decode_bucket(batch_size,
+                                                          len(block_list))[2]
             padding_fn = lambda tensor, pad_value: pad_list(
                 tensor, block_bucket_size, itertools.repeat(pad_value))
 
@@ -988,20 +960,17 @@ class HPUModelRunner:
     def _bucketize_merged_prompt(self, seq_lens, num_blocks):
         seq = sum(seq_lens)
         num_blocks = sum(num_blocks)
-        if self.enable_bucketing:
-            seq = self.bucketing_ctx.get_padded_prompt_seq_len(seq)
-            num_blocks = round_up(num_blocks, 32)
+        seq = self.bucketing_manager.find_prompt_bucket(1, seq, num_blocks)[1]
+        num_blocks = round_up(num_blocks, 32)
         return (1, seq, num_blocks)
 
     def _bucketize_2d_prompt(self, seq_lens, num_blocks):
         bs = len(seq_lens)
         seq = max(seq_lens)
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
-        if self.enable_bucketing:
-            if bs <= self.max_prefill_batch_size:
-                bs = self.bucketing_ctx.get_padded_batch_size(bs, True)
-            seq = self.bucketing_ctx.get_padded_prompt_seq_len(seq)
-            num_blocks = round_up(num_blocks, 32)
+        bs, seq, _ = self.bucketing_manager.find_prompt_bucket(
+            bs, seq, num_blocks)
+        num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
 
     def _get_prompt_bucketing_fn(self):
@@ -1023,7 +992,8 @@ class HPUModelRunner:
         # DECODES are the first num_decodes REQUESTS.
         # PREFILLS are the next num_reqs - num_decodes REQUESTS.
         num_reqs = num_prefills + num_decodes
-        block_table_cpu_tensor = self.input_batch.block_table.get_cpu_tensor()
+        block_table_cpu_tensor = self.input_batch.block_table[
+            0].get_cpu_tensor()
         all_batch_contents = [BatchContents()]
 
         for batch_idx in range(num_decodes, num_reqs):
@@ -1218,17 +1188,29 @@ class HPUModelRunner:
         # logic knows to ignore those indicies. Otherwise, the
         # padding data can be dummy since we have a causal mask.
 
-        block_table_cpu_tensor = self.input_batch.block_table.get_cpu_tensor()
+        block_table_cpu_tensor = self.input_batch.block_table[
+            0].get_cpu_tensor()
         if num_decodes == 0:
             return DecodeInputData(num_decodes=0)
+        # BLOCK_TABLE [batch, max_num_blocks_per_req]
+        context_lens = self.input_batch.num_computed_tokens_cpu[:num_decodes]
+
+        # NOTE(kzawora): the +1 is what causes this entire thing to work,
+        # as in the paged attention, we don't fetch just the context from cache,
+        # but also kvs for the current token
+        num_blocks = np.ceil(
+            (context_lens + 1) / self.block_size).astype(np.int32).tolist()
 
         # PAD FOR STATIC SHAPES.
         padded_batch_size: int
-        if self.enable_bucketing:
-            padded_batch_size = self.bucketing_ctx.get_padded_batch_size(
-                num_decodes, False)
-        else:
-            padded_batch_size = num_decodes
+        padded_batch_size = self.bucketing_manager.find_decode_bucket(
+            num_decodes, sum(num_blocks))[0]
+
+        block_tables_list = []
+        for i, n in enumerate(num_blocks):
+            seq_block_table = block_table_cpu_tensor[i, :n].tolist()
+            assert len(seq_block_table) == n
+            block_tables_list.append(seq_block_table)
 
         # POSITIONS. [batch, 1]
         # We slice at the end, since we use the positions for gathering.
@@ -1267,24 +1249,11 @@ class HPUModelRunner:
         dummy_slots = itertools.cycle(
             range(self._PAD_SLOT_ID, self._PAD_SLOT_ID + self.block_size))
         slot_mapping[num_decodes:].apply_(lambda _, ds=dummy_slots: next(ds))
-        # BLOCK_TABLE [batch, max_num_blocks_per_req]
-        context_lens = self.input_batch.num_computed_tokens_cpu[:num_decodes]
-
-        # NOTE(kzawora): the +1 is what causes this entire thing to work,
-        # as in the paged attention, we don't fetch just the context from cache,
-        # but also kvs for the current token
-        num_blocks = np.ceil(
-            (context_lens + 1) / self.block_size).astype(np.int32).tolist()
-        block_tables_list = []
-        for i, n in enumerate(num_blocks):
-            seq_block_table = block_table_cpu_tensor[i, :n].tolist()
-            assert len(seq_block_table) == n
-            block_tables_list.append(seq_block_table)
 
         # CONTEXT_LENS [batch_size]
         block_list, block_groups, block_usage = \
             self.get_habana_paged_attn_buffers(
-            block_tables_list, slot_mapping.tolist())
+            block_tables_list, slot_mapping.tolist(), padded_batch_size)
 
         logits_indices = torch.zeros(padded_batch_size,
                                      dtype=torch.int32,
@@ -1707,21 +1676,17 @@ class HPUModelRunner:
             get_target_layer_suffix_list(
                 model_config.model_type if model_config is not None else None),
             hidden_layer_markstep_interval)
-        path_to_rope = get_path_to_rope(self.model)
         torch.hpu.synchronize()
 
         with HabanaMemoryProfiler() as m:  # noqa: SIM117
             self.model = _maybe_wrap_in_hpu_graph(self.model,
-                                                  vllm_config=self.vllm_config,
-                                                  layer_names=path_to_rope)
+                                                  vllm_config=self.vllm_config)
         self.model_memory_usage = m.consumed_device_memory
         logger.info("Wrapping in HPUGraph took %.4f GB",
                     self.model_memory_usage / float(2**30))
 
         with HabanaMemoryProfiler() as m:
-            self._maybe_compile(self.model,
-                                vllm_config=self.vllm_config,
-                                layer_names=path_to_rope)
+            self._maybe_compile(self.model)
         self.model_memory_usage = m.consumed_device_memory
         logger.info("Compilation took %.4f GB",
                     self.model_memory_usage / float(2**30))
@@ -1731,10 +1696,13 @@ class HPUModelRunner:
         ) and not self.vllm_config.model_config.enforce_eager:
             if os.getenv('VLLM_REGIONAL_COMPILATION',
                          'true').strip().lower() in ("1", "true"):
-                compiled_methods = ['_update_metadata']
+                compiled_methods = [
+                    '_update_metadata', '_rotary_prepare_cos_sin'
+                ]
                 for method_name in compiled_methods:
                     method = getattr(self.model, method_name)
-                    self._compile_region(self.model, method_name, method)
+                    if method is not None:
+                        self._compile_region(self.model, method_name, method)
                 self.regional_compilation_layers_list = [
                     RMSNorm, VocabParallelEmbedding
                 ]
@@ -1790,16 +1758,9 @@ class HPUModelRunner:
         return not self.model_config.enforce_eager
 
     def log_graph_warmup_summary(self, buckets, is_prompt, total_mem):
-        num_candidates = len(buckets)
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
-        graphed = list(c[:2] for c in self.graphed_buckets
-                       if c[2] == is_prompt)
-        if num_candidates == 0:
-            num_candidates = 1
-        msg = (f'{phase} captured:{len(graphed)} '
-               f'({100 * len(graphed) / num_candidates:.1f}%) '
-               f'used_mem:{format_bytes(total_mem)} '
-               f'buckets:{sorted(list(graphed))}')
+        msg = (f'{phase} captured:{len(buckets)} '
+               f'used_mem:{format_bytes(total_mem)}')
         logger.info(msg)
 
     def warmup_scenario(self,
@@ -1872,7 +1833,8 @@ class HPUModelRunner:
                 block_list, block_groups, block_usage = \
                     self.get_habana_paged_attn_buffers(
                         slot_mapping=slot_mapping,
-                        block_tables=block_tables)
+                        block_tables=block_tables,
+                        batch_size=batch_size)
                 block_list_device = _async_h2d_tensor_copy(
                     block_list, self.device)
                 block_usage_device = _async_h2d_tensor_copy(
@@ -1961,7 +1923,7 @@ class HPUModelRunner:
         msg = (f"[Warmup][{phase}][{i+1}/{max_i}] "
                f"batch_size:{batch_size} "
                f"query_len:{seq_len} "
-               f"num_ctx_blocks:{num_blocks} "
+               f"num_blocks:{num_blocks} "
                f"free_mem:{free_mem}")
         logger.info(msg)
 
@@ -2023,7 +1985,7 @@ class HPUModelRunner:
             mm_hashes=[],
             mm_positions=[],
             sampling_params=sampling_params,
-            block_ids=block_ids,
+            block_ids=[block_ids],
             num_computed_tokens=num_computed_tokens,
             lora_request=None,
         )
@@ -2072,7 +2034,7 @@ class HPUModelRunner:
             total_num_scheduled_tokens=sum(scheduled_tokens.values()),
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=0,
+            num_common_prefix_blocks=[0],
             finished_req_ids=set(),
             free_encoder_input_ids=[],
             structured_output_request_ids={},
@@ -2085,7 +2047,7 @@ class HPUModelRunner:
             total_num_scheduled_tokens=0,
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=0,
+            num_common_prefix_blocks=[0],
             finished_req_ids=set(req.req_id for req in requests),
             free_encoder_input_ids=[],
             structured_output_request_ids={},
@@ -2145,19 +2107,17 @@ class HPUModelRunner:
         if prompt_profile_cfg or decode_profile_cfg:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
-        self.bucketing_ctx.generate_prompt_buckets()
         kv_caches = self.kv_caches
-        max_blocks = int(kv_caches[0][0].size(0) // self.block_size)
-        self.bucketing_ctx.generate_prompt_buckets()
-        self.bucketing_ctx.generate_decode_buckets(max_blocks)
+        self.bucketing_manager.generate_prompt_buckets()
+        self.bucketing_manager.generate_decode_buckets()
 
         if not htorch.utils.internal.is_lazy(
         ) and not self.model_config.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() in ('1', 'true') else 1
             cache_size_limit = 1 + multiplier * (
-                len(self.bucketing_ctx.prompt_buckets) +
-                len(self.bucketing_ctx.decode_buckets))
+                len(self.bucketing_manager.prompt_buckets) +
+                len(self.bucketing_manager.decode_buckets))
             torch._dynamo.config.cache_size_limit = max(
                 cache_size_limit, torch._dynamo.config.cache_size_limit)
             # Multiply by 8 to follow the original default ratio between
@@ -2188,26 +2148,26 @@ class HPUModelRunner:
                            'Please update Gaudi Software Suite.')
         with compile_only_mode_context(
         ) if can_use_compile_only_mode else contextlib.nullcontext():
-
             if not self.model_config.enforce_eager:
                 assert self.mem_margin is not None, \
                     ("HabanaWorker.determine_num_available_blocks needs "
                     "to be called before warming up the model.")
                 #TODO(kzawora): align_workers
-                #mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
-                #    self.warmup_graphs(
-                #    self.bucketing_ctx.prompt_buckets,
-                #    True, kv_caches)
-                mem_post_prompt = 0
+                mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
+                    self.warmup_graphs(
+                    self.bucketing_manager.prompt_buckets,
+                    True, kv_caches)
                 mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
-                    self.bucketing_ctx.decode_buckets,
+                    self.bucketing_manager.decode_buckets,
                     False, kv_caches)
 
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.prompt_buckets, True, mem_post_prompt)
+                    self.bucketing_manager.prompt_buckets, True,
+                    mem_post_prompt)
                 self.log_graph_warmup_summary(
-                    self.bucketing_ctx.decode_buckets, False, mem_post_decode)
+                    self.bucketing_manager.decode_buckets, False,
+                    mem_post_decode)
 
         end_time = time.perf_counter()
         end_mem = HabanaMemoryProfiler.current_device_memory_usage()
@@ -2277,13 +2237,17 @@ class HPUModelRunner:
                 "supported yet.")
 
         kv_caches: dict[str, torch.Tensor] = {}
+        kv_cache_sizes = {}
+        for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
+            assert len(kv_cache_tensor.shared_by) == 1
+            kv_cache_sizes[kv_cache_tensor.shared_by[0]] = kv_cache_tensor.size
 
         for kv_cache_group in kv_cache_config.kv_cache_groups:
             kv_cache_spec = kv_cache_group.kv_cache_spec
             for layer_name in kv_cache_group.layer_names:
-                tensor_config = kv_cache_config.tensors[layer_name]
-                assert tensor_config.size % kv_cache_spec.page_size_bytes == 0
-                num_blocks = tensor_config.size // kv_cache_spec.page_size_bytes
+                tensor_size = kv_cache_sizes[layer_name]
+                assert tensor_size % kv_cache_spec.page_size_bytes == 0
+                num_blocks = tensor_size // kv_cache_spec.page_size_bytes
                 # `num_blocks` is the number of blocks the model runner can use.
                 # `kv_cache_config.num_blocks` is the number of blocks that
                 # KVCacheManager may allocate.
@@ -2313,7 +2277,7 @@ class HPUModelRunner:
             self.kv_caches)
 
         if self.enable_bucketing:
-            self.bucketing_ctx.num_hpu_blocks = num_blocks
+            self.bucketing_manager.num_hpu_blocks = num_blocks
         self._PAD_BLOCK_ID = num_blocks
         self._PAD_SLOT_ID = num_blocks * self.block_size
 
