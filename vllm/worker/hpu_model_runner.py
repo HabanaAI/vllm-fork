@@ -353,6 +353,8 @@ class HpuModelAdapter(torch.nn.Module):
         self.interleaved_sliding_window = getattr(
             text_config, "interleaved_sliding_window",
             None) if text_config else None
+        self.use_fsdpa_window = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+            "false").strip().lower() in ("1", "true")
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -503,14 +505,12 @@ class HpuModelAdapter(torch.nn.Module):
                                           seq_len, window_size, device, dtype):
 
         # FusedSDPA causal+window works only when seq_len is multiple of
-        # SLICE_SIZE.
-        is_slice_kernel = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-                                    "false").strip().lower() in ("1", "true")
+        # SLICE_SIZE. Otherwise create a custom attn_mask.
         slice_size = int(os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
-
         if (seq_len <= window_size
-                or (is_slice_kernel and self.prefill_use_fusedsdpa
-                    and self.is_causal and seq_len % slice_size == 0)
+                or (self.prefill_use_fusedsdpa and self.is_causal and
+                self.use_fsdpa_window and slice_size !=0 and
+                seq_len % slice_size == 0)
                 or not attn_metadata.is_prompt):
             #no need to set sliding window mask, just use causal mask
             return attn_metadata

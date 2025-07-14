@@ -392,7 +392,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         HPUFusedSDPA = kernels.fsdpa()
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
-
+        self.use_fsdpa_window = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+            "false").strip().lower() in ("1", "true")
         self.prefill_impl = get_config().prompt_attn_impl
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
@@ -546,17 +547,22 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             if self.sliding_window:
                 if attn_metadata.window_attn_bias is not None:
                     attn_bias = attn_metadata.window_attn_bias
-                else:
-                    window_size = (self.sliding_window, 0)
-                    common_args['window_size'] = window_size
 
-                    #TODO: Currently HPU doesn't support GQA for FusedSDPA with
-                    # causal + window, so make sure QKV are all same shape.
-                    if query_shape != kv_shape:
-                        repeat_kv = self.num_heads // self.num_kv_heads
-                        key = key.repeat_interleave(repeat_kv, dim=1)
-                        value = value.repeat_interleave(repeat_kv, dim=1)
-                        kv_shape = query_shape
+                if self.use_fsdpa_window:
+                    slice_size = int(os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD",
+                                               "0"))
+                    if slice_size !=0 and (seq_len % slice_size == 0):
+                        attn_bias = attn_metadata.attn_bias
+                        window_size = (self.sliding_window, 0)
+                        common_args['window_size'] = window_size
+                        # TODO: Currently HPU doesn't support GQA for FusedSDPA
+                        # with causal + window, so repeat KV so QKV are all the
+                        # same shape.
+                        if query_shape != kv_shape:
+                            repeat_kv = self.num_heads // self.num_kv_heads
+                            key = key.repeat_interleave(repeat_kv, dim=1)
+                            value = value.repeat_interleave(repeat_kv, dim=1)
+                            kv_shape = query_shape
 
             out = ops.prompt_attention(
                 impl=self.prefill_impl,

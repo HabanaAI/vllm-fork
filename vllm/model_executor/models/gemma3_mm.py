@@ -508,6 +508,10 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             self.language_model.make_empty_intermediate_tensors)
         if is_hpu:
             self.graphed_multimodal_buckets = None
+            self.use_fsdpa_window = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+                "false").strip().lower() in ("1", "true")
+            self.fsdpa_window_slice_size =  int(os.getenv(
+                "PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
 
     @property
     def dtype(self):
@@ -749,13 +753,21 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             global_attn_masks.append(global_attn_mask)
             if self.sliding_window is not None:
-                # Create a local causal mask with sliding window (1024).
-                local_attn_mask = torch.ones_like(global_attn_mask)
-                local_attn_mask = torch.tril(local_attn_mask,
-                                             diagonal=-self.sliding_window)
-                local_attn_mask = torch.where(local_attn_mask == 0,
-                                              global_attn_mask, float("-inf"))
-                local_attn_masks.append(local_attn_mask)
+                if is_hpu and self.use_fsdpa_window and (
+                    self.fsdpa_window_slice_size != 0) and (
+                    seq_len % self.fsdpa_window_slice_size == 0):
+                    # In HPU, no need to create local attn_mask
+                    # if FusedSDPA with window_size kernel is supported.
+                    local_attn_masks = None
+                else:
+                    # Create a local causal mask with sliding window (1024).
+                    local_attn_mask = torch.ones_like(global_attn_mask)
+                    local_attn_mask = torch.tril(local_attn_mask,
+                                                 diagonal=-self.sliding_window)
+                    local_attn_mask = torch.where(local_attn_mask == 0,
+                                                    global_attn_mask, 
+                                                    float("-inf"))
+                    local_attn_masks.append(local_attn_mask)
         kwargs["global_attn_masks"] = global_attn_masks
         kwargs["local_attn_masks"] = local_attn_masks
         return kwargs
