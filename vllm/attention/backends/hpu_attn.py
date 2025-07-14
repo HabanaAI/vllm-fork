@@ -393,7 +393,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
         self.use_fsdpa_window = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-            "false").strip().lower() in ("1", "true")
+                                          "false").strip().lower() in ("1",
+                                                                       "true")
         self.prefill_impl = get_config().prompt_attn_impl
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
@@ -549,9 +550,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     attn_bias = attn_metadata.window_attn_bias
 
                 if self.use_fsdpa_window:
-                    slice_size = int(os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD",
-                                               "0"))
-                    if slice_size !=0 and (seq_len % slice_size == 0):
+                    slice_size = int(
+                        os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
+                    if slice_size != 0 and (seq_len % slice_size == 0):
                         attn_bias = attn_metadata.attn_bias
                         window_size = (self.sliding_window, 0)
                         common_args['window_size'] = window_size
