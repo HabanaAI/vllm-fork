@@ -358,6 +358,12 @@ cd vllm-fork
 huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-ep16-0610  --local-dir ./scripts/nc_workspace_measure_kvache
 ```
 
+For case running DeepSeek-R1-0528 with tp-size 16, we have downloaded and kept the measurement files of `Yi30/ds-r1-0528-default-pile-g2-ep16-0610` to `scripts/measure_kvcache/ds-r1-0528-g2-tp16`. You can just copy to target folder:
+```bash
+cd vllm-fork
+cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measure_kvache
+```
+
 2. Configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX`
 
 After downloading measurement files, you need to configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in set_head_node.sh and set_worker_node.sh
