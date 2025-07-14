@@ -49,7 +49,11 @@ if [ "$5" == "debug" ]; then
     echo " Debug mode enabled"
 fi
 
+#For OAM
 DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
+#For PCIE
+# DECODE_IPS=("10.112.110.161" "10.112.110.148")
+
 DBASE_PORT=8200
 DECODE_ARGS=""
 
@@ -61,8 +65,11 @@ for ((i=0; i<$NUM_DECODE; i++)); do
     done
 done
 
-
+#For OAM
 PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
+#For PCIE
+# PREFILL_IPS=("10.112.110.157")
+
 PBASE_PORT=8100
 PREFILL_ARGS=""
 

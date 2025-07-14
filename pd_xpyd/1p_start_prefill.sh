@@ -9,7 +9,7 @@ if [ "$2" == "debug" ]; then
     echo " Debug mode enabled"
 fi
 
-if [ -z "$1" ] || [ "$1" == "g10" ]; then
+if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
     if [ "$DEBUG_MODE" == "1" ]; then
     	source "$BASH_DIR"/start_etc_mooncake_master.sh debug
     	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh debug"
