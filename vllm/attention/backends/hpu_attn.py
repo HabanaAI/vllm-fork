@@ -143,7 +143,10 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     window_block_usage: Optional[torch.Tensor] = None
     window_attn_bias: Optional[torch.Tensor] = None
     use_window_sdpa: Optional[bool] = None
+<<<<<<< HEAD
     sliding_window_right: Optional[int] = None
+=======
+>>>>>>> df82ec650 (Changes after code review)
 
 
 @dataclass
@@ -551,8 +554,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
                 if attn_metadata.use_window_sdpa:
                     attn_bias = attn_metadata.attn_bias
+<<<<<<< HEAD
                     window_size = (self.sliding_window, 
                                    attn_metadata.sliding_window_right)
+=======
+                    window_size = (self.sliding_window, 0)
+>>>>>>> df82ec650 (Changes after code review)
                     common_args['window_size'] = window_size
                     # TODO: Currently HPU doesn't support GQA for FusedSDPA
                     # with causal + window, so repeat KV so QKV are all the
