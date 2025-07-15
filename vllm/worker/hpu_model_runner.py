@@ -515,7 +515,6 @@ class HpuModelAdapter(torch.nn.Module):
 
         prefill_metadata = attn_metadata
         shift = 0
-
         #causal + window size
         tensor = torch.full((batch_size, 1, seq_len, seq_len),
                             device=device,
@@ -1094,6 +1093,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     and not self.lora_config)
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
+        self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+                                         "false").strip().lower() in ("1",
+                                                                      "true")
 
     def _set_gc_threshold(self) -> None:
         """
@@ -2926,7 +2928,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(batch_size)
                 ]
         self.profiler.start('internal', scenario_name)
-        times = num_iters if use_graphs or is_pt_profiler_run else 1
+        times = num_iters if (use_graphs and not self.use_window_sdpa) or is_pt_profiler_run else 1
         if is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
@@ -3927,6 +3929,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
+                            if warmup_mode:
+                                bypass_model_exec = False
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets)
@@ -3936,6 +3940,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs
                             )
+                        if warmup_mode and bypass_model_exec:
+                            return []
 
                     with self.profiler.record_event('internal',
                                                     model_event_name,
