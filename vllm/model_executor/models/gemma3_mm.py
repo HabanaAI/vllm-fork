@@ -499,6 +499,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
+        if is_hpu:
+            self.graphed_multimodal_buckets = None
 
     @property
     def dtype(self):
