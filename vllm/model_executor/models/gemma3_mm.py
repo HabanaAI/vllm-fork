@@ -508,11 +508,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             self.language_model.make_empty_intermediate_tensors)
         if is_hpu:
             self.graphed_multimodal_buckets = None
-            self.use_fsdpa_window = os.getenv(
-                "PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-                "false").strip().lower() in ("1", "true")
-            self.fsdpa_window_slice_size = int(
-                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
 
     @property
     def dtype(self):

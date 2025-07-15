@@ -393,9 +393,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         HPUFusedSDPA = kernels.fsdpa()
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
-        self.use_fsdpa_window = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-                                          "false").strip().lower() in ("1",
-                                                                       "true")
         self.prefill_impl = get_config().prompt_attn_impl
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
