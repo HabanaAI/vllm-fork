@@ -349,13 +349,16 @@ class HpuModelAdapter(torch.nn.Module):
             text_config, "interleaved_sliding_window",
             None) if text_config else None
 
-        text_config = vllm_config.model_config.hf_config.get_text_config()
-        self.interleaved_sliding_window = getattr(
-            text_config, "interleaved_sliding_window",
-            None) if text_config else None
-        self.use_fsdpa_window = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-                                          "false").strip().lower() in ("1",
-                                                                       "true")
+        self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+                                         "false").strip().lower() in ("1",
+                                                                      "true")
+        if self.use_window_sdpa:
+            self.slice_size = int(
+                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
+
+            os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
+            os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
+            os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -505,15 +508,9 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
-        # FusedSDPA causal+window works only when seq_len is multiple of
-        # SLICE_SIZE. Otherwise create a custom attn_mask.
-        slice_size = int(os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
-        if (seq_len <= window_size
-                or (self.prefill_use_fusedsdpa and self.is_causal
-                    and self.use_fsdpa_window and slice_size != 0
-                    and seq_len % slice_size == 0)
-                or not attn_metadata.is_prompt):
-            #no need to set sliding window mask, just use causal mask
+        if (seq_len <= window_size) or (not attn_metadata.is_prompt) or (
+                attn_metadata.use_window_sdpa):
+            # no need to set sliding window mask, just use built-in sdpa
             return attn_metadata
 
         prefill_metadata = attn_metadata
@@ -529,7 +526,6 @@ class HpuModelAdapter(torch.nn.Module):
         attn_bias = torch.log(mask)
 
         attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
-
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
@@ -595,6 +591,21 @@ class HpuModelAdapter(torch.nn.Module):
                                               input_ids.size(1),
                                               input_ids.device, self.dtype)
         kwargs['attn_metadata'] = attn_metadata
+        return attn_metadata
+
+    def _update_use_window_sdpa(self, attn_metadata, seq_len):
+        use_window_sdpa = False
+        if self.use_window_sdpa and self.prefill_use_fusedsdpa:
+            # TODO: We can add min token_len for the window_sdpa to be used.
+            if self.slice_size != 0 and (seq_len % self.slice_size == 0):
+                use_window_sdpa = True
+            else:
+                raise AssertionError(
+                    f"input token length {seq_len} is not multiple "
+                    f"of SLICE_SIZE {self.slice_size}. Please adjust "
+                    f"Prompt Buckets")
+
+        attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
         return attn_metadata
 
     def _update_metadata(self,
@@ -2675,6 +2686,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_usage',
             'window_block_groups',
             'window_attn_bias',
+            'use_window_sdpa',
         ])
         return attention_metadata
 
@@ -3904,6 +3916,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
+
+                #Need to set the window_slide mask at this point to decide
+                if is_prompt:
+                    attn_metadata = self.model._update_use_window_sdpa(
+                        execute_model_kwargs['attn_metadata'], seq_len)
+                    execute_model_kwargs['attn_metadata'] = attn_metadata
+
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \

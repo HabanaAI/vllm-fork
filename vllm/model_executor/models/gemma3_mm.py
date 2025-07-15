@@ -754,12 +754,9 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             global_attn_masks.append(global_attn_mask)
             if self.sliding_window is not None:
-                if is_hpu and self.use_fsdpa_window and (
-                        self.fsdpa_window_slice_size
-                        != 0) and (seq_len % self.fsdpa_window_slice_size
-                                   == 0):
-                    # In HPU, no need to create local attn_mask
-                    # if FusedSDPA with window_size kernel is supported.
+                if is_hpu and kwargs['attn_metadata'].use_window_sdpa:
+                    # In HPU, no need to create local attn_mask(save memory)
+                    # if slice_sdpa kernel is used for this input.
                     local_attn_masks = None
                 else:
                     # Create a local causal mask with sliding window (1024).
