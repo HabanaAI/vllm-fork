@@ -323,6 +323,22 @@ class HpuModelAdapter(torch.nn.Module):
 
         model_config = getattr(self.model, "config", None)
         self.model_is_mrope = uses_mrope(model_config)
+        self.is_mm_optimized = is_mm_optimized(self.model)
+        text_config = vllm_config.model_config.hf_config.get_text_config()
+        self.interleaved_sliding_window = getattr(
+            text_config, "interleaved_sliding_window",
+            None) if text_config else None
+
+        self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+                                         "false").strip().lower() in ("1",
+                                                                      "true")
+        if self.use_window_sdpa:
+            self.slice_size = int(
+                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
+
+            os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
+            os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
+            os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -430,23 +446,12 @@ class HpuModelAdapter(torch.nn.Module):
                                              attn_bias=attn_bias)
         return attn_metadata
 
-<<<<<<< HEAD
-    def _set_block_mapping(self, metadata, batch_size, device, dtype):
-=======
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
-        # FusedSDPA causal+window works only when seq_len is multiple of
-        # SLICE_SIZE.
-        is_slice_kernel = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-                                    "false").strip().lower() in ("1", "true")
-        slice_size = int(os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
-
-        if (seq_len <= window_size
-                or (is_slice_kernel and self.prefill_use_fusedsdpa
-                    and self.is_causal and seq_len % slice_size == 0)
-                or not attn_metadata.is_prompt):
-            #no need to set sliding window mask, just use causal mask
+        if (seq_len <= window_size) or (not attn_metadata.is_prompt) or (
+                attn_metadata.use_window_sdpa):
+            # no need to set sliding window mask, just use built-in sdpa
             return attn_metadata
 
         prefill_metadata = attn_metadata
@@ -462,7 +467,6 @@ class HpuModelAdapter(torch.nn.Module):
         attn_bias = torch.log(mask)
 
         attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
-
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
@@ -474,7 +478,6 @@ class HpuModelAdapter(torch.nn.Module):
             block_usage = metadata.block_usage
             block_groups = metadata.block_groups
 
->>>>>>> 9df8d17b3 (Added support for FusedSDPA with window_size)
         mask = torch.arange(0,
                             self.block_size,
                             device=device,
@@ -521,12 +524,33 @@ class HpuModelAdapter(torch.nn.Module):
 
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
+    def _update_use_window_sdpa(self, attn_metadata, seq_len):
+        use_window_sdpa = False
+        if self.use_window_sdpa and self.prefill_use_fusedsdpa:
+            # TODO: We can add min token_len for the window_sdpa to be used.
+            if self.slice_size != 0 and (seq_len % self.slice_size == 0):
+                use_window_sdpa = True
+            else:
+                raise AssertionError(
+                    f"input token length {seq_len} is not multiple "
+                    f"of SLICE_SIZE {self.slice_size}. Please adjust "
+                    f"Prompt Buckets")
+
+        attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
+        return attn_metadata
+
+    def _update_metadata(self,
+                         attn_metadata,
+                         batch_size,
+                         seq_len,
+                         device,
+                         dtype,
+                         global_attn_masks=None,
+                         local_attn_masks=None):
 
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
-<<<<<<< HEAD
-=======
 
             #For Gemma3, we need to override attn_mask with these sliding_window
             #mask which are updated during prepare_attn_mask()
@@ -543,7 +567,6 @@ class HpuModelAdapter(torch.nn.Module):
                         attn_metadata, batch_size, seq_len,
                         self.interleaved_sliding_window, device, dtype)
 
->>>>>>> 9df8d17b3 (Added support for FusedSDPA with window_size)
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype)
@@ -2407,6 +2430,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_groups',
             'input_positions',
             'alibi_blocks',
+            'window_block_list',
+            'window_block_mapping',
+            'window_block_usage',
+            'window_block_groups',
+            'window_attn_bias',
+            'use_window_sdpa',
         ])
         return attention_metadata
 
@@ -3677,6 +3706,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
+
+
+                #Need to set the window_slide mask at this point to decide
+                if is_prompt:
+                    attn_metadata = self.model._update_use_window_sdpa(
+                        execute_model_kwargs['attn_metadata'], seq_len)
+                    execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
                     with self.profiler.record_event('internal',

@@ -136,6 +136,13 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     cross_block_groups: Optional[torch.Tensor] = None
     cross_block_usage: Optional[torch.Tensor] = None
     cross_attn_bias: Optional[torch.Tensor] = None
+    window_block_list: Optional[torch.Tensor] = None
+    window_slot_mapping: Optional[torch.Tensor] = None
+    window_block_mapping: Optional[torch.Tensor] = None
+    window_block_groups: Optional[torch.Tensor] = None
+    window_block_usage: Optional[torch.Tensor] = None
+    window_attn_bias: Optional[torch.Tensor] = None
+    use_window_sdpa: Optional[bool] = None
 
 
 @dataclass
@@ -542,12 +549,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             if self.sliding_window:
                 if attn_metadata.window_attn_bias is not None:
                     attn_bias = attn_metadata.window_attn_bias
-                else:
+
+                if attn_metadata.use_window_sdpa:
+                    attn_bias = attn_metadata.attn_bias
                     window_size = (self.sliding_window, 0)
                     common_args['window_size'] = window_size
-
-                    #TODO: Currently HPU doesn't support GQA for FusedSDPA with
-                    # causal + window, so make sure QKV are all same shape.
+                    # TODO: Currently HPU doesn't support GQA for FusedSDPA
+                    # with causal + window, so repeat KV so QKV are all the
+                    # same shape.
                     if query_shape != kv_shape:
                         repeat_kv = self.num_heads // self.num_kv_heads
                         key = key.repeat_interleave(repeat_kv, dim=1)
