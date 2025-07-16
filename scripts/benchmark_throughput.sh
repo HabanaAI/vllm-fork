@@ -178,7 +178,9 @@ case "$dtype" in
         QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
         if [[ "${model_name_lower}" == *"qwen3"* ]]; then
             QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
-        elif [[ $model_name_lower == *"deepseek-r1-distill-qwen-7b"* || $model_name_lower == *"qwen2-7b-instruct"* ]]; then
+        elif [[ $model_name_lower == *"deepseek-r1-distill-qwen-7b"* \
+            || $model_name_lower == *"qwen2-7b-instruct"* \
+            || $model_name_lower == *"qwen2.5-7b-instruct"* ]]; then
             QUANT_FLAGS=(--quantization inc)
         fi
         dtype="bfloat16"
@@ -255,7 +257,7 @@ python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --model "${model_path}" \
     --trust-remote-code \
     --tensor-parallel-size "${num_hpu}" \
-    "${ENABLE_EXPERT_PARALLEL}" \
+    ${ENABLE_EXPERT_PARALLEL} \
     "${IO_FLAGS[@]}" \
     --device hpu \
     --dtype "${dtype}" \
