@@ -133,8 +133,8 @@ class RayDistributedExecutor(DistributedExecutorBase):
         if hasattr(self, '_logger') and self._logger is not None:
             self._logger.info(
                 "Shutting down Ray distributed executor. If you see error log "
-                "from logging.cc regarding SIGTERM received, please ignore because "
-                "this is the expected termination process in Ray.")
+                "from logging.cc regarding SIGTERM received, please ignore "
+                "because this is the expected termination process in Ray.")
         if getattr(self, 'shutdown_workers', False):
             self.shutdown_workers = False
             getattr(self._run_workers, 'shutdown', lambda: None)()
