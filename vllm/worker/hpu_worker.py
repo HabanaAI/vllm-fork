@@ -610,19 +610,29 @@ class HPUCacheEngine(CacheEngine):
             num_blocks, self.block_size, self.num_kv_heads, self.head_size)
         k_cache_shape = kv_cache_shape
         v_cache_shape = None if self.model_config.use_mla else kv_cache_shape
-        kv_cache: List[Tuple[torch.Tensor, torch.Tensor]] = []
+        scale_shape = kv_cache_shape[:-1] + (1,)
+        kv_cache: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = []
         dtype = self.dtype
         if device != 'hpu' and not is_fake_hpu() \
           and self.dtype == torch.float8_e4m3fn:
             dtype = torch.uint8
+        if self.dtype == torch.float8_e4m3fn and os.environ.get('QUANT_CONFIG', None) is not None:
+            create_dynamic_scales = True
+        else:
+            create_dynamic_scales = False
         for _ in range(self.num_attention_layers):
             key_cache = torch.zeros(k_cache_shape, dtype=dtype, device=device)
+            key_scale = torch.ones(scale_shape, dtype=torch.bfloat16, device=device) \
+                if create_dynamic_scales else None
             if v_cache_shape is not None:
                 value_cache = torch.zeros(v_cache_shape,
                                           dtype=dtype,
                                           device=device)
+                value_scale = torch.ones(scale_shape, dtype=torch.bfloat16, device=device) \
+                    if create_dynamic_scales else None
             else:
                 value_cache = None
-            kv_layer = (key_cache, value_cache)
+                value_scale = None
+            kv_layer = (key_cache, value_cache, key_scale, value_scale)
             kv_cache.append(kv_layer)
         return kv_cache

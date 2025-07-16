@@ -42,13 +42,15 @@ class HPUPagedAttention:
 
     @staticmethod
     def split_kv_cache(
-        kv_cache: torch.Tensor,
+        kv_cache: Tuple,
         num_kv_heads: int,
         head_size: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         key_cache = kv_cache[0]
         value_cache = kv_cache[1]
-        return key_cache, value_cache
+        k_scales = kv_cache[2]
+        v_scales = kv_cache[3]
+        return key_cache, value_cache, k_scales, v_scales
 
     @staticmethod
     def write_to_paged_cache(key: torch.Tensor, value: torch.Tensor,
@@ -67,8 +69,8 @@ class HPUPagedAttention:
 
     @staticmethod
     def swap_blocks(
-        src_kv_cache: Tuple[torch.Tensor, torch.Tensor],
-        dst_kv_cache: Tuple[torch.Tensor, torch.Tensor],
+        src_kv_cache: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        dst_kv_cache: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         src_to_dsts: torch.Tensor,
     ) -> None:
         src_key_cache = src_kv_cache[0]
@@ -79,11 +81,22 @@ class HPUPagedAttention:
         dst_value_cache = dst_kv_cache[1]
         cache_ops.swap_blocks(src_value_cache, dst_value_cache, src_to_dsts)
 
+        src_key_scales = src_kv_cache[2]
+        dst_key_scales = dst_kv_cache[2]
+        src_value_scales = src_kv_cache[3]
+        dst_value_scales = dst_kv_cache[3]
+        if src_key_scales:
+            cache_ops.swap_blocks(src_key_scales, dst_key_scales, src_to_dsts)
+        if src_value_scales:
+            cache_ops.swap_blocks(src_value_scales, dst_value_scales, src_to_dsts)
+
     @staticmethod
     def copy_blocks(
-        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
         src_to_dsts: torch.Tensor,
     ) -> None:
         key_caches = [kv_cache[0] for kv_cache in kv_caches]
         value_caches = [kv_cache[1] for kv_cache in kv_caches]
-        cache_ops.copy_blocks(key_caches, value_caches, src_to_dsts)
+        key_scales = [kv_cache[2] for kv_cache in kv_caches]
+        value_scales = [kv_cache[3] for kv_cache in kv_caches]
+        cache_ops.copy_blocks(key_caches, value_caches, key_scales, value_scales, src_to_dsts)
