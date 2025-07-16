@@ -182,9 +182,13 @@ cd vllm-fork
 huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scripts/nc_workspace_measure_kvache
 ```
 
-2. Configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX`
+2. Configure environment variables.
 
-After downloading measurement files, you need to configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vllm.sh
+After downloading measurement files, you need to configure some environment variables to make INC quantization become effective.
+
+##### Using start_vllm.sh script
+
+If you are using `start_vllm.sh` script to start vllm, please configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vllm.sh
 
 - QUANT_CONFIG
 
@@ -226,7 +230,20 @@ dump_stats_path (from config): "scripts/nc_workspace_measure_kvache/inc_measure_
 Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvache/inc_measure_output_hooks_maxabs_0_8.npz"
 ```
 
-##### Check if INC quantization enabled successfully
+##### Manually start vllm
+
+If you want to start vllm manually or use your own script, please set below environment variables.
+
+|Env Var Name|Mandatory for INC|Value|Explanation|
+|---|---|---|---|
+|INC_MEASUREMENT_DUMP_PATH_PREFIX|Yes|The root directory where measurement statistics were saved.|See above section for detail|
+|QUANT_CONFIG|Yes|Quantization config file to use, which is under `vllm-fork/scripts/quant_configs` folder|See above section for detail|
+|VLLM_REQUANT_FP8_INC|Yes|1|Enables requantization of FP8 weights with block-wise scaling using INC.|
+|VLLM_ENABLE_RUNTIME_DEQUANT|Yes|1|Enables runtime dequantization of FP8 weights with block-wise scaling.|
+|VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
+|VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
+
+3. Check if INC quantization enabled successfully
 
 If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
 
@@ -364,9 +381,13 @@ cd vllm-fork
 cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measure_kvache
 ```
 
-2. Configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX`
+2. Configure environment variables.
 
-After downloading measurement files, you need to configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in set_head_node.sh and set_worker_node.sh
+After downloading measurement files, you need to configure some environment variables to make INC quantization become effective.
+
+##### Using start_vllm.sh script
+
+If you are using `set_head_node.sh` and `set_worker_node.sh` scripts to start vllm, please configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in them.
 
 - QUANT_CONFIG
 
@@ -407,8 +428,20 @@ Then, we export `INC_MEASUREMENT_DUMP_PATH_PREFIX=/path/to/vllm-fork`, and INC w
 dump_stats_path (from config): "scripts/nc_workspace_measure_kvache/inc_measure_output"
 Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvache/inc_measure_output_hooks_maxabs_0_16.npz"
 ```
+##### Manually start vllm
 
-##### Check if INC quantization enabled successfully
+If you want to start vllm manually or use your own script, please set below environment variables.
+
+|Env Var Name|Mandatory for INC|Value|Explanation|
+|---|---|---|---|
+|INC_MEASUREMENT_DUMP_PATH_PREFIX|Yes|The root directory where measurement statistics were saved.|See above section for detail|
+|QUANT_CONFIG|Yes|Quantization config file to use, which is under `vllm-fork/scripts/quant_configs` folder|See above section for detail|
+|VLLM_REQUANT_FP8_INC|Yes|1|Enables requantization of FP8 weights with block-wise scaling using INC.|
+|VLLM_ENABLE_RUNTIME_DEQUANT|Yes|1|Enables runtime dequantization of FP8 weights with block-wise scaling.|
+|VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
+|VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
+
+3. Check if INC quantization enabled successfully
 
 If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
 
