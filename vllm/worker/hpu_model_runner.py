@@ -352,10 +352,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
-<<<<<<< HEAD
         self.sliding_window_right = 0
-=======
->>>>>>> df82ec650 (Changes after code review)
         if self.use_window_sdpa:
             self.slice_size = int(
                 os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
@@ -363,15 +360,12 @@ class HpuModelAdapter(torch.nn.Module):
             os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
             os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
             os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
-<<<<<<< HEAD
             self.sliding_window_right = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
             assert self.sliding_window_right % self.slice_size == 0, \
                 f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
                 f'not supported due to not a multiplier of '\
                 f'PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
-=======
->>>>>>> df82ec650 (Changes after code review)
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -493,29 +487,9 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
-<<<<<<< HEAD
-<<<<<<< HEAD
         if (seq_len <= window_size) or (not attn_metadata.is_prompt) or (
                 attn_metadata.use_window_sdpa):
             # no need to set sliding window mask, just use built-in sdpa
-=======
-        # FusedSDPA causal+window works only when seq_len is multiple of
-        # SLICE_SIZE.
-        is_slice_kernel = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-                                    "false").strip().lower() in ("1", "true")
-        slice_size = int(os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "0"))
-
-        if (seq_len <= window_size
-                or (is_slice_kernel and self.prefill_use_fusedsdpa
-                    and self.is_causal and seq_len % slice_size == 0)
-                or not attn_metadata.is_prompt):
-            #no need to set sliding window mask, just use causal mask
->>>>>>> c8a826052 (Add envi variable to check validity of window kernel)
-=======
-        if (seq_len <= window_size) or (not attn_metadata.is_prompt) or (
-                attn_metadata.use_window_sdpa):
-            # no need to set sliding window mask, just use built-in sdpa
->>>>>>> df82ec650 (Changes after code review)
             return attn_metadata
 
         prefill_metadata = attn_metadata
@@ -598,11 +572,8 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
-<<<<<<< HEAD
-=======
     def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
                          dtype):
->>>>>>> df82ec650 (Changes after code review)
     def _update_use_window_sdpa(self, attn_metadata, seq_len):
         use_window_sdpa = False
         if self.use_window_sdpa and self.prefill_use_fusedsdpa:
@@ -613,19 +584,9 @@ class HpuModelAdapter(torch.nn.Module):
                 raise AssertionError(
                     f"input token length {seq_len} is not multiple "
                     f"of SLICE_SIZE {self.slice_size}. Please adjust "
-<<<<<<< HEAD
-                    f"VLLM_EXPONENTIAL_BUCKETING: False "
-                    f"VLLM_PROMPT_SEQ_BUCKET_MIN: 1024 "
-                    f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
-
-        attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
-        attn_metadata = attn_metadata._replace(
-            sliding_window_right=self.sliding_window_right)
-=======
                     f"Prompt Buckets")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
->>>>>>> df82ec650 (Changes after code review)
         return attn_metadata
 
     def _update_metadata(self,
@@ -2697,10 +2658,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
-<<<<<<< HEAD
             'sliding_window_right',
-=======
->>>>>>> df82ec650 (Changes after code review)
         ])
         return attention_metadata
 
@@ -3931,10 +3889,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_batch_size': real_batch_size
                 }
 
-<<<<<<< HEAD
-=======
-
->>>>>>> df82ec650 (Changes after code review)
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
                     attn_metadata = self.model._update_use_window_sdpa(
