@@ -72,7 +72,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
     uses_ray: bool = True
 
     def _init_executor(self) -> None:
-        # Store logger reference to prevent it from being destroyed before calling self.shutdown()
+        # Logger reference prevents garbage collection during shutdown()
         self._logger = logger
         self.forward_dag: Optional[ray.dag.CompiledDAG] = None
         if envs.VLLM_USE_V1:
