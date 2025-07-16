@@ -1974,7 +1974,7 @@ class HPUModelRunner:
                                              position_ids_device,
                                              attn_metadata,
                                              logits_indices_device, kv_caches,
-                                             None, True)
+                                             True)
         # TODO: do sampling on logits, warmup sampler and prefill joiner
         htorch.core.mark_step()
         temperature = torch.ones(batch_size, dtype=torch.float32, device='cpu')
