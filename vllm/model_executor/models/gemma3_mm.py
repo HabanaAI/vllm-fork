@@ -726,10 +726,10 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
             else:
-                img_mask1[img_pos1.unsqueeze(1)] += 1
-                img_mask1 = img_mask1.permute(0, 1, 3, 2)
-                img_mask1[img_pos1.unsqueeze(1)] += 1
-                img_mask1 = img_mask1.permute(0, 1, 3, 2)
+                img_mask[img_pos.unsqueeze(1)] += 1
+                img_mask = img_mask.permute(0, 1, 3, 2)
+                img_mask[img_pos.unsqueeze(1)] += 1
+                img_mask = img_mask.permute(0, 1, 3, 2)
 
             global_attn_mask = torch.where(img_mask == 2, 0,
                                             global_attn_mask)
