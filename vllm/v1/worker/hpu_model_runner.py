@@ -402,9 +402,6 @@ class HpuModelAdapter(torch.nn.Module):
         is_warmup = kwargs.get('warmup_mode', False)
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
-        scheduler_output = kwargs.get('scheduler_output', None)
-        if 'scheduler_output' in kwargs:
-            kwargs.pop('scheduler_output')
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
@@ -417,12 +414,13 @@ class HpuModelAdapter(torch.nn.Module):
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config):
             if not is_warmup:
-                self.maybe_setup_kv_connector(scheduler_output)
+                self.maybe_setup_kv_connector(HpuModelAdapter.scheduler_output)
             hidden_states = self.model(*args, **kwargs)
             if not is_warmup:
                 self.maybe_wait_for_kv_save()
                 finished_sending, finished_recving = (
-                    self.get_finished_kv_transfers(scheduler_output))
+                    self.get_finished_kv_transfers(
+                        HpuModelAdapter.scheduler_output))
 
             if self._rotary_prepare_cos_sin is not None:
                 self._reset_rotary_cos_sin()
@@ -491,6 +489,10 @@ class HpuModelAdapter(torch.nn.Module):
             return get_kv_transfer_group().get_finished(
                 scheduler_output.finished_req_ids)
         return None, None
+
+    @staticmethod
+    def set_scheduler_output(scheduler_output: "SchedulerOutput"):
+        HpuModelAdapter.scheduler_output = scheduler_output
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
@@ -1441,7 +1443,6 @@ class HPUModelRunner:
                                attn_metadata,
                                logits_indices,
                                kv_caches,
-                               scheduler_output,
                                warmup_mode=False):
 
         # FORWARD.
@@ -1464,7 +1465,6 @@ class HPUModelRunner:
             positions=position_ids,
             attn_metadata=trimmed_attn_metadata,
             kv_caches=kv_caches,
-            scheduler_output=scheduler_output,
             warmup_mode=warmup_mode)
         # NOTE(kzawora): returning hidden_states is required in prompt logprobs
         # scenarios, as they will do logit processing on their own
@@ -1633,6 +1633,7 @@ class HPUModelRunner:
         num_reqs = num_decodes + num_prefills
         prefill_data, decode_data = self._prepare_inputs(
             scheduler_output, num_prefills, num_decodes)
+        HpuModelAdapter.set_scheduler_output(scheduler_output)
 
         #FIXME(kzawora): Currently there's no handling of logprobs. Fix that
         # later.
@@ -1652,7 +1653,7 @@ class HPUModelRunner:
                     finished_sending, finished_recving = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
-                        self.kv_caches, scheduler_output)
+                        self.kv_caches)
                 htorch.core.mark_step()
                 sampling_metadata = self._prepare_sampling(
                     batch_changed, req_id, pad_to=logits_device.shape[0])
@@ -1672,7 +1673,7 @@ class HPUModelRunner:
                 self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
                 decode_data.attn_metadata, decode_data.logits_indices,
-                self.kv_caches, scheduler_output)
+                self.kv_caches)
             htorch.core.mark_step()
             sampling_metadata = self._prepare_sampling(
                 batch_changed,
