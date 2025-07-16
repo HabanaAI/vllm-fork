@@ -410,20 +410,15 @@ class HpuModelAdapter(torch.nn.Module):
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config):
             if not is_warmup:
-                self.maybe_setup_kv_connector(HpuModelAdapter.scheduler_output)
+                self.maybe_start_load_kv()
             hidden_states = self.model(*args, **kwargs)
             if not is_warmup:
                 self.maybe_wait_for_kv_save()
-                finished_sending, finished_recving = (
-                    self.get_finished_kv_transfers(
-                        HpuModelAdapter.scheduler_output))
 
             if self._rotary_prepare_cos_sin is not None:
                 self._reset_rotary_cos_sin()
-        if not is_warmup:
-            return hidden_states, finished_sending, finished_recving
-        else:
-            return hidden_states, None, None
+
+        return hidden_states
 
     def compute_logits(self, *args, **kwargs):
         return self.model.compute_logits(*args, **kwargs)
@@ -440,31 +435,10 @@ class HpuModelAdapter(torch.nn.Module):
     # def sampler(self):
     #    return self.model.sampler
 
-    def kv_connector_no_forward(
-            self, scheduler_output: "SchedulerOutput") -> ModelRunnerOutput:
-        # KV send/recv even if no work to do.
-        with set_forward_context(None, self.vllm_config):
-            self.maybe_setup_kv_connector(scheduler_output)
-            finished_sending, finished_recving = (
-                self.get_finished_kv_transfers(scheduler_output))
-
-        if not finished_sending and not finished_recving:
-            return EMPTY_MODEL_RUNNER_OUTPUT
-
-        output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
-        output.finished_sending = finished_sending
-        output.finished_recving = finished_recving
-        return output
-
     @staticmethod
-    def maybe_setup_kv_connector(scheduler_output: "SchedulerOutput"):
-        # Update KVConnector with the KVConnector metadata forward().
+    def maybe_start_load_kv():
         if has_kv_transfer_group():
             kv_connector = get_kv_transfer_group()
-            assert isinstance(kv_connector, KVConnectorBase_V1)
-            assert scheduler_output.kv_connector_metadata is not None
-            kv_connector.bind_connector_metadata(
-                scheduler_output.kv_connector_metadata)
 
             # Background KV cache transfers happen here.
             # These transfers are designed to be async and the requests
@@ -476,19 +450,6 @@ class HpuModelAdapter(torch.nn.Module):
     def maybe_wait_for_kv_save() -> None:
         if has_kv_transfer_group():
             get_kv_transfer_group().wait_for_save()
-
-    @staticmethod
-    def get_finished_kv_transfers(
-        scheduler_output: "SchedulerOutput",
-    ) -> tuple[Optional[set[str]], Optional[set[str]]]:
-        if has_kv_transfer_group():
-            return get_kv_transfer_group().get_finished(
-                scheduler_output.finished_req_ids)
-        return None, None
-
-    @staticmethod
-    def set_scheduler_output(scheduler_output: "SchedulerOutput"):
-        HpuModelAdapter.scheduler_output = scheduler_output
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
@@ -1453,12 +1414,11 @@ class HPUModelRunner:
             # no hpu graphs for t.compile?
             use_graphs = False
         trimmed_attn_metadata = trim_attn_metadata(attn_metadata)
-        hidden_states, finished_sending, finished_recving = self.model.forward(
-            input_ids=token_ids,
-            positions=position_ids,
-            attn_metadata=trimmed_attn_metadata,
-            kv_caches=kv_caches,
-            warmup_mode=warmup_mode)
+        hidden_states = self.model.forward(input_ids=token_ids,
+                                           positions=position_ids,
+                                           attn_metadata=trimmed_attn_metadata,
+                                           kv_caches=kv_caches,
+                                           warmup_mode=warmup_mode)
         # NOTE(kzawora): returning hidden_states is required in prompt logprobs
         # scenarios, as they will do logit processing on their own
         non_flattened_hidden_states = hidden_states
@@ -1466,8 +1426,7 @@ class HPUModelRunner:
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states[logits_indices]
         logits = self.model.compute_logits(hidden_states, None)
-        return non_flattened_hidden_states, logits, \
-            finished_sending, finished_recving
+        return non_flattened_hidden_states, logits
 
     def _get_prompt_logprobs_dict(
         self,
@@ -1608,15 +1567,8 @@ class HPUModelRunner:
                 # Return empty ModelRunnerOutput if there's no work to do.
                 return EMPTY_MODEL_RUNNER_OUTPUT
 
-            finished_sending, finished_recving = \
-                HpuModelAdapter.get_finished_kv_transfers(scheduler_output)
-            if not finished_sending and not finished_recving:
-                return EMPTY_MODEL_RUNNER_OUTPUT
+            return self.kv_connector_no_forward(scheduler_output)
 
-            output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
-            output.finished_sending = finished_sending
-            output.finished_recving = finished_recving
-            return output
         # If necessary, swap decodes/prompts to have all decodes on the start
         ensure_decodes_first(self.input_batch)
         # Prepare prompts/decodes info
@@ -1626,7 +1578,6 @@ class HPUModelRunner:
         num_reqs = num_decodes + num_prefills
         prefill_data, decode_data = self._prepare_inputs(
             scheduler_output, num_prefills, num_decodes)
-        HpuModelAdapter.set_scheduler_output(scheduler_output)
 
         #FIXME(kzawora): Currently there's no handling of logprobs. Fix that
         # later.
@@ -1642,12 +1593,14 @@ class HPUModelRunner:
                       logits_requests) in enumerate(
                           zip(*shallow_tuple(prefill_data))):
                 htorch.core.mark_step()
-                prefill_hidden_states_ts, logits_device, \
-                    finished_sending, finished_recving = \
+                self.maybe_setup_kv_connector(scheduler_output)
+                prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches)
                 htorch.core.mark_step()
+                finished_sending, finished_recving = (
+                    self.get_finished_kv_transfers(scheduler_output))
                 sampling_metadata = self._prepare_sampling(
                     batch_changed, req_id, pad_to=logits_device.shape[0])
                 sampler_output = self.sampler(
@@ -1662,12 +1615,15 @@ class HPUModelRunner:
         if num_decodes > 0:
             assert decode_data is not None
             htorch.core.mark_step()
-            _, logits_device, finished_sending, finished_recving = \
+            self.maybe_setup_kv_connector(scheduler_output)
+            _, logits_device = \
                 self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
                 decode_data.attn_metadata, decode_data.logits_indices,
                 self.kv_caches)
             htorch.core.mark_step()
+            finished_sending, finished_recving = (
+                self.get_finished_kv_transfers(scheduler_output))
             sampling_metadata = self._prepare_sampling(
                 batch_changed,
                 pd_info.decode_req_ids,
@@ -1679,6 +1635,7 @@ class HPUModelRunner:
             decode_sampled_requests.extend(
                 self.input_batch.req_ids[:num_decodes])
             htorch.core.mark_step()
+
         # From this point onward, all operations are done on CPU.
         # We already have tokens. Let's copy the data to
         # CPU as is, and then discard padded tokens.
@@ -2390,3 +2347,41 @@ class HPUModelRunner:
         self._PAD_SLOT_ID = num_blocks * self.block_size
 
         htorch.hpu.synchronize()
+
+    @staticmethod
+    def maybe_setup_kv_connector(scheduler_output: "SchedulerOutput"):
+        # Update KVConnector with the KVConnector metadata forward().
+        if has_kv_transfer_group():
+            kv_connector = get_kv_transfer_group()
+            assert isinstance(kv_connector, KVConnectorBase_V1)
+            assert scheduler_output.kv_connector_metadata is not None
+            kv_connector.bind_connector_metadata(
+                scheduler_output.kv_connector_metadata)
+
+    @staticmethod
+    def get_finished_kv_transfers(
+        scheduler_output: "SchedulerOutput",
+    ) -> tuple[Optional[set[str]], Optional[set[str]]]:
+        if has_kv_transfer_group():
+            return get_kv_transfer_group().get_finished(
+                scheduler_output.finished_req_ids)
+        return None, None
+
+    def kv_connector_no_forward(
+            self, scheduler_output: "SchedulerOutput") -> ModelRunnerOutput:
+        # KV send/recv even if no work to do.
+        with set_forward_context(None, self.vllm_config):
+            self.maybe_setup_kv_connector(scheduler_output)
+            if has_kv_transfer_group():
+                kv_connector = get_kv_transfer_group()
+                kv_connector.start_load_kv(get_forward_context())
+            finished_sending, finished_recving = (
+                self.get_finished_kv_transfers(scheduler_output))
+
+        if not finished_sending and not finished_recving:
+            return EMPTY_MODEL_RUNNER_OUTPUT
+
+        output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
+        output.finished_sending = finished_sending
+        output.finished_recving = finished_recving
+        return output
