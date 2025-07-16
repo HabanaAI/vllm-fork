@@ -30,6 +30,8 @@ export VLLM_EP_SIZE=8
 export VLLM_DELAYED_SAMPLING="false"
 export VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0
 
+export VLLM_USE_ASYNC_PD=1
+
 block_size=128
 # DO NOT change ends...
 
