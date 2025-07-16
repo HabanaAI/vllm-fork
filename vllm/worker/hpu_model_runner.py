@@ -1093,9 +1093,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     and not self.lora_config)
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
-        self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
-                                         "false").strip().lower() in ("1",
-                                                                      "true")
 
     def _set_gc_threshold(self) -> None:
         """
@@ -2928,7 +2925,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(batch_size)
                 ]
         self.profiler.start('internal', scenario_name)
-        times = num_iters if (use_graphs and not self.use_window_sdpa) or is_pt_profiler_run else 1
+        times = num_iters if use_graphs or is_pt_profiler_run else 1
         if is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
