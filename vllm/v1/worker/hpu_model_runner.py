@@ -966,6 +966,8 @@ class HPUModelRunner:
 
     def _bucketize_2d_prompt(self, seq_lens, num_blocks):
         bs = len(seq_lens)
+        if bs > self.max_prefill_batch_size:
+            return (None, None, None)
         seq = max(seq_lens)
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
         bs, seq, num_blocks = self.bucketing_manager.find_prompt_bucket(
@@ -983,6 +985,8 @@ class HPUModelRunner:
         bucketing_fn = self._get_prompt_bucketing_fn()
         target_bs, target_seq, target_blocks = bucketing_fn(
             combined_num_tokens, [])
+        if any(x is None for x in (target_bs, target_seq, target_blocks)):
+            return False
         return target_bs <= self.max_prefill_batch_size and\
             target_bs * target_seq <= self.max_num_tokens
 
