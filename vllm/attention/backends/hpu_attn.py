@@ -497,14 +497,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         k_scales = None
         v_scales = None
         if kv_cache is not None and isinstance(kv_cache, tuple):
-            key_cache, value_cache, k_scales, v_scales = HPUPagedAttention.split_kv_cache(
-                kv_cache, self.num_kv_heads, self.head_size)
+            key_cache, value_cache, k_scales, v_scales = \
+                HPUPagedAttention.split_kv_cache(
+                    kv_cache, self.num_kv_heads, self.head_size)
 
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
             key_cache = self.k_cache(key, key_cache, slot_mapping, k_scales)
-            value_cache = self.v_cache(value, value_cache, slot_mapping, v_scales)
+            value_cache = self.v_cache(value, value_cache, slot_mapping,
+                                       v_scales)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -667,14 +669,17 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         cross_slot_mapping = attn_metadata.cross_slot_mapping.flatten(
         ) if attn_metadata.cross_slot_mapping is not None else None
         if kv_cache is not None and isinstance(kv_cache, tuple):
-            key_cache, value_cache, k_scales, v_scales = HPUPagedAttention.split_kv_cache(
-                kv_cache, self.num_kv_heads, self.head_size)
+            key_cache, value_cache, k_scales, v_scales = \
+                HPUPagedAttention.split_kv_cache(
+                    kv_cache, self.num_kv_heads, self.head_size)
 
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, cross_slot_mapping, k_scales)
-            value_cache = self.v_cache(value, value_cache, cross_slot_mapping, v_scales)
+            key_cache = self.k_cache(key, key_cache, cross_slot_mapping,
+                                     k_scales)
+            value_cache = self.v_cache(value, value_cache, cross_slot_mapping,
+                                       v_scales)
 
         if attn_metadata.is_prompt:
             # Prompt run.

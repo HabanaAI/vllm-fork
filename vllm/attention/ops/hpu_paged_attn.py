@@ -69,8 +69,10 @@ class HPUPagedAttention:
 
     @staticmethod
     def swap_blocks(
-        src_kv_cache: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        dst_kv_cache: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        src_kv_cache: Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                            torch.Tensor],
+        dst_kv_cache: Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                            torch.Tensor],
         src_to_dsts: torch.Tensor,
     ) -> None:
         src_key_cache = src_kv_cache[0]
@@ -88,15 +90,18 @@ class HPUPagedAttention:
         if src_key_scales:
             cache_ops.swap_blocks(src_key_scales, dst_key_scales, src_to_dsts)
         if src_value_scales:
-            cache_ops.swap_blocks(src_value_scales, dst_value_scales, src_to_dsts)
+            cache_ops.swap_blocks(src_value_scales, dst_value_scales,
+                                  src_to_dsts)
 
     @staticmethod
     def copy_blocks(
-        kv_caches: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                              torch.Tensor]],
         src_to_dsts: torch.Tensor,
     ) -> None:
         key_caches = [kv_cache[0] for kv_cache in kv_caches]
         value_caches = [kv_cache[1] for kv_cache in kv_caches]
         key_scales = [kv_cache[2] for kv_cache in kv_caches]
         value_scales = [kv_cache[3] for kv_cache in kv_caches]
-        cache_ops.copy_blocks(key_caches, value_caches, key_scales, value_scales, src_to_dsts)
+        cache_ops.copy_blocks(key_caches, value_caches, key_scales,
+                              value_scales, src_to_dsts)
