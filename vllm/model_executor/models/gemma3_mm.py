@@ -749,7 +749,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                                   global_attn_mask,
                                                   float("-inf"))
                     local_attn_masks.append(local_attn_mask)
-                    print("libin debug create local attn")
         kwargs["global_attn_masks"] = global_attn_masks
         kwargs["local_attn_masks"] = local_attn_masks
         return kwargs
