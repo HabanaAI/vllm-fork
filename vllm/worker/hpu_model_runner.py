@@ -515,6 +515,8 @@ class HpuModelAdapter(torch.nn.Module):
 
         prefill_metadata = attn_metadata
         shift = 0
+
+
         #causal + window size
         tensor = torch.full((batch_size, 1, seq_len, seq_len),
                             device=device,
