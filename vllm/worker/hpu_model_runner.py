@@ -349,10 +349,16 @@ class HpuModelAdapter(torch.nn.Module):
             text_config, "interleaved_sliding_window",
             None) if text_config else None
 
-        text_config = vllm_config.model_config.hf_config.get_text_config()
-        self.interleaved_sliding_window = getattr(
-            text_config, "interleaved_sliding_window",
-            None) if text_config else None
+        self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
+                                         "false").strip().lower() in ("1",
+                                                                      "true")
+        if self.use_window_sdpa:
+            self.slice_size = int(
+                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
+
+            os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
+            os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
+            os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -502,14 +508,15 @@ class HpuModelAdapter(torch.nn.Module):
     def _set_attn_bias_for_sliding_window(self, attn_metadata, batch_size,
                                           seq_len, window_size, device, dtype):
 
-        if seq_len <= window_size:
-            #no need to set sliding window mask, just use causal mask
+        if (seq_len <= window_size) or (not attn_metadata.is_prompt) or (
+                attn_metadata.use_window_sdpa):
+            # no need to set sliding window mask, just use built-in sdpa
             return attn_metadata
 
         prefill_metadata = attn_metadata
         shift = 0
 
-        #causal + window size : accuracy good
+        #causal + window size
         tensor = torch.full((batch_size, 1, seq_len, seq_len),
                             device=device,
                             dtype=dtype,
@@ -519,7 +526,6 @@ class HpuModelAdapter(torch.nn.Module):
         attn_bias = torch.log(mask)
 
         attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
-
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
@@ -587,6 +593,23 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
+    def _update_use_window_sdpa(self, attn_metadata, seq_len):
+        use_window_sdpa = False
+        if self.use_window_sdpa and self.prefill_use_fusedsdpa:
+            # TODO: We can add min token_len for the window_sdpa to be used.
+            if self.slice_size != 0 and (seq_len % self.slice_size == 0):
+                use_window_sdpa = True
+            else:
+                raise AssertionError(
+                    f"input token length {seq_len} is not multiple "
+                    f"of SLICE_SIZE {self.slice_size}. Please adjust "
+                    f"VLLM_EXPONENTIAL_BUCKETING: False "
+                    f"VLLM_PROMPT_SEQ_BUCKET_MIN: 1024 "
+                    f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
+
+        attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
+        return attn_metadata
+
     def _update_metadata(self,
                          attn_metadata,
                          batch_size,
@@ -614,6 +637,7 @@ class HpuModelAdapter(torch.nn.Module):
                     attn_metadata = self._set_attn_bias_for_sliding_window(
                         attn_metadata, batch_size, seq_len,
                         self.interleaved_sliding_window, device, dtype)
+
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
@@ -2664,6 +2688,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_usage',
             'window_block_groups',
             'window_attn_bias',
+            'use_window_sdpa',
         ])
         return attention_metadata
 
@@ -3893,10 +3918,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
+
+                #Need to set the window_slide mask at this point to decide
+                if is_prompt:
+                    attn_metadata = self.model._update_use_window_sdpa(
+                        execute_model_kwargs['attn_metadata'], seq_len)
+                    execute_model_kwargs['attn_metadata'] = attn_metadata
+
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
+                            if warmup_mode:
+                                bypass_model_exec = False
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets)
@@ -3906,6 +3940,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs
                             )
+                        if warmup_mode and bypass_model_exec:
+                            return []
 
                     with self.profiler.record_event('internal',
                                                     model_event_name,
@@ -4194,7 +4230,24 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             return
         model_input = self.cached_step_inputs.pop(0)
         model_output = self.cached_step_outputs.pop(0)
-        delayed_tokens = model_output.token_ids.cpu().squeeze(-1).tolist()
+
+        assert model_output.sampling_metadata is not None, \
+            'Sampling metadata is required to patch the output!'
+        seq_groups = model_output.sampling_metadata.seq_groups
+        logprobs_required = any(seq_group.sampling_params.logprobs is not None
+                                for seq_group in seq_groups)
+        prompt_logprobs_required = any(
+            seq_group.sampling_params.prompt_logprobs is not None
+            for seq_group in seq_groups)
+
+        if model_output.is_prompt and prompt_logprobs_required:
+            sample_idx_tensor = torch.tensor(
+                [sdx for sg in seq_groups for sdx in sg.sample_indices])
+
+            sampled_tokens = model_output.token_ids[sample_idx_tensor, :]
+            delayed_tokens = sampled_tokens.cpu().squeeze(-1).tolist()
+        else:
+            delayed_tokens = model_output.token_ids.cpu().squeeze(-1).tolist()
 
         ctx = model_input.async_callback.keywords["ctx"]  # type: ignore
         # If there's no output to patch with, which is usually the case when
@@ -4217,21 +4270,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_data._cached_all_token_ids[-1] = real_out
         delayed_logprobs = None
         delayed_prompt_logprobs = None
-        assert model_output.sampling_metadata is not None, \
-            'Sampling metadata is required to patch the output!'
-        logprobs_required = any(
-            seq_group.sampling_params.logprobs is not None
-            for seq_group in model_output.sampling_metadata.seq_groups)
-        prompt_logprobs_required = any(
-            seq_group.sampling_params.prompt_logprobs is not None
-            for seq_group in model_output.sampling_metadata.seq_groups)
         if logprobs_required or prompt_logprobs_required:
             # We are one step ahead, so prompt is already marked as a computed.
             # We need to reset the computed tokens count to 0,
             # so that we can recompute the prompt logprobs.
             computed_tokens = []
             if model_output.is_prompt:
-                for seq_group in model_output.sampling_metadata.seq_groups:
+                for seq_group in seq_groups:
                     seq_ids = seq_group.seq_ids
                     assert len(seq_ids) == 1  # prompt has only 1 seq id.
                     seq_data = seq_group.seq_data[seq_ids[0]]
@@ -4245,7 +4290,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             # Reset the computed tokens count to the original value.
             if model_output.is_prompt:
-                for seq_group in model_output.sampling_metadata.seq_groups:
+                for seq_group in seq_groups:
                     seq_ids = seq_group.seq_ids
                     seq_data = seq_group.seq_data[seq_ids[0]]
                     seq_data.update_num_computed_tokens(computed_tokens.pop(0))
