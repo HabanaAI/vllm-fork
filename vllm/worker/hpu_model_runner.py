@@ -55,8 +55,10 @@ from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
                              MultiModalRegistry)
 from vllm.sampling_params import SamplingParams
+
+
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
-                           Logprob, SequenceData, SequenceGroupMetadata,
+                           Logprob, SequenceData, SequenceGroupMetadata,ExecuteModelRequest,
                            SequenceOutput)
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
                         make_tensor_with_pad)
@@ -69,6 +71,7 @@ from vllm.worker.model_runner_base import (
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
+
 
 logger = init_logger(__name__)
 
@@ -1546,6 +1549,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.device, non_blocking=True)
         input_positions = input_positions.to(  # type: ignore
             self.device, non_blocking=True)
+        
         block_list = block_list.to(  # type: ignore
             self.device, non_blocking=True)
         block_groups = block_groups.to(  # type: ignore
@@ -1603,7 +1607,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
         finished_requests_ids: Optional[List[str]] = None,
         align_worker=False,
+        accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req=None,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
+             
+        if execute_model_req is not None and execute_model_req.expand is not None:
+            expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand()
+            seq_group_metadata_list = expanded_request.seq_group_metadata_list
+            finished_requests_ids=expanded_request.finished_requests_ids
+            execute_model_req.hack_indices_of_seq_with_bonus_tokens=indices_of_seq_with_bonus_tokens
+            execute_model_req.expand_req=expanded_request
+      
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -1618,6 +1632,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = None
         batch_size_padded = None
 
+        
+        
         self.event_start = self.profiler.get_timestamp_us()
         is_prompt = seq_group_metadata_list[0].is_prompt
         base_event_name = 'prompt' if is_prompt else 'decode'
@@ -1629,6 +1645,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         prefill_reqs = []
         decode_reqs = []
+        
+        if accepted_token_id is not None:
+            valid_tokens = accepted_token_id[accepted_token_id != -1]
+            
+            if accepted_token_id.numel()-valid_tokens.numel()==1:
+                pass
+                
         for seq_group_meta in seq_group_metadata_list:
             if seq_group_meta.is_prompt:
                 prefill_reqs.append(seq_group_meta)
@@ -1648,7 +1671,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_kwargs,
             slot_mapping,
             lora_ids,
-        ) = self._prepare_prompt(prefill_reqs, align_worker=align_worker)
+        ) = self._prepare_prompt(prefill_reqs, align_worker=align_worker)      
+          
         (
             decode_input_tokens,
             decode_input_positions,
@@ -1659,7 +1683,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs, align_worker=align_worker)
-
+        
+        
         if not self.is_pooler:
             generators = self.get_generators(finished_requests_ids)
             sampling_metadata = SamplingMetadata.prepare(
@@ -1772,6 +1797,27 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata
 
+        rank = torch.distributed.get_rank()
+        
+   
+
+        #     print(f"{input_tokens=}")
+        #     print(f"{query_lens=}")
+        #     print(f"{input_positions=}")
+        #     print(f"{lora_requests=}")
+        #     print(f"{sampling_metadata=}")
+        #     print(f"{lora_ids=}")
+        #     print(f"{lora_mapping=}")
+        #     print(f"{real_batch_size=}")
+        #     print(f"{batch_size_padded=}")
+        #     print(f"{seq_lens=}")
+        #     print(f"{attn_metadata.num_decode_tokens=}")
+        #     print(f"{attn_metadata.slot_mapping=}")
+        #     print(f"{attn_metadata.input_positions=}")
+        #     print(f"{attn_metadata.block_usage.shape=}")
+        #     print(f"{attn_metadata.block_groups.shape=}")
+            
+     
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
@@ -2509,7 +2555,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
+        accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req:Optional[ExecuteModelRequest]=None
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2523,7 +2571,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return self.prepare_model_input_align_worker(seq_group_metadata_list,
                                                      virtual_engine,
                                                      finished_requests_ids,
-                                                     False)
+                                                     False,
+                                                     accepted_token_id,
+                                                    execute_model_req,)
 
     @torch.inference_mode()
     def prepare_model_input_align_worker(
@@ -2532,6 +2582,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         align_worker: bool = False,
+        accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req:Optional[ExecuteModelRequest]=None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2547,8 +2599,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if self.profiler.enabled:
                 self.profiler_counter_helper.capture_seq_group_metadata_stats(
                     seq_group_metadata_list=seq_group_metadata_list)
+
             model_input, sampling_metadata = self.prepare_input_tensors(
-                seq_group_metadata_list, finished_requests_ids, align_worker)
+                seq_group_metadata_list, finished_requests_ids, align_worker, accepted_token_id,execute_model_req)
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
@@ -2655,12 +2708,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         num_steps: int = 1,
         profile_run_mode=False,
         seqs=None,
+        accepted_token_id: Optional[torch.Tensor] = None,
+        execute_model_req=None,
         is_dummy_run=False,
         **kwargs,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         warmup_mode = kwargs.get('warmup_mode', False)
         previous_hidden_states = kwargs.get('previous_hidden_states')
-
         self.has_patched_prev_output = False
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
@@ -2695,6 +2749,21 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     0, target_indices, self.cached_step_outputs[i])
                 htorch.core.mark_step()
 
+
+        '''
+        # if False: # !self.hpu_opt
+        if self.is_driver_worker:
+            model_kwargs_broadcast_data = {
+                "input_tokens": model_input.input_tokens
+            }
+            broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+            input_tokens = model_input.input_tokens
+
+        else:
+            model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
+            input_tokens = model_kwargs_broadcast_data["input_tokens"]
+
+        '''       
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step
