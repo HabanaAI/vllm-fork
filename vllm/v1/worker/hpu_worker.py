@@ -251,7 +251,7 @@ class HPUWorker:
             if self.step == self.profile_steps[1]:
                 self.step_profiler.stop()
                 self.step_profiler = None
-                assert False, 'Step profiling finished!'
+                raise RuntimeError('Step profiling finished!')
         self.step += 1
         return output if self.rank == 0 else None
 
