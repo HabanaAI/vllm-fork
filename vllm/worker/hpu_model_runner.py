@@ -522,8 +522,6 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
-    def _update_metadata(self, attn_metadata, batch_size, seq_len, device,
-                         dtype):
     def _update_use_window_sdpa(self, attn_metadata, seq_len):
         use_window_sdpa = False
         if self.use_window_sdpa and self.prefill_use_fusedsdpa:

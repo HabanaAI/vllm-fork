@@ -12,4 +12,3 @@ vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@ab11
 # Dependencies for HPU vllm docker image
 datasets
 pandas
->>>>>>> 35ed9f3e6 (Update hpu extension version to dev commit)

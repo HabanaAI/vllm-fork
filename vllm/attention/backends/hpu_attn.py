@@ -539,8 +539,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
 
-<<<<<<< HEAD
-=======
             common_args = self.common_attention_args(block_list, key_cache,
                                                      value_cache,
                                                      attn_metadata.block_size)
@@ -562,7 +560,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         value = value.repeat_interleave(repeat_kv, dim=1)
                         kv_shape = query_shape
 
->>>>>>> 9df8d17b3 (Added support for FusedSDPA with window_size)
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
@@ -572,14 +569,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 attn_bias=attn_bias,
                 position_bias=position_bias,
                 valid_seq_lengths=attn_metadata.seq_lens_tensor,
-<<<<<<< HEAD
-                **self.common_attention_args(block_list, key_cache,
-                                             value_cache,
-                                             attn_metadata.block_size))
-=======
                 **common_args)
 
->>>>>>> 9df8d17b3 (Added support for FusedSDPA with window_size)
             output = out.reshape(batch_size, seq_len, hidden_size)
         else:
             # Decoding run.
