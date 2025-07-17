@@ -416,7 +416,7 @@ class HpuModelAdapter(torch.nn.Module):
             delattr(self._rotary_embed_module, "cos")
         if hasattr(self._rotary_embed_module, "sin"):
             delattr(self._rotary_embed_module, "sin")
-
+    '''
     # copying from PR 1163
     # needs cleanup/unified approach later
     def compute_input_embeddings_for_gemma(self, **kwargs):
@@ -443,6 +443,23 @@ class HpuModelAdapter(torch.nn.Module):
 
         kwargs.update({'inputs_embeds': inputs_embeds})
         kwargs.pop('pixel_values', None)
+        return kwargs
+        '''
+        
+    def compute_input_embeddings_for_gemma(self, **kwargs):
+
+        if 'inputs_embeds' in kwargs:
+            print('do nothing')
+            return kwargs
+
+        input_ids = kwargs['input_ids']
+
+        vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
+        inputs_embeds = self.model.get_input_embeddings(
+            input_ids, vision_embeddings)
+
+        kwargs.update({'inputs_embeds': inputs_embeds})
+        #kwargs.pop('pixel_values', None)
         return kwargs
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
@@ -526,6 +543,7 @@ class HpuModelAdapter(torch.nn.Module):
         attn_bias = torch.log(mask)
 
         attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
+        print("libin debug create mask for sliding window")
         return attn_metadata
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
@@ -622,7 +640,7 @@ class HpuModelAdapter(torch.nn.Module):
         if attn_metadata.is_prompt:
             attn_metadata = self._set_attn_bias(attn_metadata, batch_size,
                                                 seq_len, device, dtype)
-
+            '''
             #For Gemma3, we need to override attn_mask with these sliding_window
             #mask which are updated during prepare_attn_mask()
             if global_attn_masks is not None:
@@ -637,6 +655,7 @@ class HpuModelAdapter(torch.nn.Module):
                     attn_metadata = self._set_attn_bias_for_sliding_window(
                         attn_metadata, batch_size, seq_len,
                         self.interleaved_sliding_window, device, dtype)
+            '''
 
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
@@ -735,7 +754,7 @@ class HpuModelAdapter(torch.nn.Module):
         if self._rotary_prepare_cos_sin is not None and not self.model_is_mrope:
             self._rotary_prepare_cos_sin(
                 kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
-        if self.model_is_mrope or self.is_mm_optimized:
+        if self.model_is_mrope: # or self.is_mm_optimized:
             # inputs_embeds was computed on execute_model
             # now we always want to use the inputs_embeds
             # even if the prompt is text only
@@ -3925,6 +3944,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         execute_model_kwargs['attn_metadata'], seq_len)
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
+
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
@@ -4013,6 +4033,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     continue
 
+                mem_summary1 = htorch.hpu.memory_summary()
+                print('libin memory_summary1:')
+                print(mem_summary1)
                 if use_delayed_sampling:
                     fake_output = self._delayed_sampler_outputs(model_input)
                 elif model_input.async_callback is not None:

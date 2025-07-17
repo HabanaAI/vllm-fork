@@ -636,7 +636,16 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 **kwargs: object) -> IntermediateTensors:
         if intermediate_tensors is not None:
             inputs_embeds = None
-
+        elif is_hpu:
+            if inputs_embeds is not None and 'pixel_values' in kwargs:
+                kwargs = self.prepare_attn_masks(
+                    input_ids,
+                    positions,
+                    mask_dtype=self.dtype,
+                    **kwargs,
+                )
+                kwargs.pop('pixel_values', None)
+            input_ids = None
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
@@ -747,8 +756,14 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                                   global_attn_mask,
                                                   float("-inf"))
                     local_attn_masks.append(local_attn_mask)
-        kwargs["global_attn_masks"] = global_attn_masks
-        kwargs["local_attn_masks"] = local_attn_masks
+        if is_hpu:
+            kwargs['attn_metadata'] = kwargs['attn_metadata']._replace(attn_bias=global_attn_masks[0])
+            if not kwargs['attn_metadata'].use_window_sdpa:
+                kwargs['attn_metadata'] = kwargs['attn_metadata']._replace(window_attn_bias=local_attn_masks[0])
+        else:
+            kwargs["global_attn_masks"] = global_attn_masks
+            kwargs["local_attn_masks"] = local_attn_masks
+
         return kwargs
 
     def compute_logits(
