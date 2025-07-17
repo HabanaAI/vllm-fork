@@ -1310,7 +1310,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.long,
                                            device='cpu')
-
+        prompt_total_len_tensor = torch.sum(seq_lens_tensor)
         placeholder_index_maps = {
             modality: placeholder_map.index_map()
             for modality, placeholder_map in
@@ -1326,6 +1326,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_tokens_tensor = self.move_to_device(input_tokens_tensor)
         input_positions = self.move_to_device(input_positions)
         seq_lens_tensor = self.move_to_device(seq_lens_tensor)
+        prompt_total_len_tensor = self.move_to_device(
+            prompt_total_len_tensor)
         slot_mapping = self.move_to_device(slot_mapping)
         context_lens_tensor = self.move_to_device(context_lens_tensor)
 
@@ -1340,6 +1342,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             attn_bias=attn_bias,
             seq_lens=seq_lens,
             seq_lens_tensor=self.move_to_device(seq_lens_tensor),
+            prompt_total_len_tensor=prompt_total_len_tensor,
             context_lens_tensor=context_lens_tensor,
             num_prefills=real_num_seqs,
             num_prefill_tokens=num_prefill_tokens,
@@ -1940,6 +1943,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'block_indices',
             'block_offsets',
             'block_groups',
+            'prompt_total_len_tensor'
         ])
         return attention_metadata
 

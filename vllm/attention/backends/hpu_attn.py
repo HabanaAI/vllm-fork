@@ -172,6 +172,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     cross_block_groups: Optional[torch.Tensor] = None
     cross_block_usage: Optional[torch.Tensor] = None
     cross_attn_bias: Optional[torch.Tensor] = None
+    prompt_total_len_tensor: Optional[torch.Tensor] = None
 
 
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
@@ -328,7 +329,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
             block_list = attn_metadata.block_list if attn_metadata \
                 and attn_metadata.block_list is not None else None
-
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
@@ -336,7 +336,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 value=value.view(kv_shape),
                 is_causal=True,
                 attn_bias=attn_bias,
-                valid_seq_lengths=attn_metadata.seq_lens_tensor,
+                valid_seq_lengths=attn_metadata.prompt_total_len_tensor,
                 **self.common_attention_args(block_list, key_cache,
                                              value_cache))
             output = out.reshape(batch_size, seq_len, hidden_size)
