@@ -12,6 +12,7 @@ import warnings
 from functools import cache
 from typing import Any, Optional, Union
 
+import benchmark_utils
 import torch
 import uvloop
 from PIL import Image
@@ -712,6 +713,15 @@ def validate_args(args):
         raise ValueError("n must be 1 for MII backend.")
     if args.backend == "mii" and args.tokenizer != args.model:
         raise ValueError("Tokenizer must be the same as the model for MII backend.")
+
+    if args.limit_mm_per_prompt:
+        key = list(args.limit_mm_per_prompt.keys())[0]
+        value = args.limit_mm_per_prompt[key]
+        if key != 'image' or value < 1:
+            raise ValueError(
+                "No correct KEY=VALUE found after limit-mm-per-prompt.")
+        else:
+            benchmark_utils.image_per_prompt = int(value)
 
     # --data-parallel is not supported currently.
     # https://github.com/vllm-project/vllm/issues/16222
