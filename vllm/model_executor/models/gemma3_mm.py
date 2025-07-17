@@ -674,7 +674,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         kwargs["has_images"] = True
         seq_lens = []
         if is_hpu:
-            IMG_TOKENS = self.config.mm_tokens_per_image
             seq_len = input_ids.shape[1]
             bs = input_ids.shape[0]
             kwargs["seq_lens"] = [seq_len] * bs
