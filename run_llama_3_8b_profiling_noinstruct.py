@@ -2,6 +2,7 @@
 import torch
 import habana_frameworks.torch.core as htcore
   
+import os
 import time
 import random
 import argparse
@@ -77,7 +78,15 @@ def main():
     # Create an LLM.
     llm = LLM(model=model, enforce_eager=enforce_eager, swap_space=0, dtype=torch.bfloat16, tensor_parallel_size=world_size, block_size=block_size, max_num_seqs=batch_size, gpu_memory_utilization=gpu_mem_utilization, max_seq_len_to_capture=max_seq_len_to_capture, max_model_len=max_seq_len_to_capture, num_scheduler_steps=1)
     chat_template = load_chat_template(provided_chat_template)
-    tokenizer = llm.llm_engine.get_tokenizer()
+#
+
+    use_v1 = os.getenv("VLLM_USE_V1", "0") == "1"
+    print("USE_V1: ",use_v1)
+    if use_v1:
+        tokenizer = llm.llm_engine.tokenizer.tokenizer
+    else:
+        tokenizer = llm.llm_engine.get_tokenizer()
+
     conversations = [get_conversation() for _ in range(batch_size)]
 #    prompts = [tokenizer.apply_chat_template(
 #                conversation=conversation,
@@ -97,9 +106,11 @@ def main():
 
     # Generate texts from the prompts. The output is a list of RequestOutput objects
     # that contain the prompt, generated text, and other information.
-    outputs = llm.generate(prompts, sampling_params)
+#    outputs = llm.generate(prompts, sampling_params)
+#    outputs = llm.generate(prompts, sampling_params)
+    #import pdb; pdb.set_trace()
     outputs = llm.generate(prompts, sampling_params, profiling=True)
-    outputs = llm.generate(prompts, sampling_params) 
+ #   outputs = llm.generate(prompts, sampling_params) 
     start = time.time()
     profile_ctx = contextlib.nullcontext()
     if profiling:
