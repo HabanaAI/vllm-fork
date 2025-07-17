@@ -92,6 +92,11 @@ else
     export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv.json"
     KV_CACHE_DTYPE="auto"
 fi
+
+# For 0528
+export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa.json"
+export INC_FORCE_SCALE_FP32=1
+
 ####### INC WOQ ReQuant End   #######
 
 # !!!!!!!!!!!!!!!!!!!! set bucketing !!!!!!!!!!!!!
