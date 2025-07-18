@@ -582,7 +582,9 @@ class HpuModelAdapter(torch.nn.Module):
                 raise AssertionError(
                     f"input token length {seq_len} is not multiple "
                     f"of SLICE_SIZE {self.slice_size}. Please adjust "
-                    f"Prompt Buckets")
+                    f"VLLM_EXPONENTIAL_BUCKETING: False "
+                    f"VLLM_PROMPT_SEQ_BUCKET_MIN: 1024 "
+                    f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
         return attn_metadata
