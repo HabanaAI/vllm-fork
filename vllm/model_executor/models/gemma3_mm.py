@@ -637,13 +637,16 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         if intermediate_tensors is not None:
             inputs_embeds = None
         elif is_hpu:
+            #import pdb;pdb.set_trace()
             if inputs_embeds is not None and 'pixel_values' in kwargs:
+                print("libin debug calling model forward prepare_attn_masks input_ids {input_ids.shape}")
                 kwargs = self.prepare_attn_masks(
                     input_ids,
                     positions,
                     mask_dtype=self.dtype,
                     **kwargs,
                 )
+
                 kwargs.pop('pixel_values', None)
             input_ids = None
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
@@ -680,6 +683,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         mask_dtype: torch.dtype,
         **kwargs,
     ):
+
         kwargs["has_images"] = True
         seq_lens = []
         if is_hpu:
@@ -738,7 +742,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask = img_mask.permute(0, 1, 3, 2)
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0, 1, 3, 2)
-
+            
             global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
             global_attn_masks.append(global_attn_mask)
 

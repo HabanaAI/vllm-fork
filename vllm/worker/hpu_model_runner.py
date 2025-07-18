@@ -446,21 +446,6 @@ class HpuModelAdapter(torch.nn.Module):
         return kwargs
         '''
         
-    def compute_input_embeddings_for_gemma(self, **kwargs):
-
-        if 'inputs_embeds' in kwargs:
-            print('do nothing')
-            return kwargs
-
-        input_ids = kwargs['input_ids']
-
-        vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
-        inputs_embeds = self.model.get_input_embeddings(
-            input_ids, vision_embeddings)
-
-        kwargs.update({'inputs_embeds': inputs_embeds})
-        #kwargs.pop('pixel_values', None)
-        return kwargs
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -666,7 +651,7 @@ class HpuModelAdapter(torch.nn.Module):
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, True)
         return attn_metadata
-
+    '''
     def compute_input_embeddings_for_mm_optimized(self, **kwargs):
         input_ids = kwargs['input_ids']
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
@@ -687,6 +672,23 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs.update({'inputs_embeds': inputs_embeds})
         # done compute the visual tokens
         kwargs.pop('pixel_values', None)
+        return kwargs
+    '''
+    
+    def compute_input_embeddings_for_mm_optimized(self, **kwargs):
+
+        if 'inputs_embeds' in kwargs:
+            print('do nothing')
+            return kwargs
+
+        input_ids = kwargs['input_ids']
+
+        vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
+        inputs_embeds = self.model.get_input_embeddings(
+            input_ids, vision_embeddings)
+
+        kwargs.update({'inputs_embeds': inputs_embeds})
+        #kwargs.pop('pixel_values', None)
         return kwargs
 
     def compute_input_embeddings_for_mrope_mm_optimized(self, **kwargs):
@@ -763,6 +765,9 @@ class HpuModelAdapter(torch.nn.Module):
                 'input_ids': None,
             })
         attn_meta = kwargs.pop('attn_metadata')
+        if self.is_mm_optimized:
+            kwargs['attn_metadata'] = attn_meta
+
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta,
@@ -1435,11 +1440,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return self.model
 
     def _use_graphs(self, img_args=None):
-        if not img_args:
-            return not self.enforce_eager
+        return True
+        #if not img_args:
+        #    return not self.enforce_eager
         #TODO: We might need to check both language bucket and multimodal bucket
         # and return True only it's avialble, or return separately.
-        return (img_args) in self.graphed_multimodal_buckets
+        #return (img_args) in self.graphed_multimodal_buckets
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -3966,6 +3972,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
+                        print(f"libin debug hpu runner model forward input_ids {execute_model_kwargs['input_ids'].shape}")
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
@@ -4033,9 +4040,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     continue
 
-                mem_summary1 = htorch.hpu.memory_summary()
-                print('libin memory_summary1:')
-                print(mem_summary1)
+                #mem_summary1 = htorch.hpu.memory_summary()
+                #print('libin memory_summary1:')
+                #print(mem_summary1)
                 if use_delayed_sampling:
                     fake_output = self._delayed_sampler_outputs(model_input)
                 elif model_input.async_callback is not None:
