@@ -143,6 +143,12 @@ class Singleton(type):
         return cls._instances[cls]
 
 
+def is_mm_optimized(model):
+    return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
+        if hasattr(model, 'model') else \
+        'Gemma3ForConditionalGeneration' in str(type(model))
+
+
 def pad_flat_tensor(tensor, desired_size):
     assert tensor.dim() == 1, 'Only flat tensors are supported'
     padding_needed = desired_size - tensor.size(0)
@@ -482,7 +488,7 @@ class HpuModelAdapter(torch.nn.Module):
                             self.block_size,
                             device=device,
                             dtype=torch.int32).unsqueeze(0)
-        mask = mask >= metadata.block_usage.unsqueeze(-1)
+        mask = mask >= block_usage.unsqueeze(-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
 
@@ -569,7 +575,7 @@ class HpuModelAdapter(torch.nn.Module):
 
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
-                                                    device, dtype)
+                                                    device, dtype, False)
         return attn_metadata
 
     def compute_input_embeddings_for_mrope(self, **kwargs):
