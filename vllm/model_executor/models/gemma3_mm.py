@@ -43,8 +43,11 @@ from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
+<<<<<<< HEAD
 
 is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
+=======
+>>>>>>> 45d07d10c (added missing definitions)
 
 
 class Gemma3ImagePixelInputs(TypedDict):
