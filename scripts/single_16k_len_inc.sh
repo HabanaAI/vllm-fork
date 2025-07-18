@@ -33,7 +33,7 @@ export HABANA_VISIBLE_MODULES="0,1,2,3,4,5,6,7"
 export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
 
 export VLLM_MOE_N_SLICE=8
-export VLLM_EP_SIZE=8
+export VLLM_EP_SIZE=16
 
 block_size=128
 # DO NOT change ends...
@@ -61,12 +61,12 @@ unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET
 unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
 
 export VLLM_SKIP_WARMUP=True
-# export PT_HPU_RECIPE_CACHE_CONFIG=/data/16k_cache,false,16384
+export PT_HPU_RECIPE_CACHE_CONFIG=/data/16k_cache,true,16384
 #set_bucketing
 
 ####### INC WOQ ReQuant Start #######
 model_path=/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/
-# model_path=/mnt/disk5/Kimi-K2-Instruct-G2/
+model_path=/mnt/disk5/Kimi-K2-Instruct-G2/
 unset PT_HPU_RECIPE_CACHE_CONFIG
 export VLLM_MOE_N_SLICE=1
 export VLLM_MLA_DISABLE_REQUANTIZATION=1
@@ -136,7 +136,7 @@ python3 -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8688 \
 --model $model_path \
 --device hpu \
 --dtype bfloat16 \
---tensor-parallel-size 8 \
+--tensor-parallel-size 16 \
 --trust-remote-code  \
 --max-model-len $max_model_len \
 --max-num-seqs $max_num_seqs \

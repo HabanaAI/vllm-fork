@@ -634,7 +634,7 @@ class DeepseekV2Model(nn.Module):
                 prefix=f"{prefix}.embed_tokens")
         else:
             self.embed_tokens = PPMissingLayer()
-        # config.num_hidden_layers = 25
+        # config.num_hidden_layers = 4
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
             lambda prefix: DeepseekV2DecoderLayer(

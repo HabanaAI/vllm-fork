@@ -3,8 +3,8 @@ DEFAULT_MODEL_PATH="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207"
 # DEFAULT_MODEL_PATH=/mnt/disk9/hf_models/Kimi-K2-Instruct-G2/
 # DEFAULT_MODEL_PATH=/mnt/disk8/yiliu7/moonshotai/Kimi-K2-Instruct
 DEFAULT_MODEL_PATH=/mnt/disk5/Kimi-K2-Instruct-G2/
- 
-FP8_MODEL_PATH="${1:-$DEFAULT_MODEL_PATH}"
+
+FP8_MODEL_PATH=$DEFAULT_MODEL_PATH
 
 QUANT_CONFIG_FILE="/mnt/disk3/yiliu4/vllm-fork/scripts/quant_configs/inc_measure_with_fp8kv_config.json"
 timestamp=$(date +%Y%m%d_%H%M%S)
@@ -35,6 +35,11 @@ NUM_PROMPTS=512
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        # model
+        --model)
+            FP8_MODEL_PATH=$2
+            shift 2
+            ;;
         --wd)
             WORLD_SIZE=$2
             shift 2
@@ -53,7 +58,8 @@ done
 export RAY_DEDUP_LOGS=0
 
 export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
-
+VLLM_REQUANT_FP8_INC=1 \
+QUANT_CONFIG=${QUANT_CONFIG_FILE} \
 VLLM_LOGGING_LEVEL=DEBUG \
 PT_HPU_LAZY_MODE=1 \
 VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0 \
@@ -65,9 +71,7 @@ VLLM_PROMPT_SEQ_BUCKET_STEP=512 \
 VLLM_PROMPT_SEQ_BUCKET_MAX=1024 \
 VLLM_DECODE_BS_BUCKET_MIN=1 \
 VLLM_DECODE_BS_BUCKET_MAX=1 \
-VLLM_REQUANT_FP8_INC=1 \
 VLLM_MOE_N_SLICE=1 \
-QUANT_CONFIG=${QUANT_CONFIG_FILE} \
     python scripts/run_example_tp.py \
     --model ${FP8_MODEL_PATH} \
     --tokenizer ${FP8_MODEL_PATH} \
