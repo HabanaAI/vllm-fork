@@ -30,6 +30,7 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         replace_token_matches)
 # yapf: enable
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
@@ -39,6 +40,7 @@ from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
                     maybe_prefix, merge_multimodal_embeddings)
 
 logger = init_logger(__name__)
+is_hpu = current_platform.is_hpu()
 
 
 class Gemma3ImagePixelInputs(TypedDict):
