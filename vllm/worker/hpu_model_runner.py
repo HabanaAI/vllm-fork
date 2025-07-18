@@ -86,7 +86,8 @@ VLLM_MERGED_PREFILL = os.environ.get('VLLM_MERGED_PREFILL',
                                      'false').lower() == 'true'
 VLLM_BUCKETING_SCHEME = os.environ.get('VLLM_BUCKETING_SCHEME', 'legacy')
 VLLM_STRICT_BUCKETS = os.environ.get('VLLM_STRICT_BUCKETS', 'false') == 'true'
-VLLM_STEP0_FIRST_TOKEN = bool(int(os.environ.get('VLLM_STEP0_FIRST_TOKEN', '0')))
+VLLM_STEP0_FIRST_TOKEN = bool(
+    int(os.environ.get('VLLM_STEP0_FIRST_TOKEN', '0')))
 DUMMY_TOKEN_ID = -1
 
 
@@ -169,6 +170,7 @@ def make_cpu_tensor(data, max_len, pad, dtype, flat) -> torch.Tensor:
                                 dtype=dtype,
                                 device='cpu')
 
+
 def make_hpu_tensor(data, max_len, pad, dtype, flat, device) -> torch.Tensor:
     if flat:
         data = [flatten(data)]
@@ -177,6 +179,7 @@ def make_hpu_tensor(data, max_len, pad, dtype, flat, device) -> torch.Tensor:
                                 pad=pad,
                                 dtype=dtype,
                                 device=device)
+
 
 def get_target_layer_suffix_list(model_type) -> list[str]:
     # This sets the suffix for the hidden layer name, which is controlled by
@@ -250,6 +253,7 @@ def get_path_to_rope(model: torch.nn.Module):
     # Return the result if found, otherwise None
     return path_to_rope
 
+
 # File bucketing scheme minimal
 def read_buckets(filename, max_bs, max_blocks):
     buckets = {}
@@ -260,8 +264,11 @@ def read_buckets(filename, max_bs, max_blocks):
             blocks = set(min(int(b), max_blocks) for b in blocks.split())
             buckets.setdefault(bs, set())
             buckets[bs].update(blocks)
-    buckets_nested = [(bs, list(sorted(buckets[bs]))) for bs in sorted(buckets.keys())]
-    return [(bs, bucket) for bs, bucket_list in buckets_nested for bucket in bucket_list]
+    buckets_nested = [(bs, list(sorted(buckets[bs])))
+                      for bs in sorted(buckets.keys())]
+    return [(bs, bucket) for bs, bucket_list in buckets_nested
+            for bucket in bucket_list]
+
 
 class HpuModelAdapter:
 
@@ -1310,7 +1317,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.long,
                                            device='cpu')
-
+        prompt_total_len_tensor = torch.sum(seq_lens_tensor)
         placeholder_index_maps = {
             modality: placeholder_map.index_map()
             for modality, placeholder_map in
@@ -1326,6 +1333,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_tokens_tensor = self.move_to_device(input_tokens_tensor)
         input_positions = self.move_to_device(input_positions)
         seq_lens_tensor = self.move_to_device(seq_lens_tensor)
+        prompt_total_len_tensor = self.move_to_device(prompt_total_len_tensor)
         slot_mapping = self.move_to_device(slot_mapping)
         context_lens_tensor = self.move_to_device(context_lens_tensor)
 
@@ -1340,6 +1348,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             attn_bias=attn_bias,
             seq_lens=seq_lens,
             seq_lens_tensor=self.move_to_device(seq_lens_tensor),
+            prompt_total_len_tensor=prompt_total_len_tensor,
             context_lens_tensor=context_lens_tensor,
             num_prefills=real_num_seqs,
             num_prefill_tokens=num_prefill_tokens,
@@ -1929,17 +1938,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'attn_bias',
-            'seq_lens_tensor',
-            'context_lens_tensor',
-            'block_list',
-            'block_mapping',
-            'block_usage',
-            'slot_mapping',
-            'is_prompt',
-            'block_indices',
-            'block_offsets',
-            'block_groups',
+            'attn_bias', 'seq_lens_tensor', 'context_lens_tensor',
+            'block_list', 'block_mapping', 'block_usage', 'slot_mapping',
+            'is_prompt', 'block_indices', 'block_offsets', 'block_groups',
+            'prompt_total_len_tensor'
         ])
         return attention_metadata
 
@@ -2219,8 +2221,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # File bucketing scheme
             if VLLM_BUCKETING_SCHEME.startswith('file:'):
                 _, filename = VLLM_BUCKETING_SCHEME.split(':')
-                self.bucketing_ctx.global_state.decode_buckets = read_buckets(filename, self.max_num_seqs, max_blocks)
-                logger.info(f"Overriding bucketing scheme with file-bucketing {self.bucketing_ctx.global_state.decode_buckets}")
+                self.bucketing_ctx.global_state.decode_buckets = read_buckets(
+                    filename, self.max_num_seqs, max_blocks)
+                logger.info(
+                    f"Overriding bucketing scheme with file-bucketing {self.bucketing_ctx.global_state.decode_buckets}"
+                )
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
             phase, bs, seq_len, graph = profile.split('_')
@@ -2774,7 +2779,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if use_delayed_sampling and self.is_driver_worker:
                         if force_sample:
                             assert len(output.outputs[0].samples) == 1
-                            output.sampled_token_ids=torch.tensor([[output.outputs[0].samples[0].output_token]], device=self.device)
+                            output.sampled_token_ids = torch.tensor(
+                                [[output.outputs[0].samples[0].output_token]],
+                                device=self.device)
                         else:
                             self._patch_prev_output()
                         step_output = self._pad_to_max_num_seqs(
