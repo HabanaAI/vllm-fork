@@ -24,8 +24,8 @@ test_benchmark_serving_range() {
 }
 
 
-test_benchmark_serving_range 1024 1024 1 3 1
-test_benchmark_serving_range 1024 1024 32 96 1
+# test_benchmark_serving_range 1024 1024 1 3 1
+test_benchmark_serving_range 1024 1024 32 32 1
 
 
 #####################

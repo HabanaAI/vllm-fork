@@ -31,6 +31,33 @@ source "$BASH_DIR"/utils.sh
 ray stop --force
 
 
+
+
+timestamp=$(date +%Y%m%d_%H%M%S)
+torch_prof_out_dir="dyanmic_torch_profiler_${timestamp}"
+
+echo "torch_prof_out_dir: $torch_prof_out_dir"
+
+
+export HABANA_PROFILE_WRITE_HLTV=1 
+export HABANA_PROFILE=1
+# hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --trace-analyzer-xlsx on -invoc csv,hltv -merged csv,hltv
+hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --trace-analyzer-xlsx on
+hl-prof-config --gaudi2
+hl_prof_out_dir="dynamic_prof_hlv_${VLLM_PT_PROFILE}_${timestamp}"
+hl-prof-config -o $hl_prof_out_dir
+
+export VLLM_TORCH_PROFILER_DIR=$torch_prof_out_dir
+export VLLM_ENGINE_PROFILER_ENABLED=1
+export VLLM_ENGINE_PROFILER_WARMUP_STEPS=1033
+export VLLM_ENGINE_PROFILER_STEPS=4
+export VLLM_ENGINE_PROFILER_REPEAT=1
+
+
+export VLLM_PROFILE_FILE="server_events_${torch_prof_out_dir}.json"
+export VLLM_PROFILER_ENABLED=true
+
+
 # DO NOT change unless you fully undersand its purpose
 export HABANA_VISIBLE_DEVICES="ALL"
 export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
