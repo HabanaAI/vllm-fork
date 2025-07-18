@@ -153,7 +153,7 @@ The command output is like below.
 ```bash
 Start vllm server for a huggingface model on Gaudi.
 
-Syntax: bash start_vllm.sh <-w> [-u:p:l:b:c:s:q] [-h]
+Syntax: bash start_vllm.sh <-w> [-u:p:l:b:c:sq] [-h]
 options:
 w  Weights of the model, could be model id in huggingface or local path
 u  URL of the server, str, default=0.0.0.0

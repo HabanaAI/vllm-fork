@@ -9,7 +9,7 @@ Help() {
     # Display Help
     echo "Start vllm server for a huggingface model on Gaudi."
     echo
-    echo "Syntax: bash  start_vllm.sh <-w> [-u:p:l:b:c:s] [-h]"
+    echo "Syntax: bash  start_vllm.sh <-w> [-u:p:l:b:c:sq] [-h]"
     echo "options:"
     echo "w  Weights of the model, could be model id in huggingface or local path"
     echo "u  URL of the server, str, default=0.0.0.0"
@@ -34,7 +34,7 @@ max_model_len=16384
 # Change to fp8_inc if want to use fp8 kv cache
 KV_CACHE_DTYPE=auto
 
-while getopts hw:u:p:l:b:c:s:q flag; do
+while getopts hw:u:p:l:b:c:sq flag; do
     case $flag in
     h) # display Help
         Help
