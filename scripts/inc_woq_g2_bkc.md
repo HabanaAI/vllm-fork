@@ -2,6 +2,9 @@
 
 Please use the firmware and software stack mentioned [here](https://github.com/HabanaAI/vllm-fork/tree/deepseek_r1/scripts/quickstart).
 
+> [!NOTE]
+> The steps below have been verified on G2D and [Synapse v1.21.1](https://docs.habana.ai/en/v1.21.1/Release_Notes/GAUDI_Release_Notes.html#new-features-v1-21-1).
+
 ## 1. Installation
 
 - vLLM
@@ -36,7 +39,6 @@ This script 1) converts official model weights from `torch.float8_e4m3fn` format
 >
 > 2) Set the `QUANT_CONFIG` environment variable to point to this configuration file.
 >
->For more details, refer to the `INC WOQ ReQuant` section in the `single_16k_len_inc.sh` script.
 
 ### Configure the Measurement Statistics Results
 
@@ -76,28 +78,8 @@ Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache/in
 
 ```bash
 cd vllm-fork
-huggingface-cli download Yi30/inc-woq-2282samples-514-g2  --local-dir ./scripts/nc_workspace_measure_kvcache
+huggingface-cli download Yi30/miki-k2-pile-g2-tp16-2nd-0717 --local-dir ./scripts/nc_workspace_measure_kvcache
 ```
 
 - Running the Benchmark
-
-```bash
-cd vllm-fork
-bash ./scripts/single_16k_len_inc.sh
-```
-
-### 3.2 FP8 KV + Per-Channel Quantization
-
-- Get calibration files
-
-```bash
-cd vllm-fork
-huggingface-cli download Yi30/inc-woq-default-pile-one-cache-412-g2  --local-dir ./scripts/nc_workspace_measure_kvcache
-```
-
-- Running the Benchmark
-
-```bash
-cd vllm-fork
-bash scripts/single_16k_len.sh --fp8_kv
-```
+AS Kimi-K2-Instruct requires at least two nodes for serving, please following the [Multi-Node Setup and Serving Deployment](https://github.com/HabanaAI/vllm-fork/tree/deepseek_r1/scripts/quickstart#multi-node-setup-and-serving-deployment) section to start the serving process.
