@@ -3888,6 +3888,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
+                            if warmup_mode:
+                                bypass_model_exec = True
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets)
@@ -3897,6 +3899,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs
                             )
+                        if warmup_mode and bypass_model_exec:
+                            return []
 
                     with self.profiler.record_event('internal',
                                                     model_event_name,
