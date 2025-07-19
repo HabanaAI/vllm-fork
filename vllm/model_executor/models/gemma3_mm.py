@@ -43,17 +43,8 @@ from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
-<<<<<<< HEAD
-<<<<<<< HEAD
-
-is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
-=======
->>>>>>> 45d07d10c (added missing definitions)
-=======
 is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
 
-is_hpu = current_platform.is_hpu()
->>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
 
 
 class Gemma3ImagePixelInputs(TypedDict):
@@ -682,10 +673,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         kwargs["has_images"] = True
         seq_lens = []
         if is_hpu:
-<<<<<<< HEAD
-=======
             IMG_TOKENS = self.config.mm_tokens_per_image
->>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
             seq_len = input_ids.shape[1]
             bs = input_ids.shape[0]
             kwargs["seq_lens"] = [seq_len] * bs
@@ -709,18 +697,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         local_attn_masks = []
         start_idx = 0
         for seq_len in seq_lens:
-<<<<<<< HEAD
             if is_hpu:
                 global_attn_mask = self.hpu_build_mask(input_ids, mask_dtype)
             else:
-=======
-            if not is_hpu:
->>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
                 end_idx = start_idx + seq_len
                 input_token_ids = input_ids[start_idx:end_idx]
                 start_idx = end_idx
                 bs = 1
-<<<<<<< HEAD
                 # Create a global causal mask.
                 global_attn_mask = torch.empty(
                     bs,
@@ -743,53 +726,19 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 global_attn_mask = torch.where(img_mask == 2, 0,
                                                global_attn_mask)
             global_attn_masks.append(global_attn_mask)
-=======
-            else:
-                input_token_ids = input_ids
-            # Create a global causal mask.
-            global_attn_mask = torch.empty(
-                bs,
-                1,
-                seq_len,
-                seq_len,
-                dtype=mask_dtype,
-                device=input_ids.device,
-            )
-            global_attn_mask.fill_(float("-inf"))
-            # Fill the lower triangle with 0.
-            global_attn_mask = global_attn_mask.triu(diagonal=1)
-
-            # Consider the bidirectional attention between image tokens.
-            img_mask = torch.zeros_like(global_attn_mask)
-            img_pos = (input_token_ids == self.config.image_token_index)
->>>>>>> 5da0a6218 (Gemma3 related changes for 1.22)
 
             if not is_hpu:
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
-                global_attn_mask = torch.where(img_mask == 2, 0,
-                                               global_attn_mask)
             else:
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0, 1, 3, 2)
                 img_mask[img_pos.unsqueeze(1)] += 1
                 img_mask = img_mask.permute(0, 1, 3, 2)
 
-                img_pos_cum = torch.cumsum(img_pos, 1)
-                img_causal = torch.arange(seq_len,
-                    device = input_ids.device).unsqueeze(0) - \
-                    img_pos_cum + (img_pos_cum//IMG_TOKENS + 1) * IMG_TOKENS + 1
-                img_causal = torch.cat(
-                    (img_causal[:, 0:1] - 1, img_causal[:, :-1]), dim=1)
-                img_causal = img_causal.clamp_(min=0, max=seq_len -
-                                               1).unsqueeze(1).unsqueeze(3)
-                ind = torch.arange(seq_len, device=input_ids.device).unsqueeze(
-                    0).unsqueeze(1).unsqueeze(2)
-                img_mask[ind < img_causal] += 1
-                global_attn_mask = torch.where(img_mask == 3, 0,
-                                               global_attn_mask)
-
+            global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
             global_attn_masks.append(global_attn_mask)
+
             if self.sliding_window is not None:
                 if is_hpu and kwargs['attn_metadata'].use_window_sdpa:
                     # In HPU, no need to create local attn_mask(save memory)
