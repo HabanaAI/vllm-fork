@@ -250,6 +250,8 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
         if kv_cache is not None and len(kv_cache) == 2:
             self.latent_cache_k(latent_vec_k, kv_cache[0], slot_mapping)
             k_cache = kv_cache[0]
+        else:
+            k_cache = None
 
         if is_prefill:
             return self._forward_prefill(q, latent_vec_k, k_cache,
