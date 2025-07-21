@@ -957,7 +957,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = len(seq_group_metadata_list)
         batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
             real_batch_size, is_prompt)
-        if self.dp_awared_padding and (self.vllm_config.kv_transfer_config is None or not is_prompt):
+        if self.dp_awared_padding:
             if self.is_driver_worker:
                 batch_size_padded = align_dp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
@@ -1178,8 +1178,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.bucketing_ctx.get_padded_prompt_seq_len(max_query_len),
             self.block_size)
 
-        # Align the prompt length across DP groups when PD aggregation is not enabled.
-        if self.dp_awared_padding and self.vllm_config.kv_transfer_config is None:
+        if self.dp_awared_padding:
             if self.is_driver_worker:
                 max_prompt_len = align_dp_groups(
                     max_prompt_len, torch.distributed.ReduceOp.MAX)
@@ -1891,7 +1890,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _dummy_run(self, max_num_batched_tokens: int) -> None:
         assert max_num_batched_tokens == 1
-        self.warmup_scenario(max_num_batched_tokens, 1, False, None, False,
+        is_prompt = False
+        if self.vllm_config.kv_transfer_config is not None and \
+            self.vllm_config.kv_transfer_config.is_kv_producer:
+            is_prompt = True
+        self.warmup_scenario(max_num_batched_tokens, 1, is_prompt, None, False,
                              True, False, 0, 1, True, True)
         return
 
