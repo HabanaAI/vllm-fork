@@ -442,7 +442,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 cutlass_block_fp8_supported=self.cutlass_block_fp8_supported,
             )
 
-        if current_platform.is_hpu():
+        if self.block_quant and current_platform.is_hpu():
             if layer.weight_scale.dim() > 1:
                 weight_scale = layer.weight_scale.transpose(0, 1)
             else:
