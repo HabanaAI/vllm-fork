@@ -1875,6 +1875,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
+        if max_batch_size < 1:
+            max_batch_size = 1
+            max_seq_len = self.max_num_batched_tokens
+
+        logger.info(
+            "Running profile run with max_batch_size=%d, max_seq_len=%d",
+            max_batch_size,
+            max_seq_len,
+        )
+
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True, is_profile_run=True)
         return
@@ -2854,7 +2864,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.selected_token_indices
                         )
-                        if warmup_mode == True and is_dummy_run == False:
+                        if profile_run_mode == True and is_dummy_run == False:
                             torch.hpu.synchronize()
                             import torch.distributed as dist
                             if dist.is_initialized():
