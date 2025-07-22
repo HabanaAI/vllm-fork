@@ -664,10 +664,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
         return hidden_states
 
-    def hpu_build_mask(
-        self,
-        input_ids: torch.Tensor,
-        mask_dtype: torch.dtype) -> torch.Tensor:
+    def hpu_build_mask(self, input_ids: torch.Tensor,
+                       mask_dtype: torch.dtype) -> torch.Tensor:
         """
         Same semantics, but:
         • keep everything as BOOL until the final cast
@@ -679,14 +677,15 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         img_tokens = self.config.mm_tokens_per_image
         image_token_index = self.config.image_token_index
         # 1)   bool causal mask (True == masked)
-        causal_bool = torch.triu(torch.ones(seq_len, seq_len,
-                                            dtype=torch.bool, device=dev), 1)
-        mask_bool = causal_bool.unsqueeze(0).unsqueeze(0).expand(bs, 1, -1, -1).clone()
+        causal_bool = torch.triu(
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=dev), 1)
+        mask_bool = causal_bool.unsqueeze(0).unsqueeze(0).expand(
+            bs, 1, -1, -1).clone()
 
         # 2)   pre-compute a few broadcastable helpers
-        img_pos = (input_ids == image_token_index)                   # [B,S]
-        img_row = img_pos.unsqueeze(1).unsqueeze(3)                  # [B,1,S,1]
-        img_col = img_pos.unsqueeze(1).unsqueeze(2)                  # [B,1,1,S]
+        img_pos = (input_ids == image_token_index)  # [B,S]
+        img_row = img_pos.unsqueeze(1).unsqueeze(3)  # [B,1,S,1]
+        img_col = img_pos.unsqueeze(1).unsqueeze(2)  # [B,1,1,S]
 
         img_pos_cum = torch.cumsum(img_pos, 1)
         img_causal = torch.arange(seq_len, device=dev).unsqueeze(0) \
@@ -694,13 +693,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         img_causal = torch.cat((img_causal[:, :1] - 1, img_causal[:, :-1]), 1) \
             .clamp_(0, seq_len - 1) \
             .unsqueeze(1).unsqueeze(3)                          # [B,1,S,1]
-        ind = torch.arange(seq_len, device=dev).view(1, 1, 1, -1)   # [1,1,1,S]
+        ind = torch.arange(seq_len, device=dev).view(1, 1, 1, -1)  # [1,1,1,S]
 
         # 3)   positions we must *unmask*  (row img  ∧  col img  ∧  col < img_causal)
         allow = img_row & img_col & (ind < img_causal)
-        mask_bool &= ~allow                                               # flip to False
+        mask_bool &= ~allow  # flip to False
 
-        # 4)   final fp16/32 version
+        # 4)   final bfp16/32 version
         out = torch.zeros_like(mask_bool, dtype=mask_dtype) \
             .masked_fill(mask_bool, float("-inf"))
 
@@ -740,7 +739,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         start_idx = 0
         for seq_len in seq_lens:
             if is_hpu:
-                global_attn_mask = self.hpu_build_mask(input_ids,  mask_dtype)
+                global_attn_mask = self.hpu_build_mask(input_ids, mask_dtype)
             else:
                 end_idx = start_idx + seq_len
                 input_token_ids = input_ids[start_idx:end_idx]
@@ -765,7 +764,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
-                global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
+                global_attn_mask = torch.where(img_mask == 2, 0,
+                                              global_attn_mask)
 
             global_attn_masks.append(global_attn_mask)
 
