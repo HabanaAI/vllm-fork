@@ -38,9 +38,9 @@ class VarsGenerator:
                                            self.context['MODEL']]
 
         if filtered.empty:
-            raise ValueError(f"No matching rows found for model "
-                             f"'{self.context['MODEL']}'")
-
+            print(f"[WARNING] No matching rows for model "
+                  f"'{self.context['MODEL']}'")
+            return {}
         return filtered.iloc[0].to_dict()
 
     def build_context(self):
@@ -94,7 +94,12 @@ class VarsGenerator:
 
     def auto_calc_all(self):
         for param, func in PARAM_CALC_FUNCS.items():
-            self.context[param] = func(self.context)
+            try:
+                self.context[param] = func(self.context)
+            except KeyError as e:
+                print(f"[WARNING] Skipping '{param}' due to missing key: {e}")
+            except TypeError as e:
+                print(f"[WARNING] Skipping '{param}' due to TypeError: {e}")
 
     def calculate_variables(self):
         """
