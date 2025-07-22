@@ -1333,7 +1333,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_tokens_tensor = self.move_to_device(input_tokens_tensor)
         input_positions = self.move_to_device(input_positions)
         seq_lens_tensor = self.move_to_device(seq_lens_tensor)
-        prompt_total_len_tensor = self.move_to_device(prompt_total_len_tensor)
+        prompt_total_len_tensor = self.move_to_device(
+            prompt_total_len_tensor)
         slot_mapping = self.move_to_device(slot_mapping)
         context_lens_tensor = self.move_to_device(context_lens_tensor)
 
@@ -1938,9 +1939,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
-            'attn_bias', 'seq_lens_tensor', 'context_lens_tensor',
-            'block_list', 'block_mapping', 'block_usage', 'slot_mapping',
-            'is_prompt', 'block_indices', 'block_offsets', 'block_groups',
+            'attn_bias',
+            'seq_lens_tensor',
+            'context_lens_tensor',
+            'block_list',
+            'block_mapping',
+            'block_usage',
+            'slot_mapping',
+            'is_prompt',
+            'block_indices',
+            'block_offsets',
+            'block_groups',
             'prompt_total_len_tensor'
         ])
         return attention_metadata
