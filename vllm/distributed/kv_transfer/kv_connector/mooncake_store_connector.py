@@ -237,9 +237,9 @@ class MooncakeStoreConnector(KVConnectorBase):
         hidden_or_intermediate_states: Union[torch.Tensor,
                                              IntermediateTensors],
     ) -> None:
-        if self.rank != 0:
-            # only the first rank will send kv cache
-            return
+        # if self.rank != 0:
+        #     # only the first rank will send kv cache
+        #     return
         input_tokens_tensor_cpu = model_input.input_tokens.to("cpu") # shape: [batch_size, seq_len_padding_to_128]
         torch.hpu.synchronize()
         seq_lens = model_input.attn_metadata.seq_lens # 2D list
@@ -354,9 +354,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             # get roi for current seq
             load_key_prefix = self.tensor_hash(current_tokens)
             # For deepseek, we only need recv first rank
-            load_kvcache_key = f"{load_key_prefix}_0"
+            load_kvcache_key = f"{load_key_prefix}_{self.rank}"
             remote_kv = self.kv_store.get(load_kvcache_key)
-            hidden_key = f"{load_key_prefix}_hidden_0"
+            hidden_key = f"{load_key_prefix}_hidden_{self.rank}"
             hidden = self.kv_store.get(hidden_key)
             
             if remote_kv is None or hidden is None:
