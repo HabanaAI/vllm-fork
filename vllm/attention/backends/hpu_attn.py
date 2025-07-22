@@ -405,6 +405,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
+        if self.sliding_window is not None and self.fused_scaled_dot_product_attention is not None:
+            self.sliding_window_right = int(os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
         self.prompt_position_bias = None
         self.prev_attn = None
         self.alibi_slopes = None
@@ -549,7 +551,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
                 if attn_metadata.use_window_sdpa:
                     attn_bias = attn_metadata.attn_bias
-                    window_size = (self.sliding_window, 0)
+                    window_size = (self.sliding_window, self.sliding_window_right)
                     common_args['window_size'] = window_size
                     # TODO: Currently HPU doesn't support GQA for FusedSDPA
                     # with causal + window, so repeat KV so QKV are all the
