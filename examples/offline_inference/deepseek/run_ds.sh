@@ -13,8 +13,8 @@ export VLLM_SKIP_WARMUP=true
 WORLD_SIZE=8
 # WORLD_SIZE=1
 
-PT_HPU_LAZY_MODE=1  \
-python deepseek_example.py \
+PT_HPU_LAZY_MODE=1 \
+    python deepseek_example.py \
     --model ${FP8_MODEL_PATH} \
     --tokenizer ${FP8_MODEL_PATH} \
     --osl 32 \

@@ -40,6 +40,7 @@ os.environ["VLLM_EP_SIZE"] = f"{args.ep_size}"
 os.environ["VLLM_MLA_DISABLE_REQUANTIZATION"] = "1"
 os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
 
+
 def sample_sonnet_requests(
     dataset_path: str,
     num_requests: int,
