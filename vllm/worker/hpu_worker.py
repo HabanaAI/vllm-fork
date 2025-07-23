@@ -7,11 +7,8 @@
 
 import contextlib
 import gc
-import gzip
-import json
 import os
 import queue
-import time
 from typing import List, Optional, Set, Tuple, Type
 
 import habana_frameworks.torch as htorch  # noqa:F401
