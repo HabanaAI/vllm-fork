@@ -405,7 +405,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
-        if self.sliding_window is not None and self.fused_scaled_dot_product_attention is not None:
+        if self.sliding_window is not None and \
+            self.fused_scaled_dot_product_attention is not None:
             self.sliding_window_right = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
         self.prompt_position_bias = None
