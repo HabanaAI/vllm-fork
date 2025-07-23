@@ -369,6 +369,7 @@ To run DeepSeek-R1 with INC FP8 quantization in multi-nodes case, you need to fo
 |---|---|---|
 |DeepSeek-R1-0528|16|Yi30/ds-r1-0528-default-pile-g2-ep16-0610|
 |DeepSeek-R1|16|Yi30/ds-r1-default-pile-g2-ep16-0610|
+|kimi-k2|16|Yi30/miki-k2-pile-g2-tp16-2nd-0717|
 
 For example, if you want to run DeepSeek-R1-0528, with tp-size 16, you can download measurement files with:
 ```bash
