@@ -6,6 +6,7 @@ FP8_MODEL_PATH="${1:-$DEFAULT_MODEL_PATH}"
 
 export CALC_SCALE_WITH_CGUID=1
 export QUANT_CONFIG="./quant_configs/dynamic_quant_config.json"
+# export QUANT_CONFIG="./quant_configs/unit_quant_config.json"
 export VLLM_SKIP_WARMUP=true
 
 WORLD_SIZE=8
