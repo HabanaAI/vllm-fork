@@ -765,7 +765,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
                 global_attn_mask = torch.where(img_mask == 2, 0,
-                                              global_attn_mask)
+                                               global_attn_mask)
 
             global_attn_masks.append(global_attn_mask)
 
