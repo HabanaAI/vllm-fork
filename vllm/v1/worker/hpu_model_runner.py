@@ -133,6 +133,10 @@ class DecodeInputData:
     logits_indices: Optional[torch.Tensor] = None
 
 
+class BucketingFailedException(Exception):
+    pass
+
+
 def bool_helper(value):
     value = value.lower()
     return value in ("y", "yes", "t", "true", "on", "1")
@@ -1013,11 +1017,12 @@ class HPUModelRunner:
 
     def _bucketize_2d_prompt(self, seq_lens, num_blocks):
         bs = len(seq_lens)
+        if bs > self.max_prefill_batch_size:
+            raise BucketingFailedException
         seq = max(seq_lens)
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
-        bs, seq, _ = self.bucketing_manager.find_prompt_bucket(
+        bs, seq, num_blocks = self.bucketing_manager.find_prompt_bucket(
             bs, seq, num_blocks)
-        num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
 
     def _get_prompt_bucketing_fn(self):
@@ -1029,8 +1034,11 @@ class HPUModelRunner:
     def _can_merge_prefill_contents(self, lhs, rhs):
         combined_num_tokens = lhs.get_num_tokens() + rhs.get_num_tokens()
         bucketing_fn = self._get_prompt_bucketing_fn()
-        target_bs, target_seq, target_blocks = bucketing_fn(
-            combined_num_tokens, [])
+        try:
+            target_bs, target_seq, target_blocks = bucketing_fn(
+                combined_num_tokens, [])
+        except BucketingFailedException:
+            return False
         return target_bs <= self.max_prefill_batch_size and\
             target_bs * target_seq <= self.max_num_tokens
 
