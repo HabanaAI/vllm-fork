@@ -687,7 +687,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         img_causal = torch.cat((img_causal[:, :1] - 1, img_causal[:, :-1]), 1) \
             .clamp_(0, seq_len - 1) \
             .unsqueeze(1).unsqueeze(3)                          # [B,1,S,1]
-        ind = torch.arange(seq_len, device=device).view(1, 1, 1, -1)  # [1,1,1,S]
+        ind = torch.arange(seq_len, device=device).view(1, 1, 1,
+                                                        -1)  # [1,1,1,S]
 
         # positions we must *unmask*  (row img  ∧  col img
         # ∧  col < img_causal)

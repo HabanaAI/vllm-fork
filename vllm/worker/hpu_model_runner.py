@@ -587,7 +587,8 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
-        attn_metadata = attn_metadata._replace(sliding_window_right=self.sliding_window_right)
+        attn_metadata = attn_metadata._replace(
+            sliding_window_right=self.sliding_window_right)
         return attn_metadata
 
     def _update_metadata(self,
