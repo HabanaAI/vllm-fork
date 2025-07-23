@@ -367,11 +367,12 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
 - `VLLM_HANDLE_TOPK_DUPLICATES`: if ``true`` - handles duplicates outside top-k. The default is `false`.
 - `VLLM_CONFIG_HIDDEN_LAYERS`: configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. It helps to improve throughput by reducing inter-token latency limitations in some models. The default is `1`.
 - `VLLM_SKIP_WARMUP`: if `true`, warm-up is skipped. The default is `false`.
+- `VLLM_FUSEDSDPA_SLIDE_RIGHT`:  right sliding window size when fusedsdpa used with sliding window. It helps with memory and performance when long context is used. The default is 0.
 
 > [!TIP]
 > When a deployed workload does not utilize the full context that a model can handle, it is good practice to limit the maximum values upfront based on the input and output token lengths that will be generated after serving the vLLM server.
 <br><br>**Example:**<br>Let's assume that we want to deploy text generation model Qwen2.5-1.5B, which has a defined `max_position_embeddings` of 131072 (our `max_model_len`). At the same time, we know that our workload pattern will not use the full context length because we expect a maximum input token size of 1K and predict generating a maximum of 2K tokens as output. In this case, starting the vLLM server to be ready for the full context length is unnecessary. Instead, we should limit it upfront to achieve faster service preparation and decrease warm-up time. The recommended values in this example should be:
-> - `--max_model_len`: `3072` - the sum of input and output sequences (1+2)*1024.  
+> - `--max_model_len`: `3072` - the sum of input and output sequences (1+2)*1024. 
 > - `VLLM_PROMPT_SEQ_BUCKET_MAX`: `1024` - the maximum input token size that we expect to handle.
 
 <br/>**Additional Performance Tuning Knobs - Linear Bucketing Strategy only:**
