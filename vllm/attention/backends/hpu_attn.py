@@ -145,6 +145,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     use_window_sdpa: Optional[bool] = None
     sliding_window_right: Optional[int] = None
 
+
 @dataclass
 class HPUMLAMetadata(HPUAttentionMetadata, AttentionMetadata):
     pass
