@@ -17,7 +17,7 @@ import torch.distributed
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing.common import HPUBucketingManager
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
-                                         HabanaMemoryProfiler, 
+                                         HabanaMemoryProfiler,
                                          HabanaProfilerCounterHelper,
                                          format_bytes)
 from vllm_hpu_extension.runtime import get_config
