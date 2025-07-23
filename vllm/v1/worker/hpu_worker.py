@@ -70,6 +70,13 @@ class HPUWorker:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
             init_cached_hf_modules()
+
+        self.gc_track_recompiles = bool(
+            "PT_HPU_METRICS_GC_DETAILS" in os.environ
+            and bool_helper(os.getenv("PT_HPU_METRICS_GC_DETAILS")))
+
+    def init_profiler(self):
+        """Initialize the profiler."""
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
             logger.info("Profiling enabled. Traces will be saved to: %s",
@@ -89,10 +96,6 @@ class HPUWorker:
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
-        self.gc_track_recompiles = bool(
-            "PT_HPU_METRICS_GC_DETAILS" in os.environ
-            and bool_helper(os.getenv("PT_HPU_METRICS_GC_DETAILS")))
-
 
     def start_profile(self):
         if self.profiler is None:
@@ -122,6 +125,7 @@ class HPUWorker:
         self.model_runner = HPUModelRunner(
             vllm_config=self.vllm_config,
             is_driver_worker=self.is_driver_worker)
+        self.init_profiler()
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
