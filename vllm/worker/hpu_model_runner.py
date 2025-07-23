@@ -358,6 +358,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
+        self.sliding_window_right = 0
         if self.use_window_sdpa:
             self.slice_size = int(
                 os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
@@ -365,6 +366,11 @@ class HpuModelAdapter(torch.nn.Module):
             os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
             os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
             os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
+            self.sliding_window_right = int(
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
+            assert self.sliding_window_right % self.slice_size == 0, \
+                'VLLM_FUSEDSDPA_SLIDE_RIGHT not supported due to not \
+                    a mulitiplier of PT_HPU_QKV_SLICE_SEQ_LEN_THLD'
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -586,6 +592,7 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
+        attn_metadata = attn_metadata._replace(sliding_window_right=self.sliding_window_right)
         return attn_metadata
 
     def _update_metadata(self,
@@ -2657,6 +2664,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
+            'sliding_window_right',
         ])
         return attention_metadata
 

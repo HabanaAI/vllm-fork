@@ -666,36 +666,30 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
     def hpu_build_mask(self, input_ids: torch.Tensor,
                        mask_dtype: torch.dtype) -> torch.Tensor:
-        """
-        Same semantics, but:
-        • keep everything as BOOL until the final cast
-        • reuse the causal mask, one copy per seq-len
-        • no second [B,S,S] buffer – use broadcasting logic instead
-        """
         bs, seq_len = input_ids.shape
-        dev = input_ids.device
+        device = input_ids.device
         img_tokens = self.config.mm_tokens_per_image
         image_token_index = self.config.image_token_index
-        # 1)   bool causal mask (True == masked)
+        # bool causal mask (True == masked)
         causal_bool = torch.triu(
-            torch.ones(seq_len, seq_len, dtype=torch.bool, device=dev), 1)
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=device), 1)
         mask_bool = causal_bool.unsqueeze(0).unsqueeze(0).expand(
             bs, 1, -1, -1).clone()
 
-        # 2)   pre-compute a few broadcastable helpers
+        # pre-compute a few broadcastable helpers
         img_pos = (input_ids == image_token_index)  # [B,S]
         img_row = img_pos.unsqueeze(1).unsqueeze(3)  # [B,1,S,1]
         img_col = img_pos.unsqueeze(1).unsqueeze(2)  # [B,1,1,S]
 
         img_pos_cum = torch.cumsum(img_pos, 1)
-        img_causal = torch.arange(seq_len, device=dev).unsqueeze(0) \
+        img_causal = torch.arange(seq_len, device=device).unsqueeze(0) \
             - img_pos_cum + (img_pos_cum // img_tokens + 1) * img_tokens + 1
         img_causal = torch.cat((img_causal[:, :1] - 1, img_causal[:, :-1]), 1) \
             .clamp_(0, seq_len - 1) \
             .unsqueeze(1).unsqueeze(3)                          # [B,1,S,1]
-        ind = torch.arange(seq_len, device=dev).view(1, 1, 1, -1)  # [1,1,1,S]
+        ind = torch.arange(seq_len, device=device).view(1, 1, 1, -1)  # [1,1,1,S]
 
-        # 3)   positions we must *unmask*  (row img  ∧  col img
+        # positions we must *unmask*  (row img  ∧  col img
         # ∧  col < img_causal)
         allow = img_row & img_col & (ind < img_causal)
         mask_bool &= ~allow  # flip to False
