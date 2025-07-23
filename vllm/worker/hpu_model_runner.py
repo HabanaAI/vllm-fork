@@ -365,7 +365,9 @@ class HpuModelAdapter(torch.nn.Module):
             self.sliding_window_right = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
             assert self.sliding_window_right % self.slice_size == 0, \
-                f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) not supported due to not a mulitiplier of PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
+                f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
+                f'not supported due to not a multiplier of '\
+                f'PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
