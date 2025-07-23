@@ -637,6 +637,7 @@ class HPUModelRunner:
         # TODO(madamczyk-intel): add a knob for that
         # TODO(madamczyk-intel): debug why increasing it lowers acc
         self.logits_rounding = 1
+        self.shared_kv_cache_layers: dict[str, str] = {}
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
