@@ -59,7 +59,8 @@ def initialize_kv_cache(runner):
             kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
         ],
     )
-    runner.initialize_attn_backend(kv_cache_config)
+    if not current_platform.is_hpu():
+        runner.initialize_attn_backend(kv_cache_config)
 
 
 def get_vllm_config():
