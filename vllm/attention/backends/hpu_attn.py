@@ -551,7 +551,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
                 if attn_metadata.use_window_sdpa:
                     attn_bias = attn_metadata.attn_bias
-                    window_size = (self.sliding_window, 
+                    window_size = (self.sliding_window,
                                    attn_metadata.sliding_window_right)
                     common_args['window_size'] = window_size
                     # TODO: Currently HPU doesn't support GQA for FusedSDPA
