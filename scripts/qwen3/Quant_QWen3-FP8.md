@@ -50,6 +50,7 @@ bash 01-benchmark-online-30B-fp8.sh --model_path /workspace/HF_models/Qwen3-30B-
 
 Please refer to https://github.com/HabanaAI/vllm-fork/tree/dev/qwen3/scripts for other benchmarks.
 
+If you are benchmarking an FP8 model with `scale_format=const`, setting `VLLM_DISABLE_MARK_SCALES_AS_CONST=true` can help speed up the warmup stage
 
 ## 3. Others
 

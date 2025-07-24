@@ -159,6 +159,9 @@ bash start_gaudi_vllm_server.sh \
     -c /vllm_cache/Qwen2.5-32B-Instruct/
 ```
 
+Note: 
+If you are benchmarking an FP8 model with `scale_format=const`, setting `VLLM_DISABLE_MARK_SCALES_AS_CONST=true` can help speed up the warmup stage.
+
 - #### Loading fp8 models directly
 Gaudi2 uses `fp8_e4m3fnuz` instead of `fp8_e4m3fn`, so the fp8 weights and the corresponding scales have to be converted by [convert_fp8_weights_for_gaudi2.py](quantization/convert_fp8_weights_for_gaudi2.py) first. vLLM on Gaudi supports dynamic and static activation quantization with extra `input_scales` provided, for example:
 ``` bash
