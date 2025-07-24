@@ -8,6 +8,7 @@ import importlib
 import inspect
 import json
 import multiprocessing
+multiprocessing.set_start_method("spawn", force=True)
 import os
 import signal
 import socket
@@ -40,6 +41,7 @@ from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine  # type: ignore
 from vllm.engine.multiprocessing.client import MQLLMEngineClient
 from vllm.engine.multiprocessing.engine import run_mp_engine
+from vllm.engine.async_mm_preprocessor import AsyncMultiModalPreprocessor
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.chat_utils import (load_chat_template,
                                          resolve_hf_chat_template,
@@ -1179,6 +1181,7 @@ async def init_app_state(
         prompt_adapters=args.prompt_adapters,
     )
     await state.openai_serving_models.init_static_loras()
+    mm_preprocessor = AsyncMultiModalPreprocessor(vllm_config)
     state.openai_serving_chat = OpenAIServingChat(
         engine_client,
         model_config,
@@ -1192,6 +1195,7 @@ async def init_app_state(
         tool_parser=args.tool_call_parser,
         reasoning_parser=args.reasoning_parser,
         enable_prompt_tokens_details=args.enable_prompt_tokens_details,
+        mm_preprocessor=mm_preprocessor,
     ) if model_config.runner_type == "generate" else None
     state.openai_serving_completion = OpenAIServingCompletion(
         engine_client,
