@@ -696,6 +696,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         # 4)   final bfp16/32 version
         out = torch.zeros_like(mask_bool, dtype=mask_dtype) \
             .masked_fill(mask_bool, float("-inf"))
+
         return out
 
     def prepare_attn_masks(
@@ -760,13 +761,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 img_mask[:, :, img_pos, :] += 1
                 global_attn_mask = torch.where(img_mask == 2, 0,
                                                global_attn_mask)
-            global_attn_masks.append(global_attn_mask)
-
-                img_mask[:, :, :, img_pos] += 1
-                img_mask[:, :, img_pos, :] += 1
-                global_attn_mask = torch.where(img_mask == 2, 0,
-                                               global_attn_mask)
-
             global_attn_masks.append(global_attn_mask)
 
             if self.sliding_window is not None:

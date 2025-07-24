@@ -352,10 +352,6 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
-<<<<<<< HEAD
-=======
-
->>>>>>> beffa20f8 (Modifications from PR#1635 (rebased on PR#1616))
         self.sliding_window_right = 0
         if self.use_window_sdpa:
             self.slice_size = int(
