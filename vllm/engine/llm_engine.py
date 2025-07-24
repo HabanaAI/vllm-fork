@@ -755,12 +755,18 @@ class LLMEngine:
             seq_len = prompt["prompt_embeds"].shape[0]
             prompt["prompt_token_ids"] = [0] * seq_len
 
-        processed_inputs = self.input_preprocessor.preprocess(
-            prompt,
-            tokenization_kwargs=tokenization_kwargs,
-            lora_request=lora_request,
-            prompt_adapter_request=prompt_adapter_request,
-        )
+        if isinstance(prompt, dict) and prompt.get("type") == "multimodal":
+            logger.info("[DEBUG] BYPASSING PREPROCESSING FOR REQUEST: %s", request_id)
+            processed_inputs = prompt
+        else:
+            # Fallback for text-only or other non-preprocessed requests.
+            logger.info("[DEBUG] PERFORMING STANDARD PREPROCESSING FOR REQUEST: %s", request_id)
+            processed_inputs = self.input_preprocessor.preprocess(
+                prompt,
+                tokenization_kwargs=tokenization_kwargs,
+                lora_request=lora_request,
+                prompt_adapter_request=prompt_adapter_request,
+            )
 
         self._add_processed_request(
             request_id=request_id,

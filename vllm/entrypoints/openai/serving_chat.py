@@ -34,6 +34,7 @@ from vllm.entrypoints.openai.serving_models import OpenAIServingModels
 from vllm.entrypoints.openai.tool_parsers import ToolParser, ToolParserManager
 from vllm.entrypoints.openai.tool_parsers.mistral_tool_parser import (
     MistralToolCall)
+import pprint
 from vllm.logger import init_logger
 from vllm.outputs import CompletionOutput, RequestOutput
 from vllm.reasoning import ReasoningParser, ReasoningParserManager
@@ -64,6 +65,7 @@ class OpenAIServingChat(OpenAIServing):
         enable_auto_tools: bool = False,
         tool_parser: Optional[str] = None,
         enable_prompt_tokens_details: bool = False,
+        mm_preprocessor= None,
     ) -> None:
         super().__init__(engine_client=engine_client,
                          model_config=model_config,
@@ -74,7 +76,11 @@ class OpenAIServingChat(OpenAIServing):
         self.response_role = response_role
         self.chat_template = chat_template
         self.chat_template_content_format: Final = chat_template_content_format
-
+        self.mm_preprocessor = mm_preprocessor
+        # Create a semaphore to limit concurrent preprocessing tasks
+        if self.mm_preprocessor:
+            max_concurrent_preproc = 16 # 32 failed, 64 failed
+            self.preprocessing_semaphore = asyncio.Semaphore(max_concurrent_preproc)
         # set up tool use
         self.enable_auto_tools: bool = enable_auto_tools
         if self.enable_auto_tools:
@@ -195,10 +201,30 @@ class OpenAIServingChat(OpenAIServing):
                 truncate_prompt_tokens=request.truncate_prompt_tokens,
                 add_special_tokens=request.add_special_tokens,
             )
+            # if engine_prompts:
+            #     logger.info(
+            #         "Structure of `engine_prompt` after creation:\n%s",
+            #         pprint.pformat(engine_prompts[0])
+            #     )
         except (ValueError, TypeError, RuntimeError,
                 jinja2.TemplateError) as e:
             logger.exception("Error in preprocessing prompt inputs")
             return self.create_error_response(f"{e} {e.__cause__}")
+
+        if self.mm_preprocessor:
+            try:
+                # Use the semaphore to limit concurrency, other request must wait too much will OOM Ray...
+                async with self.preprocessing_semaphore:
+                    new_engine_prompts = []
+                    for engine_prompt in engine_prompts:
+                        processed_inputs = await self.mm_preprocessor.preprocess(engine_prompt)
+                        new_engine_prompts.append(processed_inputs)
+                    
+                    # Overwrite the original prompts with the fully processed ones!
+                    engine_prompts = new_engine_prompts
+            except Exception as e:
+                logger.exception("Error in async multimodal preprocessing")
+                return self.create_error_response(f"Error during image processing: {e}")
 
         request_id = "chatcmpl-" \
                      f"{self._base_request_id(raw_request, request.request_id)}"
@@ -231,6 +257,9 @@ class OpenAIServingChat(OpenAIServing):
 
                 trace_headers = (None if raw_request is None else await
                                  self._get_trace_headers(raw_request.headers))
+
+                # logger.info("SENDING TO ENGINE (REQUEST %s):\n%s",
+                #             request_id, pprint.pformat(engine_prompt))
 
                 if isinstance(sampling_params, BeamSearchParams):
                     generator = self.engine_client.beam_search(
