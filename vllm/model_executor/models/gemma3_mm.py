@@ -663,7 +663,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
         return hidden_states
 
-
     def hpu_build_mask(self, input_ids: torch.Tensor,
                        mask_dtype: torch.dtype) -> torch.Tensor:
         bs, seq_len = input_ids.shape
@@ -687,7 +686,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         img_causal = torch.cat((img_causal[:, :1] - 1, img_causal[:, :-1]), 1) \
             .clamp_(0, seq_len - 1) \
             .unsqueeze(1).unsqueeze(3)                          # [B,1,S,1]
-        ind = torch.arange(seq_len, device=device).view(1, 1, 1, -1)  # [1,1,1,S]
+        ind = torch.arange(seq_len, device=device).view(1, 1, 1,
+                                                        -1)  # [1,1,1,S]
 
         # positions we must *unmask*  (row img  ∧  col img
         # ∧  col < img_causal)
@@ -697,7 +697,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         out = torch.zeros_like(mask_bool, dtype=mask_dtype) \
             .masked_fill(mask_bool, float("-inf"))
         return out
-
 
     def prepare_attn_masks(
         self,
@@ -763,16 +762,11 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                                global_attn_mask)
             global_attn_masks.append(global_attn_mask)
 
-            if not is_hpu:
                 img_mask[:, :, :, img_pos] += 1
                 img_mask[:, :, img_pos, :] += 1
-            else:
-                img_mask[img_pos.unsqueeze(1)] += 1
-                img_mask = img_mask.permute(0, 1, 3, 2)
-                img_mask[img_pos.unsqueeze(1)] += 1
-                img_mask = img_mask.permute(0, 1, 3, 2)
+                global_attn_mask = torch.where(img_mask == 2, 0,
+                                               global_attn_mask)
 
-            global_attn_mask = torch.where(img_mask == 2, 0, global_attn_mask)
             global_attn_masks.append(global_attn_mask)
 
             if self.sliding_window is not None:
