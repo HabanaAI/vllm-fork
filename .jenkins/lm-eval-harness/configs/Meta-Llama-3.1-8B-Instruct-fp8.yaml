@@ -7,7 +7,7 @@ tasks:
   - name: "exact_match,strict-match"
     value: 0.612
   - name: "exact_match,flexible-extract"
-    value: 0.676
+    value: 0.624
 limit: 250
 num_fewshot: 8
 dtype: "bfloat16"
