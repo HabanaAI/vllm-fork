@@ -39,6 +39,7 @@ import numpy as np
 from tqdm.asyncio import tqdm
 from transformers import PreTrainedTokenizerBase
 
+import benchmark_utils
 from backend_request_func import (
     ASYNC_REQUEST_FUNCS,
     OPENAI_COMPATIBLE_BACKENDS,
@@ -611,6 +612,18 @@ def main(args: argparse.Namespace):
     tokenizer_id = args.tokenizer if args.tokenizer is not None else args.model
     tokenizer_mode = args.tokenizer_mode
 
+    if args.limit_mm_per_prompt:
+        key = list(args.limit_mm_per_prompt.keys())[0]
+        value = args.limit_mm_per_prompt[key]
+        if key != "image" or value < 1:
+            raise ValueError(
+                "Invalid format for --limit-mm-per-prompt. "
+                "Use 'image=N' where N is a positive integer."
+            )
+        else:
+            print(f"INFO: Limiting requests to {value} images per prompt.")
+            benchmark_utils.image_per_prompt = int(value)
+
     if args.base_url is not None:
         api_url = f"{args.base_url}{args.endpoint}"
         base_url = f"{args.base_url}"
@@ -1075,6 +1088,14 @@ if __name__ == "__main__":
         '"ttft", "tpot", "e2el". For more context on the definition of '
         "goodput, refer to DistServe paper: https://arxiv.org/pdf/2401.09670 "
         "and the blog: https://hao-ai-lab.github.io/blogs/distserve",
+    )
+    parser.add_argument(
+        "--limit-mm-per-prompt",
+        metavar="KEY=VALUE",
+        type=lambda x: {x.split("=")[0]: int(x.split("=")[1])},
+        default=None,
+        help="Limit the number of multimodal items per prompt. "
+        "Example: --limit-mm-per-prompt image=100",
     )
 
     # group for dataset specific arguments
