@@ -2127,6 +2127,13 @@ class SchedulerConfig:
     like full attention and sliding window attention.
     """
 
+    async_scheduling: bool = True
+    """EXPERIMENTAL: If set to True, perform async scheduling. This may help
+    reduce the CPU overheads, leading to better latency and throughput. However,
+    async scheduling is currently not supported with some features such as
+    structured outputs, speculative decoding, and pipeline parallelism.
+    """
+
     def compute_hash(self) -> str:
         """
         WARNING: Whenever a new field is added to this config,
@@ -2215,6 +2222,10 @@ class SchedulerConfig:
                 "long_prefill_token_threshold=%d",
                 self.max_num_partial_prefills, self.max_long_partial_prefills,
                 self.long_prefill_token_threshold)
+
+        if self.async_scheduling:
+            self.scheduler_cls = (
+                "vllm.v1.core.sched.async_scheduler.AsyncScheduler")
 
         self._verify_args()
 
