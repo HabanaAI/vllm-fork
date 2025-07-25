@@ -6,7 +6,6 @@ import gzip
 import json
 import os
 import queue
-import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Optional
 
@@ -16,9 +15,10 @@ import torch.nn as nn
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
-from vllm.config import ParallelConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
+from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.logger import init_logger
 from vllm.model_executor import set_random_seed
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_fake_hpu
@@ -58,6 +58,7 @@ class HPUWorker:
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
 
+        self.parallel_config.rank = rank
         self.local_rank = local_rank
         self.rank = rank
         self.distributed_init_method = distributed_init_method
@@ -73,12 +74,19 @@ class HPUWorker:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
             init_cached_hf_modules()
+
+        self.gc_track_recompiles = bool(
+            "PT_HPU_METRICS_GC_DETAILS" in os.environ
+            and bool_helper(os.getenv("PT_HPU_METRICS_GC_DETAILS")))
+
+    def init_profiler(self):
+        """Initialize the profiler."""
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
             logger.info("Profiling enabled. Traces will be saved to: %s",
                         torch_profiler_trace_dir)
             if os.getenv('VLLM_PROFILER_ENABLED') == 'full':
-                fn = self.full_trace_handler
+                fn = self.model_runner.profiler.full_trace_handler
                 with_stack = False
             else:
                 fn = torch.profiler.tensorboard_trace_handler
@@ -92,56 +100,6 @@ class HPUWorker:
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
-        self.gc_track_recompiles = bool(
-            "PT_HPU_METRICS_GC_DETAILS" in os.environ
-            and bool_helper(os.getenv("PT_HPU_METRICS_GC_DETAILS")))
-
-    def full_trace_handler(self, dir_name, use_gzip=False):
-
-        def handler_fn(prof) -> None:
-            if not os.path.isdir(dir_name):
-                try:
-                    os.makedirs(dir_name, exist_ok=True)
-                except Exception as e:
-                    raise RuntimeError("Can't create directory: " +
-                                       dir_name) from e
-            file_name = f"vllm.{time.time_ns()}.pt.trace.json"
-            file_path = os.path.join(dir_name, file_name)
-            prof.export_chrome_trace(file_path)
-            with open(file_path) as f:
-                pytorch_trace = json.load(f)
-            os.remove(file_path)
-            base = pytorch_trace['baseTimeNanoseconds'] / 1000
-            events = self.model_runner.profiler.profiling_trace_events
-            while True:
-                try:
-                    event_str = events.get_nowait()
-                    event = json.loads(event_str[:-1])
-                    event['ts'] = event['ts'] - base
-                    pytorch_trace['traceEvents'].append(event)
-                except queue.Empty:
-                    break
-
-            pytorch_trace['traceEvents'].append({
-                "args": {
-                    "name": "vLLM"
-                },
-                "name": "process_name",
-                "ph": "M",
-                "pid": 1,
-                "tid": 0,
-                "ts": 0.0
-            })
-            if use_gzip:
-                file_path = file_path + ".gz"
-                with gzip.open(file_path, 'wt', encoding="ascii") as zipfile:
-                    json.dump(pytorch_trace, zipfile)
-            else:
-                with open(file_path, "w") as outfile:
-                    outfile.write(json.dumps(pytorch_trace))
-            logger.info("Saved full profiling to %s", file_path)
-
-        return handler_fn
 
     def start_profile(self):
         if self.profiler is None:
@@ -163,7 +121,7 @@ class HPUWorker:
 
     def init_device(self):
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.parallel_config, self.rank,
+        init_worker_distributed_environment(self.vllm_config, self.rank,
                                             self.distributed_init_method,
                                             self.local_rank)
         # Set random seed.
@@ -171,6 +129,7 @@ class HPUWorker:
         self.model_runner = HPUModelRunner(
             vllm_config=self.vllm_config,
             is_driver_worker=self.is_driver_worker)
+        self.init_profiler()
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
@@ -276,6 +235,7 @@ class HPUWorker:
         msg = (f"Usable num_blocks: {kv_cache_config.num_blocks}, "
                f"actual allocated num_blocks: "
                f"{self.model_runner.kv_caches[0][0].shape[0]} "
+               f"{self.model_runner.kv_caches[0][0].shape} "
                f"(_PAD_BLOCK_ID={self.model_runner._PAD_BLOCK_ID}, "
                f"_PAD_SLOT_ID={self.model_runner._PAD_SLOT_ID})")
         logger.info(msg)
@@ -313,12 +273,13 @@ class HPUWorker:
 
 
 def init_worker_distributed_environment(
-    parallel_config: ParallelConfig,
+    vllm_config: VllmConfig,
     rank: int,
     distributed_init_method: Optional[str] = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    parallel_config = vllm_config.parallel_config
     init_distributed_environment(parallel_config.world_size,
                                  rank,
                                  distributed_init_method,
@@ -331,6 +292,7 @@ def init_worker_distributed_environment(
     assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
+    ensure_kv_transfer_initialized(vllm_config)
 
 
 @contextmanager
