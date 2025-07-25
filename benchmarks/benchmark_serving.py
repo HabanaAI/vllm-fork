@@ -623,7 +623,7 @@ def main(args: argparse.Namespace):
         else:
             print(f"INFO: Limiting requests to {value} images per prompt.")
             benchmark_utils.image_per_prompt = int(value)
-
+    benchmark_utils.text_len = args.text_len
     if args.base_url is not None:
         api_url = f"{args.base_url}{args.endpoint}"
         base_url = f"{args.base_url}"
@@ -1248,6 +1248,14 @@ if __name__ == "__main__":
         help="A subset of LoRA module names passed in when "
         "launching the server. For each request, the "
         "script chooses a LoRA module at random.",
+    )
+
+    parser.add_argument(
+        "--text-len",
+        type=int,
+        default=0,
+        help="Target token length for the prompt. Trims if longer, pads with "
+        "pad/eos token if shorter. Default 0 means no change.",
     )
 
     args = parser.parse_args()
