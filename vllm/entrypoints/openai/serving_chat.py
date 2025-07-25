@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from collections.abc import Sequence as GenericSequence
@@ -78,7 +79,11 @@ class OpenAIServingChat(OpenAIServing):
         self.mm_preprocessor = mm_preprocessor
         # Create a semaphore to limit concurrent preprocessing tasks
         if self.mm_preprocessor:
-            max_concurrent_preproc = 16  # 32 failed, 64 failed
+            # This number causes Ray to OOM if too big.
+            # 16 fails if 6 images per prompt # 32 failed, 64 failed
+            # Setting a more conservative number to ensure nothing breaks
+            max_concurrent_preproc = int(
+                os.getenv("VLLM_MAX_CONCURRENT_PREPROC", "4"))
             self.preprocessing_semaphore = asyncio.Semaphore(
                 max_concurrent_preproc)
         # set up tool use
