@@ -30,6 +30,7 @@ from datasets import load_dataset
 from PIL import Image
 from transformers import PreTrainedTokenizerBase
 
+import benchmark_utils
 from vllm.lora.request import LoRARequest
 from vllm.lora.utils import get_adapter_absolute_path
 from vllm.multimodal import MultiModalDataDict
@@ -870,7 +871,21 @@ class MuirBenchDataset(HuggingFaceDataset):
             prompt = parser_fn(item)
             prompt_len = len(tokenizer(prompt).input_ids)
 
-            mm_content = [process_image(img) for img in item["image_list"]]
+            original_images = item["image_list"]
+            final_images = original_images
+
+            target_image_count = benchmark_utils.image_per_prompt
+            if target_image_count > 0:
+                if not original_images:
+                    final_images = []
+                else:
+                    looped_images = list(original_images)
+                    while len(looped_images) < target_image_count:
+                        looped_images.extend(original_images)
+
+                    final_images = looped_images[:target_image_count]
+
+            mm_content = [process_image(img) for img in final_images]
 
             if enable_multimodal_chat:
                 prompt = self.apply_multimodal_chat_transformation(prompt, mm_content)
