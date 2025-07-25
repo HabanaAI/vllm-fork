@@ -355,6 +355,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
+        bucket_cfg = self.model_runner.bucketing_ctx.global_state
+        block_step = bucket_cfg.decode_block_bucket_cfg[1]
+        num_hpu_blocks = (num_hpu_blocks // block_step) * block_step
+        num_cpu_blocks = (num_cpu_blocks // block_step) * block_step
+
         self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
         if self.model_runner.lora_manager:
