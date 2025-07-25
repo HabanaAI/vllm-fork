@@ -869,7 +869,21 @@ class MuirBenchDataset(HuggingFaceDataset):
                 raise ValueError(f"Unsupported dataset path: {self.dataset_path}")
 
             prompt = parser_fn(item)
-            prompt_len = len(tokenizer(prompt).input_ids)
+            target_text_len = benchmark_utils.text_len
+            if target_text_len > 0:
+                input_ids = tokenizer(prompt).input_ids
+                current_len = len(input_ids)
+
+                if current_len > target_text_len:
+                    final_ids = input_ids[:target_text_len]
+                else:
+                    padding_needed = target_text_len - current_len
+                    final_ids = input_ids + [tokenizer.pad_token_id] * padding_needed
+
+                prompt = tokenizer.decode(final_ids, skip_special_tokens=True)
+                prompt_len = len(final_ids)
+            else:
+                prompt_len = len(tokenizer(prompt).input_ids)
 
             original_images = item["image_list"]
             final_images = original_images

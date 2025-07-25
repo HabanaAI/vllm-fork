@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 image_per_prompt = 0
+text_len = 0
 
 
 def convert_to_pytorch_benchmark_format(
