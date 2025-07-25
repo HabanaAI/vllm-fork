@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
 import json
@@ -126,18 +127,19 @@ class RayDistributedExecutor(DistributedExecutorBase):
         self.shutdown_workers = True
         self.terminate_ray = True
 
-    def shutdown(self) -> None:
-        logger.info(
-            "Shutting down Ray distributed executor. If you see error log "
-            "from logging.cc regarding SIGTERM received, please ignore because "
-            "this is the expected termination process in Ray.")
+    def shutdown(self, logger=logger) -> None:
+        if logger is not None:
+            logger.info(
+                "Shutting down Ray distributed executor. If you see error log "
+                "from logging.cc regarding SIGTERM received, please ignore "
+                "because this is the expected termination process in Ray.")
         if getattr(self, 'shutdown_workers', False):
-            self._run_workers("shutdown")
             self.shutdown_workers = False
+            getattr(self._run_workers, 'shutdown', lambda: None)()
         if getattr(self, 'terminate_ray', False):
+            self.terminate_ray = False
             for worker in self.workers:
                 worker.__ray_terminate__.remote()
-            self.terminate_ray = False
         if hasattr(self, "forward_dag") and self.forward_dag is not None:
             self.forward_dag.teardown()
             import ray
@@ -551,12 +553,12 @@ class RayDistributedExecutor(DistributedExecutorBase):
         ray.get(parallel_worker_tasks)
 
     def _check_ray_cgraph_installation(self):
-        import pkg_resources  # type: ignore
+        import importlib.metadata
+
         from packaging import version
 
         required_version = version.parse("2.43.0")
-        current_version = version.parse(
-            pkg_resources.get_distribution("ray").version)
+        current_version = version.parse(importlib.metadata.version("ray"))
         if current_version < required_version:
             raise ValueError(f"Ray version {required_version} is "
                              f"required, but found {current_version}")
