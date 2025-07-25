@@ -170,7 +170,20 @@ def run_vllm(
     requests: List[SampleRequest],
     n: int,
     engine_args: EngineArgs,
+    dp_size,
+    local_dp_rank,
+    global_dp_rank,
+    dp_master_ip,
+    dp_master_port,
+    out,
 ) -> float:
+    import os
+    os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
+    os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
+    os.environ["VLLM_DP_SIZE"] = str(dp_size)
+    os.environ["VLLM_DP_MASTER_IP"] = dp_master_ip
+    os.environ["VLLM_DP_MASTER_PORT"] = str(dp_master_port)
+
     from vllm import LLM, SamplingParams
     llm = LLM(**dataclasses.asdict(engine_args))
 
@@ -218,7 +231,7 @@ def run_vllm(
                 ignore_eos=True,
             ))
         end = time.perf_counter()
-    return end - start
+    out.append(end - start)
 
 
 async def run_vllm_async(
@@ -408,8 +421,43 @@ def main(args: argparse.Namespace):
                     args.disable_frontend_multiprocessing,
                 ))
         else:
-            elapsed_time = run_vllm(requests, args.n,
-                                    EngineArgs.from_cli_args(args))
+            # elapsed_time = run_vllm(requests, args.n,
+            #                         EngineArgs.from_cli_args(args))
+
+            from vllm.utils import get_open_port
+
+            dp_size = args.dp_size
+            node_size = args.node_size
+            node_rank = args.node_rank
+
+            if node_size == 1:
+                dp_master_ip = "127.0.0.1"
+                dp_master_port = get_open_port()
+            else:
+                dp_master_ip = args.master_addr
+                dp_master_port = args.master_port
+
+            assert dp_size % node_size == 0, "dp_size should be divisible by node_size"
+            dp_per_node = dp_size // node_size
+
+            from multiprocessing import Process, Manager
+
+            with Manager() as manager:
+                procs = []
+                shared_list = manager.list()
+                for local_dp_rank, global_dp_rank in enumerate(
+                        range(node_rank * dp_per_node, (node_rank + 1) * dp_per_node)):
+                    proc = Process(target=run_vllm,
+                                args=(requests, args.n,
+                                    EngineArgs.from_cli_args(args),
+                                    dp_size, local_dp_rank,
+                                    global_dp_rank, dp_master_ip, dp_master_port, shared_list))
+                    proc.start()
+                    procs.append(proc)
+                for proc in procs:
+                    proc.join(timeout=30000)
+                import statistics
+                elapsed_time = statistics.mean(shared_list)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -420,9 +468,9 @@ def main(args: argparse.Namespace):
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
     total_num_tokens = sum(request.prompt_len + request.expected_output_len
-                           for request in requests)
+                           for request in requests * args.dp_size)
     total_output_tokens = sum(request.expected_output_len
-                              for request in requests)
+                              for request in requests * args.dp_size)
     if is_multi_modal:
         print("\033[91mWARNING\033[0m: Multi-modal request detected. The "
               "following metrics are not accurate because image tokens are not"
@@ -436,7 +484,7 @@ def main(args: argparse.Namespace):
     if args.output_json:
         results = {
             "elapsed_time": elapsed_time,
-            "num_requests": len(requests),
+            "num_requests": len(requests) * args.dp_size,
             "total_num_tokens": total_num_tokens,
             "requests_per_second": len(requests) / elapsed_time,
             "tokens_per_second": total_num_tokens / elapsed_time,
@@ -491,6 +539,26 @@ if __name__ == "__main__":
                         action='store_true',
                         default=False,
                         help="Disable decoupled async engine frontend.")
+    parser.add_argument("--dp-size",
+                        type=int,
+                        default=2,
+                        help="Data parallel size")
+    parser.add_argument("--node-size",
+                        type=int,
+                        default=1,
+                        help="Total number of nodes")
+    parser.add_argument("--node-rank",
+                        type=int,
+                        default=0,
+                        help="Rank of the current node")
+    parser.add_argument("--master-addr",
+                        type=str,
+                        default="",
+                        help="Master node IP address")
+    parser.add_argument("--master-port",
+                        type=int,
+                        default=0,
+                        help="Master node port")
     # LoRA
     parser.add_argument(
         "--lora-path",
