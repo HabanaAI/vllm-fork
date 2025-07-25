@@ -194,7 +194,8 @@ class Scheduler(SchedulerInterface):
         while req_index < len(self.running) and token_budget > 0:
             request = self.running[req_index]
 
-            num_new_tokens = (request.num_tokens_with_spec -
+            num_new_tokens = (request.num_tokens_with_spec +
+                              request.num_output_placeholders -
                               request.num_computed_tokens)
             if (0 < self.scheduler_config.long_prefill_token_threshold <
                     num_new_tokens):
@@ -220,9 +221,11 @@ class Scheduler(SchedulerInterface):
             if num_new_tokens == 0:
                 # The request cannot be scheduled because one of the following
                 # reasons:
-                # 1. No new tokens to schedule. This may happen when PP>1 and
-                #    we have already scheduled all prompt tokens but they are
-                #    not finished yet.
+                # 1. No new tokens to schedule. This may happen when
+                #    (1) PP>1 and we have already scheduled all prompt tokens
+                #    but they are not finished yet.
+                #    (2) Async scheduling and the request has reached to either
+                #    its max_total_tokens or max_model_len.
                 # 2. The encoder budget is exhausted.
                 # 3. The encoder cache is exhausted.
                 # NOTE(woosuk): Here, by doing `continue` instead of `break`,
@@ -759,19 +762,10 @@ class Scheduler(SchedulerInterface):
             new_token_ids = generated_token_ids
             kv_transfer_params = None
 
-            # Append generated tokens and check for stop. Note that if
-            # a request is still being prefilled, we expect the model runner
-            # to return empty token ids for the request.
-            for num_new, output_token_id in enumerate(new_token_ids, 1):
-                request.append_output_token_ids(output_token_id)
-
-                # Check for stop and update request state.
-                # This must be called before we make the EngineCoreOutput.
-                stopped = check_stop(request, self.max_model_len)
-                if stopped:
-                    kv_transfer_params = self._free_request(request)
-                    del new_token_ids[num_new:]  # Trim new tokens if needed.
-                    break
+            # Check for stop and update request status.
+            if new_token_ids:
+                new_token_ids, stopped = self._update_request_with_output(
+                    request, new_token_ids)
 
             # Extract sample logprobs if needed.
             if request.sampling_params.logprobs is not None and logprobs:
@@ -860,6 +854,26 @@ class Scheduler(SchedulerInterface):
                 self.make_stats(spec_decoding_stats))
 
         return engine_core_outputs
+
+    def _update_request_with_output(
+        self,
+        request: Request,
+        new_token_ids: list[int],
+    ) -> tuple[list[int], bool]:
+        # Append generated tokens and check for stop. Note that if
+        # a request is still being prefilled, we expect the model runner
+        # to return empty token ids for the request.
+        stopped = False
+        for num_new, output_token_id in enumerate(new_token_ids, 1):
+            request.append_output_token_ids(output_token_id)
+
+            # Check for stop and update request state.
+            # This must be called before we make the EngineCoreOutput.
+            stopped = check_stop(request, self.max_model_len)
+            if stopped:
+                del new_token_ids[num_new:]  # Trim new tokens if needed.
+                break
+        return new_token_ids, stopped
 
     def get_request_counts(self) -> tuple[int, int]:
         """Returns (num_running_reqs, num_waiting_reqs)."""
