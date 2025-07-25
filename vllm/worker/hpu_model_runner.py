@@ -354,20 +354,16 @@ class HpuModelAdapter(torch.nn.Module):
                                                                       "true")
         self.sliding_window_right = 0
         if self.use_window_sdpa:
-            self.slice_size = int(
-                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
-
-            os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
+            self.slice_size = int(os.getenv("PT_HPU_SDPA_BC_FACTOR", "1024"))
             self.sliding_window_thld = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '8192'))
             self.sliding_window_right = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
-            assert self.sliding_window_right % self.slice_size == 0, \
+            assert self.sliding_window_right in (0, -1) or \
+                self.sliding_window_right % self.slice_size == 0, \
                 f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
                 f'not supported due to not a multiplier of '\
-                f'PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
+                f'PT_HPU_SDPA_BC_FACTOR({self.slice_size})!'
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -574,7 +570,7 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
-    def _update_use_window_sdpa(self, attn_metadata, seq_len):
+    def _update_use_window_sdpa(self, attn_metadata, seq_len, is_img):
         use_window_sdpa = False
         if self.use_window_sdpa and self.prefill_use_fusedsdpa:
             if self.slice_size != 0 and (seq_len % self.slice_size == 0):
@@ -588,11 +584,11 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
             if seq_len < self.sliding_window_thld:
-                use_window_sdpa=False
+                use_window_sdpa = False
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
         attn_metadata = attn_metadata._replace(
-            sliding_window_right=self.sliding_window_right)
+            sliding_window_right=self.sliding_window_right if is_img else 0)
         return attn_metadata
 
     def _update_metadata(self,
@@ -3896,8 +3892,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
+                    is_image = False if not model_input.multi_modal_kwargs or \
+                        'pixel_values' not in model_input.multi_modal_kwargs \
+                        else True
+
                     attn_metadata = self.model._update_use_window_sdpa(
-                        execute_model_kwargs['attn_metadata'], seq_len)
+                        execute_model_kwargs['attn_metadata'], seq_len,
+                        is_image)
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
