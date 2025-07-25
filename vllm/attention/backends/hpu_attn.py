@@ -562,6 +562,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         key = key.repeat_interleave(repeat_kv, dim=1)
                         value = value.repeat_interleave(repeat_kv, dim=1)
                         kv_shape = query_shape
+                else:
+                    window_size = (-1,-1)
 
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
