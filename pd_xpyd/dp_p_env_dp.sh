@@ -1,0 +1,72 @@
+#set -x
+
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$BASH_DIR"/pd_bucket.sh
+
+export PT_HPU_LAZY_MODE=1
+
+# DO NOT change unless you fully undersand its purpose
+export HABANA_VISIBLE_DEVICES="ALL"
+export VLLM_MLA_DISABLE_REQUANTIZATION=0
+export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
+export RAY_IGNORE_UNHANDLED_ERRORS="1"
+export PT_HPU_WEIGHT_SHARING=0
+export HABANA_VISIBLE_MODULES="0,1,2,3,4,5,6,7"
+export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
+
+export VLLM_MOE_N_SLICE=8
+export VLLM_EP_SIZE=8
+export VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0
+
+block_size=128
+
+unset VLLM_HPU_LOG_STEP_GRAPH_COMPILATION PT_HPU_METRICS_GC_DETAILS GRAPH_VISUALIZATION
+
+unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
+unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
+unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET_MAX
+unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
+
+export VLLM_EP_SIZE=8
+
+model_path=/local_dataset_2/pytorch/DeepSeek-R1-static-6layers/
+
+export VLLM_GPU_MEMORY_UTILIZATION=0.8
+export VLLM_GRAPH_RESERVED_MEM=0.1
+export VLLM_GRAPH_PROMPT_RATIO=1
+# params
+model_len=2176
+max_num_batched_tokens=5000
+max_num_seqs=2
+input_min=2048
+input_max=2048
+output_max=1
+
+unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
+unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
+unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET_MAX
+unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
+
+set_bucketing
+
+export VLLM_DECODE_BS_BUCKET_MIN=1
+export VLLM_DECODE_BS_BUCKET_STEP=1
+export VLLM_DECODE_BS_BUCKET_MAX=4
+export VLLM_DECODE_BLOCK_BUCKET_MIN=128
+export VLLM_DECODE_BLOCK_BUCKET_STEP=1
+export VLLM_DECODE_BLOCK_BUCKET_MAX=128
+
+echo " environments are reseted "
+
+env | grep VLLM_PROMPT_BS
+env | grep VLLM_PROMPT_SEQ
+env | grep VLLM_DECODE_BS
+env | grep VLLM_DECODE_BLOCK
+
+export VLLM_SKIP_WARMUP=True
+export VLLM_USE_V1=0
+
+# unset VLLM_SKIP_WARMUP
+#export PT_HPU_RECIPE_CACHE_CONFIG=./_prefill_cache,false,16384
+
+python benchmarks/benchmark_throughput.py  --input-len ${input_max} --output-len ${output_max} --num-prompts 100 --model ${model_path} --tensor-parallel-size 1 --max-num-seqs ${max_num_seqs} --dtype bfloat16 --block-size ${block_size} --gpu-memory-utilization 0.9 --use-v2-block-manager --trust-remote-code --max-model-len ${model_len} --dp-size 8
