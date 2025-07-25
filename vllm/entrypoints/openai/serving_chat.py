@@ -201,11 +201,7 @@ class OpenAIServingChat(OpenAIServing):
                 truncate_prompt_tokens=request.truncate_prompt_tokens,
                 add_special_tokens=request.add_special_tokens,
             )
-            # if engine_prompts:
-            #     logger.info(
-            #         "Structure of `engine_prompt` after creation:\n%s",
-            #         pprint.pformat(engine_prompts[0])
-            #     )
+
         except (ValueError, TypeError, RuntimeError,
                 jinja2.TemplateError) as e:
             logger.exception("Error in preprocessing prompt inputs")
@@ -261,9 +257,6 @@ class OpenAIServingChat(OpenAIServing):
 
                 trace_headers = (None if raw_request is None else await
                                  self._get_trace_headers(raw_request.headers))
-
-                # logger.info("SENDING TO ENGINE (REQUEST %s):\n%s",
-                #             request_id, pprint.pformat(engine_prompt))
 
                 if isinstance(sampling_params, BeamSearchParams):
                     generator = self.engine_client.beam_search(
