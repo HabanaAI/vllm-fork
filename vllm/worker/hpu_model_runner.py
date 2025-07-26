@@ -352,13 +352,18 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
+        self.sliding_window_right = 0
         if self.use_window_sdpa:
-            self.slice_size = int(
-                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
-
-            os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
+            self.slice_size = int(os.getenv("PT_HPU_SDPA_BC_FACTOR", "1024"))
+            self.sliding_window_thld = int(
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '8192'))
+            self.sliding_window_right = int(
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
+            assert self.sliding_window_right in (0, -1) or \
+                self.sliding_window_right % self.slice_size == 0, \
+                f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
+                f'not supported due to not a multiplier of '\
+                f'PT_HPU_SDPA_BC_FACTOR({self.slice_size})!'
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -565,10 +570,9 @@ class HpuModelAdapter(torch.nn.Module):
         kwargs['attn_metadata'] = attn_metadata
         return attn_metadata
 
-    def _update_use_window_sdpa(self, attn_metadata, seq_len):
+    def _update_use_window_sdpa(self, attn_metadata, seq_len, is_img):
         use_window_sdpa = False
         if self.use_window_sdpa and self.prefill_use_fusedsdpa:
-            # TODO: We can add min token_len for the window_sdpa to be used.
             if self.slice_size != 0 and (seq_len % self.slice_size == 0):
                 use_window_sdpa = True
             else:
@@ -579,7 +583,12 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_MIN: 1024 "
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
+            if seq_len < self.sliding_window_thld:
+                use_window_sdpa = False
+
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
+        attn_metadata = attn_metadata._replace(
+            sliding_window_right=self.sliding_window_right if is_img else 0)
         return attn_metadata
 
     def _update_metadata(self,
@@ -609,7 +618,6 @@ class HpuModelAdapter(torch.nn.Module):
                     attn_metadata = self._set_attn_bias_for_sliding_window(
                         attn_metadata, batch_size, seq_len,
                         self.interleaved_sliding_window, device, dtype)
-
         else:
             attn_metadata = self._set_block_mapping(attn_metadata, batch_size,
                                                     device, dtype, False)
@@ -1482,17 +1490,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
 
-    def _get_position_pad(self) -> int:
-        """
-        For gemma3 models,
-        due to the Hack in Gemma3ForConditionalGeneration::prepare_attn_masks,
-        '0' can't be used as pad for input position tensor.
-        In case, it might have '0's for bucketing, those '0' will be counted as
-        new sequence in the prepare_attn_masks() which is wrong.
-        """
-        model_type = getattr(self.model_config.hf_config, 'model_type', '')
-        return -1 if model_type == 'gemma3' else 0
-
     def add_vision_buckets_to_mrope_mm_optimized(self):
         if self.mm_registry is not None:
             model = self.get_model()
@@ -1748,11 +1745,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
                                                      input_mrope_positions=input_mrope_positions,
                                                      max_prompt_len=max_prompt_len,
-                                                     pad=self._get_position_pad())
+                                                     pad=0)
         else:
             input_positions = make_cpu_tensor(input_positions,
                                               max_len=max_prompt_len,
-                                              pad=self._get_position_pad(),
+                                              pad=0,
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
@@ -2662,6 +2659,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
+            'sliding_window_right',
         ])
         return attention_metadata
 
@@ -3895,7 +3893,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
                     attn_metadata = self.model._update_use_window_sdpa(
-                        execute_model_kwargs['attn_metadata'], seq_len)
+                        execute_model_kwargs['attn_metadata'], seq_len,
+                        bool(model_input.multi_modal_kwargs and \
+                       'pixel_values' in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
