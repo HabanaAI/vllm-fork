@@ -3892,13 +3892,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
-                    is_image = True if model_input.multi_modal_kwargs and \
-                        'pixel_values' in model_input.multi_modal_kwargs \
-                        else False
-
                     attn_metadata = self.model._update_use_window_sdpa(
                         execute_model_kwargs['attn_metadata'], seq_len,
-                        is_image)
+                        bool(model_input.multi_modal_kwargs and \
+                       'pixel_values' in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
