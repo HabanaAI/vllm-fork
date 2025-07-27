@@ -441,6 +441,7 @@ class Gemma3MultiModalProjector(nn.Module):
                                      stride=self.kernel_size)
 
     def forward(self, vision_outputs: torch.Tensor):
+        #print("libin debug Gemma3MultiModalProjector input shape ", vision_outputs.shape)
         batch_size, _, seq_length = vision_outputs.shape
 
         reshaped_vision_outputs = vision_outputs.transpose(1, 2)
@@ -570,7 +571,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             pixel_values,
         )
 
-        if is_hpu and len(self.graphed_multimodal_buckets) > 1:
+
+        if is_hpu:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
                     self.vision_buckets.multimodal_buckets)
             start_idx = 0
@@ -581,11 +583,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 batch_sliced_image_features = \
                         image_features[start_idx:end_idx, ...]
                 if is_lazy:
+                    #print("libin debug _process_image_input ", batch_sliced_image_features.shape)
                     image_embeds_multibatches += \
                             [self.multi_modal_projector(
                                 batch_sliced_image_features,
                                 bypass_hpu_graphs=i
-                                not in self.graphed_multimodal_buckets)]
+                                not in self.graphed_multimodal_buckets
+                                and len(self.graphed_multimodal_buckets) > 0)]
                 else:
                     image_embeds_multibatches += \
                             [self.multi_modal_projector( \
