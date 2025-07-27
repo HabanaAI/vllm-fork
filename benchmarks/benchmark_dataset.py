@@ -92,9 +92,16 @@ class BenchmarkDataset(ABC):
         This method is used for chat models that expect a specific conversation
         format.
         """
+        import benchmark_utils
+        images = benchmark_utils.image_per_prompt
         content = [{"text": prompt, "type": "text"}]
         if mm_content is not None:
-            content.append(mm_content)
+            if images > 1:
+                for i in range(images):
+                    content.append(mm_content)
+            else:
+                content.append(mm_content)
+
         return [{"role": "user", "content": content}]
 
     def load_data(self) -> None:
@@ -740,6 +747,7 @@ class ConversationDataset(HuggingFaceDataset):
         num_requests: int,
         output_len: Optional[int] = None,
         enable_multimodal_chat: bool = False,
+        input_len: Optional[int] = None,
         **kwargs,
     ) -> list:
         # Filter examples with at least 2 conversations
@@ -754,8 +762,14 @@ class ConversationDataset(HuggingFaceDataset):
             prompt, completion = conv[0]["value"], conv[1]["value"]
 
             prompt_ids = tokenizer(prompt).input_ids
+            if input_len > 0:
+                print("libin debug origing prompt_len ",len(prompt_ids) )
+                tokens = (prompt_ids * (input_len // len(prompt_ids) + 1))[:input_len]
+                prompt =  tokenizer.decode(tokens)
+                prompt_ids = tokenizer(prompt).input_ids
             completion_ids = tokenizer(completion).input_ids
             prompt_len = len(prompt_ids)
+            print("libin debug prompt_len ",prompt_len )
             completion_len = len(completion_ids)
             output_len = completion_len if dynamic_output else output_len
             assert isinstance(output_len, int) and output_len > 0
@@ -815,6 +829,7 @@ class VisionArenaDataset(HuggingFaceDataset):
             prompt = parser_fn(item)
             mm_content = process_image(item["images"][0])
             prompt_len = len(tokenizer(prompt).input_ids)
+            
             if enable_multimodal_chat:
                 # Note: when chat is enabled the request prompt_len is no longer
                 # accurate and we will be using request output to count the
