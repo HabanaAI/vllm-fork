@@ -2955,7 +2955,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    intermediate_tensors=intermediate_tensors,
                                    warmup_mode=True,
                                    ctx_blocks=ctx,
-                                   is_dummy_run=is_dummy_run)
+                                   is_dummy_run=is_dummy_run,
+                                   is_pt_profiler_run=is_pt_profiler_run)
             else:  # decode with multi-step
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
@@ -3177,12 +3178,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
+            if self.is_mm_run():
+                img_args = (int(seq_len) //
+                            self.model.model.config.mm_tokens_per_image
+                            if self.is_mm_optimized else int(seq_len))
             self.warmup_scenario(int(bs),
                                  int(seq_len),
                                  ctx,
                                  is_prompt,
                                  kv_caches,
-                                 is_pt_profiler_run=True)
+                                 is_pt_profiler_run=True,
+                                 img_args=img_args if self.is_mm_run() else None)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -3658,6 +3664,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         seqs=None,
         ctx_blocks: int = 1,
         is_dummy_run: bool = False,
+        is_pt_profiler_run: bool = False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
@@ -3902,7 +3909,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
-                            if warmup_mode:
+                            if warmup_mode and not is_pt_profiler_run:
                                 bypass_model_exec = True
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
