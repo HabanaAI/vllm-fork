@@ -3180,13 +3180,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 img_args = (int(seq_len) //
                             self.model.model.config.mm_tokens_per_image
                             if self.is_mm_optimized else int(seq_len))
-            self.warmup_scenario(int(bs),
-                                 int(seq_len),
-                                 ctx,
-                                 is_prompt,
-                                 kv_caches,
-                                 is_pt_profiler_run=True,
-                                 img_args=img_args if self.is_mm_run() else None)
+            self.warmup_scenario(
+                int(bs),
+                int(seq_len),
+                ctx,
+                is_prompt,
+                kv_caches,
+                is_pt_profiler_run=True,
+                img_args=img_args if self.is_mm_run() else None)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
