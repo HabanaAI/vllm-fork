@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from io import BytesIO
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union, List
 
 import numpy as np
 import pandas as pd
@@ -1207,34 +1207,31 @@ class MuirBenchDataset(HuggingFaceDataset):
         enable_multimodal_chat: bool = False,
         input_len: Optional[int] = None,
         **kwargs,
-    ) -> list:
-        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
-        sampled_requests = []
+   ) -> List[SampleRequest]:
+        output_len = output_len or self.DEFAULT_OUTPUT_LEN
+        sampled_requests: List[SampleRequest] = []
 
         for item in self.data:
             if len(sampled_requests) >= num_requests:
                 break
-            parser_fn = self.SUPPORTED_DATASET_PATHS.get(self.dataset_path)
-            if parser_fn is None:
-                raise ValueError(f"Unsupported dataset path: {self.dataset_path}")
+            prompt = self.SUPPORTED_DATASET_PATHS[self.dataset_path](item)
+            original_prompt = prompt
 
-            prompt = parser_fn(item)
-            if input_len is not None and input_len > 0:
-                input_ids = tokenizer(prompt).input_ids
-                current_len = len(input_ids)
+            input_ids = tokenizer(original_prompt, add_special_tokens=False).input_ids
 
-                if current_len > input_len:
+            if input_len and input_len > 0:
+                if len(input_ids) >= input_len:
                     final_ids = input_ids[:input_len]
-                elif current_len < input_len:
-                    final_ids = (input_ids * (input_len // len(input_ids) + 1))[:input_len]
-                    #padding_needed = input_len- current_len
-                    #final_ids = input_ids + [tokenizer.pad_token_id] * padding_needed
+                else:
+                    pad_str = " hi"
+                    pad_id = tokenizer(pad_str, add_special_tokens=False).input_ids[0]
+                    padding = [pad_id] * (input_len - len(input_ids))
+                    final_ids = input_ids + padding
 
-                prompt = tokenizer.decode(final_ids, skip_special_tokens=True)
+                prompt = tokenizer.decode(final_ids, skip_special_tokens=False)
                 prompt_len = len(final_ids)
-                print("libin debug prompt_len ", prompt_len)
             else:
-                prompt_len = len(tokenizer(prompt).input_ids)
+                prompt_len = len(input_ids)
 
             original_images = item["image_list"]
             final_images = original_images
