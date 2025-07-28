@@ -496,6 +496,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         ) if attn_metadata.slot_mapping is not None else None
         key_cache = None
         value_cache = None
+
+
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -562,6 +564,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         key = key.repeat_interleave(repeat_kv, dim=1)
                         value = value.repeat_interleave(repeat_kv, dim=1)
                         kv_shape = query_shape
+
+                    # TODO: Currently when Slice kernel is used, order of graph
+                    # for kvcache index copy and sdpa are mixed up, causing
+                    # perf issue. Split the graph here.
+                    import habana_frameworks.torch as htorch
+                    htorch.core.mark_step()
                 else:
                     window_size = (-1, -1)
 
