@@ -436,7 +436,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         # with accuracy issue. Will remove this once it's fixed.
         if self.sliding_window is not None:
             self.sliding_window_right = int(
-                        os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
 
     def _maybe_init_alibi_biases(
         self,
