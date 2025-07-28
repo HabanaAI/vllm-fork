@@ -79,7 +79,7 @@ class Proxy:
         custom_create_chat_completion: Optional[Callable[
             [Request], StreamingResponse]] = None,
         generator_on_p_node:bool = False,
-        debug_mode:bool = False,
+        benchmark_mode:bool = False,
         repeat_p_request:int = 1,
         repeat_d_times:int = 100
     ):
@@ -94,7 +94,7 @@ class Proxy:
         self.router = APIRouter()
         self.setup_routes()
         self.generator = P_first_token_generator if generator_on_p_node else D_first_token_generator
-        self.debug_mode = debug_mode
+        self.benchmark_mode = benchmark_mode
         self.repeat_p_request = repeat_p_request
         self.repeat_d_times = repeat_d_times
 
@@ -233,7 +233,7 @@ class Proxy:
             logger.error("Error in add_instance_endpoint: %s", str(e))
             raise HTTPException(status_code=500, detail=str(e)) from e
 
-    async def forward_request_debug_mode(self, url, data, use_chunked=True):
+    async def forward_request_benchmark_mode(self, url, data, use_chunked=True):
         async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
             headers = {
                 "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
@@ -327,8 +327,8 @@ class Proxy:
         }
         return status
 
-    def handle_debug_mode_requests(self, request):
-        if self.debug_mode != 1:
+    def handle_benchmark_mode_requests(self, request):
+        if self.benchmark_mode != 1:
             return
 
         if self.repeat_p_request == 0:
@@ -340,7 +340,7 @@ class Proxy:
                     raise HTTPException(status_code=503, detail="No decode instances available")
                 try:
                     asyncio.create_task(
-                        self.forward_request_debug_mode(
+                        self.forward_request_benchmark_mode(
                             f"http://{decode_instance}/v1/completions",
                             request
                         )
@@ -371,7 +371,7 @@ class Proxy:
                     raise http_exc
 
             # Perform kv recv and decoding stage
-            self.handle_debug_mode_requests(request)
+            self.handle_benchmark_mode_requests(request)
 
             decode_instance = self.schedule(self.decode_cycler)
             value = value.strip().decode("utf-8").removesuffix("data: [DONE]").encode("utf-8")
@@ -420,7 +420,7 @@ class Proxy:
                 self.remove_instance_endpoint("prefill", prefill_instance)
                 raise http_exc
             # Perform kv recv and decoding stage
-            self.handle_debug_mode_requests(request)
+            self.handle_benchmark_mode_requests(request)
 
             decode_instance = self.schedule(self.decode_cycler)
             value = value.strip().decode("utf-8").removesuffix("data: [DONE]").encode("utf-8")
@@ -551,7 +551,7 @@ class ProxyServer:
             custom_create_completion=create_completion,
             custom_create_chat_completion=create_chat_completion,
             generator_on_p_node=args.generator_on_p_node,
-            debug_mode=args.debug_mode,
+            benchmark_mode=args.benchmark_mode,
             repeat_p_request=args.repeat_p_request,
             repeat_d_times=args.repeat_d_times,
         )
@@ -652,9 +652,9 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--debug_mode",
+        "--benchmark_mode",
         action="store_true",
-        help="debug mode, single P for multiple D ",
+        help="benchmark mode, single P for multiple D ",
     )
 
     parser.add_argument(
