@@ -356,7 +356,7 @@ class HpuModelAdapter(torch.nn.Module):
         if self.use_window_sdpa:
             self.slice_size = int(os.getenv("PT_HPU_SDPA_BC_FACTOR", "1024"))
             self.sliding_window_thld = int(
-                os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '8192'))
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '10240'))
             self.sliding_window_right = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
             assert self.sliding_window_right in (0, -1) or \
@@ -572,7 +572,8 @@ class HpuModelAdapter(torch.nn.Module):
 
     def _update_use_window_sdpa(self, attn_metadata, seq_len, is_img):
         use_window_sdpa = False
-        if self.use_window_sdpa and self.prefill_use_fusedsdpa:
+        if self.use_window_sdpa and seq_len >= self.sliding_window_thld and \
+           self.prefill_use_fusedsdpa:
             if self.slice_size != 0 and (seq_len % self.slice_size == 0):
                 use_window_sdpa = True
             else:
@@ -582,9 +583,6 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_EXPONENTIAL_BUCKETING: False "
                     f"VLLM_PROMPT_SEQ_BUCKET_MIN: 1024 "
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
-
-            if seq_len < self.sliding_window_thld:
-                use_window_sdpa = False
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
         attn_metadata = attn_metadata._replace(
