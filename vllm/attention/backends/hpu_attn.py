@@ -406,7 +406,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
-
         self.prompt_position_bias = None
         self.prev_attn = None
         self.alibi_slopes = None
@@ -552,6 +551,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     attn_bias = attn_metadata.window_attn_bias
 
                 if attn_metadata.use_window_sdpa:
+                    # TODO: Currently when sliding_window FusedSDPA is used,
+                    # the order of graphs for kvcache index copy and sdpa are
+                    # mixed up, causing the perf issue. Split the graph here.
+                    import habana_frameworks.torch as htorch
+                    htorch.core.mark_step()
+
                     attn_bias = attn_metadata.attn_bias
                     window_size = (self.sliding_window,
                                    attn_metadata.sliding_window_right)
@@ -559,17 +564,11 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     # TODO: Currently HPU doesn't support GQA for FusedSDPA
                     # with causal + window, so repeat KV so QKV are all the
                     # same shape.
-                    if query_shape != kv_shape:
+                    if query_shape != kv_shape and attn_bias is None:
                         repeat_kv = self.num_heads // self.num_kv_heads
                         key = key.repeat_interleave(repeat_kv, dim=1)
                         value = value.repeat_interleave(repeat_kv, dim=1)
                         kv_shape = query_shape
-
-                    # TODO: Currently when Slice kernel is used, order of graph
-                    # for kvcache index copy and sdpa are mixed up, causing
-                    # perf issue. Split the graph here.
-                    import habana_frameworks.torch as htorch
-                    htorch.core.mark_step()
                 else:
                     window_size = (-1, -1)
 
