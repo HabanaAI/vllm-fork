@@ -21,7 +21,7 @@ from vllm_hpu_extension.defragmentation import OnlineDefragmenter
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
                                          HabanaMemoryProfiler,
                                          HabanaProfilerCounterHelper,
-                                         format_bytes)
+                                         format_bytes, setup_profiler)
 from vllm_hpu_extension.runtime import finalize_config, get_config
 from vllm_hpu_extension.utils import pad_list
 
@@ -1591,6 +1591,7 @@ class HPUModelRunner:
             cached = {
                 req.req_id: flatten(req.new_block_ids)
                 for req in scheduler_output.scheduled_cached_reqs
+                if req.new_block_ids
             }
             self.defragmenter.update_state(new | cached,
                                            scheduler_output.finished_req_ids)
