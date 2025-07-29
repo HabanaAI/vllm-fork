@@ -143,7 +143,6 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     window_block_usage: Optional[torch.Tensor] = None
     window_attn_bias: Optional[torch.Tensor] = None
     use_window_sdpa: Optional[bool] = None
-    sliding_window_right: Optional[int] = None
 
 
 @dataclass
@@ -433,6 +432,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                       "is not implemented for "
                                       "HPUAttentionImpl")
 
+        # TODO: Currently, there is limitation of SLIDE_RIGHT value
+        # with accuracy issue. Will remove this once it's fixed.
+        if self.sliding_window is not None:
+            self.sliding_window_right = int(
+                        os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
+
     def _maybe_init_alibi_biases(
         self,
         max_seq_len,
@@ -559,7 +564,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
 
                     attn_bias = attn_metadata.attn_bias
                     window_size = (self.sliding_window,
-                                   attn_metadata.sliding_window_right)
+                        0 if attn_bias is None else self.sliding_window_right)
                     common_args['window_size'] = window_size
                     # TODO: Currently HPU doesn't support GQA for FusedSDPA
                     # with causal + window, so repeat KV so QKV are all the
