@@ -97,7 +97,7 @@ _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
 DUMMY_TOKEN_ID = -1
-UNSET_IMG_ARGS = 9999999
+DEFAULT_IMG_ARGS = 1
 shutdown_inc_called = False
 
 
@@ -123,7 +123,8 @@ class VisionBuckets:
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
                     multimodal_buckets = [
-                        1600, 3136, 4096, 6400, 7744, 9216, 12544
+                        #1600, 3136, 4096, 6400, 7744, 9216, 12544
+                        1600, 4096, 6400
                     ]
             else:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
@@ -359,7 +360,6 @@ class HpuModelAdapter(torch.nn.Module):
             self.slice_size = int(os.getenv("PT_HPU_SDPA_BC_FACTOR", "1024"))
             self.sliding_window_thld = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '8192'))
-
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -1395,6 +1395,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # and return True only it's avialble, or return separately.
         #return (img_args) in self.graphed_multimodal_buckets
         return not self.enforce_eager
+
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
 
@@ -2659,15 +2660,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
-                                                    lora_request,
-                                                    seq_len):
+                                                    lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
-        if img_args == UNSET_IMG_ARGS:
-            # Using the largest bucket
-            img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
 
         if self.model_is_mrope:
+            num_patches = img_args
+            if num_patches == DEFAULT_IMG_ARGS:
+                # Using the largest bucket
+                num_patches = self.get_model(
+                ).vision_buckets.multimodal_buckets[-1]
+
             if not hasattr(self.get_model().config, "vision_config"):
                 raise ValueError("Expect mrope model to have vision_config")
             vision_config = self.get_model().config.vision_config
@@ -2676,12 +2679,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     "Expect mrope model to have spatial_merge_size")
 
             spatial_merge_unit = vision_config.spatial_merge_size**2
-            num_image_tokens = img_args // spatial_merge_unit
-            assert img_args % 8 == 0, (
-                f"Expects img_args to be multiples of 8, got: {img_args}")
-            image_h = img_args // 8
+            num_image_tokens = num_patches // spatial_merge_unit
+            assert num_patches % 8 == 0, (
+                f"Expects num_patches to be multiples of 8, got: {num_patches}"
+            )
+            image_h = num_patches // 8
             image_grid_thw = torch.tensor(
-                [[1, image_h, int(img_args / image_h)]])
+                [[1, image_h, int(num_patches / image_h)]])
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
                 1176)  # TODO: figure out the variable name
@@ -2706,7 +2710,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         image_token_id = self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
-        prompt_token_ids = [0] * (seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
+        prompt_token_ids = [0] * (
+            seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
 
         placeholders_by_modality = {
@@ -2814,7 +2819,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=True,
             kv_caches=kv_caches,
             is_pt_profiler_run=False,
-            img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
+            img_args=DEFAULT_IMG_ARGS if self.is_mm_run() else None,
             is_lora_profile_run=True,
         )
 
@@ -2829,7 +2834,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_prompt=False,
             kv_caches=None,
             is_pt_profiler_run=False,
-            img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
+            img_args=DEFAULT_IMG_ARGS if self.is_mm_run() else None,
             is_lora_profile_run=True,
             num_iters=1,
             align_worker=True,
@@ -3070,7 +3075,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     kv_caches,
                     temperature=1.0
                     if batch_size not in warmed_random_sampler_bs else 0,
-                    img_args=1 if self.is_mm_run() else None,
+                    img_args=DEFAULT_IMG_ARGS if self.is_mm_run() else None,
                 )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
