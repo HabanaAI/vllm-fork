@@ -1,6 +1,7 @@
 echo "1. setting up general requirement......."
 apt update
 apt install git wget curl net-tools sudo iputils-ping etcd  -y
+pip install colorlog
 
 echo "2. setting up mooncake mooncake-transfer-engine private build............."
 #Mooncake

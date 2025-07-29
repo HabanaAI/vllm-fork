@@ -18,7 +18,7 @@ bash setup_env.sh
 
 ## Prefill/Decode Disaggregation & Data Parallel Usage
 
-0. prepare and modify mooncake.json
+### 0. prepare and modify mooncake.json
 
 ```bash
 # create a new file with the name "mooncake_$machine.json (mooncake_g1.json, g1 is the machine name)
@@ -29,28 +29,29 @@ bash setup_env.sh
 `master_server_address` is the remote machine IP where mooncake master is launched. high speed network is preferred.
 ```
 
-1. Adjust 1p_start_prefill.sh to automatically launch/stop etc & mooncake master server. refer to following example:
+### 1. Adjust 1p_start_prefill.sh to automatically launch/stop etc & mooncake master server. refer to following example:
 
 ```bash
 if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
-    if [ "$DEBUG_MODE" == "1" ]; then
-	source "$BASH_DIR"/start_etc_mooncake_master.sh debug
-	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh debug"
+    if [ "$BENCHMARK_MODE" == "1" ]; then
+       	source "$BASH_DIR"/start_etc_mooncake_master.sh benchmark
+       	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh benchmark"
     else
-	source "$BASH_DIR"/start_etc_mooncake_master.sh
-	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh"
+       	source "$BASH_DIR"/start_etc_mooncake_master.sh
+       	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh"
     fi
 fi
+
 ```
 
-2. Adjust dp0_xp2d_start_decode.sh, dp1_xp2d_start_decode.sh for decode node(DP16/2Nodes as an example)
+### 2. Adjust dp0_xp2d_start_decode.sh, dp1_xp2d_start_decode.sh for decode node(DP16/2Nodes as an example)
 
 ```bash
 last line: source "$BASH_DIR"/dp_start_decode.sh g13 16 $TP_SIZE 0 "10.239.129.81" 
 parameters are: machine, DP Size, TP Size, DP Index, DP Host IP
 ```
 
-3. Adjust proxy server, xpyd_start_proxy.sh
+### 3. Adjust proxy server, xpyd_start_proxy.sh
 
 ```bash
 # Adjust Prefill/Decode IPs
@@ -58,17 +59,17 @@ PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10
 DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
 ```
 
-4. Start prefill server(s): source 1p_start_prefill.sh $machine (note: the machine with etcd/mooncake master MUST be launched firstly)
+### 4. Start prefill server(s): source 1p_start_prefill.sh $machine (note: the machine with etcd/mooncake master MUST be launched firstly)
 
-5. Start decode servers(s): source dp0_xp2d_start_decode.sh / source dp1_xp2d_start_decode.sh
+### 5. Start decode servers(s): source dp0_xp2d_start_decode.sh / source dp1_xp2d_start_decode.sh
 
-6. Start proxy server: bash xpyd_start_proxy.sh x y z false
+### 6. Start proxy server: bash xpyd_start_proxy.sh x y z false
 
 ```bash
 # note: x for prefill nodes number, y for decode nodes number, z for decode tp size, false for first token from decode
 ```
 
-7. Launch client command for inference. --host ip is the proxy server ip
+### 7. Launch client command for inference. --host ip is the proxy server ip
 
 ## Benchmark mode:
 
