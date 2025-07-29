@@ -500,8 +500,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         ) if attn_metadata.slot_mapping is not None else None
         key_cache = None
         value_cache = None
-
-
         if kv_cache is not None and isinstance(kv_cache, tuple):
             key_cache, value_cache = HPUPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -563,8 +561,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     htorch.core.mark_step()
 
                     attn_bias = attn_metadata.attn_bias
-                    window_size = (self.sliding_window,
-                        0 if attn_bias is None else self.sliding_window_right)
+                    window_size = (self.sliding_window, 0 if attn_bias is None
+                                   else self.sliding_window_right)
                     common_args['window_size'] = window_size
                     # TODO: Currently HPU doesn't support GQA for FusedSDPA
                     # with causal + window, so repeat KV so QKV are all the
