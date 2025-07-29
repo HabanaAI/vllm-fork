@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import collections
 import contextlib
+import copy
 import functools
 import itertools
 import math
@@ -16,14 +17,20 @@ import torch
 import torch.distributed
 import vllm_hpu_extension.environment as environment
 from vllm_hpu_extension.bucketing.common import HPUBucketingManager
-from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
+from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
+                                         HabanaMemoryProfiler,
+                                         HabanaProfilerCounterHelper,
+                                         format_bytes)
 from vllm_hpu_extension.runtime import get_config
 
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import get_attn_backend
 from vllm.config import VllmConfig
-from vllm.forward_context import set_forward_context
+from vllm.distributed.kv_transfer import (get_kv_transfer_group,
+                                          has_kv_transfer_group)
+from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
+from vllm.forward_context import get_forward_context, set_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
@@ -127,6 +134,10 @@ class DecodeInputData:
     position_ids: Optional[torch.Tensor] = None
     attn_metadata: Optional[HPUAttentionMetadataV1] = None
     logits_indices: Optional[torch.Tensor] = None
+
+
+class BucketingFailedException(Exception):
+    pass
 
 
 def bool_helper(value):
@@ -391,6 +402,7 @@ class HpuModelAdapter(torch.nn.Module):
         # kwargs['attn_metadata'].slot_mapping, compared to untrimmed metadata
         kwargs = kwargs.copy()
         #        selected_token_indices = kwargs.pop('selected_token_indices')
+        is_warmup = kwargs.get('warmup_mode', False)
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
         input_ids = kwargs['input_ids']
@@ -404,7 +416,12 @@ class HpuModelAdapter(torch.nn.Module):
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config):
+            if not is_warmup:
+                self.maybe_start_load_kv()
             hidden_states = self.model(*args, **kwargs)
+            if not is_warmup:
+                self.maybe_wait_for_kv_save()
+
             if self._rotary_prepare_cos_sin is not None:
                 self._reset_rotary_cos_sin()
         return hidden_states
@@ -423,6 +440,22 @@ class HpuModelAdapter(torch.nn.Module):
     # @property
     # def sampler(self):
     #    return self.model.sampler
+
+    @staticmethod
+    def maybe_start_load_kv():
+        if has_kv_transfer_group():
+            kv_connector = get_kv_transfer_group()
+
+            # Background KV cache transfers happen here.
+            # These transfers are designed to be async and the requests
+            # involved may be disjoint from the running requests.
+            # Do this here to save a collective_rpc.
+            kv_connector.start_load_kv(get_forward_context())
+
+    @staticmethod
+    def maybe_wait_for_kv_save() -> None:
+        if has_kv_transfer_group():
+            get_kv_transfer_group().wait_for_save()
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
@@ -521,6 +554,7 @@ class HPUModelRunner:
         self,
         vllm_config: VllmConfig,
         device: torch.device = 'hpu',
+        is_driver_worker: bool = False,
     ):
         # TODO: use ModelRunnerBase.__init__(self, vllm_config=vllm_config)
         environment.set_vllm_config(vllm_config)
@@ -534,6 +568,7 @@ class HPUModelRunner:
         self.speculative_config = vllm_config.speculative_config
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
+        self.is_driver_worker = is_driver_worker
 
         self.sampler = get_sampler()
 
@@ -632,6 +667,9 @@ class HPUModelRunner:
         # TODO(madamczyk-intel): add a knob for that
         # TODO(madamczyk-intel): debug why increasing it lowers acc
         self.logits_rounding = 1
+        # High-level profiler
+        self.profiler = HabanaHighLevelProfiler()
+        self.profiler_counter_helper = HabanaProfilerCounterHelper()
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
@@ -696,6 +734,8 @@ class HPUModelRunner:
             req_index = self.input_batch.remove_request(req_id)
             if req_index is not None:
                 removed_req_indices.append(req_index)
+            if req_id in self.input_batch.req_type:
+                del self.input_batch.req_type[req_id]
 
         # Remove the unscheduled requests from the persistent batch.
         # NOTE(woosuk): The unscheduled requests are either preempted requests
@@ -826,6 +866,10 @@ class HPUModelRunner:
         assert self.model is not None
         return self.model
 
+    def is_decoder_only(self, req_id) -> bool:
+        return bool(req_id in self.input_batch.req_type and \
+            self.input_batch.req_type[req_id] == "decode")
+
     def _get_prompts_and_decodes(
         self,
         scheduler_output: "SchedulerOutput",
@@ -835,24 +879,44 @@ class HPUModelRunner:
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
 
+        if scheduler_output.kv_connector_metadata:
+            requests = scheduler_output.kv_connector_metadata.requests
+        else:
+            requests = None
+
         # Traverse decodes first
         decode_req_ids = []
+        num_computed_tokens_decode = []
         for i in range(num_reqs):
             req_id = self.input_batch.req_ids[i]
             assert req_id is not None
+
+            if requests is not None and req_id not in self.input_batch.req_type:
+                for request in requests:
+                    if request.req_id == req_id:
+                        self.input_batch.req_type[req_id] = "prefill" \
+                            if request.load_spec is None else "decode"
+                        break
 
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
             num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
                 req_id]
 
-            if num_computed_tokens < num_prompt_tokens:
+            if num_computed_tokens < num_prompt_tokens and \
+                not self.is_decoder_only(req_id):
                 # This is prompt
                 break
 
             # This is decode
-            assert num_scheduled_tokens == 1
+            if not self.is_decoder_only(req_id):
+                assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
+            num_computed_tokens_decode.append(int(num_computed_tokens + 1))
+
+        if self.profiler.enabled:
+            self.profiler_counter_helper.capture_decode_seq_stats(
+                num_computed_tokens_decode)
 
         # Traverse prompts
         prompt_req_ids = []
@@ -966,11 +1030,12 @@ class HPUModelRunner:
 
     def _bucketize_2d_prompt(self, seq_lens, num_blocks):
         bs = len(seq_lens)
+        if bs > self.max_prefill_batch_size:
+            raise BucketingFailedException
         seq = max(seq_lens)
         num_blocks = max(num_blocks) if len(num_blocks) > 0 else 0
-        bs, seq, _ = self.bucketing_manager.find_prompt_bucket(
+        bs, seq, num_blocks = self.bucketing_manager.find_prompt_bucket(
             bs, seq, num_blocks)
-        num_blocks = round_up(num_blocks, 32)
         return (bs, seq, num_blocks)
 
     def _get_prompt_bucketing_fn(self):
@@ -982,8 +1047,11 @@ class HPUModelRunner:
     def _can_merge_prefill_contents(self, lhs, rhs):
         combined_num_tokens = lhs.get_num_tokens() + rhs.get_num_tokens()
         bucketing_fn = self._get_prompt_bucketing_fn()
-        target_bs, target_seq, target_blocks = bucketing_fn(
-            combined_num_tokens, [])
+        try:
+            target_bs, target_seq, target_blocks = bucketing_fn(
+                combined_num_tokens, [])
+        except BucketingFailedException:
+            return False
         return target_bs <= self.max_prefill_batch_size and\
             target_bs * target_seq <= self.max_num_tokens
 
@@ -1063,6 +1131,8 @@ class HPUModelRunner:
         token_ids = contents.token_ids
         req_ids = contents.req_ids
         query_lens = [len(tids) for tids in contents.token_ids]
+        if self.profiler.enabled:
+            self.profiler_counter_helper.capture_prompt_seq_stats(query_lens)
         context_lens = contents.context_lens
 
         token_positions = [
@@ -1319,7 +1389,7 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            if idx < num_decodes:
+            if idx < num_decodes and not self.is_decoder_only(req_id):
                 assert seq_num_scheduled_tokens == 1
         return (self._prepare_prefill_inputs(num_prefills, num_decodes,
                                              num_scheduled_tokens),
@@ -1341,8 +1411,8 @@ class HPUModelRunner:
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
             logger.warning(
-                "Configuration: (%s, %s, %s, %s) was not warmed-up!", phase,
-                batch_size, seq_len, num_blocks)
+                "Configuration: rank (%s, %s, %s, %s, %s) was not warmed-up!",
+                os.getenv('RANK', '0'), phase, batch_size, seq_len, num_blocks)
 
     def _execute_model_generic(self,
                                token_ids,
@@ -1367,17 +1437,32 @@ class HPUModelRunner:
             # no hpu graphs for t.compile?
             use_graphs = False
         trimmed_attn_metadata = trim_attn_metadata(attn_metadata)
-        hidden_states = self.model.forward(input_ids=token_ids,
-                                           positions=position_ids,
-                                           attn_metadata=trimmed_attn_metadata,
-                                           kv_caches=kv_caches)
+        if self.is_driver_worker:
+            model_event_name = ("model_forward_"
+                                f"bs{batch_size}_"
+                                f"seq{seq_len}_"
+                                f"ctx{num_blocks}_"
+                                f"graphs{'T' if use_graphs else 'F'}")
+        else:
+            model_event_name = 'model_executable'
+        with self.profiler.record_event('internal', model_event_name):
+            hidden_states = self.model.forward(
+                input_ids=token_ids,
+                positions=position_ids,
+                attn_metadata=trimmed_attn_metadata,
+                kv_caches=kv_caches,
+                warmup_mode=warmup_mode)
         # NOTE(kzawora): returning hidden_states is required in prompt logprobs
         # scenarios, as they will do logit processing on their own
         non_flattened_hidden_states = hidden_states
 
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states[logits_indices]
-        logits = self.model.compute_logits(hidden_states, None)
+        with self.profiler.record_event('internal', ('compute_logits'
+                                                     f'{batch_size}_'
+                                                     f'seq{seq_len}_ctx'
+                                                     f'{num_blocks}')):
+            logits = self.model.compute_logits(hidden_states, None)
         return non_flattened_hidden_states, logits
 
     def _get_prompt_logprobs_dict(
@@ -1515,8 +1600,12 @@ class HPUModelRunner:
 
         batch_changed = self._update_states(scheduler_output)
         if not scheduler_output.total_num_scheduled_tokens:
-            # Return empty ModelRunnerOuptut if there's no work to do.
-            return EMPTY_MODEL_RUNNER_OUTPUT
+            if not has_kv_transfer_group():
+                # Return empty ModelRunnerOuptut if there's no work to do.
+                return EMPTY_MODEL_RUNNER_OUTPUT
+
+            return self.kv_connector_no_forward(scheduler_output)
+
         # If necessary, swap decodes/prompts to have all decodes on the start
         ensure_decodes_first(self.input_batch)
         # Prepare prompts/decodes info
@@ -1524,8 +1613,9 @@ class HPUModelRunner:
         num_decodes = len(pd_info.decode_req_ids)
         num_prefills = len(pd_info.prompt_req_ids)
         num_reqs = num_decodes + num_prefills
-        prefill_data, decode_data = self._prepare_inputs(
-            scheduler_output, num_prefills, num_decodes)
+        with self.profiler.record_event('internal', 'prepare_input_tensors'):
+            prefill_data, decode_data = self._prepare_inputs(
+                scheduler_output, num_prefills, num_decodes)
 
         #FIXME(kzawora): Currently there's no handling of logprobs. Fix that
         # later.
@@ -1540,64 +1630,110 @@ class HPUModelRunner:
                       attn_metadata, logits_indices,
                       logits_requests) in enumerate(
                           zip(*shallow_tuple(prefill_data))):
+                self.event_start = self.profiler.get_timestamp_us()
+                self.profiler.start("internal", "prefill")
                 htorch.core.mark_step()
+                self.maybe_setup_kv_connector(scheduler_output)
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches)
                 htorch.core.mark_step()
-                sampling_metadata = self._prepare_sampling(
-                    batch_changed, req_id, pad_to=logits_device.shape[0])
-                sampler_output = self.sampler(
-                    logits=logits_device, sampling_metadata=sampling_metadata)
-                prefill_sampled_token_ids.append(
-                    sampler_output.sampled_token_ids.flatten())
-                prefill_sampled_requests.extend(logits_requests)
+                finished_sending, finished_recving = (
+                    self.get_finished_kv_transfers(scheduler_output))
+                with self.profiler.record_event('internal', "sampler"):
+                    sampling_metadata = self._prepare_sampling(
+                        batch_changed, req_id, pad_to=logits_device.shape[0])
+                    sampler_output = self.sampler(
+                        logits=logits_device,
+                        sampling_metadata=sampling_metadata)
+                    prefill_sampled_token_ids.append(
+                        sampler_output.sampled_token_ids.flatten())
+                    prefill_sampled_requests.extend(logits_requests)
                 htorch.core.mark_step()
+                if self.is_driver_worker and self.profiler.enabled:
+                    # Stop recording 'execute_model_generic' event
+                    self.profiler.end()
+                    event_end = self.profiler.get_timestamp_us()
+                    counters = self.profiler_counter_helper.get_counter_dict(
+                        cache_config=self.cache_config,
+                        duration=event_end - self.event_start,
+                        seq_len=self._seq_len(attn_metadata),
+                        batch_size_padded=token_ids.size(0),
+                        real_batch_size=len(req_id),
+                        prompt_batch_idx=idx,
+                        is_prompt=True)
+                    self.profiler.record_counter(self.event_start, counters)
+            if self.is_driver_worker and self.profiler.enabled:
+                self.profiler_counter_helper.reset_prompt_seq_stats()
 
         ######################### DECODES #########################
         # Decodes run as one single batch with [padded_decode_bs, 1]
         if num_decodes > 0:
+            self.event_start = self.profiler.get_timestamp_us()
+            self.profiler.start("internal", "decode")
             assert decode_data is not None
             htorch.core.mark_step()
-            _, logits_device = self._execute_model_generic(
+            self.maybe_setup_kv_connector(scheduler_output)
+            _, logits_device = \
+                self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
                 decode_data.attn_metadata, decode_data.logits_indices,
                 self.kv_caches)
             htorch.core.mark_step()
-            sampling_metadata = self._prepare_sampling(
-                batch_changed,
-                pd_info.decode_req_ids,
-                pad_to=logits_device.shape[0])
-            sampler_output = self.sampler(logits=logits_device,
-                                          sampling_metadata=sampling_metadata)
-            decode_sampled_token_ids.append(
-                sampler_output.sampled_token_ids.flatten())
-            decode_sampled_requests.extend(
-                self.input_batch.req_ids[:num_decodes])
+            finished_sending, finished_recving = (
+                self.get_finished_kv_transfers(scheduler_output))
+            with self.profiler.record_event('internal', "sampler"):
+                sampling_metadata = self._prepare_sampling(
+                    batch_changed,
+                    pd_info.decode_req_ids,
+                    pad_to=logits_device.shape[0])
+                sampler_output = self.sampler(
+                    logits=logits_device, sampling_metadata=sampling_metadata)
+                decode_sampled_token_ids.append(
+                    sampler_output.sampled_token_ids.flatten())
+                decode_sampled_requests.extend(
+                    self.input_batch.req_ids[:num_decodes])
             htorch.core.mark_step()
+
+            if self.is_driver_worker and self.profiler.enabled:
+                # Stop recording 'execute_model' event
+                self.profiler.end()
+                event_end = self.profiler.get_timestamp_us()
+                counters = self.profiler_counter_helper.get_counter_dict(
+                    cache_config=self.cache_config,
+                    duration=event_end - self.event_start,
+                    seq_len=self._seq_len(decode_data.attn_metadata),
+                    batch_size_padded= \
+                        decode_data.token_ids.size(0),  # type: ignore
+                    real_batch_size=decode_data.num_decodes,
+                    prompt_batch_idx=None,
+                    is_prompt=False)
+                self.profiler.record_counter(self.event_start, counters)
         # From this point onward, all operations are done on CPU.
         # We already have tokens. Let's copy the data to
         # CPU as is, and then discard padded tokens.
-
-        prefill_sampled_token_ids = [
-            tensor.cpu() for tensor in prefill_sampled_token_ids
-        ]
-        decode_sampled_token_ids = [
-            tensor.cpu()[:num_decodes] for tensor in decode_sampled_token_ids
-        ]
-        sampled_token_ids_list = torch.cat(decode_sampled_token_ids +
-                                           prefill_sampled_token_ids).tolist()
-        sampled_token_requests = \
-            decode_sampled_requests + prefill_sampled_requests
-        max_req_index = max(self.input_batch.req_id_to_index.values())
-        postprocessed_sampled_token_ids: list[list]
-        postprocessed_sampled_token_ids = [[]
-                                           for _ in range(max_req_index + 1)]
-        for tok_id, req_id in zip(sampled_token_ids_list,
-                                  sampled_token_requests):
-            postprocessed_sampled_token_ids[
-                self.input_batch.req_id_to_index[req_id]].append(tok_id)
+        with self.profiler.record_event('internal', "sampler_postprocessing"):
+            prefill_sampled_token_ids = [
+                tensor.cpu() for tensor in prefill_sampled_token_ids
+            ]
+            decode_sampled_token_ids = [
+                tensor.cpu()[:num_decodes]
+                for tensor in decode_sampled_token_ids
+            ]
+            sampled_token_ids_list = torch.cat(
+                decode_sampled_token_ids + prefill_sampled_token_ids).tolist()
+            sampled_token_requests = \
+                decode_sampled_requests + prefill_sampled_requests
+            max_req_index = max(self.input_batch.req_id_to_index.values())
+            postprocessed_sampled_token_ids: list[list]
+            postprocessed_sampled_token_ids = [[]
+                                               for _ in range(max_req_index +
+                                                              1)]
+            for tok_id, req_id in zip(sampled_token_ids_list,
+                                      sampled_token_requests):
+                postprocessed_sampled_token_ids[
+                    self.input_batch.req_id_to_index[req_id]].append(tok_id)
 
         # NOTE(kzawora): idk what happens if part of batch doesn't have logprobs
 
@@ -1631,7 +1767,11 @@ class HPUModelRunner:
             logprobs=logprobs,
             spec_token_ids=None,
             prompt_logprobs_dict=prompt_logprobs_dict,  # type: ignore[arg-type]
+            finished_sending=finished_sending,
+            finished_recving=finished_recving,
         )
+        if has_kv_transfer_group():
+            get_kv_transfer_group().clear_connector_metadata()
         return model_runner_output
 
     def load_model(self) -> None:
@@ -1788,6 +1928,14 @@ class HPUModelRunner:
         slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
 
         use_graphs = self._use_graphs()
+        phase = "prompt" if is_prompt else "decode"
+        scenario_name = ("warmup_"
+                         f"{phase}_"
+                         f"bs{batch_size}_"
+                         f"seq{query_seq_len}_"
+                         f"ctx{num_blocks}_"
+                         f"graphs{'T' if use_graphs else 'F'}")
+
         input_ids = torch.zeros((batch_size, query_seq_len),
                                 dtype=torch.int32,
                                 device='cpu')
@@ -1801,6 +1949,7 @@ class HPUModelRunner:
         input_ids_device = _async_h2d_tensor_copy(input_ids, self.device)
         position_ids_device = _async_h2d_tensor_copy(position_ids, self.device)
         slot_mapping_device = _async_h2d_tensor_copy(slot_mapping, self.device)
+        self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_pt_profiler_run else 1
         for time_index in range(times):
             if is_prompt:
@@ -1855,67 +2004,19 @@ class HPUModelRunner:
                                                        self.device)
         # Dummy run.
         htorch.core.mark_step()
-        logits = self._execute_model_generic(input_ids_device,
-                                             position_ids_device,
-                                             attn_metadata,
-                                             logits_indices_device, kv_caches,
-                                             True)
+        _ = self._execute_model_generic(input_ids_device, position_ids_device,
+                                        attn_metadata, logits_indices_device,
+                                        kv_caches, True)
         # TODO: do sampling on logits, warmup sampler and prefill joiner
         htorch.core.mark_step()
         temperature = torch.ones(batch_size, dtype=torch.float32, device='cpu')
         top_p = torch.ones(batch_size, dtype=torch.float32, device='cpu')
         top_k = torch.ones(batch_size, dtype=torch.float32, device='cpu')
-        temperature_device = _async_h2d_tensor_copy(temperature, self.device)
-        top_p_device = _async_h2d_tensor_copy(top_p, self.device)
-        top_k_device = _async_h2d_tensor_copy(top_k, self.device)
-        generators = {
-            i: None
-            for i in range(batch_size)
-        }  # NOTE(kzawora): idk what to set here
-        max_num_logprobs = 0  # NOTE(kzawora): idk what to set here
-        # NOTE(kzawora: do this in a smarter way)
+        _ = _async_h2d_tensor_copy(temperature, self.device)
+        _ = _async_h2d_tensor_copy(top_p, self.device)
+        _ = _async_h2d_tensor_copy(top_k, self.device)
+        self.profiler.end()
         return None
-        htorch.core.mark_step()
-        sampling_metadata = SamplingMetadata(
-            temperature=temperature_device,
-            all_greedy=False,  # hacky
-            all_random=True,  # hacky
-            top_p=top_p_device,
-            top_k=top_k_device,
-            no_top_p=True,
-            no_top_k=True,
-            generators=generators,
-            max_num_logprobs=max_num_logprobs,
-        )
-        tokens_all_random = self.sampler(logits, sampling_metadata)
-        htorch.core.mark_step()
-        sampling_metadata = SamplingMetadata(
-            temperature=temperature_device,
-            all_greedy=True,  # hacky
-            all_random=False,  # hacky
-            top_p=top_p_device,
-            top_k=top_k_device,
-            no_top_p=True,
-            no_top_k=True,
-            generators=generators,
-            max_num_logprobs=max_num_logprobs,
-        )
-        tokens_all_greedy = self.sampler(logits, sampling_metadata)
-        htorch.core.mark_step()
-        sampling_metadata = SamplingMetadata(
-            temperature=temperature_device,
-            all_greedy=False,  # hacky
-            all_random=False,  # hacky
-            top_p=top_p_device,
-            top_k=top_k_device,
-            no_top_p=True,
-            no_top_k=True,
-            generators=generators,
-            max_num_logprobs=max_num_logprobs,
-        )
-        tokens_mixed = self.sampler(logits, sampling_metadata)
-        htorch.core.mark_step()
-        return tokens_all_random, tokens_all_greedy, tokens_mixed
 
     def log_warmup(self, phase, i, max_i, batch_size, seq_len, num_blocks):
         free_mem = format_bytes(
@@ -2130,6 +2231,7 @@ class HPUModelRunner:
             logger.info("Skipping warmup...")
             return
 
+        self.profiler.start('internal', 'warmup')
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
         start_time = time.perf_counter()
 
@@ -2181,6 +2283,7 @@ class HPUModelRunner:
             f"Warmup finished in {elapsed_time:.0f} secs, "
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
+        self.profiler.end()
 
     def shutdown_inc(self):
         can_finalize_inc = self._is_quant_with_inc() and \
@@ -2199,30 +2302,6 @@ class HPUModelRunner:
     @torch.inference_mode()
     def profile_run(self) -> None:
         return
-        """Profile to measure peak memory during forward pass."""
-
-        # use an empty tensor instead of `None`` to force Dynamo to pass
-        # it by reference, rather by specializing on the value `None`.
-        # the `dtype` argument does not matter, and we use `float32` as
-        # a placeholder (it has wide hardware support).
-        # it is important to create tensors inside the loop, rather than
-        # multiplying the list, to avoid Dynamo from treating them as
-        # tensor aliasing.
-        num_layers = self.model_config.get_num_layers(self.parallel_config)
-        kv_caches = [None] * num_layers
-
-        # Run empty prefill forwards - prefill max batch and prefill max seq
-        self.warmup_scenario(batch_size=1,
-                             seq_or_block=self.max_model_len,
-                             is_prompt=True,
-                             kv_caches=kv_caches)
-        max_seq_len = math.ceil(
-            (self.max_num_tokens // self.max_prefill_batch_size) /
-            self.block_size) * self.block_size
-        self.warmup_scenario(batch_size=self.max_prefill_batch_size,
-                             seq_or_block=max_seq_len,
-                             is_prompt=True,
-                             kv_caches=kv_caches)
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         """
@@ -2260,11 +2339,18 @@ class HPUModelRunner:
                     kv_cache_shape = self.attn_backend.get_kv_cache_shape(
                         num_blocks + 1, kv_cache_spec.block_size,
                         kv_cache_spec.num_kv_heads, kv_cache_spec.head_size)
+                    v_cache_shape = None if self.model_config.use_mla \
+                    else kv_cache_shape
                     dtype = kv_cache_spec.dtype
                     key_cache = torch.zeros(kv_cache_shape,
                                             dtype=dtype,
                                             device=self.device)
-                    value_cache = torch.zeros_like(key_cache)
+                    if v_cache_shape is not None:
+                        value_cache = torch.zeros(v_cache_shape,
+                                                  dtype=dtype,
+                                                  device=self.device)
+                    else:
+                        value_cache = None
                     kv_caches[layer_name] = (key_cache, value_cache)
                 else:
                     # TODO: add new branches when introducing more types of
@@ -2282,3 +2368,41 @@ class HPUModelRunner:
         self._PAD_SLOT_ID = num_blocks * self.block_size
 
         htorch.hpu.synchronize()
+
+    @staticmethod
+    def maybe_setup_kv_connector(scheduler_output: "SchedulerOutput"):
+        # Update KVConnector with the KVConnector metadata forward().
+        if has_kv_transfer_group():
+            kv_connector = get_kv_transfer_group()
+            assert isinstance(kv_connector, KVConnectorBase_V1)
+            assert scheduler_output.kv_connector_metadata is not None
+            kv_connector.bind_connector_metadata(
+                scheduler_output.kv_connector_metadata)
+
+    @staticmethod
+    def get_finished_kv_transfers(
+        scheduler_output: "SchedulerOutput",
+    ) -> tuple[Optional[set[str]], Optional[set[str]]]:
+        if has_kv_transfer_group():
+            return get_kv_transfer_group().get_finished(
+                scheduler_output.finished_req_ids)
+        return None, None
+
+    def kv_connector_no_forward(
+            self, scheduler_output: "SchedulerOutput") -> ModelRunnerOutput:
+        # KV send/recv even if no work to do.
+        with set_forward_context(None, self.vllm_config):
+            self.maybe_setup_kv_connector(scheduler_output)
+            if has_kv_transfer_group():
+                kv_connector = get_kv_transfer_group()
+                kv_connector.start_load_kv(get_forward_context())
+            finished_sending, finished_recving = (
+                self.get_finished_kv_transfers(scheduler_output))
+
+        if not finished_sending and not finished_recving:
+            return EMPTY_MODEL_RUNNER_OUTPUT
+
+        output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
+        output.finished_sending = finished_sending
+        output.finished_recving = finished_recving
+        return output
