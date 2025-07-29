@@ -45,7 +45,6 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
 
-is_hpu = current_platform.is_hpu()
 
 
 class Gemma3ImagePixelInputs(TypedDict):
@@ -687,13 +686,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         img_col = img_pos.unsqueeze(1).unsqueeze(2)  # [B,1,1,S]
 
         img_pos_cum = torch.cumsum(img_pos, 1)
-        img_causal = torch.arange(seq_len, device=device).unsqueeze(0) \
+        img_causal_h = torch.arange(seq_len, device=device)
+        img_causal = img_causal_h.unsqueeze(0) \
             - img_pos_cum + (img_pos_cum // img_tokens + 1) * img_tokens + 1
         img_causal = torch.cat((img_causal[:, :1] - 1, img_causal[:, :-1]), 1) \
             .clamp_(0, seq_len - 1) \
             .unsqueeze(1).unsqueeze(3)                          # [B,1,S,1]
-        ind = torch.arange(seq_len, device=device).view(1, 1, 1,
-                                                        -1)  # [1,1,1,S]
+        ind = img_causal_h.view(1, 1, 1, -1)  # [1,1,1,S]
 
         # positions we must *unmask*  (row img  ∧  col img
         # ∧  col < img_causal)
