@@ -32,19 +32,16 @@ logger.propagate = False
 
 
 def log_info_blue(msg):
-    logger.info(f"{escape_codes['cyan']}{msg}{escape_codes['reset']}")
-
+    logger.info("%s%s%s", escape_codes['cyan'], msg, escape_codes['reset'])
 
 def log_info_green(msg):
-    logger.info(f"{escape_codes['green']}{msg}{escape_codes['reset']}")
-
+    logger.info("%s%s%s", escape_codes['green'], msg, escape_codes['reset'])
 
 def log_info_yellow(msg):
-    logger.info(f"{escape_codes['yellow']}{msg}{escape_codes['reset']}")
-
+    logger.info("%s%s%s", escape_codes['yellow'], msg, escape_codes['reset'])
 
 def log_info_red(msg):
-    logger.info(f"{escape_codes['red']}{msg}{escape_codes['reset']}")
+    logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
 
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
@@ -125,6 +122,11 @@ class Proxy:
         self.router = APIRouter()
         self.setup_routes()
         self.generator = P_first_token_generator if generator_on_p_node else D_first_token_generator
+        self.generator = (
+            P_first_token_generator
+            if generator_on_p_node
+            else D_first_token_generator
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(model)
 
     def on_done(self,
@@ -346,9 +348,10 @@ class Proxy:
                 end_time = time.time()
 
                 log_info_green(
-                    f"create_completion -- prompt length: {total_length}, tokenizer took {(end_time - start_time) * 1000:.2f} ms"
+                    f"create_completion -- prompt length: {total_length}, "
+                    f"tokenizer took "
+                    f"{(end_time - start_time) * 1000:.2f} ms"
                 )
-
                 prefill_instance = self.schedule(self.prefill_cycler,
                                                  is_prompt=True,
                                                  request_len=total_length)
@@ -412,7 +415,9 @@ class Proxy:
                 for msg in kv_prepare_request['messages'])
             end_time = time.time()
             log_info_green(
-                f"create_chat_completion -- prompt length: {total_length}, tokenizer took {(end_time - start_time) * 1000:.2f} ms"
+                f"create_chat_completion -- prompt length: {total_length}, "
+                f"tokenizer took "
+                f"{(end_time - start_time) * 1000:.2f} ms"
             )
 
             prefill_instance = self.schedule(self.prefill_cycler,
@@ -530,7 +535,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 self.prefill_utils_counter[min_index] += request_len
                 self.prefill_schedule_index += 1
                 log_info_yellow(
-                    f"<schedule prefill {self.prefill_schedule_index}> instance = {min_index}, min_tokens = {min_value}"
+                    f"<schedule prefill {self.prefill_schedule_index}> "
+                    f"instance = {min_index}, min_tokens = {min_value}"
                 )
                 return self.prefill_instances[min_index]
             else:
@@ -551,13 +557,16 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 self.decode_kv_utils_counter[min_index] += request_len
                 self.decode_schedule_index += 1
                 log_info_blue(
-                    f"<schedule decode {self.decode_schedule_index}>  instance = {min_index}, min_batch = {min_value}"
+                    f"<schedule decode {self.decode_schedule_index}> "
+                    f"instance = {min_index}, min_batch = {min_value}"
                 )
                 log_info_blue(
-                    f"<schedule decode>  decode_bs_counter: {self.decode_bs_counter}"
+                    f"<schedule decode> "
+                    f"decode_bs_counter: {self.decode_bs_counter}"
                 )
                 log_info_blue(
-                    f"<schedule decode>  decode_kv_utils_counter: {self.decode_kv_utils_counter}"
+                    f"<schedule decode> "
+                    f"decode_kv_utils_counter: {self.decode_kv_utils_counter}"
                 )
 
                 return self.decode_instances[min_index]
@@ -571,7 +580,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 index = self.prefill_instances.index(prefill_instance)
                 self.prefill_schedule_completion_index += 1
                 log_info_yellow(
-                    f"<Prefill completed {self.prefill_schedule_completion_index}>  instance = {index}, req_len={req_len}"
+                    f"<Prefill completed {self.prefill_schedule_completion_index}> "
+                    f"instance = {index}, req_len={req_len}"
                 )
 
                 self.prefill_bs_counter[index] -= 1
@@ -592,7 +602,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 index = self.decode_instances.index(decode_instance)
                 self.decode_schedule_completion_index += 1
                 log_info_blue(
-                    f"<Decode completed {self.decode_schedule_completion_index}>  instance = {index}, req_len={req_len}"
+                    f"<Decode completed {self.decode_schedule_completion_index}> "
+                    f"instance = {index}, req_len={req_len}"
                 )
 
                 self.decode_bs_counter[index] -= 1
@@ -609,10 +620,12 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     index = self.decode_instances.index(decode_instance)
                     self.decode_kv_utils_counter[index] -= req_len
                     log_info_blue(
-                        f"<schedule_completion decode>  decode_bs_counter: {self.decode_bs_counter}"
+                        f"<schedule_completion decode> "
+                        f"decode_bs_counter: {self.decode_bs_counter}"
                     )
                     log_info_blue(
-                        f"<schedule_completion decode>  decode_kv_utils_counter: {self.decode_kv_utils_counter}"
+                        f"<schedule_completion decode> "
+                        f"decode_kv_utils_counter: {self.decode_kv_utils_counter}"
                     )
 
 
