@@ -2659,7 +2659,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
-                                                    lora_request):
+                                                    lora_request,
+                                                    seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
@@ -2704,8 +2705,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             }
 
         image_token_id = self.get_model().config.image_token_id
-        prompt_token_ids = [image_token_id] * num_image_tokens
+        prompt_token_ids_image = [image_token_id] * num_image_tokens
+        prompt_token_ids = [0] * (seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
+
         placeholders_by_modality = {
             'image':
             [PlaceholderRange(offset=0, length=len(prompt_token_ids))]
@@ -2742,13 +2745,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_len = max(seq_len, 1)
         computed_block_nums = None
         if is_prompt:
-            print("libin debug is mm and image args ", self.is_mm_run(), img_args)
             if self.is_mm_run() and img_args is not None:
                 return self.create_dummy_multi_modal_seq_group_metadata(
                     group_id=group_id,
                     img_args=img_args,
                     sampling_params=sampling_params,
                     lora_request=lora_request,
+                    seq_len=seq_len,
                 )
             else:
                 input_len = seq_len
@@ -3067,7 +3070,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     kv_caches,
                     temperature=1.0
                     if batch_size not in warmed_random_sampler_bs else 0,
-                    img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
+                    img_args=1 if self.is_mm_run() else None,
                 )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
@@ -3814,6 +3817,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 list(self.graphed_multimodal_buckets)
                             # set is unhasable and causes friction with
                             # hpu graphs, hence turning it to a list
+                        #print("libin debug execute mode id ", execute_model_kwargs['input_ids'].shape, warmup_mode)
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 **execute_model_kwargs
