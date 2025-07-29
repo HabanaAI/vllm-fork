@@ -18,6 +18,7 @@ from colorlog.escape_codes import escape_codes
 from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
 from fastapi.responses import JSONResponse, StreamingResponse
+from transformers import AutoTokenizer
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
                               "%Y-%m-%d %H:%M:%S")
@@ -47,8 +48,6 @@ def log_info_red(msg):
 
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
-
-from transformers import AutoTokenizer
 
 
 async def P_first_token_generator(generator_p,
