@@ -2666,6 +2666,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
+        image_token_id = self.get_model().config.image_token_id
 
         if self.model_is_mrope:
             if not hasattr(self.get_model().config, "vision_config"):
@@ -2694,6 +2695,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "pixel_values": pixel_values,
                 "image_grid_thw": image_grid_thw,
             }
+            prompt_token_ids = [image_token_id] * num_image_tokens
         else:
             s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
@@ -2703,10 +2705,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "pixel_values": pixel_values,
                 "num_crops": torch.zeros([img_args], dtype=torch.int32)
             }
-
-        image_token_id = self.get_model().config.image_token_id
-        prompt_token_ids_image = [image_token_id] * num_image_tokens
-        prompt_token_ids = [0] * (seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
+            prompt_token_ids = [image_token_id] * num_image_tokens
+            prompt_token_ids = [0] * (seq_len - len(prompt_token_ids)) + prompt_token_ids
+        
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
 
         placeholders_by_modality = {
@@ -3070,7 +3071,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     kv_caches,
                     temperature=1.0
                     if batch_size not in warmed_random_sampler_bs else 0,
-                    img_args=1 if self.is_mm_run() else None,
                 )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
@@ -3817,6 +3817,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 list(self.graphed_multimodal_buckets)
                             # set is unhasable and causes friction with
                             # hpu graphs, hence turning it to a list
+                        #if not warmup_mode:
                         #print("libin debug execute mode id ", execute_model_kwargs['input_ids'].shape, warmup_mode)
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
@@ -3828,6 +3829,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
+                        #if not warmup_mode:
+                        #print("libin debug execute mode id modelforward ", warmup_mode)
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
