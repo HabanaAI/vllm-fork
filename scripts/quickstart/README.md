@@ -1,10 +1,15 @@
-# DeepSeek-R1 Support
+# Running DeepseekV3ForCausalLM architecture models with deepseek_r1 branch
 
-This guide provides the step-by-step instructions on deploying and running DeepSeek-R1 671B with vLLM serving framework on Intel® Gaudi® HPUs. It covers the hardware requirements, software prerequisites, model weights downloading and conversion, environment setup, model serving deployment and performance and accuracy benchmarking on single-node and multi-node 8\*Gaudi servers. 
+This guide provides the step-by-step instructions on deploying and running DeepseekV3ForCausalLM architecture models with vLLM serving framework on Intel® Gaudi® HPUs. It covers the hardware requirements, software prerequisites, model weights downloading and conversion, environment setup, model serving deployment and performance and accuracy benchmarking on single-node and multi-node 8\*Gaudi servers. 
+
+Verified models:
+- deepseek-ai/DeepSeek-R1-0528
+- deepseek-ai/DeepSeek-R1
+- moonshotai/Kimi-K2-Instruct
 
 ## Table of Contents
 
-- [DeepSeek-R1 Support](#deepseek-r1-support)
+- [Running DeepseekV3ForCausalLM architecture models with deepseek_r1 branch](#running-deepseekv3forcausallm-architecture-models-with-deepseek_r1-branch)
   - [Table of Contents](#table-of-contents)
   - [Hardware Requirements](#hardware-requirements)
   - [Software Prerequisites](#software-prerequisites)
@@ -36,16 +41,23 @@ This guide provides the step-by-step instructions on deploying and running DeepS
 
 ## Hardware Requirements
 
-* DeepSeek-R1 671B has 671B parameters with FP8 precision and takes up about 642GB memory. Single-node 8\*Gaudi2 OAM (768GB memory in total) is enough to accommodate the model weights and required KV cache with limited context length (<=32k). 
+* DeepSeek-R1-0528 or DeepSeek-R1 
 
-* To support higher concurrency and longer token lengths, 2-node 8\*Gaudi2 servers are recommended. 
+  * DeepSeek-R1-0528 or DeepSeek-R1 has 671B parameters with FP8 precision and takes up about 642GB memory. Single-node 8\*Gaudi2 OAM (768GB memory in total) is enough to accommodate the model weights and required KV cache with limited context length (<=32k). 
+
+  * To support higher concurrency and longer token lengths, 2-node 8\*Gaudi2 servers are recommended. 
+
+* Kimi-K2-Instruct
+  
+  * Kimi-K2-Instruct has 1T parameters with FP8 precision, needs 2-node 8\*Gaudi2 servers to accommodate the model weights.
 
 The following table outlines the mininum requirements for each hardware component of each node to achieve high-performance inference.
 
-| Servers | CPU per Node | Accelerators per Node | RAM per Node | Storage per Node | Frontend Networking per Node <br>(In-band Management/Storage) | Backend Networking per Node <br>(Compute, w/ RDMA) |
-| -------------- | --------------------------------------------------- | -------------------- | ------------- | ------------------------------------------------------ | -- | -- |
-| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
-| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|Model| Servers | CPU per Node | Accelerators per Node | RAM per Node | Storage per Node | Frontend Networking per Node <br>(In-band Management/Storage) | Backend Networking per Node <br>(Compute, w/ RDMA) |
+|---| -------------- | --------------------------------------------------- | -------------------- | ------------- | ------------------------------------------------------ | -- | -- |
+|DeepSeek-R1-0528/DeepSeek-R1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
+|DeepSeek-R1-0528/DeepSeek-R1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|Kimi-K2-Instruct| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
 
 ### Set CPU to Performance Mode
 Please change the CPU setting to be performance optimization mode in BIOS setup and execute the command below in OS to make sure get the best CPU performance. 
@@ -70,7 +82,7 @@ sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_
 ## Model Weights Downloading and Conversion
 
 ### Start Docker Container on the Gaudi Server
-Assume that the original DeepSeek-R1 model weight files are downloaded and converted in the folder /mnt/disk4 which has at least 1.5TB disk space. 
+Assume that the original model weight files are downloaded and converted in the folder /mnt/disk4, which should have at least 1.5TB disk space for DeepSeek-R1-0528/DeepSeek-R1, and at least 2TB for Kimi-K2-Instruct. 
 > [!NOTE]
 > * Make sure the pulled docker image aligns with the corresponding Gaudi driver and OS version. The default one used in this guide is for Gaudi driver/firmware 1.20.1 and Ubuntu 22.04, referring to [Use Intel(R)Gaudi Containers](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Docker_Installation.html#use-intel-gaudi-containers) for other images.
 
@@ -90,27 +102,40 @@ git-lfs install
 git clone https://huggingface.co/deepseek-ai/DeepSeek-R1 /data/hf_models/DeepSeek-R1
 # Option2: Download from ModelScope
 git clone https://www.modelscope.cn/deepseek-ai/DeepSeek-R1 /data/hf_models/DeepSeek-R1
+
+# Download DeepSeek-R1-0528
+git clone https://huggingface.co/deepseek-ai/DeepSeek-R1-0528 /data/hf_models/DeepSeek-R1-0528
+
+# Download Kimi-K2-Instruct
+git clone https://huggingface.co/moonshotai/Kimi-K2-Instruct /data/hf_models/Kimi-K2-Instruct
 ```
 
 ### Convert the Model
-To serve DeepSeek-R1 model with Gaudi2D, the original HuggingFace FP8 model weights should be converted to channel-wise FP8 model weights using the command below on Gaudi server. We assume that the original model has been downloaded in the /data/hf_models/DeepSeek-R1 folder and the converted model will be saved in the /data/hf_models/DeepSeek-R1-Gaudi folder. Please make sure that the new folder has enough disk space (>650GB). If the disk I/O is fast enough, it will take about 15 minutes to finish the conversion.
+To serve DeepSeek-R1 model with Gaudi2D, the original HuggingFace FP8 model weights should be converted using the command below on Gaudi server. We assume that the original model has been downloaded in the /data/hf_models/DeepSeek-R1 folder and the converted model will be saved in the /data/hf_models/DeepSeek-R1-G2 folder. Please make sure that the new folder has enough disk space (>650GB for DeepSeek-R1). If the disk I/O is fast enough, it will take about 15 minutes to finish the conversion.
+
+`-i` option of convert_for_g2.py specifies the path to origin model weights, `-o` option specifies the output folder. Please don't add `/` to the end of input or output path. 
 
 ```bash
 git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
 cd vllm-fork
-pip install compress_pickle torch safetensors numpy --extra-index-url https://download.pytorch.org/whl/cpu
+pip install torch safetensors numpy --extra-index-url https://download.pytorch.org/whl/cpu
 
-python scripts/convert_block_fp8_to_channel_fp8.py --model_path /data/hf_models/DeepSeek-R1 --qmodel_path /data/hf_models/DeepSeek-R1-Gaudi --input_scales_path scripts/DeepSeek-R1-BF16-w8afp8-static-no-ste_input_scale_inv.pkl.gz
+python scripts/convert_for_g2.py -i /data/hf_models/DeepSeek-R1 -o /data/hf_models/DeepSeek-R1-G2
 ```
 
-The conversion is finished when the message below is shown. The converted model weight files are saved in your specified folder, like /data/hf_models/DeepSeek-R1-Gaudi, and we will use this converted model to host vLLM service. 
+The conversion is finished when the message below is shown. The converted model weight files are saved in your specified folder, like /data/hf_models/DeepSeek-R1-G2, and we will use this converted model to host vLLM service. 
 
 ```bash
-INFO:__main__:[160/163] Saving 649 tensors to /data/hf_models/DeepSeek-R1-Gaudi/model-00160-of-000163.safetensors
-100%|█████████████████████████████████████████████████████████████████████████████████████████████| 163/163 [11:30<00:00,  4.24s/it]
-Saving tensor mapping to /data/hf_models/DeepSeek-R1-Gaudi/model.safetensors.index.json
-Conversion is completed.
-
+...
+processing /data/hf_models/DeepSeek-R1/model-00163-of-000163.safetensors
+skip model.layers.61.embed_tokens.weight.
+skip model.layers.61.enorm.weight.
+skip model.layers.61.hnorm.weight.
+skip model.layers.61.input_layernorm.weight.
+skip model.layers.61.post_attention_layernorm.weight.
+skip model.layers.61.shared_head.head.weight.
+skip model.layers.61.shared_head.norm.weight.
+saving to /data/hf_models/DeepSeek-R1-G2/model-00163-of-000163.safetensors
 ```
 
 ## Single-Node Setup and Serving Deployment
@@ -118,9 +143,7 @@ Conversion is completed.
 In the same container in which we convert the model weight, clone the latest code and install it. 
 ```bash
 git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
-git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-hpu-extension.git
 pip install -e vllm-fork/
-pip install -e vllm-hpu-extension/
 ```
 ### HCCL Demo Test
 Download HCCL Demo, compile and execute the hccl_demo test. Make sure the HCCL demo test passes on 8 HPU. For detailed info, pelease refer to [HCCL Demo](https://github.com/HabanaAI/hccl_demo)
@@ -250,7 +273,7 @@ If INC quantization is enabled successfully, `Preparing model with INC` should b
 
 ### Launch vLLM Serving with TP=8
 ```bash
-bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
+bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
@@ -270,7 +293,7 @@ On bare metal, execute the following command to send a request to the Chat Compl
 ```bash
 curl http://127.0.0.1:8688/v1/chat/completions \
   -X POST \
-  -d '{"model": "/data/hf_models/DeepSeek-R1-Gaudi", "messages": [{"role": "user", "content": "List 3 countries and their capitals."}], "max_tokens":128}' \
+  -d '{"model": "/data/hf_models/DeepSeek-R1-G2", "messages": [{"role": "user", "content": "List 3 countries and their capitals."}], "max_tokens":128}' \
   -H 'Content-Type: application/json'
 ```
 
@@ -369,7 +392,7 @@ To run DeepSeek-R1 with INC FP8 quantization in multi-nodes case, you need to fo
 |---|---|---|
 |DeepSeek-R1-0528|16|Yi30/ds-r1-0528-default-pile-g2-ep16-0610|
 |DeepSeek-R1|16|Yi30/ds-r1-default-pile-g2-ep16-0610|
-|kimi-k2|16|Yi30/miki-k2-pile-g2-tp16-2nd-0717|
+|Kimi-K2-Instruct|16|Yi30/miki-k2-pile-g2-tp16-2nd-0717|
 
 For example, if you want to run DeepSeek-R1-0528, with tp-size 16, you can download measurement files with:
 ```bash
@@ -492,7 +515,7 @@ The example command is like below. It may take several hours to finish the warm 
 python -m vllm.entrypoints.openai.api_server \
     --host 192.168.1.101 \
     --port 8688 \
-    --model /data/hf_models/DeepSeek-R1-Gaudi \
+    --model /data/hf_models/DeepSeek-R1-G2 \
     --tensor-parallel-size 16 \
     --max-num-seqs $max_num_seqs \
     --max-num-batched-tokens $max_num_batched_tokens \
@@ -516,7 +539,7 @@ You may check the vLLM performance with benchmark_vllm_client.sh.
 - Please copy benchmark_vllm_client.sh into the folder "vllm-fork/benchmarks". 
 - Update the model path, vLLM server IP and port in the script file if required. 
 ```bash
-model_path=/data/hf_models/DeepSeek-R1-Gaudi
+model_path=/data/hf_models/DeepSeek-R1-G2
 ip_addr=127.0.0.1
 port=8688
 ```
@@ -542,7 +565,7 @@ export no_proxy=127.0.0.1
 ### Run lm_eval
 Change the model path, vLLM IP address or port in the command below if required. 
 ```bash
-lm_eval --model local-completions --tasks gsm8k --model_args model=/data/hf_models/DeepSeek-R1-Gaudi,base_url=http://127.0.0.1:8688/v1/completions --batch_size 16 --log_samples --output_path ./lm_eval_output
+lm_eval --model local-completions --tasks gsm8k --model_args model=/data/hf_models/DeepSeek-R1-G2,base_url=http://127.0.0.1:8688/v1/completions --batch_size 16 --log_samples --output_path ./lm_eval_output
 ```
 
 
