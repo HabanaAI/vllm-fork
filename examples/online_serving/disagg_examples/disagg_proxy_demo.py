@@ -121,7 +121,6 @@ class Proxy:
         self.custom_create_chat_completion = custom_create_chat_completion
         self.router = APIRouter()
         self.setup_routes()
-        self.generator = P_first_token_generator if generator_on_p_node else D_first_token_generator
         self.generator = (
             P_first_token_generator
             if generator_on_p_node
@@ -580,7 +579,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 index = self.prefill_instances.index(prefill_instance)
                 self.prefill_schedule_completion_index += 1
                 log_info_yellow(
-                    f"<Prefill completed {self.prefill_schedule_completion_index}> "
+                    f"<Prefill completed "
+                    f"{self.prefill_schedule_completion_index}> "
                     f"instance = {index}, req_len={req_len}"
                 )
 
@@ -602,7 +602,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 index = self.decode_instances.index(decode_instance)
                 self.decode_schedule_completion_index += 1
                 log_info_blue(
-                    f"<Decode completed {self.decode_schedule_completion_index}> "
+                    f"<Decode completed "
+                    f"{self.decode_schedule_completion_index}> "
                     f"instance = {index}, req_len={req_len}"
                 )
 
@@ -625,7 +626,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     )
                     log_info_blue(
                         f"<schedule_completion decode> "
-                        f"decode_kv_utils_counter: {self.decode_kv_utils_counter}"
+                        f"decode_kv_utils_counter: "
+                        f"{self.decode_kv_utils_counter}"
                     )
 
 
