@@ -356,7 +356,7 @@ class HpuModelAdapter(torch.nn.Module):
         if self.use_window_sdpa:
             self.slice_size = int(os.getenv("PT_HPU_SDPA_BC_FACTOR", "1024"))
             self.sliding_window_thld = int(
-                os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '10240'))
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '8192'))
             self.sliding_window_right = int(
                 os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
             assert self.sliding_window_right in (0, -1) or \
