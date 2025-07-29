@@ -570,14 +570,15 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     attn_bias = attn_metadata.window_attn_bias
 
                 if attn_metadata.use_window_sdpa:
+                    import habana_frameworks.torch as htorch
+                    htorch.core.mark_step()
                     attn_bias = attn_metadata.attn_bias
-                    window_size = (self.sliding_window,
-                                   attn_metadata.sliding_window_right)
+                    window_size = (self.sliding_window, 0)
                     common_args['window_size'] = window_size
                     # TODO: Currently HPU doesn't support GQA for FusedSDPA
                     # with causal + window, so repeat KV so QKV are all the
                     # same shape.
-                    if query_shape != kv_shape:
+                    if query_shape != kv_shape and attn_bias is None:
                         repeat_kv = self.num_heads // self.num_kv_heads
                         key = key.repeat_interleave(repeat_kv, dim=1)
                         value = value.repeat_interleave(repeat_kv, dim=1)

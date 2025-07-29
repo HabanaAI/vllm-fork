@@ -354,20 +354,12 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
-        self.sliding_window_right = 0
-        if self.use_window_sdpa:
-            self.slice_size = int(
-                os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
 
-            os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
-            os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
-            self.sliding_window_right = int(
-                os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
-            assert self.sliding_window_right % self.slice_size == 0, \
-                f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
-                f'not supported due to not a multiplier of '\
-                f'PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
+        if self.use_window_sdpa:
+            self.slice_size = int(os.getenv("PT_HPU_SDPA_BC_FACTOR", "1024"))
+            self.sliding_window_thld = int(
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_THLD', '8192'))
+
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -589,8 +581,6 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
-        attn_metadata = attn_metadata._replace(
-            sliding_window_right=self.sliding_window_right)
         return attn_metadata
 
     def _update_metadata(self,
@@ -1399,12 +1389,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return self.model
 
     def _use_graphs(self, img_args=None):
-        if not img_args:
-            return not self.enforce_eager
+        #if not img_args:
+        #    return not self.enforce_eager
         #TODO: We might need to check both language bucket and multimodal bucket
         # and return True only it's avialble, or return separately.
-        return (img_args) in self.graphed_multimodal_buckets
-
+        #return (img_args) in self.graphed_multimodal_buckets
+        return not self.enforce_eager
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
 
@@ -1422,6 +1412,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
             logger.warning("Configuration: %s was not warmed-up!",
+                           (phase, batch_size, seq_len, num_blocks))
+        elif seen and not warmup_mode:
+            logger.warning("Configuration: %s was warmed-up!",
                            (phase, batch_size, seq_len, num_blocks))
 
     def _get_mrope_positions_and_delta(self, seq_data, mm_kwargs, context_len):
@@ -2661,7 +2654,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
-            'sliding_window_right',
         ])
         return attention_metadata
 
@@ -2750,6 +2742,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_len = max(seq_len, 1)
         computed_block_nums = None
         if is_prompt:
+            print("libin debug is mm and image args ", self.is_mm_run(), img_args)
             if self.is_mm_run() and img_args is not None:
                 return self.create_dummy_multi_modal_seq_group_metadata(
                     group_id=group_id,
@@ -3074,6 +3067,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     kv_caches,
                     temperature=1.0
                     if batch_size not in warmed_random_sampler_bs else 0,
+                    img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
                 )
             warmed_random_sampler_bs.add(batch_size)
             used_mem = align_workers(mem_prof.consumed_device_memory,
