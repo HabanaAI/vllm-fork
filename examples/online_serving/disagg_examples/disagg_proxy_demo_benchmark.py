@@ -383,6 +383,9 @@ class Proxy:
         try:
             request = await raw_request.json()
 
+            # Perform kv recv and decoding stage
+            self.handle_benchmark_mode_requests(request)
+
             if len(self.prefill_instances) > 0:
                 kv_prepare_request = request.copy()
                 kv_prepare_request["max_tokens"] = 1
@@ -403,7 +406,7 @@ class Proxy:
                     raise http_exc
 
             # Perform kv recv and decoding stage
-            self.handle_benchmark_mode_requests(request)
+            # self.handle_benchmark_mode_requests(request)
 
             decode_instance = self.schedule(self.decode_cycler)
             value = value.strip().decode("utf-8").removesuffix(
