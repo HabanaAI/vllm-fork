@@ -1,10 +1,11 @@
+
 #! /bin/bash
 
 # set -x
 
 USE_FP8_KV=false
 USE_NATIVE_SCALING=true
-
+export PT_HPU_LAZY_MODE=1
 # Parse arguments
 for arg in "$@"
 do
@@ -66,6 +67,7 @@ export PT_HPU_RECIPE_CACHE_CONFIG=/data/16k_cache,false,16384
 
 ####### INC WOQ ReQuant Start #######
 model_path=/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207/
+model_path=/mnt/disk7/yiliu4/DeepSeek-R1-0528-G2-2nd/
 unset PT_HPU_RECIPE_CACHE_CONFIG
 export VLLM_MOE_N_SLICE=1
 export VLLM_MLA_DISABLE_REQUANTIZATION=1
@@ -97,6 +99,8 @@ fi
 export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa.json"
 export INC_FORCE_SCALE_FP32=1
 
+
+echo "model_path: $model_path"
 ####### INC WOQ ReQuant End   #######
 
 # !!!!!!!!!!!!!!!!!!!! set bucketing !!!!!!!!!!!!!
