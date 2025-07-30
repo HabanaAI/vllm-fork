@@ -263,10 +263,12 @@ class GemmaRMSNorm(CustomOp):
                 x = x + residual
             residual = x
 
-        from vllm_hpu_extension.kernels import rms_norm
-        HPUFusedRMSNorm = rms_norm()
-        x = HPUFusedRMSNorm.apply(x, 1 + weight, variance_epsilon)
-        x = x.to(orig_dtype)
+        x = x.float()
+        variance = x.pow(2).mean(dim=-1, keepdim=True)
+        x = x * torch.rsqrt(variance + variance_epsilon)
+        # Llama does x.to(float16) * w whilst Gemma is (x * w).to(float16)
+        # See https://github.com/huggingface/transformers/pull/29402
+        x = x * (1.0 + weight.float())
         return x if residual is None else (x, residual)
 
     def forward_native(
