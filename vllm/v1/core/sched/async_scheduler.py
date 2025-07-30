@@ -43,5 +43,6 @@ class AsyncScheduler(Scheduler):
         if status_before_update == RequestStatus.RUNNING:
             self.kv_cache_manager.cache_blocks(
                 request,
+                self.kv_cache_manager.req_to_block_hashes[request.request_id],
                 request.num_computed_tokens - request.num_output_placeholders)
         return new_token_ids, stopped
