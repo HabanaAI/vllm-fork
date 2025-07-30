@@ -27,6 +27,21 @@ bash setup_env.sh
 `metadata_server` is the remote machine IP where etcd is launched
 `protocal` is rdma or tcp
 `master_server_address` is the remote machine IP where mooncake master is launched. high speed network is preferred.
+
+# note: rdma is limited to following device list, otherwise set to tcp
+
+ibdev2netdev
+mlx5_0 port 1 ==> ens108np0 (Up)
+mlx5_1 port 1 ==> ens9f0np0 (Up) # or Down. Does not matter
+mlx5_2 port 1 ==> ens9f1np1 (Up) # or Down. Does not matter
+mlx5_3 port 1 ==> ens109np0 (Up)
+mlx5_4 port 1 ==> ens110np0 (Up)
+mlx5_5 port 1 ==> ens111np0 (Up)
+mlx5_6 port 1 ==> ens112np0 (Up)
+mlx5_7 port 1 ==> ens113np0 (Up)
+mlx5_8 port 1 ==> ens114np0 (Up)
+mlx5_9 port 1 ==> ens115np0 (Up)
+
 ```
 
 ### 1. Adjust 1p_start_prefill.sh to automatically launch/stop etc & mooncake master server. refer to following example:
