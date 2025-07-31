@@ -19,14 +19,13 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheTensor)
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.worker.gpu_input_batch import InputBatch
-from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 10
 DEVICE = "cuda"
 
 
-def initialize_kv_cache(runner: GPUModelRunner):
+def initialize_kv_cache(runner):
     """
     Only perform necessary steps in GPUModelRunner.initialize_kv_cache()
     """
@@ -60,7 +59,8 @@ def initialize_kv_cache(runner: GPUModelRunner):
             kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
         ],
     )
-    runner.initialize_attn_backend(kv_cache_config)
+    if not current_platform.is_hpu():
+        runner.initialize_attn_backend(kv_cache_config)
 
 
 def get_vllm_config():
@@ -93,13 +93,6 @@ def get_vllm_config():
     )
     return vllm_config
 
-    if current_platform.is_hpu():
-        from vllm.v1.worker.hpu_model_runner import HPUModelRunner
-        return HPUModelRunner(vllm_config)
-    else:
-        from vllm.v1.worker.gpu_model_runner import GPUModelRunner
-        return GPUModelRunner(vllm_config, 'cuda')
-
 
 @pytest.fixture
 def model_runner():
@@ -109,7 +102,12 @@ def model_runner():
     head_size = model_config.get_head_size()
     vllm_config.compilation_config.static_forward_context[
         "layer.0"] = Attention(num_heads, head_size, 0.1)
-    runner = GPUModelRunner(vllm_config, DEVICE)
+    if current_platform.is_hpu():
+        from vllm.v1.worker.hpu_model_runner import HPUModelRunner
+        runner = HPUModelRunner(vllm_config)
+    else:
+        from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+        runner = GPUModelRunner(vllm_config, 'cuda')
     initialize_kv_cache(runner)
     return runner
 
@@ -516,7 +514,12 @@ def test_init_kv_cache_without_kv_sharing():
     # Set high context length to test max context length estimation
     vllm_config.model_config.max_model_len = 3_000_000
     vllm_ctx = vllm_config.compilation_config.static_forward_context
-    runner = GPUModelRunner(vllm_config, DEVICE)
+    if current_platform.is_hpu():
+        from vllm.v1.worker.hpu_model_runner import HPUModelRunner
+        runner = HPUModelRunner(vllm_config)
+    else:
+        from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+        runner = GPUModelRunner(vllm_config, 'cuda')
     kv_cache_spec = runner.get_kv_cache_spec()
     assert len(kv_cache_spec) == 2
     assert len(runner.shared_kv_cache_layers) == 0
@@ -584,7 +587,12 @@ def test_init_kv_cache_with_kv_sharing_valid():
     # Set high context length to test max context length estimation
     vllm_config.model_config.max_model_len = 3_000_000
     vllm_ctx = vllm_config.compilation_config.static_forward_context
-    runner = GPUModelRunner(vllm_config, DEVICE)
+    if current_platform.is_hpu():
+        from vllm.v1.worker.hpu_model_runner import HPUModelRunner
+        runner = HPUModelRunner(vllm_config)
+    else:
+        from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+        runner = GPUModelRunner(vllm_config, 'cuda')
     kv_cache_spec = runner.get_kv_cache_spec()
     assert len(kv_cache_spec) == 1
     assert layer_0 in kv_cache_spec
