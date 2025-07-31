@@ -44,16 +44,16 @@ mlx5_9 port 1 ==> ens115np0 (Up)
 
 ```
 
-### 1. Adjust 1p_start_prefill.sh to automatically launch/stop etc & mooncake master server. refer to following example:
+### 1. Adjust 1p_start_prefill.sh to automatically launch/stop etcd & mooncake master server. refer to following example:
 
 ```bash
 if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
     if [ "$BENCHMARK_MODE" == "1" ]; then
-       	source "$BASH_DIR"/start_etc_mooncake_master.sh benchmark
-       	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh benchmark"
+       	source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark
+       	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark"
     else
-       	source "$BASH_DIR"/start_etc_mooncake_master.sh
-       	echo "source "$BASH_DIR"/start_etc_mooncake_master.sh"
+       	source "$BASH_DIR"/start_etcd_mooncake_master.sh
+       	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
     fi
 fi
 
