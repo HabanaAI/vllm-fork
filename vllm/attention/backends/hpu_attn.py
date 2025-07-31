@@ -143,7 +143,8 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     window_block_usage: Optional[torch.Tensor] = None
     window_attn_bias: Optional[torch.Tensor] = None
     use_window_sdpa: Optional[bool] = None
-
+    prompt_logprobs_required: Optional[bool] = None
+    logprobs_required: Optional[bool] = None
 
 @dataclass
 class HPUMLAMetadata(HPUAttentionMetadata, AttentionMetadata):
