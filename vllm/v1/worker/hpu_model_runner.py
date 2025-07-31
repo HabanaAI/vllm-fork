@@ -599,12 +599,13 @@ class HPUModelRunner:
         self.kv_caches: list[torch.Tensor] = []
         self.inc_initialized_successfully = False
         self._is_inc_finalized = False
+        self.max_num_reqs = self.scheduler_config.max_num_seqs
 
         # Request states.
         self.requests: dict[str, CachedRequestState] = {}
         # Persistent batch.
         self.input_batch = InputBatch(
-            max_num_reqs=self.scheduler_config.max_num_seqs,
+            max_num_reqs=self.max_num_reqs,
             max_model_len=self.max_model_len,
             max_num_batched_tokens=self.max_num_tokens,
             device=self.device,
@@ -650,6 +651,7 @@ class HPUModelRunner:
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
 
         self.defragmenter = OnlineDefragmenter()
+        self.shared_kv_cache_layers: dict[str, str] = {}
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
