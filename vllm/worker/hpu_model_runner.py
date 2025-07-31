@@ -689,9 +689,9 @@ class HpuModelAdapter(torch.nn.Module):
             virtual_engine = kwargs.pop('virtual_engine')
 
         input_ids = kwargs['input_ids']
-        global_attn_masks = kwargs.get("global_attn_masks") \
+        global_attn_masks = kwargs.pop("global_attn_masks") \
                 if kwargs.get("global_attn_masks") else None
-        local_attn_masks = kwargs.get("local_attn_masks") \
+        local_attn_masks = kwargs.pop("local_attn_masks") \
                 if kwargs.get("local_attn_masks") else None
 
         kwargs['attn_metadata'] = self._update_metadata(
@@ -1383,12 +1383,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, img_args=None):
-        if not img_args:
-            return not self.enforce_eager
-        #TODO: We might need to check both language bucket and multimodal bucket
-        # and return True only it's avialble, or return separately.
-        return (img_args) in self.graphed_multimodal_buckets
+    def _use_graphs(self):
+        return not self.enforce_eager
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -2853,7 +2849,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         align_worker=False,
                         is_dummy_run=False) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = is_dummy_run or self._use_graphs(img_args)
+        use_graphs = is_dummy_run or self._use_graphs()
 
         scenario_name = ("warmup_"
                          f"{phase}_"
@@ -3740,7 +3736,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     ctx_blocks = seq_len
                 seq_len = 1
             img_args = self._get_img_args_from_model_input(model_input)
-            use_graphs = self._use_graphs(img_args=img_args)
+            use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None
