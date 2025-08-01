@@ -14,6 +14,7 @@ from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+from vllm.platforms import current_platform
 
 SQRT2 = 2**0.5
 
@@ -172,6 +173,10 @@ class MLPSpeculator(nn.Module):
             z = self.emb[head_index](last_tokens)  # b k d
             states = self.proj[head_index](previous_hidden_states)
 
+            if current_platform.is_hpu():
+                padding = z.shape[0] - states.shape[0]
+                if (padding > 0):
+                    states = torch.nn.functional.pad(states, (0, 0, 0, 0, 0, padding))
             # Weighted add of state_weight*state and emb_weight*z
             # Let subsequent LN take care of denominator
             # state_weight is close to 1, so shouldn't be any precision issues
