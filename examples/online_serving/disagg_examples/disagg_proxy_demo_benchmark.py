@@ -548,7 +548,9 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
                 print(
-                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] schedule prefill! scheduling prefill instance... min_value={min_value}, min_index={min_index}"
+                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                    f"schedule prefill! scheduling prefill instance... "
+                    f"min_value={min_value}, min_index={min_index}"
                 )
                 return self.prefill_instances[min_index]
             else:
@@ -556,7 +558,9 @@ class LoadBalancedScheduler(SchedulingPolicy):
                 min_index = self.decode_bs_counter.index(min_value)
                 self.decode_bs_counter[min_index] += 1
                 print(
-                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] schedule decode! scheduling decode instance... min_value={min_value}, min_index={min_index}"
+                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                    f"schedule decode! scheduling decode instance... "
+                    f"min_value={min_value}, min_index={min_index}"
                 )
                 return self.decode_instances[min_index]
 
@@ -566,7 +570,7 @@ class LoadBalancedScheduler(SchedulingPolicy):
         with self.lock:
             if prefill_instance:
                 print(
-                    " LoadBalancedScheduler->schedule_completion prefill_instance =",
+                    " LoadBalance->schedule_completion prefill_instance =",
                     prefill_instance)
                 index = self.prefill_instances.index(prefill_instance)
                 self.prefill_bs_counter[index] -= 1
@@ -582,7 +586,7 @@ class LoadBalancedScheduler(SchedulingPolicy):
 
             if decode_instance:
                 print(
-                    " LoadBalancedScheduler->schedule_completion decode_instance =",
+                    " LoadBalance->schedule_completion decode_instance =",
                     decode_instance)
                 index = self.decode_instances.index(decode_instance)
                 self.decode_bs_counter[index] -= 1
