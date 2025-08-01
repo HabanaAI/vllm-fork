@@ -411,9 +411,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             else VLLMFP8KVCache()
         self.v_cache = VLLMKVCache() if not self.enable_fp8_attn \
             else VLLMFP8KVCache()
-        HPUFusedSDPA = kernels.fsdpa()
-        self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
-            else ModuleFusedSDPA(HPUFusedSDPA)
+        self.fused_scaled_dot_product_attention = ModuleFusedSDPA()
         self.prefill_impl = get_config().prompt_attn_impl
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
