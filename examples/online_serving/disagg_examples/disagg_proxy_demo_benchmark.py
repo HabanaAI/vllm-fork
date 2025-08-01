@@ -261,12 +261,12 @@ class Proxy:
             try:
                 async with session.post(url=url, json=data,
                                         headers=headers) as response:
-                    if 200 <= response.status < 300 
-                        or 400 <= response.status < 500:
+                    if (200 <= response.status < 300 or 
+                            400 <= response.status < 500):
                         if use_chunked:
                             chunks = []
-                            async for chunk_bytes in 
-                                response.content.iter_chunked(1024):
+                            async for chunk_bytes in ( 
+                                response.content.iter_chunked(1024)):
                                 chunks.append(chunk_bytes)
                             return b"".join(chunks)
                         else:
@@ -305,11 +305,11 @@ class Proxy:
             try:
                 async with session.post(url=url, json=data,
                                         headers=headers) as response:
-                    if 200 <= response.status < 300 
-                        or 400 <= response.status < 500:  # noqa: E501
+                    if (200 <= response.status < 300 
+                        or 400 <= response.status < 500):
                         if use_chunked:
-                            async for chunk_bytes 
-                                in response.content.iter_chunked(1024):
+                            async for chunk_bytes in ( 
+                                response.content.iter_chunked(1024)):
                                 yield chunk_bytes
                         else:
                             content = await response.read()
