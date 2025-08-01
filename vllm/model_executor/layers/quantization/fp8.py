@@ -336,6 +336,10 @@ class Fp8LinearMethod(LinearMethodBase):
             return
 
         if current_platform.is_hpu():
+            layer.weight = torch.nn.Parameter(layer.weight.data, requires_grad=False)
+            if self.quant_config.is_checkpoint_fp8_serialized and not self.block_quant:
+                layer.weight_scale_inv = torch.nn.Parameter(layer.weight_scale_inv.data,
+                                                            requires_grad=False)
             if self.quant_config.activation_scheme == "static":
                 layer.input_scale = Parameter(layer.input_scale.max(),
                                               requires_grad=False)
