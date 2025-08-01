@@ -33,7 +33,7 @@ async def P_first_token_generator(generator_p,
     async for chunk in generator_p:
         yield chunk
     print(
-        f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ",
+        f"P:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]prefill finished:",
         prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(prefill_instance=prefill_instance)
@@ -44,7 +44,7 @@ async def P_first_token_generator(generator_p,
             continue
         yield chunk
     print(
-        f"P->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ",
+        f"P:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]decode finished:",
         decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(decode_instance=decode_instance)
@@ -58,7 +58,7 @@ async def D_first_token_generator(generator_p,
     async for _ in generator_p:
         continue
     print(
-        f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] prefill completed: ",
+        f"D:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]prefill finished:",
         prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(prefill_instance=prefill_instance)
@@ -66,7 +66,7 @@ async def D_first_token_generator(generator_p,
     async for chunk in generator_d:
         yield chunk
     print(
-        f"D->[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] decode completed: ",
+        f"D:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]decode finished:",
         decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
         callback_owner.on_done(decode_instance=decode_instance)
@@ -107,7 +107,8 @@ class Proxy:
         self.custom_create_chat_completion = custom_create_chat_completion
         self.router = APIRouter()
         self.setup_routes()
-        self.generator = P_first_token_generator if generator_on_p_node else D_first_token_generator
+        self.generator = (P_first_token_generator
+                          if generator_on_p_node else D_first_token_generator)
         self.benchmark_mode = benchmark_mode
         self.repeat_p_request = repeat_p_request
         self.repeat_d_times = repeat_d_times
@@ -260,12 +261,12 @@ class Proxy:
             try:
                 async with session.post(url=url, json=data,
                                         headers=headers) as response:
-                    if 200 <= response.status < 300 or 400 <= response.status < 500:
+                    if 200 <= response.status < 300 
+                        or 400 <= response.status < 500:
                         if use_chunked:
-                            # 收集所有 chunk 并合并为 bytes 返回
                             chunks = []
-                            async for chunk_bytes in response.content.iter_chunked(
-                                    1024):
+                            async for chunk_bytes in 
+                                response.content.iter_chunked(1024):
                                 chunks.append(chunk_bytes)
                             return b"".join(chunks)
                         else:
@@ -282,7 +283,8 @@ class Proxy:
                         raise HTTPException(
                             status_code=response.status,
                             detail=
-                            f"Request failed with status {response.status}: {error_content}",
+                            f"Request failed with status"
+                            f"{response.status}: {error_content}",
                         )
             except aiohttp.ClientError as e:
                 logger.error("ClientError occurred: %s", str(e))
@@ -303,10 +305,11 @@ class Proxy:
             try:
                 async with session.post(url=url, json=data,
                                         headers=headers) as response:
-                    if 200 <= response.status < 300 or 400 <= response.status < 500:  # noqa: E501
+                    if 200 <= response.status < 300 
+                        or 400 <= response.status < 500:  # noqa: E501
                         if use_chunked:
-                            async for chunk_bytes in response.content.iter_chunked(  # noqa: E501
-                                    1024):
+                            async for chunk_bytes 
+                                in response.content.iter_chunked(1024):
                                 yield chunk_bytes
                         else:
                             content = await response.read()
@@ -404,9 +407,6 @@ class Proxy:
                 except HTTPException as http_exc:
                     self.remove_instance_endpoint("prefill", prefill_instance)
                     raise http_exc
-
-            # Perform kv recv and decoding stage
-            # self.handle_benchmark_mode_requests(request)
 
             decode_instance = self.schedule(self.decode_cycler)
             value = value.strip().decode("utf-8").removesuffix(
