@@ -14,12 +14,12 @@ else
 fi
 
 if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
-    if [ "$DEBUG_MODE" == "1" ]; then
-    	source "$BASH_DIR"/start_etcd_mooncake_master.sh debug
-    	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh debug"
+    if [ "$BENCHMARK_MODE" == "1" ]; then
+	source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark
+ 	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark"
     else
 	source "$BASH_DIR"/start_etcd_mooncake_master.sh
-        echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
+	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
     fi
 fi
 
