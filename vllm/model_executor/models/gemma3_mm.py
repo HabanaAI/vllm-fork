@@ -271,6 +271,11 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             mm_data,
             mm_kwargs,
         )
+        if "pixel_values" in processed_outputs:
+            # Cast pixel values to model dtype already here,
+            # so we need to transfer less data to the GPU
+            processed_outputs["pixel_values"] = processed_outputs[
+                "pixel_values"].to(self.info.ctx.model_config.dtype)
 
         # HF processor pops the `num_crops` kwarg, which is needed by vLLM
         if (images := mm_data.get("images")) is not None:
@@ -647,7 +652,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             inputs_embeds = self.get_input_embeddings(input_ids,
                                                       vision_embeddings)
-            if vision_embeddings is not None:
+            if (vision_embeddings is not None) and len(vision_embeddings) != 0:
                 kwargs = self.prepare_attn_masks(
                     input_ids,
                     positions,
