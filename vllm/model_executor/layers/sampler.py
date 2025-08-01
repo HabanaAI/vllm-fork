@@ -794,7 +794,8 @@ def _sample_with_torch(
     * Defer Pythonization & preserve GPU-side
       tensors required for Pythonization
     '''
-
+    print(probs.shape)
+    print(logprobs.shape)
     categorized_seq_group_ids: dict[SamplingType, list[int]] = {
         t: []
         for t in SamplingType
