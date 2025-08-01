@@ -1031,8 +1031,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
         else:
             #hpu_opt
-            pading_tokens = [[10], [12]]
-            accepted_token_ids_by_step=[[item[0] for _ in range(batch_size)] for item in pading_tokens]           
+            HPU_VLLM_SPECDECODE_DUMMY_TOKEN=-2
+            padding_tokens = [[HPU_VLLM_SPECDECODE_DUMMY_TOKEN]] * 2
+            accepted_token_ids_by_step=[[item[0] for _ in range(batch_size)] for item in padding_tokens]           
 
         # Construct the output on a per-step, per-sequence basis.
         # Non-terminal prefill chunks will end up here as rows with just -1s

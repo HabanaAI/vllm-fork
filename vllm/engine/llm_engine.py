@@ -1150,10 +1150,16 @@ class LLMEngine:
                 #wa for MTP opt
                 #todo , sync the final text.
                 token_ids=request_output.outputs[0].token_ids
-                if token_ids[-2:] == [10, 12]:
-                    token_ids = token_ids[:-2]
-                elif token_ids[-1] == 10:
-                    token_ids = token_ids[:-1]
+                HPU_VLLM_SPECDECODE_DUMMY_TOKEN=-2
+                # if token_ids[-2:] == [-2, -2]:
+                #     token_ids = token_ids[:-2]
+                # elif token_ids[-1] == -2:
+                #     token_ids = token_ids[:-1]
+                for _ in range(2):
+                    if token_ids and token_ids[-1] == HPU_VLLM_SPECDECODE_DUMMY_TOKEN:
+                        token_ids.pop()
+                    else:
+                        break
                 request_output.outputs[0].text=self.tokenizer.tokenizer.decode(token_ids, skip_special_tokens=True)
                 ctx.request_outputs.append(request_output)
 
