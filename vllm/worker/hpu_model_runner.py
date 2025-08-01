@@ -33,8 +33,10 @@ from attr import dataclass
 from vllm_hpu_extension.bucketing.common import HPUBucketingManager
 from vllm_hpu_extension.ops import LoraMask as LoraMask
 from vllm_hpu_extension.profiler import (HabanaHighLevelProfiler,
-                                         HabanaMemoryProfiler, format_bytes)
-from vllm_hpu_extension.runtime import get_config
+                                         HabanaMemoryProfiler,
+                                         HabanaProfilerCounterHelper,
+                                         format_bytes)
+from vllm_hpu_extension.runtime import finalize_config, get_config
 
 import vllm.envs as envs
 from vllm.attention import AttentionMetadata, get_attn_backend
@@ -352,6 +354,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_window_sdpa = os.getenv("PT_HPU_SDPA_QKV_SLICE_MODE_FWD",
                                          "false").strip().lower() in ("1",
                                                                       "true")
+        self.sliding_window_right = 0
         if self.use_window_sdpa:
             self.slice_size = int(
                 os.getenv("PT_HPU_QKV_SLICE_SEQ_LEN_THLD", "1024"))
@@ -359,6 +362,12 @@ class HpuModelAdapter(torch.nn.Module):
             os.environ["PT_HPU_SDPA_BC_FACTOR"] = str(self.slice_size)
             os.environ["PT_HPU_SDPA_BR_FACTOR"] = str(self.slice_size)
             os.environ["PT_HPU_QKV_SLICE_SEQ_LEN_THLD"] = str(self.slice_size)
+            self.sliding_window_right = int(
+                os.environ.get('VLLM_FUSEDSDPA_SLIDE_RIGHT', '0'))
+            assert self.sliding_window_right % self.slice_size == 0, \
+                f'VLLM_FUSEDSDPA_SLIDE_RIGHT({self.sliding_window_right}) '\
+                f'not supported due to not a multiplier of '\
+                f'PT_HPU_QKV_SLICE_SEQ_LEN_THLD({self.slice_size})!'
 
         # This applies exclusively to Qwen2/2.5-VL models
         # both use mrope. We wrap the visual and language
@@ -416,34 +425,6 @@ class HpuModelAdapter(torch.nn.Module):
             delattr(self._rotary_embed_module, "cos")
         if hasattr(self._rotary_embed_module, "sin"):
             delattr(self._rotary_embed_module, "sin")
-
-    # copying from PR 1163
-    # needs cleanup/unified approach later
-    def compute_input_embeddings_for_gemma(self, **kwargs):
-
-        if 'inputs_embeds' in kwargs:
-            print('do nothing')
-            return kwargs
-
-        input_ids = kwargs['input_ids']
-
-        vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
-        inputs_embeds = self.model.get_input_embeddings(
-            input_ids, vision_embeddings)
-
-        if vision_embeddings is not None:
-            input_ids = kwargs['input_ids']
-            positions = kwargs['positions']
-            kwargs = self.model.prepare_attn_masks(
-                mask_dtype=self.dtype,
-                **kwargs,
-            )
-            kwargs['input_ids'] = input_ids
-            kwargs['positions'] = positions
-
-        kwargs.update({'inputs_embeds': inputs_embeds})
-        kwargs.pop('pixel_values', None)
-        return kwargs
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -608,6 +589,8 @@ class HpuModelAdapter(torch.nn.Module):
                     f"VLLM_PROMPT_SEQ_BUCKET_STEP: 1024 ")
 
         attn_metadata = attn_metadata._replace(use_window_sdpa=use_window_sdpa)
+        attn_metadata = attn_metadata._replace(
+            sliding_window_right=self.sliding_window_right)
         return attn_metadata
 
     def _update_metadata(self,
@@ -985,7 +968,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         is_causal: bool = True,
     ):
         ModelRunnerBase.__init__(self, vllm_config=vllm_config)
+
         environment.set_vllm_config(vllm_config)
+        finalize_config()
+
         self.is_driver_worker = is_driver_worker
         self.return_hidden_states = return_hidden_states
 
@@ -1049,7 +1035,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # Profiler stats
         self.profiler = HabanaHighLevelProfiler()
-        self.profiler_counter_helper = HabanaProfilerCounterHelper()
+        self.profiler_counter_helper = HabanaProfilerCounterHelper(is_v1=False)
         self.seen_configs: set = set()
         self._mem_margin: Optional[int] = None
         self.use_prefix_caching = (
@@ -1510,17 +1496,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return tensor if tensor is None else tensor.to(self.device,
                                                        non_blocking=True)
 
-    def _get_position_pad(self) -> int:
-        """
-        For gemma3 models,
-        due to the Hack in Gemma3ForConditionalGeneration::prepare_attn_masks,
-        '0' can't be used as pad for input position tensor.
-        In case, it might have '0's for bucketing, those '0' will be counted as
-        new sequence in the prepare_attn_masks() which is wrong.
-        """
-        model_type = getattr(self.model_config.hf_config, 'model_type', '')
-        return -1 if model_type == 'gemma3' else 0
-
     def add_vision_buckets_to_mrope_mm_optimized(self):
         if self.mm_registry is not None:
             model = self.get_model()
@@ -1776,11 +1751,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 make_mrope_positions_tensor_with_pad(input_positions=input_positions,
                                                      input_mrope_positions=input_mrope_positions,
                                                      max_prompt_len=max_prompt_len,
-                                                     pad=self._get_position_pad())
+                                                     pad=0)
         else:
             input_positions = make_cpu_tensor(input_positions,
                                               max_len=max_prompt_len,
-                                              pad=self._get_position_pad(),
+                                              pad=0,
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
@@ -2689,6 +2664,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
+            'sliding_window_right',
         ])
         return attention_metadata
 
@@ -2773,7 +2749,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             sampling_params = None
         else:
             sampling_params = SamplingParams(temperature=temperature)
-            num_blocks = math.ceil(seq_len / self.block_size)
+        num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
         computed_block_nums = None
         if is_prompt:
@@ -3341,95 +3317,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._mem_margin = value
 
 
-class HabanaProfilerCounterHelper:
-
-    def __init__(self):
-        self.niter = 0
-        self.average_real_throughput = None
-        self.logged_once = False
-        self.real_seq_lens = []
-        self.prompt_seq_lens = []
-
-    def capture_seq_group_metadata_stats(self, seq_group_metadata_list):
-        self.real_seq_lens = [
-            len(seq_data.prompt_token_ids) + len(seq_data.output_token_ids)
-            for seq_group_metadata in seq_group_metadata_list
-            for seq_data in seq_group_metadata.seq_data.values()
-        ]
-        self.prompt_seq_lens = [
-            len(seq_data.prompt_token_ids)
-            for seq_group_metadata in seq_group_metadata_list
-            for seq_data in seq_group_metadata.seq_data.values()
-        ]
-
-    def get_counter_dict(self, cache_config, duration, seq_len,
-                         batch_size_padded, real_batch_size, is_prompt):
-        throughput = batch_size_padded / (duration / 1e6)
-        throughput_effective = real_batch_size / (duration / 1e6)
-
-        real_max_seq_len = max(self.real_seq_lens)
-        real_num_tokens = sum(self.real_seq_lens)
-        padded_num_tokens = batch_size_padded * seq_len
-        batch_token_utilization = real_num_tokens / padded_num_tokens
-        if self.average_real_throughput is None:
-            self.average_real_throughput = throughput_effective
-        else:  # https://www.heikohoffmann.de/htmlthesis/node134.html
-            self.average_real_throughput = self.average_real_throughput + 1 / (
-                self.niter + 1) * (throughput_effective -
-                                   self.average_real_throughput)
-        phase = "prompt" if is_prompt else "decode"
-        counters = {
-            f'{phase}_bucket_batch_size': batch_size_padded,
-            f'{phase}_batch_size': real_batch_size,
-            f'{phase}_bucket_seq_len': seq_len,
-            f'{phase}_seq_len': real_max_seq_len,
-            f'{phase}_bucket_gen_throughput': throughput,
-            f'{phase}_real_gen_throughput': throughput_effective,
-            f'{phase}_batch_token_utilization': batch_token_utilization,
-            'average_real_throughput': self.average_real_throughput,
-            'engine_iteration': self.niter,
-        }
-        self.niter += 1
-        if is_prompt:
-            prompt_bucket_in_throughput = (seq_len * batch_size_padded) / (
-                duration / 1e6)
-            prompt_real_in_throughput = sum(
-                self.prompt_seq_lens) / (duration / 1e6)
-            counters[
-                f'{phase}_bucket_in_throughput'] = prompt_bucket_in_throughput
-            counters[f'{phase}_real_in_throughput'] = prompt_real_in_throughput
-
-        # KV cache might not be created yet (e.g. for profiling run)
-        if cache_config.num_gpu_blocks is not None and \
-            cache_config.num_gpu_blocks != 0:
-            cache_num_blocks_used = [
-                math.ceil(sl / cache_config.block_size)
-                for sl in self.real_seq_lens
-            ]
-            cache_total_num_blocks_used = sum(cache_num_blocks_used)
-            num_cache_blocks = cache_config.num_gpu_blocks
-            cache_total_num_free_blocks = \
-                num_cache_blocks - cache_total_num_blocks_used
-            cache_computed_utilization = \
-                cache_total_num_blocks_used / num_cache_blocks
-            max_blocks_per_seq = math.ceil(seq_len / cache_config.block_size)
-            batch_block_utilization = cache_total_num_blocks_used / (
-                batch_size_padded * max_blocks_per_seq)
-            counters['cache_num_blocks_used'] = cache_total_num_blocks_used
-            counters['cache_num_free_blocks'] = cache_total_num_free_blocks
-            counters['cache_computed_utilization'] = cache_computed_utilization
-            counters[
-                f'{phase}_batch_block_utilization'] = batch_block_utilization
-        if not self.logged_once:
-            counters['const_cache_num_blocks'] = cache_config.num_gpu_blocks
-            counters[
-                'const_gpu_memory_utilization'] = \
-                    cache_config.gpu_memory_utilization
-            counters['const_block_size'] = cache_config.block_size
-            self.logged_once = True
-        return counters
-
-
 class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     """
     GPU model runner with sampling step.
@@ -3930,7 +3817,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode:
-                                bypass_model_exec = False
+                                bypass_model_exec = True
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets)
@@ -4130,6 +4017,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     seq_len=seq_len,
                     batch_size_padded=batch_size_padded,
                     real_batch_size=real_batch_size,
+                    prompt_batch_idx=0,
                     is_prompt=is_prompt)
                 self.profiler.record_counter(self.event_start, counters)
             if num_steps == 1:

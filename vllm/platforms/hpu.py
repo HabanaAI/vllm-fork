@@ -35,14 +35,25 @@ class HpuPlatform(Platform):
         "bitsandbytes"
     ]
 
+    @property
+    def supported_dtypes(self) -> list[torch.dtype]:
+        """Returns the supported dtypes for the current platform."""
+        # Be careful with the order of the dtypes. The first dtype will
+        # be used as the default dtype fallback for the current platform,
+        # when encountering unsupported dtypes in "auto" dtype.
+        return [torch.bfloat16, torch.float32]
+
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: _Backend, head_size: int,
                              dtype: torch.dtype, kv_cache_dtype: Optional[str],
                              block_size: int, use_v1: bool,
                              use_mla: bool) -> str:
-        if use_v1:
+        if use_v1 and not use_mla:
             logger.info("Using HPUAttentionV1 backend.")
             return "vllm.v1.attention.backends.hpu_attn.HPUAttentionBackendV1"
+        if use_v1 and use_mla:
+            logger.info("Using HPUAttentionMLA backend.")
+            return "vllm.attention.backends.hpu_attn.HPUMLAAttentionBackend"
         if use_mla:
             logger.info("Using HPUAttentionMLA backend.")
             return "vllm.attention.backends.hpu_attn.HPUMLAAttentionBackend"
@@ -56,10 +67,6 @@ class HpuPlatform(Platform):
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
         return cls.device_name
-
-    @classmethod
-    def inference_mode(cls):
-        return torch.no_grad()
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
