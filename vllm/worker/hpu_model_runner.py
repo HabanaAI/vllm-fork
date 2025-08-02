@@ -371,7 +371,7 @@ class HpuModelAdapter(torch.nn.Module):
             if self.is_mm_optimized:
                 if hasattr(self.model, 'vision_tower'):
                     self.model.vision_tower = htorch.hpu.wrap_in_hpu_graph(
-                        self.model.vision_tower, disable_tensor_cache=True)
+                        self.model.vision_tower, disable_tensor_cache=False)
                 if hasattr(self.model, 'multi_modal_projector'):
                     self.model.multi_modal_projector = \
                             htorch.hpu.wrap_in_hpu_graph( \
