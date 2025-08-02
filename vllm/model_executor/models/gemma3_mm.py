@@ -304,7 +304,6 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
         num_crops = hf_inputs.get("num_crops", torch.empty(0))
-
         return dict(
             pixel_values=MultiModalFieldConfig.flat_from_sizes(
                 "image", num_crops + 1),
@@ -446,6 +445,7 @@ class Gemma3MultiModalProjector(nn.Module):
                                      stride=self.kernel_size)
 
     def forward(self, vision_outputs: torch.Tensor):
+        print("Gemma3MultiModalProjector: ", vision_outputs.shape)
         batch_size, _, seq_length = vision_outputs.shape
 
         reshaped_vision_outputs = vision_outputs.transpose(1, 2)
@@ -534,7 +534,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         assert image_embeds is None, "Gemma3 does not support image_embeds."
         if pixel_values is None:
             return None
-
         if not isinstance(pixel_values, (torch.Tensor, list)):
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
@@ -575,7 +574,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             pixel_values,
         )
 
-        if is_hpu:
+        if is_hpu and len(self.graphed_multimodal_buckets) > 1:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
                     self.vision_buckets.multimodal_buckets)
             start_idx = 0
@@ -583,18 +582,11 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
-                batch_sliced_image_features = \
-                        image_features[start_idx:end_idx, ...]
-                if is_lazy:
-                    image_embeds_multibatches += \
+                indices = torch.arange(start_idx, end_idx)
+                batch_sliced_image_features = torch.index_select(
+                    image_features, dim=0, index=indices)
+                image_embeds_multibatches += \
                             [self.multi_modal_projector(
-                                batch_sliced_image_features,
-                                bypass_hpu_graphs=i
-                                not in self.graphed_multimodal_buckets
-                                and len(self.graphed_multimodal_buckets) > 0)]
-                else:
-                    image_embeds_multibatches += \
-                            [self.multi_modal_projector( \
                                 batch_sliced_image_features)]
                 start_idx = end_idx
             image_embeds = torch.cat(image_embeds_multibatches, dim=0)

@@ -413,6 +413,12 @@ class Gemma3Model(nn.Module):
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
+
+        print(f"Gemma3Model : input_ids:{input_ids.shape if input_ids is not None else input_ids}, "
+              f"positions:{positions.shape}, inputs_embeds:{inputs_embeds.shape if inputs_embeds is not None else inputs_embeds}, "
+              f"intermediate_tensors:{intermediate_tensors.shape if intermediate_tensors is not None else intermediate_tensors}, "
+              f"kwargs{kwargs}")
+
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
