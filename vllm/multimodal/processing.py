@@ -1757,6 +1757,49 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
 
         return prompt_ids, prompt, mm_placeholders
 
+    async def _maybe_apply_prompt_updates_async(
+        self,
+        mm_items: MultiModalDataItems,
+        hf_processor_mm_kwargs: Mapping[str, object],
+        prompt_ids: list[int],
+        mm_kwargs: MultiModalKwargs,
+        is_update_applied: bool,
+    ) -> tuple[list[int], str, Mapping[str, list[PlaceholderFeaturesInfo]]]:
+        unbound_prompt_updates = self._get_prompt_updates(
+            mm_items,
+            hf_processor_mm_kwargs,
+            mm_kwargs,
+        )
+        mm_prompt_updates = self._bind_and_group_updates(
+            unbound_prompt_updates)
+
+        mm_item_counts = mm_items.get_all_counts()
+        self._validate_mm_kwargs(mm_kwargs, mm_item_counts)
+        import pdb;pdb.set_trace()
+        if is_update_applied:
+            mm_placeholders = self._find_mm_placeholders(
+                mm_prompt_updates,
+                prompt_ids,
+                mm_item_counts,
+            )
+            self._validate_mm_placeholders(mm_placeholders, mm_item_counts)
+
+            tokenizer = self.info.get_tokenizer()
+            prompt = decode_tokens(tokenizer, prompt_ids)
+        else:
+            (
+                prompt_ids,
+                prompt,
+                mm_placeholders,
+            ) = self._apply_prompt_updates(
+                prompt_ids,
+                mm_prompt_updates,
+                mm_item_counts,
+            )
+            self._validate_mm_placeholders(mm_placeholders, mm_item_counts)
+
+        return prompt_ids, prompt, mm_placeholders
+
     def apply(
         self,
         prompt: Union[str, list[int]],
@@ -1812,6 +1855,63 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
             mm_hashes=mm_hashes,
             mm_placeholders=mm_placeholder_ranges,
         )
+
+    async def apply_async(
+        self,
+        prompt: Union[str, list[int]],
+        mm_data: MultiModalDataDict,
+        hf_processor_mm_kwargs: Mapping[str, object],
+        return_mm_hashes: bool = False,
+    ) -> MultiModalInputs:
+        """
+        Process multi-modal inputs to be used in vLLM.
+
+        The main steps are:
+
+        1. Apply HF Processor on prompt text and multi-modal data together,
+           outputting token IDs and processed tensors.
+        2. Find and update sequences in the token IDs with placeholder tokens.
+           The number of placeholder tokens equals the feature size of the
+           multi-modal data outputted by the multi-modal encoder.
+        3. Extract information about the placeholder tokens from the
+           processed token IDs.
+        """
+        mm_items = self._to_mm_items(mm_data)
+
+        (
+            prompt_ids,
+            mm_kwargs,
+            mm_hashes,
+            is_update_applied,
+        ) = self._cached_apply_hf_processor(
+            prompt,
+            mm_items,
+            hf_processor_mm_kwargs,
+            return_mm_hashes=return_mm_hashes,
+        )
+
+        prompt_ids, prompt, mm_placeholders = await self._maybe_apply_prompt_updates_async(
+            mm_items=mm_items,
+            hf_processor_mm_kwargs=hf_processor_mm_kwargs,
+            prompt_ids=prompt_ids,
+            mm_kwargs=mm_kwargs,
+            is_update_applied=is_update_applied,
+        )
+
+        mm_placeholder_ranges = {
+            modality: [item.to_range() for item in placeholders]
+            for modality, placeholders in mm_placeholders.items()
+        }
+
+        return MultiModalInputs(
+            type="multimodal",
+            prompt=prompt,
+            prompt_token_ids=prompt_ids,
+            mm_kwargs=mm_kwargs,
+            mm_hashes=mm_hashes,
+            mm_placeholders=mm_placeholder_ranges,
+        )
+
 
 
 class EncDecMultiModalProcessor(BaseMultiModalProcessor[_I]):

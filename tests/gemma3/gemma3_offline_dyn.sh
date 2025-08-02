@@ -18,7 +18,8 @@ export PT_HPU_LAZY_MODE=1
 #export VLLM_PROMPT_USE_FUSEDSDPA=False
 
 
-#export VLLM_SKIP_WARMUP=true
+export VLLM_SKIP_WARMUP=true
 
 
+#python gemma3_offline_dyn.py --model google/gemma-3-4b-it --tensor-parallel-size 1 --batchconfig config1.json
 python gemma3_offline_dyn.py --model google/gemma-3-4b-it --tensor-parallel-size 1 --batchconfig config1.json

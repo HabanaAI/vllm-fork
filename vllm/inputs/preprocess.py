@@ -302,7 +302,7 @@ class InputPreprocessor:
         if mm_processor_kwargs is None:
             mm_processor_kwargs = {}
 
-        return mm_processor.apply(prompt, mm_data, mm_processor_kwargs,
+        return await mm_processor.apply_async(prompt, mm_data, mm_processor_kwargs,
                                   return_mm_hashes)
 
     def _process_embeds(

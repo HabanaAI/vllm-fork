@@ -5,6 +5,7 @@ import os
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Optional, TypedDict
 
+import time
 import torch
 from torch import nn
 from transformers import BatchFeature, Gemma3Config, Gemma3Processor
@@ -379,6 +380,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
 
         return token_ids
 
+    '''
     def _find_mm_placeholders(
         self,
         mm_prompt_updates: Mapping[str, Sequence[BoundPromptUpdate]],
@@ -400,13 +402,19 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
                 return [newline_2, newline_2]
 
             return [tok]
-
+        import pdb;pdb.set_trace()
+        start_time = time.perf_counter()
         repl_token_ids = list[int]()
         repl_orig_idxs = list[int]()
         for orig_idx, orig_tok in enumerate(new_token_ids):
             repl_toks = get_repl_toks(orig_tok)
             repl_token_ids.extend(repl_toks)
             repl_orig_idxs.extend(orig_idx for _ in range(len(repl_toks)))
+
+        # End time measurement
+        end_time = time.perf_counter()
+        loop_duration = end_time - start_time
+        print(f"##MD: Synchronous loop duration: {loop_duration:.4f} seconds")
 
         repls = find_mm_placeholders(mm_prompt_updates, repl_token_ids,
                                      mm_item_counts)
@@ -423,7 +431,66 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             ]
             for modality, placeholders in repls.items()
         }
+    #'''
+    async def _find_mm_placeholders(
+        self,
+        mm_prompt_updates: Mapping[str, Sequence[BoundPromptUpdate]],
+        new_token_ids: list[int],
+        mm_item_counts: Mapping[str, int],
+    ) -> Mapping[str, list[PlaceholderFeaturesInfo]]:
+        # We need to detect "\n\n" inside "\n\n\n" and "\n\n\n\n"
+        tokenizer = self.info.get_tokenizer()
+        vocab = tokenizer.get_vocab()
+        newline_1 = vocab["\n"]
+        newline_2 = vocab["\n\n"]
+        newline_3 = vocab["\n\n\n"]
+        newline_4 = vocab["\n\n\n\n"]
 
+        def get_repl_toks(tok: int) -> list[int]:
+            if tok == newline_3:
+                return [newline_1, newline_2]
+            if tok == newline_4:
+                return [newline_2, newline_2]
+
+            return [tok]
+
+        import pdb;pdb.set_trace()
+        async def process_token(orig_idx, orig_tok):
+            repl_toks = get_repl_toks(orig_tok)
+            return repl_toks, [orig_idx for _ in range(len(repl_toks))]
+
+        # Start time measurement
+        start_time = time.perf_counter()
+
+        tasks = [process_token(orig_idx, orig_tok) for orig_idx, orig_tok in enumerate(new_token_ids)]
+        results = await asyncio.gather(*tasks)
+
+        # End time measurement
+        end_time = time.perf_counter()
+        loop_duration = end_time - start_time
+        print(f"##MD: Async loop duration: {loop_duration:.4f} seconds")
+
+        repl_token_ids = []
+        repl_orig_idxs = []
+        for repl_toks, orig_idxs in results:
+            repl_token_ids.extend(repl_toks)
+            repl_orig_idxs.extend(orig_idxs)
+
+        repls = find_mm_placeholders(mm_prompt_updates, repl_token_ids, mm_item_counts)
+
+        return {
+            modality: [
+                PlaceholderFeaturesInfo(
+                    modality=p.modality,
+                    item_idx=p.item_idx,
+                    start_idx=repl_orig_idxs[p.start_idx],
+                    tokens=p.tokens,
+                    is_embed=p.is_embed,
+                ) for p in placeholders
+            ]
+            for modality, placeholders in repls.items()
+        }
+    #'''
 
 class Gemma3MultiModalProjector(nn.Module):
 
