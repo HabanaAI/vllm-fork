@@ -48,7 +48,8 @@ export VLLM_DELAYED_SAMPLING="true"
 #export VLLM_MOE_SLICE_LENGTH=20480
 
 # params
-CONST_LEN=16384
+# CONST_LEN=16384
+CONST_LEN=18432
 max_model_len=$CONST_LEN
 max_num_batched_tokens=$CONST_LEN
 max_num_seqs=256

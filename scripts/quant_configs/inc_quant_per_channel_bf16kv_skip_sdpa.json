@@ -23,5 +23,5 @@
             "block2batch_matmul"
         ]
     },
-    "dump_stats_path": "./scripts/nc_workspace_measure_kvache/inc_measure_output"
+    "dump_stats_path": "/mnt/disk3/yiliu4/vllm-hpu-extension/calibration/Yi30/inc-woq-2282samples-514-g2-unified-tp1-expand-tp8/inc_measure_output"
 }
