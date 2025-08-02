@@ -622,11 +622,13 @@ class HpuModelAdapter(torch.nn.Module):
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
 
-        #TODO: In warmup, we need to warmup the model with dummy image data for
-        #multimodal model, here instead of generating a dummy image, we are just
-        #generating attn_mask for the images and pass with attn_metadata, so we
-        #can reuse HPU graph without running the whole vision tower.
-        if vision_embeddings is not None or warmup_mode:
+        # TODO: In warmup, we need to warmup the model with dummy image data for
+        # multimodal model for prompt, here instead of generating a dummy image,
+        # we are just generating attn_mask for the images and pass with
+        # attn_metadata, so we can reuse HPU graph without running
+        # the whole vision tower.
+        if vision_embeddings is not None or (
+            warmup_mode &  kwargs['attn_metadata'].is_prompt):
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
             kwargs = self.model.prepare_attn_masks(
