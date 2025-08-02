@@ -380,7 +380,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
 
         return token_ids
 
-    '''
+    #'''
     def _find_mm_placeholders(
         self,
         mm_prompt_updates: Mapping[str, Sequence[BoundPromptUpdate]],
@@ -432,7 +432,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             for modality, placeholders in repls.items()
         }
     #'''
-    async def _find_mm_placeholders(
+    async def _find_mm_placeholders_async(
         self,
         mm_prompt_updates: Mapping[str, Sequence[BoundPromptUpdate]],
         new_token_ids: list[int],

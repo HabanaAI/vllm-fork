@@ -1663,8 +1663,79 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
                 modality: [match._origin for match in token_matches]
                 for modality, token_matches in mm_text_matches.items()
             }
-
+        ##import pdb;pdb.set_trace()
         placeholders = self._find_mm_placeholders(
+            matched_updates,
+            token_ids,
+            mm_item_counts,
+        )
+
+        return token_ids, text, placeholders
+
+    async def _apply_prompt_updates_async(
+        self,
+        token_ids: list[int],
+        mm_prompt_updates: Mapping[str, Sequence[BoundPromptUpdate]],
+        mm_item_counts: Mapping[str, int],
+    ) -> tuple[list[int], str, Mapping[str, list[PlaceholderFeaturesInfo]]]:
+        tokenizer = self.info.get_tokenizer()
+
+        mm_token_matches = {
+            modality: find_token_matches(token_ids, updates)
+            for modality, updates in mm_prompt_updates.items()
+        }
+        mm_match_counts = {
+            modality: len(matches)
+            for modality, matches in mm_token_matches.items()
+        }
+
+        # If the search text does not represent a special token,
+        # it may have different token IDs in the prompt, because
+        # the tokens may go across the boundaries of the search text.
+        # ----
+        # e.g. when searching for "foo" in "food", if "food" itself makes
+        # up a token, then the token ID of "foo" will not appear at all
+        # ----
+        # Since it is inefficient to search for all possible tokenizations
+        # of the search text in the prompt, we instead perform string-based
+        # updates on the decoded token IDs, then encode them back.
+        if all(
+            mm_match_counts.get(modality, 0) >= item_count
+            for modality, item_count in mm_item_counts.items()
+        ):  # yapf: disable
+            token_ids = self._apply_token_matches(
+                token_ids,
+                mm_token_matches,
+                mm_item_counts,
+            )
+
+            text = decode_tokens(tokenizer, token_ids)
+            matched_updates = {
+                modality: [match._origin for match in token_matches]
+                for modality, token_matches in mm_token_matches.items()
+            }
+        else:
+            text = decode_tokens(tokenizer, token_ids)
+
+            mm_text_matches = {
+                modality: find_text_matches(text, updates)
+                for modality, updates in mm_prompt_updates.items()
+            }
+            text = self._apply_text_matches(
+                text,
+                mm_text_matches,
+                mm_item_counts,
+            )
+
+            token_ids = encode_tokens(tokenizer,
+                                      text,
+                                      add_special_tokens=False)
+            matched_updates = {
+                modality: [match._origin for match in token_matches]
+                for modality, token_matches in mm_text_matches.items()
+            }
+        import pdb;pdb.set_trace()
+        placeholders = await self._find_mm_placeholders_async(
             matched_updates,
             token_ids,
             mm_item_counts,
@@ -1732,7 +1803,7 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
 
         mm_item_counts = mm_items.get_all_counts()
         self._validate_mm_kwargs(mm_kwargs, mm_item_counts)
-
+        import pdb;pdb.set_trace()
         if is_update_applied:
             mm_placeholders = self._find_mm_placeholders(
                 mm_prompt_updates,
@@ -1791,7 +1862,7 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
                 prompt_ids,
                 prompt,
                 mm_placeholders,
-            ) = self._apply_prompt_updates(
+            ) = await self._apply_prompt_updates_async(
                 prompt_ids,
                 mm_prompt_updates,
                 mm_item_counts,
