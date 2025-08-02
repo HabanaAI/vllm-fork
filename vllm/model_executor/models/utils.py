@@ -52,6 +52,11 @@ def greedy_plan(batchsize, available_batchsizes):
     # sort descending
     available_batchsizes_sorted = sorted(available_batchsizes,
                                          key=lambda x: -x)
+    # if batch is in range of available batches, use nearest larger one to pad
+    # else, do split based on greedy
+    batch_in_range = min([v for v in available_batchsizes_sorted if v >= batchsize] or [None])
+    if batch_in_range:
+        return [batch_in_range]
     idx = 0
     left_to_process = batchsize
     result = []
@@ -61,6 +66,7 @@ def greedy_plan(batchsize, available_batchsizes):
             left_to_process -= available_batchsizes_sorted[idx]
         else:
             idx += 1
+
     if left_to_process > 0:
         result += [available_batchsizes_sorted[-1]]  # this will be padded
     return result

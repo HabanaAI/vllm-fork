@@ -570,22 +570,29 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         pixel_values = image_input["pixel_values"]
         num_patches = image_input["num_patches"]
 
-        image_features = self._image_pixels_to_features(
-            self.vision_tower,
-            pixel_values,
-        )
-
         if is_hpu:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
-                    self.vision_buckets.multimodal_buckets)
+                        self.vision_buckets.multimodal_buckets)
+            padding_need = len(batch_breakdown) == 1 and batch_breakdown[0] > pixel_values.size(0)
+            if padding_need:
+                bs_padded = batch_breakdown[0] - pixel_values.size(0)
+                # check if we should use conact 
+                pixel_values = nn.functional.pad(pixel_values, (0, 0, 0, 0, 0, 0, 0, bs_padded), "constant", 0)
+
             start_idx = 0
             image_embeds_multibatches = []
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
-                batch_sliced_image_features = \
-                        image_features[start_idx:end_idx, ...]
+                batch_sliced_pixel_values = \
+                        pixel_values[start_idx:end_idx, ...]
+                print("libin debug batch_sliced_pixel_values ", batch_sliced_pixel_values.shape)
                 if is_lazy:
+                    batch_sliced_image_features = self.vision_tower(
+                        batch_sliced_pixel_values,
+                        bypass_hpu_graphs=i
+                                not in self.graphed_multimodal_buckets
+                                and len(self.graphed_multimodal_buckets) > 0)
                     image_embeds_multibatches += \
                             [self.multi_modal_projector(
                                 batch_sliced_image_features,
@@ -593,12 +600,23 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                                 not in self.graphed_multimodal_buckets
                                 and len(self.graphed_multimodal_buckets) > 0)]
                 else:
+                    batch_sliced_image_features = self._image_pixels_to_features(
+                        self.vision_tower,
+                        batch_sliced_pixel_values,
+                    )
                     image_embeds_multibatches += \
                             [self.multi_modal_projector( \
                                 batch_sliced_image_features)]
                 start_idx = end_idx
-            image_embeds = torch.cat(image_embeds_multibatches, dim=0)
+            if padding_need:
+                image_embeds = image_embeds_multibatches[0][:-1,:,:]
+            else:
+                image_embeds = torch.cat(image_embeds_multibatches, dim=0)
         else:
+            image_features = self._image_pixels_to_features(
+                self.vision_tower,
+                pixel_values,
+            )
             image_embeds = self.multi_modal_projector(image_features)
         return [
             e.flatten(0, 1) for e in image_embeds.split(num_patches.tolist())

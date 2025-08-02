@@ -17,6 +17,10 @@ from typing import List, Optional, Set, Tuple, Type
 import habana_frameworks.torch as htorch  # noqa:F401
 import torch
 import torch.distributed
+from vllm_hpu_extension.debug import init_debug_logger
+from vllm_hpu_extension.profiler import (HabanaMemoryProfiler, format_bytes,
+                                         setup_profiler)
+from vllm_hpu_extension.runtime import get_config
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
@@ -40,7 +44,13 @@ from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
 
 logger = init_logger(__name__)
-
+def setup_step_profiler(steps):
+    if steps is None:
+        return None
+    print("libin debug steps ", steps)
+    step_start, step_end = steps[0], steps[1]
+    active = step_end - step_start + 1
+    return setup_profiler(warmup=0, active=active)
 
 class HPUWorker(LocalOrDistributedWorkerBase):
     """A worker class that executes (a partition of) the model on a HPU.
@@ -125,6 +135,11 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+   
+        self.step = 0
+        self.profile_steps = get_config().VLLM_PROFILE_STEPS
+        self.step_profiler = setup_step_profiler(self.profile_steps)
+        self.step_debug = init_debug_logger('steps')
 
     def full_trace_handler(self, dir_name, use_gzip=False):
 
@@ -241,6 +256,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None,
     ) -> Optional[List[SamplerOutput]]:
+        if self.step_debug:
+            self.step_debug(f'step={self.step}')
+        if self.step_profiler and self.step == self.profile_steps[0]:
+            self.step_profiler.start()
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION     - will log graph compilations per engine step, only when there was any - highly recommended to use alongside PT_HPU_METRICS_GC_DETAILS! # noqa:E501
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL - will log graph compilations per engine step, always, even if there were none # noqa:E501
         # VLLM_HPU_LOG_STEP_CPU_FALLBACKS         - will log cpu fallbacks per engine step, only when there was any # noqa:E501
@@ -299,11 +318,27 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 msg = ("VLLM_HPU_STEP_CPU_FALLBACK: "
                        f"{cpu_fallback_local_metric.stats()}, {input_stats}")
                 logger.warning(msg)
-
+            if self.step_profiler:
+                if self.step >= self.profile_steps[0]:
+                    self.step_profiler.step()
+                if self.step == self.profile_steps[1]:
+                    self.step_profiler.stop()
+                    self.step_profiler = None
+                    raise RuntimeError('Step profiling finished!')
+            self.step += 1
             return output
 
         output = LocalOrDistributedWorkerBase.execute_model(
             self, execute_model_req)
+        
+        if self.step_profiler:
+            if self.step >= self.profile_steps[0]:
+                self.step_profiler.step()
+            if self.step == self.profile_steps[1]:
+                self.step_profiler.stop()
+                self.step_profiler = None
+                raise RuntimeError('Step profiling finished!')
+        self.step += 1
         return output
 
     @torch.inference_mode()
