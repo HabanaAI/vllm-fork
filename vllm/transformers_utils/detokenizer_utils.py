@@ -104,6 +104,7 @@ def detokenize_incrementally(
     read_offset: int,
     skip_special_tokens: bool = False,
     spaces_between_special_tokens: bool = True,
+    last_n=1
 ) -> Tuple[List[str], str, int, int]:
     """Detokenizes the input ids incrementally and returns the new tokens
     and the new text.
@@ -129,7 +130,7 @@ def detokenize_incrementally(
         spaces_between_special_tokens: Whether to add spaces between special
             tokens.
     """
-    new_token_id = all_input_ids[-1]
+    new_token_id = all_input_ids[-last_n:]
     # This is the first iteration for this sequence
     is_first_iter = prev_tokens is None
     if is_first_iter:
@@ -141,10 +142,15 @@ def detokenize_incrementally(
     assert prev_tokens is not None
 
     # If the new token id is out of bounds, return an empty string.
-    if 0 <= new_token_id < len(tokenizer):
         # Put new_token_id in a list so skip_special_tokens is respected
+    if isinstance(new_token_id, int):
+        new_token_ids = [new_token_id]
+    else:
+        new_token_ids = new_token_id  
+        
+    if all(0 <= tid < len(tokenizer) for tid in new_token_id):
         new_tokens = tokenizer.convert_ids_to_tokens(
-            [new_token_id], skip_special_tokens=skip_special_tokens)
+            new_token_ids, skip_special_tokens=skip_special_tokens)
         if isinstance(new_tokens, str):
             new_tokens = [new_tokens]
     else:
@@ -163,6 +169,7 @@ def detokenize_incrementally(
             output_tokens[prefix_offset:read_offset])
         new_text = tokenizer.convert_tokens_to_string(
             output_tokens[prefix_offset:])
+        c=0
     else:
         prefix_text = _convert_tokens_to_string_with_added_encoders(
             tokenizer,
@@ -176,6 +183,8 @@ def detokenize_incrementally(
             skip_special_tokens=skip_special_tokens,
             spaces_between_special_tokens=spaces_between_special_tokens,
         )
+        c=0
+
 
     if len(new_text) <= len(prefix_text) or new_text.endswith("�"):
         # utf-8 char at the end means it's a potential unfinished byte sequence
@@ -183,6 +192,6 @@ def detokenize_incrementally(
         # If it's in the middle, it's probably a real invalid id generated
         # by the model
         return new_tokens, "", prefix_offset, read_offset
-
+    c=0
     new_text = new_text[len(prefix_text):]
     return new_tokens, new_text, read_offset, len(output_tokens)

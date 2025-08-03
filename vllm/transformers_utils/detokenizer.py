@@ -16,6 +16,8 @@ class Detokenizer:
 
     def __init__(self, tokenizer_group: BaseTokenizerGroup):
         self.tokenizer_group = tokenizer_group
+        self.passa=0
+        self.last_len=0
 
     def get_tokenizer_for_seq(self, sequence: Sequence) -> AnyTokenizer:
         """Returns the HF tokenizer to use for a given sequence."""
@@ -108,6 +110,29 @@ class Detokenizer:
             The number of characters added to the output text.
         """
         all_input_ids = seq.get_token_ids()
+        
+    
+        HPU_VLLM_SPECDECODE_DUMMY_TOKEN=-2
+        for _ in range(2):
+            if all_input_ids and all_input_ids[-1] == HPU_VLLM_SPECDECODE_DUMMY_TOKEN:
+                all_input_ids.pop()
+                if self.passa==0:
+                    self.passa=1
+            else:
+                break
+        last_n=1 
+        if   len(all_input_ids)==self.last_len:
+            return 0
+        elif self.last_len!=0:
+            last_n=len(all_input_ids)-self.last_len
+        self.last_len=len(all_input_ids)
+        
+        # if self.passa==1:
+        #     self.passa=2
+        #     return 0
+        
+        
+        print(f"!!!xxoo:{all_input_ids}")
         token_id_generated_this_iteration = all_input_ids[-1]
         tokenizer = self.get_tokenizer_for_seq(seq)
 
@@ -131,6 +156,7 @@ class Detokenizer:
              read_offset=seq.read_offset,
              skip_special_tokens=prms.skip_special_tokens,
              spaces_between_special_tokens=prms.spaces_between_special_tokens,
+             last_n=last_n
          )
 
         # Decode logprobs
@@ -156,6 +182,7 @@ class Detokenizer:
                         skip_special_tokens=prms.skip_special_tokens,
                         spaces_between_special_tokens=prms.
                         spaces_between_special_tokens,
+                        last_n=last_n
                     )
                     sample_logprob.decoded_token = new_text
 
