@@ -47,7 +47,7 @@ logger = init_logger(__name__)
 def setup_step_profiler(steps):
     if steps is None:
         return None
-    print("libin debug steps ", steps)
+    #print("libin debug steps ", steps)
     step_start, step_end = steps[0], steps[1]
     active = step_end - step_start + 1
     return setup_profiler(warmup=0, active=active)
