@@ -321,13 +321,17 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
 
         def get_replacement_gemma3(item_idx: int):
             images = mm_items.get_items("image", ImageProcessorItems)
+            import time
+            start = time.time()
 
             image_size = images.get_image_size(item_idx)
-            return self.info.get_image_repl(
+            re = self.info.get_image_repl(
                 image_width=image_size.width,
                 image_height=image_size.height,
                 processor=hf_processor,
             )
+            print("libin debug get_replacement_gemma3 ", item_idx, " take ", time.time() - start)
+            return re
 
         return [
             PromptReplacement(
@@ -569,28 +573,46 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         pixel_values = image_input["pixel_values"]
         num_patches = image_input["num_patches"]
 
-        image_features = self._image_pixels_to_features(
-            self.vision_tower,
-            pixel_values,
-        )
 
-        if is_hpu and len(self.graphed_multimodal_buckets) > 1:
+        if is_hpu:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
-                    self.vision_buckets.multimodal_buckets)
+                        self.vision_buckets.multimodal_buckets)
+
+            padding_need = len(batch_breakdown) == 1 and batch_breakdown[0] > pixel_values.size(0)
+            print("libin debug padded needed ", padding_need, " batch_breakdown ", batch_breakdown)
+            if padding_need:
+                bs_padded = batch_breakdown[0] - pixel_values.size(0)
+                # check if we should use conact 
+                pixel_values = nn.functional.pad(pixel_values, (0, 0, 0, 0, 0, 0, 0, bs_padded), "constant", 0)
+
             start_idx = 0
             image_embeds_multibatches = []
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
                 indices = torch.arange(start_idx, end_idx)
-                batch_sliced_image_features = torch.index_select(
-                    image_features, dim=0, index=indices)
+                batch_sliced_pixel_values = torch.index_select(
+                    pixel_values, dim=0, index=indices)
+                batch_sliced_image_features = self._image_pixels_to_features(
+                    self.vision_tower,
+                    batch_sliced_pixel_values
+                )
                 image_embeds_multibatches += \
                             [self.multi_modal_projector(
                                 batch_sliced_image_features)]
                 start_idx = end_idx
-            image_embeds = torch.cat(image_embeds_multibatches, dim=0)
+
+            if padding_need:
+                index = torch.arange(0, image_embeds_multibatches[0].size(0) - bs_padded)
+                image_embeds = torch.index_select(image_embeds_multibatches[0], dim=0, index=index)
+                
+            else:
+                image_embeds = torch.cat(image_embeds_multibatches, dim=0)
         else:
+            image_features = self._image_pixels_to_features(
+                self.vision_tower,
+                pixel_values,
+            )
             image_embeds = self.multi_modal_projector(image_features)
         return [
             e.flatten(0, 1) for e in image_embeds.split(num_patches.tolist())

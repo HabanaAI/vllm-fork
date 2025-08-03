@@ -52,6 +52,13 @@ def greedy_plan(batchsize, available_batchsizes):
     # sort descending
     available_batchsizes_sorted = sorted(available_batchsizes,
                                          key=lambda x: -x)
+
+    # if batch is in range of available batches, use nearest larger one to pad
+    # elsewise, do split based on greedy
+    batch_in_range = min([v for v in available_batchsizes_sorted if v >= batchsize] or [None])
+    if batch_in_range:
+        return [batch_in_range]
+
     idx = 0
     left_to_process = batchsize
     result = []
@@ -452,6 +459,16 @@ def _merge_multimodal_embeddings(
         #TODO dynamic? is a list of varying length
         # still.. torch.where might be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
+        '''
+        flattened = _flatten_embeddings(multimodal_embeddings).unsqueeze(0) #torch.Size([2048, 2560])
+        is_multimodal_index = is_multimodal.nonzero().index_select(1, torch.tensor([0])).squeeze(-1) #torch.Size([2048, 2])
+        inputs_embeds = inputs_embeds.index_copy_(1, is_multimodal_index, flattened) #torch.Size([1, 77047, 2560]
+        '''
+        #import pdb;pdb.set_trace()
+        #TODO dynamic? is a list of varying length
+        # still.. torch.where might be faster than boolean indexing?
+        #inputs_embeds[is_multimodal] = flattened
+
         return inputs_embeds
 
     num_expected_tokens = is_multimodal.sum().item()
