@@ -102,6 +102,10 @@ class AsyncMetricsCollector:
         if current_platform.Event is None:
             return None
 
+        if not current_platform.is_cuda_alike and not current_platform.is_hpu(
+        ):
+            return None
+
         # If a copy was initiated in the previous call, collect and return.
         if self._in_flight_copy is not None:
             ready_event = self._in_flight_copy
