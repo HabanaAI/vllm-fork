@@ -41,6 +41,7 @@ from .siglip import SiglipVisionModel
 from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
                     init_vllm_registered_model, maybe_prefix,
                     merge_multimodal_embeddings)
+import asyncio
 
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
