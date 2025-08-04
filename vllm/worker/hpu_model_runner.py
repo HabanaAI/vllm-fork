@@ -55,8 +55,6 @@ from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
                              MultiModalRegistry)
 from vllm.sampling_params import SamplingParams
-
-
 from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
                            Logprob, SequenceData, SequenceGroupMetadata,ExecuteModelRequest,
                            SequenceOutput)
@@ -71,7 +69,6 @@ from vllm.worker.model_runner_base import (
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
-
 
 logger = init_logger(__name__)
 
@@ -1549,7 +1546,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.device, non_blocking=True)
         input_positions = input_positions.to(  # type: ignore
             self.device, non_blocking=True)
-        
         block_list = block_list.to(  # type: ignore
             self.device, non_blocking=True)
         block_groups = block_groups.to(  # type: ignore
@@ -1610,7 +1606,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         accepted_token_id: Optional[torch.Tensor] = None,
         execute_model_req=None,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
-             
+
+
+        # Delay the synchronization behavior in spec decode to improve CPU/GPU overlap
         if execute_model_req is not None and execute_model_req.expand is not None:
             expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand()
             seq_group_metadata_list = expanded_request.seq_group_metadata_list
@@ -1643,12 +1641,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         prefill_reqs = []
         decode_reqs = []
-        
-        if accepted_token_id is not None:
-            valid_tokens = accepted_token_id[accepted_token_id != -1]
-            
-            if accepted_token_id.numel()-valid_tokens.numel()==1:
-                pass
                 
         for seq_group_meta in seq_group_metadata_list:
             if seq_group_meta.is_prompt:
@@ -2682,6 +2674,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         warmup_mode = kwargs.get('warmup_mode', False)
         previous_hidden_states = kwargs.get('previous_hidden_states')
+
         self.has_patched_prev_output = False
         use_delayed_sampling = VLLM_DELAYED_SAMPLING and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \

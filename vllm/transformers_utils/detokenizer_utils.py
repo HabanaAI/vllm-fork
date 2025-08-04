@@ -104,7 +104,7 @@ def detokenize_incrementally(
     read_offset: int,
     skip_special_tokens: bool = False,
     spaces_between_special_tokens: bool = True,
-    last_n=1
+    last_n: int = 1
 ) -> Tuple[List[str], str, int, int]:
     """Detokenizes the input ids incrementally and returns the new tokens
     and the new text.
@@ -129,6 +129,8 @@ def detokenize_incrementally(
         skip_special_tokens: Whether to skip special tokens.
         spaces_between_special_tokens: Whether to add spaces between special
             tokens.
+        last_n: Number of most recent token IDs to treat as newly added.
+
     """
     new_token_id = all_input_ids[-last_n:]
     # This is the first iteration for this sequence
@@ -141,13 +143,13 @@ def detokenize_incrementally(
              skip_special_tokens=skip_special_tokens)
     assert prev_tokens is not None
 
-    # If the new token id is out of bounds, return an empty string.
-        # Put new_token_id in a list so skip_special_tokens is respected
     if isinstance(new_token_id, int):
         new_token_ids = [new_token_id]
     else:
+        # List
         new_token_ids = new_token_id  
-        
+    # Put new_token_id in a list so skip_special_tokens is respected
+    # If the new token id is out of bounds, return an empty string.
     if all(0 <= tid < len(tokenizer) for tid in new_token_id):
         new_tokens = tokenizer.convert_ids_to_tokens(
             new_token_ids, skip_special_tokens=skip_special_tokens)
@@ -169,7 +171,6 @@ def detokenize_incrementally(
             output_tokens[prefix_offset:read_offset])
         new_text = tokenizer.convert_tokens_to_string(
             output_tokens[prefix_offset:])
-        c=0
     else:
         prefix_text = _convert_tokens_to_string_with_added_encoders(
             tokenizer,
@@ -192,6 +193,5 @@ def detokenize_incrementally(
         # If it's in the middle, it's probably a real invalid id generated
         # by the model
         return new_tokens, "", prefix_offset, read_offset
-    c=0
     new_text = new_text[len(prefix_text):]
     return new_tokens, new_text, read_offset, len(output_tokens)

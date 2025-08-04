@@ -407,7 +407,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         start_time = time.perf_counter()
+        
         inputs = self.prepare_input(execute_model_req, accepted_token_id)
+
         # Need to keep worker running when executing dummy batch under DP
         # scenario
         if self.is_driver_worker:

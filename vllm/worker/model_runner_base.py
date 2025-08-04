@@ -12,7 +12,6 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.sampler import SamplerOutput
 
-
 from vllm.sequence import IntermediateTensors, SequenceGroupMetadata, ExecuteModelRequest
 if TYPE_CHECKING:
     from vllm.attention import AttentionMetadata
