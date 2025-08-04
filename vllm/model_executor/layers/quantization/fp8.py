@@ -1016,22 +1016,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
             else:
                 x_fp8 = x
-            
-            if layer.dp_size > 1:
-                cu_tokens_across_dp_cpu = get_forward_context(
-                ).dp_metadata.cu_tokens_across_dp_cpu
-
-                topk_ids_across_dp = get_forward_context(
-                ).dp_metadata.topk_ids_across_dp
-                topk_ids = layer.multicast_fn(topk_ids.to(torch.int32),
-                                              cu_tokens_across_dp_cpu,
-                                              topk_ids_across_dp).long()
-
-                topk_weights_across_dp = get_forward_context(
-                ).dp_metadata.topk_weights_across_dp
-                topk_weights = layer.multicast_fn(topk_weights,
-                                                  cu_tokens_across_dp_cpu,
-                                                  topk_weights_across_dp)
 
             batched_tokens = x.shape[0]
 
