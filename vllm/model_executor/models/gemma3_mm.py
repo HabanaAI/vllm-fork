@@ -322,18 +322,13 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
 
         def get_replacement_gemma3(item_idx: int):
             images = mm_items.get_items("image", ImageProcessorItems)
-            import time
-            start = time.time()
 
             image_size = images.get_image_size(item_idx)
-            re = self.info.get_image_repl(
+            return self.info.get_image_repl(
                 image_width=image_size.width,
                 image_height=image_size.height,
                 processor=hf_processor,
             )
-            print("libin debug get_replacement_gemma3 ", item_idx, " take ", time.time() - start)
-            return re
-
         return [
             PromptReplacement(
                 modality="image",

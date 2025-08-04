@@ -143,6 +143,7 @@ class OpenAIServingChat(OpenAIServing):
         for the API specification. This API mimics the OpenAI
         Chat Completion API.
         """
+        t1 = time.time()
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
@@ -217,8 +218,9 @@ class OpenAIServingChat(OpenAIServing):
             logger.exception("Error in preprocessing prompt inputs")
             return self.create_error_response(f"{e} {e.__cause__}")
         
-        
+        t2 = time.time()
         if self.mm_preprocessor:
+            
             try:
                 # Use the semaphore to limit concurrency,
                 # other request must wait too much will OOM Ray...
@@ -236,7 +238,7 @@ class OpenAIServingChat(OpenAIServing):
                 logger.exception("Error in async multimodal preprocessing")
                 return self.create_error_response(
                     f"Error during image processing: {e}")
-
+        t3 = time.time()
         request_id = "chatcmpl-" \
                      f"{self._base_request_id(raw_request, request.request_id)}"
 
@@ -269,8 +271,7 @@ class OpenAIServingChat(OpenAIServing):
                 trace_headers = (None if raw_request is None else await
                                  self._get_trace_headers(raw_request.headers))
                 
-                logger.info("libin SENDING TO ENGINE (REQUEST %s):\n%s",
-                             request_id, print.pformat(engine_prompt))
+                t4 = time.time()
 
                 if isinstance(sampling_params, BeamSearchParams):
                     generator = self.engine_client.beam_search(
@@ -289,7 +290,9 @@ class OpenAIServingChat(OpenAIServing):
                         prompt_adapter_request=prompt_adapter_request,
                         priority=request.priority,
                     )
-
+                t5 = time.time()
+                logger.info(f"libin create_chat_completion loop request: {request_id} before mm time take: {t4-t3} mm {t5-t4}")
+                t3 = t5
                 generators.append(generator)
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
@@ -300,14 +303,18 @@ class OpenAIServingChat(OpenAIServing):
 
         # Streaming response
         if request.stream:
-            return self.chat_completion_stream_generator(
+            re =  self.chat_completion_stream_generator(
                 request, result_generator, request_id, model_name,
                 conversation, tokenizer, request_metadata)
+            logger.info(f"libin create_chat_completion stream Done : {request_id} start time take {t2-t1}, {t3-t2}, after loop: {time.time() - t5}")
+            return re
 
         try:
-            return await self.chat_completion_full_generator(
+            re =  await self.chat_completion_full_generator(
                 request, result_generator, request_id, model_name,
                 conversation, tokenizer, request_metadata)
+            logger.info(f"libin create_chat_completion stream Done : {request_id} start time take {t2-t1}, {t3-t2}, after loop:{time.time() - t5}")
+            return re
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
             return self.create_error_response(str(e))
