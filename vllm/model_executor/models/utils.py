@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional, Protocol, Union, overload
 
-import habana_frameworks.torch.core as htcore
+#import habana_frameworks.torch.core as htcore
 import torch
 import torch.nn as nn
 from torch.func import functional_call

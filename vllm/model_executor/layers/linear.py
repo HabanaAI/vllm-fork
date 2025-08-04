@@ -7,7 +7,7 @@ from typing import Any, Callable, Literal, Optional, Union
 
 import torch
 import torch.nn as nn
-from habana_frameworks.torch.core.weight_sharing import HabanaParameterWrapper
+#from habana_frameworks.torch.core.weight_sharing import HabanaParameterWrapper
 from torch.nn.parameter import Parameter, UninitializedParameter
 
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
