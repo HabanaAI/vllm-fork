@@ -336,6 +336,25 @@ class Proxy:
         }
         return status
 
+    def get_total_token_length(self, prompt):
+        fake_len = 100
+        if isinstance(prompt, str):
+            return len(self.tokenizer(prompt)["input_ids"])
+        elif isinstance(prompt, list):
+            if all(isinstance(p, str) for p in prompt):
+                return sum(len(self.tokenizer(p)["input_ids"]) for p in prompt)
+            elif (all(isinstance(p, list) and 
+                all(isinstance(x, int) for x in p) for p in prompt)):
+                # Already tokenized
+                return sum(len(p) for p in prompt)
+            else:
+                logger.error(f"Unsupported prompt format: "
+                f"{type(prompt)} / nested types")
+                return fake_len
+        else:
+            logger.error(f"Unsupported prompt type: {type(prompt)}")
+            return fake_len
+
     async def create_completion(self, raw_request: Request):
         try:
             request = await raw_request.json()
@@ -345,8 +364,8 @@ class Proxy:
                 kv_prepare_request["max_tokens"] = 1
 
                 start_time = time.time()
-                total_length = len(
-                    self.tokenizer(kv_prepare_request['prompt'])['input_ids'])
+                prompt = kv_prepare_request.get("prompt")
+                total_length = self.get_total_token_length(prompt)
                 end_time = time.time()
 
                 log_info_green(
@@ -413,7 +432,7 @@ class Proxy:
             start_time = time.time()
             # prefill stage
             total_length = sum(
-                len(self.tokenizer(msg['content'])['input_ids'])
+                self.get_total_token_length(msg['content'])
                 for msg in kv_prepare_request['messages'])
             end_time = time.time()
             log_info_green(
