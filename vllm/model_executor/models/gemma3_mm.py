@@ -45,7 +45,7 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
 is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
-
+import time, threading
 
 class Gemma3ImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
@@ -265,6 +265,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
         mm_data: Mapping[str, object],
         mm_kwargs: Mapping[str, object],
     ) -> BatchFeature:
+        start = time.time()
         processed_outputs = super()._call_hf_processor(
             prompt,
             mm_data,
@@ -295,7 +296,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
                 for size in image_sizes
             ]
             processed_outputs["num_crops"] = torch.tensor(num_crops)
-
+        print("libin debug _call_hf_processor ", time.time() - start, threading.get_ident())
         return processed_outputs
 
     def _get_mm_fields_config(
@@ -388,6 +389,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
         new_token_ids: list[int],
         mm_item_counts: Mapping[str, int],
     ) -> Mapping[str, list[PlaceholderFeaturesInfo]]:
+        start = time.time()
         # We need to detect "\n\n" inside "\n\n\n" and "\n\n\n\n"
         tokenizer = self.info.get_tokenizer()
         vocab = tokenizer.get_vocab()
@@ -414,7 +416,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
         repls = find_mm_placeholders(mm_prompt_updates, repl_token_ids,
                                      mm_item_counts)
 
-        return {
+        re = {
             modality: [
                 PlaceholderFeaturesInfo(
                     modality=p.modality,
@@ -426,6 +428,8 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             ]
             for modality, placeholders in repls.items()
         }
+        print("libin debug _find_mm_placeholders ", time.time() - start, threading.get_ident())
+        return re
 
 
 class Gemma3MultiModalProjector(nn.Module):
