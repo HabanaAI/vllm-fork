@@ -769,13 +769,14 @@ class LLMEngine:
             #logger.info(
             #    "[DEBUG] libin PERFORMING STANDARD PREPROCESSING FOR REQUEST: %s",
             #    request_id)
+
             processed_inputs = self.input_preprocessor.preprocess(
                 prompt,
                 tokenization_kwargs=tokenization_kwargs,
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
             )
-
+            logger.info(f"libin preprocess request sync {time.time() -arrival_time} for req {request_id}")
         self._add_processed_request(
             request_id=request_id,
             processed_inputs=processed_inputs,
