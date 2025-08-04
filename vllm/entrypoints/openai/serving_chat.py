@@ -270,7 +270,7 @@ class OpenAIServingChat(OpenAIServing):
                                  self._get_trace_headers(raw_request.headers))
                 
                 logger.info("libin SENDING TO ENGINE (REQUEST %s):\n%s",
-                             request_id, pprint.pformat(engine_prompt))
+                             request_id, print.pformat(engine_prompt))
 
                 if isinstance(sampling_params, BeamSearchParams):
                     generator = self.engine_client.beam_search(
