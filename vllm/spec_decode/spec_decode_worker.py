@@ -350,6 +350,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.accepted_token_ids_ = None
         self.target_logprobs_ = None
         self.prompt_logprobs_ = None
+        #todo  env set
         self.hpu_opt=True
         
 
@@ -777,15 +778,14 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         execute_model_req.previous_hidden_states = self.previous_hidden_states
         self.previous_hidden_states = None
         if self.hpu_opt:
-            if 1:#self.rank == self._driver_rank:
-                self._pending_step = self._pending_step + 1
-                if self._pending_step > 1:
-                    #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
-                    #print(f" cache before pop{self.cached_step_accepted_tokens=}")
-                    self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
-                    
-                    self.target_logprobs_=self.cached_step_target_logprobs[0]
-                    self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
+            self._pending_step = self._pending_step + 1
+            if self._pending_step > 1:
+                #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
+                #print(f" cache before pop{self.cached_step_accepted_tokens=}")
+                self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
+                
+                self.target_logprobs_=self.cached_step_target_logprobs[0]
+                self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
 
 
 

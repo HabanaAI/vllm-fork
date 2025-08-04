@@ -1632,8 +1632,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = None
         batch_size_padded = None
 
-        
-        
         self.event_start = self.profiler.get_timestamp_us()
         is_prompt = seq_group_metadata_list[0].is_prompt
         base_event_name = 'prompt' if is_prompt else 'decode'
@@ -1797,27 +1795,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attn_metadata = prefill_attn_metadata if \
             prefill_attn_metadata is not None else decode_attn_metadata
 
-        rank = torch.distributed.get_rank()
-        
-   
-
-        #     print(f"{input_tokens=}")
-        #     print(f"{query_lens=}")
-        #     print(f"{input_positions=}")
-        #     print(f"{lora_requests=}")
-        #     print(f"{sampling_metadata=}")
-        #     print(f"{lora_ids=}")
-        #     print(f"{lora_mapping=}")
-        #     print(f"{real_batch_size=}")
-        #     print(f"{batch_size_padded=}")
-        #     print(f"{seq_lens=}")
-        #     print(f"{attn_metadata.num_decode_tokens=}")
-        #     print(f"{attn_metadata.slot_mapping=}")
-        #     print(f"{attn_metadata.input_positions=}")
-        #     print(f"{attn_metadata.block_usage.shape=}")
-        #     print(f"{attn_metadata.block_groups.shape=}")
-            
-     
         return self._model_input_cls(input_tokens=input_tokens,
                                      seq_lens=seq_lens,
                                      query_lens=query_lens,
@@ -2739,21 +2716,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     0, target_indices, self.cached_step_outputs[i])
                 htorch.core.mark_step()
 
-
-        '''
-        # if False: # !self.hpu_opt
-        if self.is_driver_worker:
-            model_kwargs_broadcast_data = {
-                "input_tokens": model_input.input_tokens
-            }
-            broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
-            input_tokens = model_input.input_tokens
-
-        else:
-            model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
-            input_tokens = model_kwargs_broadcast_data["input_tokens"]
-
-        '''       
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
                 # not first or last multi-step

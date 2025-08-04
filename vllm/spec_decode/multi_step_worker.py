@@ -70,7 +70,6 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
 
         For multi step worker, this indicator shall be True.
         """
-        rank=torch.distributed.get_rank()
         
         self._raise_if_unsupported(execute_model_req)
         
@@ -89,13 +88,11 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                                 token1 = accepted_token_id_[seq_index][0]
                                 for seq in seq_data_iter:
                                     seq.output_token_ids = seq.output_token_ids[:-2] + (token1,)
-                                    #seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1]
                                     seq._num_computed_tokens -= 1
                             else:
                                 token2 = accepted_token_id_[seq_index][1]
                                 for seq in seq_data_iter:
                                     seq.output_token_ids = seq.output_token_ids[:-2] + (token1, token2)
-                                    #seq._new_appended_tokens = seq._new_appended_tokens[:-3] + [token1, token2]
                     return expand_fn(execute_model_req, seq_ids_with_bonus_token_in_last_step)
 
                 execute_model_req.expand = expand
@@ -111,9 +108,6 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
             expanded_request, indices_of_seq_with_bonus_tokens =\
                 self._expand_execute_model_request(
                     execute_model_req, seq_ids_with_bonus_token_in_last_step)
-        
-        
-        
         
         # Run model sample_len times.
         model_outputs: List[SamplerOutput] = []
@@ -156,7 +150,6 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # move indices to device to avoid stream sync
         indices_of_seq_with_bonus_tokens = torch.tensor(
             indices_of_seq_with_bonus_tokens, device=self.device)
-        # if model_outputs[0].sampled_token_ids[0][0].item()==2501:
       
         filtered_model_outputs = self._filter_model_output(
             model_outputs, indices_of_seq_with_bonus_tokens)
