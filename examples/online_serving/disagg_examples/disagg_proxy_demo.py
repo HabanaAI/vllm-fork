@@ -348,11 +348,13 @@ class Proxy:
                 # Already tokenized
                 return sum(len(p) for p in prompt)
             else:
-                logger.error(f"Unsupported prompt format: "
-                f"{type(prompt)} / nested types")
+                logger.error(
+                    "Unsupported prompt format: %s / nested types. Value: %r",
+                    type(prompt), prompt
+                )
                 return fake_len
         else:
-            logger.error(f"Unsupported prompt type: {type(prompt)}")
+            logger.error("Unsupported prompt type: %s", type(prompt))
             return fake_len
 
     async def create_completion(self, raw_request: Request):
