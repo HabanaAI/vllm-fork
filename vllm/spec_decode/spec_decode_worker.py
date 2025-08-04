@@ -47,7 +47,7 @@ from vllm.spec_decode.util import (Timer, create_logprobs_output,
                                    split_batch_by_proposal_len)
 from vllm.utils import resolve_obj_by_qualname
 from vllm.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
-
+import os
 logger = init_logger(__name__)
 
 
@@ -114,7 +114,10 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
 
     return spec_decode_worker
 
-
+def is_delay_specdecode_enabled() -> bool:
+    if current_platform.is_hpu():
+        return os.environ.get("HPU_VLLM_DELAY_SPECDECODE", "false").lower() == "true"
+    return False
 # Reminder: Please update docs/source/features/compatibility_matrix.md
 # If the feature combo become valid
 class SpecDecodeWorker(LoraNotSupportedWorkerBase):
@@ -351,7 +354,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.target_logprobs_ = None
         self.prompt_logprobs_ = None
         #todo  env set
-        self.hpu_opt=True
+        self.hpu_delay_specdecode=is_delay_specdecode_enabled()
         
 
 
@@ -777,7 +780,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # Pass last hidden states from target model to proposer
         execute_model_req.previous_hidden_states = self.previous_hidden_states
         self.previous_hidden_states = None
-        if self.hpu_opt:
+        if self.hpu_delay_specdecode:
             self._pending_step = self._pending_step + 1
             if self._pending_step > 1:
                 #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
@@ -792,7 +795,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         with Timer() as proposal_timer:
             #print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
-            if self.hpu_opt:      
+            if self.hpu_delay_specdecode:      
                 proposals = self.proposer_worker.get_spec_proposals(
                     execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
             else:
@@ -810,7 +813,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         with Timer() as scoring_timer:
             #print(f"==============put to score {self.accepted_token_ids_=}===")
             
-            if self.hpu_opt:
+            if self.hpu_delay_specdecode:
                 proposal_scores = self.scorer.score_proposals(
                     execute_model_req,
                     proposals,
@@ -955,7 +958,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_index = accepted_token_ids + 1  # Convert -1 to 0
             accepted_index = accepted_index.count_nonzero(dim=1).add_(-1)  # b
             # Drop non-terminal prefill chunks hidden states.
-            if not self.hpu_opt:   
+            if not self.hpu_delay_specdecode:   
                 hidden_states = hidden_states[accepted_index !=
                                             VLLM_INVALID_TOKEN_ID]
                 accepted_index = accepted_index[accepted_index !=
@@ -1027,10 +1030,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     self.sync_last=True
                     break
 
-        if not self.hpu_opt or  self.sync_last:
+        if not self.hpu_delay_specdecode or  self.sync_last:
             accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
         else:
-            #hpu_opt
             from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
             padding_tokens = [[HPU_VLLM_SPECDECODE_DUMMY_TOKEN]] * 2
             accepted_token_ids_by_step=[[item[0] for _ in range(batch_size)] for item in padding_tokens]           

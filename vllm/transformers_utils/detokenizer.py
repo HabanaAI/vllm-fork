@@ -9,10 +9,6 @@ from .detokenizer_utils import (convert_prompt_ids_to_tokens,
                                 detokenize_incrementally)
 from .tokenizer import AnyTokenizer
 from .tokenizer_group import BaseTokenizerGroup
-import os
-
-def is_delay_specdecode_enabled() -> bool:
-    return os.environ.get("HPU_VLLM_DELAY_SPECDECODE", "false").lower() == "true"
 
 class Detokenizer:
     """Provides methods to decode the output of a model into text."""
@@ -114,6 +110,7 @@ class Detokenizer:
         """
         all_input_ids = seq.get_token_ids()
         last_n=1 
+        from vllm.spec_decode.spec_decode_worker import is_delay_specdecode_enabled
         if is_delay_specdecode_enabled():
             from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
             for _ in range(2):
