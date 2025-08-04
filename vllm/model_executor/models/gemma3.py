@@ -414,7 +414,7 @@ class Gemma3Model(nn.Module):
         **kwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
 
-        print(f"Gemma3Model : input_ids:{input_ids.shape if input_ids is not None else input_ids}, "
+        logger.info(f"libin debug Gemma3Model : input_ids:{input_ids.shape if input_ids is not None else input_ids}, "
               f"positions:{positions.shape}, inputs_embeds:{inputs_embeds.shape if inputs_embeds is not None else inputs_embeds}, "
               f"intermediate_tensors:{intermediate_tensors.shape if intermediate_tensors is not None else intermediate_tensors}, "
               f"kwargs{kwargs}")

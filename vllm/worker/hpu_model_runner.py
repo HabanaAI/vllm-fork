@@ -3923,8 +3923,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
-                        if is_prompt:
-                            print(f"MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape}")
+                        if is_prompt and self.is_driver_worker:
+                            logger.info(f"libin debug MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape} real_batch {real_batch_size}")
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
