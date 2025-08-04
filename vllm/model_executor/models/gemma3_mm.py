@@ -296,7 +296,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
                 for size in image_sizes
             ]
             processed_outputs["num_crops"] = torch.tensor(num_crops)
-        logger.info(f"libin debug _call_hf_processor , {time.time() - start}, {threading.get_ident()}")
+        #logger.info(f"libin debug _call_hf_processor , {time.time() - start}, {threading.get_ident()}")
         return processed_outputs
 
     def _get_mm_fields_config(
@@ -423,7 +423,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             ]
             for modality, placeholders in repls.items()
         }
-        logger.info(f"libin debug _find_mm_placeholders , {time.time() - start}, {threading.get_ident()}")
+        #logger.info(f"libin debug _find_mm_placeholders , {time.time() - start}, {threading.get_ident()}")
         return re
 
 
@@ -578,7 +578,7 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                         self.vision_buckets.multimodal_buckets)
 
             padding_need = len(batch_breakdown) == 1 and batch_breakdown[0] > pixel_values.size(0)
-            logger.info(f"libin debug padded needed {padding_need} batch_breakdown {batch_breakdown}")
+            #logger.info(f"libin debug padded needed {padding_need} batch_breakdown {batch_breakdown}")
             if padding_need:
                 bs_padded = batch_breakdown[0] - pixel_values.size(0)
                 # check if we should use conact 

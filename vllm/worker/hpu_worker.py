@@ -254,8 +254,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         execute_model_req: Optional[ExecuteModelRequest] = None,
     ) -> Optional[List[SamplerOutput]]:
         
-        if self.step_debug:
-            self.step_debug(f'step={self.step}')
+        #if self.step_debug:
+        #    self.step_debug(f'step={self.step}')
         if self.step_profiler and self.step == self.profile_steps[0]:
             self.step_profiler.start()
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION     - will log graph compilations per engine step, only when there was any - highly recommended to use alongside PT_HPU_METRICS_GC_DETAILS! # noqa:E501
