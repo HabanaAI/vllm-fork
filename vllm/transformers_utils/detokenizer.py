@@ -9,7 +9,10 @@ from .detokenizer_utils import (convert_prompt_ids_to_tokens,
                                 detokenize_incrementally)
 from .tokenizer import AnyTokenizer
 from .tokenizer_group import BaseTokenizerGroup
+import os
 
+def is_delay_specdecode_enabled() -> bool:
+    return os.environ.get("HPU_VLLM_DELAY_SPECDECODE", "false").lower() == "true"
 
 class Detokenizer:
     """Provides methods to decode the output of a model into text."""
@@ -110,30 +113,20 @@ class Detokenizer:
             The number of characters added to the output text.
         """
         all_input_ids = seq.get_token_ids()
-        
-    
-        from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
-
-        for _ in range(2):
-            if all_input_ids and all_input_ids[-1] == HPU_VLLM_SPECDECODE_DUMMY_TOKEN:
-                all_input_ids.pop()
-                if self.passa==0:
-                    self.passa=1
-            else:
-                break
         last_n=1 
-        if   len(all_input_ids)==self.last_len:
-            return 0
-        elif self.last_len!=0:
-            last_n=len(all_input_ids)-self.last_len
-        self.last_len=len(all_input_ids)
-        
-        # if self.passa==1:
-        #     self.passa=2
-        #     return 0
-        
-        
-        print(f"!!!xxoo:{all_input_ids}")
+        if is_delay_specdecode_enabled():
+            from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
+            for _ in range(2):
+                if all_input_ids and all_input_ids[-1] == HPU_VLLM_SPECDECODE_DUMMY_TOKEN:
+                    all_input_ids.pop()
+                else:
+                    break
+            if  len(all_input_ids)==self.last_len:
+                return 0
+            elif self.last_len!=0:
+                last_n=len(all_input_ids)-self.last_len
+            self.last_len=len(all_input_ids)
+
         token_id_generated_this_iteration = all_input_ids[-1]
         tokenizer = self.get_tokenizer_for_seq(seq)
 
