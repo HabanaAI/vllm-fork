@@ -98,16 +98,20 @@ The original DeepSeek-R1 model is available both on [HuggingFace](https://huggin
 sudo apt install git-lfs
 git-lfs install
 
-# Option1: Download from HuggingFace
+# Option1: Download DeepSeek-R1 from HuggingFace
 git clone https://huggingface.co/deepseek-ai/DeepSeek-R1 /data/hf_models/DeepSeek-R1
-# Option2: Download from ModelScope
+# Option2: Download DeepSeek-R1 from ModelScope
 git clone https://www.modelscope.cn/deepseek-ai/DeepSeek-R1 /data/hf_models/DeepSeek-R1
 
-# Download DeepSeek-R1-0528
+# Option1: Download DeepSeek-R1-0528 from HuggingFace
 git clone https://huggingface.co/deepseek-ai/DeepSeek-R1-0528 /data/hf_models/DeepSeek-R1-0528
+# Option2: Download DeepSeek-R1-0528 from ModelScope
+git clone https://www.modelscope.cn/deepseek-ai/DeepSeek-R1-0528.git /data/hf_models/DeepSeek-R1-0528
 
-# Download Kimi-K2-Instruct
+# Option1: Download Kimi-K2-Instruct from HuggingFace
 git clone https://huggingface.co/moonshotai/Kimi-K2-Instruct /data/hf_models/Kimi-K2-Instruct
+# Option2: Download Kimi-K2-Instruct from ModelScope
+git clone https://www.modelscope.cn/moonshotai/Kimi-K2-Instruct.git /data/hf_models/Kimi-K2-Instruct
 ```
 
 ### Convert the Model
@@ -120,7 +124,14 @@ git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
 cd vllm-fork
 pip install torch safetensors numpy --extra-index-url https://download.pytorch.org/whl/cpu
 
+# Conversion for DeepSeek-R1
 python scripts/convert_for_g2.py -i /data/hf_models/DeepSeek-R1 -o /data/hf_models/DeepSeek-R1-G2
+
+# Conversion for DeepSeek-R1-0528
+python scripts/convert_for_g2.py -i /data/hf_models/DeepSeek-R1-0528 -o /data/hf_models/DeepSeek-R1-0528-G2
+
+# Conversion for Kimi-K2-Instruct
+python scripts/convert_for_g2.py -i /data/hf_models/Kimi-K2-Instruct -o /data/hf_models/Kimi-K2-Instruct-G2
 ```
 
 The conversion is finished when the message below is shown. The converted model weight files are saved in your specified folder, like /data/hf_models/DeepSeek-R1-G2, and we will use this converted model to host vLLM service. 
@@ -273,7 +284,7 @@ If INC quantization is enabled successfully, `Preparing model with INC` should b
 
 ### Launch vLLM Serving with TP=8
 ```bash
-bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
+bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
