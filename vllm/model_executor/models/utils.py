@@ -6,7 +6,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional, Protocol, Union, overload
 
-import habana_frameworks.torch.core as htcore
+from vllm.platforms import current_platform
+if current_platform.is_hpu():
+    import habana_frameworks.torch.core as htcore
 import torch
 import torch.nn as nn
 from torch.func import functional_call
@@ -31,16 +33,16 @@ Given a desired batchsize to process in terms of available_batchsizes
 Pick the largest available_batchsizes that can fit batchsize, and reiterate
 For example, if batchsize = 9, available batchsize is 4, 2
 then: 4, 4, 2 will be used
- 
+
 Note this is not optimal padding wastage wise
 greedy_plan(9, [12,8]) -> [8,8] (pad waste = 7)
 greedy_plan(9, [12]) => [12] (pad waste = 3)
 still picking largest batches greedily, because large batches tend to be
 more compute bound
-(ideally we'd have the runtime of each batch and use that as a metric to 
+(ideally we'd have the runtime of each batch and use that as a metric to
 reduce the amount of total time)
- 
- 
+
+
 Seems similar to a "coin change" problem, where available_batchsizes are
 available denominations and batchsize is amount to be paid
 but unlike traditional coin change it might not be possible to make
@@ -420,7 +422,7 @@ def merge_multimodal_embeddings_from_map(
         inputs_embeds: torch.Tensor, multimodal_embeddings: NestedTensors,
         placeholder_map: MultiModalPlaceholderMap.IndexMap) -> torch.Tensor:
     """
-    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided 
+    Merge ``multimodal_embeddings`` into ``inputs_embeds`` using the provided
     placeholder map .
 
     Note:
@@ -514,11 +516,11 @@ def merge_multimodal_embeddings(
     Merge ``multimodal_embeddings`` into ``inputs_embeds`` by overwriting the
     positions in ``inputs_embeds`` corresponding to placeholder tokens in
     ``input_ids``.
-    
-    ``placeholder_token_id`` can be a list of token ids (e.g, token ids 
-    of img_start, img_break, and img_end tokens) when needed: This means 
-    the order of these tokens in the ``input_ids`` MUST MATCH the order of 
-    their embeddings in ``multimodal_embeddings`` since we need to 
+
+    ``placeholder_token_id`` can be a list of token ids (e.g, token ids
+    of img_start, img_break, and img_end tokens) when needed: This means
+    the order of these tokens in the ``input_ids`` MUST MATCH the order of
+    their embeddings in ``multimodal_embeddings`` since we need to
     slice-merge instead of individually scattering.
 
     For example, if input_ids is "TTTTTSIIIBIIIBIIIETTT", where
@@ -527,9 +529,9 @@ def merge_multimodal_embeddings(
     - I is image embedding token
     - B is image break token
     - E is image end token.
-    
-    Then the image embeddings (that correspond to I's) from vision encoder 
-    must be padded with embeddings of S, B, and E in the same order of 
+
+    Then the image embeddings (that correspond to I's) from vision encoder
+    must be padded with embeddings of S, B, and E in the same order of
     input_ids for a correct embedding merge.
 
     Note:
