@@ -1031,7 +1031,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
         else:
             #hpu_opt
-            HPU_VLLM_SPECDECODE_DUMMY_TOKEN=-2
+            from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
             padding_tokens = [[HPU_VLLM_SPECDECODE_DUMMY_TOKEN]] * 2
             accepted_token_ids_by_step=[[item[0] for _ in range(batch_size)] for item in padding_tokens]           
 

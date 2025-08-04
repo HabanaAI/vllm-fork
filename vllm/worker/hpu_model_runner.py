@@ -86,7 +86,7 @@ LORA_WARMUP_RANK = 8
 VLLM_DELAYED_SAMPLING = os.environ.get('VLLM_DELAYED_SAMPLING',
                                        'false').lower() == 'true'
 DUMMY_TOKEN_ID = -1
-
+HPU_VLLM_SPECDECODE_DUMMY_TOKEN = -2
 _SAMPLING_EPS = 1e-5
 
 class PhaseType(Enum):

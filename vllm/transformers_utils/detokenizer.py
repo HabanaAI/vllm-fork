@@ -112,7 +112,8 @@ class Detokenizer:
         all_input_ids = seq.get_token_ids()
         
     
-        HPU_VLLM_SPECDECODE_DUMMY_TOKEN=-2
+        from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
+
         for _ in range(2):
             if all_input_ids and all_input_ids[-1] == HPU_VLLM_SPECDECODE_DUMMY_TOKEN:
                 all_input_ids.pop()

@@ -1150,8 +1150,8 @@ class LLMEngine:
                 #wa for MTP opt
                 #todo , sync the final text.
                 if True:
+                    from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
                     token_ids=request_output.outputs[0].token_ids
-                    HPU_VLLM_SPECDECODE_DUMMY_TOKEN=-2
                     for _ in range(2):
                         if token_ids and token_ids[-1] == HPU_VLLM_SPECDECODE_DUMMY_TOKEN:
                             token_ids.pop()
