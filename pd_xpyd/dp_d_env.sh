@@ -5,8 +5,6 @@ source "$BASH_DIR"/pd_env.sh
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
-model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
-
 export VLLM_GPU_MEMORY_UTILIZATION=0.9
 export VLLM_GRAPH_RESERVED_MEM=0.2
 export VLLM_GRAPH_PROMPT_RATIO=0
@@ -49,6 +47,7 @@ env | grep VLLM_DECODE_BLOCK
 
 export VLLM_SKIP_WARMUP=True
 #unset VLLM_SKIP_WARMUP
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_d,false,16384
 
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
@@ -57,4 +56,8 @@ export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 
 export PT_HPU_MOE_THRESHOLD=64
+
+if [ "$INC_FP8" -eq 1 ]; then
+  export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json
+fi
 

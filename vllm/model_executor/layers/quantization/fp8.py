@@ -1166,6 +1166,22 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             n_expert_slice = actual_num_experts // moe_n_slice
             if self.quant_config.enable_runtime_dequant and VLLM_REQUANT_FP8_INC:
                 assert not use_partial_experts, "Partial experts not supported with VLLM_REQUANT_FP8_INC"
+
+                if layer.dp_size > 1:
+                    cu_tokens_across_dp_cpu = get_forward_context(
+                    ).dp_metadata.cu_tokens_across_dp_cpu
+
+                    topk_ids_across_dp = get_forward_context(
+                    ).dp_metadata.topk_ids_across_dp
+                    topk_ids = layer.multicast_fn(topk_ids.to(torch.int32),
+                                                cu_tokens_across_dp_cpu,
+                                                topk_ids_across_dp).long()
+
+                    topk_weights_across_dp = get_forward_context(
+                    ).dp_metadata.topk_weights_across_dp
+                    topk_weights = layer.multicast_fn(topk_weights,
+                                                    cu_tokens_across_dp_cpu,
+                                                    topk_weights_across_dp)
                 final_hidden_states = layer.moe_op(
                     x,
                     topk_ids.to(torch.int64),

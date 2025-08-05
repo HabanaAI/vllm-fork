@@ -36,6 +36,14 @@ if [ "$DP_SIZE" -eq 1 ]; then
   unset VLLM_DP_MASTER_PORT
 fi
 
+if [ "$INC_FP8" -eq 1 ]; then
+  kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"
+  echo "<decode>it's inc fp8 kv cache mode"
+else
+  kv_cache_dtype_arg=""
+  echo "<decode>it's bf16 kv cache mode"
+fi
+
 for ((i=0; i<$DP_RANK; i++))
 do
   RANK=$((DP_INDEX * DP_RANK + i))
@@ -55,6 +63,7 @@ do
     --use-padding-aware-scheduling
     --use-v2-block-manager
     --distributed_executor_backend mp
+    $kv_cache_dtype_arg
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
 
