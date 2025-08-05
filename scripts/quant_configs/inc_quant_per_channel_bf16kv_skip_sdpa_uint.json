@@ -1,7 +1,7 @@
 {
     "mode": "QUANTIZE",
     "observer": "maxabs",
-    "scale_method": "uint_scale",
+    "scale_method": "unit_scale",
     "scale_format": "const",
     "allowlist": {
         "types": [],
