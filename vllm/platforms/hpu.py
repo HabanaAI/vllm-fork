@@ -73,10 +73,11 @@ class HpuPlatform(Platform):
 
         if parallel_config.worker_cls == "auto":
             if envs.VLLM_USE_V1:
-                raise ValueError("In-tree HPU support for v1 has been removed "
-                                 "from vllm-fork. Please use vLLM-Gaudi plugin "
-                                 "(https://github.com/vllm-project/vllm-gaudi) "
-                                 "for V1 support")
+                raise ValueError(
+                    "In-tree HPU support for v1 has been removed "
+                    "from vllm-fork. Please use vLLM-Gaudi plugin "
+                    "(https://github.com/vllm-project/vllm-gaudi) "
+                    "for V1 support")
             if scheduler_config.is_multi_step:
                 parallel_config.worker_cls = \
                     "vllm.worker.multi_step_hpu_worker.MultiStepHPUWorker"
