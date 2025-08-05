@@ -46,8 +46,9 @@ from vllm.transformers_utils.tokenizers import (maybe_serialize_tool_calls,
                                                 validate_request_params)
 
 logger = init_logger(__name__)
-
-
+from viztracer import VizTracer
+count = 0
+tracer = VizTracer()
 class OpenAIServingChat(OpenAIServing):
 
     def __init__(
@@ -143,7 +144,18 @@ class OpenAIServingChat(OpenAIServing):
         for the API specification. This API mimics the OpenAI
         Chat Completion API.
         """
+        '''
+        global count
+        count = count + 1
+        if count == 1:
+            tracer.start()
+        if count == 3:
+            tracer.stop()
+            tracer.save("./myprofile.json")
+            exit()
+        '''
         t1 = time.time()
+        
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)

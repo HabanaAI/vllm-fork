@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import pickle
-import signal
+import signal,time
 from contextlib import contextmanager
 from typing import Iterator, List, Optional, Union
 
@@ -232,16 +232,18 @@ class MQLLMEngine:
                         self.engine.do_log_stats()
                         logger.debug(
                             "Waiting for new requests in engine loop.")
-
+            start = time.time()
             # Handle any input from the client.
             self.handle_new_input()
-
+            t1 = time.time()
             # Engine step.
             request_outputs = self.engine_step()
-
+            t2 = time.time()
             # Send request outputs (if async, done in engine_step callback).
             if not self.use_async_sockets:
                 self._send_outputs(request_outputs)
+            t3 = time.time()
+            logger.info(f"libin run engine loop handle_new_input { t1-start}, engine_step {t2-t1} output {t3-t2}")
 
     def engine_step(self) -> List[RequestOutput]:
         """Engine step wrapper with error handling."""

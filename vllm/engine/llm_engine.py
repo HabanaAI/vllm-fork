@@ -776,7 +776,7 @@ class LLMEngine:
                 lora_request=lora_request,
                 prompt_adapter_request=prompt_adapter_request,
             )
-            logger.info(f"libin preprocess request sync {time.time() -arrival_time} for req {request_id}")
+    
         self._add_processed_request(
             request_id=request_id,
             processed_inputs=processed_inputs,
@@ -787,6 +787,7 @@ class LLMEngine:
             trace_headers=trace_headers,
             priority=priority,
         )
+        logger.info(f"libin add request sync {time.time() -arrival_time} for req {request_id}")
 
     def _create_sequence_group_with_sampling(
         self,

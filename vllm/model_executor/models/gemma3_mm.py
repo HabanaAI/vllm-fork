@@ -271,6 +271,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             mm_data,
             mm_kwargs,
         )
+        t1 = time.time()
         if "pixel_values" in processed_outputs:
             # Cast pixel values to model dtype already here,
             # so we need to transfer less data to the GPU
@@ -296,7 +297,7 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
                 for size in image_sizes
             ]
             processed_outputs["num_crops"] = torch.tensor(num_crops)
-        #logger.info(f"libin debug _call_hf_processor , {time.time() - start}, {threading.get_ident()}")
+        logger.info(f"libin debug _call_hf_processor total: {time.time() - start} img_preprocess {t1-start} id {threading.get_ident()}")
         return processed_outputs
 
     def _get_mm_fields_config(
