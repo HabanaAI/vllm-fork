@@ -158,6 +158,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
                 'HPU' in name or
                 'RAY' in name or
                 'VLLM' in name or
+                "INC" in name or
                 name in forced_envs
             )
             )
