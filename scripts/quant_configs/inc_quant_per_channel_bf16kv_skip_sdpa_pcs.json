@@ -1,0 +1,27 @@
+{
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "ACT_MAXABS_HW_WEIGHTS_PCS_MAXABS_POW2",
+    "scale_format": "const",
+    "allowlist": {
+        "types": [],
+        "names": []
+    },
+    "blocklist": {
+        "types": [],
+        "names": [
+            "lm_head",
+            "mlp\\.gate\\b",
+            "latent_cache_k_nodeq",
+            "latent_cache_v_nodeq",
+            "latent_cache_v",
+            "latent_cache_k",
+            "matmul_qk",
+            "matmul_av",
+            "fused_scaled_dot_product_attention",
+            "batch2block_matmul",
+            "block2batch_matmul"
+        ]
+    },
+    "dump_stats_path": "./scripts/unified_expand/inc_measure_output"
+}
