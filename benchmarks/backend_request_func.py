@@ -393,10 +393,6 @@ async def async_request_openai_chat_completions(
             "messages": messages,
             "temperature": 0.0,
             "max_completion_tokens": request_func_input.output_len,
-            "stream": True,
-            "stream_options": {
-                "include_usage": True,
-            },
         }
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
@@ -419,6 +415,21 @@ async def async_request_openai_chat_completions(
                 url=api_url, json=payload, headers=headers
             ) as response:
                 if response.status == 200:
+                    # handles non streaming response
+                    if not payload.get("stream", False):
+                        full = await response.json()
+                        msg = full["choices"][0]["message"]
+                        output.generated_text = msg.get("content", "")
+                        usage = full.get("usage", {})
+                        output.output_tokens = usage.get("completion_tokens", 0)
+                        # no streaming metrics in this mode
+                        output.ttft = 0.0
+                        output.latency = time.perf_counter() - st
+                        output.success = True
+                        if pbar:
+                            pbar.update(1)
+                        return output
+
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
                         if not chunk_bytes:
