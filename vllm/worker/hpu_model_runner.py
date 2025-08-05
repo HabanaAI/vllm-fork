@@ -3923,8 +3923,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
-                        if is_prompt and self.is_driver_worker:
-                            logger.info(f"libin debug MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape} real_batch {real_batch_size}")
+                        #if self.is_driver_worker:
+                        #    logger.info(f"libin debug MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape} real_batch {real_batch_size}")
+                            #logger.info(f"libin debug MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape} real_batch {real_batch_size}")
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
@@ -3965,16 +3966,18 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 # In case there are any logits processors pending
                 # we need to sync with host earlier
-                if use_delayed_sampling \
-                   and self.is_driver_worker:
-                    self._patch_prev_output()
-
+                
+                #if use_delayed_sampling \
+                #   and self.is_driver_worker:
+                #    self._patch_prev_output()
+                '''
                 if (use_delayed_sampling and self.is_driver_worker
                         and self.has_logits_processors(sampling_metadata)):
                     # when use_delayed_sampling if the computation
                     # of logits depends on the sampled results
                     # we obtain the actual sampled results in advance
                     self._patch_prev_output()
+                '''
                 # Compute the logits.
                 with self.profiler.record_event('internal',
                                                 ('compute_logits_'

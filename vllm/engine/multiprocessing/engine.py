@@ -243,7 +243,7 @@ class MQLLMEngine:
             if not self.use_async_sockets:
                 self._send_outputs(request_outputs)
             t3 = time.time()
-            logger.info(f"libin run engine loop handle_new_input { t1-start}, engine_step {t2-t1} output {t3-t2}")
+            #logger.info(f"libin run engine loop handle_new_input { t1-start}, engine_step {t2-t1} output {t3-t2}")
 
     def engine_step(self) -> List[RequestOutput]:
         """Engine step wrapper with error handling."""

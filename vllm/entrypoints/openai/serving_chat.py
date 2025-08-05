@@ -46,9 +46,9 @@ from vllm.transformers_utils.tokenizers import (maybe_serialize_tool_calls,
                                                 validate_request_params)
 
 logger = init_logger(__name__)
-from viztracer import VizTracer
-count = 0
-tracer = VizTracer()
+#from viztracer import VizTracer
+#count = 0
+#tracer = VizTracer()
 class OpenAIServingChat(OpenAIServing):
 
     def __init__(
@@ -325,7 +325,7 @@ class OpenAIServingChat(OpenAIServing):
             re =  await self.chat_completion_full_generator(
                 request, result_generator, request_id, model_name,
                 conversation, tokenizer, request_metadata)
-            logger.info(f"libin create_chat_completion stream Done : {request_id} start time take {t2-t1}, {t3-t2}, loop: {t6-t3}, after loop: {time.time() - t6}")
+            logger.info(f"libin create_chat_completion not stream Done : {request_id} start time take {t2-t1}, {t3-t2}, loop: {t6-t3}, after loop: {time.time() - t6}")
             return re
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
