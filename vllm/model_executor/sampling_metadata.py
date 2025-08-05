@@ -139,7 +139,7 @@ class SamplingMetadata:
         num_prompts: int,
         skip_sampler_cpu_output: bool = False,
         reuse_sampling_tensors: bool = False,
-        force_greedy_sample: bool = False,
+        skip_softmax_for_greedy: bool = False,
     ) -> None:
         self.seq_groups = seq_groups
         self.selected_token_indices = selected_token_indices
@@ -147,7 +147,7 @@ class SamplingMetadata:
         self.num_prompts = num_prompts
         self.skip_sampler_cpu_output = skip_sampler_cpu_output
         self.reuse_sampling_tensors = reuse_sampling_tensors
-        self.force_greedy_sample = force_greedy_sample
+        self.skip_softmax_for_greedy = skip_softmax_for_greedy
 
     @staticmethod
     def prepare(
@@ -164,7 +164,7 @@ class SamplingMetadata:
             selected_token_indices,
             categorized_sample_indices,
             num_prompts,
-            force_greedy_sample,
+            skip_softmax_for_greedy,
         ) = _prepare_seq_groups(seq_group_metadata_list, seq_lens, query_lens,
                                 device, generators, cache)
         selected_token_indices = async_tensor_h2d(
@@ -189,7 +189,7 @@ class SamplingMetadata:
             selected_token_indices=selected_token_indices,
             categorized_sample_indices=categorized_sample_indices,
             num_prompts=num_prompts,
-            force_greedy_sample=force_greedy_sample,
+            skip_softmax_for_greedy=skip_softmax_for_greedy,
         )
         return sampling_metadata
 
@@ -255,7 +255,10 @@ def _prepare_seq_groups(
     # Total number of prompts from given sequence groups.
     num_prompts = 0
 
-    force_greedy_sample = True
+    # This is used to skip softmax for greedy sampling.
+    # initial value is True, once we hit one non-greedy sampling type
+    # or with logprobs, we will set it to False.
+    skip_softmax_for_greedy = True
 
     for i, seq_group_metadata in enumerate(seq_group_metadata_list):
         seq_ids = seq_group_metadata.seq_data.keys()
@@ -355,11 +358,14 @@ def _prepare_seq_groups(
                 list(range(logit_idx, logit_idx + sample_len)))
             logit_idx += sample_len
 
-        if force_greedy_sample:
+        if skip_softmax_for_greedy:
             # If we detect non_greedy in seq_group_metadata, we will
-            # set force_greedy_sample to False.
-            force_greedy_sample = \
+            # set skip_softmax_for_greedy to False.
+            skip_softmax_for_greedy = \
                 sampling_params.sampling_type == SamplingType.GREEDY
+            skip_softmax_for_greedy = skip_softmax_for_greedy and \
+                (sampling_params.logprobs is None or \
+                    sampling_params.logprobs == 0)
 
         if cache is not None:
             sample_obj.sampling_params = sampling_params
@@ -387,7 +393,7 @@ def _prepare_seq_groups(
         cache.reset()
 
     return (seq_groups, selected_token_indices, categorized_sample_indices,
-            num_prompts, force_greedy_sample)
+            num_prompts, skip_softmax_for_greedy)
 
 
 @dataclass
