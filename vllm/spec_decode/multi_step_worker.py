@@ -73,6 +73,9 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         
         self._raise_if_unsupported(execute_model_req)
         
+        # Expand the batch for sequences with a bonus token.
+        # Perform a forward pass on the expanded batch and filter the
+        # response to retain only the original sequences' responses.
         if accepted_token_id is not None:
             def bind_expand_fn_to_request(execute_model_req, accepted_token_id, seq_ids_with_bonus_token_in_last_step, expand_fn):
                 def expand():
@@ -146,7 +149,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                     model_output, expanded_request.seq_group_metadata_list,
                     indices_of_seq_with_bonus_tokens)
                 model_outputs.append(model_output)
-                
+
         # move indices to device to avoid stream sync
         indices_of_seq_with_bonus_tokens = torch.tensor(
             indices_of_seq_with_bonus_tokens, device=self.device)
@@ -173,7 +176,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         execute_model_req: ExecuteModelRequest,
         seq_with_bonus_token_in_last_step: set,
     ) -> Tuple[ExecuteModelRequest, List[int]]:
-        """`
+        """
         Expands the execute model request based on sequences with bonus
         tokens.
 

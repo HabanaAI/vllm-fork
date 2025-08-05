@@ -345,12 +345,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.hpu_delay_specdecode=is_delay_specdecode_enabled()
         if self.hpu_delay_specdecode:
             self.init_hpu_cache()
-   
-        
-        
-        #todo  env set
-        
-
 
     def init_hpu_cache(self) ->None:
         self._pending_data = None
@@ -822,7 +816,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
         with Timer() as scoring_timer:
             #print(f"==============put to score {self.accepted_token_ids_=}===")
-            
             if self.hpu_delay_specdecode:
                 proposal_scores = self.scorer.score_proposals(
                     execute_model_req,
@@ -858,11 +851,10 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_token_ids, target_logprobs = self._verify_tokens(
                 execute_model_req.seq_group_metadata_list, proposal_scores,
                 proposals, execute_model_req.num_lookahead_slots)
-            
+
         stage_times = (proposal_timer.elapsed_time_ms / num_lookahead_slots,
                        scoring_timer.elapsed_time_ms,
                        verification_timer.elapsed_time_ms)
-        #print("!!!accept token id",accepted_token_ids)
 
         self._pending_data = {
             "seq_group_metadata_list": execute_model_req.seq_group_metadata_list,
@@ -876,7 +868,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             self.cached_step_target_logprobs.append(target_logprobs)
             self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
-        # print(f"!!!_create_output_sampler_list {accepted_token_ids}")
         res = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
@@ -1034,7 +1025,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # Serialize tensor to CPU Python list.
         #dummy token=2
         n=2
-        #todo batch>1 compatible
         for seq_index, sg in enumerate(seq_group_metadata_list):
             for seq  in sg.seq_data.values():
                 if seq.get_output_len()+n>= seq_group_metadata_list[seq_index].sampling_params.max_tokens:
@@ -1117,7 +1107,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 SamplerOutput(
                     outputs=[create_sequence_group_output(
                         **seq_kwargs)]))  # type: ignore
-            
+
         # Decodes, create one SamplerOutput per-step (at most K+1).
         for step_index in range(num_steps):
             if all(token_id == -1 for sg, token_id in zip(
@@ -1392,4 +1382,3 @@ def prepare_prefill_hidden_states(
     # align n-1th hidden state with nth token.
     return HiddenStates(prefill_hidden_states.roll(
         shifts=1, dims=0)) if prefill_hidden_states is not None else None
-
