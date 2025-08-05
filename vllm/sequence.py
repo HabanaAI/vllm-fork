@@ -1345,10 +1345,8 @@ class HiddenStates(msgspec.Struct, array_like=True,
                 index = [self._seq_ids.index(seq_id) for seq_id in seq_ids]
             else:
                 # This path is added for use_padding_aware_scheduling
-                index = [
-                    self._seq_ids.index(seq_id)
-                    if seq_id in self._seq_ids else 0 for seq_id in seq_ids
-                ]
+                index = [self._seq_ids.index(seq_id) for seq_id in seq_ids if seq_id in self._seq_ids]
+                index = index + ([-1] * (len(seq_ids) - len(index))) 
             self.hidden_states = self.hidden_states[index]
             if self.second_last_token_hidden_states is not None:
                 self.second_last_token_hidden_states = self\
