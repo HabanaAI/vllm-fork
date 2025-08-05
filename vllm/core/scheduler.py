@@ -571,6 +571,7 @@ class Scheduler:
                 self.scheduler_profiler.start('internal', 'fetching_kv')
                 seq_group = self.fetching_kv.get()
                 hash_prefix = hash_list(seq_group.prompt_token_ids)
+                print(f"start fetching kv hash: {hash_prefix}")
                 prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
                     hash_prefix)
                 put_to_shared_dict(prefix, kv_cache, hidden_states)
@@ -578,6 +579,7 @@ class Scheduler:
                     self.waiting.append(self.fetching_kv.get())
                 self.fetching_kv.task_done()
                 self.scheduler_profiler.end()
+                print(f"fetching kv hash: {hash_prefix} done")
             else:
                 time.sleep(0.1)
 
