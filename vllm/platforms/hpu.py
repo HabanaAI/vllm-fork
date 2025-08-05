@@ -125,7 +125,7 @@ class HpuPlatform(Platform):
 
     @classmethod
     def is_pin_memory_available(cls):
-        logger.warning("Pin memory is not supported on HPU.")
+        logger.info("Pin memory is supported on HPU.")
         return True
 
     @classmethod
