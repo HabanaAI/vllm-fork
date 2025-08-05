@@ -52,6 +52,10 @@ from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsTensors,
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.utils import bind_kv_cache
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+from vllm.v1.core.sched.output import NewRequestData
+
+from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
+
 
 if TYPE_CHECKING:
     from vllm.v1.core.scheduler import SchedulerOutput
@@ -388,6 +392,7 @@ class HpuModelAdapter(torch.nn.Module):
         is_warmup = kwargs.get('warmup_mode', False)
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
+        is_warmup = kwargs.get('is_warmup', False)
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._update_metadata(
             kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
@@ -584,7 +589,7 @@ class HPUModelRunner:
             self.parallel_config)
         self.head_size = self.model_config.get_head_size()
         self.hidden_size = self.model_config.get_hidden_size()
-
+        logger.debug(f'buke model config: {self.model_config=}')
         self.attn_backend = get_attn_backend(
             self.head_size,
             self.dtype,
@@ -1405,7 +1410,8 @@ class HPUModelRunner:
                                attn_metadata,
                                logits_indices,
                                kv_caches,
-                               warmup_mode=False):
+                               warmup_mode=False,
+                               scheduler_output = None):
 
         # FORWARD.
         batch_size = token_ids.size(0)
@@ -1678,7 +1684,7 @@ class HPUModelRunner:
                 self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
                 decode_data.attn_metadata, decode_data.logits_indices,
-                self.kv_caches)
+                self.kv_caches, scheduler_output=scheduler_output)
             htorch.core.mark_step()
             finished_sending, finished_recving = (
                 self.get_finished_kv_transfers(scheduler_output))
@@ -1772,6 +1778,53 @@ class HPUModelRunner:
         if has_kv_transfer_group():
             get_kv_transfer_group().clear_connector_metadata()
         return model_runner_output
+    def kv_connector_no_forward(
+            self, scheduler_output: "SchedulerOutput") -> ModelRunnerOutput:
+        # KV send/recv even if no work to do.
+        with set_forward_context(None, self.vllm_config):
+            self.maybe_setup_kv_connector(scheduler_output)
+            finished_sending, finished_recving = (
+                self.get_finished_kv_transfers(scheduler_output))
+
+        if not finished_sending and not finished_recving:
+            return EMPTY_MODEL_RUNNER_OUTPUT
+
+        output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
+        output.finished_sending = finished_sending
+        output.finished_recving = finished_recving
+        return output
+
+    @staticmethod
+    def maybe_setup_kv_connector(scheduler_output: "SchedulerOutput"):
+        # Update KVConnector with the KVConnector metadata forward().
+        if has_kv_transfer_group():
+            kv_connector = get_kv_transfer_group()
+            assert isinstance(kv_connector, KVConnectorBase_V1)
+            assert scheduler_output.kv_connector_metadata is not None
+            kv_connector.bind_connector_metadata(
+                scheduler_output.kv_connector_metadata)
+
+            # Background KV cache transfers happen here.
+            # These transfers are designed to be async and the requests
+            # involved may be disjoint from the running requests.
+            # Do this here to save a collective_rpc.
+            
+            kv_connector.start_load_kv(scheduler_output.kv_connector_metadata)
+
+    @staticmethod
+    def maybe_wait_for_kv_save(req: Optional[NewRequestData]) -> None:
+        if has_kv_transfer_group():
+            get_kv_transfer_group().wait_for_save(req)
+
+    @staticmethod
+    def get_finished_kv_transfers(
+        scheduler_output: "SchedulerOutput",
+    ) -> tuple[Optional[set[str]], Optional[set[str]]]:
+        if has_kv_transfer_group():
+            return get_kv_transfer_group().get_finished(
+                scheduler_output)
+        return None, None
+
 
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
@@ -2208,6 +2261,7 @@ class HPUModelRunner:
         if prompt_profile_cfg or decode_profile_cfg:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
+        self.bucketing_ctx.generate_prompt_buckets()
         kv_caches = self.kv_caches
         self.bucketing_manager.generate_prompt_buckets()
         self.bucketing_manager.generate_decode_buckets()
@@ -2315,6 +2369,12 @@ class HPUModelRunner:
                 "Hybrid models with more than one KV cache type are not "
                 "supported yet.")
 
+        # build a map from layer_name -> KVCacheTensor
+        tensor_map: dict[str, KVCacheTensor] = {}
+        for tensor in kv_cache_config.kv_cache_tensors:
+            for lname in tensor.shared_by:
+                tensor_map[lname] = tensor
+
         kv_caches: dict[str, torch.Tensor] = {}
         kv_cache_sizes = {}
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
@@ -2342,6 +2402,7 @@ class HPUModelRunner:
                     v_cache_shape = None if self.model_config.use_mla \
                     else kv_cache_shape
                     dtype = kv_cache_spec.dtype
+                    logger.debug(f'buke: {kv_cache_shape=}')
                     key_cache = torch.zeros(kv_cache_shape,
                                             dtype=dtype,
                                             device=self.device)
@@ -2352,6 +2413,7 @@ class HPUModelRunner:
                     else:
                         value_cache = None
                     kv_caches[layer_name] = (key_cache, value_cache)
+                    logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
                 else:
                     # TODO: add new branches when introducing more types of
                     # KV cache specs.
@@ -2366,6 +2428,9 @@ class HPUModelRunner:
             self.bucketing_manager.num_hpu_blocks = num_blocks
         self._PAD_BLOCK_ID = num_blocks
         self._PAD_SLOT_ID = num_blocks * self.block_size
+
+        if has_kv_transfer_group():
+            get_kv_transfer_group().register_kv_caches(kv_caches)
 
         htorch.hpu.synchronize()
 
