@@ -38,6 +38,7 @@ from typing import Any, Optional
 import numpy as np
 from tqdm.asyncio import tqdm
 from transformers import PreTrainedTokenizerBase
+import benchmark_utils
 
 from backend_request_func import (
     ASYNC_REQUEST_FUNCS,
@@ -65,6 +66,7 @@ from benchmark_dataset import (
     HuggingFaceDataset,
     InstructCoderDataset,
     MTBenchDataset,
+    MuirBenchDataset,
     NextEditPredictionDataset,
     RandomDataset,
     SampleRequest,
@@ -304,7 +306,7 @@ async def benchmark(
         input_requests[0].multi_modal_data,
     )
 
-    assert test_mm_content is None or isinstance(test_mm_content, dict)
+    assert test_mm_content is None or isinstance(test_mm_content, (dict, list))
     test_input = RequestFuncInput(
         model=model_id,
         model_name=model_name,
@@ -610,6 +612,18 @@ def main(args: argparse.Namespace):
     tokenizer_id = args.tokenizer if args.tokenizer is not None else args.model
     tokenizer_mode = args.tokenizer_mode
 
+    if args.limit_mm_per_prompt:
+        key = list(args.limit_mm_per_prompt.keys())[0]
+        value = args.limit_mm_per_prompt[key]
+        if key != "image" or value < 1:
+            raise ValueError(
+                "Invalid format for --limit-mm-per-prompt. "
+                "Use 'image=N' where N is a positive integer."
+            )
+        else:
+            print(f"INFO: Limiting requests to {value} images per prompt.")
+            benchmark_utils.image_per_prompt = int(value)
+
     if args.base_url is not None:
         api_url = f"{args.base_url}{args.endpoint}"
         base_url = f"{args.base_url}"
@@ -687,6 +701,9 @@ def main(args: argparse.Namespace):
         elif args.dataset_path in ASRDataset.SUPPORTED_DATASET_PATHS:
             dataset_class = ASRDataset
             args.hf_split = "train"
+        elif args.dataset_path in MuirBenchDataset.SUPPORTED_DATASET_PATHS:
+            dataset_class = MuirBenchDataset
+            args.hf_split = "test"
         else:
             supported_datasets = set(
                 [
@@ -712,7 +729,8 @@ def main(args: argparse.Namespace):
                 "Multi-modal content is only supported on 'openai-chat' and "
                 "'openai-audio' backend."
             )
-        input_requests = dataset_class(
+        if dataset_class == MuirBenchDataset:
+            input_requests = dataset_class(
             dataset_path=args.dataset_path,
             dataset_subset=args.hf_subset,
             dataset_split=args.hf_split,
@@ -721,8 +739,20 @@ def main(args: argparse.Namespace):
             num_requests=args.num_prompts,
             tokenizer=tokenizer,
             output_len=args.hf_output_len,
+            input_len=args.input_len,
         )
-
+        else:
+            
+            input_requests = dataset_class(
+                dataset_path=args.dataset_path,
+                dataset_subset=args.hf_subset,
+                dataset_split=args.hf_split,
+                random_seed=args.seed,
+            ).sample(
+                num_requests=args.num_prompts,
+                tokenizer=tokenizer,
+                output_len=args.hf_output_len,
+            )
     else:
         # For datasets that follow a similar structure, use a mapping.
         dataset_mapping = {
@@ -1072,6 +1102,14 @@ if __name__ == "__main__":
         "goodput, refer to DistServe paper: https://arxiv.org/pdf/2401.09670 "
         "and the blog: https://hao-ai-lab.github.io/blogs/distserve",
     )
+    parser.add_argument(
+        "--limit-mm-per-prompt",
+        metavar="KEY=VALUE",
+        type=lambda x: {x.split("=")[0]: int(x.split("=")[1])},
+        default=None,
+        help="Limit the number of multimodal items per prompt. "
+        "Example: --limit-mm-per-prompt image=100",
+    )
 
     # group for dataset specific arguments
     custom_group = parser.add_argument_group("custom dataset options")
@@ -1225,6 +1263,14 @@ if __name__ == "__main__":
         "script chooses a LoRA module at random.",
     )
 
+    parser.add_argument(
+        "--input-len",
+        type=int,
+        default=0,
+        help="Target token length for the prompt. Trims if longer, pads with "
+        "pad/eos token if shorter. Default 0 means no change.",
+    )
+    
     args = parser.parse_args()
 
     main(args)

@@ -283,6 +283,7 @@ class MQLLMEngine:
 
     def run_engine_loop(self):
         """Core busy loop of the LLMEngine."""
+        '''
         WARMUP_STEP =  3500
         ACTIVE_STEP = 10
         hb_profer = HabanaProfile(
@@ -293,6 +294,7 @@ class MQLLMEngine:
             hb_profer.start()
 
             step_count = 0
+        '''
         while True:
             if not self.engine.has_unfinished_requests():
                 # Poll until there is work to do.
@@ -321,7 +323,7 @@ class MQLLMEngine:
 
             # Engine step.
             request_outputs = self.engine_step()
-            
+            '''
             if PROFILE:
                 hb_profer.step()
                 print("libin start to count ", step_count)
@@ -329,7 +331,7 @@ class MQLLMEngine:
                 if step_count == ACTIVE_STEP + WARMUP_STEP:
                     hb_profer.stop()
                     exit()
-
+            '''
             # Send request outputs (if async, done in engine_step callback).
             if not self.use_async_sockets:
                 self._send_outputs(request_outputs)
