@@ -15,7 +15,6 @@ class Detokenizer:
 
     def __init__(self, tokenizer_group: BaseTokenizerGroup):
         self.tokenizer_group = tokenizer_group
-        self.passa=0
         self.last_len=0
 
     def get_tokenizer_for_seq(self, sequence: Sequence) -> AnyTokenizer:
