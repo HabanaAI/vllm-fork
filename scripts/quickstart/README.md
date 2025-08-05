@@ -192,13 +192,15 @@ cd vllm-fork
 huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scripts/nc_workspace_measure_kvcache
 ```
 
-#### 2. Configure environment variables.
+#### 2. Configure environment variables. (Optional)
 
 After downloading measurement files, you need to configure some environment variables to make INC quantization become effective.
 
 ##### 2.1 Using start_vllm.sh script
 
-If you are using `start_vllm.sh` script to start vllm, please configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vllm.sh
+If you want to use `start_vllm.sh` script to start vllm, plan to use FP8 kv cache, and have downloaded the measurement files to recommended path (/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache), you can skip this section and just use the default env var values.
+
+If you want to use custom path or use BF16 kv cache, please re-configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vllm.sh
 
 - QUANT_CONFIG
 
@@ -206,15 +208,16 @@ Depends on kv-cache-dtype to use, you should use quantization configuration file
 
 These quantization config is located in vllm-fork/scripts/quant_configs.
 
-|KV-Cache-Dtype|QUANT_CONFIG|
-|---|---|
-|BF16|inc_quant_per_channel_bf16kv.json|
-|FP8|inc_quant_per_channel_with_fp8kv_config.json|
+|KV-Cache-Dtype|vLLM --kv-cache-dtype argument|QUANT_CONFIG|
+|---|---|---|
+|BF16|auto|inc_quant_per_channel_bf16kv.json|
+|FP8|fp8_inc|inc_quant_per_channel_with_fp8kv_config.json|
 
-For example, if you want to use BF16 kv cache, you should set QUANT_CONFIG with:
+For example, if you want to use FP8 kv cache, you should set QUANT_CONFIG with:
 ```
-export QUANT_CONFIG=/path/to/vllm-fork/scripts/quant_configs/inc_quant_per_channel_bf16kv.json
+export QUANT_CONFIG=/path/to/vllm-fork/scripts/quant_configs/inc_quant_per_channel_with_fp8kv_config.json
 ```
+and pass "fp8_inc" to vLLM --kv-cache-dtype argument.
 
 - INC_MEASUREMENT_DUMP_PATH_PREFIX
 
@@ -430,15 +433,16 @@ Depends on kv-cache-dtype to use, you should use quantization configuration file
 
 These quantization config is located in vllm-fork/scripts/quant_configs.
 
-|KV-Cache-Dtype|QUANT_CONFIG|
-|---|---|
-|BF16|inc_quant_per_channel_bf16kv.json|
-|FP8|inc_quant_per_channel_with_fp8kv_config.json|
+|KV-Cache-Dtype|vLLM --kv-cache-dtype argument|QUANT_CONFIG|
+|---|---|---|
+|BF16|auto|inc_quant_per_channel_bf16kv.json|
+|FP8|fp8_inc|inc_quant_per_channel_with_fp8kv_config.json|
 
 For example, if you want to use BF16 kv cache, you should set QUANT_CONFIG with:
 ```
 export QUANT_CONFIG=/path/to/vllm-fork/scripts/quant_configs/inc_quant_per_channel_bf16kv.json
 ```
+and pass "auto" to vLLM --kv-cache-dtype argument.
 
 - INC_MEASUREMENT_DUMP_PATH_PREFIX
 
