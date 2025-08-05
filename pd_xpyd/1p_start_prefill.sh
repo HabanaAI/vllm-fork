@@ -34,6 +34,11 @@ source "$BASH_DIR"/dp_p_env.sh
 #unset VLLM_SKIP_WARMUP
 #export PT_HPU_RECIPE_CACHE_CONFIG=./_prefill_cache,false,16384
 
+timestamp=$(date +"%Y%m%d_%H%M%S")
+log_dir="xpyd_logs"
+mkdir -p "$log_dir"
+log_file="$log_dir/prefill_${timestamp}.log"
+
 if [ "$INC_FP8" -eq 1 ]; then
   kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"
   echo "<prefill>it's inc fp8 kv cache mode"
@@ -57,4 +62,4 @@ python3 -m vllm.entrypoints.openai.api_server \
   --use-v2-block-manager \
   --distributed_executor_backend mp \
   $kv_cache_dtype_arg \
-  --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
+  --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}' 2>&1 | tee "$log_file"
