@@ -213,6 +213,7 @@ def _prepare_seq_groups(
         list[int],
         dict[SamplingType, list[int]],
         int,
+        bool,
 ]:
     """Prepare sequence groups and indices for sampling.
 
