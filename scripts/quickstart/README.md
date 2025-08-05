@@ -20,6 +20,7 @@ Verified models:
   - [Single-Node Setup and Serving Deployment](#single-node-setup-and-serving-deployment)
     - [Download and Install vLLM](#download-and-install-vllm)
     - [HCCL Demo Test](#hccl-demo-test)
+    - [INC FP8 Quantization](#inc-fp8-quantization)
     - [The parameters of starting vLLM server script](#the-parameters-of-starting-vllm-server-script)
     - [Launch vLLM Serving with TP=8](#launch-vllm-serving-with-tp8)
     - [Send Requests to Ensure the Service Functionality](#send-requests-to-ensure-the-service-functionality)
@@ -174,37 +175,11 @@ The hccl test is passed if the message below is shown. For Gaudi PCIe system wit
 #########################################################################################
 ```
 
-
-### The parameters of starting vLLM server script
-There are some system environment variables which need be set to get the best vLLM performance. We provide the sample script to set the recommended environment variables.
-
-The script file "start_vllm.sh" is used to start vLLM service. You may execute the command below to check its supported parameters.
-```bash
-bash start_vllm.sh -h
-```
-
-The command output is like below. 
-```bash
-Start vllm server for a huggingface model on Gaudi.
-
-Syntax: bash start_vllm.sh <-w> [-u:p:l:b:c:sq] [-h]
-options:
-w  Weights of the model, could be model id in huggingface or local path
-u  URL of the server, str, default=0.0.0.0
-p  Port number for the server, int, default=8688
-l  max_model_len for vllm, int, default=16384, maximal value for single node: 32768
-b  max_num_seqs for vllm, int, default=128
-c  Cache HPU recipe to the specified path, str, default=None
-s  Skip warmup or not, bool, default=false
-q  Enable inc fp8 quantization
-h  Help info
-```
-
-#### INC FP8 Quantization
+### INC FP8 Quantization
 
 To run DeepSeek-R1 with INC FP8 quantization in single-node case, you need to follow:
 
-1. Download corresponding measurement files according to target model and tp-size.
+#### 1. Download corresponding measurement files according to target model and tp-size.
 
 |Model|TP-Size|Measurement Files|
 |---|---|---|
@@ -217,11 +192,11 @@ cd vllm-fork
 huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scripts/nc_workspace_measure_kvcache
 ```
 
-2. Configure environment variables.
+#### 2. Configure environment variables.
 
 After downloading measurement files, you need to configure some environment variables to make INC quantization become effective.
 
-##### Using start_vllm.sh script
+##### 2.1 Using start_vllm.sh script
 
 If you are using `start_vllm.sh` script to start vllm, please configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vllm.sh
 
@@ -265,7 +240,7 @@ dump_stats_path (from config): "scripts/nc_workspace_measure_kvcache/inc_measure
 Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache/inc_measure_output_hooks_maxabs_0_8.npz"
 ```
 
-##### Manually start vllm
+##### 2.2 Manually start vllm
 
 If you want to start vllm manually or use your own script, please set below environment variables.
 
@@ -278,9 +253,35 @@ If you want to start vllm manually or use your own script, please set below envi
 |VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
 |VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
 
-3. Check if INC quantization enabled successfully
+#### 3. Check if INC quantization enabled successfully
 
 If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
+
+
+### The parameters of starting vLLM server script
+There are some system environment variables which need be set to get the best vLLM performance. We provide the sample script to set the recommended environment variables.
+
+The script file "start_vllm.sh" is used to start vLLM service. You may execute the command below to check its supported parameters.
+```bash
+bash start_vllm.sh -h
+```
+
+The command output is like below. 
+```bash
+Start vllm server for a huggingface model on Gaudi.
+
+Syntax: bash start_vllm.sh <-w> [-u:p:l:b:c:sq] [-h]
+options:
+w  Weights of the model, could be model id in huggingface or local path
+u  URL of the server, str, default=0.0.0.0
+p  Port number for the server, int, default=8688
+l  max_model_len for vllm, int, default=16384, maximal value for single node: 32768
+b  max_num_seqs for vllm, int, default=128
+c  Cache HPU recipe to the specified path, str, default=None
+s  Skip warmup or not, bool, default=false
+q  Enable inc fp8 quantization
+h  Help info
+```
 
 ### Launch vLLM Serving with TP=8
 ```bash
@@ -366,9 +367,7 @@ The expected throughput is below.
 ### Install VLLM on Both Nodes
 ```bash
 git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
-git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-hpu-extension.git
 pip install -e vllm-fork/
-pip install -e vllm-hpu-extension/
 ```
 
 ### Configure Multi-Node Script
@@ -397,7 +396,7 @@ output_max=16896
 
 To run DeepSeek-R1 with INC FP8 quantization in multi-nodes case, you need to follow:
 
-1. Download corresponding measurement files to both head and worker node according to target model and tp-size.
+##### 1. Download corresponding measurement files to both head and worker node according to target model and tp-size.
 
 |Model|TP-Size|Measurement Files|
 |---|---|---|
@@ -417,11 +416,11 @@ cd vllm-fork
 cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measure_kvcache
 ```
 
-2. Configure environment variables.
+##### 2. Configure environment variables.
 
 After downloading measurement files, you need to configure some environment variables to make INC quantization become effective.
 
-##### Using start_vllm.sh script
+###### 2.1 Using set_head_node.sh & set_worker_node.sh scripts
 
 If you are using `set_head_node.sh` and `set_worker_node.sh` scripts to start vllm, please configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in them.
 
@@ -464,7 +463,7 @@ Then, we export `INC_MEASUREMENT_DUMP_PATH_PREFIX=/path/to/vllm-fork`, and INC w
 dump_stats_path (from config): "scripts/nc_workspace_measure_kvcache/inc_measure_output"
 Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache/inc_measure_output_hooks_maxabs_0_16.npz"
 ```
-##### Manually start vllm
+###### 2.2 Manually start vllm
 
 If you want to start vllm manually or use your own script, please set below environment variables.
 
@@ -477,7 +476,7 @@ If you want to start vllm manually or use your own script, please set below envi
 |VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
 |VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
 
-3. Check if INC quantization enabled successfully
+##### 3. Check if INC quantization enabled successfully
 
 If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
 
