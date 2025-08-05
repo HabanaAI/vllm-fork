@@ -120,7 +120,7 @@ class Detokenizer:
                     break
             if  len(all_input_ids)==self.last_len:
                 return 0
-            elif self.last_len!=0:
+            elif self.last_len!=0 and seq.read_offset!=0:
                 last_n=len(all_input_ids)-self.last_len
             self.last_len=len(all_input_ids)
 

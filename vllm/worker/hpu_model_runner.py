@@ -1376,7 +1376,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if len(block_table) == 0:
                     block_number = _PAD_BLOCK_ID
                 else:
-                    block_number = block_table[position // self.block_size]
+                    block_number = block_table[ min(position // self.block_size, len(block_table)-1)]
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:

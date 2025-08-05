@@ -342,6 +342,17 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self._disable_log_stats = disable_log_stats
         self._num_spec_prefill_steps = num_spec_prefill_steps
 
+        self.hpu_delay_specdecode=is_delay_specdecode_enabled()
+        if self.hpu_delay_specdecode:
+            self.init_hpu_cache()
+   
+        
+        
+        #todo  env set
+        
+
+
+    def init_hpu_cache(self) ->None:
         self._pending_data = None
         self._pending_step = 0
 
@@ -353,12 +364,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.accepted_token_ids_ = None
         self.target_logprobs_ = None
         self.prompt_logprobs_ = None
-        #todo  env set
-        self.hpu_delay_specdecode=is_delay_specdecode_enabled()
         
-
-
-
     def init_device(self) -> None:
         """Initialize both scorer and proposer models.
         """
@@ -785,10 +791,14 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if self._pending_step > 1:
                 #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
                 #print(f" cache before pop{self.cached_step_accepted_tokens=}")
-                self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
-                
-                self.target_logprobs_=self.cached_step_target_logprobs[0]
-                self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
+                if len(next(iter(execute_model_req.seq_group_metadata_list[0].seq_data.items()))[1].output_token_ids_array)==1:
+                    self.init_hpu_cache()
+                    self._pending_step=1
+                else:
+                    self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
+                    
+                    self.target_logprobs_=self.cached_step_target_logprobs[0]
+                    self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
 
 
 
@@ -859,14 +869,15 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             "k": execute_model_req.num_lookahead_slots,
             "stage_times": stage_times,
         }
-
-        self.cached_step_accepted_tokens.append(accepted_token_ids)
-        #print(f" cache after append{self.cached_step_accepted_tokens=}")
-        self.cached_step_target_logprobs.append(target_logprobs)
-        self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
         
-        print(f"!!!_create_output_sampler_list {accepted_token_ids}")
-        tmp = self._create_output_sampler_list(
+        if self.hpu_delay_specdecode:
+            self.cached_step_accepted_tokens.append(accepted_token_ids)
+            #print(f" cache after append{self.cached_step_accepted_tokens=}")
+            self.cached_step_target_logprobs.append(target_logprobs)
+            self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
+        
+        # print(f"!!!_create_output_sampler_list {accepted_token_ids}")
+        res = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
             target_logprobs=target_logprobs,
@@ -874,7 +885,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if not self._disable_logprobs else None,
             k=execute_model_req.num_lookahead_slots,
             stage_times=stage_times)
-        return tmp
+        return res
         
 
     @nvtx_range("spec_decode_worker._verify_tokens")

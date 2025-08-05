@@ -184,8 +184,6 @@ def detokenize_incrementally(
             skip_special_tokens=skip_special_tokens,
             spaces_between_special_tokens=spaces_between_special_tokens,
         )
-        c=0
-
 
     if len(new_text) <= len(prefix_text) or new_text.endswith("�"):
         # utf-8 char at the end means it's a potential unfinished byte sequence
