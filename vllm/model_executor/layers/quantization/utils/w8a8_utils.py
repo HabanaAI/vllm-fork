@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
+# isort: off
+#ruff: noqa E402
+# yapf: disable
 from typing import Callable, Optional, Union
 
 import torch
+
 from vllm.platforms import current_platform
+
 if current_platform.is_hpu():
     from vllm_hpu_extension.scales import ConvertScaleToHwAligned
 
@@ -21,6 +25,9 @@ if current_platform.is_hpu():
     import habana_frameworks.torch.utils.experimental as htexp
     from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
+
+#isort: on
+# yapf: enable
 # The condition to determine if it is on a platform that supports
 # torch._scaled_mm rowwise feature.
 # The condition is determined once as the operations

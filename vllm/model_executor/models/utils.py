@@ -1,14 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
+# isort: off
+#ruff: noqa E402
+# yapf: disable
 import itertools
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional, Protocol, Union, overload
 
 from vllm.platforms import current_platform
+
 if current_platform.is_hpu():
     import habana_frameworks.torch.core as htcore
+
 import torch
 import torch.nn as nn
 from torch.func import functional_call
@@ -24,6 +28,8 @@ from vllm.sequence import IntermediateTensors
 from vllm.utils import (get_cuda_view_from_cpu_tensor, is_pin_memory_available,
                         is_uva_available)
 
+#isort: on
+# yapf: enable
 logger = init_logger(__name__)
 
 WeightsMapping = Mapping[str, Optional[str]]

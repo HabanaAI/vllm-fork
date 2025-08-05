@@ -1,37 +1,43 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
+# isort: off
+#ruff: noqa E402
+# yapf: disable
 import itertools
 from abc import abstractmethod
 from typing import Any, Callable, Literal, Optional, Union
 
 import torch
 import torch.nn as nn
-from vllm.platforms import current_platform #isort: skip
+
+from vllm.platforms import current_platform
+
 is_hpu = current_platform.is_hpu()
 if is_hpu:
     from habana_frameworks.torch.core.weight_sharing \
         import HabanaParameterWrapper
-from torch.nn.parameter import Parameter, UninitializedParameter # noqa: E402
+
+from torch.nn.parameter import Parameter, UninitializedParameter
 
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               split_tensor_along_last_dim,
                               tensor_model_parallel_all_gather,
-                              tensor_model_parallel_all_reduce) # noqa: E402
-from vllm.logger import init_logger # noqa: E402
+                              tensor_model_parallel_all_reduce)
+from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig, QuantizeMethodBase) # noqa: E402
-from vllm.model_executor.layers.utils import dispatch_unquantized_gemm # noqa: E402
-# yapf: disable
+    QuantizationConfig, QuantizeMethodBase)
+from vllm.model_executor.layers.utils import dispatch_unquantized_gemm
 from vllm.model_executor.parameter import (BasevLLMParameter,
                                            BlockQuantScaleParameter,
                                            PackedColumnParameter,
                                            PackedvLLMParameter,
                                            PerTensorScaleParameter,
-                                           RowvLLMParameter) # noqa: E402
+                                           RowvLLMParameter)
+
+from vllm.model_executor.utils import set_weight_attrs
+#isort: on
 # yapf: enable
-from vllm.model_executor.utils import set_weight_attrs # noqa: E402
 
 logger = init_logger(__name__)
 
