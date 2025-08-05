@@ -23,5 +23,5 @@
             "block2batch_matmul"
         ]
     },
-    "dump_stats_path": "./scripts/unified_expand/inc_measure_output"
+    "dump_stats_path": "./scripts/unified_expand_hw/inc_measure_output"
 }
