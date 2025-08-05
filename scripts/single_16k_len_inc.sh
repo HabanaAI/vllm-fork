@@ -51,7 +51,7 @@ export VLLM_DELAYED_SAMPLING="true"
 #export VLLM_MOE_SLICE_LENGTH=20480
 
 # params
-CONST_LEN=16384
+CONST_LEN=18432
 max_model_len=$CONST_LEN
 max_num_batched_tokens=$CONST_LEN
 max_num_seqs=256
@@ -102,7 +102,7 @@ else
 fi
 
 
-export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa.json"
+export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa_uint.json"
 export INC_FORCE_SCALE_FP32=1
 
 echo "Model path $model_path"
