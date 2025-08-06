@@ -103,7 +103,7 @@ fi
 
 
 export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa.json"
-export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa_pcs.json"
+# export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa_pcs.json"
 # export QUANT_CONFIG="./scripts/quant_configs/inc_quant_per_channel_bf16kv_skip_sdpa_uint.json"
 export INC_FORCE_SCALE_FP32=1
 
