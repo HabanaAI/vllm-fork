@@ -794,6 +794,10 @@ def main(args: argparse.Namespace):
         if v is not None
     }
 
+    if not args.full and args.endpoint in ("/v1/chat/completions", "/chat/completions"):
+        sampling_params["stream"] = True
+        sampling_params["stream_options"] = {"include_usage": True}
+
     # Sampling parameters are only supported by openai-compatible backend.
     if sampling_params and args.backend not in OPENAI_COMPATIBLE_BACKENDS:
         raise ValueError(
@@ -1270,7 +1274,13 @@ if __name__ == "__main__":
         help="Target token length for the prompt. Trims if longer, pads with "
         "pad/eos token if shorter. Default 0 means no change.",
     )
-    
+
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Set full token response mode, only for /chat/completions",
+    )
+
     args = parser.parse_args()
 
     main(args)
