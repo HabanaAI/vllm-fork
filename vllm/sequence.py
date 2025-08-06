@@ -1344,10 +1344,8 @@ class HiddenStates(msgspec.Struct, array_like=True,
         index = [self._seq_ids.index(seq_id) for seq_id in seq_ids]
 
         is_paddingaware_scheduling = orig_seq_len > len(self._seq_ids)
-        if is_paddingaware_scheduling:
-            index = index + ([-1] * (orig_seq_len - len(index)))
-
         if seq_ids != self._seq_ids or is_paddingaware_scheduling:
+            index = index + ([-1] * (orig_seq_len - len(index)))
             self.hidden_states = self.hidden_states[index]
             if self.second_last_token_hidden_states is not None:
                 self.second_last_token_hidden_states = self\
