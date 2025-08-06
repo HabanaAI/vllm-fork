@@ -415,7 +415,7 @@ async def async_request_openai_chat_completions(
                 url=api_url, json=payload, headers=headers
             ) as response:
                 if response.status == 200:
-                    # handles non streaming response
+                    # handles non streaming response, full
                     if not payload.get("stream", False):
                         full = await response.json()
                         msg = full["choices"][0]["message"]
