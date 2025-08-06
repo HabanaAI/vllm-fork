@@ -366,6 +366,9 @@ def _prepare_seq_groups(
             skip_softmax_for_greedy = skip_softmax_for_greedy and \
                 (sampling_params.logprobs is None or \
                     sampling_params.logprobs == 0)
+            skip_softmax_for_greedy = skip_softmax_for_greedy and \
+                (sampling_params.prompt_logprobs is None or \
+                    sampling_params.prompt_logprobs == 0)
 
         if cache is not None:
             sample_obj.sampling_params = sampling_params
