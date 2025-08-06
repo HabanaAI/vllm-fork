@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     VLLM_DP_MASTER_IP: str = ""
     VLLM_DP_MASTER_PORT: int = 0
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
+    VLLM_USE_PREFILL_OUTPUT: bool = False
 
 
 def get_default_cache_root():
