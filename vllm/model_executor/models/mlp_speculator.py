@@ -14,7 +14,6 @@ from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-from vllm.platforms import current_platform
 
 SQRT2 = 2**0.5
 
@@ -169,11 +168,6 @@ class MLPSpeculator(nn.Module):
 
         for head_index in range(num_predict_tokens):
 
-            if current_platform.is_hpu():
-                last_tokens_batches = last_tokens.shape[0]
-                previous_hidden_states_batches = previous_hidden_states.shape[0]
-                if (last_tokens_batches > previous_hidden_states_batches):
-                    last_tokens = last_tokens[:previous_hidden_states_batches]
             # Project and predict
             z = self.emb[head_index](last_tokens)  # b k d
             states = self.proj[head_index](previous_hidden_states)
