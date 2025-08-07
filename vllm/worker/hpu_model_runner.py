@@ -3150,13 +3150,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     return []
 
-                # Need receive the output from prefill
-                if need_recv_kv and self.use_prefill_output:
-                    output = self.recv_prefill_output(sampling_metadata)
-                    if output is not None:
-                        return [output]
-                    # Sample to get output if failed to get from prefill
-
                 is_prev_output_patched = False
                 if use_delayed_sampling:
                     fake_output = self._delayed_sampler_outputs(model_input)
@@ -3184,10 +3177,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                      f'bs{batch_size}_'
                                      f'seq{seq_len}'),
                         args=profiler_args):
-                    output = self.model.sample(
-                        logits=logits,
-                        sampling_metadata=sampling_metadata,
-                    )
+                    # Receive the output from prefill if needed
+                    bypass_sampling = False
+                    if need_recv_kv and self.use_prefill_output:
+                        output = self.recv_prefill_output(sampling_metadata)
+                        if output is not None:
+                            bypass_sampling = True
+                    if not bypass_sampling:
+                        output = self.model.sample(
+                            logits=logits,
+                            sampling_metadata=sampling_metadata,
+                        )
                     # Note: speculative decoding, multi-step and delayed sampling
                     # are not supported for this logic
                     if need_send_kv and self.use_prefill_output:
