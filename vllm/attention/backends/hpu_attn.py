@@ -14,7 +14,7 @@ import vllm_hpu_extension.kernels as kernels
 import vllm_hpu_extension.ops as ops
 from vllm_hpu_extension.runtime import get_config
 from vllm_hpu_extension.utils import (FP8Matmul, Matmul, ModuleFusedSDPA,
-                                      Softmax, VLLMFP8KVCache, VLLMKVCache)
+                                      Softmax, VLLMFP8KVCache, VLLMKVCache, BlockSoftmaxConstMax)
 
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer,
@@ -295,11 +295,11 @@ class HPUMLAImpl(MLACommonImpl[HPUAttentionMetadata], torch.nn.Module):
             matmul_qk_op=self.matmul_qk,
             softmax_op=self.softmax,
             matmul_av_op=self.matmul_av,
-            fsdpa_op=self.fused_scaled_dot_product_attention.apply \
+            fsdpa_op=self.fused_scaled_dot_product_attention.apply
             if self.fused_scaled_dot_product_attention is not None else None)
         attn_output = out.view(batch_size, -1, self.num_heads, q.shape[-1])
         attn_output = attn_output[..., :v.shape[-1]]\
-                .reshape(batch_size, -1, self.num_heads * v.shape[-1])
+            .reshape(batch_size, -1, self.num_heads * v.shape[-1])
 
         return attn_output
 
@@ -393,6 +393,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         HPUFusedSDPA = kernels.fsdpa()
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
+        # self.block_softmax_max_const = BlockSoftmaxConstMax()
+        self.block_softmax_max_const = None
         self.prefill_impl = get_config().prompt_attn_impl
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
@@ -523,8 +525,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     and self.prompt_position_bias is not None
                     and self.alibi_slopes is not None):
                 assert attn_bias is not None, \
-                        'attn_bias must be set before calling ' \
-                        'model.forward with alibi biases'
+                    'attn_bias must be set before calling ' \
+                    'model.forward with alibi biases'
                 slice_1_size = attn_bias.size(-2)
                 slice_2_size = attn_bias.size(-1)
                 if self.max_seq_len >= max(slice_1_size, slice_2_size):
@@ -641,6 +643,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             'keys_fetch_func': self.k_cache.fetch_from_cache,
             'values_fetch_func': self.v_cache.fetch_from_cache,
             'softmax_op': self.softmax,
+            'block_softmax_max_const_op': self.block_softmax_max_const,
             'block_list': block_list,
             'key_cache': key_cache,
             'value_cache': value_cache,
@@ -758,7 +761,7 @@ def _make_prompt_alibi_bias(
     bias = torch.arange(seq_len, dtype=dtype, device=alibi_slopes.device)
     bias = bias[None, :] - bias[:, None]  # Shape: [seq_len, seq_len]
 
-    #padded_len = (seq_len + 7) // 8 * 8
+    # padded_len = (seq_len + 7) // 8 * 8
     num_heads = alibi_slopes.shape[0]
     per_head_bias = torch.empty(
         1,
