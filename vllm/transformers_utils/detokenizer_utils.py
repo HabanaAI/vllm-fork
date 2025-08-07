@@ -97,14 +97,14 @@ def convert_ids_list_to_tokens(
 # https://github.com/huggingface/text-generation-inference/blob/v0.9.4/server/text_generation_server/models/model.py#L62C9-L62C15
 # under Apache 2.0 license
 def detokenize_incrementally(
-    tokenizer: AnyTokenizer,
-    all_input_ids: List[int],
-    prev_tokens: Optional[List[str]],
-    prefix_offset: int,
-    read_offset: int,
-    skip_special_tokens: bool = False,
-    spaces_between_special_tokens: bool = True,
-) -> Tuple[List[str], str, int, int]:
+        tokenizer: AnyTokenizer,
+        all_input_ids: List[int],
+        prev_tokens: Optional[List[str]],
+        prefix_offset: int,
+        read_offset: int,
+        skip_special_tokens: bool = False,
+        spaces_between_special_tokens: bool = True,
+        last_n: int = 1) -> Tuple[List[str], str, int, int]:
     """Detokenizes the input ids incrementally and returns the new tokens
     and the new text.
 
@@ -128,8 +128,10 @@ def detokenize_incrementally(
         skip_special_tokens: Whether to skip special tokens.
         spaces_between_special_tokens: Whether to add spaces between special
             tokens.
+        last_n: Number of most recent token IDs to treat as newly added.
+
     """
-    new_token_id = all_input_ids[-1]
+    new_token_id = all_input_ids[-last_n:]
     # This is the first iteration for this sequence
     is_first_iter = prev_tokens is None
     if is_first_iter:
@@ -140,11 +142,16 @@ def detokenize_incrementally(
              skip_special_tokens=skip_special_tokens)
     assert prev_tokens is not None
 
+    if isinstance(new_token_id, int):
+        new_token_ids = [new_token_id]
+    else:
+        # List
+        new_token_ids = new_token_id
+    # Put new_token_id in a list so skip_special_tokens is respected
     # If the new token id is out of bounds, return an empty string.
-    if 0 <= new_token_id < len(tokenizer):
-        # Put new_token_id in a list so skip_special_tokens is respected
+    if all(0 <= tid < len(tokenizer) for tid in new_token_id):
         new_tokens = tokenizer.convert_ids_to_tokens(
-            [new_token_id], skip_special_tokens=skip_special_tokens)
+            new_token_ids, skip_special_tokens=skip_special_tokens)
         if isinstance(new_tokens, str):
             new_tokens = [new_tokens]
     else:
@@ -183,6 +190,5 @@ def detokenize_incrementally(
         # If it's in the middle, it's probably a real invalid id generated
         # by the model
         return new_tokens, "", prefix_offset, read_offset
-
     new_text = new_text[len(prefix_text):]
     return new_tokens, new_text, read_offset, len(output_tokens)
