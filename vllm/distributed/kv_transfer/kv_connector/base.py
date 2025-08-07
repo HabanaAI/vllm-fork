@@ -8,7 +8,7 @@ The class provides two primary abstract methods:
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Tuple, Union, Optional
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
 
@@ -161,16 +161,12 @@ class KVConnectorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def send_sampler_output(
-        self,
-        sampling_metadata: "SamplingMetadata",
-        output: "SamplerOutput"
-    ) -> None:
+    def send_sampler_output(self, sampling_metadata: "SamplingMetadata",
+                            output: "SamplerOutput") -> None:
         raise NotImplementedError
 
     @abstractmethod
     def recv_sampler_output(
-            self,
-            sampling_metadata: "SamplingMetadata"
+            self, sampling_metadata: "SamplingMetadata"
     ) -> Optional["SamplerOutput"]:
         raise NotImplementedError

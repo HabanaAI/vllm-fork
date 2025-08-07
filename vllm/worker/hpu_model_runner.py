@@ -2866,7 +2866,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # received KV caches
                 # NOTE: The receive operation is blocking
                 bypass_model_exec = False
-                need_recv_kv = self.need_recv_kv(model_input, kv_caches, warmup_mode)
+                need_recv_kv = self.need_recv_kv(model_input, kv_caches,
+                                                 warmup_mode)
                 if need_recv_kv:
                     # we assume kv cache is recved and put into the dict!
                     def tensor_hash(tensor: torch.Tensor) -> int:
@@ -3011,7 +3012,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # Sending KV cache in distributed KV cache transfer setting
                 # NOTE: the send operation is non-blocking
 
-                need_send_kv = self.need_send_kv(model_input, kv_caches, warmup_mode)
+                need_send_kv = self.need_send_kv(model_input, kv_caches,
+                                                 warmup_mode)
                 if need_send_kv:
                     cur_time = time.time()
 
@@ -3407,12 +3409,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         self.has_patched_prev_output = True
 
     def send_prefill_output(self, sampling_metadata, output):
-        get_kv_transfer_group().send_sampler_output(
-            sampling_metadata,
-            output
-        )
+        get_kv_transfer_group().send_sampler_output(sampling_metadata, output)
 
     def recv_prefill_output(self, sampling_metadata):
         # Since the output is small we do a sync receive
-        return get_kv_transfer_group().recv_sampler_output(
-            sampling_metadata)
+        return get_kv_transfer_group().recv_sampler_output(sampling_metadata)

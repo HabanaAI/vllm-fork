@@ -8,11 +8,11 @@ database-style KVStore.
 """
 import hashlib
 import time
-from typing import TYPE_CHECKING, List, Tuple, Union, Optional
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
-import torch
 import msgspec
 import numpy as np
+import torch
 
 from vllm import _custom_ops as ops
 from vllm.config import VllmConfig
@@ -21,7 +21,7 @@ from vllm.executor.msgspec_utils import decode_hook, encode_hook
 from vllm.logger import init_logger
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput
-from vllm.sequence import IntermediateTensors, CompletionSequenceGroupOutput
+from vllm.sequence import CompletionSequenceGroupOutput, IntermediateTensors
 
 if TYPE_CHECKING:
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
@@ -92,7 +92,8 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         self.sampler_output_decoder = msgspec.msgpack.Decoder(
             CompletionSequenceGroupOutput, dec_hook=decode_hook)
-        self.sampler_output_encoder = msgspec.msgpack.Encoder(enc_hook=encode_hook)
+        self.sampler_output_encoder = msgspec.msgpack.Encoder(
+            enc_hook=encode_hook)
 
     def close(self) -> None:
         """Close the buffer and release resources.
@@ -547,17 +548,13 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         # Prepare the store key
         prompt_prefix = self.hash_list(prompt_token_ids)
-        sampling_bytes = self.sampler_output_encoder.encode(
-            sampling_params)
+        sampling_bytes = self.sampler_output_encoder.encode(sampling_params)
         sampling_prefix = self.hash_bytes(sampling_bytes)
         sampler_output_key = f"{prompt_prefix}_sampling_{sampling_prefix}"
         return sampler_output_key
 
-    def send_sampler_output(
-            self,
-            sampling_metadata: SamplingMetadata,
-            output: SamplerOutput
-    ) -> None:
+    def send_sampler_output(self, sampling_metadata: SamplingMetadata,
+                            output: SamplerOutput) -> None:
         seq_groups_to_sample = sampling_metadata.seq_groups
         outputs = output.outputs
         assert len(seq_groups_to_sample) == len(outputs),\
@@ -567,27 +564,29 @@ class MooncakeStoreConnector(KVConnectorBase):
             if not seq_group_to_sample.seq_data:
                 continue
             start_time = time.time()
-            sampler_output_key = self.get_sampler_output_key(seq_group_to_sample)
+            sampler_output_key = self.get_sampler_output_key(
+                seq_group_to_sample)
 
             # Use msgpack to encode to bytes
             sampler_output_bytes = self.sampler_output_encoder.encode(
                 sampler_output_of_seq_group)
 
             self.kv_store.put_bytes(sampler_output_key, sampler_output_bytes)
-            logger.debug(
-                "Put sampler output: %s, time: %s",
-                sampler_output_key, time.time() - start_time)
+            logger.debug("Put sampler output: %s, time: %s",
+                         sampler_output_key,
+                         time.time() - start_time)
 
     def recv_sampler_output(
-            self, sampling_metadata: SamplingMetadata
-    ) -> Optional[SamplerOutput]:
+            self,
+            sampling_metadata: SamplingMetadata) -> Optional[SamplerOutput]:
         seq_groups_to_sample = sampling_metadata.seq_groups
         outputs: List[CompletionSequenceGroupOutput] = []
         for seq_group_to_sample in seq_groups_to_sample:
             if not seq_group_to_sample.seq_data:
                 return None
             start_time = time.time()
-            sampler_output_key = self.get_sampler_output_key(seq_group_to_sample)
+            sampler_output_key = self.get_sampler_output_key(
+                seq_group_to_sample)
             if not self.wait_for_key(sampler_output_key, 10):
                 logger.warning(
                     "Sampler output with key: %s is not ready in 10 seconds",
@@ -596,9 +595,8 @@ class MooncakeStoreConnector(KVConnectorBase):
 
             sampler_output_bytes = self.kv_store.get_bytes(sampler_output_key)
             if not sampler_output_bytes:
-                logger.warning(
-                    "Sampler output with key: %s doesn't exist",
-                    sampler_output_key)
+                logger.warning("Sampler output with key: %s doesn't exist",
+                               sampler_output_key)
                 return None
 
             # Use msgpack to decode the bytes to CompletionSequenceGroupOutput
@@ -607,8 +605,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             outputs.append(sampler_output)
             logger.debug(
                 "Get sampler output: %s, time: %s",
-                sampler_output_key, time.time() - start_time)
+                sampler_output_key,
+                time.time() - start_time)
 
         # All the sample outputs are received
-        return SamplerOutput(
-            outputs=outputs)
+        return SamplerOutput(outputs=outputs)
