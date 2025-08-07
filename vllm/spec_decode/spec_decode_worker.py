@@ -29,6 +29,8 @@ if current_platform.is_cuda_alike():
 if current_platform.is_hpu():
     from vllm.spec_decode.hpu_draft_model_runner import HPUTP1DraftModelRunner
 
+import os
+
 from vllm.spec_decode.interfaces import (SpeculativeProposals,
                                          SpeculativeScorer, SpeculativeScores)
 from vllm.spec_decode.medusa_worker import MedusaWorker
@@ -47,7 +49,7 @@ from vllm.spec_decode.util import (Timer, create_logprobs_output,
                                    split_batch_by_proposal_len)
 from vllm.utils import resolve_obj_by_qualname
 from vllm.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
-import os
+
 logger = init_logger(__name__)
 
 
@@ -114,10 +116,19 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
 
     return spec_decode_worker
 
+
 def is_delay_specdecode_enabled() -> bool:
     if current_platform.is_hpu():
-        return os.environ.get("HPU_VLLM_DELAY_SPECDECODE", "false").lower() == "true"
+        return os.environ.get("HPU_VLLM_DELAY_SPECDECODE",
+                              "false").lower() == "true"
     return False
+
+
+def get_delay_num_speculative_tokens():
+    # TODO:support longer num_speculative_tokens
+    return 2
+
+
 # Reminder: Please update docs/source/features/compatibility_matrix.md
 # If the feature combo become valid
 class SpecDecodeWorker(LoraNotSupportedWorkerBase):
@@ -247,6 +258,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     "[Speculative Decoding] Disabling MQA scorer as the "
                     "target model is not running in eager mode.")
 
+        if is_delay_specdecode_enabled():
+            assert num_speculative_tokens == 1, "Only 1 speculative token is supported when delayed spec decode is enabled"
         return SpecDecodeWorker(
             proposer_worker,
             scorer_worker,
@@ -342,11 +355,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self._disable_log_stats = disable_log_stats
         self._num_spec_prefill_steps = num_spec_prefill_steps
 
-        self.hpu_delay_specdecode=is_delay_specdecode_enabled()
+        self.hpu_delay_specdecode = is_delay_specdecode_enabled()
         if self.hpu_delay_specdecode:
             self.init_delay_specdecode_cache()
 
-    def init_delay_specdecode_cache(self) ->None:
+    def init_delay_specdecode_cache(self) -> None:
         self._pending_data = None
         self._pending_step = 0
 
@@ -358,7 +371,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         self.accepted_token_ids_ = None
         self.target_logprobs_ = None
         self.prompt_logprobs_ = None
-        
+
     def init_device(self) -> None:
         """Initialize both scorer and proposer models.
         """
@@ -785,25 +798,29 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if self._pending_step > 1:
                 #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
                 #print(f" cache before pop{self.cached_step_accepted_tokens=}")
-                if len(next(iter(execute_model_req.seq_group_metadata_list[0].seq_data.items()))[1].output_token_ids_array)==1:
+                if len(
+                        next(
+                            iter(execute_model_req.seq_group_metadata_list[0].
+                                 seq_data.items()))
+                    [1].output_token_ids_array) == 1:
                     self.init_delay_specdecode_cache()
-                    self._pending_step=1
+                    self._pending_step = 1
                 else:
-                    self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
-                    
-                    self.target_logprobs_=self.cached_step_target_logprobs[0]
-                    self.prompt_logprobs_=self.cached_step_prompt_logprobs[0] if not self._disable_logprobs else None
+                    self.accepted_token_ids_ = self.cached_step_accepted_tokens.pop(
+                        0)
 
-
+                    self.target_logprobs_ = self.cached_step_target_logprobs[0]
+                    self.prompt_logprobs_ = self.cached_step_prompt_logprobs[
+                        0] if not self._disable_logprobs else None
 
         with Timer() as proposal_timer:
             #print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
-            if not self.hpu_delay_specdecode:      
-                self.accepted_token_ids_=None
+            if not self.hpu_delay_specdecode:
+                self.accepted_token_ids_ = None
             proposals = self.proposer_worker.get_spec_proposals(
-                execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
-        
+                execute_model_req, self._seq_with_bonus_token_in_last_step,
+                self.accepted_token_ids_)
 
         if not self._allow_zero_draft_token_step and proposals.no_proposals:
             #TODO: Fix it #5814
@@ -815,7 +832,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         with Timer() as scoring_timer:
             #print(f"==============put to score {self.accepted_token_ids_=}===")
             if not self.hpu_delay_specdecode:
-                self.accepted_token_ids_=None
+                self.accepted_token_ids_ = None
             proposal_scores = self.scorer.score_proposals(
                 execute_model_req,
                 proposals,
@@ -850,17 +867,19 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                        verification_timer.elapsed_time_ms)
 
         self._pending_data = {
-            "seq_group_metadata_list": execute_model_req.seq_group_metadata_list,
+            "seq_group_metadata_list":
+            execute_model_req.seq_group_metadata_list,
             "k": execute_model_req.num_lookahead_slots,
             "stage_times": stage_times,
         }
-        
+
         if self.hpu_delay_specdecode:
             self.cached_step_accepted_tokens.append(accepted_token_ids)
             #print(f" cache after append{self.cached_step_accepted_tokens=}")
             self.cached_step_target_logprobs.append(target_logprobs)
-            self.cached_step_prompt_logprobs.append(proposal_scores.prompt_logprobs)
-        
+            self.cached_step_prompt_logprobs.append(
+                proposal_scores.prompt_logprobs)
+
         res = self._create_output_sampler_list(
             execute_model_req.seq_group_metadata_list,
             accepted_token_ids,
@@ -870,7 +889,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             k=execute_model_req.num_lookahead_slots,
             stage_times=stage_times)
         return res
-        
 
     @nvtx_range("spec_decode_worker._verify_tokens")
     def _verify_tokens(
@@ -953,11 +971,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             accepted_index = accepted_token_ids + 1  # Convert -1 to 0
             accepted_index = accepted_index.count_nonzero(dim=1).add_(-1)  # b
             # Drop non-terminal prefill chunks hidden states.
-            if not self.hpu_delay_specdecode:   
+            if not self.hpu_delay_specdecode:
                 hidden_states = hidden_states[accepted_index !=
-                                            VLLM_INVALID_TOKEN_ID]
+                                              VLLM_INVALID_TOKEN_ID]
                 accepted_index = accepted_index[accepted_index !=
-                                            VLLM_INVALID_TOKEN_ID]
+                                                VLLM_INVALID_TOKEN_ID]
             assert len(accepted_index) == hidden_states.shape[0] == len(
                 terminal_metadata)
             index = accepted_index[:, None, None].expand(-1, 1,
@@ -1014,22 +1032,27 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             seq_group_metadata_list)
 
         num_logprobs_per_seq = get_all_num_logprobs(seq_group_metadata_list)
-        self.sync_last=False
+        self.sync_last = False
         # Serialize tensor to CPU Python list.
-        #dummy token=2
-        n=2
+        #get_delay_num_speculative_tokens() dummy token=2
+
         for seq_index, sg in enumerate(seq_group_metadata_list):
-            for seq  in sg.seq_data.values():
-                if seq.get_output_len()+n>= seq_group_metadata_list[seq_index].sampling_params.max_tokens:
-                    self.sync_last=True
+            for seq in sg.seq_data.values():
+                if seq.get_output_len() + get_delay_num_speculative_tokens(
+                ) >= seq_group_metadata_list[
+                        seq_index].sampling_params.max_tokens:
+                    self.sync_last = True
                     break
 
-        if not self.hpu_delay_specdecode or  self.sync_last:
+        if not self.hpu_delay_specdecode or self.sync_last:
             accepted_token_ids_by_step = accepted_token_ids_by_step.tolist()
         else:
-            from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
-            padding_tokens = [[HPU_VLLM_SPECDECODE_DUMMY_TOKEN]] * 2
-            accepted_token_ids_by_step=[[item[0] for _ in range(batch_size)] for item in padding_tokens]           
+            from vllm.worker.hpu_model_runner import (
+                HPU_VLLM_SPECDECODE_DUMMY_TOKEN)
+            padding_tokens = [[HPU_VLLM_SPECDECODE_DUMMY_TOKEN]
+                              ] * get_delay_num_speculative_tokens()
+            accepted_token_ids_by_step = [[item[0] for _ in range(batch_size)]
+                                          for item in padding_tokens]
 
         # Construct the output on a per-step, per-sequence basis.
         # Non-terminal prefill chunks will end up here as rows with just -1s

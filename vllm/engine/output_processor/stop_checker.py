@@ -45,9 +45,13 @@ class StopChecker:
         if seq.get_output_len() < sampling_params.min_tokens:
             return
 
+        from vllm.spec_decode.spec_decode_worker import (
+            get_delay_num_speculative_tokens)
+        last_n = get_delay_num_speculative_tokens() + 1
         # Check if the sequence has generated the EOS token.
         if ((not sampling_params.ignore_eos)
-                and ( seq.get_last_token_id() == seq.eos_token_id or seq.get_last_n_token_id(3)==seq.eos_token_id)) :
+                and (seq.get_last_token_id() == seq.eos_token_id
+                     or seq.get_last_n_token_id(last_n) == seq.eos_token_id)):
             # Remove the last EOS token unless explicitly specified
             # This prevents unintended exposure of the EOS token
             if new_char_count and (

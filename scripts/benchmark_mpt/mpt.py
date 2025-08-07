@@ -32,8 +32,11 @@ if __name__ == "__main__":
         "The president of the United States is",
     ]
     # Create a sampling params object.
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=32,seed=2024)
-    model_name="/mnt/disk9/ds_r1/DeepSeek-R1-fp8-G2/DeepSeek-R1-G2-static" #G12
+    seed=2024
+
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=64,seed=seed)
+    model_name="/mnt/disk7/mz/DeepSeek-R1-MTP/DeepSeek-R1-G2-static" #G16
+
    
 
     # Create an LLM.
@@ -46,7 +49,6 @@ if __name__ == "__main__":
             trust_remote_code=True,
             max_model_len=1024)
     '''
-    seed=2024
     llm = LLM(model=model_name,
             trust_remote_code=True,
             #enforce_eager=True,
@@ -61,7 +63,7 @@ if __name__ == "__main__":
             kv_cache_dtype="fp8_inc",
             enable_expert_parallel=True,
             num_speculative_tokens=1,
-            seed=2024)
+            seed=seed)
     # Generate texts from the prompts. The output is a list of RequestOutput objects
     # that contain the prompt, generated text, and other information.
     # os.environ['HPU_VLLM_DELAY_SPECDECODE']='True'
