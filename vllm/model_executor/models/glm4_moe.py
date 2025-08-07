@@ -134,7 +134,9 @@ class Glm4MoE(nn.Module):
         parallel_config = vllm_config.parallel_config
         self.enable_eplb = enable_eplb
 
-        self.n_redundant_experts = parallel_config.num_redundant_experts
+        # Comment code below until we rebase to latset vllm
+        # self.n_redundant_experts = parallel_config.num_redundant_experts
+        self.n_redundant_experts = 0
         self.n_logical_experts = self.n_routed_experts
         self.n_physical_experts = (self.n_logical_experts +
                                    self.n_redundant_experts)
@@ -159,8 +161,11 @@ class Glm4MoE(nn.Module):
             prefix=f"{prefix}.experts",
             scoring_func="sigmoid",
             e_score_correction_bias=self.gate.e_score_correction_bias,
-            enable_eplb=self.enable_eplb,
-            num_redundant_experts=self.n_redundant_experts)
+            # Comment code below until we rebase to latset vllm
+            # enable_eplb=self.enable_eplb,
+            # num_redundant_experts=self.n_redundant_experts
+
+        )
 
         if config.n_shared_experts is not None:
             intermediate_size = (config.moe_intermediate_size *
@@ -176,7 +181,8 @@ class Glm4MoE(nn.Module):
             )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        num_tokens, hidden_dim = hidden_states.shape
+        orig_shape = hidden_states.shape
+        hidden_dim = hidden_states.shape[-1]
         hidden_states = hidden_states.view(-1, hidden_dim)
 
         if self.n_shared_experts is not None:
@@ -191,7 +197,7 @@ class Glm4MoE(nn.Module):
             final_hidden_states = (
                 self.experts.maybe_all_reduce_tensor_model_parallel(
                     final_hidden_states))
-        return final_hidden_states.view(num_tokens, hidden_dim)
+        return final_hidden_states.view(orig_shape)
 
 
 class Glm4MoeAttention(nn.Module):
@@ -381,7 +387,9 @@ class Glm4MoeModel(nn.Module):
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
-        enable_eplb = vllm_config.parallel_config.enable_eplb
+        # comment code below until we rebase to latset vllm
+        # enable_eplb = vllm_config.parallel_config.enable_eplb
+        enable_eplb = False
         self.config = config
 
         self.vocab_size = config.vocab_size
@@ -533,15 +541,13 @@ class Glm4MoeModel(nn.Module):
                     # available replicas.
                     weight_loader = typing.cast(Callable[..., bool],
                                                 param.weight_loader)
-                    success = weight_loader(param,
-                                            loaded_weight,
-                                            name_mapped,
-                                            shard_id=shard_id,
-                                            expert_id=expert_id,
-                                            return_success=True)
-                    if success:
-                        name = name_mapped
-                        break
+                    weight_loader(param,
+                                  loaded_weight,
+                                  name_mapped,
+                                  shard_id=shard_id,
+                                  expert_id=expert_id)
+                    name = name_mapped
+                    break
                 else:
                     if is_expert_weight:
                         # We've checked that this is an expert weight
