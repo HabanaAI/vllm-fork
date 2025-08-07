@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, List, Tuple, Union, Optional
 
 import torch
 
-from vllm.model_executor import SamplingMetadata
-from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.sequence import IntermediateTensors
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
+    from vllm.model_executor import SamplingMetadata
+    from vllm.model_executor.layers.sampler import SamplerOutput
     from vllm.worker.hpu_model_runner import (
         ModelInputForHPUWithSamplingMetadata)
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
@@ -163,14 +163,14 @@ class KVConnectorBase(ABC):
     @abstractmethod
     def send_sampler_output(
         self,
-        sampling_metadata: SamplingMetadata,
-        output: SamplerOutput
+        sampling_metadata: "SamplingMetadata",
+        output: "SamplerOutput"
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def recv_sampler_output(
             self,
-            sampling_metadata: SamplingMetadata
-    ) -> Optional[SamplerOutput]:
+            sampling_metadata: "SamplingMetadata"
+    ) -> Optional["SamplerOutput"]:
         raise NotImplementedError
