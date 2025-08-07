@@ -288,18 +288,22 @@ class GemmaRMSNorm(CustomOp):
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         from vllm_hpu_extension.kernels import rms_norm
         HPUFusedRMSNorm = rms_norm()
-        orig_dtype = x.dtype
+        if HPUFusedRMSNorm is None:
+            return self.forward_native(x, residual)
         if residual is not None:
-            if orig_dtype == torch.float16:
-                x = x + residual.float()
+            orig_shape = x.shape
+            if orig_shape != residual.shape:
+                residual = residual + x.view(residual.shape)
             else:
-                x = x + residual
-            residual = x
+                residual = residual + x
+            x = HPUFusedRMSNorm.apply(residual, 1 + self.weight.data,
+                                      self.variance_epsilon)
+            if x.shape != orig_shape:
+                x = x.view(orig_shape)
+            return x, residual
 
         x = HPUFusedRMSNorm.apply(x, 1 + self.weight.data,
                                   self.variance_epsilon)
-        x = x.to(orig_dtype)
-
         return x if residual is None else (x, residual)
 
     def forward_cuda(
