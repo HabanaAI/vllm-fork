@@ -344,9 +344,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
         self.hpu_delay_specdecode=is_delay_specdecode_enabled()
         if self.hpu_delay_specdecode:
-            self.init_hpu_cache()
+            self.init_delay_specdecode_cache()
 
-    def init_hpu_cache(self) ->None:
+    def init_delay_specdecode_cache(self) ->None:
         self._pending_data = None
         self._pending_step = 0
 
@@ -786,7 +786,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
                 #print(f" cache before pop{self.cached_step_accepted_tokens=}")
                 if len(next(iter(execute_model_req.seq_group_metadata_list[0].seq_data.items()))[1].output_token_ids_array)==1:
-                    self.init_hpu_cache()
+                    self.init_delay_specdecode_cache()
                     self._pending_step=1
                 else:
                     self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0)
@@ -799,13 +799,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         with Timer() as proposal_timer:
             #print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
-            if self.hpu_delay_specdecode:      
-                proposals = self.proposer_worker.get_spec_proposals(
-                    execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
-            else:
-                proposals = self.proposer_worker.get_spec_proposals(
-                    execute_model_req, self._seq_with_bonus_token_in_last_step)
-                
+            if not self.hpu_delay_specdecode:      
+                self.accepted_token_ids_=None
+            proposals = self.proposer_worker.get_spec_proposals(
+                execute_model_req, self._seq_with_bonus_token_in_last_step, self.accepted_token_ids_)
+        
 
         if not self._allow_zero_draft_token_step and proposals.no_proposals:
             #TODO: Fix it #5814
@@ -816,18 +814,13 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
         with Timer() as scoring_timer:
             #print(f"==============put to score {self.accepted_token_ids_=}===")
-            if self.hpu_delay_specdecode:
-                proposal_scores = self.scorer.score_proposals(
-                    execute_model_req,
-                    proposals,
-                    self.accepted_token_ids_,
-                )
-            else:
-                proposal_scores = self.scorer.score_proposals(
-                    execute_model_req,
-                    proposals,
-                )
-        
+            if not self.hpu_delay_specdecode:
+                self.accepted_token_ids_=None
+            proposal_scores = self.scorer.score_proposals(
+                execute_model_req,
+                proposals,
+                self.accepted_token_ids_,
+            )
         _, (non_spec_seqs, non_spec_indices) = split_batch_by_proposal_len(
             execute_model_req.seq_group_metadata_list, proposals.proposal_lens)
         # With prefill chunking enabled, `non_spec_seqs` contains prefills too:
