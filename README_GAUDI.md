@@ -363,6 +363,7 @@ batch size is often at its maximum, making large-batch HPU graphs critical to ca
 - `VLLM_HANDLE_TOPK_DUPLICATES`: if ``true`` - handles duplicates outside top-k. The default is `false`.
 - `VLLM_CONFIG_HIDDEN_LAYERS`: configures how many hidden layers to run in a HPUGraph for model splitting among hidden layers when TP is 1. It helps to improve throughput by reducing inter-token latency limitations in some models. The default is `1`.
 - `VLLM_SKIP_WARMUP`: if `true`, warm-up is skipped. The default is `false`.
+- `VLLM_HPU_FORCE_CHANNEL_FP8`: if `true` forces using per-channel quantization using dynamic quantization for models that are using block quantization. Enabled by default
 
 > [!TIP]
 > When a deployed workload does not utilize the full context that a model can handle, it is good practice to limit the maximum values upfront based on the input and output token lengths that will be generated after serving the vLLM server.
