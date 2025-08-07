@@ -24,7 +24,6 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from .vision import VisionEncoderInfo, resolve_visual_encoder_outputs
 
-
 class SiglipEncoderInfo(VisionEncoderInfo[SiglipVisionConfig]):
 
     def get_num_image_tokens(
@@ -232,6 +231,7 @@ class SiglipMLP(nn.Module):
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states, _ = self.fc1(hidden_states)
         hidden_states = self.activation_fn(hidden_states)
+
         hidden_states, _ = self.fc2(hidden_states)
         return hidden_states
 
@@ -266,19 +266,25 @@ class SiglipEncoderLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-    ) -> tuple[torch.Tensor, None]:
-        residual = hidden_states
+        residual: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if residual is not None:
+            hidden_states += residual
 
+        residual = hidden_states
         hidden_states = self.layer_norm1(hidden_states)
+
         hidden_states, _ = self.self_attn(hidden_states=hidden_states)
+
         hidden_states += residual
 
         residual = hidden_states
         hidden_states = self.layer_norm2(hidden_states)
         hidden_states = self.mlp(hidden_states)
-        hidden_states += residual
 
-        return hidden_states, None
+        #hidden_states += residual
+
+        return hidden_states , residual
 
 
 class SiglipEncoder(nn.Module):
@@ -306,6 +312,7 @@ class SiglipEncoder(nn.Module):
             for layer_idx in range(num_hidden_layers)
         ])
 
+
     def forward(
         self,
         inputs_embeds: torch.Tensor,
@@ -314,15 +321,16 @@ class SiglipEncoder(nn.Module):
         hidden_states_pool = [inputs_embeds]
         hidden_states = inputs_embeds
 
+        residual = None
         for encoder_layer in self.layers:
-            hidden_states, _ = encoder_layer(hidden_states)
+            hidden_states, residual = encoder_layer(hidden_states, residual)
             if return_all_hidden_states:
-                hidden_states_pool.append(hidden_states)
+                hidden_states_pool.append(hidden_states + residual)
         # If we have multiple feature sample layers, we return all hidden
         # states in order and grab the ones we need by index.
         if return_all_hidden_states:
             return hidden_states_pool
-        return hidden_states
+        return hidden_states + residual
 
 
 class SiglipMultiheadAttentionPoolingHead(nn.Module):
