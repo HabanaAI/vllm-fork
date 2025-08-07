@@ -50,7 +50,6 @@ do
     -tp "$TP_SIZE"
     --max-num-seqs "$max_num_seqs"
     --trust-remote-code
-    --kv-cache-dtype fp8_inc
     --disable-log-requests
     --max-num-batched-tokens "$max_num_batched_tokens"
     --use-padding-aware-scheduling
@@ -61,7 +60,7 @@ do
 
   if [ "$DP_RANK" -ne 1 ]; then
     echo "env VLLM_DP_RANK=$RANK ${CMD[*]}"
-    env VLLM_DP_RANK="$RANK" "${CMD[@]}" &
+    env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" &
   else
     echo "${CMD[*]}"
     "${CMD[@]}" &

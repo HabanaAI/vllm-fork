@@ -20,6 +20,7 @@ from vllm.multimodal import MultiModalDataDict, MultiModalPlaceholderDict
 from vllm.pooling_params import PoolingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import RequestOutputKind, SamplingParams
+from vllm.utils import SharedDict
 
 VLLM_TOKEN_ID_ARRAY_TYPE = "l"
 
@@ -1329,6 +1330,8 @@ class ExecuteModelRequest(
     async_callback: Optional[Callable] = None
     # Dummy batch
     is_dummy_batch: bool = False
+    # kv_cache_shared_dict
+    kv_cache_shared_dict: Optional[SharedDict] = None
 
     
     expand: Optional[Callable[[], Tuple[Any, Any]]] = None

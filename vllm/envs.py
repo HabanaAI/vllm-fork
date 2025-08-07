@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import sys
 import tempfile
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -90,9 +91,11 @@ if TYPE_CHECKING:
     VLLM_RAY_BUNDLE_INDICES: str = ""
     VLLM_CUDART_SO_PATH: Optional[str] = None
     VLLM_DP_RANK: int = 0
+    VLLM_DP_RANK_LOCAL: int = -1
     VLLM_DP_SIZE: int = 1
     VLLM_DP_MASTER_IP: str = ""
     VLLM_DP_MASTER_PORT: int = 0
+    VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
 
 
 def get_default_cache_root():
@@ -594,6 +597,12 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_DP_RANK":
     lambda: int(os.getenv("VLLM_DP_RANK", "0")),
 
+    # Rank of the process in the data parallel setting.
+    # Defaults to VLLM_DP_RANK when not set.
+    "VLLM_DP_RANK_LOCAL":
+    lambda: int(
+        os.getenv("VLLM_DP_RANK_LOCAL", sys.modules[__name__].VLLM_DP_RANK)),
+
     # World size of the data parallel setting
     "VLLM_DP_SIZE":
     lambda: int(os.getenv("VLLM_DP_SIZE", "1")),
@@ -606,12 +615,16 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_DP_MASTER_PORT":
     lambda: int(os.getenv("VLLM_DP_MASTER_PORT", "0")),
 
-    # When running pipeline parallelism on multiple nodes the primary communication channel
-    # for parralel communications may not be able to communicate. This would result in hangs
-    # after all_reduce/send/recv operations which PP group uses. To resolve this issue
-    # VLLM_PP_USE_CPU_COMS can be used to force PP communications through GLOO on the CPU.
+    # When running pipeline parallelism on multiple nodes the primary
+    # communication channel for parallel communications may not be able
+    # to communicate. This would result in hangs after all_reduce/send/recv
+    # operations which PP group uses.
+    # To resolve this issue VLLM_PP_USE_CPU_COMS can be used to force PP
+    # communications through GLOO on the CPU.
     "VLLM_PP_USE_CPU_COMS":
     lambda: bool(int(os.getenv("VLLM_PP_USE_CPU_COMS", "0"))),
+    "VLLM_USE_ASYNC_TRANSFER_IN_PD":
+    lambda: bool(int(os.getenv("VLLM_USE_ASYNC_TRANSFER_IN_PD", "0"))),
 }
 
 # end-env-vars-definition

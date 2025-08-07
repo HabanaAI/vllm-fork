@@ -42,27 +42,34 @@ else
     FIRST_TOKEN_FROM_P=$4
 fi
 
-DEBUG_MODE=0
+BENCHMARK_MODE=0
 
-if [ "$5" == "debug" ]; then
-    DEBUG_MODE=1
-    echo " Debug mode enabled"
+if [ "$5" == "benchmark" ]; then
+    BENCHMARK_MODE=1
+    echo " Benchmark mode enabled"
 fi
 
+#For OAM
 DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
+#For PCIE
+# DECODE_IPS=("10.112.110.161" "10.112.110.148")
+
 DBASE_PORT=8200
 DECODE_ARGS=""
 
-for ((i=0; i<D_INSTANCE_NUMBER; i++)); do
-    IP=${DECODE_IPS[$i]}
-    for ((j=0; j<NUM_DECODE; j++)); do
-        PORT=$((DBASE_PORT + j))
-        DECODE_ARGS="$DECODE_ARGS ${IP}:${PORT}"
+for ((i=0; i<$NUM_DECODE; i++)); do
+    PORT=$((DBASE_PORT + i))
+    for ((j=0; j<D_INSTANCE_NUMBER; j++)); do
+	IP=${DECODE_IPS[$j]}
+	DECODE_ARGS="$DECODE_ARGS ${IP}:${PORT}"
     done
 done
 
+#For OAM
+PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
+#For PCIE
+# PREFILL_IPS=("10.112.110.157")
 
-PREFILL_IPS=("10.239.129.9" "10.239.129.24" "10.239.129.67" "10.239.129.21")
 PBASE_PORT=8100
 PREFILL_ARGS=""
 
@@ -72,15 +79,15 @@ for ((i=0; i<P_INSTANCE_NUMBER; i++)); do
     PREFILL_ARGS="$PREFILL_ARGS ${IP}:${PORT}"
 done
 
-if [ "$DEBUG_MODE" == "1" ]; then
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_debugmode.py \
+if [ "$BENCHMARK_MODE" == "1" ]; then
+    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark.py \
         --model $MODEL_PATH \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
         --port 8868 \
         --repeat_p_request 1 \
-        --repeat_d_times 100 \
-        --debug_mode"
+        --repeat_d_times 639 \
+        --benchmark_mode"
 
 else
 

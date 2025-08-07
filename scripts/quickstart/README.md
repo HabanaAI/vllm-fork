@@ -15,7 +15,7 @@ This guide provides the step-by-step instructions on deploying and running DeepS
   - [Single-Node Setup and Serving Deployment](#single-node-setup-and-serving-deployment)
     - [Download and Install vLLM](#download-and-install-vllm)
     - [HCCL Demo Test](#hccl-demo-test)
-    - [Adjust Workload Parameters in Start Script if Required](#adjust-workload-parameters-in-start-script-if-required)
+    - [The parameters of starting vLLM server script](#the-parameters-of-starting-vllm-server-script)
     - [Launch vLLM Serving with TP=8](#launch-vllm-serving-with-tp8)
     - [Send Requests to Ensure the Service Functionality](#send-requests-to-ensure-the-service-functionality)
   - [Multi-Node Setup and Serving Deployment](#multi-node-setup-and-serving-deployment)
@@ -131,7 +131,7 @@ make
 HCCL_COMM_ID=127.0.0.1:5555 python3 run_hccl_demo.py --nranks 8 --node_id 0 --size 32m --test all_reduce --loop 1000 --ranks_per_node 8
 ```
 
-The hccl test is passed if the message below is shown. For Gaudi PCIe system without Host NIC scale-out, the communication need go throughput CPU UPI and NW Bandwidth is less than 20GB/s. 
+The hccl test is passed if the message below is shown. For Gaudi PCIe system without Host NIC scale-out, the communication need go throughput CPU UPI and NW Bandwidth should be about 18GB/s. 
 ```bash 
 #########################################################################################
 [BENCHMARK] hcclAllReduce(dataSize=33554432, count=8388608, dtype=float, iterations=1000)
@@ -141,18 +141,116 @@ The hccl test is passed if the message below is shown. For Gaudi PCIe system wit
 ```
 
 
-### Adjust Workload Parameters in Start Script if Required
-Modify `single_16k_len.sh` (for 16k context) or `single_32k_len.sh` (for 32k context) for the fields of the following parameters based on your real workload requirements during runtime. For example, set the right model path, vLLM port and vLLM warmup cache folder. 
+### The parameters of starting vLLM server script
+There are some system environment variables which need be set to get the best vLLM performance. We provide the sample script to set the recommended environment variables.
+
+The script file "start_vllm.sh" is used to start vLLM service. You may execute the command below to check its supported parameters.
 ```bash
-#To be changed
-model_path=/data/hf_models/DeepSeek-R1-Gaudi
-vllm_port=8688
-export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/16k_cache,false,16384
+bash start_vllm.sh -h
 ```
+
+The command output is like below. 
+```bash
+Start vllm server for a huggingface model on Gaudi.
+
+Syntax: bash start_vllm.sh <-w> [-u:p:l:b:c:sq] [-h]
+options:
+w  Weights of the model, could be model id in huggingface or local path
+u  URL of the server, str, default=0.0.0.0
+p  Port number for the server, int, default=8688
+l  max_model_len for vllm, int, default=16384, maximal value for single node: 32768
+b  max_num_seqs for vllm, int, default=128
+c  Cache HPU recipe to the specified path, str, default=None
+s  Skip warmup or not, bool, default=false
+q  Enable inc fp8 quantization
+h  Help info
+```
+
+#### INC FP8 Quantization
+
+To run DeepSeek-R1 with INC FP8 quantization in single-node case, you need to follow:
+
+1. Download corresponding measurement files according to target model and tp-size.
+
+|Model|TP-Size|Measurement Files|
+|---|---|---|
+|DeepSeek-R1-0528|8|Yi30/ds-r1-0528-default-pile-g2-0529|
+|DeepSeek-R1|8|Yi30/inc-woq-2282samples-514-g2|
+
+For example, if you want to run DeepSeek-R1-0528, with tp-size 8, you can download measurement files with:
+```bash
+cd vllm-fork
+huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scripts/nc_workspace_measure_kvcache
+```
+
+2. Configure environment variables.
+
+After downloading measurement files, you need to configure some environment variables to make INC quantization become effective.
+
+##### Using start_vllm.sh script
+
+If you are using `start_vllm.sh` script to start vllm, please configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in start_vllm.sh
+
+- QUANT_CONFIG
+
+Depends on kv-cache-dtype to use, you should use quantization configuration file accordingly.
+
+These quantization config is located in vllm-fork/scripts/quant_configs.
+
+|KV-Cache-Dtype|QUANT_CONFIG|
+|---|---|
+|BF16|inc_quant_per_channel_bf16kv.json|
+|FP8|inc_quant_per_channel_with_fp8kv_config.json|
+
+For example, if you want to use BF16 kv cache, you should set QUANT_CONFIG with:
+```
+export QUANT_CONFIG=/path/to/vllm-fork/scripts/quant_configs/inc_quant_per_channel_bf16kv.json
+```
+
+- INC_MEASUREMENT_DUMP_PATH_PREFIX
+
+The environment variable `INC_MEASUREMENT_DUMP_PATH_PREFIX` specifies the root directory where measurement statistics were saved.
+The final path is constructed by joining this root directory with the `dump_stats_path` defined in the quantization JSON file specified by the `QUANT_CONFIG` environment variable.
+
+If we download the measurements to `/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache`, we got below files:
+
+```bash
+user:vllm-fork$ pwd
+/path/to/vllm-fork
+user:vllm-fork$ ls -l  ./scripts/nc_workspace_measure_kvcache
+-rw-r--r-- 1 user Software-SG 1949230 May 15 08:05 inc_measure_output_hooks_maxabs_0_8.json
+-rw-r--r-- 1 user Software-SG  254451 May 15 08:05 inc_measure_output_hooks_maxabs_0_8_mod_list.json
+-rw-r--r-- 1 user Software-SG 1044888 May 15 08:05 inc_measure_output_hooks_maxabs_0_8.npz
+...
+```
+
+Then, we export `INC_MEASUREMENT_DUMP_PATH_PREFIX=/path/to/vllm-fork`, and INC will parse the full as below:
+
+```
+dump_stats_path (from config): "scripts/nc_workspace_measure_kvcache/inc_measure_output"
+Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache/inc_measure_output_hooks_maxabs_0_8.npz"
+```
+
+##### Manually start vllm
+
+If you want to start vllm manually or use your own script, please set below environment variables.
+
+|Env Var Name|Mandatory for INC|Value|Explanation|
+|---|---|---|---|
+|INC_MEASUREMENT_DUMP_PATH_PREFIX|Yes|The root directory where measurement statistics were saved.|See above section for detail|
+|QUANT_CONFIG|Yes|Quantization config file to use, which is under `vllm-fork/scripts/quant_configs` folder|See above section for detail|
+|VLLM_REQUANT_FP8_INC|Yes|1|Enables requantization of FP8 weights with block-wise scaling using INC.|
+|VLLM_ENABLE_RUNTIME_DEQUANT|Yes|1|Enables runtime dequantization of FP8 weights with block-wise scaling.|
+|VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
+|VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
+
+3. Check if INC quantization enabled successfully
+
+If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
 
 ### Launch vLLM Serving with TP=8
 ```bash
-bash single_16k_len.sh
+bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-Gaudi -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
@@ -163,7 +261,6 @@ INFO 04-09 00:49:01 api_server.py:800] None
 INFO 04-09 00:49:01 api_server.py:937] Starting vLLM API server on http://0.0.0.0:8688
 INFO 04-09 00:49:01 launcher.py:23] Available routes are:
 INFO 04-09 00:49:01 launcher.py:31] Route: /openapi.json, Methods: HEAD, GET
-
 ```
 
 ### Send Requests to Ensure the Service Functionality
@@ -173,11 +270,11 @@ On bare metal, execute the following command to send a request to the Chat Compl
 ```bash
 curl http://127.0.0.1:8688/v1/chat/completions \
   -X POST \
-  -d '{"model": "/models/DeepSeek-R1-G2-gaudi", "messages": [{"role": "user", "content": "List 3 countries and their capitals."}], "max_tokens":128}' \
+  -d '{"model": "/data/hf_models/DeepSeek-R1-Gaudi", "messages": [{"role": "user", "content": "List 3 countries and their capitals."}], "max_tokens":128}' \
   -H 'Content-Type: application/json'
 ```
 
-If it reponses normally, refer to [Run The Benchmark](#Check-the-vLLM-performanc) and [Check the Model Accuracy](#check-the-model-accuracy) to measure the performance and accuracy.
+If it reponses normally, refer to [Check the vLLM Performance](#Check-the-vLLM-performance) and [Check the Model Accuracy](#check-the-model-accuracy) to measure the performance and accuracy.
 
 
 ## Multi-Node Setup and Serving Deployment
@@ -262,6 +359,93 @@ input_max=20480
 output_max=16896
 ```
 
+#### INC FP8 Quantization
+
+To run DeepSeek-R1 with INC FP8 quantization in multi-nodes case, you need to follow:
+
+1. Download corresponding measurement files to both head and worker node according to target model and tp-size.
+
+|Model|TP-Size|Measurement Files|
+|---|---|---|
+|DeepSeek-R1-0528|16|Yi30/ds-r1-0528-default-pile-g2-ep16-0610|
+|DeepSeek-R1|16|Yi30/ds-r1-default-pile-g2-ep16-0610|
+
+For example, if you want to run DeepSeek-R1-0528, with tp-size 16, you can download measurement files with:
+```bash
+cd vllm-fork
+huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-ep16-0610  --local-dir ./scripts/nc_workspace_measure_kvcache
+```
+
+For case running DeepSeek-R1-0528 with tp-size 16, we have downloaded and kept the measurement files of `Yi30/ds-r1-0528-default-pile-g2-ep16-0610` to `scripts/measure_kvcache/ds-r1-0528-g2-tp16`. You can just copy to target folder:
+```bash
+cd vllm-fork
+cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measure_kvcache
+```
+
+2. Configure environment variables.
+
+After downloading measurement files, you need to configure some environment variables to make INC quantization become effective.
+
+##### Using start_vllm.sh script
+
+If you are using `set_head_node.sh` and `set_worker_node.sh` scripts to start vllm, please configure `QUANT_CONFIG` and `INC_MEASUREMENT_DUMP_PATH_PREFIX` env var in them.
+
+- QUANT_CONFIG
+
+Depends on kv-cache-dtype to use, you should use quantization configuration file accordingly.
+
+These quantization config is located in vllm-fork/scripts/quant_configs.
+
+|KV-Cache-Dtype|QUANT_CONFIG|
+|---|---|
+|BF16|inc_quant_per_channel_bf16kv.json|
+|FP8|inc_quant_per_channel_with_fp8kv_config.json|
+
+For example, if you want to use BF16 kv cache, you should set QUANT_CONFIG with:
+```
+export QUANT_CONFIG=/path/to/vllm-fork/scripts/quant_configs/inc_quant_per_channel_bf16kv.json
+```
+
+- INC_MEASUREMENT_DUMP_PATH_PREFIX
+
+The environment variable `INC_MEASUREMENT_DUMP_PATH_PREFIX` specifies the root directory where measurement statistics were saved.
+The final path is constructed by joining this root directory with the `dump_stats_path` defined in the quantization JSON file specified by the `QUANT_CONFIG` environment variable.
+
+If we download the measurements to `/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache`, we got below files:
+
+```bash
+user:vllm-fork$ pwd
+/path/to/vllm-fork
+user:vllm-fork$ ls -l  ./scripts/nc_workspace_measure_kvcache
+-rw-r--r-- 1 root root    1136822 Jul  4 13:30 inc_measure_output_hooks_maxabs_0_16.json
+-rw-r--r-- 1 root root     611732 Jul  4 13:30 inc_measure_output_hooks_maxabs_0_16.npz
+-rw-r--r-- 1 root root     155379 Jul  4 13:30 inc_measure_output_hooks_maxabs_0_16_mod_list.json
+...
+```
+
+Then, we export `INC_MEASUREMENT_DUMP_PATH_PREFIX=/path/to/vllm-fork`, and INC will parse the full as below:
+
+```
+dump_stats_path (from config): "scripts/nc_workspace_measure_kvcache/inc_measure_output"
+Resulting full path: "/path/to/vllm-fork/scripts/nc_workspace_measure_kvcache/inc_measure_output_hooks_maxabs_0_16.npz"
+```
+##### Manually start vllm
+
+If you want to start vllm manually or use your own script, please set below environment variables.
+
+|Env Var Name|Mandatory for INC|Value|Explanation|
+|---|---|---|---|
+|INC_MEASUREMENT_DUMP_PATH_PREFIX|Yes|The root directory where measurement statistics were saved.|See above section for detail|
+|QUANT_CONFIG|Yes|Quantization config file to use, which is under `vllm-fork/scripts/quant_configs` folder|See above section for detail|
+|VLLM_REQUANT_FP8_INC|Yes|1|Enables requantization of FP8 weights with block-wise scaling using INC.|
+|VLLM_ENABLE_RUNTIME_DEQUANT|Yes|1|Enables runtime dequantization of FP8 weights with block-wise scaling.|
+|VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
+|VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
+
+3. Check if INC quantization enabled successfully
+
+If INC quantization is enabled successfully, `Preparing model with INC` should be observed in vllm server log.
+
 #### Apply Configuration on Both Nodes
 Run the following command on both head and worker nodes:
 header node
@@ -313,7 +497,7 @@ python -m vllm.entrypoints.openai.api_server \
     --max-num-batched-tokens $max_num_batched_tokens \
     --disable-log-requests \
     --dtype bfloat16 \
-    --kv-cache-dtype fp8_inc \
+    --kv-cache-dtype $KV_CACHE_DTYPE \
     --use-v2-block-manager \
     --num_scheduler_steps 1\
     --block-size $block_size \

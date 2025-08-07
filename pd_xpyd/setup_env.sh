@@ -1,10 +1,12 @@
 echo "1. setting up general requirement......."
 apt update
 apt install git wget curl net-tools sudo iputils-ping etcd  -y
+pip install colorlog
 
-echo "2. setting up mooncake mooncake-transfer-engine==0.3.0b3............."
+echo "2. setting up mooncake mooncake-transfer-engine private build............."
 #Mooncake
-pip3 install mooncake-transfer-engine==0.3.0b3
+wget https://github.com/hlin99/Mooncake/releases/download/private_buildv1/mooncake_transfer_engine-0.1.0-cp310-cp310-manylinux2014_x86_64.whl
+pip install mooncake_transfer_engine-0.1.0-cp310-cp310-manylinux2014_x86_64.whl
 
 echo "3. setting up RDMA for mooncake ..................."
 #RDMA

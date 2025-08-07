@@ -2,8 +2,8 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 if [ -z "$1" ] || [ "$1" == "g10" ]; then
-    source "$BASH_DIR"/start_etc_mooncake_master.sh
-    echo "source "$BASH_DIR"/start_etc_mooncake_master.sh"
+    source "$BASH_DIR"/start_etcd_mooncake_master.sh
+    echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
 fi
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib

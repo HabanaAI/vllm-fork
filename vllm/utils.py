@@ -201,6 +201,31 @@ class Counter:
         self.counter = 0
 
 
+class SharedDict:
+
+    def __init__(self):
+        self.dict = {}
+        self.ref_count: Dict[str, int] = {}
+        self.lock = threading.Lock()
+
+    def add_item(self, key, value):
+        with self.lock:
+            self.dict[key] = value
+            self.ref_count[key] = self.ref_count.get(key, 0) + 1
+
+    def get_item(self, key):
+        with self.lock:
+            return self.dict.get(key, None)
+
+    def remove_item(self, key):
+        with self.lock:
+            if key in self.dict:
+                self.ref_count[key] -= 1
+                if self.ref_count[key] == 0:
+                    # Remove the item from the dict if no references left
+                    del self.dict[key]
+
+
 class CacheInfo(NamedTuple):
     hits: int
     total: int
@@ -532,10 +557,11 @@ def get_open_port() -> int:
         dp_port = envs.VLLM_DP_MASTER_PORT
         while True:
             port = _get_open_port()
-            if port >= dp_port and port < dp_port + 10:
+            if dp_port <= port < dp_port + 10:
                 continue
             return port
     return _get_open_port()
+
 
 def _get_open_port() -> int:
     port = envs.VLLM_PORT
