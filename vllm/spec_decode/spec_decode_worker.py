@@ -796,8 +796,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         if self.hpu_delay_specdecode:
             self._pending_step = self._pending_step + 1
             if self._pending_step > 1:
-                #self.accepted_token_ids_=self.cached_step_accepted_tokens.pop(0).cpu()
-                #print(f" cache before pop{self.cached_step_accepted_tokens=}")
+                
                 if len(
                         next(
                             iter(execute_model_req.seq_group_metadata_list[0].
@@ -814,7 +813,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                         0] if not self._disable_logprobs else None
 
         with Timer() as proposal_timer:
-            #print(f"==============put to spec {self.accepted_token_ids_=}===")
             # Generate proposals using draft worker.
             if not self.hpu_delay_specdecode:
                 self.accepted_token_ids_ = None
@@ -830,7 +828,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         execute_model_req.previous_hidden_states = None
 
         with Timer() as scoring_timer:
-            #print(f"==============put to score {self.accepted_token_ids_=}===")
             if not self.hpu_delay_specdecode:
                 self.accepted_token_ids_ = None
             proposal_scores = self.scorer.score_proposals(
@@ -875,7 +872,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
         if self.hpu_delay_specdecode:
             self.cached_step_accepted_tokens.append(accepted_token_ids)
-            #print(f" cache after append{self.cached_step_accepted_tokens=}")
             self.cached_step_target_logprobs.append(target_logprobs)
             self.cached_step_prompt_logprobs.append(
                 proposal_scores.prompt_logprobs)
@@ -1034,7 +1030,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         num_logprobs_per_seq = get_all_num_logprobs(seq_group_metadata_list)
         self.sync_last = False
         # Serialize tensor to CPU Python list.
-        #get_delay_num_speculative_tokens() dummy token=2
 
         for seq_index, sg in enumerate(seq_group_metadata_list):
             for seq in sg.seq_data.values():
