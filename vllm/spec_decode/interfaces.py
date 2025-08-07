@@ -96,6 +96,5 @@ class SpeculativeScorer(ABC):
         execute_model_req: ExecuteModelRequest,
         proposals: SpeculativeProposals,
         accepted_token_id: Optional[torch.Tensor] = None,
-
     ) -> SpeculativeScores:
         raise NotImplementedError

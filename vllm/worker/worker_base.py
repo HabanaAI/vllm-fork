@@ -335,7 +335,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         return model_input, worker_input, kwargs
 
     def _get_driver_input_and_broadcast(
-        self, execute_model_req: ExecuteModelRequest,
+        self,
+        execute_model_req: ExecuteModelRequest,
         accepted_token_id: Optional[torch.Tensor] = None
     ) -> Tuple[BroadcastableModelInput, WorkerInput, Dict[str, torch.Tensor]]:
         """ Get the driver input and broadcast it to other workers.  """
@@ -349,8 +350,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 execute_model_req.virtual_engine,
                 execute_model_req.finished_requests_ids,
                 accepted_token_id=accepted_token_id,
-                execute_model_req=execute_model_req
-                ))
+                execute_model_req=execute_model_req))
 
         kwargs = extract_previous_hidden_states(execute_model_req)
 
@@ -392,7 +392,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 self.model_runner._dummy_run(1)
                 return None
 
-            return self._get_driver_input_and_broadcast(execute_model_req, accepted_token_id)
+            return self._get_driver_input_and_broadcast(
+                execute_model_req, accepted_token_id)
         else:
             return self._get_worker_input_from_broadcast()
 
@@ -407,7 +408,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         start_time = time.perf_counter()
-        
+
         inputs = self.prepare_input(execute_model_req, accepted_token_id)
         # Need to keep worker running when executing dummy batch under DP
         # scenario

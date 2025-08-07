@@ -61,9 +61,9 @@ from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
                              MultiModalRegistry)
 from vllm.sampling_params import SamplingParams
-from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
-                           Logprob, SequenceData, SequenceGroupMetadata,ExecuteModelRequest,
-                           SequenceOutput)
+from vllm.sequence import (CompletionSequenceGroupOutput, ExecuteModelRequest,
+                           IntermediateTensors, Logprob, SequenceData,
+                           SequenceGroupMetadata, SequenceOutput)
 from vllm.utils import (SharedDict, bind_kv_cache, is_fake_hpu,
                         is_pin_memory_available, make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
@@ -1391,7 +1391,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if len(block_table) == 0:
                     block_number = _PAD_BLOCK_ID
                 else:
-                    block_number = block_table[ min(position // self.block_size, len(block_table)-1)]
+                    block_number = block_table[min(position // self.block_size,
+                                                   len(block_table) - 1)]
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:
@@ -1621,15 +1622,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         execute_model_req=None,
     ) -> Tuple[TModelInputForHPU, SamplingMetadata]:
 
-
         # Delay the synchronization behavior in spec decode to improve CPU/GPU overlap
         if execute_model_req is not None and execute_model_req.expand is not None:
-            expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand()
+            expanded_request, indices_of_seq_with_bonus_tokens = execute_model_req.expand(
+            )
             seq_group_metadata_list = expanded_request.seq_group_metadata_list
-            finished_requests_ids=expanded_request.finished_requests_ids
-            execute_model_req.hack_indices_of_seq_with_bonus_tokens=indices_of_seq_with_bonus_tokens
-            execute_model_req.expand_req=expanded_request
-      
+            finished_requests_ids = expanded_request.finished_requests_ids
+            execute_model_req.hack_indices_of_seq_with_bonus_tokens = indices_of_seq_with_bonus_tokens
+            execute_model_req.expand_req = expanded_request
+
         if len(seq_group_metadata_list) == 0:
             return self._model_input_cls(), None
 
@@ -1655,7 +1656,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         prefill_reqs = []
         decode_reqs = []
-                
+
         for seq_group_meta in seq_group_metadata_list:
             if seq_group_meta.is_prompt:
                 prefill_reqs.append(seq_group_meta)
@@ -1675,8 +1676,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_kwargs,
             slot_mapping,
             lora_ids,
-        ) = self._prepare_prompt(prefill_reqs, align_worker=align_worker)      
-          
+        ) = self._prepare_prompt(prefill_reqs, align_worker=align_worker)
+
         (
             decode_input_tokens,
             decode_input_positions,
@@ -1687,8 +1688,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs, align_worker=align_worker)
-        
-        
+
         if not self.is_pooler:
             generators = self.get_generators(finished_requests_ids)
             sampling_metadata = SamplingMetadata.prepare(
@@ -2551,7 +2551,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None,
         accepted_token_id: Optional[torch.Tensor] = None,
-        execute_model_req:Optional[ExecuteModelRequest]=None
+        execute_model_req: Optional[ExecuteModelRequest] = None
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2562,12 +2562,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         - input_tokens[num_prefill_tokens:] contains decode tokens.
         If cuda graph is required, this API automatically pads inputs.
         """
-        return self.prepare_model_input_align_worker(seq_group_metadata_list,
-                                                     virtual_engine,
-                                                     finished_requests_ids,
-                                                     False,
-                                                     accepted_token_id,
-                                                    execute_model_req,)
+        return self.prepare_model_input_align_worker(
+            seq_group_metadata_list,
+            virtual_engine,
+            finished_requests_ids,
+            False,
+            accepted_token_id,
+            execute_model_req,
+        )
 
     @torch.inference_mode()
     def prepare_model_input_align_worker(
@@ -2577,7 +2579,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         finished_requests_ids: Optional[List[str]] = None,
         align_worker: bool = False,
         accepted_token_id: Optional[torch.Tensor] = None,
-        execute_model_req:Optional[ExecuteModelRequest]=None,
+        execute_model_req: Optional[ExecuteModelRequest] = None,
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -2595,7 +2597,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     seq_group_metadata_list=seq_group_metadata_list)
 
             model_input, sampling_metadata = self.prepare_input_tensors(
-                seq_group_metadata_list, finished_requests_ids, align_worker, accepted_token_id,execute_model_req)
+                seq_group_metadata_list, finished_requests_ids, align_worker,
+                accepted_token_id, execute_model_req)
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 

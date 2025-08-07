@@ -796,7 +796,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         if self.hpu_delay_specdecode:
             self._pending_step = self._pending_step + 1
             if self._pending_step > 1:
-                
+
                 if len(
                         next(
                             iter(execute_model_req.seq_group_metadata_list[0].

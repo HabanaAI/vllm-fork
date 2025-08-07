@@ -352,12 +352,12 @@ class SequenceData(msgspec.Struct,
             return self._prompt_token_ids[-1]
         return self._output_token_ids[-1]
 
-    def get_last_n_token_id(self,n) -> int:
-        if self.get_output_len()<n:
+    def get_last_n_token_id(self, n) -> int:
+        if self.get_output_len() < n:
             return None
         if not self._output_token_ids:
-            return self._prompt_token_ids[(-1)*n]
-        return self._output_token_ids[(-1)*n]
+            return self._prompt_token_ids[(-1) * n]
+        return self._output_token_ids[(-1) * n]
 
     def get_prompt_token_ids(self) -> Tuple[int, ...]:
         return self.prompt_token_ids
@@ -580,8 +580,9 @@ class Sequence:
     def get_last_token_id(self) -> int:
         return self.data.get_last_token_id()
 
-    def get_last_n_token_id(self,n):
+    def get_last_n_token_id(self, n):
         return self.data.get_last_n_token_id(n)
+
     def get_output_token_ids(self) -> Tuple[int, ...]:
         return self.data.get_output_token_ids()
 
@@ -1333,10 +1334,10 @@ class ExecuteModelRequest(
     # kv_cache_shared_dict
     kv_cache_shared_dict: Optional[SharedDict] = None
 
-    
     expand: Optional[Callable[[], Tuple[Any, Any]]] = None
     hack_indices_of_seq_with_bonus_tokens: Optional[List[int]] = None
-    expand_req:Optional["ExecuteModelRequest"] =None
+    expand_req: Optional["ExecuteModelRequest"] = None
+
     @property
     def is_first_multi_step(self) -> bool:
         # TODO(will) make this be able to handle batches with variable number of

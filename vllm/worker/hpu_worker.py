@@ -19,10 +19,10 @@ import torch.distributed
 from vllm_hpu_extension.profiler import HabanaMemoryProfiler, format_bytes
 
 import vllm.envs as envs
-from vllm.config import ParallelConfig, VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized, get_dp_group,
+from vllm.config import VllmConfig
+from vllm.distributed import (ensure_kv_transfer_initialized,
+                              ensure_model_parallel_initialized, get_dp_group,
                               get_pp_group, get_tp_group,
-                              ensure_kv_transfer_initialized,
                               init_distributed_environment)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -269,7 +269,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 for seq_group_metadata in seq_group_metadata_list
             ])
             # for dummy run in DP, we don't have real seq, so use a dummy context_len here
-            if(len(seq_group_metadata_list) == 0):
+            if (len(seq_group_metadata_list) == 0):
                 max_context_len = 128
             else:
                 max_context_len = max([
@@ -377,10 +377,10 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
-        num_hpu_blocks = self.align_dp_groups(
-            num_hpu_blocks, torch.distributed.ReduceOp.MIN)
-        num_cpu_blocks = self.align_dp_groups(
-            num_cpu_blocks, torch.distributed.ReduceOp.MIN)
+        num_hpu_blocks = self.align_dp_groups(num_hpu_blocks,
+                                              torch.distributed.ReduceOp.MIN)
+        num_cpu_blocks = self.align_dp_groups(num_cpu_blocks,
+                                              torch.distributed.ReduceOp.MIN)
 
         self.model_runner.bucketing_ctx.num_hpu_blocks = num_hpu_blocks
 
@@ -555,7 +555,7 @@ def init_worker_distributed_environment(
 
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
-    
+
     if parallel_config.pipeline_parallel_size > 1 and \
         not envs.VLLM_PP_USE_CPU_COMS:
         # torch-ccl hpu need a collective API warm up
@@ -597,6 +597,7 @@ def init_worker_distributed_environment(
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
     ensure_kv_transfer_initialized(vllm_config)
+
 
 def raise_if_cache_size_invalid(num_gpu_blocks, block_size,
                                 max_model_len) -> None:

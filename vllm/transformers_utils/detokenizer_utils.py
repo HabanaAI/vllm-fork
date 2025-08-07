@@ -97,15 +97,14 @@ def convert_ids_list_to_tokens(
 # https://github.com/huggingface/text-generation-inference/blob/v0.9.4/server/text_generation_server/models/model.py#L62C9-L62C15
 # under Apache 2.0 license
 def detokenize_incrementally(
-    tokenizer: AnyTokenizer,
-    all_input_ids: List[int],
-    prev_tokens: Optional[List[str]],
-    prefix_offset: int,
-    read_offset: int,
-    skip_special_tokens: bool = False,
-    spaces_between_special_tokens: bool = True,
-    last_n: int = 1
-) -> Tuple[List[str], str, int, int]:
+        tokenizer: AnyTokenizer,
+        all_input_ids: List[int],
+        prev_tokens: Optional[List[str]],
+        prefix_offset: int,
+        read_offset: int,
+        skip_special_tokens: bool = False,
+        spaces_between_special_tokens: bool = True,
+        last_n: int = 1) -> Tuple[List[str], str, int, int]:
     """Detokenizes the input ids incrementally and returns the new tokens
     and the new text.
 
@@ -147,7 +146,7 @@ def detokenize_incrementally(
         new_token_ids = [new_token_id]
     else:
         # List
-        new_token_ids = new_token_id  
+        new_token_ids = new_token_id
     # Put new_token_id in a list so skip_special_tokens is respected
     # If the new token id is out of bounds, return an empty string.
     if all(0 <= tid < len(tokenizer) for tid in new_token_id):
