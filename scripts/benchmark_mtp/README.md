@@ -1,7 +1,7 @@
 ```
 # Baseline
-python mpt.py
+python mtp.py
 
 # Optimized (with delayed speculative decode)
-HPU_VLLM_DELAY_SPECDECODE=True python mpt.py
+HPU_VLLM_DELAY_SPECDECODE=True python mtp.py
 ```
