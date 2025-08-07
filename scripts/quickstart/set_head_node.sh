@@ -20,6 +20,9 @@ output_max=16896
 # Change to fp8_inc if want to use fp8 kv cache
 KV_CACHE_DTYPE=auto
 
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$BASH_DIR"/utils.sh
+
 # INC FP8 quantization
 export INC_MEASUREMENT_DUMP_PATH_PREFIX=
 export QUANT_CONFIG=
@@ -29,6 +32,7 @@ if [ -n "$QUANT_CONFIG" ]; then
     export VLLM_HPU_MARK_SCALES_AS_CONST=false
     export VLLM_MOE_N_SLICE=1
     export INC_FORCE_NAIVE_SCALING=1
+    clean_inc_scale
 else
     export VLLM_MOE_N_SLICE=8
 fi
@@ -39,10 +43,6 @@ export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
 export VLLM_DELAYED_SAMPLING="true"
 export VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0
 export VLLM_MLA_DISABLE_REQUANTIZATION=0
-
-
-BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
-source "$BASH_DIR"/utils.sh
 
 ray stop --force
 
