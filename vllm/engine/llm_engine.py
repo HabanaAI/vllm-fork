@@ -1155,19 +1155,6 @@ class LLMEngine:
                 self.seq_id_to_seq_group,
                 use_cache=self.use_cached_outputs)
             if request_output:
-
-                # debug detokenizer, sync the final text.
-                # if True:
-                    # from vllm.worker.hpu_model_runner import HPU_VLLM_SPECDECODE_DUMMY_TOKEN
-                    # token_ids=request_output.outputs[0].token_ids
-                    # for _ in range(2):
-                    #     if token_ids and token_ids[-1] == HPU_VLLM_SPECDECODE_DUMMY_TOKEN:
-                    #         token_ids.pop()
-                    #     else:
-                    #         break
-                    # request_output.outputs[0].text=self.tokenizer.tokenizer.decode(token_ids, skip_special_tokens=True)
-                    
-                
                 ctx.request_outputs.append(request_output)
 
         # When we process a single request, we skip it for the next time,
