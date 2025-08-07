@@ -98,3 +98,10 @@ step4: launch proxy server: bash xpyd_start_proxy.sh 1 2 1 false benchmark
 step5: lanch client command with only 1 prompt
 python3 benchmarks/benchmark_serving.py --backend vllm --model /mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/ --dataset-name sonnet --request-rate inf --host 10.239.129.9 --port 8868 --sonnet-input-len 2000 --sonnet-output-len 1000 --sonnet-prefix-len 100 --trust-remote-code --max-concurrency 1024 --num-prompts 1 --ignore-eos --burstiness 1000 --dataset-path benchmarks/sonnet.txt --save-result
 ```
+```bash
+# note: If the vllm is is shared across nodes (i.e. one code base in nfs, and multi-nodes link to the same code base),
+		you can switch benchmark mode and normal mode automatically.
+#       If the vllm is not share, make sure VLLM_USE_ASYNC_TRANSFER_IN_PD in pd_env.sh is set to(mannually)
+		0 for benchmark mode 
+		1 for normal run mode
+```
