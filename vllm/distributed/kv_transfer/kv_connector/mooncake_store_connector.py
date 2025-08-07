@@ -536,15 +536,21 @@ class MooncakeStoreConnector(KVConnectorBase):
 
     def get_sampler_output_key(self, seq_group_to_sample):
         # Use first seq data for prompt tokens
-        prompt_token_ids = seq_group_to_sample.seq_data[0].prompt_token_ids
+        first_seq_data = next(iter(seq_group_to_sample.seq_data.values()))
+        prompt_token_ids = first_seq_data.prompt_token_ids
         sampling_params = seq_group_to_sample.sampling_params
+
+        sampling_params = sampling_params.clone()
+        # Prefill and decode will use different max_tokens
+        # To match both side, we use the same
+        sampling_params.max_tokens = 1
 
         # Prepare the store key
         prompt_prefix = self.hash_list(prompt_token_ids)
         sampling_bytes = self.sampler_output_encoder.encode(
             sampling_params)
         sampling_prefix = self.hash_bytes(sampling_bytes)
-        sampler_output_key = f"{prompt_prefix}_sampling_{sampling_prefix}_{self.rank}"
+        sampler_output_key = f"{prompt_prefix}_sampling_{sampling_prefix}"
         return sampler_output_key
 
     def send_sampler_output(
@@ -558,6 +564,8 @@ class MooncakeStoreConnector(KVConnectorBase):
             "Sequence groups to sample must be the same size with the sampler outputs."
         for seq_group_to_sample, sampler_output_of_seq_group in zip(
                 seq_groups_to_sample, outputs):
+            if not seq_group_to_sample.seq_data:
+                continue
             start_time = time.time()
             sampler_output_key = self.get_sampler_output_key(seq_group_to_sample)
 
@@ -576,6 +584,8 @@ class MooncakeStoreConnector(KVConnectorBase):
         seq_groups_to_sample = sampling_metadata.seq_groups
         outputs: List[CompletionSequenceGroupOutput] = []
         for seq_group_to_sample in seq_groups_to_sample:
+            if not seq_group_to_sample.seq_data:
+                return None
             start_time = time.time()
             sampler_output_key = self.get_sampler_output_key(seq_group_to_sample)
             if not self.wait_for_key(sampler_output_key, 10):
