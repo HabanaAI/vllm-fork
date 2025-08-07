@@ -10,8 +10,8 @@ export GLOO_SOCKET_IFNAME=
 export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k_1k_20k_16k,false,32768
 
 # vLLM parameters
-max_num_batched_tokens=32768
-max_num_seqs=512
+export max_num_batched_tokens=32768
+export max_num_seqs=512
 input_min=768
 input_max=20480
 output_max=16896
@@ -20,8 +20,8 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/utils.sh
 
 # INC FP8 quantization
-export INC_MEASUREMENT_DUMP_PATH_PREFIX=
-export QUANT_CONFIG=
+export INC_MEASUREMENT_DUMP_PATH_PREFIX=$(realpath "$BASH_DIR/../..")
+export QUANT_CONFIG=$(realpath "$BASH_DIR/../quant_configs/inc_quant_per_channel_bf16kv.json")
 if [ -n "$QUANT_CONFIG" ]; then
     export VLLM_REQUANT_FP8_INC=1
     export VLLM_ENABLE_RUNTIME_DEQUANT=1
@@ -55,7 +55,7 @@ export PT_HPU_LAZY_MODE=1
 
 export VLLM_EP_SIZE=16
 
-block_size=128
+export block_size=128
 # DO NOT change ends...
 
 # memory footprint tunning params
