@@ -10,21 +10,25 @@ export GLOO_SOCKET_IFNAME=
 export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k_1k_20k_16k,false,32768
 
 # vLLM parameters
-max_num_batched_tokens=32768
-max_num_seqs=512
+export max_num_batched_tokens=32768
+export max_num_seqs=512
 input_min=768
 input_max=20480
 output_max=16896
 
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$BASH_DIR"/utils.sh
+
 # INC FP8 quantization
-export INC_MEASUREMENT_DUMP_PATH_PREFIX=
-export QUANT_CONFIG=
+export INC_MEASUREMENT_DUMP_PATH_PREFIX=$(realpath "$BASH_DIR/../..")
+export QUANT_CONFIG=$(realpath "$BASH_DIR/../quant_configs/inc_quant_per_channel_bf16kv.json")
 if [ -n "$QUANT_CONFIG" ]; then
     export VLLM_REQUANT_FP8_INC=1
     export VLLM_ENABLE_RUNTIME_DEQUANT=1
     export VLLM_HPU_MARK_SCALES_AS_CONST=false
     export VLLM_MOE_N_SLICE=1
     export INC_FORCE_NAIVE_SCALING=1
+    clean_inc_scale
 else
     export VLLM_MOE_N_SLICE=8
 fi
@@ -35,10 +39,6 @@ export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=1
 export VLLM_DELAYED_SAMPLING="true"
 export VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0
 export VLLM_MLA_DISABLE_REQUANTIZATION=0
-
-
-BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
-source "$BASH_DIR"/utils.sh
 
 ray stop --force
 
@@ -55,7 +55,7 @@ export PT_HPU_LAZY_MODE=1
 
 export VLLM_EP_SIZE=16
 
-block_size=128
+export block_size=128
 # DO NOT change ends...
 
 # memory footprint tunning params
