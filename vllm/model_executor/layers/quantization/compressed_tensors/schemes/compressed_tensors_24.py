@@ -7,10 +7,8 @@ from compressed_tensors import CompressionFormat, ModelCompressor
 from compressed_tensors.quantization import (QuantizationArgs,
                                              QuantizationStrategy,
                                              QuantizationType)
-try:
-    from compressed_tensors.utils import combine_shards
-except:
-    pass
+from compressed_tensors.utils import combine_shards
+
 from vllm import _custom_ops as ops
 from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                QKVParallelLinear)

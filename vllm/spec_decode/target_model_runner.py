@@ -2,11 +2,13 @@
 
 from typing import List, Optional
 
+import torch
+
 from vllm.sequence import SequenceGroupMetadata
 from vllm.worker.model_runner_base import (ModelRunnerBase,
                                            ModelRunnerInputBase,
                                            ModelRunnerWrapperBase)
-import torch
+
 
 class TargetModelRunner(ModelRunnerWrapperBase):
     """Specialized model runner for speculative decoding target model.
