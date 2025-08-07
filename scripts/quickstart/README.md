@@ -254,6 +254,7 @@ If you want to start vllm manually or use your own script, please set below envi
 |VLLM_REQUANT_FP8_INC|Yes|1|Enables requantization of FP8 weights with block-wise scaling using INC.|
 |VLLM_ENABLE_RUNTIME_DEQUANT|Yes|1|Enables runtime dequantization of FP8 weights with block-wise scaling.|
 |VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
+|INC_FORCE_NAIVE_SCALING|Yes|1|When set to 1, INC will use naive scaling, which can have better accuracy. If set to 0, INC will use hw aligned scale, which has better performance but worse accuracy.|
 |VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
 
 #### 3. Check if INC quantization enabled successfully
@@ -374,9 +375,9 @@ pip install -e vllm-fork/
 ```
 
 ### Configure Multi-Node Script
-#### Set the IP address and NIC interface name in set_header_node_sh and set_worker_node_sh. 
+#### Set the IP address and NIC interface name in set_head_node_sh and set_worker_node_sh. 
 ```bash
-# set IP address of header node
+# set IP address of head node
 export VLLM_HOST_IP=192.168.1.101
 # set NIC interface name of worker IP address
 export GLOO_SOCKET_IFNAME=enx6c1ff7012f87
@@ -478,6 +479,7 @@ If you want to start vllm manually or use your own script, please set below envi
 |VLLM_REQUANT_FP8_INC|Yes|1|Enables requantization of FP8 weights with block-wise scaling using INC.|
 |VLLM_ENABLE_RUNTIME_DEQUANT|Yes|1|Enables runtime dequantization of FP8 weights with block-wise scaling.|
 |VLLM_MOE_N_SLICE|Yes|1|Specifies the number of slices for the MoE part.|
+|INC_FORCE_NAIVE_SCALING|Yes|1|When set to 1, INC will use naive scaling, which can have better accuracy. If set to 0, INC will use hw aligned scale, which has better performance but worse accuracy.|
 |VLLM_HPU_MARK_SCALES_AS_CONST|No|false(recommended) or true|Marks the scaling values of the quantized model as constant.|
 
 ##### 3. Check if INC quantization enabled successfully
@@ -486,9 +488,9 @@ If INC quantization is enabled successfully, `Preparing model with INC` should b
 
 #### Apply Configuration on Both Nodes
 Run the following command on both head and worker nodes:
-header node
+head node
 ```bash
-source set_header_node.sh
+source set_head_node.sh
 ```
 worker node
 ```bash
@@ -501,14 +503,14 @@ source set_worker_node.sh
 ### Start Ray Cluster
 
 #### Start Ray on Head Node
-ray start --head --node-ip-address=HEADER_NODE_ip --port=PORT
+ray start --head --node-ip-address=HEAD_NODE_ip --port=PORT
 ```bash
 ray start --head --node-ip-address=192.168.1.101 --port=8850
 ```
 
 #### Start Ray on Worker Node
 
-ray start --address='HEADER_NODE_IP:port'
+ray start --address='HEAD_NODE_IP:port'
 ```bash
 ray start --address='192.168.1.101:8850'
 ```
@@ -537,12 +539,12 @@ python -m vllm.entrypoints.openai.api_server \
     --dtype bfloat16 \
     --kv-cache-dtype $KV_CACHE_DTYPE \
     --use-v2-block-manager \
-    --num_scheduler_steps 1\
+    --num-scheduler-steps 1\
     --block-size $block_size \
     --max-model-len $max_num_batched_tokens \
-    --distributed_executor_backend ray \
-    --gpu_memory_utilization $VLLM_GPU_MEMORY_UTILIZATION \
-    --trust_remote_code \
+    --distributed-executor-backend ray \
+    --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION \
+    --trust-remote-code \
     --enable-reasoning \
     --reasoning-parser deepseek_r1
 ```
