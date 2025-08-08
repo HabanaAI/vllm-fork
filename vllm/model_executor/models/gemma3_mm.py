@@ -5,6 +5,7 @@ import os
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Optional, TypedDict
 
+from PIL import Image
 import torch
 from torch import nn
 from transformers import BatchFeature, Gemma3Config, Gemma3Processor
@@ -265,13 +266,18 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
         mm_data: Mapping[str, object],
         mm_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        start = time.time()
+#        import os, uuid
+#        images = mm_data.get("images")
+#        if images:
+#            for img in images:
+#                if isinstance(img, Image.Image):
+#                    w, h = img.size
+#                    print(f">> img: {w} x {h}")
         processed_outputs = super()._call_hf_processor(
             prompt,
             mm_data,
             mm_kwargs,
         )
-        t1 = time.time()
         if "pixel_values" in processed_outputs:
             # Cast pixel values to model dtype already here,
             # so we need to transfer less data to the GPU
@@ -297,7 +303,6 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
                 for size in image_sizes
             ]
             processed_outputs["num_crops"] = torch.tensor(num_crops)
-        logger.info(f"libin debug _call_hf_processor total: {time.time() - start} img_preprocess {t1-start} id {threading.get_ident()}")
         return processed_outputs
 
     def _get_mm_fields_config(
@@ -385,7 +390,6 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
         new_token_ids: list[int],
         mm_item_counts: Mapping[str, int],
     ) -> Mapping[str, list[PlaceholderFeaturesInfo]]:
-        start = time.time()
         # We need to detect "\n\n" inside "\n\n\n" and "\n\n\n\n"
         tokenizer = self.info.get_tokenizer()
         vocab = tokenizer.get_vocab()
@@ -424,7 +428,6 @@ class Gemma3MultiModalProcessor(BaseMultiModalProcessor[Gemma3ProcessingInfo]):
             ]
             for modality, placeholders in repls.items()
         }
-        #logger.info(f"libin debug _find_mm_placeholders , {time.time() - start}, {threading.get_ident()}")
         return re
 
 
@@ -449,7 +452,6 @@ class Gemma3MultiModalProjector(nn.Module):
                                      stride=self.kernel_size)
 
     def forward(self, vision_outputs: torch.Tensor):
-        logger.info(f"libin Gemma3MultiModalProjector:  {vision_outputs.shape}")
         batch_size, _, seq_length = vision_outputs.shape
 
         reshaped_vision_outputs = vision_outputs.transpose(1, 2)
@@ -579,7 +581,6 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                         self.vision_buckets.multimodal_buckets)
 
             padding_need = len(batch_breakdown) == 1 and batch_breakdown[0] > pixel_values.size(0)
-            #logger.info(f"libin debug padded needed {padding_need} batch_breakdown {batch_breakdown}")
             if padding_need:
                 bs_padded = batch_breakdown[0] - pixel_values.size(0)
                 # check if we should use conact 

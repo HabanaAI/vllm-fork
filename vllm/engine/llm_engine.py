@@ -761,15 +761,8 @@ class LLMEngine:
         is_multimodal = isinstance(prompt,
                                    dict) and prompt.get("type") == "multimodal"
         if self.enable_async_mm_preprocess and is_multimodal:
-            #logger.info("[DEBUG] libin BYPASSING PREPROCESSING FOR REQUEST: %s",
-            #             request_id)
             processed_inputs = prompt
         else:
-            # Fallback for text-only or other non-preprocessed requests.
-            #logger.info(
-            #    "[DEBUG] libin PERFORMING STANDARD PREPROCESSING FOR REQUEST: %s",
-            #    request_id)
-
             processed_inputs = self.input_preprocessor.preprocess(
                 prompt,
                 tokenization_kwargs=tokenization_kwargs,
@@ -787,7 +780,6 @@ class LLMEngine:
             trace_headers=trace_headers,
             priority=priority,
         )
-        logger.info(f"libin add request sync {time.time() -arrival_time} for req {request_id}")
 
     def _create_sequence_group_with_sampling(
         self,

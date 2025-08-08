@@ -2024,9 +2024,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         padding_fn = None
         if self.use_contiguous_pa:
-            block_bucket_size = max(max(block_list) + 1, len(block_list))
+            bbs = max(max(block_list) + 1, len(block_list))
             block_bucket_size = self.bucketing_manager.find_decode_bucket(
-                len(seq_group_metadata_list), block_bucket_size)[2]
+                len(seq_group_metadata_list), bbs)[2]
             if self.dp_awared_padding:
                 if self.is_driver_worker:
                     block_bucket_size = align_dp_groups(
@@ -2047,6 +2047,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     window_indices[bid] = i
                 window_padding_fn = lambda tensor, pad_value: gather_list(
                     tensor, window_indices, pad_value)
+             #print(f">> bbs:{bbs}, padded:{block_bucket_size}")
         else:
             block_bucket_size = self.bucketing_manager.find_decode_bucket(
                 len(seq_group_metadata_list), len(block_list))[2]
@@ -3529,6 +3530,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             cfg = (batch_size, seq_len, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
+        #print(f">> cfg={cfg}")
         if not seen and not warmup_mode:
             logger.warning("Configuration: %s was not warmed-up!",
                            (phase.value, batch_size, seq_len,
@@ -3923,9 +3925,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
-                        #if self.is_driver_worker:
-                        #    logger.info(f"libin debug MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape} real_batch {real_batch_size}")
-                            #logger.info(f"libin debug MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape} real_batch {real_batch_size}")
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.

@@ -46,9 +46,6 @@ from vllm.transformers_utils.tokenizers import (maybe_serialize_tool_calls,
                                                 validate_request_params)
 
 logger = init_logger(__name__)
-#from viztracer import VizTracer
-#count = 0
-#tracer = VizTracer()
 class OpenAIServingChat(OpenAIServing):
 
     def __init__(
@@ -154,8 +151,8 @@ class OpenAIServingChat(OpenAIServing):
             tracer.save("./myprofile.json")
             exit()
         '''
-        t1 = time.time()
-        
+        t1 = time.perf_counter()
+
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
@@ -230,7 +227,6 @@ class OpenAIServingChat(OpenAIServing):
             logger.exception("Error in preprocessing prompt inputs")
             return self.create_error_response(f"{e} {e.__cause__}")
         
-        t2 = time.time()
         if self.mm_preprocessor:
             
             try:
@@ -256,12 +252,10 @@ class OpenAIServingChat(OpenAIServing):
         request_metadata = RequestResponseMetadata(request_id=request_id)
         if raw_request:
             raw_request.state.request_metadata = request_metadata
-        t3 = time.time()
         # Schedule the request and get the result generator.
         generators: list[AsyncGenerator[RequestOutput, None]] = []
         try:
             for i, engine_prompt in enumerate(engine_prompts):
-                tl = time.time()
                 sampling_params: Union[SamplingParams, BeamSearchParams]
                 default_max_tokens = self.max_model_len - len(
                     engine_prompt["prompt_token_ids"])
@@ -283,8 +277,6 @@ class OpenAIServingChat(OpenAIServing):
                 trace_headers = (None if raw_request is None else await
                                  self._get_trace_headers(raw_request.headers))
                 
-                t4 = time.time()
-
                 if isinstance(sampling_params, BeamSearchParams):
                     generator = self.engine_client.beam_search(
                         prompt=engine_prompt,
@@ -302,8 +294,6 @@ class OpenAIServingChat(OpenAIServing):
                         prompt_adapter_request=prompt_adapter_request,
                         priority=request.priority,
                     )
-                t5 = time.time()
-                logger.info(f"libin create_chat_completion loop request: {request_id} before mm time take: {t4-tl} mm {t5-t4}")
 
                 generators.append(generator)
         except ValueError as e:
@@ -312,20 +302,20 @@ class OpenAIServingChat(OpenAIServing):
 
         assert len(generators) == 1
         result_generator, = generators
-        t6 = time.time()
         # Streaming response
         if request.stream:
             re =  self.chat_completion_stream_generator(
                 request, result_generator, request_id, model_name,
                 conversation, tokenizer, request_metadata)
-            logger.info(f"libin create_chat_completion stream Done : {request_id} start time take {t2-t1}, {t3-t2}, loop: {t6-t3}, after loop: {time.time() - t6}")
             return re
 
         try:
+            t2 = time.perf_counter()
             re =  await self.chat_completion_full_generator(
                 request, result_generator, request_id, model_name,
                 conversation, tokenizer, request_metadata)
-            logger.info(f"libin create_chat_completion not stream Done : {request_id} start time take {t2-t1}, {t3-t2}, loop: {t6-t3}, after loop: {time.time() - t6}")
+            t3 = time.perf_counter()
+            print(f">> pre:{t2-t1}, gen:{t3-t2}")
             return re
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error

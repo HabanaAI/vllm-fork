@@ -762,7 +762,6 @@ class ConversationDataset(HuggingFaceDataset):
 
             prompt_ids = tokenizer(prompt).input_ids
             if input_len is not None and input_len > 0:
-                #print("libin debug origing prompt_len ",len(prompt_ids) )
                 if len(prompt_ids) > input_len:
                     prompt_ids = prompt_ids[:input_len]
                 elif len(prompt_ids) < input_len:
@@ -771,7 +770,6 @@ class ConversationDataset(HuggingFaceDataset):
                     prompt_ids = tokenizer(prompt).input_ids
             completion_ids = tokenizer(completion).input_ids
             prompt_len = len(prompt_ids)
-            print("libin debug prompt_len ",prompt_len )
             completion_len = len(completion_ids)
             output_len = completion_len if dynamic_output else output_len
             assert isinstance(output_len, int) and output_len > 0

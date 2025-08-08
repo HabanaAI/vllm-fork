@@ -455,31 +455,17 @@ def _merge_multimodal_embeddings(
     # skip check for HPU, the number of tokens is a cpu fallback during HPU lazy
     if current_platform.is_hpu():
         htcore.mark_step()
-        #import torch
-        #from habana_frameworks.torch.hpu.metrics import metric_global
 
-        #gc_metric = metric_global("graph_compilation")
-
-        #print("libin debug before mm " , gc_metric.stats())
-
-        flattened = _flatten_embeddings(multimodal_embeddings)
-        inputs_embeds[is_multimodal] = flattened
-        '''
+        #flattened = _flatten_embeddings(multimodal_embeddings)
+        #inputs_embeds[is_multimodal] = flattened
+        
         flattened = _flatten_embeddings(multimodal_embeddings) #torch.Size([1792, 2560])
         is_multimodal_index = is_multimodal.flatten().nonzero().squeeze(-1) #torch.Size([1792])
 
         inputs_embeds_s = inputs_embeds.shape #torch.Size([4, 1408, 2560])
         inputs_embeds = inputs_embeds.view(inputs_embeds_s[0] * inputs_embeds_s[1], inputs_embeds_s[2]) #torch.Size([5632, 2560])
         inputs_embeds = inputs_embeds.index_copy_(0, is_multimodal_index, flattened).view(inputs_embeds_s) #inputs_embeds
-        '''
-        #htcore.mark_step()
-        #gc_metric = metric_global("graph_compilation")
-
-        #print("libin debug after mm " , gc_metric.stats())
-        #TODO dynamic? is a list of varying length
-        # still.. torch.where might be faster than boolean indexing?
-        #inputs_embeds[is_multimodal] = flattened
-
+        
         return inputs_embeds
 
     num_expected_tokens = is_multimodal.sum().item()
