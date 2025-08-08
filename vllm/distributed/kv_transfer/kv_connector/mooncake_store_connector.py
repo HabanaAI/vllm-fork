@@ -603,10 +603,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             sampler_output = self.sampler_output_decoder.decode(
                 sampler_output_bytes)
             outputs.append(sampler_output)
-            logger.debug(
-                "Get sampler output: %s, time: %s",
-                sampler_output_key,
-                time.time() - start_time)
+            logger.debug("Get sampler output: %s, time: %s",
+                         sampler_output_key,
+                         time.time() - start_time)
 
         # All the sample outputs are received
         return SamplerOutput(outputs=outputs)

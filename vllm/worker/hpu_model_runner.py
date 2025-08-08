@@ -2697,6 +2697,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         assert not (use_delayed_sampling and
             self.parallel_config.pipeline_parallel_size != 1), \
             'Delayed sampling is not compatible with Pipeline Parallelism!'
+        assert not (self.use_prefill_output and num_steps != 1), \
+            'Use prefill output is not compatible with MSS!'
+        assert not (self.use_prefill_output and use_delayed_sampling), \
+            'Use prefill output is not compatible with Delayed sampling!'
+        assert not (self.use_prefill_output and self.return_hidden_states), \
+            'Use prefill output is not compatible with speculative decoding!'
         assert model_input.input_tokens is not None
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
@@ -3190,8 +3196,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             logits=logits,
                             sampling_metadata=sampling_metadata,
                         )
-                    # Note: speculative decoding, multi-step and delayed sampling
-                    # are not supported for this logic
                     if need_send_kv and self.use_prefill_output:
                         self.send_prefill_output(sampling_metadata, output)
                     if num_steps > 1:
