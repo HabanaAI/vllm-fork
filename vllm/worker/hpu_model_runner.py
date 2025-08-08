@@ -1391,7 +1391,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, img_args=None):
+    def _use_graphs(self):
         return not self.enforce_eager
 
     def _is_valid_bucket(self, bucket):
@@ -3748,7 +3748,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            img_args = self._get_img_args_from_model_input(model_input)
             use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)

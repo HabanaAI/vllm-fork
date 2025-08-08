@@ -598,9 +598,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                     self.vision_tower,
                     batch_sliced_pixel_values
                 )
-                image_embeds_multibatches += \
-                            [self.multi_modal_projector(
-                                batch_sliced_image_features)]
+                image_embeds = self.multi_modal_projector(batch_sliced_image_features)
+                image_embeds_multibatches += [image_embeds.clone()]
                 start_idx = end_idx
 
             if padding_need:
