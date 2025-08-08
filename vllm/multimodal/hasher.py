@@ -3,7 +3,7 @@
 
 import pickle
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 import torch
