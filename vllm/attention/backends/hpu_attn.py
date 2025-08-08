@@ -393,8 +393,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         HPUFusedSDPA = kernels.fsdpa()
         self.fused_scaled_dot_product_attention = None if HPUFusedSDPA is None \
             else ModuleFusedSDPA(HPUFusedSDPA)
-        # self.block_softmax_max_const = BlockSoftmaxConstMax()
-        self.block_softmax_max_const = None
+        self.block_softmax_max_const = BlockSoftmaxConstMax()
         self.prefill_impl = get_config().prompt_attn_impl
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
