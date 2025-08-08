@@ -38,18 +38,23 @@ class MooncakeStoreConfig:
         """Load the config from a JSON file."""
         with open(file_path) as fin:
             config = json.load(fin)
-        rank_id = torch.distributed.get_rank()
-        rank_id = rank_id % 8
 
         device_names = config.get("device_name")
         if isinstance(device_names, str):
-            device_names = [device_names]
-        elif not isinstance(device_names, list):
+            device = device_names
+        elif isinstance(device_names, list):
+            rank_id = torch.distributed.get_rank()
+            rank_id = rank_id % 8
+            device_name_count = len(device_names)
+            if rank_id >= device_name_count:
+                raise ValueError(f"Expect {rank_id + 1} device names, "
+                                 f"but got {device_name_count}")
+            device = device_names[rank_id]
+        else:
             raise ValueError(
                 f"device_name must be a string or list of strings, "
                 f"but got {type(device_names)}"
             )
-        device = device_names[rank_id]
 
         return MooncakeStoreConfig(
             local_hostname=config.get("local_hostname"),
