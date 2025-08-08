@@ -6,22 +6,26 @@ import os
 
 
 import argparse
+import shutil
 
 
 def copy_other_files(input_path, output_path):
-    import shutil
+    for root, dirs, files in os.walk(input_path):
+        rel_dir = os.path.relpath(root, input_path)
+        dest_dir = os.path.join(output_path, rel_dir)
+        os.makedirs(dest_dir, exist_ok=True)
 
-    for file in os.listdir(input_path):
-        if file.endswith(".json") or file.endswith(".py"):
-            print(f"copying {file} to {output_path}")
-            shutil.copyfile(
-                os.path.join(input_path, file),
-                os.path.join(output_path, file),
-            )
+        for file in files:
+            if file.endswith(".safetensors"):
+                continue
+            src_file = os.path.join(root, file)
+            dst_file = os.path.join(dest_dir, file)
+            print(f"Copying file {src_file} to {dst_file}")
+            shutil.copyfile(src_file, dst_file)
 
 
 def convert_files(input_path, output_path):
-    all_safetensors = glob(f"{input_path}/*.safetensors")
+    all_safetensors = glob(f"{input_path}/**/*.safetensors", recursive=True)  # recursive glob
     # sort by file name
     all_safetensors.sort()
     for safetensors_path in all_safetensors:
@@ -44,11 +48,13 @@ def convert_files(input_path, output_path):
                         # "scale_inv" in deepseek-r1 is actually "scale"
                         tensor = tensor.float() * 448.0 / 240.0
                     else:
-                        raise NotImplementedError(f"Cannot covert {k}")
+                        raise NotImplementedError(f"Cannot convert {k}")
                 else:
                     print(f"skip {k}.")
                 tensors[k] = tensor
-        new_tensor_path = safetensors_path.replace(input_path, output_path)
+        rel_path = os.path.relpath(safetensors_path, input_path)
+        new_tensor_path = os.path.join(output_path, rel_path)
+        os.makedirs(os.path.dirname(new_tensor_path), exist_ok=True)
         print(f"saving to {new_tensor_path}")
         save_file(tensors, new_tensor_path)
 
@@ -70,8 +76,8 @@ if __name__ == "__main__":
         help="Path to the output directory.",
     )
     args = parser.parse_args()
-    input_path = args.input_path
-    output_path = args.output_path
+    input_path = os.path.normpath(args.input_path)
+    output_path = os.path.normpath(args.output_path)
 
     # create output directory if it does not exist
     if not os.path.exists(output_path):
