@@ -588,9 +588,9 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                     batch_sliced_pixel_values,
                 )
                 #print("Input to MultiModal: ", image_features.shape)
-                image_embeds_multibatches += \
-                            [self.multi_modal_projector(
-                                image_features)]
+                image_embeds = self.multi_modal_projector(
+                                image_features)
+                image_embeds_multibatches += [image_embeds.clone()]
                 start_idx = end_idx
             image_embeds = torch.cat(image_embeds_multibatches, dim=0)
         else:
