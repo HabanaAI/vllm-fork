@@ -591,8 +591,6 @@ class DynamicNTKAlphaRotaryEmbedding(RotaryEmbedding):
         cos = freqs.cos()
         sin = freqs.sin()
         cache = torch.cat((cos, sin), dim=-1)
-#        cache = cache.to(dtype=self.dtype)  # ensure correct dtype
-#        cache = cache.contiguous()  # ensure contiguous memory
         return cache
 
 
