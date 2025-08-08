@@ -431,9 +431,9 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
-        if is_hpu:
-            import habana_frameworks.torch as htorch
-            htorch.core.mark_step()
+        # if is_hpu:
+        #     import habana_frameworks.torch as htorch
+        #     htorch.core.mark_step()
 
         aux_hidden_states = []
         for idx, layer in enumerate(
