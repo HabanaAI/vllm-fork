@@ -180,6 +180,10 @@ _TEXT_GENERATION_EXAMPLE_MODELS = {
     "GraniteMoeSharedForCausalLM": _HfExamplesInfo("ibm-research/moe-7b-1b-active-shared-experts"),  # noqa: E501
     "Grok1ModelForCausalLM": _HfExamplesInfo("hpcai-tech/grok-1",
                                              trust_remote_code=True),
+    "HunYuanMoEV1ForCausalLM": _HfExamplesInfo("tencent/Hunyuan-A13B-Instruct",
+                                               trust_remote_code=True),
+    "HunYuanDenseV1ForCausalLM":_HfExamplesInfo("tencent/Hunyuan-7B-Instruct-0124",
+                                                trust_remote_code=True),
     "InternLMForCausalLM": _HfExamplesInfo("internlm/internlm-chat-7b",
                                            trust_remote_code=True),
     "InternLM2ForCausalLM": _HfExamplesInfo("internlm/internlm2-chat-7b",
