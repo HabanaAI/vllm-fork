@@ -1,0 +1,542 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from collections.abc import Iterable
+from typing import Optional
+
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
+from torch import nn
+
+from vllm import envs
+from vllm.compilation.decorators import support_torch_compile
+from vllm.config import CacheConfig, VllmConfig
+from vllm.distributed import (
+    get_ep_group,
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+)
+from vllm.model_executor.layers.fused_moe import FusedMoE
+from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.linear import QKVParallelLinear, RowParallelLinear
+from vllm.model_executor.layers.logits_processor import LogitsProcessor
+from vllm.model_executor.layers.quantization import QuantizationConfig
+from vllm.model_executor.layers.rotary_embedding import get_rope
+from vllm.model_executor.layers.vocab_parallel_embedding import (
+    ParallelLMHead,
+    VocabParallelEmbedding,
+)
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.platforms import current_platform
+from vllm.sequence import IntermediateTensors
+from vllm.transformers_utils.configs.gpt_oss import GptOssConfig
+from vllm.utils import hpu_device_string
+from vllm.utils import cdiv
+
+from .utils import extract_layer_index, maybe_prefix
+
+
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(
+        batch, num_key_value_heads, n_rep, slen, head_dim
+    )
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
+
+def eager_attention_forward(
+    module: nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: Optional[torch.Tensor],
+    scaling: float,
+    dropout: float = 0.0,
+    **kwargs,
+):
+    key_states = repeat_kv(key, module.num_key_value_groups)
+    value_states = repeat_kv(value, module.num_key_value_groups)
+    attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
+    if attention_mask is not None:
+        causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+        attn_weights = attn_weights + causal_mask
+
+    sinks = module.sinks.reshape(1, -1, 1, 1).expand(
+        query.shape[0], -1, query.shape[-2], -1
+    )
+    combined_logits = torch.cat([attn_weights, sinks], dim=-1)
+
+    # This was not in the original implementation and slightly affect results; it prevents overflow in BF16/FP16
+    # when training with bsz>1 we clamp max values.
+
+    combined_logits = combined_logits - combined_logits.max(dim=-1, keepdim=True).values
+    probs = F.softmax(combined_logits, dim=-1, dtype=combined_logits.dtype)
+    scores = probs[..., :-1]  # we drop the sink here
+    attn_weights = nn.functional.dropout(scores, p=dropout, training=module.training)
+    attn_output = torch.matmul(attn_weights, value_states)
+    attn_output = attn_output.transpose(1, 2).contiguous()
+    return attn_output, attn_weights
+
+
+class OAIAttention(nn.Module):
+
+    def __init__(
+        self,
+        config: GptOssConfig,
+        quant_config: Optional[QuantizationConfig] = None,
+        cache_config: Optional[CacheConfig] = None,
+        prefix: str = "",
+    ):
+        super().__init__()
+        self.layer_idx = extract_layer_index(prefix)
+        self.head_dim = config.head_dim
+        self.num_attention_heads = config.num_attention_heads
+        self.num_key_value_heads = config.num_key_value_heads
+        self.hidden_size = config.hidden_size
+
+        self.rotary_emb = get_rope(
+            self.head_dim,
+            rotary_dim=self.head_dim,
+            max_position=config.max_position_embeddings,
+            base=config.rope_theta,
+            dtype=torch.float32,
+            rope_scaling={
+                "rope_type": "yarn",
+                "factor": config.rope_scaling["factor"],
+                "original_max_position_embeddings": config.rope_scaling[
+                    "original_max_position_embeddings"
+                ],
+                "beta_fast": config.rope_scaling["beta_fast"],
+                "beta_slow": config.rope_scaling["beta_slow"],
+            },
+            is_neox_style=True,
+        )
+
+        tp_size = get_tensor_model_parallel_world_size()
+
+        # Initialize attention sinks with default dtype
+        self.sinks = torch.nn.Parameter(
+            torch.empty(
+                config.num_attention_heads // tp_size,
+                dtype=torch.bfloat16,
+                requires_grad=False,
+            )
+        )
+
+        self.norm = RMSNorm(config.hidden_size, eps=1e-5)
+
+        self.q_size = self.num_attention_heads * self.head_dim // tp_size
+        self.kv_size = self.num_key_value_heads * self.head_dim // tp_size
+        self.scaling = self.head_dim**-0.5
+        self.rope_theta = config.rope_theta
+
+        self.qkv = QKVParallelLinear(
+            hidden_size=self.hidden_size,
+            head_size=self.head_dim,
+            total_num_heads=self.num_attention_heads,
+            total_num_kv_heads=self.num_key_value_heads,
+            quant_config=quant_config,
+            prefix=f"{prefix}.qkv_proj",
+        )
+
+        self.o_proj = RowParallelLinear(
+            input_size=self.num_attention_heads * self.head_dim,
+            output_size=self.hidden_size,
+            quant_config=quant_config,
+            prefix=f"{prefix}.o_proj",
+        )
+
+        self.num_local_attention_heads = config.num_attention_heads // tp_size
+        self.num_local_key_value_heads = config.num_key_value_heads // tp_size
+        self.num_key_value_groups = (
+            self.num_local_attention_heads // self.num_local_key_value_heads
+        )
+
+    def forward(
+        self, hidden_states: torch.Tensor, positions: torch.Tensor
+    ) -> torch.Tensor:
+        t = self.norm(hidden_states)
+
+        qkv, _ = self.qkv(t)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        q, k = self.rotary_emb(positions, q, k)
+        q = q.to(torch.bfloat16)
+        k = k.to(torch.bfloat16)
+        v = v.contiguous()
+
+        # Reshape for attention computation
+        batch_size, seq_len = hidden_states.shape[:2]
+        q = q.view(
+            batch_size, seq_len, self.num_local_attention_heads, self.head_dim
+        ).transpose(1, 2)
+        k = k.view(
+            batch_size, seq_len, self.num_local_key_value_heads, self.head_dim
+        ).transpose(1, 2)
+        v = v.view(
+            batch_size, seq_len, self.num_local_key_value_heads, self.head_dim
+        ).transpose(1, 2)
+
+        # Use eager attention forward
+        attn_output, _ = eager_attention_forward(
+            module=self,
+            query=q,
+            key=k,
+            value=v,
+            attention_mask=None,  # You may need to pass proper mask based on your use case
+            scaling=self.scaling,
+            dropout=0.0,
+        )
+
+        # Reshape back
+        attn_output = (
+            attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
+        )
+        output, _ = self.o_proj(attn_output)
+
+        return output + hidden_states
+
+
+class MLPBlock(torch.nn.Module):
+
+    def __init__(
+        self,
+        config: GptOssConfig,
+        layer_idx: int,
+        quant_config: QuantizationConfig,
+        prefix: str = "",
+    ):
+        super().__init__()
+        self.layer_idx = layer_idx
+        self.num_experts = config.num_local_experts
+        self.experts_per_token = config.num_experts_per_tok
+        self.world_size = dist.get_world_size() if dist.is_initialized() else 1
+        self.norm = RMSNorm(config.hidden_size, eps=1e-5)
+        self.router = torch.nn.Linear(
+            config.hidden_size, config.num_local_experts, dtype=torch.bfloat16
+        )
+        assert config.intermediate_size % self.world_size == 0
+        self.experts = FusedMoE(
+            num_experts=config.num_local_experts,
+            top_k=config.num_experts_per_tok,
+            hidden_size=config.hidden_size,
+            intermediate_size=config.intermediate_size,
+            reduce_results=True,
+            renormalize=True,
+            quant_config=quant_config,
+            prefix=f"{prefix}.experts",
+            apply_router_weight_on_input=False,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        t = self.norm(x)
+        g = self.router(t)
+        t = self.experts(hidden_states=t, router_logits=g)
+        return x + t
+
+
+class TransformerBlock(torch.nn.Module):
+
+    def __init__(
+        self,
+        config: GptOssConfig,
+        quant_config: QuantizationConfig,
+        prefix: str = "",
+    ):
+        super().__init__()
+        self.layer_idx = extract_layer_index(prefix)
+        self.attn = OAIAttention(config, prefix=f"{prefix}.attn")
+        self.mlp = MLPBlock(
+            config, self.layer_idx, quant_config=quant_config, prefix=f"{prefix}.mlp"
+        )
+
+    def forward(
+        self, hidden_states: torch.Tensor, positions: torch.Tensor
+    ) -> torch.Tensor:
+        attn_output = self.attn(hidden_states, positions)
+        output = self.mlp(attn_output)
+        return output
+
+
+@support_torch_compile
+class GptOssModel(nn.Module):
+
+    def __init__(
+        self,
+        *,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+    ):
+        super().__init__()
+        self.config = vllm_config.model_config.hf_config
+        self.quant_config = vllm_config.quant_config
+        self.config.hidden_size = self.config.hidden_size
+        self.embedding = VocabParallelEmbedding(
+            self.config.vocab_size,
+            self.config.hidden_size,
+        )
+        self.layers = torch.nn.ModuleList(
+            [
+                TransformerBlock(
+                    self.config,
+                    quant_config=self.quant_config,
+                    prefix=maybe_prefix(prefix, f"block.{layer_idx}"),
+                )
+                for layer_idx in range(self.config.num_hidden_layers)
+            ]
+        )
+        self.norm = RMSNorm(self.config.hidden_size, eps=1e-5)
+
+    def forward(self, input_ids: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        x = self.embedding(input_ids)
+        for layer in self.layers:
+            x = layer(x, positions)
+        x = self.norm(x)
+        return x
+
+
+class GptOssForCausalLM(nn.Module):
+
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        prefix: str = "",
+    ):
+        super().__init__()
+        self.vllm_config = vllm_config
+        self.model_config = vllm_config.model_config.hf_config
+        self.model = GptOssModel(
+            vllm_config=vllm_config,
+            prefix=maybe_prefix(prefix, "model"),
+        )
+        self.lm_head = ParallelLMHead(
+            self.model_config.vocab_size,
+            self.model_config.hidden_size,
+        )
+        self.logits_processor = LogitsProcessor(self.model_config.vocab_size)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        assert intermediate_tensors is None
+        assert inputs_embeds is None
+        return self.model(input_ids, positions)
+
+    def compute_logits(
+        self, hidden_states: torch.Tensor, sampling_metadata: SamplingMetadata
+    ) -> torch.Tensor:
+        logits = self.logits_processor(self.lm_head, hidden_states, sampling_metadata)
+        return logits
+
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        rename_mapping = {
+            "self_attn": "attn",
+            "input_layernorm.weight": "attn.norm.weight",
+            "post_attention_layernorm.weight": "mlp.norm.weight",
+            "embed_tokens": "embedding",
+        }
+
+        def maybe_rename(name: str) -> str:
+            for remap_name, new_name in rename_mapping.items():
+                if remap_name in name:
+                    return name.replace(remap_name, new_name)
+            return name
+
+        params_dict = dict(self.named_parameters())
+        loaded_params: set[str] = set()
+        mxfp4_block = 32
+
+        tp_rank = get_tensor_model_parallel_rank()
+        tp_size = get_tensor_model_parallel_world_size()
+        intermediate_size = self.model_config.intermediate_size
+        intermediate_size_block = intermediate_size // mxfp4_block
+        per_rank_intermediate_size_block = cdiv(intermediate_size_block, tp_size)
+        per_rank_intermediate_size = per_rank_intermediate_size_block * mxfp4_block
+
+        # Calculate common slicing bounds for current rank
+        tp_rank_start = tp_rank * per_rank_intermediate_size
+        tp_rank_end = min((tp_rank + 1) * per_rank_intermediate_size, intermediate_size)
+
+        # Attention heads per rank
+        heads_per_rank = self.model_config.num_attention_heads // tp_size
+        head_start = tp_rank * heads_per_rank
+
+        use_ep = self.vllm_config.parallel_config.enable_expert_parallel
+        ep_size = get_ep_group().world_size
+        ep_rank = get_ep_group().rank
+        num_experts = self.model_config.num_local_experts
+        experts_per_rank = num_experts // ep_size
+        ep_rank_start = ep_rank * experts_per_rank
+        ep_rank_end = (ep_rank + 1) * experts_per_rank
+
+        for name, weight in weights:
+            if current_platform.is_hpu():
+                device = hpu_device_string()
+                weight = weight.to(device)
+            else:
+                weight = weight.cuda()
+
+            if "gate_up_proj" in name and not "gate_up_proj_bias" in name:
+                # Handle MLP gate and up projection weights
+                new_name = name.replace("gate_up_proj", "w13_weight")
+
+                # flat weight from (E, 2 * N, block_size, entry_per_block)
+                # to (E, 2 * N, -1), shouldn't trigger copy for contiguous
+                weight = weight.view(
+                    num_experts, 2 * intermediate_size, -1
+                ).contiguous()
+
+                # Extract gate and up projection parts
+                # since the weight is shuffled, we can slice directly
+                if use_ep:
+                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    narrow_weight = weight[:, 2 * tp_rank_start : 2 * tp_rank_end, ...]
+
+                param = params_dict[new_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=new_name,
+                    shard_id="w1",
+                    expert_id=None,
+                )
+                loaded_params.add(new_name)
+
+            elif "down_proj" in name and not "down_proj_bias" in name:
+                # Handle MLP down projection weights
+                new_name = name.replace("down_proj", "w2_weight")
+                # same flatten here, but since 2 mx4 value are packed in 1
+                # uint8, divide by 2
+                weight = weight.view(num_experts, -1, intermediate_size).contiguous()
+                if use_ep:
+                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    narrow_weight = weight[..., tp_rank_start:tp_rank_end]
+
+                param = params_dict[new_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=new_name,
+                    shard_id="w2",
+                    expert_id=None,
+                )
+                loaded_params.add(new_name)
+
+            elif "gate_up_proj_scales" in name:
+                # Handle MLP gate and up projection weights scale
+                new_name = name.replace("gate_up_proj_scales", "w13_weight_scale")
+                if use_ep:
+                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    narrow_weight = weight[:, 2 * tp_rank_start : 2 * tp_rank_end, ...]
+
+                param = params_dict[new_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=new_name,
+                    shard_id=None,
+                    expert_id=None,
+                )
+                loaded_params.add(new_name)
+
+            elif "down_proj_scales" in name:
+                # Handle MLP down projection weights
+                new_name = name.replace("down_proj_scales", "w2_weight_scale")
+                if use_ep:
+                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    narrow_weight = weight[
+                        ..., tp_rank_start // mxfp4_block : tp_rank_end // mxfp4_block
+                    ]
+
+                param = params_dict[new_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=new_name,
+                    shard_id=None,
+                    expert_id=None,
+                )
+                loaded_params.add(new_name)
+            elif "gate_up_proj_bias" in name:
+                continue
+                # Handle MLP gate and up projection biases
+                new_name = name.replace("gate_up_proj_bias", "w13_bias")
+
+                # Extract gate and up projection bias parts
+                if use_ep:
+                    narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    narrow_weight = weight[:, 2 * tp_rank_start : 2 * tp_rank_end]
+
+                param = params_dict[new_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=new_name,
+                    shard_id=None,
+                    expert_id=None,
+                )
+                loaded_params.add(new_name)
+
+            elif "down_proj_bias" in name:
+                continue  # Skip loading extra bias for GPTQ models
+                # Handle MLP down projection bias
+                new_name = name.replace("down_proj_bias", "w2_bias")
+                param = params_dict[new_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                if use_ep:
+                    weight = weight[ep_rank_start:ep_rank_end, ...]
+                else:
+                    # (only load on rank 0 to avoid duplication)
+                    if tp_rank != 0:
+                        weight.zero_()
+                weight_loader(
+                    param, weight, weight_name=new_name, shard_id=None, expert_id=None
+                )
+                loaded_params.add(new_name)
+            elif "sinks" in name:
+                # Handle attention sinks (distributed across ranks)
+                name = name.replace("self_attn", "attn")
+                param = params_dict[name]
+                narrow_weight = weight.narrow(0, head_start, heads_per_rank)
+                param.data.copy_(narrow_weight)
+                loaded_params.add(name)
+            elif "q_proj" in name or "k_proj" in name or "v_proj" in name:
+                shard_id = "q" if "q_proj" in name else "k" if "k_proj" in name else "v"
+                name = name.replace("self_attn", "attn")
+                param_name = name.replace(f"{shard_id}_proj", "qkv")
+                param = params_dict[param_name]
+                weight_loader = param.weight_loader
+                weight_loader(param, weight, loaded_shard_id=shard_id)
+                loaded_params.add(param_name)
+            else:
+                # Handle all other weights with potential renaming
+                renamed_name = maybe_rename(name)
+                if renamed_name not in params_dict:
+                    print(f"Warning: {renamed_name} not found in params_dict")
+                    continue
+                param = params_dict[renamed_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(param, weight)
+                loaded_params.add(renamed_name)
+
+        return loaded_params
