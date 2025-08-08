@@ -445,7 +445,6 @@ class Gemma3MultiModalProjector(nn.Module):
                                      stride=self.kernel_size)
 
     def forward(self, vision_outputs: torch.Tensor):
-        print("Gemma3MultiModalProjector: ", vision_outputs.shape)
         batch_size, _, seq_length = vision_outputs.shape
 
         reshaped_vision_outputs = vision_outputs.transpose(1, 2)
@@ -575,28 +574,25 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             start_idx = 0
             image_embeds_multibatches = []
 
-            #print("batch_breakdown: ", batch_breakdown)
             for i in batch_breakdown:
                 end_idx = start_idx + i
                 indices = torch.arange(start_idx, end_idx)
-                batch_sliced_pixel_values = torch.index_select(
-                    pixel_values, dim=0, index=indices)
+                batch_sliced_pixel_values = torch.index_select(pixel_values,
+                                                               dim=0,
+                                                               index=indices)
 
-                #print("Input to VisionTower:", batch_sliced_pixel_values.shape)
                 image_features = self._image_pixels_to_features(
                     self.vision_tower,
                     batch_sliced_pixel_values,
                 )
-                #print("Input to MultiModal: ", image_features.shape)
-                image_embeds = self.multi_modal_projector(
-                                image_features)
+                image_embeds = self.multi_modal_projector(image_features)
                 image_embeds_multibatches += [image_embeds.clone()]
                 start_idx = end_idx
             image_embeds = torch.cat(image_embeds_multibatches, dim=0)
         else:
             image_features = self._image_pixels_to_features(
-                    self.vision_tower,
-                    pixel_values,
+                self.vision_tower,
+                pixel_values,
             )
             image_embeds = self.multi_modal_projector(image_features)
         return [

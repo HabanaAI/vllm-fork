@@ -628,7 +628,7 @@ class HpuModelAdapter(torch.nn.Module):
         # attn_metadata, so we can reuse HPU graph without running
         # the whole vision tower.
         if vision_embeddings is not None or (
-            warmup_mode &  kwargs['attn_metadata'].is_prompt):
+                warmup_mode & kwargs['attn_metadata'].is_prompt):
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
             kwargs = self.model.prepare_attn_masks(
@@ -642,10 +642,11 @@ class HpuModelAdapter(torch.nn.Module):
         # done compute the visual tokens and others
         kwargs.pop('pixel_values', None)
         kwargs.pop("num_crops", None)
-        kwargs.pop("graphed_multimodal_buckets",None)
+        kwargs.pop("graphed_multimodal_buckets", None)
         return kwargs
 
-    def compute_input_embeddings_for_mrope_mm_optimized(self, warmup_mode, **kwargs):
+    def compute_input_embeddings_for_mrope_mm_optimized(
+            self, warmup_mode, **kwargs):
 
         if 'inputs_embeds' in kwargs:
             return kwargs
@@ -685,7 +686,7 @@ class HpuModelAdapter(torch.nn.Module):
                 return kwargs
             else:
                 return self.compute_input_embeddings_for_mm_optimized(
-                    warmup_mode,**kwargs)
+                    warmup_mode, **kwargs)
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
@@ -1391,7 +1392,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self, img_args=None):
+    def _use_graphs(self):
         return not self.enforce_eager
 
     def _is_valid_bucket(self, bucket):
@@ -2656,8 +2657,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
-                                                    lora_request,
-                                                    seq_len):
+                                                    lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
@@ -2703,7 +2703,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         image_token_id = self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
-        prompt_token_ids = [0] * (seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
+        prompt_token_ids = [0] * (
+            seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
             'image':
@@ -3746,7 +3747,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            img_args = self._get_img_args_from_model_input(model_input)
             use_graphs = self._use_graphs()
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
@@ -3922,8 +3922,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
-                        if is_prompt:
-                            print(f"MODEL FORWARD: inputs {execute_model_kwargs['inputs_embeds'].shape}")
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.

@@ -476,7 +476,6 @@ class SiglipVisionModel(nn.Module):
         interpolate_pos_encoding: bool = False,
         feature_sample_layers: Optional[list[int]] = None,
     ) -> torch.Tensor:
-        print("Gemma3VisionTower : ", pixel_values.shape)
         return self.vision_model(
             pixel_values=pixel_values,
             interpolate_pos_encoding=interpolate_pos_encoding,
