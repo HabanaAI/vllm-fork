@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     VLLM_DP_MASTER_IP: str = ""
     VLLM_DP_MASTER_PORT: int = 0
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
+    VLLM_USE_PREFILL_OUTPUT: bool = False
 
 
 def get_default_cache_root():
@@ -625,6 +626,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: bool(int(os.getenv("VLLM_PP_USE_CPU_COMS", "0"))),
     "VLLM_USE_ASYNC_TRANSFER_IN_PD":
     lambda: bool(int(os.getenv("VLLM_USE_ASYNC_TRANSFER_IN_PD", "0"))),
+    "VLLM_USE_PREFILL_OUTPUT":
+    lambda: bool(int(os.getenv("VLLM_USE_PREFILL_OUTPUT", "0"))),
 }
 
 # end-env-vars-definition

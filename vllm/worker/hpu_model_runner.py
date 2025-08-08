@@ -797,6 +797,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_workers=1)
         self.use_async_kv_transfer_in_pd = envs.VLLM_USE_ASYNC_TRANSFER_IN_PD
         logger.info("will use async pd: %s", self.use_async_kv_transfer_in_pd)
+        self.use_prefill_output = envs.VLLM_USE_PREFILL_OUTPUT
+        logger.info("will use prefill output: %s", self.use_prefill_output)
 
     def _set_gc_threshold(self) -> None:
         """
@@ -2695,6 +2697,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         assert not (use_delayed_sampling and
             self.parallel_config.pipeline_parallel_size != 1), \
             'Delayed sampling is not compatible with Pipeline Parallelism!'
+        assert not (self.use_prefill_output and num_steps != 1), \
+            'Use prefill output is not compatible with MSS!'
+        assert not (self.use_prefill_output and use_delayed_sampling), \
+            'Use prefill output is not compatible with Delayed sampling!'
+        assert not (self.use_prefill_output and self.return_hidden_states), \
+            'Use prefill output is not compatible with speculative decoding!'
         assert model_input.input_tokens is not None
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
@@ -2864,7 +2872,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # received KV caches
                 # NOTE: The receive operation is blocking
                 bypass_model_exec = False
-                if self.need_recv_kv(model_input, kv_caches, warmup_mode):
+                need_recv_kv = self.need_recv_kv(model_input, kv_caches,
+                                                 warmup_mode)
+                if need_recv_kv:
                     # we assume kv cache is recved and put into the dict!
                     def tensor_hash(tensor: torch.Tensor) -> int:
                         """Calculate the hash value of the tensor."""
@@ -3008,7 +3018,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # Sending KV cache in distributed KV cache transfer setting
                 # NOTE: the send operation is non-blocking
 
-                if self.need_send_kv(model_input, kv_caches, warmup_mode):
+                need_send_kv = self.need_send_kv(model_input, kv_caches,
+                                                 warmup_mode)
+                if need_send_kv:
                     cur_time = time.time()
 
                     def sync_send_kv_caches(hidden_states):
@@ -3173,10 +3185,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                      f'bs{batch_size}_'
                                      f'seq{seq_len}'),
                         args=profiler_args):
-                    output = self.model.sample(
-                        logits=logits,
-                        sampling_metadata=sampling_metadata,
-                    )
+                    # Receive the output from prefill if needed
+                    bypass_sampling = False
+                    if need_recv_kv and self.use_prefill_output:
+                        output = self.recv_prefill_output(sampling_metadata)
+                        if output is not None:
+                            bypass_sampling = True
+                    if not bypass_sampling:
+                        output = self.model.sample(
+                            logits=logits,
+                            sampling_metadata=sampling_metadata,
+                        )
+                    if need_send_kv and self.use_prefill_output:
+                        self.send_prefill_output(sampling_metadata, output)
                     if num_steps > 1:
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
@@ -3390,3 +3411,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_data.output_token_ids_array[-1] = real_out
             seq_data._cached_all_token_ids[-1] = real_out
         self.has_patched_prev_output = True
+
+    def send_prefill_output(self, sampling_metadata, output):
+        get_kv_transfer_group().send_sampler_output(sampling_metadata, output)
+
+    def recv_prefill_output(self, sampling_metadata):
+        # Since the output is small we do a sync receive
+        return get_kv_transfer_group().recv_sampler_output(sampling_metadata)
