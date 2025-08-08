@@ -106,7 +106,7 @@ from vllm.version import __version__ as VLLM_VERSION
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
-if os.environ.get('VLLM_ENABLE_ASYNC_MM_PREPROCESS') == '1':
+if os.getenv("VLLM_ENABLE_ASYNC_MM_PREPROCESS", "0") == "1":
     multiprocessing.set_start_method("spawn", force=True)
 
 prometheus_multiproc_dir: tempfile.TemporaryDirectory
