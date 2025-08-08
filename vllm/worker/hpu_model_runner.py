@@ -2411,9 +2411,26 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             lora_requests = decode_lora_requests
             lora_ids = decode_lora_ids
 
+        if self.lora_config:
+            lora_mapping = LoRAMapping(
+                **dict(index_mapping=lora_index_mapping,
+                       prompt_mapping=lora_prompt_mapping,
+                       is_prefill=(num_prefills > 0)))
+        else:
+            lora_mapping = None
+
+        if (prefill_attn_metadata is not None
+                and decode_attn_metadata is not None):
+            batch_type = BatchType.MIXED
+            raise NotImplementedError("Mixed batch is not supported on HPU")
+        elif prefill_attn_metadata is not None:
+            batch_type = BatchType.PREFILL
+        else:
+            batch_type = BatchType.DECODE
+
         if self.is_pooler:
             sampling_metadata = None
-        elif not self.use_merged_prefill:
+        elif not self.use_merged_prefill and batch_type != BatchType.DECODE:
             # FIXME: We need to adjust selected_token_indices to accommodate
             # for padding
             max_len = input_tokens.size(1)
@@ -2434,23 +2451,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 dtype=sampling_metadata.selected_token_indices.dtype,
                 device=sampling_metadata.selected_token_indices.device)
             sampling_metadata.selected_token_indices.add_(paddings)
-
-        if self.lora_config:
-            lora_mapping = LoRAMapping(
-                **dict(index_mapping=lora_index_mapping,
-                       prompt_mapping=lora_prompt_mapping,
-                       is_prefill=(num_prefills > 0)))
-        else:
-            lora_mapping = None
-
-        if (prefill_attn_metadata is not None
-                and decode_attn_metadata is not None):
-            batch_type = BatchType.MIXED
-            raise NotImplementedError("Mixed batch is not supported on HPU")
-        elif prefill_attn_metadata is not None:
-            batch_type = BatchType.PREFILL
-        else:
-            batch_type = BatchType.DECODE
 
         metadata_dict = {
             "input_tokens": input_tokens,
