@@ -13,7 +13,7 @@ Help() {
     echo "options:"
     echo "w  Weights of the model, could be model id in huggingface or local path"
     echo "n  Number of HPU to use, [1-8], default=1"
-    echo "m  Module IDs of the HPUs to use, [0-7], default=None"
+    echo "m  Module IDs of the HPUs to use, comma separated int in [0-7], default=None"
     echo "u  URL of the server, str, default=127.0.0.1"
     echo "p  Port number for the server, int, default=30001"
     echo "d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'"
@@ -119,136 +119,33 @@ if [ "$input_min" == "$input_max" ]; then
     disable_zero_padding=true
 fi
 
-if [ "$num_hpu" -gt 1 ]; then
-    export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
-fi
 
-if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-    IFS="," read -r -a MODULES <<< "$module_ids"
-    # check if the length of module_ids is equal to num_hpu
-    if [ ${#MODULES[@]} -ne "$num_hpu" ]; then
-        echo "The number of module IDs should be equal to the number of HPUs."
-        exit
-    fi
-    export HABANA_VISIBLE_MODULES=$module_ids
-
-    # set up numactl based on module ids
-    set_numactl
-elif [ "$module_ids" == "None" ]; then
-    echo "No module IDs specified, skip numactl"
-    NUMA_CTL=""
-else
-    echo "The specified module IDs should be a comma-separated list of integers instead of $module_ids."
-    exit
-fi
 echo "Starting vllm server for ${model_name} from ${model_path} with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
 
-device=$(hl-smi -Q name -f csv | tail -n 1)
 case_name=serve_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_steps${scheduler_steps}_$(date +%F-%H-%M-%S)
 
-case "$dtype" in
-    "bfloat16" | "float16")
-        echo Running with dtype="$dtype" ;;
-    "fp8")
-        echo Running with dtype="$dtype"
-        export QUANT_CONFIG=quantization/${model_name}/maxabs_quant_g2.json
-        export PT_HPU_WEIGHT_SHARING=0
-        export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
-        QUANT_FLAGS=(--quantization inc --kv-cache-dtype fp8_inc)
-        if [[ "${model_name_lower}" == *"qwen3"* ]]; then
-            QUANT_FLAGS=(--quantization inc --weights-load-device cpu)
-        elif [[ $model_name_lower == *"deepseek-r1-distill-qwen-7b"* \
-            || $model_name_lower == *"qwen2-7b-instruct"* \
-            || $model_name_lower == *"qwen2.5-7b-instruct"* ]]; then
-            QUANT_FLAGS=(--quantization inc)
-        fi
-        dtype="bfloat16"
-        ;;
-    "awq")
-        echo Running with AWQ
-        QUANT_FLAGS=(--quantization awq_hpu)
-        dtype="bfloat16"
-        ;;
-    "gptq")
-        echo Running with GPTQ
-        QUANT_FLAGS=(--quantization gptq_hpu)
-        dtype="bfloat16"
-        ;;
-    *)
-        echo Invalid dtype: "$dtype"
-        exit
-        ;;
-esac
-
-if [ "$cache_path" != "" ]; then
-    echo "HPU recipe cache will be saved to $cache_path"
-    export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,4096
-    mkdir -p "${cache_path}"
-fi
-
-if [ "$skip_warmup" = "true" ]; then
-    echo "VLLM_SKIP_WARMUP is set to True"
-    export VLLM_SKIP_WARMUP=True
-fi
-
-if [ "$profile" = "true" ]; then
-    echo "VLLM_PROFILER_ENABLED is set to True"
-    export VLLM_PROFILER_ENABLED=True
-    export VLLM_PROFILE_FILE=${case_name}_profile.json
-fi
-
-if [ "$disable_zero_padding" = "true" ]; then
-    echo "VLLM_ZERO_PADDING is disabled"
-    export VLLM_ZERO_PADDING=false
-else
-    echo "VLLM_ZERO_PADDING is enabled"
-    export VLLM_ZERO_PADDING=true
-fi
-
-if [ "$disable_fsdpa" = "true" ]; then
-    echo "VLLM_PROMPT_USE_FUSEDSDPA is disabled"
-    export VLLM_PROMPT_USE_FUSEDSDPA=false
-else
-    echo "VLLM_PROMPT_USE_FUSEDSDPA is enabled"
-    export VLLM_PROMPT_USE_FUSEDSDPA=true
-fi
-
-
-# set up environment variables
-set_env
-
-# set up bucketing based on input/output range and max_num_batched_tokens
-set_bucketing
-
-gpu_memory_utilization=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
-max_seq_len_to_capture=${VLLM_MAX_SEQ_LEN_TO_CAPTURE:-"8192"}
-
-if [[ "$model_name_lower" == *"llama-4-scout-17b-16e-instruct"* ]]; then
-    # disable expert parallel for Llama-4-Scout-17B-16E-Instruct
-    ENABLE_EXPERT_PARALLEL=""
-else
-    ENABLE_EXPERT_PARALLEL="--enable-expert-parallel"
-fi
+set_config
 
 ${NUMA_CTL} \
-python3 -m vllm.entrypoints.openai.api_server \
+echo python3 -m vllm.entrypoints.openai.api_server \
     --host "${host}" --port "${port}" \
     --device hpu \
-    --model  "${model_path}" \
+    --dtype "${dtype}" \
+    "${QUANT_ARGS[@]}" \
+    --model "${model_path}" \
     --trust-remote-code \
     --tensor-parallel-size "${num_hpu}" \
     ${ENABLE_EXPERT_PARALLEL} \
-    --dtype "${dtype}" \
-    "${QUANT_FLAGS[@]}" \
+    --seed 0 \
     --block-size "${block_size}" \
-    --max-num-seqs "$max_num_seqs" \
-    --max-num-batched-tokens "$max_num_batched_tokens" \
-    --max-model-len "$max_model_len" \
-    --max-seq-len-to-capture "$max_seq_len_to_capture" \
+    --max-num-seqs "${max_num_seqs}" \
+    --max-num-batched-tokens "${max_num_batched_tokens}" \
+    --max-model-len "${max_model_len}" \
+    --max-seq-len-to-capture "${max_seq_len_to_capture}" \
     --disable-log-requests \
     --use-v2-block-manager \
     --use-padding-aware-scheduling \
     --num-scheduler-steps "${scheduler_steps}" \
-    --distributed_executor_backend mp \
+    --distributed_executor_backend "${dist_backend}" \
     --gpu-memory-utilization "${gpu_memory_utilization}" \
-    |& tee "${case_name}".log
+    |& tee "${case_name}".log 2>&1
