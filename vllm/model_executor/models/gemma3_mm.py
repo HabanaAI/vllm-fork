@@ -571,8 +571,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
         if is_hpu:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
-                    self.vision_buckets.multimodal_buckets)
-            padding_need = len(batch_breakdown) == 1 
+                self.vision_buckets.multimodal_buckets)
+            padding_need = len(batch_breakdown) == 1 \
                 and batch_breakdown[0] > pixel_values.size(0)
             if padding_need:
                 bs_padded = batch_breakdown[0] - pixel_values.size(0)
