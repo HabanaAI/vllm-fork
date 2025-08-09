@@ -90,7 +90,12 @@ logger = init_logger(__name__)
 _TYPE_CACHE = {}
 # These values are assumed to be zero in several places.
 # Use caution when updating them!
-_PAD_SLOT_ID = 0
+
+# ON Gaudi3, The slot_id of zero-padding causes a performance issue, since 0 is
+# considered a valid index. We can set this value to -1 so that the kernel
+# ignores these indices. However, until all models are thoroughly tested,
+# we are keeping the default value as 0.
+_PAD_SLOT_ID = int(os.getenv('VLLM_PAD_SLOT_ID', '0'))
 _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
