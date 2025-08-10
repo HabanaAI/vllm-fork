@@ -78,7 +78,8 @@ class OpenAIServingChat(OpenAIServing):
         self.mm_preprocessor = mm_preprocessor
         # Create a semaphore to limit concurrent preprocessing tasks
         if self.mm_preprocessor:
-            max_concurrent_preproc = 16  # 32 failed, 64 failed
+            max_concurrent_preproc = int(
+                os.getenv("VLLM_MAX_CONCURRENT_PREPROC", "16"))  # 32 failed, 64 failed
             self.preprocessing_semaphore = asyncio.Semaphore(
                 max_concurrent_preproc)
         # set up tool use
