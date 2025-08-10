@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
 import asyncio
 import json
 import time
@@ -81,7 +82,9 @@ class OpenAIServingChat(OpenAIServing):
         self.mm_preprocessor = mm_preprocessor
         # Create a semaphore to limit concurrent preprocessing tasks
         if self.mm_preprocessor:
-            max_concurrent_preproc = 16  # 32 failed, 64 failed
+            max_concurrent_preproc = int(
+                os.getenv("VLLM_MAX_CONCURRENT_PREPROC", "16"))
+            logger.info(f"max_concurrent_preproc: {max_concurrent_preproc}")
             self.preprocessing_semaphore = asyncio.Semaphore(
                 max_concurrent_preproc)
         # set up tool use
