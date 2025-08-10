@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from collections.abc import Sequence as GenericSequence
@@ -79,7 +80,8 @@ class OpenAIServingChat(OpenAIServing):
         # Create a semaphore to limit concurrent preprocessing tasks
         if self.mm_preprocessor:
             max_concurrent_preproc = int(
-                os.getenv("VLLM_MAX_CONCURRENT_PREPROC", "16"))  # 32 failed, 64 failed
+                os.getenv("VLLM_MAX_CONCURRENT_PREPROC",
+                          "16"))  # 32 failed, 64 failed
             self.preprocessing_semaphore = asyncio.Semaphore(
                 max_concurrent_preproc)
         # set up tool use
