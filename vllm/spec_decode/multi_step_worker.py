@@ -77,12 +77,16 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # Perform a forward pass on the expanded batch and filter the
         # response to retain only the original sequences' responses.
         if accepted_token_id is not None:
+            from vllm.spec_decode.spec_decode_worker import (
+                get_delay_num_speculative_tokens)
 
             def bind_expand_fn_to_request(
                     execute_model_req, accepted_token_id,
                     seq_ids_with_bonus_token_in_last_step, expand_fn):
 
                 def expand():
+                    # TODO: support num_tokens>2
+                    num_tokens = get_delay_num_speculative_tokens()
                     if accepted_token_id is not None:
                         accepted_token_id_ = accepted_token_id.cpu()
                         for seq_index, sg in enumerate(
@@ -96,13 +100,13 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                                         seq_id)
                                 token1 = accepted_token_id_[seq_index][0]
                                 for seq in seq_data_iter:
-                                    seq.output_token_ids = seq.output_token_ids[:-2] + (
+                                    seq.output_token_ids = seq.output_token_ids[:-num_tokens] + (
                                         token1, )
                                     seq._num_computed_tokens -= 1
                             else:
                                 token2 = accepted_token_id_[seq_index][1]
                                 for seq in seq_data_iter:
-                                    seq.output_token_ids = seq.output_token_ids[:-2] + (
+                                    seq.output_token_ids = seq.output_token_ids[:-num_tokens] + (
                                         token1, token2)
                     return expand_fn(execute_model_req,
                                      seq_ids_with_bonus_token_in_last_step)

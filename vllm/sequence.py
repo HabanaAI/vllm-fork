@@ -1231,6 +1231,11 @@ class HiddenStates(msgspec.Struct, array_like=True,
 
     def __post_init__(self):
         if self.seq_group_metadata_list is not None:
+            from vllm.spec_decode.spec_decode_worker import (
+                is_delay_specdecode_enabled)
+            if not is_delay_specdecode_enabled():
+                assert len(self.seq_group_metadata_list) == len(
+                    self.hidden_states)
             self._seq_ids = get_all_seq_ids(self.seq_group_metadata_list)
 
     @property
