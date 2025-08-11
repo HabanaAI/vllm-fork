@@ -161,12 +161,12 @@ python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --max-num-seqs "${max_num_seqs}" \
     --max-num-batched-tokens "${max_num_batched_tokens}" \
     --max-model-len "${max_model_len}" \
-    --max-seq-len-to-capture "${max_seq_len_to_capture}" \
+    --max-seq-len-to-capture "${VLLM_MAX_SEQ_LEN_TO_CAPTURE}" \
     --num-prompts "${num_prompts}" \
     --save-results "${case_name}"_result.json \
     --use-v2-block-manager \
     --use-padding-aware-scheduling \
     --num-scheduler-steps "${scheduler_steps}" \
     --distributed_executor_backend "${dist_backend}" \
-    --gpu-memory-utilization "${gpu_memory_utilization}" \
+    --gpu-memory-utilization "${VLLM_GPU_MEMORY_UTILIZATION}" \
     |& tee "${case_name}".log 2>&1

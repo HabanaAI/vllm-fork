@@ -201,7 +201,7 @@ set_dtype(){
             fi
 
             echo Using "${kv_cache_dtype_arg[@]}" for $model_name
-            QUANT_ARGS=(--quantization inc "${kv_cache_dtype_arg[@]}" "${weights_load_device_arg[@]}")
+            QUANT_ARGS=(--quantization inc ${kv_cache_dtype_arg[@]} ${weights_load_device_arg[@]})
             dtype="bfloat16"
             ;;
         "awq")
