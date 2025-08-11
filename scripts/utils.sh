@@ -2,11 +2,17 @@
 
 # set -x
 
+# get device name
+device=$(hl-smi -Q name -f csv | tail -n 1)
+
 # set up common environment variables for vllm
-set_env(){
+set_common_env(){
     # pytorch bridge
     export PT_HPU_WEIGHT_SHARING=${PT_HPU_WEIGHT_SHARING:-"0"}
     export PT_HPU_LAZY_MODE=${PT_HPU_LAZY_MODE:-"1"}
+    if [ "$num_hpu" -gt 1 ]; then
+        export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
+    fi
 
     # memory usage tuning
     export VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
@@ -83,8 +89,7 @@ set_numactl(){
     CORES_STR=$(IFS="," ; echo "${CORES[*]}")
 
     NUMA_CTL="numactl -C $CORES_STR -m ${NODE_MEM[0]}"
-    MODULES_STR=$(IFS=',' ; echo "${MODULES[@]}")
-    echo "using '$NUMA_CTL' for module #.$MODULES_STR"
+    echo "using '$NUMA_CTL' for module id: $module_ids"
 }
 
 # set up bucketing based on input/output range and max_num_batched_tokens
@@ -139,4 +144,155 @@ set_bucketing(){
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
     export VLLM_DECODE_BLOCK_BUCKET_STEP=${VLLM_DECODE_BLOCK_BUCKET_STEP:-$decode_block_step}
     export VLLM_DECODE_BLOCK_BUCKET_MAX=${VLLM_DECODE_BLOCK_BUCKET_MAX:-$decode_block_max}
+}
+
+set_module_ids(){
+    if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        IFS="," read -r -a MODULES <<< "$module_ids"
+        # check if the length of module_ids is equal to num_hpu
+        if [ ${#MODULES[@]} -ne "$num_hpu" ]; then
+            echo "The number of module IDs should be equal to the number of HPUs."
+            exit
+        fi
+        export HABANA_VISIBLE_MODULES=$module_ids
+
+        # set up numactl based on module ids
+        set_numactl
+    elif [ "$module_ids" == "None" ]; then
+        echo "No module IDs specified, skip numactl"
+        NUMA_CTL=""
+    else
+        echo "The specified module IDs should be a comma-separated list of integers instead of $module_ids."
+        exit
+    fi
+}
+
+set_dtype(){
+    case "$dtype" in
+        "bfloat16" | "float16")
+            echo Running with dtype="$dtype" ;;
+        "fp8")
+            echo Running with dtype="$dtype"
+            export QUANT_CONFIG=${QUANT_CONFIG:-"$BASH_DIR/quantization/${model_name_lower}/maxabs_quant_g2.json"}
+            export PT_HPU_WEIGHT_SHARING=0
+            export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
+            kv_cache_dtype_arg=(--kv-cache-dtype fp8_inc)
+            weights_load_device_arg=""
+            if [[ "${model_name_lower}" == *"deepseek-r1-distill-llama-8b"* ]]; then
+                kv_cache_dtype_arg=(--kv-cache-dtype auto)
+            fi
+            if [[ "${model_name_lower}" == *"qwen3-235b-a22b"* ]]; then
+                kv_cache_dtype_arg=(--kv-cache-dtype auto)
+                weights_load_device_arg=(--weights-load-device cpu)
+            fi
+            if [[ "${model_name_lower}" == *"qwen3"* ]]; then
+                # qwen3 models that using fp8 attention and kv-cache
+                if [[ $model_name_lower == *"qwen3-32b"* \
+                    || $model_name_lower == *"qwen3-30b-a3b"* \
+                    ]]; then
+                    kv_cache_dtype_arg=(--kv-cache-dtype fp8_inc)
+                else
+                    kv_cache_dtype_arg=(--kv-cache-dtype auto)
+                fi
+            elif [[ $model_name_lower == *"deepseek-r1-distill-qwen-7b"* \
+                || $model_name_lower == *"qwen2-7b-instruct"* \
+                || $model_name_lower == *"qwen2.5-7b-instruct"* ]]; then
+                kv_cache_dtype_arg=(--kv-cache-dtype auto)
+            fi
+
+            echo Using "${kv_cache_dtype_arg[@]}" for $model_name
+            QUANT_ARGS=(--quantization inc ${kv_cache_dtype_arg[@]} ${weights_load_device_arg[@]})
+            dtype="bfloat16"
+            ;;
+        "awq")
+            echo Running with AWQ
+            QUANT_ARGS=(--quantization awq_hpu)
+            dtype="bfloat16"
+            ;;
+        "gptq")
+            echo Running with GPTQ
+            QUANT_ARGS=(--quantization gptq_hpu)
+            dtype="bfloat16"
+            ;;
+        *)
+            echo Invalid dtype: "$dtype"
+            exit
+            ;;
+    esac
+}
+
+set_perf_tuning(){
+    if [ "$cache_path" != "" ]; then
+        echo "HPU recipe cache will be saved to $cache_path"
+        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,4096
+        mkdir -p "${cache_path}"
+    fi
+
+    if [ "$skip_warmup" = "true" ]; then
+        echo "VLLM_SKIP_WARMUP is set to True"
+        export VLLM_SKIP_WARMUP=True
+    fi
+
+    if [ "$profile" = "true" ]; then
+        echo "VLLM_PROFILER_ENABLED is set to True"
+        export VLLM_PROFILER_ENABLED=True
+        export VLLM_PROFILE_FILE=${case_name}_profile.json
+    fi
+
+    if [ "$disable_zero_padding" = "true" ]; then
+        echo "VLLM_ZERO_PADDING is disabled"
+        export VLLM_ZERO_PADDING=false
+    else
+        echo "VLLM_ZERO_PADDING is enabled"
+        export VLLM_ZERO_PADDING=true
+    fi
+
+    if [ "$disable_fsdpa" = "true" ]; then
+        echo "VLLM_PROMPT_USE_FUSEDSDPA is disabled"
+        export VLLM_PROMPT_USE_FUSEDSDPA=false
+    else
+        echo "VLLM_PROMPT_USE_FUSEDSDPA is enabled"
+        export VLLM_PROMPT_USE_FUSEDSDPA=true
+    fi
+
+    # VLLM_FP32_SOFTMAX=true by default for model_type=qwen2* models.
+    # set VLLM_FP32_SOFTMAX=false for models without accuracy issue.
+    if [[ $model_name_lower == *"deepseek-r1-distill-qwen-14b"* \
+        || $model_name_lower == *"deepseek-r1-distill-qwen-32b"* \
+        || $model_name_lower == *"deepseek-r1-distill-llama-8b"* \
+        || $model_name_lower == *"deepseek-r1-distill-llama-70b"* \
+        || $model_name_lower == *"qwen3-8b"* \
+        || $model_name_lower == *"qwen3-14b"* \
+        || $model_name_lower == *"qwen3-32b"* \
+        || $model_name_lower == *"qwq-32b"* \
+        || $model_name_lower == *"qwen3-30b-a3b"* \
+        || $model_name_lower == *"qwen3-235b-a22b"* \
+        ]]; then
+        export VLLM_FP32_SOFTMAX=false
+        echo Set VLLM_FP32_SOFTMAX=false for $model_name
+    fi
+
+    VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
+    VLLM_MAX_SEQ_LEN_TO_CAPTURE=${VLLM_MAX_SEQ_LEN_TO_CAPTURE:-"8192"}
+
+    if [[ "$model_name_lower" == *"llama-4-scout-17b-16e-instruct"* ]]; then
+        # disable expert parallel for Llama-4-Scout-17B-16E-Instruct
+        ENABLE_EXPERT_PARALLEL=""
+    else
+        ENABLE_EXPERT_PARALLEL="--enable-expert-parallel"
+    fi
+
+    if [ "$num_hpu" -gt 8 ]; then
+        dist_backend="ray"
+    else
+        dist_backend="mp"
+    fi
+}
+
+set_config(){
+    set_module_ids
+    set_dtype
+    set_common_env
+    set_bucketing
+    set_perf_tuning
 }
