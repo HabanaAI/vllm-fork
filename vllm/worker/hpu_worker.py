@@ -212,7 +212,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 # set the HPU device using local_rank to maintain NUMA affinity.
                 torch.hpu.set_device(self.local_rank)
             else:
-                torch.hpu.set_device(self.device)
+                torch.hpu.set_device(self.local_rank)
         elif self.device_config.device_type == "cpu":
             self.device = torch.device("cpu")
         else:
