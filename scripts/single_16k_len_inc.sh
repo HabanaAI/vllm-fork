@@ -20,8 +20,6 @@ done
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 # source "$BASH_DIR"/utils.sh
 
-ray stop --force
-
 
 # DO NOT change unless you fully undersand its purpose
 export HABANA_VISIBLE_DEVICES="ALL"
@@ -73,6 +71,8 @@ export VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0
 export VLLM_REQUANT_FP8_INC=1
 export VLLM_ENABLE_RUNTIME_DEQUANT=1
 export VLLM_HPU_MARK_SCALES_AS_CONST=false
+export VLLM_LOGGING_LEVEL=DEBUG
+export PT_HPU_LAZY_MODE=1
 
 if $USE_NATIVE_SCALING; then
     echo "Using naive scaling"
