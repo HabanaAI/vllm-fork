@@ -127,7 +127,7 @@ case_name=serve_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out
 set_config
 
 ${NUMA_CTL} \
-echo python3 -m vllm.entrypoints.openai.api_server \
+python3 -m vllm.entrypoints.openai.api_server \
     --host "${host}" --port "${port}" \
     --device hpu \
     --dtype "${dtype}" \

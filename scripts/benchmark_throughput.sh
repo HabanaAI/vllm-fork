@@ -146,7 +146,7 @@ fi
 set_config
 
 ${NUMA_CTL} \
-echo python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
+python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --backend vllm \
     --device hpu \
     --dtype "${dtype}" \

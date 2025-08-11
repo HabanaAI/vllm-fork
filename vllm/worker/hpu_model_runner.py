@@ -3568,6 +3568,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_data = list(sg.seq_data.values())[0]
             # This is a hack. Assigning output_token_ids triggers
             # a cache recomputation and we only need to update the last token
-            seq_data.output_token_ids_array[-1] = real_out
-            seq_data._cached_all_token_ids[-1] = real_out
+            if seq_data.output_token_ids_array:
+                seq_data.output_token_ids_array[-1] = real_out
+            if seq_data._cached_all_token_ids:
+                seq_data._cached_all_token_ids[-1] = real_out
         self.has_patched_prev_output = True
