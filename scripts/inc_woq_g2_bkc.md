@@ -28,7 +28,17 @@ python ./scripts/convert_for_g2.py -i /path/to/official/model -o /path/to/conver
 
 This script 1) converts official model weights from `torch.float8_e4m3fn` format to `torch.float8_e4m3fnuz` format, and 2) copies other JSON and Python files into the target path.
 
-## 3. Benchmark
+## 3. Calibrate the Model
+To calibrate the model, navigate to the vllm-fork directory and run the calibration script:
+```bash
+cd vllm-fork
+bash scripts/run_inc_calib.sh --model /path/to/converted/model/
+```
+
+> [!TIP]
+> By default, the script uses 512 samples for calibration. To perform a quick smoke test, you can reduce the number of samples to 16 by adding the `--prompts 16`.
+
+## 4. Benchmark
 
 > [!NOTE]
 > For INC WoQ requantization, make sure to:
