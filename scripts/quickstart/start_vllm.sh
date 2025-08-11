@@ -72,6 +72,7 @@ if [ "$inc_fp8_quant" = "true" ]; then
     export VLLM_ENABLE_RUNTIME_DEQUANT=1
     export VLLM_HPU_MARK_SCALES_AS_CONST=false
     export VLLM_MOE_N_SLICE=1
+    export INC_FORCE_NAIVE_SCALING=1
 else
     export VLLM_MOE_N_SLICE=8
 fi
