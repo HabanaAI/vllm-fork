@@ -1584,7 +1584,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 encoder_seq_lens.append(encoder_seq_len)
                 # Build slot mapping
                 if seq_group_metadata.cross_block_table is None:
-                    cross_slot_mapping.extend([_DUMMY_SLOT_ID] * encoder_seq_len)
+                    cross_slot_mapping.extend([_DUMMY_SLOT_ID] *
+                                              encoder_seq_len)
                 else:
                     for i in range(0, encoder_seq_len):
                         block_number = seq_group_metadata.cross_block_table[
