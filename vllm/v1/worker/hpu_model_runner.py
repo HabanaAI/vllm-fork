@@ -2438,6 +2438,11 @@ class HPUModelRunner:
                     else:
                         value_cache = None
                     kv_caches[layer_name] = (key_cache, value_cache)
+                    if value_cache is not None:
+                        logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
+                    else:
+                        logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|value_cache=None")
+
                     #logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
                 else:
                     # TODO: add new branches when introducing more types of
