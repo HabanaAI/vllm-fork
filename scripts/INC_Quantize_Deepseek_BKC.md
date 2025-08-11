@@ -19,7 +19,7 @@ VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation
 pip install git+https://github.com/intel/neural-compressor.git@r1-woq
 ```
 
-## 2. Convert the model Files (G2 Only)
+## 2. Convert the Model Files (G2 Only)
 
 ```bash
 cd vllm-fork
