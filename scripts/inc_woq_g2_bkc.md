@@ -19,7 +19,7 @@ VLLM_TARGET_DEVICE=hpu pip install -e .  --no-build-isolation
 pip install git+https://github.com/intel/neural-compressor.git@r1-woq
 ```
 
-## 2. Convert the model files
+## 2. Convert the model Files (G2 Only)
 
 ```bash
 cd vllm-fork
@@ -36,7 +36,7 @@ bash scripts/run_inc_calib.sh --model /path/to/converted/model/
 ```
 
 > [!TIP]
-> By default, the script uses 512 samples for calibration. To perform a quick smoke test, you can reduce the number of samples to 16 by adding the `--prompts 16`.
+> By default, the script uses 512 samples for calibration. To perform a quick smoke test, you can reduce the number of samples to 16 by adding the `--nprompts 16`.
 
 ## 4. Benchmark
 
