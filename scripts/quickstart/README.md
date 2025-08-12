@@ -88,7 +88,7 @@ Assume that the original model weight files are downloaded and converted in the 
 > * Make sure the pulled docker image aligns with the corresponding Gaudi driver and OS version. The default one used in this guide is for Gaudi driver/firmware 1.20.1 and Ubuntu 22.04, referring to [Use Intel(R)Gaudi Containers](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Docker_Installation.html#use-intel-gaudi-containers) for other images.
 
 ```bash
-docker run -it --name deepseek_server --runtime=habana -e HABANA_VISIBLE_DEVICES=all -v /mnt/disk4:/data -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
+docker run -it --name deepseek_server --runtime=habana -e HABANA_VISIBLE_DEVICES=all --device=/dev:/dev -v /dev:/dev -v /mnt/disk4:/data -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --cap-add SYS_PTRACE --cap-add=CAP_IPC_LOCK --ulimit memlock=-1:-1 --net=host --ipc=host vault.habana.ai/gaudi-docker/1.20.1/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
 ```
 
 ### Download the Original Model
@@ -581,7 +581,7 @@ export no_proxy=127.0.0.1
 ### Run lm_eval
 Change the model path, vLLM IP address or port in the command below if required. 
 ```bash
-lm_eval --model local-completions --tasks gsm8k --model_args model=/data/hf_models/DeepSeek-R1-G2,base_url=http://127.0.0.1:8688/v1/completions --batch_size 16 --log_samples --output_path ./lm_eval_output
+lm_eval --model local-completions --tasks gsm8k --model_args model=/data/hf_models/DeepSeek-R1-G2,max_gen_toks=4096,max_length=16384,base_url=http://127.0.0.1:8688/v1/completions --batch_size 16 --log_samples --output_path ./lm_eval_output
 ```
 
 
