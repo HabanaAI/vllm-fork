@@ -52,6 +52,13 @@ def greedy_plan(batchsize, available_batchsizes):
     # sort descending
     available_batchsizes_sorted = sorted(available_batchsizes,
                                          key=lambda x: -x)
+
+    # if batch is in range of available batches, use nearest large one to pad
+    # elsewise, do split based on greedy
+    batch_in_range = min(
+        [v for v in available_batchsizes_sorted if v >= batchsize] or [None])
+    if batch_in_range:
+        return [batch_in_range]
     idx = 0
     left_to_process = batchsize
     result = []
@@ -449,8 +456,6 @@ def _merge_multimodal_embeddings(
     if current_platform.is_hpu():
         htcore.mark_step()
         flattened = _flatten_embeddings(multimodal_embeddings)
-        #TODO dynamic? is a list of varying length
-        # still.. torch.where might be faster than boolean indexing?
         inputs_embeds[is_multimodal] = flattened
         return inputs_embeds
 
@@ -549,6 +554,31 @@ def merge_multimodal_embeddings(
         (input_ids == placeholder_token_id),
         multimodal_embeddings,
     )
+
+
+def merge_multimodal_embeddings_static(
+    input_ids: torch.Tensor,
+    inputs_embeds: torch.Tensor,
+    multimodal_embeddings: NestedTensors,
+    placeholder_token_id: Union[int, list[int]],
+) -> torch.Tensor:
+    assert current_platform.is_hpu(), ("Support HPU only")
+    if isinstance(placeholder_token_id, list):
+        placeholder_token_id = torch.tensor(placeholder_token_id,
+                                            device=input_ids.device)
+        is_multimodal = torch.isin(input_ids, placeholder_token_id),
+    else:
+        is_multimodal = input_ids == placeholder_token_id
+    htcore.mark_step()
+
+    flattened = _flatten_embeddings(multimodal_embeddings)
+    is_multimodal_index = is_multimodal.flatten().nonzero().squeeze(-1)
+    inputs_embeds_s = inputs_embeds.shape
+    inputs_embeds = inputs_embeds.view(inputs_embeds_s[0] * inputs_embeds_s[1],
+                                       inputs_embeds_s[2])
+    inputs_embeds = inputs_embeds.index_copy_(0, is_multimodal_index,
+                                              flattened).view(inputs_embeds_s)
+    return inputs_embeds
 
 
 class LayerFn(Protocol):
