@@ -14,6 +14,9 @@ To achieve the best performance on HPU, please follow the methods outlined in th
 - Intel Gaudi 2 and 3 AI accelerators
 - Intel Gaudi software version 1.22.0 and above
 
+## Running vLLM on Gaudi with Docker Compose
+Starting with the 1.22 release, we are introducing ready-to-run container images that bundle vLLM and Gaudi software. Please follow the [instruction](https://github.com/HabanaAI/vllm-fork/tree/v0.9.0.1%2BGaudi-1.22.0/.cd) to quickly launch vLLM on Gaudi using a prebuilt Docker image and Docker Compose, with options for custom parameters and benchmarking.
+
 ## Quick Start Using Dockerfile
 Set up the container with the latest Intel Gaudi Software Suite release using the Dockerfile.
 
