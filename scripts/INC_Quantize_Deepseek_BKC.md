@@ -37,6 +37,8 @@ bash scripts/run_inc_calib.sh --model /path/to/converted/model/
 
 > [!TIP]
 > By default, the script uses 512 samples for calibration. To perform a quick smoke test, you can reduce the number of samples to 16 by adding the `--nprompts 16`.
+> [!TIP]
+> For improved performance or to handle DP/PP scenarios, navigate to the [vllm-hpu-extension](https://github.com/HabanaAI/vllm-hpu-extension/tree/main/calibration) and post-process the measurement results accordingly.
 
 ## 4. Benchmark
 
