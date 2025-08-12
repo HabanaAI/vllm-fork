@@ -1684,9 +1684,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if bs > 1 and self.use_merged_prefill:
             bs = 1
         max_prompt_len = max(
-            self.bucketing_manager.find_prompt_bucket(
-                bs, target_query_len, ctx)[1],
-            self.block_size)
+            self.bucketing_manager.find_prompt_bucket(bs, target_query_len,
+                                                      ctx)[1], self.block_size)
 
         if self.dp_awared_padding and\
             self.vllm_config.kv_transfer_config is None:
