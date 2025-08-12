@@ -89,3 +89,33 @@ set_bucketing(){
     export VLLM_DECODE_BLOCK_BUCKET_STEP=${VLLM_DECODE_BLOCK_BUCKET_STEP:-$decode_block_step}
     export VLLM_DECODE_BLOCK_BUCKET_MAX=${VLLM_DECODE_BLOCK_BUCKET_MAX:-$decode_block_max}
 }
+
+# clean existing INC scale
+clean_inc_scale(){
+    inc_measurement_dump_path_prefix=$INC_MEASUREMENT_DUMP_PATH_PREFIX
+    quant_config_path=$QUANT_CONFIG
+    if [ -z $inc_measurement_dump_path_prefix ] || [ -z $quant_config_path ]; then
+        return
+    fi
+
+    quant_config_path=$(realpath $quant_config_path)
+    if [ ! -f $quant_config_path ]; then
+        return
+    fi
+    dump_stats_path=$(awk -F': ' '/"dump_stats_path"/ {gsub(/[",]/, "", $2); print $2}' $quant_config_path)
+
+    if [ -z "$dump_stats_path" ]; then
+        return
+    elif [[ "$dump_stats_path" == /* ]]; then
+        scale_path="$dump_stats_path*ACT_MAXABS_HW_WEIGHTS*"
+        if ls $scale_path &> /dev/null; then
+            rm $scale_path
+        fi
+    else
+        inc_measurement_dump_path_prefix=$(realpath $inc_measurement_dump_path_prefix)
+        scale_path="$inc_measurement_dump_path_prefix/$dump_stats_path*ACT_MAXABS_HW_WEIGHTS*"
+        if ls $scale_path &> /dev/null; then
+            rm $scale_path
+        fi
+    fi
+}

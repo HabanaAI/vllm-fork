@@ -31,7 +31,6 @@ max_num_seqs=128
 host=0.0.0.0
 max_model_len=16384
 
-# Change to fp8_inc if want to use fp8 kv cache
 KV_CACHE_DTYPE=auto
 
 while getopts hw:u:p:l:b:c:sq flag; do
@@ -67,12 +66,15 @@ done
 # INC FP8 quantization
 if [ "$inc_fp8_quant" = "true" ]; then
     export INC_MEASUREMENT_DUMP_PATH_PREFIX=$(realpath "$BASH_DIR/../..")
-    export QUANT_CONFIG=$(realpath "$BASH_DIR/../quant_configs/inc_quant_per_channel_bf16kv.json")
+    export QUANT_CONFIG=$(realpath "$BASH_DIR/../quant_configs/inc_quant_per_channel_with_fp8kv_config.json")
+    # Set to "fp8_inc" if want to use fp8 kv cache, else set to "auto" to use bf16 kv cache
+    KV_CACHE_DTYPE=fp8_inc
     export VLLM_REQUANT_FP8_INC=1
     export VLLM_ENABLE_RUNTIME_DEQUANT=1
     export VLLM_HPU_MARK_SCALES_AS_CONST=false
     export VLLM_MOE_N_SLICE=1
     export INC_FORCE_NAIVE_SCALING=1
+    clean_inc_scale
 else
     export VLLM_MOE_N_SLICE=8
 fi
