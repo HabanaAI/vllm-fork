@@ -550,7 +550,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                                                      attn_metadata.block_size)
 
             if self.sliding_window:
-                if attn_metadata.window_attn_bias is not None:
+                if hasattr(attn_metadata, 'window_attn_bias') and attn_metadata.window_attn_bias is not None:
                     attn_bias = attn_metadata.window_attn_bias
 
                 if attn_metadata.use_window_sdpa:
