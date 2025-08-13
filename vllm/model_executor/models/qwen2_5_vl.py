@@ -1100,7 +1100,6 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         offset = 0
         results = []
         # process each image one by one
-        print(f" ============ {pixel_values.shape} =====================", )
         for img_idx in range(grid_thw.shape[0]):
             img_shape = grid_thw[img_idx, :].unsqueeze(0)
             curr_img_size = img_shape.prod()
@@ -1160,19 +1159,16 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                 cu_seqlens, _, _ = self.pre_attn(
                     pixel_values_curr_img_padded, img_shape_padded)
 
-            # Create full attention block mask before VisionTransformer
-            # to save memory/time
-            fullatt_block_attn_mask = \
-                create_block_diagonal_attention_mask_outerprod(cu_seqlens)
-            
-            img_last_index = img_shape_padded_lw.prod().item()
+            # # Create full attention block mask before VisionTransformer
+            # # to save memory/time
+            # fullatt_block_attn_mask = \
+            #     create_block_diagonal_attention_mask_outerprod(cu_seqlens)
 
-            assert pixel_values_curr_img_padded.shape[0] == cu_seqlens[
-                -1] == rot_pos_emb.shape[0]
 
-            # copy the local att mask to the full attn mask
-            fullatt_block_attn_mask[:img_last_index, :img_last_index] = \
-                localatt_block_attn_mask[:img_last_index, :img_last_index]
+            # # copy the local att mask to the full attn mask
+            # img_last_index = img_shape_padded_lw.prod().item()
+            # fullatt_block_attn_mask[:img_last_index, :img_last_index] = \
+            #     localatt_block_attn_mask[:img_last_index, :img_last_index]
 
             htcore.mark_step()
             hidden_states = self.forward(pixel_values_curr_img_padded,
