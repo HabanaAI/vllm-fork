@@ -3843,7 +3843,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         if warmup_mode and bypass_model_exec:
                             return []
 
-
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
