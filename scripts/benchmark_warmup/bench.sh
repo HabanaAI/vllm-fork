@@ -38,7 +38,7 @@ echo "after rm:"
 ls "${cache_path}"
 export PT_HPU_RECIPE_CACHE_CONFIG="${cache_path},false,8192"
 
-# 运run
+# run
 bash benchmark_throughput.sh \
     -w "$model_path" \
     -i "$input_len" \

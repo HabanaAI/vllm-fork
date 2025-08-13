@@ -2847,7 +2847,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
                     logger.info(msg)
 
-                    #xxx
                     def reorder_buckets(buckets):
                         if not self.fast_warmup:
                             return buckets
@@ -3430,10 +3429,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                        sampling_metadata)
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
-                if not self.is_driver_worker:  #continue
+                if not self.is_driver_worker:
                     continue
 
-                if use_delayed_sampling:  #F
+                if use_delayed_sampling:
                     fake_output = self._delayed_sampler_outputs(model_input)
                 elif model_input.async_callback is not None:
                     model_input.async_callback()
@@ -3484,7 +3483,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     len(data.output_token_ids)
                     seq_group_metadata_list, _, _ = self._add_dummy_seq(
                         seq_group_metadata_list, is_prompt=False)
-
                     for seq_group_metadata in seq_group_metadata_list:
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[
