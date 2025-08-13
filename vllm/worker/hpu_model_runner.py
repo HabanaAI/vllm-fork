@@ -956,7 +956,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "VLLM_FAST_WARMUP will be ignored.")
         if self.fast_warmup and "PT_HPU_RECIPE_CACHE_CONFIG" not in os.environ:
             logger.warning(
-                "VLLM_FAST_WARMUP is set to true but PT_HPU_RECIPE_CACHE_CONFIG "
+                "VLLM_FAST_WARMUP is set to true"
+                "but PT_HPU_RECIPE_CACHE_CONFIG "
                 "is not set. Fast warmup will be ignored.")
 
     @property
@@ -2542,7 +2543,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  num_patches=num_patches)
 
     def assign_elements(self, lst, n_ranks):
-        # Split the bucket list into n_ranks sub-lists in a load-balanced manner.
+        # Split the bucket list into 
+        # n_ranks sub-lists in a load-balanced manner.
         if not lst:
             return [[] for _ in range(n_ranks)]
 
@@ -2580,7 +2582,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # Check that all elements in rank_to_data have the same length
             lengths = [len(x) for x in rank_to_data]
             assert all(
-                l == lengths[0] for l in lengths
+                length == lengths[0] for length in lengths
             ), "Not all elements in rank_to_data have the same length"
             buckets = rank_to_data[torch.distributed.get_rank()]
 
@@ -2851,11 +2853,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         if not self.fast_warmup:
                             return buckets
 
-                        # Ensure the order of graph warm-up matches the compilation order.
-                        # Each rank warms up the shapes it is responsible for compiling first,
+                        # Ensure the order of graph warm-up 
+                        # matches the compilation order.
+                        # Each rank warms up the shapes 
+                        # it is responsible for compiling first,
                         # before compiling shapes from other ranks.
                         # This provides a time buffer for RECIPE writes to disk,
-                        # which is helpful for multi-node or NFS-based file systems.
+                        # which is helpful for multi-node or 
+                        # NFS-based file systems.
                         rank_to_data = self.assign_elements(
                             buckets, torch.distributed.get_world_size())
                         cur_rank = torch.distributed.get_rank()
@@ -2872,7 +2877,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         return flattened
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
-                        prompt_strategy, reorder_buckets(self.bucketing_ctx.prompt_buckets),
+                        prompt_strategy, 
+                        reorder_buckets(self.bucketing_ctx.prompt_buckets),
                         True, kv_caches, prompt_available_memory)
 
                     decode_strategy = os.environ.get(

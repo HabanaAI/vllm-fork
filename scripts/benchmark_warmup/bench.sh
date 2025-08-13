@@ -16,9 +16,9 @@ fi
 model_path="/mnt/ctrl/disk3/HF_models/llama-3-8b"
 input_len=1024
 output_len=512
-batch_size=64
+max_num_seqs=64
 num_prompts=10
-num_models=4
+num_gpus=4
 
 if [ "$enable_fast" = true ]; then
     cache_path="/mnt/disk2/mingzhil/current_cache"
@@ -39,10 +39,10 @@ ls "${cache_path}"
 export PT_HPU_RECIPE_CACHE_CONFIG="${cache_path},false,8192"
 
 # run
-bash benchmark_throughput.sh \
+bash ../benchmark_throughput.sh \
     -w "$model_path" \
     -i "$input_len" \
     -o "$output_len" \
-    -b "$batch_size" \
+    -b "$max_num_seqs" \
     -p "$num_prompts" \
-    -n "$num_models" |& tee "$log_file"
+    -n "$num_gpus" |& tee "$log_file"
