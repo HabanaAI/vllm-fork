@@ -2815,8 +2815,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if not self.is_pooler:
                     self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,
                                             False, kv_caches)
-            torch.hpu.synchronize()
-            torch.distributed.barrier()
             compile_time = time.perf_counter()
 
             if not self.enforce_eager and htorch.utils.internal.is_lazy():
