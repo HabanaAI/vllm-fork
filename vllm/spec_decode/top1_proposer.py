@@ -45,6 +45,7 @@ class Top1Proposer(SpeculativeProposer):
         self,
         execute_model_req: ExecuteModelRequest,
         seq_ids_with_bonus_token_in_last_step: Set[int],
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> SpeculativeProposals:
         """Get speculative proposals given the input batch.
 
@@ -81,6 +82,7 @@ class Top1Proposer(SpeculativeProposer):
                 sample_len=proposal_len,
                 seq_ids_with_bonus_token_in_last_step=\
                     seq_ids_with_bonus_token_in_last_step,
+                accepted_token_id=accepted_token_id,
             )
             (
                 proposal_lens,

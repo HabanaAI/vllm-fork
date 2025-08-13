@@ -2,7 +2,7 @@
 
 import copy
 import weakref
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import torch
 
@@ -61,6 +61,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         execute_model_req: ExecuteModelRequest,
         sample_len: int,
         seq_ids_with_bonus_token_in_last_step: Set[int],
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> Tuple[List[SamplerOutput], bool]:
         """Run the model forward pass sample_len times. Returns the list of
         sampler output, one per model forward pass, along with indicator of
@@ -69,13 +70,61 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
 
         For multi step worker, this indicator shall be True.
         """
+
         self._raise_if_unsupported(execute_model_req)
+
         # Expand the batch for sequences with a bonus token.
         # Perform a forward pass on the expanded batch and filter the
         # response to retain only the original sequences' responses.
-        expanded_request, indices_of_seq_with_bonus_tokens =\
-            self._expand_execute_model_request(
-                execute_model_req, seq_ids_with_bonus_token_in_last_step)
+        if accepted_token_id is not None:
+            from vllm.spec_decode.spec_decode_worker import (
+                get_delay_num_speculative_tokens)
+
+            def bind_expand_fn_to_request(
+                    execute_model_req, accepted_token_id,
+                    seq_ids_with_bonus_token_in_last_step, expand_fn):
+
+                def expand():
+                    # TODO: support num_tokens>2
+                    num_tokens = get_delay_num_speculative_tokens()
+                    if accepted_token_id is not None:
+                        accepted_token_id_ = accepted_token_id.cpu()
+                        for seq_index, sg in enumerate(
+                                execute_model_req.seq_group_metadata_list):
+                            seq_data_iter = sg.seq_data.values()
+                            last_token_id = accepted_token_id_[seq_index][-1]
+                            token1 = accepted_token_id_[seq_index][0]
+                            if last_token_id == -1:
+                                for seq_id in sg.seq_data:
+                                    seq_ids_with_bonus_token_in_last_step.discard(
+                                        seq_id)
+                                token1 = accepted_token_id_[seq_index][0]
+                                for seq in seq_data_iter:
+                                    seq.output_token_ids = seq.output_token_ids[:-num_tokens] + (
+                                        token1, )
+                                    seq._num_computed_tokens -= 1
+                            else:
+                                token2 = accepted_token_id_[seq_index][1]
+                                for seq in seq_data_iter:
+                                    seq.output_token_ids = seq.output_token_ids[:-num_tokens] + (
+                                        token1, token2)
+                    return expand_fn(execute_model_req,
+                                     seq_ids_with_bonus_token_in_last_step)
+
+                execute_model_req.expand = expand
+
+            bind_expand_fn_to_request(
+                execute_model_req,
+                accepted_token_id,
+                seq_ids_with_bonus_token_in_last_step,
+                self._expand_execute_model_request,
+            )
+            expanded_request = execute_model_req
+
+        else:
+            expanded_request, indices_of_seq_with_bonus_tokens =\
+                self._expand_execute_model_request(
+                    execute_model_req, seq_ids_with_bonus_token_in_last_step)
 
         # Run model sample_len times.
         model_outputs: List[SamplerOutput] = []
@@ -99,13 +148,18 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
                 self.worker.model_runner.return_hidden_states = True
             for _ in range(sample_len):
                 model_output: List[SamplerOutput] = self.worker.execute_model(
-                    execute_model_req=expanded_request)
+                    execute_model_req=expanded_request,
+                    accepted_token_id=accepted_token_id)
                 assert (len(model_output) == 1
                         ), "composing multistep workers not supported"
                 model_output = model_output[0]
                 self._maybe_update_previous_hidden_states(
                     model_output, expanded_request)
-
+                if execute_model_req.hack_indices_of_seq_with_bonus_tokens is not None:
+                    indices_of_seq_with_bonus_tokens = execute_model_req.hack_indices_of_seq_with_bonus_tokens
+                    expanded_request = execute_model_req.expand_req
+                    execute_model_req.hack_indices_of_seq_with_bonus_tokens = None
+                    execute_model_req.expand_req = None
                 self._append_new_tokens(
                     model_output, expanded_request.seq_group_metadata_list,
                     indices_of_seq_with_bonus_tokens)
@@ -114,6 +168,7 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         # move indices to device to avoid stream sync
         indices_of_seq_with_bonus_tokens = torch.tensor(
             indices_of_seq_with_bonus_tokens, device=self.device)
+
         filtered_model_outputs = self._filter_model_output(
             model_outputs, indices_of_seq_with_bonus_tokens)
         return filtered_model_outputs, True
@@ -238,12 +293,14 @@ class MultiStepWorker(ProposerWorkerBase, DelegateWorkerBase):
         self,
         execute_model_req: ExecuteModelRequest,
         seq_ids_with_bonus_token_in_last_step: set,
+        accepted_token_id: Optional[torch.Tensor] = None,
     ) -> SpeculativeProposals:
         """Produce speculations given an input batch of sequences. The number of
         speculative tokens per sequence is determined by max_proposal_len.
         """
         return self._proposer.get_spec_proposals(
-            execute_model_req, seq_ids_with_bonus_token_in_last_step)
+            execute_model_req, seq_ids_with_bonus_token_in_last_step,
+            accepted_token_id)
 
     @staticmethod
     def _append_new_tokens(
