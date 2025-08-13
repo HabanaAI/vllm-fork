@@ -404,12 +404,12 @@ class HpuModelAdapter(torch.nn.Module):
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config):
-            if not is_warmup:
-                self.maybe_start_load_kv()
+            #if not is_warmup:
+            #    self.maybe_start_load_kv()
             hidden_states = self.model(*args, **kwargs)
             #from remote_pdb import RemotePdb; RemotePdb('0.0.0.0', 4444).set_trace()
-            if not is_warmup:
-                self.maybe_wait_for_kv_save()
+            #if not is_warmup:
+            #    self.maybe_wait_for_kv_save()
 
             if self._rotary_prepare_cos_sin is not None:
                 self._reset_rotary_cos_sin()
@@ -656,6 +656,10 @@ class HPUModelRunner:
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
 
         self.defragmenter = OnlineDefragmenter()
+        from datetime import datetime
+        current_timestamp = datetime.now()
+        unix_timestamp = current_timestamp.timestamp()
+        self.modelrunnerid = unix_timestamp
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
@@ -1589,6 +1593,7 @@ class HPUModelRunner:
         # Transfer [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] to CPU
         # On CPU, sanitize [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] -> [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2] # noqa
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
+        logger.debug(f'buke enter execute_model ||{os.getpid()=}|{scheduler_output=}')
 
         if self.defragmenter.enabled and self.kv_caches:
             new = {
@@ -1609,7 +1614,7 @@ class HPUModelRunner:
             if not has_kv_transfer_group():
                 # Return empty ModelRunnerOuptut if there's no work to do.
                 return EMPTY_MODEL_RUNNER_OUTPUT
-            logger.debug(f'buke before kv_connector_no_forward {scheduler_output.total_num_scheduled_tokens=}|{scheduler_output=}')
+            logger.debug(f'buke before kv_connector_no_forward |{os.getpid()=}|{scheduler_output.total_num_scheduled_tokens=}|{scheduler_output=}')
             return self.kv_connector_no_forward(scheduler_output)
 
         # If necessary, swap decodes/prompts to have all decodes on the start
@@ -1629,6 +1634,9 @@ class HPUModelRunner:
         prefill_sampled_requests = []
         decode_sampled_token_ids = []
         decode_sampled_requests = []
+        assert not (num_prefills > 0 and num_decodes > 0)
+        self.maybe_setup_kv_connector(scheduler_output)
+        finished_sending, finished_recving = set(), set()
         ######################### PREFILLS #########################
         if num_prefills > 0:
             htorch.core.mark_step()
@@ -1639,15 +1647,17 @@ class HPUModelRunner:
                 self.event_start = self.profiler.get_timestamp_us()
                 self.profiler.start("internal", "prefill")
                 htorch.core.mark_step()
-                logger.debug(f'buke {num_prefills=}|{num_decodes=}|{scheduler_output=}')
-                self.maybe_setup_kv_connector(scheduler_output)
+                #from pstack import pstack; pstack()
+                logger.debug(f'buke {self.modelrunnerid=} |{os.getpid()=}|{num_prefills=}|{num_decodes=}|{token_ids.shape=}|{scheduler_output=}')
+                #self.maybe_setup_kv_connector(scheduler_output)
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches)
                 htorch.core.mark_step()
-                finished_sending, finished_recving = (
-                    self.get_finished_kv_transfers(scheduler_output))
+                
+                #finished_sending, finished_recving = (
+                #    self.get_finished_kv_transfers(scheduler_output))
                 with self.profiler.record_event('internal', "sampler"):
                     sampling_metadata = self._prepare_sampling(
                         batch_changed, req_id, pad_to=logits_device.shape[0])
@@ -1681,16 +1691,16 @@ class HPUModelRunner:
             self.profiler.start("internal", "decode")
             assert decode_data is not None
             htorch.core.mark_step()
-            logger.debug(f'buke {num_prefills=}|{num_decodes=}|{scheduler_output=}')
-            self.maybe_setup_kv_connector(scheduler_output)
+            logger.debug(f'buke {self.modelrunnerid=} {os.getpid()=}|{num_prefills=}|{num_decodes=}|{decode_data.token_ids=}|{scheduler_output=}')
+            #self.maybe_setup_kv_connector(scheduler_output)
             _, logits_device = \
                 self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
                 decode_data.attn_metadata, decode_data.logits_indices,
                 self.kv_caches, scheduler_output=scheduler_output)
             htorch.core.mark_step()
-            finished_sending, finished_recving = (
-                self.get_finished_kv_transfers(scheduler_output))
+            #finished_sending, finished_recving = (
+            #    self.get_finished_kv_transfers(scheduler_output))
             with self.profiler.record_event('internal', "sampler"):
                 sampling_metadata = self._prepare_sampling(
                     batch_changed,
@@ -1767,7 +1777,7 @@ class HPUModelRunner:
         prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
         logprobs = None
-
+        self.maybe_wait_for_kv_save(scheduler_output.scheduled_new_reqs)
         model_runner_output = ModelRunnerOutput(
             req_ids=all_req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
@@ -1815,19 +1825,19 @@ class HPUModelRunner:
             #logger.debug(f'buke maybe_setup_kv_connector: {scheduler_output=}')
             kv_connector.start_load_kv(scheduler_output.kv_connector_metadata)
 
-    # @staticmethod
-    # def maybe_wait_for_kv_save(req: Optional[NewRequestData]) -> None:
-    #     if has_kv_transfer_group():
-    #         get_kv_transfer_group().wait_for_save(req)
-
     @staticmethod
-    def get_finished_kv_transfers(
-        scheduler_output: "SchedulerOutput",
-    ) -> tuple[Optional[set[str]], Optional[set[str]]]:
+    def maybe_wait_for_kv_save(req: Optional[NewRequestData]) -> None:
         if has_kv_transfer_group():
-            return get_kv_transfer_group().get_finished(
-                scheduler_output)
-        return None, None
+            get_kv_transfer_group().wait_for_save()
+
+    # @staticmethod
+    # def get_finished_kv_transfers(
+    #     scheduler_output: "SchedulerOutput",
+    # ) -> tuple[Optional[set[str]], Optional[set[str]]]:
+    #     if has_kv_transfer_group():
+    #         return get_kv_transfer_group().get_finished(
+    #             scheduler_output)
+    #     return None, None
 
 
     def load_model(self) -> None:
@@ -2406,7 +2416,7 @@ class HPUModelRunner:
                     v_cache_shape = None if self.model_config.use_mla \
                     else kv_cache_shape
                     dtype = kv_cache_spec.dtype
-                    logger.debug(f'buke: {kv_cache_shape=}')
+                    logger.debug(f'buke: |{os.getpid()=}|{kv_cache_shape=}')
                     key_cache = torch.zeros(kv_cache_shape,
                                             dtype=dtype,
                                             device=self.device)
@@ -2548,7 +2558,7 @@ def copy_kv_blocks(
     #     src_device=src_device,
     #     dst_device=dst_device,
     #     )
-    logger.debug(f"buke copy_kv_blocks: {block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy start {time.perf_counter()}")
+    logger.debug(f"buke copy_kv_blocks: |{os.getpid()=}|{block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy start {time.perf_counter()}")
     for i, local_block_id in enumerate(src_block_ids): 
         for layer, kv_layer in src_kv_caches.items():
             start = block_size * local_block_id
@@ -2559,7 +2569,7 @@ def copy_kv_blocks(
                 k, v = kv_layer
             dst_kv_caches[layer][0][start:end].copy_(k[start:end], non_blocking = False)
             dst_kv_caches[layer][1][start:end].copy_(v[start:end], non_blocking = False)
-    logger.debug(f"buke copy_kv_blocks: {block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy end {time.perf_counter()}")
+    logger.debug(f"buke copy_kv_blocks: |{os.getpid()=}|{block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy end {time.perf_counter()}")
 
     #from remote_pdb import RemotePdb
     #RemotePdb('0.0.0.0', 4444).set_trace()
