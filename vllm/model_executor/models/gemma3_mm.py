@@ -571,6 +571,14 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
         if is_hpu:
             batch_breakdown = greedy_plan(pixel_values.shape[0], \
                     self.vision_buckets.multimodal_buckets)
+            
+            padding_need = len(batch_breakdown) == 1 \
+                and batch_breakdown[0] > pixel_values.size(0)
+            if padding_need:
+                bs_padded = batch_breakdown[0] - pixel_values.size(0)
+                pixel_values = nn.functional.pad(pixel_values, \
+                    (0, 0, 0, 0, 0, 0, 0, bs_padded), "constant", 0)
+
             start_idx = 0
             image_embeds_multibatches = []
 
@@ -588,7 +596,13 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
                 image_embeds = self.multi_modal_projector(image_features)
                 image_embeds_multibatches += [image_embeds.clone()]
                 start_idx = end_idx
-            image_embeds = torch.cat(image_embeds_multibatches, dim=0)
+            if padding_need:
+                index = torch.arange(0, \
+                    image_embeds_multibatches[0].size(0) - bs_padded)
+                image_embeds = torch.index_select(\
+                    image_embeds_multibatches[0], dim=0, index=index)
+            else:
+                image_embeds = torch.cat(image_embeds_multibatches, dim=0)
         else:
             image_features = self._image_pixels_to_features(
                 self.vision_tower,

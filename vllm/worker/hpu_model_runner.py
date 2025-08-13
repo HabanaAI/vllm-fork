@@ -1520,12 +1520,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return PreparePromptMetadata.empty()
 
         is_enc_dec_model = self.model_config.is_encoder_decoder
+        logprobs_required = None
+        prompt_logprobs_required = None
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
             assert len(seq_ids) == 1
             seq_id = seq_ids[0]
-
+            if self.use_delayed_sampling:
+                if seq_group_metadata.sampling_params.logprobs \
+                    and logprobs_required is None:
+                    logprobs_required = True
+                if seq_group_metadata.sampling_params.prompt_logprobs \
+                    and prompt_logprobs_required is None:
+                    prompt_logprobs_required = True
             computed_block_nums = seq_group_metadata.computed_block_nums
             if (self.scheduler_config is not None
                     and self.scheduler_config.chunked_prefill_enabled
@@ -1835,6 +1843,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_placeholder_index_maps=placeholder_index_maps,
             enable_kv_scales_calculation=False,
             input_positions=input_positions,
+            prompt_logprobs_required=prompt_logprobs_required,
+            logprobs_required=logprobs_required,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
@@ -2656,6 +2666,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
+            "prompt_logprobs_required",
+            "logprobs_required",
         ])
         return attention_metadata
 
@@ -3968,14 +3980,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # we need to sync with host earlier
                 if use_delayed_sampling \
                    and self.is_driver_worker:
-                    self._patch_prev_output()
-
+                    self._patch_prev_output(attn_metadata.prompt_logprobs_required, \
+                        attn_metadata.logprobs_required)
+                '''
                 if (use_delayed_sampling and self.is_driver_worker
                         and self.has_logits_processors(sampling_metadata)):
                     # when use_delayed_sampling if the computation
                     # of logits depends on the sampled results
                     # we obtain the actual sampled results in advance
                     self._patch_prev_output()
+                '''
                 # Compute the logits.
                 with self.profiler.record_event('internal',
                                                 ('compute_logits_'
@@ -4200,7 +4214,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def __del__(self):
         self.shutdown_inc()
 
-    def _patch_prev_output(self):
+    def _patch_prev_output(self, logprobs_required, prompt_logprobs_required):
         if self.has_patched_prev_output:
             return
         assert len(self.cached_step_inputs) == len(self.cached_step_outputs), \
@@ -4235,12 +4249,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         delayed_prompt_logprobs = None
         assert model_output.sampling_metadata is not None, \
             'Sampling metadata is required to patch the output!'
+        '''
         logprobs_required = any(
             seq_group.sampling_params.logprobs is not None
             for seq_group in model_output.sampling_metadata.seq_groups)
         prompt_logprobs_required = any(
             seq_group.sampling_params.prompt_logprobs is not None
             for seq_group in model_output.sampling_metadata.seq_groups)
+        '''
         if logprobs_required or prompt_logprobs_required:
             # We are one step ahead, so prompt is already marked as a computed.
             # We need to reset the computed tokens count to 0,
