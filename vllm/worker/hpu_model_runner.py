@@ -2674,8 +2674,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
-                                                    lora_request,
-                                                    seq_len):
+                                                    lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
         if img_args == UNSET_IMG_ARGS:
@@ -2721,7 +2720,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         image_token_id = self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
-        prompt_token_ids = [0] * (seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
+        prompt_token_ids = [0] * (
+            seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
             'image':
@@ -3194,13 +3194,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
-            self.warmup_scenario(int(bs),
-                                 int(seq_len),
-                                 ctx,
-                                 is_prompt,
-                                 kv_caches,
-                                 is_pt_profiler_run=True,
-                                 img_args=int(img_args) if self.is_mm_run() else None)
+            self.warmup_scenario(
+                int(bs),
+                int(seq_len),
+                ctx,
+                is_prompt,
+                kv_caches,
+                is_pt_profiler_run=True,
+                img_args=int(img_args) if self.is_mm_run() else None)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
@@ -3830,17 +3831,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
-                            if warmup_mode:
+                            if warmup_mode and not is_pt_profiler_run:
                                 bypass_model_exec = True
                             execute_model_kwargs[
                                     'graphed_multimodal_buckets'] = \
                                 list(self.graphed_multimodal_buckets)
                             # set is unhasable and causes friction with
                             # hpu graphs, hence turning it to a list
-                            execute_model_kwargs = self.model.compute_input_embeddings_for_mrope_mm_optimized(
-                                **execute_model_kwargs
-                            )
-                        if warmup_mode and bypass_model_exec and not is_pt_profiler_run:
+                        execute_model_kwargs = self.model.compute_input_embeddings_for_mrope_mm_optimized(
+                            **execute_model_kwargs)
+                        if warmup_mode and bypass_model_exec:
                             return []
 
 
