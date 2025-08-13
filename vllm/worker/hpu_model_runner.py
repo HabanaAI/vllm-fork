@@ -664,6 +664,7 @@ class HpuModelAdapter(torch.nn.Module):
                     **kwargs)
                 video_input = self.model._parse_and_validate_video_input(
                     **kwargs)
+                print("=============== >>>>>>>>>>>>>>>>>>>> compute embeds")
                 inputs_embeds = self.model.get_input_embeddings_v0(
                     input_ids,
                     image_input=image_input,
@@ -2774,6 +2775,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             (self.multimodal_buckets is not None)
 
     def profile_run(self) -> None:
+        return 
         # Skip profile run on decode instances
         if self.vllm_config.kv_transfer_config is not None and\
             self.vllm_config.kv_transfer_config.is_kv_consumer:
