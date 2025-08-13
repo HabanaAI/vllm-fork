@@ -553,7 +553,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 if hasattr(attn_metadata, 'window_attn_bias') and attn_metadata.window_attn_bias is not None:
                     attn_bias = attn_metadata.window_attn_bias
 
-                if attn_metadata.use_window_sdpa:
+                if hasattr(attn_metadata, 'use_window_sdpa') and attn_metadata.use_window_sdpa:
                     # TODO: Currently when sliding_window FusedSDPA is used,
                     # the order of graphs for kvcache index copy and sdpa are
                     # mixed up, causing the perf issue. Split the graph here.
