@@ -224,7 +224,7 @@ set_dtype(){
 set_perf_tuning(){
     if [ "$cache_path" != "" ]; then
         echo "HPU recipe cache will be saved to $cache_path"
-        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,4096
+        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,16384
         mkdir -p "${cache_path}"
     fi
 
