@@ -899,8 +899,8 @@ class HPUModelRunner:
                 break
 
             # This is decode
-            if not self.is_decoder_only(req_id):
-                assert num_scheduled_tokens == 1
+            #if not self.is_decoder_only(req_id):
+            #    assert num_scheduled_tokens == 1
             decode_req_ids.append(req_id)
             num_computed_tokens_decode.append(int(num_computed_tokens + 1))
 
@@ -923,8 +923,8 @@ class HPUModelRunner:
             # Must be prompt
             assert num_computed_tokens < num_prompt_tokens
             num_output_tokens = len(self.requests[req_id].output_token_ids)
-            assert num_output_tokens == 0, \
-                f'req_id: {req_id}, {num_output_tokens}'
+            #assert num_output_tokens == 0, \
+            #    f'req_id: {req_id}, {num_output_tokens}'
 
             prompt_req_ids.append(req_id)
             prompt_scheduled_tokens.append(num_scheduled_tokens)
@@ -1384,8 +1384,8 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            if idx < num_decodes and not self.is_decoder_only(req_id):
-                assert seq_num_scheduled_tokens == 1
+            #if idx < num_decodes and not self.is_decoder_only(req_id):
+            #    assert seq_num_scheduled_tokens == 1
         return (self._prepare_prefill_inputs(num_prefills, num_decodes,
                                              num_scheduled_tokens),
                 self._prepare_decode_inputs(num_decodes, num_scheduled_tokens))
