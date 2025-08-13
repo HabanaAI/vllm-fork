@@ -955,10 +955,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Both VLLM_FAST_WARMUP and VLLM_SKIP_WARMUP are set to true. "
                 "VLLM_FAST_WARMUP will be ignored.")
         if self.fast_warmup and "PT_HPU_RECIPE_CACHE_CONFIG" not in os.environ:
-            logger.warning(
-                "VLLM_FAST_WARMUP is set to true"
-                "but PT_HPU_RECIPE_CACHE_CONFIG "
-                "is not set. Fast warmup will be ignored.")
+            logger.warning("VLLM_FAST_WARMUP is set to true"
+                           "but PT_HPU_RECIPE_CACHE_CONFIG "
+                           "is not set. Fast warmup will be ignored.")
 
     @property
     def model_is_mrope(self) -> bool:
@@ -2543,7 +2542,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  num_patches=num_patches)
 
     def assign_elements(self, lst, n_ranks):
-        # Split the bucket list into 
+        # Split the bucket list into
         # n_ranks sub-lists in a load-balanced manner.
         if not lst:
             return [[] for _ in range(n_ranks)]
@@ -2577,8 +2576,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 buckets, torch.distributed.get_world_size())
 
             for i, sublist in enumerate(rank_to_data):
-                logger.info(
-                    f"Rank {i} assigned {len(sublist)} buckets: {sublist}")
+                msg = f"Rank {i} assigned {len(sublist)} buckets: {sublist}"
+                logger.info(msg)
             # Check that all elements in rank_to_data have the same length
             lengths = [len(x) for x in rank_to_data]
             assert all(
@@ -2853,13 +2852,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         if not self.fast_warmup:
                             return buckets
 
-                        # Ensure the order of graph warm-up 
+                        # Ensure the order of graph warm-up
                         # matches the compilation order.
-                        # Each rank warms up the shapes 
+                        # Each rank warms up the shapes
                         # it is responsible for compiling first,
                         # before compiling shapes from other ranks.
                         # This provides a time buffer for RECIPE writes to disk,
-                        # which is helpful for multi-node or 
+                        # which is helpful for multi-node or
                         # NFS-based file systems.
                         rank_to_data = self.assign_elements(
                             buckets, torch.distributed.get_world_size())
@@ -2869,15 +2868,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                             for j in range(len(rank_to_data[0]))
                             for i in range(len(rank_to_data))
                         ]
-
-                        logger.info(
-                            f"Rank {cur_rank} assigned {len(flattened)} buckets: {flattened}"
-                        )
+                        msg = (f"Rank {cur_rank} assigned"
+                               f"{len(flattened)} buckets: {flattened}")
+                        logger.info(msg)
 
                         return flattened
                     mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                         self.warmup_graphs(
-                        prompt_strategy, 
+                        prompt_strategy,
                         reorder_buckets(self.bucketing_ctx.prompt_buckets),
                         True, kv_caches, prompt_available_memory)
 
@@ -2885,7 +2883,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         'VLLM_GRAPH_DECODE_STRATEGY', 'max_bs')
                     mem_post_decode, decode_batch_seq, decode_captured_all = \
                         self.warmup_graphs(
-                        decode_strategy, reorder_buckets(self.bucketing_ctx.decode_buckets),
+                        decode_strategy,
+                        reorder_buckets(self.bucketing_ctx.decode_buckets),
                         False, kv_caches, decode_available_memory)
 
                     # Not all prompt buckets were captured, but all decode
@@ -2952,7 +2951,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         compile_elapsed_time = compile_time - start_time
         graph_warmup_elapsed_time = end_time - compile_time
         msg = (
-            f"Warmup finished in {elapsed_time:.0f} secs, compile:{compile_elapsed_time:.0f} secs, graph:{graph_warmup_elapsed_time:.0f} secs\n"
+            f"Warmup finished in {elapsed_time:.0f} secs,"
+            f"compile:{compile_elapsed_time:.0f} secs,"
+            f"graph:{graph_warmup_elapsed_time:.0f} secs\n"
             f"allocated {format_bytes(end_mem - start_mem)} of device memory")
         logger.info(msg)
 
