@@ -946,6 +946,7 @@ class FusedMoE(torch.nn.Module):
             moe_quant_params["intermediate_size_full"] = intermediate_size
         if is_hpu:
             num_experts = self.local_num_experts
+            global_num_experts = self.global_num_experts
             ep_shift = self.ep_rank * num_experts
             from vllm_hpu_extension.ops import (
                 VllmMixtureOfExpertsOp, VllmMixtureOfExpertsOpFP8,
@@ -956,6 +957,7 @@ class FusedMoE(torch.nn.Module):
                                                   UnquantizedFusedMoEMethod):
                 moe_op = VllmMixtureOfExpertsOp(
                     num_experts,
+                    global_num_experts,
                     experts_min,
                     experts_max,
                 )
@@ -964,12 +966,14 @@ class FusedMoE(torch.nn.Module):
                            ) and not envs.VLLM_HPU_FORCE_CHANNEL_FP8:
                     moe_op = VllmMixtureOfExpertsOpFP8(
                         num_experts,
+                        global_num_experts,
                         experts_min,
                         experts_max,
                     )
                 else:
                     moe_op = VllmMixtureOfExpertsOpFP8PerChannel(
                         num_experts,
+                        global_num_experts,
                         experts_min,
                         experts_max,
                     )
