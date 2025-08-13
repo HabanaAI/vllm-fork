@@ -280,7 +280,6 @@ class LLM:
         profiler = torch.profiler.profile(
             schedule=schedule,
             activities=activities,
-            # debug_activities=debug_activities,
             on_trace_ready=torch.profiler.tensorboard_trace_handler(
                 '.', use_gzip=True),
             record_shapes=False,
