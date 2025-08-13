@@ -2922,6 +2922,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         input_tokens_tensor_cpu = self.input_tokens_tensor_cpu
                         block_indices_list = attn_metadata.block_indices.tolist(
                         )
+                        # block_indices was 2D and the second dimension was
+                        # padded to block size.
+                        padded_num_blocks = (\
+                            attn_metadata.slot_mapping.size(1) + \
+                            self.block_size - 1) // self.block_size
                         torch.hpu.synchronize()
                         seq_lens_tensor = \
                             model_input.attn_metadata.seq_lens_tensor
@@ -2936,7 +2941,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     hidden_states_list[0])
                                 # skip the seq with only one token
                                 continue
-                            num_blocks = (slen + 127) // 128
+                            num_blocks = (slen + self.block_size -
+                                          1) // self.block_size
                             end_block_idx = start_block_idx + num_blocks
 
                             kv_cache_shape = (61, num_blocks * self.block_size,
@@ -2992,7 +2998,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 self.cache_k(key, key_cache_current_layer,
                                              block_indices_tensor, None)
 
-                            start_block_idx = end_block_idx
+                            start_block_idx += padded_num_blocks
                             htorch.core.mark_step()
                         hidden_states = torch.cat(hidden_states_list, dim=0)
                         bypass_model_exec = True
