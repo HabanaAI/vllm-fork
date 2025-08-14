@@ -1197,7 +1197,6 @@ async def init_app_state(
             tool_parser=args.tool_call_parser,
             reasoning_parser=args.reasoning_parser,
             enable_prompt_tokens_details=args.enable_prompt_tokens_details,
-            use_harmony=args.use_harmony,
         )
         if model_config.runner_type == "generate"
         else None
@@ -1212,9 +1211,8 @@ async def init_app_state(
             chat_template=resolved_chat_template,
             chat_template_content_format=args.chat_template_content_format,
             return_tokens_as_token_ids=args.return_tokens_as_token_ids,
-            use_harmony=args.use_harmony,
         )
-        if model_config.runner_type == "generate" and args.use_harmony
+        if model_config.runner_type == "generate"
         else None
     )
 

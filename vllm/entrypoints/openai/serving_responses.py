@@ -100,7 +100,6 @@ class OpenAIServingResponses(OpenAIServing):
         enable_prompt_tokens_details: bool = False,
         enable_force_include_usage: bool = False,
         enable_log_outputs: bool = False,
-        use_harmony: bool = False,
     ) -> None:
         super().__init__(
             engine_client=engine_client,
@@ -150,8 +149,7 @@ class OpenAIServingResponses(OpenAIServing):
                 "the store."
             )
 
-        self.use_harmony =use_harmony
-        print(f"JAY DEBUG: self.use_harmony: {use_harmony}")
+        self.use_harmony = "gpt_oss" in model_config.hf_config.model_type
         if self.use_harmony:
             logger.warning(
                 "For gpt-oss, we ignore --enable-auto-tool-choice "

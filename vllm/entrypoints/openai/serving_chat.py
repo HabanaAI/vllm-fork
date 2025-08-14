@@ -95,7 +95,6 @@ class OpenAIServingChat(OpenAIServing):
         enable_auto_tools: bool = False,
         tool_parser: Optional[str] = None,
         enable_prompt_tokens_details: bool = False,
-        use_harmony: bool = False,
     ) -> None:
         super().__init__(
             engine_client=engine_client,
@@ -110,11 +109,13 @@ class OpenAIServingChat(OpenAIServing):
         self.chat_template_content_format: Final = chat_template_content_format
 
         # Harmony integration
-        self.use_harmony = use_harmony and HARMONY_AVAILABLE
-        if use_harmony and not HARMONY_AVAILABLE:
+        self.use_harmony = "gpt_oss" in model_config.hf_config.model_type
+        if self.use_harmony and not HARMONY_AVAILABLE:
             logger.warning(
                 "Harmony integration requested but openai_harmony not available"
             )
+        else:
+            logger.info(f"Using Harmony integration: {self.use_harmony}")
 
         # set up tool use
         self.enable_auto_tools: bool = enable_auto_tools
