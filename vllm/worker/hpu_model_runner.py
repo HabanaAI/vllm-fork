@@ -1963,6 +1963,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is_dummy_run=False) -> None:
         use_graphs = (is_dummy_run) or self._use_graphs(
             batch_size, seq_len, is_prompt, is_profile_run=is_profile_run)
+        pid = f"RANK{get_world_group().rank_in_group}DP{get_dp_group().rank_in_group}TP{get_tp_group().rank_in_group}"
+        self.profiler.set_process_name(pid)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
                          f"bs{batch_size}_"
@@ -2606,6 +2608,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         - input_tokens[num_prefill_tokens:] contains decode tokens.
         If cuda graph is required, this API automatically pads inputs.
         """
+        pid = f"RANK{get_world_group().rank_in_group}DP{get_dp_group().rank_in_group}TP{get_tp_group().rank_in_group}"
+        self.profiler.set_process_name(pid)
         with self.profiler.record_event('internal', 'prepare_input_tensors'):
             assert seq_group_metadata_list is not None
             if self.profiler.enabled:
