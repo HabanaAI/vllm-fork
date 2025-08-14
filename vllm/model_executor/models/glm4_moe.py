@@ -390,7 +390,7 @@ class Glm4MoeModel(nn.Module):
         # enable_eplb = vllm_config.parallel_config.enable_eplb
         enable_eplb = False
         self.config = config
-
+        # config.num_hidden_layers = 4
         self.vocab_size = config.vocab_size
 
         if get_pp_group().is_first_rank:
@@ -511,7 +511,8 @@ class Glm4MoeModel(nn.Module):
                     continue
                 if is_pp_missing_parameter(name, self):
                     continue
-
+                if name not in params_dict:
+                    continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
@@ -533,7 +534,8 @@ class Glm4MoeModel(nn.Module):
 
                     if is_pp_missing_parameter(name_mapped, self):
                         continue
-
+                    if name_mapped not in params_dict:
+                        continue
                     param = params_dict[name_mapped]
                     # We should ask the weight loader to return success or not
                     # here since otherwise we may skip experts with other
@@ -565,7 +567,8 @@ class Glm4MoeModel(nn.Module):
 
                     if is_pp_missing_parameter(name, self):
                         continue
-
+                    if name not in params_dict:
+                        continue
                     param = params_dict[name]
                     weight_loader = getattr(param, "weight_loader",
                                             default_weight_loader)

@@ -131,6 +131,25 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
         self.rocm_aiter_moe_enabled = is_rocm_aiter_moe_enabled()
 
+
+    def _gaudi_weight_wrapper(self, weight_loader):
+        """Wrapper for Gaudi weight conversion."""
+
+        def wrapper(*args, **kwargs):
+            # args[0] is parameter, args[1] is loaded_weight
+            # weights will be always in fp8, but scales will be in fp32,
+            # so we can detect it by dtype
+            loaded_weight = args[1]
+            if loaded_weight.dtype == torch.float8_e4m3fn:
+                loaded_weight.data = (loaded_weight.data.float() * 0.5).to(
+                    torch.float8_e4m3fn)
+            else:
+                loaded_weight.data = (loaded_weight.data * 2.0)
+            args = (args[0], loaded_weight) + args[2:]
+            weight_loader(*args, **kwargs)
+
+        return wrapper
+
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
@@ -144,6 +163,10 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         params_dtype = torch.float8_e4m3fn
 
         # WEIGHTS
+        if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
+            logger.warning(f"using FP8UZ conversion for moe {getattr(layer, '_tmp_name', 'unk')}")
+            extra_weight_attrs["weight_loader"] = self._gaudi_weight_wrapper(
+                extra_weight_attrs.get("weight_loader"))
         w13_weight = torch.nn.Parameter(torch.empty(
             num_experts,
             2 * intermediate_size_per_partition,
