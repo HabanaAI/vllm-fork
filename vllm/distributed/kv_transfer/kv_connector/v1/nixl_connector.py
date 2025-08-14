@@ -697,7 +697,6 @@ class NixlConnectorWorker:
 
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
         """Register the KV Cache data in nixl."""
-
         _, first_kv_cache = next(iter(kv_caches.items()))
         if self.device_type == "hpu":
             if self.use_mla:
@@ -734,7 +733,7 @@ class NixlConnectorWorker:
             # tpu (v1) kv shape per layer:
             # (num_blocks, block_size, num_kv_heads * 2, head_size)
             self.num_blocks = first_kv_cache.shape[0]
-            block_rank = 3  # [block_size, kv_heads, head_dim]#
+            block_rank = 3  # [block_size, kv_heads, head_dim]
             block_shape = first_kv_cache.shape[-block_rank:]
             block_size, n_kv_heads_x_2, head_dim = block_shape
             self.slot_size_bytes = kv_elem_size * n_kv_heads_x_2 * head_dim
