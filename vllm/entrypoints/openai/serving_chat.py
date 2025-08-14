@@ -45,8 +45,6 @@ from vllm.transformers_utils.tokenizer import AnyTokenizer, MistralTokenizer
 from vllm.transformers_utils.tokenizers import (maybe_serialize_tool_calls,
                                                 truncate_tool_call_ids,
                                                 validate_request_params)
-gSum = 0
-gCnt = 0
 
 logger = init_logger(__name__)
 
@@ -143,9 +141,6 @@ class OpenAIServingChat(OpenAIServing):
         for the API specification. This API mimics the OpenAI
         Chat Completion API.
         """
-
-        global gSum
-        global gCnt
 
         t1 = time.perf_counter()
 
@@ -305,17 +300,13 @@ class OpenAIServingChat(OpenAIServing):
                 conversation, tokenizer, request_metadata)
 
         try:
-            re = await self.chat_completion_full_generator(
+            resp = await self.chat_completion_full_generator(
                 request, result_generator, request_id, model_name,
                 conversation, tokenizer, request_metadata)
             t3 = time.perf_counter()
 
-            gSum += (t3 - t1)
-            gCnt += 1
-            avg = gSum/gCnt
-
-            print(f">> {gCnt}, {t2-t1}, {t3-t2}, {gSum}, {avg}")
-            return re
+            print(f">> {t2-t1}, {t3-t2}")
+            return resp
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
             return self.create_error_response(str(e))
