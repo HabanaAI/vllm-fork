@@ -25,6 +25,8 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceGroupMetadataDelta,
                            SequenceStatus)
 from vllm.utils import Device, PyObjectCache, SharedDict
+from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
+                                            get_tp_group, get_world_group)
 
 logger = init_logger(__name__)
 
@@ -465,10 +467,12 @@ class Scheduler:
         # Sequence groups in FETCHING_KV state, before becoming waiting,
         self.fetching_kv: Queue[SequenceGroup] = Queue()
         self.fetching_thread = threading.Thread(target=self._fetch_kv_thread, )
+        pid = f"RANK{get_world_group().rank_in_group}DP{get_dp_group().rank_in_group}TP{get_tp_group().rank_in_group}"
         if self.need_fetch_kv:
             from vllm_hpu_extension.profiler import HabanaHighLevelProfiler
             self.scheduler_profiler = HabanaHighLevelProfiler(
                 "scheduler_instance_0")
+            self.scheduler_profiler.set_process_name(pid)
             self.fetching_thread.start()
         # Sequence groups in the WAITING state.
         # Contain new prefill or preempted requests.
