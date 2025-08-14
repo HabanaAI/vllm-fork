@@ -2739,6 +2739,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             self.parallel_config.pipeline_parallel_size != 1), \
             'Delayed sampling is not compatible with Pipeline Parallelism!'
         assert model_input.input_tokens is not None
+        this_seq_ids = self._get_seq_ids(model_input) if self.is_driver_worker else []
         if use_delayed_sampling and not model_input.is_prompt and \
                 self.is_driver_worker:
             num_cached = len(self.cached_step_outputs)
@@ -3069,8 +3070,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logger.debug("KV recv time: %f s", now - cur_time)
 
                 profiler_args = {
+                    'stage': 'prompt' if is_prompt else 'decode',
+                    'is_dummy_run': is_dummy_run,
+                    'seq_ids': this_seq_ids,
                     'real_seq_len': model_input.seq_lens,
-                    'real_batch_size': real_batch_size
+                    'seq_len_padded': seq_len,
+                    'real_batch_size': real_batch_size,
+                    'batch_size_padded': batch_size_padded,
                 }
                 if not bypass_model_exec:
                     with self.profiler.record_event('internal',
