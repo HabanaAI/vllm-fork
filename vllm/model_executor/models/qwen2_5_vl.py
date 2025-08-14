@@ -1159,21 +1159,21 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                 cu_seqlens, _, _ = self.pre_attn(
                     pixel_values_curr_img_padded, img_shape_padded)
 
-            # # Create full attention block mask before VisionTransformer
-            # # to save memory/time
-            # fullatt_block_attn_mask = \
-            #     create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+            # Create full attention block mask before VisionTransformer
+            # to save memory/time
+            fullatt_block_attn_mask = \
+                create_block_diagonal_attention_mask_outerprod(cu_seqlens)
 
 
-            # # copy the local att mask to the full attn mask
-            # img_last_index = img_shape_padded_lw.prod().item()
-            # fullatt_block_attn_mask[:img_last_index, :img_last_index] = \
-            #     localatt_block_attn_mask[:img_last_index, :img_last_index]
+            # copy the local att mask to the full attn mask
+            img_last_index = img_shape_padded_lw.prod().item()
+            fullatt_block_attn_mask[:img_last_index, :img_last_index] = \
+                localatt_block_attn_mask[:img_last_index, :img_last_index]
 
             htcore.mark_step()
             hidden_states = self.forward(pixel_values_curr_img_padded,
                                          rotary_pos_emb=rot_pos_emb,
-                                         full_attn_mask=localatt_block_attn_mask,
+                                         full_attn_mask=fullatt_block_attn_mask,
                                          local_attn_mask=localatt_block_attn_mask)
             htcore.mark_step()
 

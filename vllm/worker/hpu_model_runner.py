@@ -664,7 +664,6 @@ class HpuModelAdapter(torch.nn.Module):
                     **kwargs)
                 video_input = self.model._parse_and_validate_video_input(
                     **kwargs)
-                print("=============== >>>>>>>>>>>>>>>>>>>> compute embeds")
                 inputs_embeds = self.model.get_input_embeddings_v0(
                     input_ids,
                     image_input=image_input,
