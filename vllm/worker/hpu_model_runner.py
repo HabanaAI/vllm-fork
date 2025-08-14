@@ -499,20 +499,38 @@ class HpuModelAdapter(torch.nn.Module):
 
     def _set_block_mapping(self, metadata, batch_size, device, dtype,
                            is_window_block):
+
         if is_window_block:
             block_usage = metadata.window_block_usage
             block_groups = metadata.window_block_groups
+
+            mask = torch.arange(0,
+                                self.block_size,
+                                device=device,
+                                dtype=torch.int32).unsqueeze(0)
+
+            # Create mask based on block_usage including negative index
+            mask_positive = mask >= block_usage.unsqueeze(-1)
+            mask_negative = mask < (self.block_size +
+                                    block_usage.unsqueeze(-1))
+            mask_combined = torch.where(
+                block_usage.unsqueeze(-1) >= 0, mask_positive, mask_negative)
+
+            # Create attn_bias using the combined mask
+            attn_bias = (torch.zeros_like(mask_combined,
+                                          dtype=dtype).masked_fill_(
+                                              mask_combined, -math.inf))
         else:
             block_usage = metadata.block_usage
             block_groups = metadata.block_groups
 
-        mask = torch.arange(0,
-                            self.block_size,
-                            device=device,
-                            dtype=torch.int32).unsqueeze(0)
-        mask = mask >= block_usage.unsqueeze(-1)
-        attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -math.inf))
+            mask = torch.arange(0,
+                                self.block_size,
+                                device=device,
+                                dtype=torch.int32).unsqueeze(0)
+            mask = mask >= block_usage.unsqueeze(-1)
+            attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
+                mask, -math.inf))
 
         if not is_fake_hpu():
             block_mapping = torch.nn.functional.one_hot(block_groups,
@@ -1951,6 +1969,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if self.interleaved_sliding_window is not None:
                     sliding_window_blocks = (self.interleaved_sliding_window //
                                              self.block_size)
+                    if (slot + 1) % self.block_size != 0:
+                        sliding_window_blocks += 1
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
 
@@ -1987,9 +2007,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.interleaved_sliding_window is not None:
             window_block_groups = [[i] * len(bt)
                                    for i, bt in enumerate(window_block_tables)]
+            first_block_usage = [(-diff if diff != 0 else self.block_size)
+                                 for lbu in last_block_usage
+                                 for diff in [self.block_size - lbu]]
             window_block_usage = [
-                [self.block_size] * (len(bt) - 1) + [lbu]
-                for bt, lbu in zip(block_tables, last_block_usage) if bt
+                [fbu] + [self.block_size] * (len(bt) - 2) + [lbu]
+                for fbu, bt, lbu in zip(first_block_usage, window_block_tables,
+                                        last_block_usage) if bt
             ]
 
             window_block_list = flatten(window_block_tables)
@@ -2073,12 +2097,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             window_block_list = window_padding_fn(window_block_list,
                                                   _PAD_BLOCK_ID)
             window_block_groups = window_padding_fn(window_block_groups, -1)
-            #window_block_usage = window_padding_fn(window_block_usage, 1)
-            window_block_usage = [
-                [1] if i == 0 else [block_usage[idx]]
-                for idx, (i,
-                          j) in enumerate(zip(window_block_list, block_usage))
-            ]
+            window_block_usage = window_padding_fn(window_block_usage, 1)
 
         if is_enc_dec_model:
             if self.use_contiguous_pa:
