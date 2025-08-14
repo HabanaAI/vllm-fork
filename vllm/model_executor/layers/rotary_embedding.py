@@ -269,8 +269,7 @@ class RotaryEmbedding(CustomOp):
         # forward, since the offset information wasn't available previously
         if not hasattr(self, "sin") or self.recompute_cos_sin:
             self.prepare_cos_sin(positions, offsets, recompute_cos_sin=True)
-        if hasattr(self, "scaling_factors") or hasattr(
-                self, "scaling_factor") or self.sin is None:
+        elif hasattr(self, "scaling_factors") or self.sin is None:
             self.prepare_cos_sin(positions, offsets)
 
         num_tokens = positions.numel()
