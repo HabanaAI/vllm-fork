@@ -601,7 +601,6 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         """
         weight_loader = extra_weight_attrs.get("weight_loader")
         if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            logger.warning(f"using FP8UZ conversion for {getattr(layer, '_tmp_prefix', '')}")
             weight_loader = self._gaudi_weight_wrapper(weight_loader)
         layer.scheme.create_weights(
             layer=layer,

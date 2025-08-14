@@ -164,7 +164,6 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
         # WEIGHTS
         if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            logger.warning(f"using FP8UZ conversion for moe {getattr(layer, '_tmp_name', 'unk')}")
             extra_weight_attrs["weight_loader"] = self._gaudi_weight_wrapper(
                 extra_weight_attrs.get("weight_loader"))
         w13_weight = torch.nn.Parameter(torch.empty(
