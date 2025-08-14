@@ -390,7 +390,6 @@ class Glm4MoeModel(nn.Module):
         # enable_eplb = vllm_config.parallel_config.enable_eplb
         enable_eplb = False
         self.config = config
-        # config.num_hidden_layers = 4
         self.vocab_size = config.vocab_size
 
         if get_pp_group().is_first_rank:
