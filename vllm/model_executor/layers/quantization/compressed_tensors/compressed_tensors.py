@@ -5,6 +5,7 @@ from contextlib import suppress
 from typing import Any, Literal, Optional, cast
 
 import torch
+import vllm.envs as envs
 from compressed_tensors.config import (CompressionFormat,
                                        SparsityCompressionConfig,
                                        SparsityStructure)
@@ -12,7 +13,6 @@ from compressed_tensors.quantization import (QuantizationArgs,
                                              QuantizationStrategy,
                                              QuantizationType)
 from pydantic import BaseModel
-
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.linear import (LinearBase, LinearMethodBase,
@@ -561,7 +561,6 @@ class CompressedTensorsConfig(QuantizationConfig):
 
         return weight_quant.num_bits == input_quant.num_bits == 8
 
-import vllm.envs as envs
 class CompressedTensorsLinearMethod(LinearMethodBase):
 
     def __init__(self, quantization_config: CompressedTensorsConfig):
