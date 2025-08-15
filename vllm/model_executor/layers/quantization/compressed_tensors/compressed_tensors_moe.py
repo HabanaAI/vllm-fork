@@ -29,7 +29,7 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
-
+from vllm.model_executor.layers.quantization.compressed_tensors.utils import gaudi_weight_wrapper
 logger = init_logger(__name__)
 
 
@@ -131,27 +131,6 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
         self.rocm_aiter_moe_enabled = is_rocm_aiter_moe_enabled()
 
-
-    def _gaudi_weight_wrapper(self, weight_loader):
-        """Wrapper for Gaudi weight conversion."""
-        
-        self.FP8_SCALE_FACTOR = 2.0
-        def wrapper(*args, **kwargs):
-            # args[0] is parameter, args[1] is loaded_weight
-            # weights will be always in fp8, but scales will be in fp32,
-            # so we can detect it by dtype
-            loaded_weight = args[1]
-            if loaded_weight.dtype == torch.float8_e4m3fn:
-                loaded_weight.data = (
-                    loaded_weight.data.float() / self.FP8_SCALE_FACTOR
-                ).to(torch.float8_e4m3fn)
-            else:
-                loaded_weight.data = (loaded_weight.data * self.FP8_SCALE_FACTOR)
-            args = (args[0], loaded_weight) + args[2:]
-            weight_loader(*args, **kwargs)
-
-        return wrapper
-
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
@@ -166,8 +145,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
         # WEIGHTS
         if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            extra_weight_attrs["weight_loader"] = self._gaudi_weight_wrapper(
-                extra_weight_attrs.get("weight_loader"))
+            extra_weight_attrs["weight_loader"] = gaudi_weight_wrapper(
+                extra_weight_attrs.get("weight_loader")
+            )
         w13_weight = torch.nn.Parameter(torch.empty(
             num_experts,
             2 * intermediate_size_per_partition,

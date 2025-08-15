@@ -29,8 +29,11 @@ from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsW8A8Int8, CompressedTensorsW8A16Fp8,
     CompressedTensorsWNA16)
 from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
-    find_matched_target, is_activation_quantization_format,
-    should_ignore_layer)
+    find_matched_target,
+    is_activation_quantization_format,
+    should_ignore_layer,
+    gaudi_weight_wrapper,
+)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.platforms import current_platform
 
@@ -569,27 +572,6 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         layer.scheme.process_weights_after_loading(layer)
 
-    def _gaudi_weight_wrapper(self, weight_loader):
-        """Wrapper for Gaudi weight conversion."""
-        
-        self.FP8_SCALE_FACTOR = 2.0
-        def wrapper(*args, **kwargs):
-            # args[0] is parameter, args[1] is loaded_weight
-            # weights will be always in fp8, but scales will be in fp32,
-            # so we can detect it by dtype
-            loaded_weight = args[1]
-            if loaded_weight.dtype == torch.float8_e4m3fn:
-                loaded_weight = (
-                    loaded_weight.float() / self.FP8_SCALE_FACTOR
-                ).to(torch.float8_e4m3fn)
-            else:
-                loaded_weight = loaded_weight.data * self.FP8_SCALE_FACTOR
-            args = (args[0], loaded_weight) + args[2:]
-
-            weight_loader(*args, **kwargs)
-
-        return wrapper
-
     def create_weights(self, layer: torch.nn.Module,
                        input_size_per_partition: int,
                        output_partition_sizes: list[int], input_size: int,
@@ -602,7 +584,7 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         """
         weight_loader = extra_weight_attrs.get("weight_loader")
         if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
-            weight_loader = self._gaudi_weight_wrapper(weight_loader)
+            weight_loader = gaudi_weight_wrapper(weight_loader)
         layer.scheme.create_weights(
             layer=layer,
             input_size=input_size,
