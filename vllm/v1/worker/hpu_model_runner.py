@@ -868,8 +868,12 @@ class HPUModelRunner:
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
-
+        requests_type = {}
         if scheduler_output.kv_connector_metadata:
+            for req in scheduler_output.kv_connector_metadata.reqs_to_save:
+                requests_type[req] = 'p'
+            for req in scheduler_output.kv_connector_metadata.reqs_to_recv:
+                requests_type[req] = 'd'
             requests = scheduler_output.kv_connector_metadata.reqs_to_save | scheduler_output.kv_connector_metadata.reqs_to_recv
         else:
             requests = None
@@ -885,7 +889,7 @@ class HPUModelRunner:
                 for request in requests:
                     if request == req_id:
                         self.input_batch.req_type[req_id] = "prefill" \
-                            if request is not None else "decode"
+                            if requests_type[request] =='p' else "decode"
                         break
 
             num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
