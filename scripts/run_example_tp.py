@@ -249,6 +249,11 @@ if __name__ == "__main__":
         param["max_num_seqs"] = args.max_num_seqs
     if args.enforce_eager:
         param["enforce_eager"] = True
+    distributed_executor_backend = "mp"
+    if args.tp_size > 8:
+        distributed_executor_backend = "ray"
+    if args.ep_size > 1:
+        param["enable_expert_parallel"] = True
     if args.tp_size == 1:
         llm = LLM(
             model=model, 
@@ -264,12 +269,11 @@ if __name__ == "__main__":
             model=model, 
             tokenizer=args.tokenizer,
             tensor_parallel_size=args.tp_size,
-            distributed_executor_backend='mp',
+            distributed_executor_backend=distributed_executor_backend,
             trust_remote_code=True,
             max_model_len=args.max_model_len,
             dtype="bfloat16",
             gpu_memory_utilization=0.8,
-            enable_expert_parallel=True,
             **param
         )
 
@@ -285,14 +289,21 @@ if __name__ == "__main__":
     end = time.perf_counter()
     # Print the outputs.
     print(f"e2e took {end - start} seconds")
+    if args.dataset == "pile":
+        tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+        prompt_token_ids_decode_lst = []
+        for token_ids in prompt_token_ids:
+            prompt_token_ids_decode_lst.append(tokenizer.decode(token_ids[-50:], skip_special_tokens=True))
     for output_i in range(len(outputs)):
         output = outputs[output_i]
         gt_i = None if gt is None else gt[output_i]
         prompt = output.prompt
         generated_text = output.outputs[0].text
         gen_token_id = output.outputs[0].token_ids
+        prompt_decode = prompt_token_ids_decode_lst[output_i] if args.dataset == "pile" else prompt
         print("====================================")
         print(f"Prompt: {prompt!r}")
+        print(f"prompt_decode: {prompt_decode!r}")
         print(f"Generated text: {generated_text!r}")
         print(f"Generated token: {gen_token_id!r}")
         print(f"Ground truth: {gt_i!r}")
