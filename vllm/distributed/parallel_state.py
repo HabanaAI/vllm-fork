@@ -393,7 +393,15 @@ class GroupCoordinator:
         # Bypass the function if we are using only 1 GPU.
         if world_size == 1:
             return input_
-        return self.device_communicator.gather(input_, dst, dim)
+
+        import os
+        use_fake_comm = os.getenv("FAKE_COMM", "False").lower() == "true"
+        if not use_fake_comm:
+            return self.device_communicator.gather(input_, dst, dim)
+
+        new_shape = list(input_.shape)
+        new_shape[dim] = input_.shape[dim] * world_size
+        return torch.empty(new_shape, dtype=input_.dtype, device=input_.device)
 
     def broadcast(self, input_: torch.Tensor, src: int = 0):
         """Broadcast the input tensor.
