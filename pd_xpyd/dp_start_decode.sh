@@ -48,6 +48,10 @@ else
   echo "<decode>it's bf16 kv cache mode"
 fi
 
+export VLLM_TORCH_PROFILER_DIR=./profiles
+export VLLM_PROFILER_ENABLED=full
+export VLLM_PROFILE_CONFIG_PATH=profile_config.json
+
 for ((i=0; i<$DP_RANK; i++))
 do
   RANK=$((DP_INDEX * DP_RANK + i))

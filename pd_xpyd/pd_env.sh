@@ -60,7 +60,7 @@ INC_FP8=0
 if [ "$INC_FP8" -eq 1 ]; then
   model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
 else
-  model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
+  model_path=/host/mnt/disk002/HF_Models/DeepSeek-R1-Gaudi3/
 fi
 
 unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MARK_SCALES_AS_CONST

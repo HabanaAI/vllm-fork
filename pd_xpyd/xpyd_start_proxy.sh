@@ -51,13 +51,14 @@ if [ "$5" == "benchmark" ]; then
 fi
 
 #For OAM
-DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
+#DECODE_IPS=("10.112.242.154" "10.112.242.24" "10.239.129.67" "10.239.129.21")
+DECODE_IPS=("10.112.242.153" "10.112.242.24" "10.239.129.67" "10.239.129.21")
 #For PCIE
 # DECODE_IPS=("10.112.110.161" "10.112.110.148")
 
 DBASE_PORT=8200
 DECODE_ARGS=""
-
+echo $NUM_DECODE
 for ((i=0; i<$NUM_DECODE; i++)); do
     PORT=$((DBASE_PORT + i))
     for ((j=0; j<D_INSTANCE_NUMBER; j++)); do
@@ -67,7 +68,8 @@ for ((i=0; i<$NUM_DECODE; i++)); do
 done
 
 #For OAM
-PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
+#PREFILL_IPS=("10.112.242.153" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
+PREFILL_IPS=("10.112.242.154" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
 #For PCIE
 # PREFILL_IPS=("10.112.110.157")
 
@@ -81,7 +83,7 @@ for ((i=0; i<P_INSTANCE_NUMBER; i++)); do
 done
 
 if [ "$BENCHMARK_MODE" == "1" ]; then
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark.py \
+    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
@@ -92,7 +94,7 @@ if [ "$BENCHMARK_MODE" == "1" ]; then
 
 else
 
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo.py \
+    CMD="python3 ../examples/online_serving/disagg_examples/disagg_proxy_demo.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \

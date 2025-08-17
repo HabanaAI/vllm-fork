@@ -60,6 +60,8 @@ from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter, Device, SharedDict, deprecate_kwargs, weak_bind
 from vllm.version import __version__ as VLLM_VERSION
+import os
+import json
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -231,6 +233,22 @@ class LLMEngine:
         self.observability_config = vllm_config.observability_config or ObservabilityConfig(  # noqa
         )
         self.kv_cache_shared_dict = SharedDict()
+
+        # Simple file-based IPC for profiling control.
+        self._profile_ipc_path: Optional[str] = os.getenv(
+            "VLLM_PROFILE_CONFIG_PATH")
+        self._profile_cfg: Optional[dict] = None
+        self._profile_started: bool = False
+        self._profile_steps_left: int = 0
+
+        # Lazy import helper to avoid circular imports
+        def _get_hpu_profiler():
+            try:
+                from vllm.worker.hpu_worker import HPUWorker  # local import
+                return getattr(HPUWorker, "profiler", None)
+            except Exception:
+                return None
+        self._get_hpu_profiler = _get_hpu_profiler
 
         self.need_to_sync_across_dp = self.parallel_config.data_parallel_size > 1  # noqa
         if self.need_to_sync_across_dp:
@@ -1407,6 +1425,102 @@ class LLMEngine:
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
+        # Load profiling config once when available
+        if (not self._profile_started) and self._profile_cfg is None and self._profile_ipc_path:
+            try:
+                if os.path.exists(self._profile_ipc_path):
+                    
+                    with open(self._profile_ipc_path, "r") as f:
+                        self._profile_cfg = json.load(f)
+                    print(f"Profile config file detected at {self._profile_ipc_path}. Loaded config: {self._profile_cfg}")
+
+            except Exception:
+                print(f"Exception type during profile config file open: {type(Exception).__name__}")
+                assert False, f"file open failed: {self._profile_ipc_path}"
+                self._profile_cfg = None
+
+        # Start condition: in-flight equals target and current step index equals target
+        if (not self._profile_started) and self._profile_cfg is not None:
+            # Compute current in-flight requests (running queue size)
+            current_inflight = sum(len(s.running) for s in self.scheduler)
+            # Compute the minimum generated token position among decode sequences
+            # in the currently scheduled batch, ignoring sequences that have not
+            # emitted any token yet (out_len == 0), to avoid the value sticking at 0
+            # when new requests join.
+            min_generated_pos = None
+            try:
+                for scheduled in scheduler_outputs.scheduled_seq_groups:
+                    seq_group = scheduled.seq_group
+                    if seq_group.is_prefill():
+                        continue
+                    for seq in seq_group.get_seqs():
+                        out_len = seq.get_output_len()
+                        if out_len <= 0:
+                            continue
+                        if min_generated_pos is None or out_len < min_generated_pos:
+                            min_generated_pos = out_len
+            except Exception:
+                # Leave as None on any structure mismatch
+                pass
+            try:
+                target_inflight = int(self._profile_cfg.get("inflight", -1))
+                target_start_step = int(self._profile_cfg.get("start_step", -1))
+                profile_steps = int(self._profile_cfg.get("steps", 0))
+                profile_ranks_raw = self._profile_cfg.get("profile_ranks", None)
+                allowed_ranks = None
+                if isinstance(profile_ranks_raw, list):
+                    try:
+                        allowed_ranks = set(int(r) for r in profile_ranks_raw)
+                    except Exception:
+                        allowed_ranks = None
+            except Exception:
+                target_inflight = target_start_step = -1
+                profile_steps = 0
+                allowed_ranks = None
+            # Debug print for tracking profiler start conditions
+            #print(
+            #    f"[Profiler Debug] Checking start conditions: "
+            #    f"target_inflight={target_inflight}, "
+            #    f"target_start_step={target_start_step}, "
+            #    f"profile_steps={profile_steps}, "
+            #    f"current_inflight={current_inflight}, "
+            #    f"min_generated_pos={min_generated_pos}, "
+            #    f"_profile_started={self._profile_started}"
+            #)
+            # Determine this process rank (prefer torch.distributed, fallback to env)
+            try:
+                import torch
+                if torch.distributed.is_available() and torch.distributed.is_initialized():
+                    current_rank = torch.distributed.get_rank()
+                else:
+                    current_rank = int(os.environ.get("RANK", "-1"))
+            except Exception:
+                current_rank = int(os.environ.get("RANK", "-1"))
+
+            # Rank gating: if profile_ranks provided, only those ranks participate
+            rank_allowed = True if (allowed_ranks is None) else (current_rank in allowed_ranks)
+
+            # Start when: (rank allowed) AND (in-flight equals target) AND (min generated position equals target_start_step)
+            if (rank_allowed and target_inflight >= 0 and target_start_step >= 0 and profile_steps > 0
+                    and current_inflight == target_inflight
+                    and (min_generated_pos is not None and min_generated_pos == target_start_step)):
+                print(
+                    f"[Profiler Debug] Profiler start triggered on rank {current_rank}: "
+                    f"current_inflight={current_inflight}, "
+                    f"min_generated_pos={min_generated_pos}, "
+                    f"profile_steps={profile_steps}"
+                , flush=True)
+                profiler_obj = self._get_hpu_profiler()
+                if profiler_obj is not None:
+                    try:
+                        profiler_obj.start()
+                        self._profile_started = True
+                        self._profile_steps_left = profile_steps
+                        print("[Profiler Debug] Profiler started successfully.", flush=True)
+                    except Exception as e:
+                        print(f"[Profiler Debug] Profiler start failed: {e}")
+                        pass
+
         if not scheduler_outputs.is_empty():
 
             # Check if we have a cached last_output from the previous iteration.
@@ -1435,6 +1549,21 @@ class LLMEngine:
 
             outputs = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
+
+            # Stop condition: after N steps since start
+            if self._profile_started and self._profile_steps_left > 0:
+                self._profile_steps_left -= 1
+                if self._profile_steps_left == 0:
+                    profiler_obj = self._get_hpu_profiler()
+                    if profiler_obj is not None:
+                        try:
+                            profiler_obj.stop()
+                            os.remove(self._profile_ipc_path)
+                        except Exception:
+                            pass
+                    self._profile_started = False
+                    # Reset config so that only a new IPC file can trigger next start
+                    self._profile_cfg = None
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.

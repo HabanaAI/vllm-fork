@@ -1,5 +1,10 @@
 #!/bin/bash
 
+
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+export NO_PROXY=10.112.242.154,localhost,127.0.0.1
+export no_proxy=10.112.242.154,localhost,127.0.0.1
+
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 BENCHMARK_MODE=0
@@ -13,7 +18,8 @@ else
     echo " Normal mode enabled"
 fi
 
-if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
+#if [ -z "$1" ] || [ "$1" == "G3D-sys01" ] || [ "$1" == "pcie4" ]; then
+if [ True ]; then
     if [ "$BENCHMARK_MODE" == "1" ]; then
 	source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark
  	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark"
@@ -47,6 +53,7 @@ else
   echo "<prefill>it's bf16 kv cache mode"
 fi
 
+echo $VLLM_SKIP_WARMUP
 python3 -m vllm.entrypoints.openai.api_server \
   --model "$model_path" \
   --port 8100 \
