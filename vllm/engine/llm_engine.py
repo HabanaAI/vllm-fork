@@ -240,6 +240,7 @@ class LLMEngine:
         self._profile_cfg: Optional[dict] = None
         self._profile_started: bool = False
         self._profile_steps_left: int = 0
+        self._profile_cfg_mtime_ns: int = 0
 
         # Lazy import helper to avoid circular imports
         def _get_hpu_profiler():
@@ -1425,14 +1426,16 @@ class LLMEngine:
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
-        # Load profiling config once when available
-        if (not self._profile_started) and self._profile_cfg is None and self._profile_ipc_path:
+        # Load/refresh profiling config when available or changed on disk
+        if (not self._profile_started) and self._profile_ipc_path:
             try:
                 if os.path.exists(self._profile_ipc_path):
-                    
-                    with open(self._profile_ipc_path, "r") as f:
-                        self._profile_cfg = json.load(f)
-                    print(f"Profile config file detected at {self._profile_ipc_path}. Loaded config: {self._profile_cfg}")
+                    st = os.stat(self._profile_ipc_path)
+                    if self._profile_cfg is None or st.st_mtime_ns > getattr(self, "_profile_cfg_mtime_ns", 0):
+                        with open(self._profile_ipc_path, "r") as f:
+                            self._profile_cfg = json.load(f)
+                        self._profile_cfg_mtime_ns = st.st_mtime_ns
+                        print(f"Profile config file detected at {self._profile_ipc_path}. Loaded config: {self._profile_cfg}")
 
             except Exception:
                 print(f"Exception type during profile config file open: {type(Exception).__name__}")
@@ -1473,20 +1476,22 @@ class LLMEngine:
                         allowed_ranks = set(int(r) for r in profile_ranks_raw)
                     except Exception:
                         allowed_ranks = None
+                # Role targeting: accept keys 'profile_targets' (list of 'P'/'D'/'both')
+                # or 'role' ('P'/'D'/'both') for backwards compatibility.
+                allowed_roles = None
+                profile_targets = self._profile_cfg.get("profile_targets")
+                if isinstance(profile_targets, list):
+                    allowed_roles = set(str(x).upper() for x in profile_targets)
+                else:
+                    role_single = self._profile_cfg.get("role")
+                    if isinstance(role_single, str):
+                        allowed_roles = {role_single.upper()}
             except Exception:
                 target_inflight = target_start_step = -1
                 profile_steps = 0
                 allowed_ranks = None
-            # Debug print for tracking profiler start conditions
-            #print(
-            #    f"[Profiler Debug] Checking start conditions: "
-            #    f"target_inflight={target_inflight}, "
-            #    f"target_start_step={target_start_step}, "
-            #    f"profile_steps={profile_steps}, "
-            #    f"current_inflight={current_inflight}, "
-            #    f"min_generated_pos={min_generated_pos}, "
-            #    f"_profile_started={self._profile_started}"
-            #)
+                allowed_roles = None
+            
             # Determine this process rank (prefer torch.distributed, fallback to env)
             try:
                 import torch
@@ -1500,12 +1505,41 @@ class LLMEngine:
             # Rank gating: if profile_ranks provided, only those ranks participate
             rank_allowed = True if (allowed_ranks is None) else (current_rank in allowed_ranks)
 
-            # Start when: (rank allowed) AND (in-flight equals target) AND (min generated position equals target_start_step)
-            if (rank_allowed and target_inflight >= 0 and target_start_step >= 0 and profile_steps > 0
-                    and current_inflight == target_inflight
-                    and (min_generated_pos is not None and min_generated_pos == target_start_step)):
+            # Role gating: determine whether this process is P (prefill) or D (decode)
+            # Default to allowing if we cannot determine.
+            try:
+                kv_cfg = getattr(self.vllm_config, 'kv_transfer_config', None)
+                is_decode_role = bool(kv_cfg and getattr(kv_cfg, 'is_kv_consumer', False))
+                this_role = 'D' if is_decode_role else 'P'
+            except Exception:
+                is_decode_role = False
+                this_role = 'P'
+            role_allowed = True if (allowed_roles is None or 'BOTH' in allowed_roles) else (this_role in allowed_roles)
+            # Debug print for tracking profiler start conditions
+            if rank_allowed and role_allowed:
                 print(
-                    f"[Profiler Debug] Profiler start triggered on rank {current_rank}: "
+                    f"[Profiler Debug] Checking start conditions: "
+                    f"target_inflight={target_inflight}, "
+                    f"target_start_step={target_start_step}, "
+                    f"profile_steps={profile_steps}, "
+                    f"current_inflight={current_inflight}, "
+                    f"min_generated_pos={min_generated_pos}, "
+                    f"_profile_started={self._profile_started}"
+                )
+            # Start when:
+            #  - rank allowed
+            #  - role allowed
+            #  - steps > 0
+            #  - inflight equals target
+            #  - for D: min_generated_pos == target_start_step
+            #  - for P: no token position requirement
+            d_ok = (min_generated_pos is not None and min_generated_pos == target_start_step)
+            p_ok = True  # no token-index gating for P
+            if (rank_allowed and role_allowed and profile_steps > 0
+                    and target_inflight >= 0 and current_inflight == target_inflight
+                    and ((is_decode_role and target_start_step >= 0 and d_ok) or (not is_decode_role))):
+                print(
+                    f"[Profiler Debug] Profiler start triggered on rank {current_rank} (role={this_role}): "
                     f"current_inflight={current_inflight}, "
                     f"min_generated_pos={min_generated_pos}, "
                     f"profile_steps={profile_steps}"
@@ -1564,6 +1598,7 @@ class LLMEngine:
                     self._profile_started = False
                     # Reset config so that only a new IPC file can trigger next start
                     self._profile_cfg = None
+                    self._profile_cfg_mtime_ns = 0
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.

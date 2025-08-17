@@ -9,6 +9,10 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 BENCHMARK_MODE=0
 
+export VLLM_TORCH_PROFILER_DIR=./profiles
+export VLLM_PROFILER_ENABLED=full
+export VLLM_PROFILE_CONFIG_PATH=profile_config.json
+
 if [ "$2" == "benchmark" ]; then
     BENCHMARK_MODE=1
     sed -i 's/export VLLM_USE_ASYNC_TRANSFER_IN_PD=.*/export VLLM_USE_ASYNC_TRANSFER_IN_PD=0/' $BASH_DIR/pd_env.sh
