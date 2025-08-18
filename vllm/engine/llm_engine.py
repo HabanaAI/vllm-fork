@@ -1439,7 +1439,6 @@ class LLMEngine:
 
             except Exception:
                 print(f"Exception type during profile config file open: {type(Exception).__name__}")
-                assert False, f"file open failed: {self._profile_ipc_path}"
                 self._profile_cfg = None
 
         # Start condition: in-flight equals target and current step index equals target
@@ -1506,15 +1505,24 @@ class LLMEngine:
             rank_allowed = True if (allowed_ranks is None) else (current_rank in allowed_ranks)
 
             # Role gating: determine whether this process is P (prefill) or D (decode)
-            # Default to allowing if we cannot determine.
+            # For non-disaggregated case, both P and D occur in this process.
             try:
                 kv_cfg = getattr(self.vllm_config, 'kv_transfer_config', None)
+                is_disagg = kv_cfg is not None
                 is_decode_role = bool(kv_cfg and getattr(kv_cfg, 'is_kv_consumer', False))
                 this_role = 'D' if is_decode_role else 'P'
             except Exception:
+                is_disagg = False
                 is_decode_role = False
                 this_role = 'P'
-            role_allowed = True if (allowed_roles is None or 'BOTH' in allowed_roles) else (this_role in allowed_roles)
+            want_p = (allowed_roles is None or 'BOTH' in (allowed_roles or set()) or 'P' in (allowed_roles or set()))
+            want_d = (allowed_roles is None or 'BOTH' in (allowed_roles or set()) or 'D' in (allowed_roles or set()))
+            # If disaggregated: only the matching role participates.
+            # If not disaggregated: allow if either P or D is requested.
+            if is_disagg:
+                role_allowed = True if (allowed_roles is None or 'BOTH' in (allowed_roles or set())) else (this_role in allowed_roles)
+            else:
+                role_allowed = (want_p or want_d)
             # Debug print for tracking profiler start conditions
             if rank_allowed and role_allowed:
                 print(
@@ -1527,19 +1535,28 @@ class LLMEngine:
                     f"_profile_started={self._profile_started}"
                 )
             # Start when:
-            #  - rank allowed
-            #  - role allowed
-            #  - steps > 0
+            #  - rank allowed, role allowed, profile_steps > 0
             #  - inflight equals target
-            #  - for D: min_generated_pos == target_start_step
-            #  - for P: no token position requirement
-            d_ok = (min_generated_pos is not None and min_generated_pos == target_start_step)
+            #  - D-path requires token-index match; P-path does not
+            d_ok = (min_generated_pos is not None and target_start_step >= 0 and min_generated_pos == target_start_step)
             p_ok = True  # no token-index gating for P
+            start_allowed = False
+            if is_disagg:
+                # On D node, require D condition; on P node, require P condition
+                if is_decode_role and want_d and d_ok:
+                    start_allowed = True
+                if (not is_decode_role) and want_p:
+                    start_allowed = True
+            else:
+                # Non-disaggregated: allow start if either requested path is satisfied
+                if (want_d and d_ok) or want_p:
+                    start_allowed = True
+
             if (rank_allowed and role_allowed and profile_steps > 0
                     and target_inflight >= 0 and current_inflight == target_inflight
-                    and ((is_decode_role and target_start_step >= 0 and d_ok) or (not is_decode_role))):
+                    and start_allowed):
                 print(
-                    f"[Profiler Debug] Profiler start triggered on rank {current_rank} (role={this_role}): "
+                    f"[Profiler Debug] Profiler start triggered on rank {current_rank} (role={this_role}, disagg={is_disagg}): "
                     f"current_inflight={current_inflight}, "
                     f"min_generated_pos={min_generated_pos}, "
                     f"profile_steps={profile_steps}"
