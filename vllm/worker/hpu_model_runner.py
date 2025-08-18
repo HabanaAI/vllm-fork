@@ -3195,7 +3195,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                  is_pt_profiler_run=True)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
-            multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
+            multiplier = 5 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
             cache_size_limit = 1 + multiplier * (prompt_buckets +
                                                  decode_buckets)
