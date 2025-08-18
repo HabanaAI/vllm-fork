@@ -5,14 +5,15 @@ from contextlib import suppress
 from typing import Any, Literal, Optional, cast
 
 import torch
+import vllm.envs as envs
 from compressed_tensors.config import (CompressionFormat,
                                        SparsityCompressionConfig,
                                        SparsityStructure)
 from compressed_tensors.quantization import (QuantizationArgs,
                                              QuantizationStrategy,
                                              QuantizationType)
-from pydantic import BaseModel
 
+from pydantic import BaseModel
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.linear import (LinearBase, LinearMethodBase,
@@ -29,8 +30,11 @@ from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsW8A8Int8, CompressedTensorsW8A16Fp8,
     CompressedTensorsWNA16)
 from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
-    find_matched_target, is_activation_quantization_format,
-    should_ignore_layer)
+    find_matched_target,
+    is_activation_quantization_format,
+    should_ignore_layer,
+    gaudi_weight_wrapper,
+)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.platforms import current_platform
 
@@ -581,6 +585,8 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         details
         """
         weight_loader = extra_weight_attrs.get("weight_loader")
+        if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
+            weight_loader = gaudi_weight_wrapper(weight_loader)
         layer.scheme.create_weights(
             layer=layer,
             input_size=input_size,
