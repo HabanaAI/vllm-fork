@@ -3167,7 +3167,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_buckets = 0
 
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
-            phase, bs, seq_len, graph = profile.split('_')
+            if len(profile.split('_')) == 5:
+                phase, bs, seq_len, graph, img_args = profile.split('_')
+            else:
+                phase, bs, seq_len, graph = profile.split('_')
+                img_args = None
             is_prompt = phase == 'prompt'
             ctx = 0
             if not is_prompt:
@@ -3177,10 +3181,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add(cfg)
-            if self.is_mm_run():
-                img_args = (int(seq_len) //
-                            self.model.model.config.mm_tokens_per_image
-                            if self.is_mm_optimized else int(seq_len))
+            #if self.is_mm_run():
+            #    img_args = (int(seq_len) //
+            #                self.model.model.config.mm_tokens_per_image
+            #                if self.is_mm_optimized else int(seq_len))
             self.warmup_scenario(
                 int(bs),
                 int(seq_len),
@@ -3188,7 +3192,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 is_prompt,
                 kv_caches,
                 is_pt_profiler_run=True,
-                img_args=img_args if self.is_mm_run() else None)
+                img_args=int(img_args) if self.is_mm_run() else None)
             raise AssertionError("Finished profiling")
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
