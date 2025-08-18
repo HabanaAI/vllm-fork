@@ -26,7 +26,7 @@ if has_arg benchmark "$@"; then
 fi
 
 etcd --listen-client-urls http://0.0.0.0:2379 \
-     --advertise-client-urls http://localhost:2379 \
+     --advertise-client-urls http://10.112.242.154:2379 \
      >etcd.log 2>&1 &
      #--advertise-client-urls http://10.112.242.154:2379 \
 
