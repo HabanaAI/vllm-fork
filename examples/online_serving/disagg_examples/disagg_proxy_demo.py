@@ -407,12 +407,20 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            final_generator = self.generator(generator_p,
-                                             generator_d,
-                                             self,
-                                             prefill_instance,
-                                             decode_instance,
-                                             req_len=total_length)
+            if request.get("stream"):
+                final_generator = self.generator(generator_p,
+                                                 generator_d,
+                                                 self,
+                                                 prefill_instance,
+                                                 decode_instance,
+                                                 req_len=total_length)
+            else:
+                final_generator = D_first_token_generator(generator_p,
+                                                          generator_d,
+                                                          self,
+                                                          prefill_instance,
+                                                          decode_instance,
+                                                          req_len=total_length)
             response = StreamingResponse(final_generator,
                                          media_type="application/json")
             return response
