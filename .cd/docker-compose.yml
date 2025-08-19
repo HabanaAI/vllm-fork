@@ -11,6 +11,7 @@ services:
       - ./server/server_user.env
     volumes:
       - /mnt/hf_cache:/mnt/hf_cache
+      - ${DATA_PATH:-/mnt/data}:/mnt/data
     ports:
       - "8000:8000"
     cap_add:
@@ -35,8 +36,11 @@ services:
         condition: service_healthy
     environment:
       - MODEL
-      - HF_TOKEN=${HF_TOKEN}
+      - HF_TOKEN
       - PYTHONUNBUFFERED=1
     env_file:
       - ./benchmark/benchmark_user.env
+    volumes:
+      - /mnt/hf_cache:/mnt/hf_cache
+      - ${DATA_PATH}:/mnt/data
     command: ["benchmark", "--config-file", "${VLLM_BENCHMARK_CONFIG_FILE}", "--config-name", "${VLLM_BENCHMARK_CONFIG_NAME}"]
