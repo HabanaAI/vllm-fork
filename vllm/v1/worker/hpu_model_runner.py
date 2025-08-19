@@ -404,12 +404,7 @@ class HpuModelAdapter(torch.nn.Module):
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta, self.vllm_config):
-            #if not is_warmup:
-            #    self.maybe_start_load_kv()
             hidden_states = self.model(*args, **kwargs)
-            #from remote_pdb import RemotePdb; RemotePdb('0.0.0.0', 4444).set_trace()
-            #if not is_warmup:
-            #    self.maybe_wait_for_kv_save()
 
             if self._rotary_prepare_cos_sin is not None:
                 self._reset_rotary_cos_sin()
@@ -869,12 +864,13 @@ class HPUModelRunner:
         scheduler_output: "SchedulerOutput",
     ) -> PromptDecodeInfo:
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+        #my_rank = os.getenv('RANK')
+        #logger.info(f'libin debug _get_prompts_and_decodes {my_rank} {total_num_scheduled_tokens}')
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
         #TODO: remove later
-        import os
-        my_rank = os.getenv("RANK")
+
         requests_type = {}
         if scheduler_output.kv_connector_metadata:
             for req in scheduler_output.kv_connector_metadata.reqs_to_save:
@@ -1606,7 +1602,7 @@ class HPUModelRunner:
         # Transfer [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] to CPU
         # On CPU, sanitize [tokD0, tokD1, tokD2, 0, tokP0, tokP1, tokP2, 0] -> [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2] # noqa
         # Return [tokD0, tokD1, tokD2, tokP0, tokP1, tokP2]
-        logger.debug(f'buke enter execute_model ||{os.getpid()=}|{scheduler_output=}')
+        #logger.debug(f'buke enter execute_model ||{os.getpid()=}|{scheduler_output=}')
 
         if self.defragmenter.enabled and self.kv_caches:
             new = {
@@ -1649,9 +1645,10 @@ class HPUModelRunner:
         decode_sampled_token_ids = []
         decode_sampled_requests = []
         assert not (num_prefills > 0 and num_decodes > 0)
-
-        self.maybe_setup_kv_connector(scheduler_output)
+        with set_forward_context(None, self.vllm_config):
+            self.maybe_setup_kv_connector(scheduler_output)
         finished_sending, finished_recving = set(), set()
+
         ######################### PREFILLS #########################
         if num_prefills > 0:
             htorch.core.mark_step()
@@ -1662,15 +1659,13 @@ class HPUModelRunner:
                 self.event_start = self.profiler.get_timestamp_us()
                 self.profiler.start("internal", "prefill")
                 htorch.core.mark_step()
-
+                #logger.info(f"libin debug execute fwd rank {my_rank} token_ids {token_ids.shape}")
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches)
                 htorch.core.mark_step()
-                
-                #finished_sending, finished_recving = (
-                #    self.get_finished_kv_transfers(scheduler_output))
+
                 with self.profiler.record_event('internal', "sampler"):
                     sampling_metadata = self._prepare_sampling(
                         batch_changed, req_id, pad_to=logits_device.shape[0])
@@ -1695,7 +1690,10 @@ class HPUModelRunner:
                         is_prompt=True)
                     self.profiler.record_counter(self.event_start, counters)
             #TODO: check if this can be async
+            #logger.info(f'libin debug done with fwd loop rank {my_rank}')
             self.maybe_wait_for_kv_save(scheduler_output.scheduled_new_reqs)
+            finished_sending, finished_recving = (
+                self.get_finished_kv_transfers(scheduler_output))
             if self.is_driver_worker and self.profiler.enabled:
                 self.profiler_counter_helper.reset_prompt_seq_stats()
 
@@ -1706,7 +1704,7 @@ class HPUModelRunner:
             self.profiler.start("internal", "decode")
             assert decode_data is not None
             htorch.core.mark_step()
-            logger.debug(f'buke {self.modelrunnerid=} {os.getpid()=}|{num_prefills=}|{num_decodes=}|{decode_data.token_ids=}|{scheduler_output=}')
+            #logger.debug(f'buke {self.modelrunnerid=} {os.getpid()=}|{num_prefills=}|{num_decodes=}|{decode_data.token_ids=}|{scheduler_output=}')
 
             _, logits_device = \
                 self._execute_model_generic(
@@ -1714,8 +1712,7 @@ class HPUModelRunner:
                 decode_data.attn_metadata, decode_data.logits_indices,
                 self.kv_caches, scheduler_output=scheduler_output)
             htorch.core.mark_step()
-            #finished_sending, finished_recving = (
-            #    self.get_finished_kv_transfers(scheduler_output))
+
             with self.profiler.record_event('internal', "sampler"):
                 sampling_metadata = self._prepare_sampling(
                     batch_changed,
@@ -2294,7 +2291,7 @@ class HPUModelRunner:
         if prompt_profile_cfg or decode_profile_cfg:
             self._generate_profiling(prompt_profile_cfg, decode_profile_cfg)
             raise AssertionError("Finished profiling")
-        self.bucketing_ctx.generate_prompt_buckets()
+        #self.bucketing_ctx.generate_prompt_buckets()
         kv_caches = self.kv_caches
         self.bucketing_manager.generate_prompt_buckets()
         self.bucketing_manager.generate_decode_buckets()
@@ -2435,7 +2432,7 @@ class HPUModelRunner:
                     v_cache_shape = None if self.model_config.use_mla \
                     else kv_cache_shape
                     dtype = kv_cache_spec.dtype
-                    logger.debug(f'buke: |{os.getpid()=}|{kv_cache_shape=}')
+                    #logger.debug(f'buke: |{os.getpid()=}|{kv_cache_shape=}')
                     key_cache = torch.zeros(kv_cache_shape,
                                             dtype=dtype,
                                             device=self.device)
@@ -2446,11 +2443,6 @@ class HPUModelRunner:
                     else:
                         value_cache = None
                     kv_caches[layer_name] = (key_cache, value_cache)
-                    if value_cache is not None:
-                        logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
-                    else:
-                        logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|value_cache=None")
-
                     #logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
                 else:
                     # TODO: add new branches when introducing more types of
@@ -2577,7 +2569,8 @@ def copy_kv_blocks(
     #     src_device=src_device,
     #     dst_device=dst_device,
     #     )
-    logger.debug(f"buke copy_kv_blocks: |{os.getpid()=}|{block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy start {time.perf_counter()}")
+    #logger.debug(f"buke copy_kv_blocks: |{os.getpid()=}|{block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy start {time.perf_counter()}")
+    start = time.perf_counter()
     for i, local_block_id in enumerate(src_block_ids): 
         for layer, kv_layer in src_kv_caches.items():
             start = block_size * local_block_id
@@ -2588,7 +2581,7 @@ def copy_kv_blocks(
                 k, v = kv_layer
             dst_kv_caches[layer][0][start:end].copy_(k[start:end], non_blocking = False)
             dst_kv_caches[layer][1][start:end].copy_(v[start:end], non_blocking = False)
-    logger.debug(f"buke copy_kv_blocks: |{os.getpid()=}|{block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy end {time.perf_counter()}")
+    logger.info(f"copy_kv_blocks: |{os.getpid()=}|{block_size=}|{src_block_ids=}|{dst_block_ids=}|{src_device=}|{dst_device=}|copy takes {time.perf_counter() - start}")
 
     #from remote_pdb import RemotePdb
     #RemotePdb('0.0.0.0', 4444).set_trace()

@@ -1047,7 +1047,7 @@ class NixlConnectorWorker:
 
         for req_id, meta in metadata.reqs_to_save.items():
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
+                logger.info(
                     "save_load_kv for request[%s] to host xfer buffer."
                     "local_block_ids: %s. ", req_id,
                     ",".join(map(str, meta.local_block_ids)))

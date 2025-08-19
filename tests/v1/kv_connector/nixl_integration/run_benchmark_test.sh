@@ -14,7 +14,7 @@ MODELS=(
     "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/"
 )
 export VLLM_USE_V1=1
-export VLLM_SKIP_WARMUP="true"
+export VLLM_SKIP_WARMUP=True
 #export PT_HPU_LAZY_MODE=1
 
 # Number of prefill and decode instances to create
@@ -100,9 +100,11 @@ run_tests_for_model() {
     # Build the command with or without model-specific args
     BASE_CMD="RANK=0 VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
-    --enforce-eager \
+    --long_prefill_token_threshold 8192 \
+    --max_num_batched_tokens 8192 \
     --gpu-memory-utilization 0.3 \
     --tensor-parallel-size $PREFILLER_TP_SIZE \
+    --disable-log-requests \
     --kv-transfer-config '{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"cpu\"}'"
 
     if [ -n "$model_args" ]; then
@@ -132,9 +134,11 @@ run_tests_for_model() {
     # Build the command with or without model-specific args
     BASE_CMD="RANK=1 VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
-    --enforce-eager \
     --gpu-memory-utilization 0.3 \
     --tensor-parallel-size $DECODER_TP_SIZE \
+    --long_prefill_token_threshold 8192 \
+    --max_num_batched_tokens 8192 \
+    --disable-log-requests \
     --kv-transfer-config '{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"cpu\"}'"
 
     if [ -n "$model_args" ]; then
@@ -206,7 +210,7 @@ run_tests_for_model() {
  #      "max_tokens": 2,
  #      "temperature": 0
  #      }'
-  sleep 10
+  sleep 2
   # Run lm eval for this model
   echo "Running tests for $model_name"
   #TEST_MODEL=$model_name python -m pytest -s -x test_accuracy.py
@@ -217,7 +221,7 @@ run_tests_for_model() {
    --dataset-name random \
    --random-input-len "8000" \
    --random-output-len "200" \
-   --num-prompts 200  \
+   --num-prompts 100  \
    --burstiness 100 \
    --request-rate 3.6 \
    --metric-percentiles 95 \
