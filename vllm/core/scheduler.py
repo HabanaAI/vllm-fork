@@ -578,7 +578,8 @@ class Scheduler:
             hash_prefix = hash_list(seq_group.prompt_token_ids)
             prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
                 hash_prefix)
-            put_to_shared_dict(prefix, kv_cache, hidden_states)
+            if kv_cache is not None:
+                put_to_shared_dict(prefix, kv_cache, hidden_states)
             self.fetching_done.put(seq_group)
             self.fetching_queue.task_done()
             self.scheduler_profiler.end()
@@ -685,7 +686,7 @@ class Scheduler:
 
     def has_unfinished_seqs(self) -> bool:
         return len(self.waiting) != 0 or len(self.running) != 0 or len(
-            self.swapped) != 0 or not self.fetching.empty()
+            self.swapped) != 0 or len(self.fetching) != 0
 
     def get_prefix_cache_hit_rate(self, device: Device) -> float:
         return self.block_manager.get_prefix_cache_hit_rate(device)
@@ -694,8 +695,8 @@ class Scheduler:
         return self.block_manager.reset_prefix_cache()
 
     def get_num_unfinished_seq_groups(self) -> int:
-        return len(self.waiting) + len(self.running) + len(
-            self.swapped) + len(self.fetching)
+        return len(self.waiting) + len(self.running) + len(self.swapped) + len(
+            self.fetching)
 
     def get_and_reset_finished_requests_ids(self) -> List[str]:
         """Flushes the list of request ids of previously finished seq_groups."""
