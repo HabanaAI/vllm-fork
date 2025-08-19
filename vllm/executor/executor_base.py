@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
 import time
@@ -74,7 +75,7 @@ class ExecutorBase(ABC):
                 `self` argument, in addition to the arguments passed in `args`
                 and `kwargs`. The `self` argument will be the worker object.
             timeout: Maximum time in seconds to wait for execution. Raises a
-                {exc}`TimeoutError` on timeout. `None` means wait indefinitely.
+                [`TimeoutError`][] on timeout. `None` means wait indefinitely.
             args: Positional arguments to pass to the worker method.
             kwargs: Keyword arguments to pass to the worker method.
 
@@ -288,7 +289,7 @@ class DistributedExecutorBase(ExecutorBase):
     def execute_model(
         self,
         execute_model_req: ExecuteModelRequest,
-    ) -> List[SamplerOutput]:
+    ) -> Optional[List[SamplerOutput]]:
         # TODO: unify into collective_rpc
         if self.parallel_worker_tasks is None:
             self.parallel_worker_tasks = self._run_workers(
@@ -297,7 +298,6 @@ class DistributedExecutorBase(ExecutorBase):
 
         # Only the driver worker returns the sampling results.
         driver_outputs = self._driver_execute_model(execute_model_req)
-        assert driver_outputs is not None
         return driver_outputs
 
     def stop_remote_worker_execution_loop(self) -> None:
