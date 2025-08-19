@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """A layer that samples the next tokens from the model's outputs."""
 import itertools
-import warnings
+import math
+import os
+from collections.abc import Iterator
 from dataclasses import dataclass
 from importlib.util import find_spec
 from math import inf
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import msgspec
 import torch
@@ -23,7 +26,6 @@ from vllm.sequence import (VLLM_INVALID_TOKEN_ID,
 from vllm.spec_decode.metrics import SpecDecodeWorkerMetrics
 
 if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
-    import flashinfer.sampling
     # yapf: disable
     from flashinfer.sampling import (
         top_k_top_p_sampling_from_probs as flashinfer_top_k_top_p_sampling)
@@ -31,6 +33,10 @@ if envs.VLLM_USE_FLASHINFER_SAMPLER and find_spec("flashinfer"):
     # yapf: enable
 else:
     flashinfer_top_k_top_p_sampling = None
+
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 def get_sampler() -> torch.nn.Module:
@@ -42,14 +48,14 @@ def get_sampler() -> torch.nn.Module:
 
 
 # (num_token_ids, num_parent_ids) per sequence group.
-SampleResultType = List[Tuple[List[int], List[int]]]
+SampleResultType = list[tuple[list[int], list[int]]]
 
 # Types of temporary data structures used for
 # computing sample_result
-SampleMetadataType = Dict[SamplingType, Tuple[List[int],
-                                              List[SequenceGroupToSample]]]
-MultinomialSamplesType = Dict[SamplingType, torch.Tensor]
-SampleResultsDictType = Dict[int, Tuple[List[int], List[int]]]
+SampleMetadataType = dict[SamplingType, tuple[list[int],
+                                              list[SequenceGroupToSample]]]
+MultinomialSamplesType = dict[SamplingType, torch.Tensor]
+SampleResultsDictType = dict[int, tuple[list[int], list[int]]]
 
 
 # Encapsulates temporary data structures for computing
@@ -76,7 +82,7 @@ class SampleResultArgsType:
 MaybeDeferredSampleResultType = Union[SampleResultType, SampleResultArgsType]
 
 # Abbreviation of the _sample() return type
-SampleReturnType = Tuple[MaybeDeferredSampleResultType, Optional[torch.Tensor]]
+SampleReturnType = tuple[MaybeDeferredSampleResultType, Optional[torch.Tensor]]
 
 
 class SamplerOutput(
@@ -90,7 +96,7 @@ class SamplerOutput(
     also has optional fields for device tensors.
     """
 
-    outputs: List[CompletionSequenceGroupOutput]
+    outputs: list[CompletionSequenceGroupOutput]
 
     # On-device tensor containing probabilities of each token.
     sampled_token_probs: Optional[torch.Tensor] = None
@@ -217,6 +223,10 @@ class Sampler(nn.Module):
         self._do_penalties = do_penalties
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
+        self._top_k_scalar = top_k_scalar
+        self._top_p_scalar = top_p_scalar
+
+        self._apply_top_k_top_p_opt = ApplyToppTopkScalar(5)
 
     def forward(
         self,
@@ -225,17 +235,19 @@ class Sampler(nn.Module):
     ) -> Optional[SamplerOutput]:
         """
         Single-step scheduling:
-        * Perform GPU-side sampling computation & compute
-          GPU-side logprobs tensor
-        * Pythonize sampling result & logprobs tensor
+            * Perform GPU-side sampling computation & compute
+            GPU-side logprobs tensor
+            * Pythonize sampling result & logprobs tensor
 
         Multi-step scheduling:
-        * Perform GPU-side sampling computation & compute
-          GPU-side logprobs tensor
-        * Defer Pythonization of sampling result & logprobs
-          tensor
-        * Encapsulate arguments required for deferred Pythonization
-          in the {class}`SamplerOutput` structure
+            * Perform GPU-side sampling computation & compute
+            GPU-side logprobs tensor
+            * Defer Pythonization of sampling result & logprobs
+            tensor
+            * Encapsulate arguments required for deferred Pythonization
+            in the
+            [`SamplerOutput`][vllm.model_executor.layers.sampler.SamplerOutput]
+            structure
 
         Args:
             logits: (num_tokens, vocab_size).
@@ -254,6 +266,7 @@ class Sampler(nn.Module):
             # between decode runs.
             self._init_sampling_tensors(logits, sampling_metadata)
 
+        self.skip_softmax_for_greedy = sampling_metadata.skip_softmax_for_greedy
         assert self._sampling_tensors is not None
         sampling_tensors = self._sampling_tensors
         do_penalties = self._do_penalties
@@ -272,21 +285,30 @@ class Sampler(nn.Module):
 
         # Use float32 to apply temperature scaling.
         # Use in-place division to avoid creating a new tensor.
-        logits = logits.to(torch.float)
-        logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
+        if not self.skip_softmax_for_greedy:
+            logits = logits.to(torch.float)
+            logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k and flashinfer_top_k_top_p_sampling is None:
-            logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
-                                        sampling_tensors.top_ks)
+            # If we have a scalar p and k, we can use the optimized version.
+            if self._top_k_scalar and self._top_p_scalar:
+                logits = self._apply_top_k_top_p_opt(logits,
+                                                     self._top_p_scalar,
+                                                     self._top_k_scalar)
+            else:
+                logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
+                                            sampling_tensors.top_ks)
 
         if do_min_p:
             logits = _apply_min_p(logits, sampling_tensors.min_ps)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
-        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        probs = logits if self.skip_softmax_for_greedy \
+            else torch.softmax(logits, dim=-1, dtype=torch.float)
         # Compute the log probabilities.
-        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+        logprobs = logits if self.skip_softmax_for_greedy \
+            else torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
         # Sample the next tokens.
         maybe_deferred_sample_results, maybe_sampled_tokens_tensor = _sample(
@@ -346,7 +368,7 @@ def _get_bin_counts_and_mask(
     tokens: torch.Tensor,
     vocab_size: int,
     num_seqs: int,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     # Compute the bin counts for the tokens.
     # vocab_size + 1 for padding.
     bin_counts = torch.zeros((num_seqs, vocab_size + 1),
@@ -359,6 +381,118 @@ def _get_bin_counts_and_mask(
     return bin_counts, mask
 
 
+class ApplyToppTopkScalar:
+    """
+    The original implementation of _apply_top_k_top_p is more general
+    as it uses vector topp, topk
+    However in a lot of cases, topp and topk is same for all batch elements
+    For such "scalar" topp, topk cases, we can use this class
+
+    The main optimizations in this class is:
+    Use topk instead of sort, which is much faster especially for small k.
+    However just using topk might not suffice in cases as shown below
+    Consider a tensor: 9 9 8 8 8 8 7 7 7
+    Topk, with k=5, on this yields 9 9 8 8 8
+    The value "8" is on the boundary, hence the last "8" gets snipped off
+    However the original implementation accepts all the "8"s,
+    so it should output:
+    9 9 8 8 8 8 (6 values, even though k=5)
+    To ensure these semantics, we perform topk with _padded_k elements
+    If we find more boundary elements left over,
+    then we keep incrementing _padded_k
+    and in future calls use the expanded value of __padded_k
+
+    The increments to _padded_k should be done
+    with value > 1 to prevent excessive recompilations
+    due to dynamic shapes (the output shape of the topk)
+
+    The main logic of this is in __call__
+    This is a class instead of a function, just to keep track of
+    the monotonic non-decreasing state _padded_k
+
+    To enable the duplicates that are outside of kth border,
+    set VLLM_HANDLE_TOPK_DUPLICATES to 1 or true.
+    """
+    _padded_k = 0
+    _handle_duplicates = os.getenv('VLLM_HANDLE_TOPK_DUPLICATES',
+                                   '0').lower() in ['1', 'true']
+
+    def __init__(self, increment: int):
+        self._increment = increment
+
+    def __call__(self, logits: torch.Tensor, p: float, k: int):
+        if k == 1 and not ApplyToppTopkScalar._handle_duplicates:
+            new_logits = torch.full(logits.shape,
+                                    -float("inf"),
+                                    device=logits.device)
+            vals, idx = torch.max(logits, keepdim=True, dim=1)
+            new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
+            return new_logits
+
+        if k > ApplyToppTopkScalar._padded_k:
+            ApplyToppTopkScalar._padded_k = min(k + self._increment,
+                                                logits.shape[1])
+
+        vals, idx = torch.topk(logits,
+                               k=ApplyToppTopkScalar._padded_k,
+                               dim=1,
+                               sorted=True)
+
+        # this "if" checks if we have bucketed so much that
+        # we have padded k upto shape of logits
+        if self._handle_duplicates and \
+            ApplyToppTopkScalar._padded_k != logits.shape[1]:
+            smallest_of_top_k = vals[:, k - 1]
+            num_duplicates_of_smallest_of_topk = torch.sum(
+                logits == smallest_of_top_k.unsqueeze(1), 1)
+            max_num_duplicates_of_smallest_of_topk = torch.max(
+                num_duplicates_of_smallest_of_topk).item()
+
+            # there are n repeats for a border
+            # (border meaning the smallest value of the top k).
+            # we do not know if only 1 or 2 or (n-1)
+            # of them lie outside the kth border,
+            # so we choose to conservatively increase by n-1
+            # when num_duplicates > _padded_k - k
+            if max_num_duplicates_of_smallest_of_topk - 1 > (
+                    ApplyToppTopkScalar._padded_k - k):
+                incr = int(
+                    math.ceil((max_num_duplicates_of_smallest_of_topk - 1) /
+                              self._increment) * self._increment)
+                # this while loop should be traversed at most twice,
+                # because we dont increment by self._increment and retry
+                # instead we compute incr in one go
+                ApplyToppTopkScalar._padded_k = min(
+                    ApplyToppTopkScalar._padded_k + incr, logits.shape[1])
+
+                # recompute topk with expanded padded_k
+                vals, idx = torch.topk(logits,
+                                       k=ApplyToppTopkScalar._padded_k,
+                                       dim=1,
+                                       sorted=True)
+
+        idx = torch.fliplr(idx)
+        vals = torch.fliplr(vals)
+
+        top_k_smallest_val_idx = vals.size(1) - k
+        top_k_mask = vals[:, top_k_smallest_val_idx].unsqueeze(1)
+        top_k_mask = vals < top_k_mask
+        vals.masked_fill_(top_k_mask, -float("inf"))
+
+        probs_sort = vals.softmax(dim=-1)
+        probs_sum = probs_sort.cumsum(dim=-1)
+        top_p_mask = probs_sum <= (1 - p)
+        top_p_mask[:, -1] = False
+        vals.masked_fill_(top_p_mask, -float("inf"))
+
+        new_logits = torch.full(logits.shape,
+                                -float("inf"),
+                                device=logits.device)
+        new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
+
+        return new_logits
+
+
 def _apply_min_tokens_penalty(
     logits: torch.Tensor,
     sampling_metadata: SamplingMetadata,
@@ -367,7 +501,7 @@ def _apply_min_tokens_penalty(
         have not been generated yet
     """
     # list of indices in logits that will be set to -inf
-    logits_to_penalize: List[Tuple[int, int]] = []
+    logits_to_penalize: list[tuple[int, int]] = []
     logits_applied = 0
     for seq_group in sampling_metadata.seq_groups:
         seq_ids = seq_group.seq_ids
@@ -383,7 +517,7 @@ def _apply_min_tokens_penalty(
         min_tokens = sampling_params.min_tokens
         token_ids_to_penalize = sampling_params.all_stop_token_ids
         if min_tokens > 0 and token_ids_to_penalize:
-            seqs_to_penalize: List[int] = []
+            seqs_to_penalize: list[int] = []
             for j, seq_id in enumerate(seq_ids):
                 seq_data = seq_group.seq_data[seq_id]
                 if len(seq_data.output_token_ids_array) < min_tokens:
@@ -476,7 +610,7 @@ def _apply_min_p(
 
 
 def _greedy_sample(
-    selected_seq_groups: List[SequenceGroupToSample],
+    selected_seq_groups: list[SequenceGroupToSample],
     samples: torch.Tensor,
 ) -> SampleResultType:
     """Run greedy sampling on a given samples.
@@ -511,7 +645,7 @@ def _greedy_sample(
 
 
 def _random_sample(
-    selected_seq_groups: List[SequenceGroupToSample],
+    selected_seq_groups: list[SequenceGroupToSample],
     random_samples: torch.Tensor,
 ) -> SampleResultType:
     """Run random sampling on a given samples.
@@ -562,7 +696,7 @@ def _random_sample(
 def _multinomial(
     probs: torch.Tensor,
     num_samples: int,
-    seq_groups: Optional[List[SequenceGroupToSample]] = None,
+    seq_groups: Optional[list[SequenceGroupToSample]] = None,
 ) -> torch.Tensor:
     if num_samples > 1:
         probs = probs.repeat_interleave(num_samples, dim=0)
@@ -583,39 +717,16 @@ def _multinomial(
 
 def _top_k_top_p_multinomial_with_flashinfer(
         probs: torch.Tensor, top_ks: torch.Tensor, top_ps: torch.Tensor,
-        num_samples: int, seq_groups: Optional[List[SequenceGroupToSample]]):
-    max_top_k_round = 32
+        num_samples: int, seq_groups: Optional[list[SequenceGroupToSample]]):
     if num_samples > 1:
         probs = probs.repeat_interleave(num_samples, dim=0)
         top_ks = top_ks.repeat_interleave(num_samples)
         top_ps = top_ps.repeat_interleave(num_samples)
-    batch_size = probs.shape[0]
-    uniform_samples = torch.empty((max_top_k_round, batch_size),
-                                  device=probs.device)
-    if seq_groups is None:
-        uniform_samples.uniform_()
-    else:
-        sample_idx = 0
-        for seq_group in seq_groups:
-            seq_ids = seq_group.seq_ids
-            stride = len(seq_ids) * num_samples
-            assert seq_group.generator is not None
-            uniform_samples[:, sample_idx:sample_idx +
-                            stride].uniform_(generator=seq_group.generator)
-            sample_idx += stride
-    batch_next_token_ids, success = flashinfer_top_k_top_p_sampling(
+    batch_next_token_ids = flashinfer_top_k_top_p_sampling(
         probs,
-        uniform_samples,
         top_ks,
         top_ps,
     )
-    if not success.all():
-        warnings.warn("FlashInfer rejection sampling failed, fallback.",
-                      stacklevel=1)
-        probs = flashinfer.sampling.top_k_renorm_prob(probs, top_ks)
-        probs = flashinfer.sampling.top_p_renorm_prob(probs, top_ps)
-        batch_next_token_ids = flashinfer.sampling.sampling_from_probs(
-            probs, uniform_samples[0])
     return batch_next_token_ids.view(-1, num_samples)
 
 
@@ -688,7 +799,7 @@ def _sample_with_torch(
       tensors required for Pythonization
     '''
 
-    categorized_seq_group_ids: Dict[SamplingType, List[int]] = {
+    categorized_seq_group_ids: dict[SamplingType, list[int]] = {
         t: []
         for t in SamplingType
     }
@@ -751,19 +862,14 @@ def _sample_with_torch(
                               seq_groups)
 
             if flashinfer_top_k_top_p_sampling is not None:
-                multinomial_samples[
-                    sampling_type] = _top_k_top_p_multinomial_with_flashinfer(
-                        probs[long_sample_indices],
-                        sampling_tensors.top_ks[long_sample_indices],
-                        sampling_tensors.top_ps[long_sample_indices],
-                        max_n_in_batch,
-                        seq_groups_arg,
-                    )
-            else:
-                multinomial_samples[sampling_type] = _multinomial(
-                    probs[long_sample_indices],
-                    max_n_in_batch,
-                    seq_groups=seq_groups_arg)
+                logger.warning("FlashInfer 0.2.3+ does not support "
+                               "per-request generators. Falling back to "
+                               "PyTorch-native implementation.")
+
+            multinomial_samples[sampling_type] = _multinomial(
+                probs[long_sample_indices],
+                max_n_in_batch,
+                seq_groups=seq_groups_arg)
 
             if sampled_token_ids_tensor is not None:
                 # Store sampled tokens in output tensor.
@@ -852,7 +958,7 @@ def get_logprobs(
     logprobs: torch.Tensor,
     sampling_metadata: SamplingMetadata,
     sample_results: SampleResultType,
-) -> Tuple[List[Optional[PromptLogprobs]], List[SampleLogprobs]]:
+) -> tuple[list[Optional[PromptLogprobs]], list[SampleLogprobs]]:
     """Return sample logprobs and prompt logprobs.
 
     The logic consists of 3 parts.
@@ -881,9 +987,9 @@ def get_logprobs(
     """
     # The index of query token to calculate logprobs. It includes both
     # prompt and sample logprob indices.
-    query_indices: List[int] = []
+    query_indices: list[int] = []
     # The next token ids to get the logprob value from.
-    next_token_ids: List[int] = []
+    next_token_ids: list[int] = []
     # The largest requested number of logprobs. We find logprobs as many as the
     # largest num logprobs in this API. If every logprobs is None, it will be
     # set to -1.
@@ -965,8 +1071,8 @@ def get_logprobs(
         ranks = ranks.to('cpu')
 
     # Find prompt/sample logprobs.
-    prompt_logprobs_per_seq_group: List[Optional[PromptLogprobs]] = []
-    sample_logprobs_per_seq_group: List[SampleLogprobs] = []
+    prompt_logprobs_per_seq_group: list[Optional[PromptLogprobs]] = []
+    sample_logprobs_per_seq_group: list[SampleLogprobs] = []
     top_logprob_idx = 0
     selected_logprobs_idx = 0
 
@@ -1017,7 +1123,7 @@ def _get_prompt_logprob_if_needed(
         for idx, token_id in enumerate(next_prompt_tokens):
             # Calculate the prompt logprob of the real prompt tokens.
             # {token_id: (logprob, rank_from_vocab)}
-            prompt_logprobs_dict: Dict[int, Tuple[float, int]] = {
+            prompt_logprobs_dict: dict[int, tuple[float, int]] = {
                 token_id: (selected_logprob_items[idx], rank_items[idx])
             }
 
@@ -1049,7 +1155,7 @@ def _get_prompt_logprob_if_needed(
 
 def _get_sampled_logprob_if_needed(
     seq_group: SequenceGroupToSample,
-    sample_result: Tuple[List[int], List[int]],
+    sample_result: tuple[list[int], list[int]],
     selected_logprobs: torch.Tensor,
     ranks: torch.Tensor,
     top_token_ids: torch.Tensor,
@@ -1170,9 +1276,9 @@ def _modify_greedy_probs_inplace(logprobs: torch.Tensor, probs: torch.Tensor,
 def _build_sampler_output(
     maybe_deferred_sample_results: MaybeDeferredSampleResultType,
     sampling_metadata: SamplingMetadata,
-    prompt_logprobs: Optional[List[Optional[PromptLogprobs]]],
-    sample_logprobs: Optional[List[SampleLogprobs]],
-    on_device_tensors: Optional[Tuple[torch.Tensor, torch.Tensor,
+    prompt_logprobs: Optional[list[Optional[PromptLogprobs]]],
+    sample_logprobs: Optional[list[SampleLogprobs]],
+    on_device_tensors: Optional[tuple[torch.Tensor, torch.Tensor,
                                       torch.Tensor]],
     skip_sampler_cpu_output: bool = False,
 ) -> SamplerOutput:
@@ -1184,7 +1290,7 @@ def _build_sampler_output(
             allows post-processing without copies to CPU/serialization, e.g. in
             speculative decoding rejection sampling.
     """
-    sampler_output: List[CompletionSequenceGroupOutput] = []
+    sampler_output: list[CompletionSequenceGroupOutput] = []
 
     if skip_sampler_cpu_output:
         assert isinstance(maybe_deferred_sample_results, SampleResultArgsType)
@@ -1206,7 +1312,7 @@ def _build_sampler_output(
                                            prompt_logprobs, sample_logprobs):
             seq_ids = seq_group.seq_ids
             next_token_ids, parent_ids = sample_result
-            seq_outputs: List[SequenceOutput] = []
+            seq_outputs: list[SequenceOutput] = []
             for parent_id, next_token_id, logprobs in zip(
                     parent_ids, next_token_ids, group_sample_logprobs):
                 seq_outputs.append(

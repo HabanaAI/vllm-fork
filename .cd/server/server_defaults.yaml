@@ -1,0 +1,6 @@
+hw_defaults:
+  HPU_MEM:
+    GAUDI2: 96
+    GAUDI3: 128
+  DTYPE: bfloat16
+  # DEVICE_NAME: GAUDI3
