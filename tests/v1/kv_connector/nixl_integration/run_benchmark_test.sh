@@ -110,6 +110,7 @@ run_tests_for_model() {
     --gpu-memory-utilization 0.3 \
     --disable-log-requests \
     --tensor-parallel-size $PREFILLER_TP_SIZE \
+    --disable-log-requests \
     --kv-transfer-config '{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"cpu\"}'"
 
     if [ -n "$model_args" ]; then

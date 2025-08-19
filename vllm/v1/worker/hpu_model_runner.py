@@ -864,6 +864,8 @@ class HPUModelRunner:
         scheduler_output: "SchedulerOutput",
     ) -> PromptDecodeInfo:
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+        #my_rank = os.getenv('RANK')
+        #logger.info(f'libin debug _get_prompts_and_decodes {my_rank} {total_num_scheduled_tokens}')
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
@@ -2438,11 +2440,6 @@ class HPUModelRunner:
                     else:
                         value_cache = None
                     kv_caches[layer_name] = (key_cache, value_cache)
-                    if value_cache is not None:
-                        logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
-                    else:
-                        logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|value_cache=None")
-
                     #logger.debug(f"buke initialize_kv_cache: {key_cache.data_ptr()=}|{value_cache.data_ptr()=}")
                 else:
                     # TODO: add new branches when introducing more types of
