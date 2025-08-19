@@ -833,7 +833,7 @@ def with_thread_limits(div_omp: int = 4, div_torch: int = 8):
             old_torch = torch.get_num_threads()
             num_cores = os.cpu_count()
 
-            # Set new limits
+            # Set new limits 
             os.environ["OMP_NUM_THREADS"] = str(max(1, num_cores // div_omp))
             torch.set_num_threads(max(1, num_cores // div_torch))
             logger.warning_once("Setting OMP_NUM_THREADS to %s and torch.set_num_threads to %s", 
