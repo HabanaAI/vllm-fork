@@ -1052,6 +1052,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ]  #TODO: Move to HPUBucketingContext
         self.graphed_multimodal_buckets: Set[Any] = set()
         self.use_contiguous_pa = envs.VLLM_USE_HPU_CONTIGUOUS_CACHE_FETCH
+        self.do_mark_step = envs.VLLM_HPU_FORCE_MARK_STEP
 
         # Data Parallel
         self.dp_size = vllm_config.parallel_config.data_parallel_size
@@ -1113,8 +1114,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @property
     def model_is_mrope(self) -> bool:
-        config = self.model_config.hf_config
-        return uses_mrope(config)
+        self._model_is_mrope = getattr(self, '_model_is_mrope', None)
+        if self._model_is_mrope is None:
+            config = self.model_config.hf_config
+            self._model_is_mrope = uses_mrope(config)
+        return self._model_is_mrope
 
     def _is_quant_with_inc(self):
         quant_config = os.getenv("QUANT_CONFIG", None) is not None
@@ -1249,12 +1253,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             hidden_layer_markstep_interval = int(
                 os.getenv('VLLM_CONFIG_HIDDEN_LAYERS', '1'))
             model_config = getattr(self.model, "config", None)
-            modify_model_layers(
-                self.model,
-                get_target_layer_suffix_list(
-                    model_config.
-                    model_type if model_config is not None else None),
-                hidden_layer_markstep_interval)
+            if self.do_mark_step:
+                modify_model_layers(
+                    self.model,
+                    get_target_layer_suffix_list(
+                        model_config.
+                        model_type if model_config is not None else None),
+                    hidden_layer_markstep_interval)
             torch.hpu.synchronize()
 
             if self.is_pooler:
@@ -3895,7 +3900,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
-                htorch.core.mark_step()
+                if self.do_mark_step:
+                    htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
@@ -3929,7 +3935,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 output.deferred_sample_results_args,
                                 sampling_metadata, is_prompt))
                         self.cached_step_inputs.append(model_input)
-                htorch.core.mark_step()
+                if self.do_mark_step:
+                    htorch.core.mark_step()
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
                     model_input.async_callback()
