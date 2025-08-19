@@ -19,4 +19,13 @@ WORKDIR /workspace/
 
 RUN ln -s /workspace/vllm/tests && ln -s /workspace/vllm/examples && ln -s /workspace/vllm/benchmarks
 
+# Create a non-root user and group
+RUN groupadd -r vllmgroup && useradd -r -g vllmgroup -d /workspace/vllm -s /bin/bash vllmuser
+
+# Change ownership of the workspace directory
+RUN chown -R vllmuser:vllmgroup /workspace/vllm
+
+# Switch to the non-root user
+USER vllmuser
+
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
