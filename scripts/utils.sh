@@ -154,7 +154,11 @@ set_module_ids(){
             echo "The number of module IDs should be equal to the number of HPUs."
             exit
         fi
-        export HABANA_VISIBLE_MODULES=$module_ids
+        if [ "$num_hpu" -gt 1 ]; then
+            export HABANA_VISIBLE_MODULES=$module_ids
+        else
+            export HLS_MODULE_ID=$module_ids
+        fi
 
         # set up numactl based on module ids
         set_numactl
