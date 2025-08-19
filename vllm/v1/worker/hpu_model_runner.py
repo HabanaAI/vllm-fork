@@ -1665,6 +1665,7 @@ class HPUModelRunner:
                 self.event_start = self.profiler.get_timestamp_us()
                 self.profiler.start("internal", "prefill")
                 htorch.core.mark_step()
+                #logger.info(f"libin debug execute fwd rank {my_rank} token_ids {token_ids.shape}")
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
