@@ -27,9 +27,8 @@ import itertools
 import math
 from typing import Any, Optional, Union
 
-import torch
 from transformers import PretrainedConfig
-
+import torch
 from vllm.model_executor.custom_op import CustomOp
 from vllm.platforms import current_platform
 
@@ -995,7 +994,8 @@ class DeepseekScalingRotaryEmbedding(RotaryEmbedding):
             rope_mode = RotaryPosEmbeddingMode.PAIRWISE
             cos = cos.repeat_interleave(2, dim=-1).unsqueeze(-2)
             sin = sin.repeat_interleave(2, dim=-1).unsqueeze(-2)
-        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0, rope_mode)
+        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
+                                         rope_mode)
         key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0, rope_mode)
 
         if self.rotary_dim < self.head_size:

@@ -147,8 +147,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         # WEIGHTS
         if current_platform.is_hpu() and envs.VLLM_HPU_CONVERT_TO_FP8UZ:
             extra_weight_attrs["weight_loader"] = gaudi_weight_wrapper(
-                extra_weight_attrs.get("weight_loader")
-            )
+                extra_weight_attrs.get("weight_loader"))
         w13_weight = torch.nn.Parameter(torch.empty(
             num_experts,
             2 * intermediate_size_per_partition,
