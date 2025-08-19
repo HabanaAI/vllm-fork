@@ -720,13 +720,13 @@ class HpuModelAdapter(torch.nn.Module):
             kwargs.update({
                 'input_ids': None,
             })
-        attn_meta = kwargs.pop('attn_metadata')
+        attn_meta = kwargs['attn_metadata']
         if 'kv_caches' in kwargs:
             kwargs.pop('kv_caches')
         with set_forward_context(attn_meta,
                                  self.vllm_config,
                                  virtual_engine,
-                                 dp_awared_padding=self.dp_awared_padding):
+                                 dp_awared_padding=self.dp_awared_padding):         
             hidden_states = self.model(*args, **kwargs)
             if self._rotary_prepare_cos_sin is not None and \
                 not self.model_is_mrope:
