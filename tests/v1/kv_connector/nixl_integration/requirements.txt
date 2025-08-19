@@ -1,0 +1,4 @@
+pytest
+nixl
+lm-eval
+lm-eval[api]
