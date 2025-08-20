@@ -81,14 +81,22 @@ if is_hpu:
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 
-class AttentionLongSequence:
+class HPU_Attention:
 
-    @staticmethod
-    def forward(q, k, v, mask, q_block_size, softmax_mode):
+    softmax_mode = 'fp32' if \
+        os.environ.get('VLLM_FP32_SOFTMAX_VISION', 'false').lower() \
+            in ['true', '1'] else 'None'
+
+    @classmethod
+    def forward(cls, q, k, v, mask, q_block_size=64):
         """
         Support long sequence at prompt phase
         """
         q_len = q.size(-2)
+        if q_len <= 65536:  # need to investigate this crosspoint
+            return FusedSDPA.apply(q, k, v, mask, 0.0, False, None,
+                                   cls.softmax_mode)
+
         assert q_len % q_block_size == 0
         q_tiles = (q_len //
                    q_block_size) if (q_len % q_block_size == 0) else math.ceil(
@@ -101,7 +109,8 @@ class AttentionLongSequence:
             row_mask = mask[:, :, s:e, :]
             attn_output[:, :,
                         s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
-                                                  False, None, softmax_mode)
+                                                  False, None,
+                                                  cls.softmax_mode)
             # TODO: markstep after a couple of iterations
             # need to experiment the optimal number.
             if i % 75 == 0:
@@ -313,10 +322,6 @@ class Qwen2_5_VisionAttention(nn.Module):
                 f"Qwen2.5-VL does not support {self.attn_backend} backend now."
             )
 
-        self.softmax_mode = 'fp32' if os.environ.get(
-            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
-                                                             ] else 'None'
-
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
         seq_len, bs, _ = qkv.shape
@@ -387,31 +392,8 @@ class Qwen2_5_VisionAttention(nn.Module):
             # performs full attention using the previous computed mask
             q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
                           for x in [q, k, v])
-            output = F.scaled_dot_product_attention(q1,
-                                                    k1,
-                                                    v1,
-                                                    attn_mask=attn_mask,
-                                                    dropout_p=0.0)
+            output = HPU_Attention.forward(q1, k1, v1, attn_mask)
             context_layer = rearrange(output, "b h s d -> b s h d ")
-
-            # fullatt_block_attn_mask = fullattn_mask
-            # q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
-            #                 for x in [q, k, v])
-            # (batch_size, _, seq_len_N_t, _) = q1.shape
-            # (batch_size, _, seq_len_N_s, _) = k1.shape
-            # mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
-            # attn_mask = fullatt_block_attn_mask.reshape(
-            #     batch_size, 1, seq_len_N_t, seq_len_N_s,
-            #     -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
-            # assert attn_mask.shape == mask_shape
-
-            # if q1.shape[2] <= 65536:  # need to investigate this crosspoint
-            #     fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0,
-            #                                 False, None, self.softmax_mode)
-            # else:
-            #     fused_out = AttentionLongSequence.forward(
-            #         q1, k1, v1, attn_mask, 64, self.softmax_mode)
-            # context_layer = rearrange(fused_out, "b h s d -> b s h d ")
         elif self.attn_backend == _Backend.TORCH_SDPA:
             # Execute attention entry by entry for speed & less VRAM.
             outputs = []
@@ -882,40 +864,6 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
     pre_attn and post_attn methods are allow to be dynamic.
     """
 
-    def pad_multimodal_data(self, pixel_values, image_grid_thw,
-                            vision_buckets):
-        assert pixel_values.shape[0] % 64 == 0, 'needs 64 aligned resolution'
-
-        desired_number_of_pixels = vision_buckets.get_multimodal_bucket(
-            pixel_values.shape[0])
-        padding_len = desired_number_of_pixels - pixel_values.shape[0]
-        if padding_len <= 0:
-            return pixel_values, image_grid_thw
-
-        logger_msg = "Padding current number pixel " \
-            + str(pixel_values.shape[0]) \
-            + " to " \
-            + str(desired_number_of_pixels)
-        logger.info(logger_msg)
-
-        assert padding_len % 64 == 0, 'padding needs to be multiple of 64'
-
-        constant_value = -100
-        pixel_values = torch.cat([
-            pixel_values,
-            torch.ones((padding_len, pixel_values.shape[1]),
-                       device=pixel_values.device) * constant_value
-        ])
-
-        image_grid_thw = torch.cat([
-            image_grid_thw,
-            torch.tensor([[1, 8, padding_len // 8]],
-                         device=image_grid_thw.device)
-        ])
-
-        assert image_grid_thw.prod(-1).sum() == desired_number_of_pixels
-        return pixel_values, image_grid_thw
-
     def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor):
         # patchify
         seq_len, _ = x.size()
@@ -1041,16 +989,22 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                     pixel_values_curr_img, img_shape)
 
             # add padding
-            bucket_size = 9600
-            num_pad_tokens = bucket_size - seq_len
-            padded_seq_len = bucket_size
-            cu_seqlens = F.pad(cu_seqlens, (0, 1), "constant", padded_seq_len)
-            cu_window_seqlens = F.pad(cu_window_seqlens, (0, 1), "constant",
-                                      padded_seq_len)
-            hidden_states = F.pad(hidden_states, (0, 0, 0, num_pad_tokens),
-                                  "constant", -100)
-            rotary_pos_emb = F.pad(rotary_pos_emb, (0, 0, 0, num_pad_tokens),
-                                   "constant", -100)
+            bucket_size = vision_buckets.get_multimodal_bucket(curr_img_size)
+            num_pad_tokens = bucket_size - curr_img_size
+            if num_pad_tokens > 0:
+                logger_msg = "Padding current image size " \
+                    + str(curr_img_size.item()) \
+                    + " to " \
+                    + str(bucket_size)
+                logger.info(logger_msg)
+                cu_seqlens = F.pad(cu_seqlens, (0, 1), "constant", bucket_size)
+                cu_window_seqlens = F.pad(cu_window_seqlens, (0, 1),
+                                          "constant", bucket_size)
+                hidden_states = F.pad(hidden_states, (0, 0, 0, num_pad_tokens),
+                                      "constant", -100)
+                rotary_pos_emb = F.pad(rotary_pos_emb,
+                                       (0, 0, 0, num_pad_tokens), "constant",
+                                       -100)
 
             padding_attn_mask_full = create_block_diagonal_attention_mask(
                 cu_seqlens)
