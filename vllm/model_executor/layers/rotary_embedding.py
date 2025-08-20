@@ -27,8 +27,9 @@ import itertools
 import math
 from typing import Any, Optional, Union
 
-from transformers import PretrainedConfig
 import torch
+from transformers import PretrainedConfig
+
 from vllm.model_executor.custom_op import CustomOp
 from vllm.platforms import current_platform
 
@@ -300,8 +301,7 @@ class RotaryEmbedding(CustomOp):
 
         query_rot = query[..., :self.rotary_dim]
         query_pass = query[..., self.rotary_dim:]
-        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
-                                         rope_mode)
+        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0, rope_mode)
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
         if key is not None:
             key_shape = key.shape
