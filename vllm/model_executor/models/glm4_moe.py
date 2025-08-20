@@ -32,7 +32,7 @@ from transformers import PretrainedConfig
 
 from vllm.attention import Attention
 from vllm.compilation.decorators import support_torch_compile
-from vllm.config import CacheConfig, VllmConfig, get_current_vllm_config
+from vllm.config import CacheConfig, VllmConfig
 from vllm.distributed import (get_ep_group, get_pp_group,
                               get_tensor_model_parallel_world_size)
 from vllm.logger import init_logger
@@ -49,7 +49,10 @@ from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import (
-    default_weight_loader, maybe_remap_kv_scale_name)
+    default_weight_loader,
+    maybe_remap_kv_scale_name,
+    with_thread_limits,
+)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors
 
@@ -130,11 +133,9 @@ class Glm4MoE(nn.Module):
             torch.empty(config.n_routed_experts, dtype=torch.float32))
 
         # Load balancing settings.
-        vllm_config = get_current_vllm_config()
-        parallel_config = vllm_config.parallel_config
         self.enable_eplb = enable_eplb
 
-        # Comment code below until we rebase to latset vllm
+        # Comment code below until we rebase to latest vllm
         # self.n_redundant_experts = parallel_config.num_redundant_experts
         self.n_redundant_experts = 0
         self.n_logical_experts = self.n_routed_experts
@@ -161,10 +162,9 @@ class Glm4MoE(nn.Module):
             prefix=f"{prefix}.experts",
             scoring_func="sigmoid",
             e_score_correction_bias=self.gate.e_score_correction_bias,
-            # Comment code below until we rebase to latset vllm
+            # Comment code below until we rebase to latest vllm
             # enable_eplb=self.enable_eplb,
             # num_redundant_experts=self.n_redundant_experts
-
         )
 
         if config.n_shared_experts is not None:
@@ -386,7 +386,7 @@ class Glm4MoeModel(nn.Module):
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
-        # comment code below until we rebase to latset vllm
+        # comment code below until we rebase to latest vllm
         # enable_eplb = vllm_config.parallel_config.enable_eplb
         enable_eplb = False
         self.config = config
@@ -673,6 +673,7 @@ class Glm4MoeForCausalLM(nn.Module, SupportsPP):
                                        sampling_metadata)
         return logits
 
+    @with_thread_limits()
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)
