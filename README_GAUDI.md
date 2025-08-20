@@ -38,6 +38,10 @@ Runtime" section of [Docker Installation](https://docs.habana.ai/en/latest/Insta
 Make sure you have ``habanalabs-container-runtime`` package installed and that ``habana`` container runtime is registered.
 
 ### Red Hat Enterprise Linux for Use with Red Hat OpenShift AI
+> [!NOTE]
+> Prerequisit:
+Starting from the 1.22.x Intel Gaudi software version, the RHEL Docker image must be created manually before running the command.
+Additionally, the path to the Docker image must be updated in the Dockerfile.hpu.ubi file.
 
 ```
 $ docker build -f Dockerfile.hpu.ubi -t vllm-hpu-env  .
