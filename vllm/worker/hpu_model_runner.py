@@ -798,6 +798,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.use_async_kv_transfer_in_pd = envs.VLLM_USE_ASYNC_TRANSFER_IN_PD
         logger.info("will use async pd: %s", self.use_async_kv_transfer_in_pd)
 
+        # PD
+        self.kv_conf = self.vllm_config.kv_transfer_config
+
     def _set_gc_threshold(self) -> None:
         """
         Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -967,7 +970,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = len(seq_group_metadata_list)
         batch_size_padded = self.bucketing_ctx.get_padded_batch_size(
             real_batch_size, is_prompt)
-        if self.dp_awared_padding:
+        if self.dp_awared_padding and (
+            self.kv_conf is None or not is_prompt or not self.kv_conf.is_kv_consumer
+        ):
             if self.is_driver_worker:
                 batch_size_padded = align_dp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
@@ -1192,7 +1197,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.bucketing_ctx.get_padded_prompt_seq_len(max_query_len),
             self.block_size)
 
-        if self.dp_awared_padding:
+        if self.dp_awared_padding and\
+            (self.kv_conf.is_kv_producer or self.kv_conf is None):
             if self.is_driver_worker:
                 max_prompt_len = align_dp_groups(
                     max_prompt_len, torch.distributed.ReduceOp.MAX)
