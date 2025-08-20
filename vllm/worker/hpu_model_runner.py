@@ -3840,7 +3840,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 list(self.graphed_multimodal_buckets)
                             # set is unhasable and causes friction with
                             # hpu graphs, hence turning it to a list
-                        execute_model_kwargs = self.model.compute_input_embeddings_for_mrope_mm_optimized(
+                        execute_model_kwargs = \
+                            self.model.compute_input_embeddings_for_mrope_mm_optimized(
                             **execute_model_kwargs)
                         if warmup_mode and bypass_model_exec:
                             return []
