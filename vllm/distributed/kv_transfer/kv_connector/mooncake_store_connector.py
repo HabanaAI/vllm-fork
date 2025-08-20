@@ -8,15 +8,20 @@ database-style KVStore.
 """
 import hashlib
 import time
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
+import msgspec
+import numpy as np
 import torch
 
 from vllm import _custom_ops as ops
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
+from vllm.executor.msgspec_utils import decode_hook, encode_hook
 from vllm.logger import init_logger
-from vllm.sequence import IntermediateTensors
+from vllm.model_executor import SamplingMetadata
+from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.sequence import CompletionSequenceGroupOutput, IntermediateTensors
 
 if TYPE_CHECKING:
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
@@ -84,6 +89,11 @@ class MooncakeStoreConnector(KVConnectorBase):
             (self.block_size, self.v_head_size), dtype=dtype, device="hpu")
         self.cache_k = VLLMKVCache()
         self.cache_v = VLLMKVCache()
+
+        self.sampler_output_decoder = msgspec.msgpack.Decoder(
+            CompletionSequenceGroupOutput, dec_hook=decode_hook)
+        self.sampler_output_encoder = msgspec.msgpack.Encoder(
+            enc_hook=encode_hook)
 
     def close(self) -> None:
         """Close the buffer and release resources.
@@ -508,6 +518,101 @@ class MooncakeStoreConnector(KVConnectorBase):
     def tensor_hash(tensor: torch.Tensor) -> int:
         """Calculate the hash value of the tensor."""
         tensor_bytes = tensor.clone().detach().cpu().numpy().tobytes()
-        hash_object = hashlib.blake2b(tensor_bytes)
+        return MooncakeStoreConnector.hash_bytes(tensor_bytes)
+
+    @staticmethod
+    def hash_list(v):
+        input_bytes = np.array(v).tobytes()
+        return MooncakeStoreConnector.hash_bytes(input_bytes)
+
+    @staticmethod
+    def hash_bytes(v):
+        hash_object = hashlib.blake2b(v)
         hash_hex = hash_object.hexdigest()
         return int(hash_hex[:16], 16)
+
+    def wait_for_key(self, key, timeout_in_seconds):
+        if timeout_in_seconds is None:
+            # default to 10 minutes
+            timeout_in_seconds = 60 * 10
+        timeout = time.time() + timeout_in_seconds
+        while self.kv_store.is_exist(key) is False:
+            if time.time() > timeout:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def get_sampler_output_key(self, seq_group_to_sample):
+        # Use first seq data for prompt tokens
+        first_seq_data = next(iter(seq_group_to_sample.seq_data.values()))
+        prompt_token_ids = first_seq_data.prompt_token_ids
+        sampling_params = seq_group_to_sample.sampling_params
+
+        sampling_params = sampling_params.clone()
+        # Prefill and decode will use different max_tokens
+        # To match both side, we use the same
+        sampling_params.max_tokens = 1
+
+        # Prepare the store key
+        prompt_prefix = self.hash_list(prompt_token_ids)
+        sampling_bytes = self.sampler_output_encoder.encode(sampling_params)
+        sampling_prefix = self.hash_bytes(sampling_bytes)
+        sampler_output_key = f"{prompt_prefix}_sampling_{sampling_prefix}"
+        return sampler_output_key
+
+    def send_sampler_output(self, sampling_metadata: SamplingMetadata,
+                            output: SamplerOutput) -> None:
+        seq_groups_to_sample = sampling_metadata.seq_groups
+        outputs = output.outputs
+        assert len(seq_groups_to_sample) == len(outputs),\
+            "Sequence groups to sample must be the same size with the sampler outputs."
+        for seq_group_to_sample, sampler_output_of_seq_group in zip(
+                seq_groups_to_sample, outputs):
+            if not seq_group_to_sample.seq_data:
+                continue
+            start_time = time.time()
+            sampler_output_key = self.get_sampler_output_key(
+                seq_group_to_sample)
+
+            # Use msgpack to encode to bytes
+            sampler_output_bytes = self.sampler_output_encoder.encode(
+                sampler_output_of_seq_group)
+
+            self.kv_store.put_bytes(sampler_output_key, sampler_output_bytes)
+            logger.debug("Put sampler output: %s, time: %s",
+                         sampler_output_key,
+                         time.time() - start_time)
+
+    def recv_sampler_output(
+            self,
+            sampling_metadata: SamplingMetadata) -> Optional[SamplerOutput]:
+        seq_groups_to_sample = sampling_metadata.seq_groups
+        outputs: List[CompletionSequenceGroupOutput] = []
+        for seq_group_to_sample in seq_groups_to_sample:
+            if not seq_group_to_sample.seq_data:
+                return None
+            start_time = time.time()
+            sampler_output_key = self.get_sampler_output_key(
+                seq_group_to_sample)
+            if not self.wait_for_key(sampler_output_key, 10):
+                logger.warning(
+                    "Sampler output with key: %s is not ready in 10 seconds",
+                    sampler_output_key)
+                return None
+
+            sampler_output_bytes = self.kv_store.get_bytes(sampler_output_key)
+            if not sampler_output_bytes:
+                logger.warning("Sampler output with key: %s doesn't exist",
+                               sampler_output_key)
+                return None
+
+            # Use msgpack to decode the bytes to CompletionSequenceGroupOutput
+            sampler_output = self.sampler_output_decoder.decode(
+                sampler_output_bytes)
+            outputs.append(sampler_output)
+            logger.debug("Get sampler output: %s, time: %s",
+                         sampler_output_key,
+                         time.time() - start_time)
+
+        # All the sample outputs are received
+        return SamplerOutput(outputs=outputs)

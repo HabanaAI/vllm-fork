@@ -8,7 +8,7 @@ The class provides two primary abstract methods:
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
 
@@ -16,6 +16,8 @@ from vllm.sequence import IntermediateTensors
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
+    from vllm.model_executor import SamplingMetadata
+    from vllm.model_executor.layers.sampler import SamplerOutput
     from vllm.worker.hpu_model_runner import (
         ModelInputForHPUWithSamplingMetadata)
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
@@ -156,4 +158,15 @@ class KVConnectorBase(ABC):
         attn_metadata: object, kv_caches: List[torch.Tensor]
     ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForHPUWithSamplingMetadata"]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def send_sampler_output(self, sampling_metadata: "SamplingMetadata",
+                            output: "SamplerOutput") -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def recv_sampler_output(
+            self, sampling_metadata: "SamplingMetadata"
+    ) -> Optional["SamplerOutput"]:
         raise NotImplementedError
