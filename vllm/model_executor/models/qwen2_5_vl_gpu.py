@@ -796,13 +796,12 @@ class Qwen2_5_VisionTransformer(nn.Module):
                                   "constant", -100)
             rotary_pos_emb = F.pad(rotary_pos_emb, (0, 0, 0, num_pad_tokens),
                                    "constant", -100)
-            padding_attn_mask_full = create_block_diagonal_attention_mask(
-                cu_seqlens)
-            padding_attn_mask_window = create_block_diagonal_attention_mask(
-                cu_window_seqlens)
-
             print(f"Original seq len {seq_len} ==> padding {padded_seq_len}")
 
+        padding_attn_mask_full = create_block_diagonal_attention_mask(
+            cu_seqlens)
+        padding_attn_mask_window = create_block_diagonal_attention_mask(
+            cu_window_seqlens)
         hidden_states = hidden_states.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
