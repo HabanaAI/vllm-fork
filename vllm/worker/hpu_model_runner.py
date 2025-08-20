@@ -931,6 +931,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
+        self.skip_lazy_warmup = os.getenv('VLLM_SKIP_LAZY_WARMUP',
+                                          'false').lower() == 'true'
 
     @property
     def model_is_mrope(self) -> bool:
@@ -1150,6 +1152,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.skip_warmup:
             return True
         if not num_patches:
+            if self.skip_lazy_warmup and not is_prompt:
+                return True  # force decoding to use HPUgraph
             return (batch_size, seq_len, is_prompt) in self.graphed_buckets
         #TODO: We might need to check both language bucket and multimodal bucket
         # and return True only it's avialble, or return separately.
@@ -2735,11 +2739,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                            'Please update Gaudi Software Suite.')
         with compile_only_mode_context(
         ) if can_use_compile_only_mode else contextlib.nullcontext():
-            self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets, True,
-                                    kv_caches)
-            if not self.is_pooler:
-                self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,
-                                        False, kv_caches)
+            if self.skip_lazy_warmup:
+                logger.warning('The lazy mode warmup is skipped, please make '
+                               'sure the following graph captured is 100% or '
+                               'the buckets not captured may cause recompile.')
+            else:
+                self.warmup_all_buckets(self.bucketing_ctx.prompt_buckets,
+                                        True, kv_caches)
+                if not self.is_pooler:
+                    self.warmup_all_buckets(self.bucketing_ctx.decode_buckets,
+                                            False, kv_caches)
 
             if not self.enforce_eager and htorch.utils.internal.is_lazy():
                 if not self.is_pooler:
