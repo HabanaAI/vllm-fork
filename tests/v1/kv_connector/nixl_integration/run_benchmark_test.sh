@@ -221,7 +221,7 @@ run_tests_for_model() {
    --dataset-name random \
    --random-input-len "8000" \
    --random-output-len "200" \
-   --num-prompts 10 \
+   --num-prompts 100 \
    --burstiness 100 \
    --request-rate 3.6 \
    --metric-percentiles 95 \

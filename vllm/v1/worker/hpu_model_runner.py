@@ -2678,5 +2678,5 @@ def copy_kv_blocks(
 
     torch.hpu.synchronize()
     
-    logger.info(f"copy_kv_blocks: copy takes {time.perf_counter() - start} |{direction=} |{os.getpid()=}|{block_size=}\
+    logger.info(f"copy_kv_blocks: copy takes {time.perf_counter() - start}|{direction=}|{os.getpid()=}|{block_size=}|\
         {src_block_ids=}|{dst_block_ids=}")
