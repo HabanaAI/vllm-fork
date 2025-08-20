@@ -33,8 +33,8 @@ from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
     find_matched_target,
     is_activation_quantization_format,
     should_ignore_layer,
-    gaudi_weight_wrapper,
 )
+from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.platforms import current_platform
 

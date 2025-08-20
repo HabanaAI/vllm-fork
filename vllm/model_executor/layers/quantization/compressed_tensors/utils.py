@@ -4,7 +4,6 @@
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import Optional
-import torch
 import regex as re
 from compressed_tensors import CompressionFormat
 from torch.nn import Module
@@ -213,23 +212,3 @@ def _match_fused_layer(
             unfused_matches.append(None)
 
     return unfused_matches[0] if all(unfused_matches) else None
-
-def gaudi_weight_wrapper(weight_loader):
-    """Wrapper for Gaudi weight conversion."""
-    
-    FP8_SCALE_FACTOR = 2.0
-    def wrapper(*args, **kwargs):
-        # args[0] is parameter, args[1] is loaded_weight
-        # weights will be always in fp8, but scales will be in fp32,
-        # so we can detect it by dtype
-        loaded_weight = args[1]
-        if loaded_weight.dtype == torch.float8_e4m3fn:
-            loaded_weight.data = (
-                loaded_weight.data.float() / FP8_SCALE_FACTOR
-            ).to(torch.float8_e4m3fn)
-        else:
-            loaded_weight.data = (loaded_weight.data * FP8_SCALE_FACTOR)
-        args = (args[0], loaded_weight) + args[2:]
-        weight_loader(*args, **kwargs)
-
-    return wrapper
