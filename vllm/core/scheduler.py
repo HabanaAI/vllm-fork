@@ -461,9 +461,13 @@ class Scheduler:
 
         # TODO: set via config.
         self.need_fetch_kv = need_fetch_kv
-        self.fetching_thread_should_shutdown = False
-        # Sequence groups in FETCHING_KV state, before becoming waiting,
-        self.fetching_kv: Queue[SequenceGroup] = Queue()
+        # Thread safe Queue for sequence groups to fetch for KV cache
+        self.fetching_queue: Queue[SequenceGroup] = Queue()
+        # Thread safe Queue for sequence groups done for fetching
+        self.fetching_done: Queue[SequenceGroup] = Queue()
+        # Record all sequence groups in fetching
+        # it will be accessed only in scheduler thread
+        self.fetching: Deque[SequenceGroup] = deque()
         self.fetching_thread = threading.Thread(target=self._fetch_kv_thread, )
         if self.need_fetch_kv:
             from vllm_hpu_extension.profiler import HabanaHighLevelProfiler
@@ -564,26 +568,40 @@ class Scheduler:
                     end_time_stamp)
 
         while True:
-            if self.fetching_thread_should_shutdown:
+            seq_group = self.fetching_queue.get()
+            if seq_group is None:
+                # This is a shutdown signal
                 logger.info("The fetching thread is shutting down.")
                 return
-            if not self.fetching_kv.empty():
-                self.scheduler_profiler.start('internal', 'fetching_kv')
-                seq_group = self.fetching_kv.get()
-                hash_prefix = hash_list(seq_group.prompt_token_ids)
-                prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
-                    hash_prefix)
+
+            self.scheduler_profiler.start('internal', 'fetching_kv')
+            hash_prefix = hash_list(seq_group.prompt_token_ids)
+            prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
+                hash_prefix)
+            if kv_cache is not None:
                 put_to_shared_dict(prefix, kv_cache, hidden_states)
-                if seq_group is not None:
-                    self.waiting.append(self.fetching_kv.get())
-                self.fetching_kv.task_done()
-                self.scheduler_profiler.end()
-            else:
-                time.sleep(0.1)
+            self.fetching_done.put(seq_group)
+            self.fetching_queue.task_done()
+            self.scheduler_profiler.end()
+
+    def _process_fetching_done(self):
+        while not self.fetching_done.empty():
+            seq_group = self.fetching_done.get_nowait()
+            self.waiting.append(seq_group)
+            # Since the fetching is done and put to waiting
+            # remove from fetching
+            self.fetching.popleft()
+
+        if len(self.waiting) == 0 and len(self.running) == 0 and len(
+                self.swapped) == 0 and len(self.fetching) != 0:
+            # This is to avoid the empty engine step from too busy
+            # There is no better way to do this under the current structure
+            time.sleep(0.001)
 
     def shutdown(self):
-        self.fetching_thread_should_shutdown = True
         """Shutdown the scheduler."""
+        # Put a None item to signal termination
+        self.fetching_queue.put(None)
         if self.fetching_thread.is_alive():
             self.fetching_thread.join(timeout=1.0)
         else:
@@ -605,9 +623,8 @@ class Scheduler:
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         if self.need_fetch_kv:
-            self.fetching_kv.put(seq_group)
-            # we put twice to avoid fetching kv empty status
-            self.fetching_kv.put(seq_group)
+            self.fetching_queue.put(seq_group)
+            self.fetching.append(seq_group)
         else:
             # Add sequence groups to the waiting queue.
             self.waiting.append(seq_group)
@@ -675,7 +692,7 @@ class Scheduler:
 
     def has_unfinished_seqs(self) -> bool:
         return len(self.waiting) != 0 or len(self.running) != 0 or len(
-            self.swapped) != 0 or not self.fetching_kv.empty()
+            self.swapped) != 0 or len(self.fetching) != 0
 
     def get_prefix_cache_hit_rate(self, device: Device) -> float:
         return self.block_manager.get_prefix_cache_hit_rate(device)
@@ -684,8 +701,8 @@ class Scheduler:
         return self.block_manager.reset_prefix_cache()
 
     def get_num_unfinished_seq_groups(self) -> int:
-        return len(self.waiting) + len(self.running) + len(
-            self.swapped) + self.fetching_kv.qsize()
+        return len(self.waiting) + len(self.running) + len(self.swapped) + len(
+            self.fetching)
 
     def get_and_reset_finished_requests_ids(self) -> List[str]:
         """Flushes the list of request ids of previously finished seq_groups."""
@@ -1444,6 +1461,9 @@ class Scheduler:
 
     def _schedule(self) -> SchedulerOutputs:
         """Schedule queued requests."""
+        # Processed requests which have done fetching KV cache
+        # appending to the waiting queue
+        self._process_fetching_done()
         if self.scheduler_config.chunked_prefill_enabled:
             return self._schedule_chunked_prefill()
         else:
