@@ -103,8 +103,8 @@ run_tests_for_model() {
     --long_prefill_token_threshold 8192 \
     --max_num_batched_tokens 8192 \
     --gpu-memory-utilization 0.3 \
-    --tensor-parallel-size $PREFILLER_TP_SIZE \
     --disable-log-requests \
+    --tensor-parallel-size $PREFILLER_TP_SIZE \
     --kv-transfer-config '{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\",\"kv_buffer_device\":\"cpu\"}'"
 
     if [ -n "$model_args" ]; then
@@ -219,8 +219,8 @@ run_tests_for_model() {
    --seed "$(date +%s)" \
    --model /root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/ \
    --dataset-name random \
-   --random-input-len "8000" \
-   --random-output-len "200" \
+   --random-input-len 8192 \
+   --random-output-len 200 \
    --num-prompts 100 \
    --burstiness 100 \
    --request-rate 3.6 \
