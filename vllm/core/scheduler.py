@@ -592,6 +592,12 @@ class Scheduler:
             # remove from fetching
             self.fetching.popleft()
 
+        if len(self.waiting) == 0 and len(self.running) == 0 and len(
+                self.swapped) == 0 and len(self.fetching) != 0:
+            # This is to avoid the empty engine step from too busy
+            # There is no better way to do this under the current structure
+            time.sleep(0.001)
+
     def shutdown(self):
         """Shutdown the scheduler."""
         # Put a None item to signal termination
