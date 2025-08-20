@@ -9,7 +9,7 @@
 # All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
-# and OPT implementations in this library. It has been modified from its
+# and OPT implementations fin this library. It has been modified from its
 # original forms to accommodate minor architectural differences compared
 # to GPT-NeoX and OPT used by the Meta AI team that trained the model.
 #
@@ -109,39 +109,10 @@ class AttentionLongSequence:
         return attn_output
 
 
-def pad_inputs_with_fixed_size_groups(x,
-                                      y,
-                                      cu_window_seqlens,
-                                      seq_len,
-                                      window_size=64):
-    n = (len(cu_window_seqlens) - 1) * window_size
-    assert seq_len >= n, f"seq_len:{seq_len} < number windows: {n}"
-    assert x.shape[0] == y.shape[0]
-
-    pad_const = -100
-    new_shape_x = [seq_len, x.shape[1]]
-    padded_x = torch.ones(*new_shape_x, device=x.device,
-                          dtype=x.dtype) * pad_const
-    new_shape_y = [seq_len, y.shape[1]]
-    padded_y = torch.ones(*new_shape_y, device=y.device,
-                          dtype=y.dtype) * pad_const
-    seq_lens_deltas = cu_window_seqlens[1:] - cu_window_seqlens[:-1]
-    padded_pointer = 0
-    x_pointer = 0
-    for i, delta in enumerate(seq_lens_deltas):
-        padded_x[padded_pointer:padded_pointer + delta, :] = \
-            x[x_pointer:x_pointer + delta, :]
-        padded_y[padded_pointer:padded_pointer + delta, :] = \
-            y[x_pointer:x_pointer + delta, :]
-        padded_pointer += window_size
-        x_pointer = cu_window_seqlens[i + 1]
-    return padded_x, padded_y
-
-
-def create_block_diagonal_attention_mask_outerprod(indices):
-    maxsize = indices[-1]
+def create_block_diagonal_attention_mask(indices):
+    max_size = indices[-1]
     range_to_max_for_each_img = torch.arange(
-        maxsize,
+        max_size,
         device=indices.device).unsqueeze(0).repeat(indices.shape[0] - 1, 1)
     lesser = range_to_max_for_each_img < indices[1:].unsqueeze(1)
     greater_eq = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
@@ -373,10 +344,11 @@ class Qwen2_5_VisionAttention(nn.Module):
     def forward(
             self,
             x: torch.Tensor,
-            cu_seqlens: torch.Tensor,
             rotary_pos_emb: torch.Tensor,
+            cu_seqlens: Optional[torch.Tensor] = None,
             max_seqlen: Optional[int] = None,  # Only used for Flash Attention
             seqlens: Optional[list[int]] = None,  # Only used for xFormers
+            attn_mask: Optional[torch.Tensor] = None,  # Only used for HPU
     ) -> torch.Tensor:
         # [s, b, c] --> [s, b, head * 3 * head_dim]
         x, _ = self.qkv(x)
@@ -411,56 +383,35 @@ class Qwen2_5_VisionAttention(nn.Module):
             context_layer = rearrange(output,
                                       "(b s) ... -> b s ...",
                                       b=batch_size)
-        elif self.attn_backend == _Backend.TORCH_SDPA and is_hpu:
-            # We are re-purposing the variable name cu_seqlens
-            # to represent the mask for full attention,
-            # if the mask is None we are doing window attention
-            fullattn_mask = cu_seqlens
+        elif is_hpu:
+            # performs full attention using the previous computed mask
+            q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
+                          for x in [q, k, v])
+            output = F.scaled_dot_product_attention(q1,
+                                                    k1,
+                                                    v1,
+                                                    attn_mask=attn_mask,
+                                                    dropout_p=0.0)
+            context_layer = rearrange(output, "b h s d -> b s h d ")
 
-            if fullattn_mask is None:  # performs window attention
-                # we assume image is 112 aligned in both h/w dims
-                # in other words, x % 64 = 0
-                # that simplifies the slicing of window attention
-                # in patches of 64
-                outputs = []
-                cu_seqlens = list(range(0, x.shape[0] + 1, 64))
-                for i in range(1, len(cu_seqlens)):
-                    # For large image, we add mark step here
-                    # for every 100th step to make compile time shorter
-                    if i % 100 == 0:
-                        htcore.mark_step()
-                    start_idx = cu_seqlens[i - 1]
-                    end_idx = cu_seqlens[i]
-                    q_i = q[:, start_idx:end_idx]
-                    k_i = k[:, start_idx:end_idx]
-                    v_i = v[:, start_idx:end_idx]
-                    q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
-                                     for x in [q_i, k_i, v_i])
-                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False,
-                                               None, self.softmax_mode)
-                    output_i = rearrange(output_i, "b h s d -> b s h d ")
-                    outputs.append(output_i)
-                context_layer = torch.cat(outputs, dim=1)
-            else:
-                # performs full attention using the previous computed mask
-                fullatt_block_attn_mask = fullattn_mask
-                q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
-                              for x in [q, k, v])
-                (batch_size, _, seq_len_N_t, _) = q1.shape
-                (batch_size, _, seq_len_N_s, _) = k1.shape
-                mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
-                attn_mask = fullatt_block_attn_mask.reshape(
-                    batch_size, 1, seq_len_N_t, seq_len_N_s,
-                    -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
-                assert attn_mask.shape == mask_shape
+            # fullatt_block_attn_mask = fullattn_mask
+            # q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
+            #                 for x in [q, k, v])
+            # (batch_size, _, seq_len_N_t, _) = q1.shape
+            # (batch_size, _, seq_len_N_s, _) = k1.shape
+            # mask_shape = (batch_size, 1, seq_len_N_t, seq_len_N_s)
+            # attn_mask = fullatt_block_attn_mask.reshape(
+            #     batch_size, 1, seq_len_N_t, seq_len_N_s,
+            #     -1)[:, :, :, :, 0]  # reshapes the mask to be Bx1xNxN
+            # assert attn_mask.shape == mask_shape
 
-                if q1.shape[2] <= 65536:  # need to investigate this crosspoint
-                    fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0,
-                                                False, None, self.softmax_mode)
-                else:
-                    fused_out = AttentionLongSequence.forward(
-                        q1, k1, v1, attn_mask, 64, self.softmax_mode)
-                context_layer = rearrange(fused_out, "b h s d -> b s h d ")
+            # if q1.shape[2] <= 65536:  # need to investigate this crosspoint
+            #     fused_out = FusedSDPA.apply(q1, k1, v1, attn_mask, 0.0,
+            #                                 False, None, self.softmax_mode)
+            # else:
+            #     fused_out = AttentionLongSequence.forward(
+            #         q1, k1, v1, attn_mask, 64, self.softmax_mode)
+            # context_layer = rearrange(fused_out, "b h s d -> b s h d ")
         elif self.attn_backend == _Backend.TORCH_SDPA:
             # Execute attention entry by entry for speed & less VRAM.
             outputs = []
@@ -528,16 +479,18 @@ class Qwen2_5_VisionBlock(nn.Module):
     def forward(
             self,
             x: torch.Tensor,
-            cu_seqlens: torch.Tensor,
             rotary_pos_emb: torch.Tensor,
+            cu_seqlens: Optional[torch.Tensor] = None,
             max_seqlen: Optional[int] = None,  # Only used for Flash Attention
             seqlens: Optional[list[int]] = None,  # Only used for xFormers
+            attn_mask: Optional[torch.Tensor] = None,  # Only used for HPU
     ) -> torch.Tensor:
         x = x + self.attn(self.norm1(x),
                           cu_seqlens=cu_seqlens,
                           rotary_pos_emb=rotary_pos_emb,
                           max_seqlen=max_seqlen,
-                          seqlens=seqlens)
+                          seqlens=seqlens,
+                          attn_mask=attn_mask)
 
         x = x + self.mlp(self.norm2(x))
         return x
@@ -1031,27 +984,20 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
     def forward(self, hidden_states: torch.Tensor,
                 rotary_pos_emb: torch.Tensor,
-                padding_attn_mask: torch.Tensor) -> torch.Tensor:
-        assert_msg = ("HPU Graph expects seq_len to be multiples of 64.")
-        seq_len, _ = hidden_states.size()
-        assert seq_len % 64 == 0, assert_msg
-        cu_seqlens = torch.tensor([0, seq_len], device=self.device)
-        cu_window_seqlens = torch.arange(start=0,
-                                         end=seq_len + 1,
-                                         step=64,
-                                         device=self.device)
+                padding_attn_mask_window: torch.Tensor,
+                padding_attn_mask_full: torch.Tensor) -> torch.Tensor:
+
         hidden_states = hidden_states.unsqueeze(1)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
-                cu_seqlens_now = cu_seqlens
+                padding_attn_mask_now = padding_attn_mask_full
             else:
-                cu_seqlens_now = cu_window_seqlens
+                padding_attn_mask_now = padding_attn_mask_window
 
             hidden_states = blk(
                 hidden_states,
-                cu_seqlens=cu_seqlens_now,
                 rotary_pos_emb=rotary_pos_emb,
-                padding_attn_mask=padding_attn_mask,
+                attn_mask=padding_attn_mask_now,
             )
 
         # For Qwen2.5-VL-3B, float16 will overflow at last block
@@ -1091,30 +1037,37 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
             # pre-attention block
             hidden_states, rotary_pos_emb, \
-                _, cu_window_seqlens, window_index = self.pre_attn(
+                cu_seqlens, cu_window_seqlens, window_index = self.pre_attn(
                     pixel_values_curr_img, img_shape)
 
             # add padding
-            hidden_states_pad, rotary_pos_emb_pad = \
-                pad_inputs_with_fixed_size_groups(hidden_states,
-                                                  rotary_pos_emb,
-                                                  cu_window_seqlens,
-                                                  seq_len=6400,
-                                                  window_size=64)
-            img_indices = hidden_states_pad[:, 0] != -100
-            padding_attn_mask = torch.outer(img_indices, img_indices)
-            hidden_states = hidden_states_pad
-            rotary_pos_emb = rotary_pos_emb_pad
+            bucket_size = 9600
+            num_pad_tokens = bucket_size - seq_len
+            padded_seq_len = bucket_size
+            cu_seqlens = F.pad(cu_seqlens, (0, 1), "constant", padded_seq_len)
+            cu_window_seqlens = F.pad(cu_window_seqlens, (0, 1), "constant",
+                                      padded_seq_len)
+            hidden_states = F.pad(hidden_states, (0, 0, 0, num_pad_tokens),
+                                  "constant", -100)
+            rotary_pos_emb = F.pad(rotary_pos_emb, (0, 0, 0, num_pad_tokens),
+                                   "constant", -100)
+
+            padding_attn_mask_full = create_block_diagonal_attention_mask(
+                cu_seqlens)
+            padding_attn_mask_window = create_block_diagonal_attention_mask(
+                cu_window_seqlens)
 
             # static part
             htcore.mark_step()
-            hidden_states = self.forward(hidden_states,
-                                         rotary_pos_emb=rotary_pos_emb,
-                                         padding_attn_mask=padding_attn_mask)
+            hidden_states = self.forward(
+                hidden_states,
+                rotary_pos_emb=rotary_pos_emb,
+                padding_attn_mask_window=padding_attn_mask_window,
+                padding_attn_mask_full=padding_attn_mask_full)
             htcore.mark_step()
 
             # remove padding
-            hidden_states = hidden_states[img_indices, :, :]
+            hidden_states = hidden_states[:curr_img_size, :, :]
 
             # after attention
             image_embeds = self.post_attn(hidden_states, window_index)
