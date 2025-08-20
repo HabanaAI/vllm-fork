@@ -36,7 +36,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from transformers import BatchFeature
-from transformers.models.glm4v.configuration_glm4v import Glm4vVisionConfig
+from transformers.models.glm4v.configuration_glm4v import (Glm4vConfig,
+                                                           Glm4vVisionConfig)
 from transformers.models.glm4v.image_processing_glm4v import (
     Glm4vImageProcessor, smart_resize)
 from transformers.models.glm4v.video_processing_glm4v import (
@@ -814,7 +815,7 @@ class Glm4vVisionTransformer(nn.Module):
 class Glm4vProcessingInfo(BaseProcessingInfo):
 
     def get_hf_config(self):
-        return self.ctx.get_hf_config()
+        return self.ctx.get_hf_config(Glm4vConfig)
 
     def get_tokenizer(self):
         return self.ctx.tokenizer
@@ -1258,7 +1259,7 @@ class Glm4vForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
-        config = vllm_config.model_config.hf_config
+        config: Glm4vConfig = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
 
@@ -1272,18 +1273,11 @@ class Glm4vForConditionalGeneration(nn.Module, SupportsMultiModal,
             prefix=maybe_prefix(prefix, "visual"),
         )
 
-        if config.model_type == "glm4v":
-            architectures = ["Glm4ForCausalLM"]
-        elif config.model_type == "glm4v_moe":
-            architectures = ["Glm4MoeForCausalLM"]
-        else:
-            architectures = None
-
         self.language_model = init_vllm_registered_model(
             vllm_config=vllm_config,
-            hf_config=config.text_config,
-            prefix=maybe_prefix(prefix, "language_model"),
-            architectures=architectures)
+            prefix=maybe_prefix(prefix, ""),
+            architectures=["Glm4ForCausalLM"],
+        )
 
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
