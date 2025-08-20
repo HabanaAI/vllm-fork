@@ -2678,7 +2678,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                     lora_request, seq_len):
         assert self.model_is_mrope or self.is_mm_optimized, \
             ("Warmup compatible with Qwen2vl/Gemma3 models")
-        if int(img_args) == UNSET_IMG_ARGS:
+        img_args = int(img_args)
+        if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
 
@@ -2713,7 +2714,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
             num_image_tokens = self.model.model.config.mm_tokens_per_image \
-                    * int(img_args)
+                    * img_args
             multi_modal_data = {
                 "pixel_values": pixel_values,
                 "num_crops": torch.zeros([img_args], dtype=torch.int32)
