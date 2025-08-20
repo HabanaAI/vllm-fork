@@ -102,7 +102,7 @@ def pad_inputs_with_fixed_size_groups(x,
     return padded_x, padded_y
 
 
-def create_block_diagonal_attention_mask_outerprod(indices):
+def create_block_diagonal_attention_mask(indices):
     max_size = indices[-1]
     range_to_max_for_each_img = torch.arange(
         max_size,
@@ -766,40 +766,40 @@ class Qwen2_5_VisionTransformer(nn.Module):
 
         SHOULD_PAD = True
         if SHOULD_PAD:
-            hidden_states_pad, rotary_pos_emb_pad = \
-              pad_inputs_with_fixed_size_groups(
-                    hidden_states,
-                    rotary_pos_emb,
-                    cu_window_seqlens,
-                    # seq_len=(len(cu_window_seqlens) - 1)*64,
-                    seq_len=9600,
-                    window_size=64)
+            # hidden_states_pad, rotary_pos_emb_pad = \
+            #   pad_inputs_with_fixed_size_groups(
+            #         hidden_states,
+            #         rotary_pos_emb,
+            #         cu_window_seqlens,
+            #         # seq_len=(len(cu_window_seqlens) - 1)*64,
+            #         seq_len=9600,
+            #         window_size=64)
 
-            img_indices = hidden_states_pad[:, 0] != -100
-            padding_attn_mask_full = torch.outer(img_indices, img_indices)
+            # img_indices = hidden_states_pad[:, 0] != -100
+            # padding_attn_mask_full = torch.outer(img_indices, img_indices)
 
-            assert img_indices.sum() == seq_len
-            assert padding_attn_mask_full.sum() == (seq_len**2)
-            assert torch.allclose(rotary_pos_emb_pad[img_indices, :],
-                                  rotary_pos_emb)
-            assert torch.allclose(hidden_states_pad[img_indices, :],
-                                  hidden_states)
+            # assert img_indices.sum() == seq_len
+            # assert padding_attn_mask_full.sum() == (seq_len**2)
+            # assert torch.allclose(rotary_pos_emb_pad[img_indices, :],
+            #                       rotary_pos_emb)
+            # assert torch.allclose(hidden_states_pad[img_indices, :],
+            #                       hidden_states)
 
             # this padding only works for one image at time
-            padded_seq_len, _ = hidden_states_pad.size()
-            assert cu_seqlens[0] == 0
-            assert cu_seqlens[1] == seq_len
-            cu_seqlens[1] = padded_seq_len
-            cu_window_seqlens = torch.arange(start=0,
-                                             end=padded_seq_len + 1,
-                                             step=64,
-                                             device=self.device)
-            hidden_states = hidden_states_pad
-            rotary_pos_emb = rotary_pos_emb_pad
-
-            padding_attn_mask_window = \
-                create_block_diagonal_attention_mask_outerprod(cu_window_seqlens)
-            padding_attn_mask_window[~img_indices, ~img_indices] = False
+            # padded_seq_len, _ = hidden_states_pad.size()
+            num_pad_tokens = 9600 - seq_len
+            padded_seq_len = 9600
+            cu_seqlens = F.pad(cu_seqlens, (0, 1), "constant", padded_seq_len)
+            cu_window_seqlens = F.pad(cu_window_seqlens, (0, 1), "constant",
+                                      padded_seq_len)
+            hidden_states = F.pad(hidden_states, (0, 0, 0, num_pad_tokens),
+                                  "constant", -100)
+            rotary_pos_emb = F.pad(rotary_pos_emb, (0, 0, 0, num_pad_tokens),
+                                   "constant", -100)
+            padding_attn_mask_full = create_block_diagonal_attention_mask(
+                cu_seqlens)
+            padding_attn_mask_window = create_block_diagonal_attention_mask(
+                cu_window_seqlens)
 
             print(f"Original seq len {seq_len} ==> padding {padded_seq_len}")
 
@@ -827,7 +827,7 @@ class Qwen2_5_VisionTransformer(nn.Module):
 
         # push hidden states back
         if SHOULD_PAD:
-            hidden_states = hidden_states[img_indices, :, :]
+            hidden_states = hidden_states[:seq_len, :, :]
 
         # For Qwen2.5-VL-3B, float16 will overflow at last block
         # for long visual tokens sequences.
