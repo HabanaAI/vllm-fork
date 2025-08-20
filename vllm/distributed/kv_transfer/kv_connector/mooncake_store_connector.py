@@ -399,13 +399,14 @@ class MooncakeStoreConnector(KVConnectorBase):
             # For deepseek, we only need recv first rank
             load_kvcache_key = f"{load_key_prefix}_0"
             shape = (61, num_blocks * 128, self.k_v_head_size)
-            while self.kv_store.is_exist(load_kvcache_key) is False:
-                time.sleep(0.1)
-            # remote_kv = self.kv_store.get(load_kvcache_key)
-            remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape,
-                                                 self.dtype)
+            remote_kv = None
+            if self._wait_for_key(load_kvcache_key):
+                remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape,
+                                                     self.dtype)
             hidden_key = f"{load_key_prefix}_hidden_0"
-            hidden = self.kv_store.get(hidden_key)
+            hidden = None
+            if self._wait_for_key(hidden_key):
+                hidden = self.kv_store.get(hidden_key)
 
             if remote_kv is None or hidden is None:
                 # didn't find any match.
@@ -479,15 +480,15 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         load_kvcache_key = f"{prefix}_0"
         load_hidden_key = f"{prefix}_hidden_0"
-        while self.kv_store.is_exist(load_kvcache_key) is False:
-            time.sleep(0.01)
-        remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
-                                             shape=None,
-                                             dtype=self.dtype)
+        remote_kv = None
+        if self._wait_for_key(load_kvcache_key):
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
+                                                 shape=None,
+                                                 dtype=self.dtype)
         # hidden_states always use bf16.
-        while self.kv_store.is_exist(load_hidden_key) is False:
-            time.sleep(0.01)
-        hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
+        hidden = None
+        if self._wait_for_key(load_hidden_key):
+            hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
 
         if remote_kv is None or hidden is None:
             # didn't find any match.
@@ -504,3 +505,14 @@ class MooncakeStoreConnector(KVConnectorBase):
         hash_object = hashlib.blake2b(tensor_bytes)
         hash_hex = hash_object.hexdigest()
         return int(hash_hex[:16], 16)
+
+    def _wait_for_key(self, key, timeout_in_seconds=None):
+        if timeout_in_seconds is None:
+            # default to 10 seconds
+            timeout_in_seconds = 10
+        timeout = time.time() + timeout_in_seconds
+        while not self.kv_store.is_exist(key):
+            if time.time() > timeout:
+                return False
+            time.sleep(0.01)
+        return True
