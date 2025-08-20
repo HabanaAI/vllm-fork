@@ -47,7 +47,7 @@ from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import (
-    default_weight_loader, maybe_remap_kv_scale_name)
+    default_weight_loader, maybe_remap_kv_scale_name, with_thread_limits)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
@@ -781,6 +781,7 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
                         device=device),
         })
 
+    @with_thread_limits()
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
@@ -796,12 +797,6 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
             ckpt_down_proj_name="down_proj",
             ckpt_up_proj_name="up_proj",
             num_experts=self.config.n_routed_experts)
-        if current_platform.is_hpu():
-            old_num_threads = torch.get_num_threads()
-            import os
-            num_cores = os.cpu_count()
-            os.environ["OMP_NUM_THREADS"] = str(max(1, num_cores // 4))
-            torch.set_num_threads(max(1, num_cores // 8))
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
@@ -873,10 +868,6 @@ class DeepseekV2ForCausalLM(nn.Module, SupportsPP):
                                             default_weight_loader)
                     weight_loader(param, loaded_weight)
             loaded_params.add(name)
-        if current_platform.is_hpu():
-            # Restore the number of threads for HPU.
-            torch.set_num_threads(old_num_threads)
-            os.environ["OMP_NUM_THREADS"] = str(old_num_threads)
         return loaded_params
 
 
