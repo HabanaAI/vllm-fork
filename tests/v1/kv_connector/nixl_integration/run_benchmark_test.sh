@@ -220,7 +220,7 @@ run_tests_for_model() {
    --model /root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/ \
    --dataset-name random \
    --random-input-len "8000" \
-   --random-output-len "2" \
+   --random-output-len "200" \
    --num-prompts 10 \
    --burstiness 100 \
    --request-rate 3.6 \
