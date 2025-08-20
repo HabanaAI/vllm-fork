@@ -4,7 +4,7 @@ import re
 from collections.abc import Sequence
 from typing import Union
 
-from vllm.entrypoints.chat_utils import random_tool_call_id
+from vllm.entrypoints.chat_utils import make_tool_call_id
 from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               DeltaFunctionCall, DeltaMessage,
                                               DeltaToolCall,
@@ -265,7 +265,7 @@ class DeepSeekV3ToolParser(ToolParser):
                         DeltaToolCall(
                             index=self.current_tool_id,
                             type="function",
-                            id=random_tool_call_id(),
+                            id=make_tool_call_id(),
                             function=DeltaFunctionCall(
                                 name=function_name).model_dump(
                                     exclude_none=True),
