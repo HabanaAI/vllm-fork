@@ -67,6 +67,7 @@ task_name="gsm8k_oss"
 lm-eval --model local-completions \
     --model_args pretrained=/mnt/disk5/lmsys/gpt-oss-20b-bf16,base_url=http://localhost:8000/v1/completions,max_length=16384,max_gen_toks=8192,num_concurrent=128 \
     --tasks ${task_name} \
+    --limit 128 \
     --gen_kwargs="max_length=16384,max_gen_toks=8192" 
     # --num_fewshot 1 
 
