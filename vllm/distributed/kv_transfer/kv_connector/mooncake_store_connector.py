@@ -350,8 +350,6 @@ class MooncakeStoreConnector(KVConnectorBase):
             self.block_size - 1 ) // self.block_size
 
         hidden_or_intermediate_states_for_one_req = []
-        input_tokens_list = []
-        num_computed_tokens_list = []
         start_block_idx = 0
 
         # For each sequence in the batch, we patch kv tensor together,
@@ -413,12 +411,9 @@ class MooncakeStoreConnector(KVConnectorBase):
                 logger.warning("Didn't find any match, key_prefix: %s",
                                load_kvcache_key)
                 bypass_model_exec = False
+                # We need to increment the start_block_idx to continue
+                start_block_idx += padded_num_blocks
                 continue
-
-            # collecting data for rebuilding the input
-            input_tokens_list.append(current_tokens)
-            num_computed_tokens = current_tokens.shape[0]
-            num_computed_tokens_list.append(num_computed_tokens)
 
             # it's padded to block size now.
             # key_values = remote_kv.to("hpu")

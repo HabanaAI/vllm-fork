@@ -2934,6 +2934,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         hidden_states_list = []
                         start_block_idx = 0
                         k_v_head_size = 576
+                        bypass_model_exec = True
                         htorch.core.mark_step()
                         for idx, slen in enumerate(seq_lens):
                             if slen == 1:
@@ -2952,32 +2953,58 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     idx][:slen]
                                 prefix = tensor_hash(current_tokens)
                                 assert kv_cache_shared_dict is not None
-                                kv_cache_for_cur_seq, hidden_states = \
+                                fetched_data = \
                                     kv_cache_shared_dict.get_item(prefix)
+                                kv_cache_fetched = \
+                                    False if fetched_data is None else True
 
                                 if get_tensor_model_parallel_world_size() > 1:
+                                    # broadcast the fetched flag to other ranks
+                                    broadcast_tensor_dict(
+                                        {"kv_cache_fetched": kv_cache_fetched},
+                                        src=0)
+
+                                if kv_cache_fetched:
+                                    kv_cache_for_cur_seq, hidden_states = \
+                                        fetched_data
+
+                                    if get_tensor_model_parallel_world_size(
+                                    ) > 1:
+                                        kv_cache_for_cur_seq = \
+                                            tensor_model_parallel_all_reduce(
+                                            kv_cache_for_cur_seq)
+                                        hidden_states = \
+                                            tensor_model_parallel_all_reduce(
+                                            hidden_states)
+                                    kv_cache_shared_dict.remove_item(prefix)
+                            else:
+                                # read fetched kv cache flag from rank 0
+                                fetched_status_dict = \
+                                    broadcast_tensor_dict(src=0)
+                                kv_cache_fetched = fetched_status_dict[
+                                    "kv_cache_fetched"]
+                                if kv_cache_fetched:
+                                    kv_cache_for_cur_seq = torch.zeros(
+                                        kv_cache_shape,
+                                        dtype=torch.bfloat16,
+                                        device="hpu")
+                                    hidden_states = torch.zeros(
+                                        (1, 7168),
+                                        dtype=torch.bfloat16,
+                                        device="hpu")
                                     kv_cache_for_cur_seq = \
                                         tensor_model_parallel_all_reduce(
                                         kv_cache_for_cur_seq)
                                     hidden_states = \
                                         tensor_model_parallel_all_reduce(
                                         hidden_states)
-                                kv_cache_shared_dict.remove_item(prefix)
-                            else:
-                                kv_cache_for_cur_seq = torch.zeros(
-                                    kv_cache_shape,
-                                    dtype=torch.bfloat16,
-                                    device="hpu")
-                                hidden_states = torch.zeros(
-                                    (1, 7168),
-                                    dtype=torch.bfloat16,
-                                    device="hpu")
-                                kv_cache_for_cur_seq = \
-                                    tensor_model_parallel_all_reduce(
-                                    kv_cache_for_cur_seq)
-                                hidden_states = \
-                                    tensor_model_parallel_all_reduce(
-                                    hidden_states)
+
+                            if not kv_cache_fetched:
+                                bypass_model_exec = False
+                                # We need to increment the start_block_idx
+                                # to continue
+                                start_block_idx += padded_num_blocks
+                                continue
 
                             hidden_states_list.append(hidden_states)
 
@@ -3000,9 +3027,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                             start_block_idx += padded_num_blocks
                             htorch.core.mark_step()
-                        hidden_states = torch.cat(hidden_states_list, dim=0)
-                        bypass_model_exec = True
-                        htorch.core.mark_step()
+                        if not bypass_model_exec:
+                            logger.warning(
+                                "[rank%d]: Failed to receive all KVs and "
+                                "hidden states, redo model forwarding.",
+                                torch.distributed.get_rank())
+                            hidden_states = None
+                        else:
+                            hidden_states = torch.cat(hidden_states_list, dim=0)
+                            htorch.core.mark_step()
                         return hidden_states, bypass_model_exec
 
                     model = self.get_model()
