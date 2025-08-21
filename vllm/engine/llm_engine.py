@@ -1037,6 +1037,15 @@ class LLMEngine:
         """
 
         now = time.time()
+        #if os.environ.get("VLLM_TTFT_TRACE_STACK", "").lower() == "true":
+        #    try:
+        #        import traceback
+        #        wall_ms = int(time.time() * 1000)
+        #        stack = ''.join(traceback.format_stack(limit=30))
+        #        logger.info("TTFT_STACK_ENTER wall_ms=%d queue_len=%d\n%s",
+        #                    wall_ms, len(ctx.output_queue), stack)
+        #    except Exception:
+        #        pass
 
         if len(ctx.output_queue) == 0:
             return None
@@ -1166,7 +1175,36 @@ class LLMEngine:
             scheduled_seq_group = scheduler_outputs.scheduled_seq_groups[i]
 
             seq_group = scheduled_seq_group.seq_group
+            # TTFT trace: log exactly when first_token_time is set
+            _prev_ft = seq_group.metrics.first_token_time if seq_group.metrics else None
             seq_group.maybe_set_first_token_time(now)
+            if (os.environ.get("VLLM_TTFT_TRACE", "").lower() == "true"
+                    and _prev_ft is None
+                    and seq_group.metrics is not None
+                    and seq_group.metrics.first_token_time is not None):
+                try:
+                    wall_ms = int(time.time() * 1000)
+                    arrival = seq_group.metrics.arrival_time
+                    first_sched = seq_group.metrics.first_scheduled_time
+                    first_token = seq_group.metrics.first_token_time
+                    ttft_ms = (first_token - arrival) * 1000 if arrival is not None else None
+                    queue_ms = ((first_sched - arrival) * 1000
+                                if (first_sched is not None and arrival is not None) else None)
+                    prefill_ms = ((first_token - first_sched) * 1000
+                                  if (first_sched is not None and first_token is not None) else None)
+                    logger.info(
+                        "TTFT_TRACE_1 req_id=%s wall_ms=%d arrival=%.3f first_sched=%s first_token=%.3f ttft_ms=%s queue_ms=%s prefill_ms=%s",
+                        seq_group.request_id,
+                        wall_ms,
+                        arrival if arrival is not None else -1.0,
+                        (f"{first_sched:.3f}" if first_sched is not None else "None"),
+                        first_token,
+                        (f"{ttft_ms:.3f}" if ttft_ms is not None else "None"),
+                        (f"{queue_ms:.3f}" if queue_ms is not None else "None"),
+                        (f"{prefill_ms:.3f}" if prefill_ms is not None else "None"),
+                    )
+                except Exception:
+                    pass
             if not seq_group.is_prefill():
                 seq_group.set_last_token_time(now)
             request_output = RequestOutputFactory.create(
@@ -1210,7 +1248,36 @@ class LLMEngine:
             scheduled_seq_group = scheduler_outputs.scheduled_seq_groups[i]
 
             seq_group = scheduled_seq_group.seq_group
+            # TTFT trace: log exactly when first_token_time is set
+            _prev_ft = seq_group.metrics.first_token_time if seq_group.metrics else None
             seq_group.maybe_set_first_token_time(now)
+            if (os.environ.get("VLLM_TTFT_TRACE", "").lower() == "true"
+                    and _prev_ft is None
+                    and seq_group.metrics is not None
+                    and seq_group.metrics.first_token_time is not None):
+                try:
+                    wall_ms = int(time.time() * 1000)
+                    arrival = seq_group.metrics.arrival_time
+                    first_sched = seq_group.metrics.first_scheduled_time
+                    first_token = seq_group.metrics.first_token_time
+                    ttft_ms = (first_token - arrival) * 1000 if arrival is not None else None
+                    queue_ms = ((first_sched - arrival) * 1000
+                                if (first_sched is not None and arrival is not None) else None)
+                    prefill_ms = ((first_token - first_sched) * 1000
+                                  if (first_sched is not None and first_token is not None) else None)
+                    logger.info(
+                        "TTFT_TRACE_2 req_id=%s wall_ms=%d arrival=%.3f first_sched=%s first_token=%.3f ttft_ms=%s queue_ms=%s prefill_ms=%s",
+                        seq_group.request_id,
+                        wall_ms,
+                        arrival if arrival is not None else -1.0,
+                        (f"{first_sched:.3f}" if first_sched is not None else "None"),
+                        first_token,
+                        (f"{ttft_ms:.3f}" if ttft_ms is not None else "None"),
+                        (f"{queue_ms:.3f}" if queue_ms is not None else "None"),
+                        (f"{prefill_ms:.3f}" if prefill_ms is not None else "None"),
+                    )
+                except Exception:
+                    pass
             if not seq_group.is_prefill():
                 seq_group.set_last_token_time(now)
             request_output = RequestOutputFactory.create(
@@ -1524,16 +1591,16 @@ class LLMEngine:
             else:
                 role_allowed = (want_p or want_d)
             # Debug print for tracking profiler start conditions
-            if rank_allowed and role_allowed:
-                print(
-                    f"[Profiler Debug] Checking start conditions: "
-                    f"target_inflight={target_inflight}, "
-                    f"target_start_step={target_start_step}, "
-                    f"profile_steps={profile_steps}, "
-                    f"current_inflight={current_inflight}, "
-                    f"min_generated_pos={min_generated_pos}, "
-                    f"_profile_started={self._profile_started}"
-                )
+            #if rank_allowed and role_allowed:
+            #    print(
+            #        f"[Profiler Debug] Checking start conditions: "
+            #        f"target_inflight={target_inflight}, "
+            #        f"target_start_step={target_start_step}, "
+            #        f"profile_steps={profile_steps}, "
+            #        f"current_inflight={current_inflight}, "
+            #        f"min_generated_pos={min_generated_pos}, "
+            #        f"_profile_started={self._profile_started}"
+            #    )
             # Start when:
             #  - rank allowed, role allowed, profile_steps > 0
             #  - inflight equals target
@@ -1602,20 +1669,20 @@ class LLMEngine:
                 execute_model_req=execute_model_req)
 
             # Stop condition: after N steps since start
-            if self._profile_started and self._profile_steps_left > 0:
-                self._profile_steps_left -= 1
-                if self._profile_steps_left == 0:
-                    profiler_obj = self._get_hpu_profiler()
-                    if profiler_obj is not None:
-                        try:
-                            profiler_obj.stop()
-                            os.remove(self._profile_ipc_path)
-                        except Exception:
-                            pass
-                    self._profile_started = False
-                    # Reset config so that only a new IPC file can trigger next start
-                    self._profile_cfg = None
-                    self._profile_cfg_mtime_ns = 0
+            #if self._profile_started and self._profile_steps_left > 0:
+            #    self._profile_steps_left -= 1
+            #    if self._profile_steps_left == 0:
+            #        profiler_obj = self._get_hpu_profiler()
+            #        if profiler_obj is not None:
+            #            try:
+            #                profiler_obj.stop()
+            #                os.remove(self._profile_ipc_path)
+            #            except Exception:
+            #                pass
+            #        self._profile_started = False
+            #        # Reset config so that only a new IPC file can trigger next start
+            #        self._profile_cfg = None
+            #        self._profile_cfg_mtime_ns = 0
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
@@ -1672,7 +1739,15 @@ class LLMEngine:
 
             # Check if need to run the usual non-async path
             if not allow_async_output_proc:
-                self._process_model_outputs(ctx=ctx)
+                # Use torch.profiler.record_function if available; otherwise no-op
+                try:
+                    rf = getattr(torch.profiler, "record_function", None)
+                except Exception:
+                    rf = None
+                from contextlib import nullcontext
+                cm = rf("_process_model_outputs") if callable(rf) else nullcontext()
+                with cm:
+                    self._process_model_outputs(ctx=ctx)
 
                 # Log stats.
                 self.do_log_stats(scheduler_outputs, outputs)
@@ -1696,7 +1771,20 @@ class LLMEngine:
             # queued control plane messages, such as add/remove lora adapters.
             logger.debug("Stopping remote worker execution loop.")
             self.model_executor.stop_remote_worker_execution_loop()
-
+        if self._profile_started and self._profile_steps_left > 0:
+            self._profile_steps_left -= 1
+            if self._profile_steps_left == 0:
+                profiler_obj = self._get_hpu_profiler()
+                if profiler_obj is not None:
+                    try:
+                        profiler_obj.stop()
+                        os.remove(self._profile_ipc_path)
+                    except Exception:
+                        pass
+                self._profile_started = False
+                # Reset config so that only a new IPC file can trigger next start
+                self._profile_cfg = None
+                self._profile_cfg_mtime_ns = 0
         return ctx.request_outputs
 
     def _has_remaining_steps(
