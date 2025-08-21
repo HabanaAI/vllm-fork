@@ -461,6 +461,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
+        # TODO GPT-OSS: Update the code so that we create bias weights only for the models 
+        # that use bias in the MoE layer for e.g. GPT-OSS.
+        
         # Fused gate_up_proj (column parallel)
         # Fused gate_up_proj (column parallel)
         w13_weight = torch.nn.Parameter(torch.empty(
@@ -512,6 +515,11 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         # Padding the weight for better performance on ROCm
         layer.w13_weight.data = self._maybe_pad_weight(layer.w13_weight.data)
         layer.w2_weight.data = self._maybe_pad_weight(layer.w2_weight.data)
+        # Padding the bias for better performance on ROCm (if bias exists)
+        if hasattr(layer, 'w13_bias') and hasattr(layer, 'w2_bias'):
+            layer.w13_bias.data = self._maybe_pad_weight(layer.w13_bias.data)
+            layer.w2_bias.data = self._maybe_pad_weight(layer.w2_bias.data)        
+            
         # Lazy import to avoid importing triton.
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
             shuffle_weights)
@@ -539,6 +547,14 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                     layer.w13_weight.data[expert_id])
                 layer.moe_op.w2_list[expert_id].set_weight(
                     layer.w2_weight.data[expert_id])
+                
+                # Set bias for each expert if available
+                if hasattr(layer, 'w13_bias') and hasattr(layer, 'w2_bias'):
+                    if hasattr(layer.moe_op, 'w13_bias_list') and hasattr(layer.moe_op, 'w2_bias_list'):
+                        layer.moe_op.w13_bias_list[expert_id].set_bias(
+                            layer.w13_bias.data[expert_id])
+                        layer.moe_op.w2_bias_list[expert_id].set_bias(
+                            layer.w2_bias.data[expert_id])                
 
     def apply(
         self,
@@ -761,16 +777,18 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         activation: str = "silu",
         **kwargs,
     ):
-        return self.fused_moe(hidden_states=x,
-                                 w1=layer.w13_weight,
-                                 w2=layer.w2_weight,
-                                 w1_bias=layer.w13_bias,
-                                 w2_bias=layer.w2_bias,
-                                 topk=top_k,
-                                 gating_output=router_logits,
-                                 global_num_experts=global_num_experts,
-                                 expert_map=expert_map,
-                                 renormalize=renormalize)
+        import os
+        if not os.getenv("VLLM_ENABLE_FUSED_MOE_WITH_BIAS", False):
+            return self.fused_moe(hidden_states=x,
+                                    w1=layer.w13_weight,
+                                    w2=layer.w2_weight,
+                                    w1_bias=layer.w13_bias,
+                                    w2_bias=layer.w2_bias,
+                                    topk=top_k,
+                                    gating_output=router_logits,
+                                    global_num_experts=global_num_experts,
+                                    expert_map=expert_map,
+                                    renormalize=renormalize)
         input_shape = x.shape
         x = x.view(-1, x.shape[-1])
         if use_grouped_topk or custom_routing_function is not None:
@@ -787,7 +805,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 e_score_correction_bias=e_score_correction_bias)
         else:
             import torch.nn.functional as F
-            topk_weights = F.softmax(router_logits, dim=1, dtype=torch.float32)
+            topk_weights = F.softmax(router_logits, dim=-1, dtype=torch.float32)
             topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
             topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
         topk_ids = topk_ids.to(torch.int64)
@@ -1045,6 +1063,9 @@ class FusedMoE(torch.nn.Module):
                     "CompressedTensorsWNA16MarlinMoEMethod",
                     "CompressedTensorsWNA16MoEMethod")):
             moe_quant_params["intermediate_size_full"] = intermediate_size
+
+        self.quant_method.create_weights(layer=self, **moe_quant_params)
+        
         if is_hpu:
             num_experts = self.local_num_experts
             ep_shift = self.ep_rank * num_experts
@@ -1053,12 +1074,15 @@ class FusedMoE(torch.nn.Module):
                 VllmMixtureOfExpertsOpFP8PerChannel)
 
             experts_min, experts_max = ep_shift, num_experts + ep_shift - 1
+            # Check if bias parameters exist in the layer
+            has_bias = hasattr(self, 'w13_bias') and hasattr(self, 'w2_bias')       
             if quant_config is None or isinstance(self.quant_method,
                                                   UnquantizedFusedMoEMethod):
                 moe_op = VllmMixtureOfExpertsOp(
                     num_experts,
                     experts_min,
                     experts_max,
+                    bias=has_bias  # Set bias=True if bias parameters exist
                 )
             elif quant_config is not None:
                 if hasattr(quant_config, "weight_block_size"
@@ -1075,7 +1099,6 @@ class FusedMoE(torch.nn.Module):
                         experts_max,
                     )
             self.moe_op = moe_op
-        self.quant_method.create_weights(layer=self, **moe_quant_params)
 
         # Chunked all2all staging tensor
         self.batched_hidden_states: Optional[torch.Tensor] = None
@@ -1207,13 +1230,9 @@ class FusedMoE(torch.nn.Module):
 
         # Index the loaded weight for tp sharding.
         # gate_up_proj: "MergedColumnParallel", so tp sharding on output_dim
-        #shard_dim = 2
-        shard_size = expert_data.shape[shard_dim]
-
-
+        shard_size = expert_data.shape[shard_dim] // 2
         loaded_weight = loaded_weight.narrow(shard_dim, shard_size * tp_rank,
                                              shard_size)
-
         # Narrow parameter and load.
         # w1, gate_proj: Load into first logical weight of w13.
         if shard_id == "w1":
