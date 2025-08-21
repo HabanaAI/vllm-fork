@@ -3251,36 +3251,40 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             is_prev_output_patched = True
                             self._patch_prev_output()
 
-                with self.profiler.record_event(
-                        'internal', ('sample_'
-                                     f"{self.model_type}_"
-                                     f'{"prompt" if is_prompt else "decode"}_'
-                                     f'bs{batch_size}_'
-                                     f'seq{seq_len}'),
-                        args=profiler_args):
-                    # Receive the output from prefill if needed
-                    bypass_sampling = False
-                    if need_recv_kv and self.use_prefill_output:
-                        output = self.recv_prefill_output(sampling_metadata)
-                        if output is not None:
-                            bypass_sampling = True
-                    if not bypass_sampling:
+                # Receive the output from prefill if needed
+                bypass_sampling = False
+                if need_recv_kv and self.use_prefill_output:
+                    output = self.recv_prefill_output(sampling_metadata)
+                    if output is not None:
+                        bypass_sampling = True
+
+                if not bypass_sampling:
+                    with self.profiler.record_event(
+                            'internal',
+                            ('sample_'
+                             f"{self.model_type}_"
+                             f'{"prompt" if is_prompt else "decode"}_'
+                             f'bs{batch_size}_'
+                             f'seq{seq_len}'),
+                            args=profiler_args):
                         output = self.model.sample(
                             logits=logits,
                             sampling_metadata=sampling_metadata,
                         )
-                    if need_send_kv and self.use_prefill_output:
-                        self.send_prefill_output(sampling_metadata, output)
-                    if num_steps > 1:
-                        output = output.sampled_token_ids
-                        self.cached_step_outputs.append(output)
-                    if use_delayed_sampling and self.is_driver_worker:
-                        if not is_prev_output_patched:
-                            self._patch_prev_output()
-                        output = self._pad_to_max_num_seqs(
-                            output.sampled_token_ids, DUMMY_TOKEN_ID)
-                        self.cached_step_outputs.append(output)
-                        self.cached_step_inputs.append(model_input)
+                if need_send_kv and self.use_prefill_output:
+                    self.send_prefill_output(sampling_metadata, output)
+
+                if num_steps > 1:
+                    output = output.sampled_token_ids
+                    self.cached_step_outputs.append(output)
+                if use_delayed_sampling and self.is_driver_worker:
+                    if not is_prev_output_patched:
+                        self._patch_prev_output()
+                    output = self._pad_to_max_num_seqs(
+                        output.sampled_token_ids, DUMMY_TOKEN_ID)
+                    self.cached_step_outputs.append(output)
+                    self.cached_step_inputs.append(model_input)
+
                 htorch.core.mark_step()
                 if model_input.async_callback is not None:
                     model_input.async_callback()
