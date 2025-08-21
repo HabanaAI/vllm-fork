@@ -84,11 +84,7 @@ if [ "$BENCHMARK_MODE" == "1" ]; then
         --model $MODEL_PATH \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
-        --port 8868 \
-        --repeat_p_request 1 \
-        --repeat_d_times 639 \
-        --benchmark_mode"
-
+        --port 8868"
 else
 
     CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo.py \
