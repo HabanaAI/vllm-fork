@@ -493,14 +493,6 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         return remote_kv, hidden
 
-    @staticmethod
-    def tensor_hash(tensor: torch.Tensor) -> int:
-        """Calculate the hash value of the tensor."""
-        tensor_bytes = tensor.clone().detach().cpu().numpy().tobytes()
-        hash_object = hashlib.blake2b(tensor_bytes)
-        hash_hex = hash_object.hexdigest()
-        return int(hash_hex[:16], 16)
-
     def _wait_for_key(self, key, timeout_in_seconds=None):
         if timeout_in_seconds is None:
             # default to 10 seconds
@@ -511,3 +503,11 @@ class MooncakeStoreConnector(KVConnectorBase):
                 return False
             time.sleep(0.01)
         return True
+
+    @staticmethod
+    def tensor_hash(tensor: torch.Tensor) -> int:
+        """Calculate the hash value of the tensor."""
+        tensor_bytes = tensor.clone().detach().cpu().numpy().tobytes()
+        hash_object = hashlib.blake2b(tensor_bytes)
+        hash_hex = hash_object.hexdigest()
+        return int(hash_hex[:16], 16)

@@ -3034,7 +3034,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 torch.distributed.get_rank())
                             hidden_states = None
                         else:
-                            hidden_states = torch.cat(hidden_states_list, dim=0)
+                            hidden_states = torch.cat(hidden_states_list,
+                                                      dim=0)
                             htorch.core.mark_step()
                         return hidden_states, bypass_model_exec
 
