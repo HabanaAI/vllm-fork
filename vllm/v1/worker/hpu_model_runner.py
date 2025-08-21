@@ -864,8 +864,6 @@ class HPUModelRunner:
         scheduler_output: "SchedulerOutput",
     ) -> PromptDecodeInfo:
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        my_rank = os.getenv('RANK')
-        #logger.info(f'libin debug _get_prompts_and_decodes {my_rank} {total_num_scheduled_tokens}')
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
@@ -875,13 +873,16 @@ class HPUModelRunner:
         if scheduler_output.kv_connector_metadata:
             for req in scheduler_output.kv_connector_metadata.reqs_to_save:
                 requests_type[req] = 'prefill'
-            requests = scheduler_output.kv_connector_metadata.reqs_to_save
+            for req in scheduler_output.kv_connector_metadata.reqs_to_recv:
+                requests_type[req] = 'decode'
+            requests = scheduler_output.kv_connector_metadata.reqs_to_save | scheduler_output.kv_connector_metadata.reqs_to_recv
         else:
             requests = None
 
         # Traverse decodes first
         decode_req_ids = []
         num_computed_tokens_decode = []
+
         for i in range(num_reqs):
             req_id = self.input_batch.req_ids[i]
             assert req_id is not None
@@ -896,8 +897,8 @@ class HPUModelRunner:
             num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
             num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
                 req_id]
-            #logger.info(f'libin debug _get_prompts_and_decodes {my_rank} {self.input_batch.req_type[req_id]} \
-                #{num_computed_tokens=}|{num_prompt_tokens=}|{num_scheduled_tokens=}')
+            #logger.info(f'libin debug _get_prompts_and_decodes 1st_loop {os.getenv('RANK')} {num_reqs=} \
+            #    {num_computed_tokens=}|{num_prompt_tokens=}|{num_scheduled_tokens=}')
             if num_computed_tokens < num_prompt_tokens and \
                 not self.is_decoder_only(req_id):
                 # This is prompt
@@ -906,10 +907,10 @@ class HPUModelRunner:
             # This is decode
             if not self.is_decoder_only(req_id):
                 assert num_scheduled_tokens == 1
-            if not self.is_prefill_only(req_id):
-                decode_req_ids.append(req_id)
-                num_computed_tokens_decode.append(int(num_computed_tokens + 1))
-                #logger.info(f'libin debug add decode {my_rank} {self.input_batch.req_type[req_id]}')
+
+            decode_req_ids.append(req_id)
+            num_computed_tokens_decode.append(int(num_computed_tokens + 1))
+
 
         if self.profiler.enabled:
             self.profiler_counter_helper.capture_decode_seq_stats(
@@ -920,28 +921,25 @@ class HPUModelRunner:
         prompt_req_ids = []
         prompt_scheduled_tokens = []
 
-        if not self.is_decoder_only(req_id):
-            #logger.info(f'get_prompts_and_decodes req {req_id} is not decoder only')
-            for i in range(len(decode_req_ids), num_reqs):
-                req_id = self.input_batch.req_ids[i]
-                assert req_id is not None
+        for i in range(len(decode_req_ids), num_reqs):
+            req_id = self.input_batch.req_ids[i]
+            assert req_id is not None
 
-                num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
-                num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
-                num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
-                    req_id]
+            num_computed_tokens = self.input_batch.num_computed_tokens_cpu[i]
+            num_prompt_tokens = self.input_batch.num_prompt_tokens[i]
+            num_scheduled_tokens = scheduler_output.num_scheduled_tokens[
+                req_id]
 
-                # Must be prompt
-                assert num_computed_tokens < num_prompt_tokens
-                num_output_tokens = len(self.requests[req_id].output_token_ids)
-                assert num_output_tokens == 0, \
-                    f'req_id: {req_id}, {num_output_tokens}'
+            # Must be prompt
+            assert num_computed_tokens < num_prompt_tokens
+            num_output_tokens = len(self.requests[req_id].output_token_ids)
+            assert num_output_tokens == 0, \
+                f'req_id: {req_id}, {num_output_tokens}'
 
-                prompt_req_ids.append(req_id)
-                prompt_scheduled_tokens.append(num_scheduled_tokens)
-                #logger.info(f'libin debug add prompt {my_rank} {self.input_batch.req_type[req_id]} \
-                    #{num_computed_tokens=}|{num_prompt_tokens=}|{num_scheduled_tokens=}')
-
+            prompt_req_ids.append(req_id)
+            prompt_scheduled_tokens.append(num_scheduled_tokens)
+        #logger.info(f'libin debug _get_prompts_and_decodes after 2nd_loop {os.getenv('RANK')} {num_reqs=} {len(prompt_req_ids)=}\
+        #    |{len(decode_req_ids)=} | {num_computed_tokens=}|{num_prompt_tokens=}|{num_scheduled_tokens=}')
         return PromptDecodeInfo(prompt_req_ids, decode_req_ids,
                                 prompt_scheduled_tokens)
 
@@ -1397,8 +1395,8 @@ class HPUModelRunner:
             num_scheduled_tokens.append(seq_num_scheduled_tokens)
             num_prompt_tokens.append(seq_num_prompt_tokens)
             # NOTE: assert that all the decodes are "decodes".
-            #if idx < num_decodes and not self.is_decoder_only(req_id):
-            #    assert seq_num_scheduled_tokens == 1
+            if idx < num_decodes and not self.is_decoder_only(req_id):
+                assert seq_num_scheduled_tokens == 1
         return (self._prepare_prefill_inputs(num_prefills, num_decodes,
                                              num_scheduled_tokens),
                 self._prepare_decode_inputs(num_decodes, num_scheduled_tokens))
@@ -1455,8 +1453,6 @@ class HPUModelRunner:
         else:
             model_event_name = 'model_executable'
         with self.profiler.record_event('internal', model_event_name):
-            #logger.info(f"libin debug model fwd rank {os.getenv('RANK')} {token_ids.shape}")
-            
             hidden_states = self.model.forward(
                 input_ids=token_ids,
                 positions=position_ids,
@@ -1650,7 +1646,8 @@ class HPUModelRunner:
         prefill_sampled_requests = []
         decode_sampled_token_ids = []
         decode_sampled_requests = []
-        assert not (num_prefills > 0 and num_decodes > 0)
+        if not has_kv_transfer_group():
+            assert not (num_prefills > 0 and num_decodes > 0)
         with set_forward_context(None, self.vllm_config):
             self.maybe_setup_kv_connector(scheduler_output)
         finished_sending, finished_recving = set(), set()
@@ -1665,7 +1662,6 @@ class HPUModelRunner:
                 self.event_start = self.profiler.get_timestamp_us()
                 self.profiler.start("internal", "prefill")
                 htorch.core.mark_step()
-                #logger.info(f"libin debug execute fwd rank {my_rank} token_ids {token_ids.shape}")
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
@@ -1695,8 +1691,6 @@ class HPUModelRunner:
                         prompt_batch_idx=idx,
                         is_prompt=True)
                     self.profiler.record_counter(self.event_start, counters)
-            #TODO: check if this can be async
-            #logger.info(f'libin debug done with fwd loop rank {my_rank}')
             self.maybe_wait_for_kv_save(scheduler_output.scheduled_new_reqs)
             finished_sending, finished_recving = (
                 self.get_finished_kv_transfers(scheduler_output))
@@ -1710,8 +1704,6 @@ class HPUModelRunner:
             self.profiler.start("internal", "decode")
             assert decode_data is not None
             htorch.core.mark_step()
-            #logger.debug(f'buke {self.modelrunnerid=} {os.getpid()=}|{num_prefills=}|{num_decodes=}|{decode_data.token_ids=}|{scheduler_output=}')
-
             _, logits_device = \
                 self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
@@ -1795,7 +1787,7 @@ class HPUModelRunner:
         prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
         logprobs = None
-        #self.maybe_wait_for_kv_save(scheduler_output.scheduled_new_reqs)
+
         model_runner_output = ModelRunnerOutput(
             req_ids=all_req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
@@ -1824,10 +1816,6 @@ class HPUModelRunner:
         output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
         output.finished_sending = finished_sending
         output.finished_recving = finished_recving
-        # D case assingment
-        if len(finished_recving) > 0:
-            for r in finished_recving:
-                self.input_batch.req_type[r] = 'decode'
         return output
 
     @staticmethod
