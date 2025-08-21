@@ -1198,7 +1198,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.block_size)
 
         if self.dp_awared_padding and\
-            (self.kv_conf.is_kv_producer or self.kv_conf is None):
+            (self.kv_conf is None or self.kv_conf.is_kv_producer):
             if self.is_driver_worker:
                 max_prompt_len = align_dp_groups(
                     max_prompt_len, torch.distributed.ReduceOp.MAX)
