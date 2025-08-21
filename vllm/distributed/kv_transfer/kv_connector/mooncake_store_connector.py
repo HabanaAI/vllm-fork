@@ -590,6 +590,8 @@ class MooncakeStoreConnector(KVConnectorBase):
         outputs: List[CompletionSequenceGroupOutput] = []
         for seq_group_to_sample in seq_groups_to_sample:
             if not seq_group_to_sample.seq_data:
+                logger.warning(
+                    "Sequence data of sequence group to sample is empty")
                 return None
             start_time = time.time()
             sampler_output_key = self.get_sampler_output_key(
