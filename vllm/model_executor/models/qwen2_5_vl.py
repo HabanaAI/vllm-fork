@@ -342,9 +342,7 @@ class Qwen2_5_VisionAttention(nn.Module):
                 f"Qwen2.5-VL does not support {self.attn_backend} backend now."
             )
 
-        self.softmax_mode = 'fp32' if os.environ.get(
-            'VLLM_FP32_SOFTMAX_VISION', 'false').lower() in ['true', '1'
-                                                             ] else 'None'
+        self.softmax_mode = 'fp32'
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
         # [s, b, 3 * head * head_dim]
@@ -377,6 +375,7 @@ class Qwen2_5_VisionAttention(nn.Module):
             rotary_pos_emb: torch.Tensor,
             max_seqlen: Optional[int] = None,  # Only used for Flash Attention
             seqlens: Optional[list[int]] = None,  # Only used for xFormers
+            padding_attn_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # [s, b, c] --> [s, b, head * 3 * head_dim]
         x, _ = self.qkv(x)
@@ -412,16 +411,11 @@ class Qwen2_5_VisionAttention(nn.Module):
                                       "(b s) ... -> b s ...",
                                       b=batch_size)
         elif self.attn_backend == _Backend.TORCH_SDPA and is_hpu:
-            # We are re-purposing the variable name cu_seqlens
-            # to represent the mask for full attention,
-            # if the mask is None we are doing window attention
-            fullattn_mask = cu_seqlens
-
-            if fullattn_mask is None:  # performs window attention
-                # we assume image is 112 aligned in both h/w dims
-                # in other words, x % 64 = 0
-                # that simplifies the slicing of window attention
-                # in patches of 64
+            # Runs local window attention or full attention based
+            # on the length of cu_seqlens. Assume full attention
+            # runs one image at a time.
+            if len(cu_seqlens) > 2:
+                # performs local window attention                
                 outputs = []
                 cu_seqlens = list(range(0, x.shape[0] + 1, 64))
                 for i in range(1, len(cu_seqlens)):
@@ -434,16 +428,17 @@ class Qwen2_5_VisionAttention(nn.Module):
                     q_i = q[:, start_idx:end_idx]
                     k_i = k[:, start_idx:end_idx]
                     v_i = v[:, start_idx:end_idx]
+                    attn_mask = padding_attn_mask[start_idx:end_idx, start_idx:end_idx]
                     q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                      for x in [q_i, k_i, v_i])
-                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False,
+                    output_i = FusedSDPA.apply(q_i, k_i, v_i, attn_mask, 0.0, False,
                                                None, self.softmax_mode)
                     output_i = rearrange(output_i, "b h s d -> b s h d ")
                     outputs.append(output_i)
                 context_layer = torch.cat(outputs, dim=1)
             else:
                 # performs full attention using the previous computed mask
-                fullatt_block_attn_mask = fullattn_mask
+                fullatt_block_attn_mask = padding_attn_mask
                 q1, k1, v1 = (rearrange(x, "b s h d -> b h s d")
                               for x in [q, k, v])
                 (batch_size, _, seq_len_N_t, _) = q1.shape
@@ -532,12 +527,14 @@ class Qwen2_5_VisionBlock(nn.Module):
             rotary_pos_emb: torch.Tensor,
             max_seqlen: Optional[int] = None,  # Only used for Flash Attention
             seqlens: Optional[list[int]] = None,  # Only used for xFormers
+            padding_attn_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         x = x + self.attn(self.norm1(x),
                           cu_seqlens=cu_seqlens,
                           rotary_pos_emb=rotary_pos_emb,
                           max_seqlen=max_seqlen,
-                          seqlens=seqlens)
+                          seqlens=seqlens,
+                          padding_attn_mask=padding_attn_mask)
 
         x = x + self.mlp(self.norm2(x))
         return x
@@ -1099,7 +1096,7 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                 pad_inputs_with_fixed_size_groups(hidden_states,
                                                   rotary_pos_emb,
                                                   cu_window_seqlens,
-                                                  seq_len=6400,
+                                                  seq_len=6912,
                                                   window_size=64)
             img_indices = hidden_states_pad[:, 0] != -100
             padding_attn_mask = torch.outer(img_indices, img_indices)
