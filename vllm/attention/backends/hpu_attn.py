@@ -155,6 +155,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     window_block_mapping: Optional[torch.Tensor] = None
     window_block_groups: Optional[torch.Tensor] = None
     window_block_usage: Optional[torch.Tensor] = None
+    mask_to: Optional[torch.Tensor] = None
     window_attn_bias: Optional[torch.Tensor] = None
     use_window_sdpa: Optional[bool] = None
     sliding_window_right: Optional[int] = None

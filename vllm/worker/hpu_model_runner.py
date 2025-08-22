@@ -465,6 +465,9 @@ class HpuModelAdapter(torch.nn.Module):
                 device=device,
                 dtype=torch.bool),
                                    diagonal=1)
+            if self.interleaved_sliding_window:
+                for i in range(batch_size):
+                    attn_mask[i, 0, seq_lens_t[i]:, :] = True
         else:
             attn_mask = torch.zeros((batch_size, 1, seq_len, seq_len),
                                     device=device,
@@ -496,6 +499,7 @@ class HpuModelAdapter(torch.nn.Module):
 
         prefill_metadata = attn_metadata
         shift = 0
+        seq_lens_t = prefill_metadata.seq_lens_tensor
 
         #causal + window size
         tensor = torch.full((batch_size, 1, seq_len, seq_len),
@@ -504,6 +508,8 @@ class HpuModelAdapter(torch.nn.Module):
                             fill_value=1)
         mask = torch.tril(tensor, diagonal=shift)
         mask = torch.triu(mask, diagonal=shift - window_size + 1)
+        for i in range(batch_size):
+            mask[i, 0, seq_lens_t[i]:, :] = 0
         attn_bias = torch.log(mask)
 
         attn_metadata = prefill_metadata._replace(window_attn_bias=attn_bias)
@@ -514,17 +520,16 @@ class HpuModelAdapter(torch.nn.Module):
         if is_window_block:
             block_usage = metadata.window_block_usage
             block_groups = metadata.window_block_groups
+            mask = metadata.mask_to
         else:
             block_usage = metadata.block_usage
             block_groups = metadata.block_groups
-
-        mask = torch.arange(0,
+            mask = torch.arange(0,
                             self.block_size,
                             device=device,
                             dtype=torch.int32).unsqueeze(0)
-        if is_window_block:
-            block_usage = block_usage.reshape(block_usage.shape[0])
-        mask = mask >= block_usage.unsqueeze(-1)
+            mask = mask >= block_usage.unsqueeze(-1)
+
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
             mask, -math.inf))
 
@@ -1965,8 +1970,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_tables.append(block_table)
 
                 if self.interleaved_sliding_window is not None:
-                    sliding_window_blocks = (self.interleaved_sliding_window //
-                                             self.block_size) + 1
+                    if self.interleaved_sliding_window == self.block_size:
+                        sliding_window_blocks = (self.interleaved_sliding_window //
+                                                 self.block_size) + 1
+                    else:
+                        sliding_window_blocks = (self.interleaved_sliding_window //
+                                                 self.block_size) + 2
                     window_block_table = block_table[-sliding_window_blocks:]
                     window_block_tables.append(window_block_table)
 
@@ -2096,6 +2105,39 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                           j) in enumerate(zip(window_block_list, block_usage))
             ]
 
+            if self.block_size == self.interleaved_sliding_window:
+                mask_to = [0] * len(window_block_usage)
+
+                for i in range(len(seq_group_metadata_list)):
+                    indices_list = []
+                    for index, value in enumerate(window_block_groups):
+                        if value == i:
+                            indices_list.append(index)
+                    if len(indices_list) > 1:
+                        '''temp = self.block_size - \
+                                window_block_usage[indices_list[1]][0]'''
+                        temp = window_block_usage[indices_list[1]][0] - 1
+                        # if temp <= self.block_size:
+                        mask_to[indices_list[0]] = temp
+                        # else:
+                        #    mask_to[indices_list[0]] = self.block_size + 1
+            else:
+                mask_to = [(diff if diff >= 0 else 0)
+                    for lbu in window_block_usage
+                    for diff in [lbu[0] - (self.interleaved_sliding_window)]]
+                for i in range(len(seq_group_metadata_list)):
+                    indices_list = []
+                    for index, value in enumerate(window_block_groups):
+                        if value == i:
+                            indices_list.append(index)
+                    if len(indices_list) > 1:
+                        temp = mask_to[indices_list[0]] + \
+                            window_block_usage[indices_list[1]][0]
+                        if temp <= self.block_size:
+                            mask_to[indices_list[0]] = temp
+                        else:
+                            mask_to[indices_list[0]] = self.block_size
+
         if is_enc_dec_model:
             if self.use_contiguous_pa:
                 cross_block_bucket_size = max(
@@ -2203,12 +2245,38 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             window_block_usage = torch.tensor(window_block_usage,
                                               dtype=self.model_config.dtype,
                                               device='cpu')
+            
+            # create the sliding window mask
+            window_block_usage = window_block_usage.reshape(window_block_usage.shape[0])
+            '''print(window_block_usage)
+            print(window_block_groups)'''
+            mask_to = torch.tensor(mask_to, dtype=torch.int, device='cpu')
+            mask = torch.arange(0,
+                            self.block_size,
+                            device='cpu',
+                            dtype=torch.int32).unsqueeze(0)
+            mask = mask >= window_block_usage.unsqueeze(-1)
+            for i in range(mask_to.size(0)):
+                if (mask_to[i] !=  0):
+                    mask[i, :mask_to[i]] = True
+            '''print('=================================================================================')
+            print(mask[1])
+            print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+            print(mask[3])
+            print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+            print(mask[4])
+            print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+            print(mask[5])
+            print('=================================================================================')'''
+            mask_to = mask
 
             window_block_list = window_block_list.to(  # type: ignore
                 self.device, non_blocking=True)
             window_block_groups = window_block_groups.to(  # type: ignore
                 self.device, non_blocking=True)
             window_block_usage = window_block_usage.to(  # type: ignore
+                self.device, non_blocking=True)
+            mask_to = mask_to.to(  # type: ignore
                 self.device, non_blocking=True)
 
         attn_metadata = self.attn_backend.make_metadata(
@@ -2222,6 +2290,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             window_block_mapping=None,
             window_block_usage=window_block_usage,
             window_block_groups=window_block_groups,
+            mask_to=mask_to,
             attn_bias=None,
             seq_lens_tensor=None,
             encoder_seq_lens=encoder_seq_lens,
@@ -2670,6 +2739,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_mapping',
             'window_block_usage',
             'window_block_groups',
+            'mask_to',
             'window_attn_bias',
             'use_window_sdpa',
             'sliding_window_right',

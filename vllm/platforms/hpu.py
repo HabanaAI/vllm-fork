@@ -94,7 +94,8 @@ class HpuPlatform(Platform):
         # smaller sizes still work, but very inefficiently
         cache_config = vllm_config.cache_config
         if cache_config and cache_config.block_size is None:
-            cache_config.block_size = 128
+            print("Setting default block size to 256 for HPU.")
+            cache_config.block_size = 256
         if (parallel_config.distributed_executor_backend in ['mp', 'uni']
                 and envs.VLLM_WORKER_MULTIPROC_METHOD == 'fork'):
             if os.environ.get("VLLM_WORKER_MULTIPROC_METHOD",
