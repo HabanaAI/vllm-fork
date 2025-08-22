@@ -26,12 +26,12 @@ from torch import nn
 from transformers import AutoModelForCausalLM
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
+from vllm import envs
 from vllm.attention import Attention
 from vllm.config import (LoadConfig, LoadFormat, ModelConfig, ParallelConfig,
                          VllmConfig, set_current_vllm_config)
 from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size)
-from vllm import envs
 from vllm.logger import init_logger
 # yapf conflicts with isort for this block
 # yapf: disable
