@@ -31,6 +31,7 @@ parser.add_argument(
     "--max_model_len", type=int, default=16384, help="The max model length."
 )
 parser.add_argument("--random", action="store_true", help="Randomly sample prompts.")
+parser.add_argument("--dummy", action="store_true", help="Using dummy weights")
 parser.add_argument("--enforce_eager", action="store_true", help="Enforce eager")
 args = parser.parse_args()
 
@@ -199,6 +200,8 @@ if __name__ == "__main__":
         param["enforce_eager"] = True
     if args.tp_size > 8:
         param["distributed_executor_backend"] = "ray"
+    if args.dummy:
+        param["load_format"] = "dummy"
     if args.tp_size == 1:
         llm = LLM(
             model=model,

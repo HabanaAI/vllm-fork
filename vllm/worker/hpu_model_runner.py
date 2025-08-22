@@ -2876,6 +2876,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         num_iters=3,
                         align_worker=False,
                         is_dummy_run=False) -> None:
+        import time
+        start = time.time()
         phase = 'prompt' if is_prompt else 'decode'
         use_graphs = is_dummy_run or self._use_graphs(img_args)
 
@@ -2995,6 +2997,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler.end()
         if not is_dummy_run:
             gc.collect()
+        end = time.time()
+        logger.info(f"Warmup scenario {scenario_name} took {end - start:.2f} seconds")
 
     def remove_all_loras(self):
         if not self.lora_manager:
