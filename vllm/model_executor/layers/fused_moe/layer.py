@@ -63,6 +63,14 @@ logger = init_logger(__name__)
 # The size of the activations will be E x MOE_DP_CHUNK_SIZE x hidden_dim.
 MOE_DP_CHUNK_SIZE = 256
 
+import os
+def _parse_bool_env(env_var: str, default: bool = False) -> bool:
+    """Parse boolean environment variable with proper handling of various formats"""
+    value = os.getenv(env_var)
+    if value is None:
+        return default
+    return value.lower() in ("1", "true")
+
 
 @dataclass
 class FusedMoEParallelConfig:
@@ -778,7 +786,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         **kwargs,
     ):
         import os
-        if not os.getenv("VLLM_ENABLE_FUSED_MOE_WITH_BIAS", False):
+        if not _parse_bool_env("VLLM_ENABLE_FUSED_MOE_WITH_BIAS", False):
             return self.fused_moe(hidden_states=x,
                                     w1=layer.w13_weight,
                                     w2=layer.w2_weight,
