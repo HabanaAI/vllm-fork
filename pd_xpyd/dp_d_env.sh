@@ -5,7 +5,10 @@ source "$BASH_DIR"/pd_env.sh
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
-model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
+model_path=/local_dataset_2/pytorch/PowerMoE-3b/
+
+export HABANA_VISIBLE_MODULES="6,7"
+export HABANA_VISIBLE_DEVICES="6,7"
 
 export VLLM_GPU_MEMORY_UTILIZATION=0.9
 export VLLM_GRAPH_RESERVED_MEM=0.2
@@ -15,12 +18,12 @@ export VLLM_GRAPH_PROMPT_RATIO=0
 export VLLM_DELAYED_SAMPLING="true"
 
 # params
-model_len=8192
-max_num_batched_tokens=8192
+model_len=2048
+max_num_batched_tokens=2048
 max_num_seqs=32
 input_min=128
-input_max=8192
-output_max=8192
+input_max=2048
+output_max=2048
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX

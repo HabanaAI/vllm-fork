@@ -1,5 +1,10 @@
 #set +x
-export MODEL_PATH=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
+unset http_proxy
+unset https_proxy
+unset HTTP_PROXY
+unset HTTPS_PROXY
+
+export MODEL_PATH=/local_dataset_2/pytorch/PowerMoE-3b/
 
 if [ -z "$1" ]; then
     echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
@@ -31,7 +36,7 @@ if [ -z "$3" ]; then
     FIRST_TOKEN_FROM_P=false
 else
     TP_SIZE=$3
-    NUM_DECODE=$((8 / TP_SIZE))
+    NUM_DECODE=1
 fi
 
 if [ -z "$4" ]; then
@@ -50,7 +55,7 @@ if [ "$5" == "benchmark" ]; then
 fi
 
 #For OAM
-DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
+DECODE_IPS=("127.0.0.1")
 #For PCIE
 # DECODE_IPS=("10.112.110.161" "10.112.110.148")
 
@@ -66,7 +71,7 @@ for ((i=0; i<$NUM_DECODE; i++)); do
 done
 
 #For OAM
-PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10.239.128.244" "10.239.128.153")
+PREFILL_IPS=("127.0.0.1")
 #For PCIE
 # PREFILL_IPS=("10.112.110.157")
 

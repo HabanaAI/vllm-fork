@@ -41,15 +41,15 @@ class MooncakeStoreConfig:
         rank_id = torch.distributed.get_rank()
         rank_id = rank_id % 8
 
-        device_names = config.get("device_name")
-        if isinstance(device_names, str):
-            device_names = [device_names]
-        elif not isinstance(device_names, list):
-            raise ValueError(
-                f"device_name must be a string or list of strings, "
-                f"but got {type(device_names)}"
-            )
-        device = device_names[rank_id]
+        # device_names = config.get("device_name")
+        # if isinstance(device_names, str):
+        #     device_names = [device_names]
+        # elif not isinstance(device_names, list):
+        #     raise ValueError(
+        #         f"device_name must be a string or list of strings, "
+        #         f"but got {type(device_names)}"
+        #     )
+        # device = device_names[rank_id]
 
         return MooncakeStoreConfig(
             local_hostname=config.get("local_hostname"),
@@ -57,7 +57,7 @@ class MooncakeStoreConfig:
             global_segment_size=config.get("global_segment_size", 53687091200),
             local_buffer_size=config.get("local_buffer_size", 10737418240),
             protocol=config.get("protocol", "tcp"),
-            device_name=device,
+            device_name="",
             master_server_address=config.get("master_server_address"),
         )
 

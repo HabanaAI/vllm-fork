@@ -1,11 +1,16 @@
 #!/bin/bash
 #set -x
 
+unset http_proxy
+unset https_proxy
+unset HTTP_PROXY
+unset HTTPS_PROXY
+
 # machine id, EP, TP, DP Index, DP Host IP
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
 
-export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
+export MOONCAKE_CONFIG_PATH=/home/xichen/workspace/vllm-fork/pd_xpyd/mooncake.json
 echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
 
 EP_SIZE=$2
@@ -17,7 +22,7 @@ echo "TP_SIZE=$TP_SIZE"
 DP_SIZE=$((EP_SIZE / TP_SIZE))
 echo "DP_SIZE=$DP_SIZE"
 
-DP_RANK=$((8 / TP_SIZE))
+DP_RANK=$((EP_SIZE / TP_SIZE))
 echo "DP_RANK=$DP_RANK"
 
 DP_INDEX=$4

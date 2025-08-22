@@ -42,7 +42,7 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.local_tp_rank = local_rank
         self.rank = rank
         self.k_head_size = 64
-        self.v_head_size = 512
+        self.v_head_size = 64
         self.k_v_head_size = self.k_head_size + self.v_head_size
         self.block_size = 128
         max_num_blocks = 1000
