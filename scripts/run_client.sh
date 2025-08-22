@@ -34,6 +34,17 @@ output_log_file_name=lm_eval_output_${model_basename}_${taskname_str}
     
 export model_path="/mnt/disk5/lmsys/gpt-oss-20b-bf16"
 model_path="/mnt/disk5/lmsys/gpt-oss-20b-bf16"
+model_path="/software/users/yiliu4/HF_HOME/lmsys/gpt-oss-20b-bf16"
+curl -X POST http://127.0.0.1:8000/v1/completions \
+     -H "Content-Type: application/json" \
+     -d '{
+           "model": "/software/users/yiliu4/HF_HOME/lmsys/gpt-oss-20b-bf16",
+           "prompt": "Solve the following math problem step by step: What is 25 + 37?",
+           "max_tokens": 100,
+           "temperature": 0.7,
+           "top_p": 1.0
+         }'
+
 # curl -X POST http://127.0.0.1:8000/v1/completions \
 #      -H "Content-Type: application/json" \
 #      -d '{

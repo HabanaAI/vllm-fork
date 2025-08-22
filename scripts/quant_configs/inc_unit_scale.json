@@ -9,8 +9,6 @@
     },
     "blocklist": {
         "types": [
-            "FusedMoE",
-            "MoeMatmul"
         ],
         "names": [
             "lm_head",
