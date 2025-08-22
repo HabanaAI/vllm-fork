@@ -5,9 +5,11 @@ This implementation is a shim wrapper on two APIs exposed by `kv_connector`:
 1. `send_kv_caches_and_hidden_states`
 2. `recv_kv_caches_and_hidden_states
 """
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
+    from vllm.model_executor import SamplingMetadata
+    from vllm.model_executor.layers.sampler import SamplerOutput
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
     from vllm.worker.hpu_model_runner import \
         ModelInputForHPUWithSamplingMetadata
@@ -110,3 +112,12 @@ class KVTransferAgent:
                "ModelInputForHPUWithSamplingMetadata"]:
         return self.connector.recv_kv_caches_and_hidden_states_hpu(
             model_executable, model_input, attn_metadata, kv_caches)
+
+    def send_sampler_output(self, sampling_metadata: "SamplingMetadata",
+                            output: "SamplerOutput") -> None:
+        self.connector.send_sampler_output(sampling_metadata, output)
+
+    def recv_sampler_output(
+            self, sampling_metadata: "SamplingMetadata"
+    ) -> Optional["SamplerOutput"]:
+        return self.connector.recv_sampler_output(sampling_metadata)
