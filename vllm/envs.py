@@ -95,6 +95,7 @@ if TYPE_CHECKING:
     VLLM_DP_SIZE: int = 1
     VLLM_DP_MASTER_IP: str = ""
     VLLM_DP_MASTER_PORT: int = 0
+    VLLM_DP_OPT: int = 3
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
 
 
@@ -614,6 +615,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # Port of the master node in the data parallel setting
     "VLLM_DP_MASTER_PORT":
     lambda: int(os.getenv("VLLM_DP_MASTER_PORT", "0")),
+
+    # Optimization level for data parallel
+    "VLLM_DP_OPT":
+    lambda: int(os.getenv("VLLM_DP_OPT", "3")),
 
     # When running pipeline parallelism on multiple nodes the primary
     # communication channel for parallel communications may not be able

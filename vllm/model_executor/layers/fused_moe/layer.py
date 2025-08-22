@@ -22,6 +22,8 @@ from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
 from vllm.utils import direct_register_custom_op
 
+import vllm.envs as envs
+
 is_hpu = current_platform.is_hpu()
 
 if current_platform.is_cuda_alike():
@@ -476,7 +478,9 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
-        self.multicast_fn = self.hpu_multicast if is_hpu else self.naive_multicast
+        self.dp_opt = envs.VLLM_DP_OPT
+        self.multicast_fn = self.hpu_multicast\
+            if (is_hpu and self.dp_opt > 2) else self.naive_multicast
         if is_hpu:
             if VLLM_REQUANT_FP8_INC:
                 ep_shift = self.ep_rank * self.local_num_experts
@@ -905,7 +909,7 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
-            if self.activation_scheme != "static":
+            if self.activation_scheme != "static" or self.dp_opt < 1:
                 hidden_states_across_dp = get_forward_context(
                 ).dp_metadata.hidden_states_across_dp
                 hidden_states = self.multicast_fn(hidden_states,
@@ -934,17 +938,20 @@ class FusedMoE(torch.nn.Module):
             **quant_kwargs)
 
         if self.dp_size > 1:
-            start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
-                self.dp_rank - 1]
-            end = cu_tokens_across_dp_cpu[self.dp_rank]
+            if self.dp_opt < 3:
+                start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
+                    self.dp_rank - 1]
+                end = cu_tokens_across_dp_cpu[self.dp_rank]
+                all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
+                final_hidden_states = all_hidden_states[start:end, :]
+            else:
+                import habana_frameworks.torch as htorch
+                htorch.core.mark_step()
+                local_hidden_states = get_forward_context(
+                ).dp_metadata.hidden_states
+                torch.distributed.reduce_scatter_tensor(local_hidden_states, final_hidden_states, group=get_dp_group().device_group)
 
-            import habana_frameworks.torch as htorch
-            htorch.core.mark_step()
-            local_hidden_states = get_forward_context(
-            ).dp_metadata.hidden_states
-            torch.distributed.reduce_scatter_tensor(local_hidden_states, final_hidden_states, group=get_dp_group().device_group)
-
-            final_hidden_states = local_hidden_states
+                final_hidden_states = local_hidden_states
 
         if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1):
             final_hidden_states = tensor_model_parallel_all_reduce(
