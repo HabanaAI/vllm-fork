@@ -64,7 +64,7 @@ logger = init_logger(__name__)
 
 _TYPE_CACHE: dict[str, dict[str, Any]] = {}
 
-
+hpu_buffer = None
 @dataclass
 class PromptDecodeInfo:
     prompt_req_ids: list[str]
@@ -933,8 +933,9 @@ class HPUModelRunner:
             # Must be prompt
             assert num_computed_tokens < num_prompt_tokens
             num_output_tokens = len(self.requests[req_id].output_token_ids)
-            assert num_output_tokens == 0, \
-                f'req_id: {req_id}, {num_output_tokens}'
+            if not has_kv_transfer_group(): #P case num_output_tokens has non 0 
+                assert num_output_tokens == 0, \
+                    f'req_id: {req_id}, {num_output_tokens}'
 
             prompt_req_ids.append(req_id)
             prompt_scheduled_tokens.append(num_scheduled_tokens)
@@ -2459,6 +2460,11 @@ class HPUModelRunner:
             #kv_caches = { layer: torch.stack((tup[0], tup[1])) for layer,tup in kv_caches.items()}
             get_kv_transfer_group().register_kv_caches(kv_caches)
             get_kv_transfer_group().set_host_xfer_buffer_ops(copy_kv_blocks)
+            global hpu_buffer
+            #if hpu_buffer is None:
+            #    _, num_kv_heads, head_size = kv_cache_shape
+            #    shape =[len(kv_caches), 2, 8192  , num_kv_heads, head_size] 
+            #    hpu_buffer = torch.empty(shape, dtype=kv_cache_spec.dtype, device=self.device)
 
         htorch.hpu.synchronize()
 
@@ -2508,15 +2514,16 @@ def _make_src_and_dst_indices(
     src_device: Union[torch.device, str],
     dst_device: Union[torch.device, str],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    src_indices = torch.tensor(src_block_ids,
+    #convert to slot mapping
+    src_slot_mapping = np.concat([np.arange(start=s*block_size, stop=(s+1)*block_size) for s in src_block_ids])
+    dst_slot_mapping = np.concat([np.arange(start=d*block_size, stop=(d+1)*block_size) for d in dst_block_ids])
+    
+    src_slot_mapping = torch.tensor(src_slot_mapping,
                                device=src_device,
                                dtype=torch.int64)
-    dst_indices = torch.tensor(dst_block_ids,
+    dst_slot_mapping = torch.tensor(dst_slot_mapping,
                                device=dst_device,
                                dtype=torch.int64)
-    #convert to slot mapping
-    src_slot_mapping = torch.concat([torch.arange(start=s*block_size, end=(s+1)*block_size) for s in src_indices])
-    dst_slot_mapping = torch.concat([torch.arange(start=d*block_size, end=(d+1)*block_size) for d in dst_indices])
     return src_slot_mapping, dst_slot_mapping
 
 def copy_kv_blocks(
@@ -2544,15 +2551,31 @@ def copy_kv_blocks(
         dst_device=dst_device)
 
     start = time.perf_counter()
-    if direction == "h2d":
-        device = 'hpu'
-    else:
-        device = 'cpu'
+    target_device = dst_device.type
+
+    i = 0
+    global hpu_buffer
+    use_hpu_buffer = False # (len(src_slot_mapping) == hpu_buffer[0][0].size(0)) and (hpu_buffer is not None)
     for layer_name in src_kv_caches:
         key_cache = src_kv_caches[layer_name][0]
         value_cache = src_kv_caches[layer_name][1]
-        dst_kv_caches[layer_name][0][dst_slot_mapping] = key_cache[src_slot_mapping].to(device)
-        dst_kv_caches[layer_name][1][dst_slot_mapping] = value_cache[src_slot_mapping].to(device)
+
+        if direction == "d2h" and use_hpu_buffer:
+            hpu_buffer[i][0]=key_cache.index_select_(0,  src_slot_mapping)
+            hpu_buffer[i][1]=value_cache.index_select_(0,  src_slot_mapping)
+        else:
+            #import remote_pdb;remote_pdb.set_trace()      
+            dst_kv_caches[layer_name][0].index_put_((dst_slot_mapping,), key_cache.index_select(0, src_slot_mapping).to(target_device))
+            dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))                                      
+        i = i+1
+        
+        #dst_kv_caches[layer_name][0][dst_slot_mapping] = key_cache[src_slot_mapping].to(target_device)
+        #dst_kv_caches[layer_name][1][dst_slot_mapping] = value_cache[src_slot_mapping].to(target_device)
+    #if use_hpu_buffer:
+        #tmp = hpu_buffer.to('cpu')
+        #dst_kv_caches = hpu_buffer.to('cpu')
+        
+        
     torch.hpu.synchronize()
     
     logger.info(f"copy_kv_blocks: copy takes {time.perf_counter() - start}|{direction=}|{os.getpid()=}|{block_size=}|{len(src_block_ids)=}|{len(dst_block_ids)=}")
