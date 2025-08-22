@@ -782,9 +782,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Speculative decoding is not supported with "
                 "contiguous PA, please set VLLM_CONTIGUOUS_PA=false")
         self.model_type = self.model_config.hf_config.model_type
-        if self.model_type in ("medusa", "mlp_speculator", "eagle",
-                               "deepseek_mtp"):
-            self.skip_warmup = True
 
         # For both multi-step scheduling and delayed sampling
         self.cached_step_outputs: List[torch.Tensor] = []
@@ -2214,7 +2211,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_ctx.generate_prompt_buckets()
         if not self.is_pooler:
             max_blocks = kv_caches[0][0].size(0)
-            self.bucketing_ctx.generate_decode_buckets(max_blocks)
+            num_speculative_tokens = 0
+            if (self.vllm_config.speculative_config is not None
+                    and self.model_type not in ("medusa", "mlp_speculator", "eagle",
+                                                "deepseek_mtp")):
+                num_speculative_tokens = self.vllm_config.speculative_config.num_speculative_tokens
+
+            self.bucketing_ctx.generate_decode_buckets(max_blocks, num_speculative_tokens)
         if not htorch.utils.internal.is_lazy() and not self.enforce_eager:
             multiplier = 3 if os.getenv('VLLM_REGIONAL_COMPILATION',
                                         'true').lower() == 'true' else 1
@@ -2257,10 +2260,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         False, kv_caches)
 
             if not self.enforce_eager and htorch.utils.internal.is_lazy():
-                if not self.is_pooler:
-                    assert self.mem_margin is not None, \
-                        ("HabanaWorker.determine_num_available_blocks needs "
-                        "to be called before warming up the model.")
+                if not self.is_pooler and self.mem_margin is None:
+                    free_hpu_memory = torch.hpu.mem_get_info()[0]
+                    hpu_memory_margin = free_hpu_memory * (
+                        1 - self.cache_config.gpu_memory_utilization)
+                    self.mem_margin = hpu_memory_margin
 
                 free_mem = HabanaMemoryProfiler.current_free_device_memory()
                 graph_free_mem = free_mem - self.mem_margin
