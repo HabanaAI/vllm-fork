@@ -350,8 +350,6 @@ class MooncakeStoreConnector(KVConnectorBase):
             self.block_size - 1 ) // self.block_size
 
         hidden_or_intermediate_states_for_one_req = []
-        input_tokens_list = []
-        num_computed_tokens_list = []
         start_block_idx = 0
 
         # For each sequence in the batch, we patch kv tensor together,
@@ -399,25 +397,23 @@ class MooncakeStoreConnector(KVConnectorBase):
             # For deepseek, we only need recv first rank
             load_kvcache_key = f"{load_key_prefix}_0"
             shape = (61, num_blocks * 128, self.k_v_head_size)
-            while self.kv_store.is_exist(load_kvcache_key) is False:
-                time.sleep(0.1)
-            # remote_kv = self.kv_store.get(load_kvcache_key)
-            remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape,
-                                                 self.dtype)
+            remote_kv = None
+            if self._wait_for_key(load_kvcache_key):
+                remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape,
+                                                     self.dtype)
             hidden_key = f"{load_key_prefix}_hidden_0"
-            hidden = self.kv_store.get(hidden_key)
+            hidden = None
+            if self._wait_for_key(hidden_key):
+                hidden = self.kv_store.get(hidden_key)
 
             if remote_kv is None or hidden is None:
                 # didn't find any match.
                 logger.warning("Didn't find any match, key_prefix: %s",
                                load_kvcache_key)
                 bypass_model_exec = False
+                # We need to increment the start_block_idx to continue
+                start_block_idx += padded_num_blocks
                 continue
-
-            # collecting data for rebuilding the input
-            input_tokens_list.append(current_tokens)
-            num_computed_tokens = current_tokens.shape[0]
-            num_computed_tokens_list.append(num_computed_tokens)
 
             # it's padded to block size now.
             # key_values = remote_kv.to("hpu")
@@ -479,15 +475,15 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         load_kvcache_key = f"{prefix}_0"
         load_hidden_key = f"{prefix}_hidden_0"
-        while self.kv_store.is_exist(load_kvcache_key) is False:
-            time.sleep(0.01)
-        remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
-                                             shape=None,
-                                             dtype=self.dtype)
+        remote_kv = None
+        if self._wait_for_key(load_kvcache_key):
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
+                                                 shape=None,
+                                                 dtype=self.dtype)
         # hidden_states always use bf16.
-        while self.kv_store.is_exist(load_hidden_key) is False:
-            time.sleep(0.01)
-        hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
+        hidden = None
+        if self._wait_for_key(load_hidden_key):
+            hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
 
         if remote_kv is None or hidden is None:
             # didn't find any match.
@@ -496,6 +492,17 @@ class MooncakeStoreConnector(KVConnectorBase):
             return None, None
 
         return remote_kv, hidden
+
+    def _wait_for_key(self, key, timeout_in_seconds=None):
+        if timeout_in_seconds is None:
+            # default to 10 seconds
+            timeout_in_seconds = 10
+        timeout = time.time() + timeout_in_seconds
+        while not self.kv_store.is_exist(key):
+            if time.time() > timeout:
+                return False
+            time.sleep(0.01)
+        return True
 
     @staticmethod
     def tensor_hash(tensor: torch.Tensor) -> int:
