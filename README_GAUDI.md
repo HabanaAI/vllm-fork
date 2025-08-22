@@ -600,3 +600,5 @@ The following steps address Out of Memory related errors:
 - Decrease `max_num_seqs` or `max_num_batched_tokens` - This may reduce the number of concurrent requests in a batch, thereby requiring less KV cache space when overall usable memory is limited.
 - Increase `tensor_parallel_size` - This approach shards model weights, so each GPU has more memory available for KV cache.
 - To maximize the memory available for the KV cache, you can disable `HPUGraph` completely. With HPU Graphs disabled, you are trading latency and throughput at lower batches for potentially higher throughput on higher batches. You can do that by adding `--enforce-eager` flag to the server (for online inference), or by passing `enforce_eager=True` argument to LLM constructor (for offline inference).
+
+In case you observe performance degradation with respect to time to first token (TTFT) metric, set `--generation-config vllm` argument. Also make sure you have correct value set for the '--max-model-len' argument, as described in the Environment variables section of this document.
