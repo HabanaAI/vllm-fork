@@ -114,6 +114,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 )
             else:
                 raise NotImplementedError("CPU MOE only supports x86 arch.")
+        elif current_platform.is_hpu():
+            num_experts = layer.local_num_experts
+            experts_range = range(num_experts)
+            self.w1_list = [layer.w13_weight.data[i].squeeze() for i in experts_range]
+            self.w2_list = [layer.w2_weight.data[i].squeeze() for i in experts_range]
+            ep_shift = layer.ep_rank * num_experts
+            self.experts_min, self.experts_max = ep_shift, num_experts + ep_shift - 1
 
     def apply(
         self,
@@ -205,9 +212,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         if len(x.shape) == 3:
             bs, seq_len, hidden_size = x.shape
             x = x.reshape(bs * seq_len, hidden_size)
-        assert len(x.shape) == 2
-        import habana_frameworks.torch as htorch
-        htorch.core.mark_step()
+        input_shape = x.shape
+        x = x.view(-1, x.shape[-1])
         if use_grouped_topk:
             topk_weights, topk_ids = FusedMoE.select_experts(
                 hidden_states=x,
@@ -227,42 +233,34 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                                                         top_k,
                                                         dim=-1)
             topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
-            topk_weights = topk_weights.to(x.dtype)
 
-        final_hidden_states = torch.zeros_like(x)
-        num_experts = layer.w13_weight.shape[0]
-        n_expert_slice = layer.w13_weight.shape[0] // 8
-        assert n_expert_slice * 8 == num_experts
+        topk_ids = topk_ids.to(torch.int32)
+        topk_weights = topk_weights.to(x.dtype)
+        if layer.dp_size > 1:
+            cu_tokens_across_dp_cpu = get_forward_context(
+            ).dp_metadata.cu_tokens_across_dp_cpu
 
-        # w13_list = layer.hpu_fused_moe.MoeOp.w13_list
-        # w2_list = layer.hpu_fused_moe.MoeOp.w2_list
+            topk_ids_across_dp = get_forward_context(
+            ).dp_metadata.topk_ids_across_dp
+            topk_ids = layer.multicast_fn(topk_ids, cu_tokens_across_dp_cpu,
+                                          topk_ids_across_dp).to(torch.long)
 
-        for i in range(8):
-            min_expert = i * n_expert_slice
-            max_expert = (i + 1) * n_expert_slice
-            # w13_list_slice = [w13_list[i].weight.squeeze() for i in range(min_expert, max_expert)]
-            # w2_list_slice = [w2_list[i].weight.squeeze() for i in range(min_expert, max_expert)]
-            w13_list_slice = [layer.w13_weight[j].squeeze().clone() for j in range(min_expert, max_expert)]
-            w2_list_slice = [layer.w2_weight[j].squeeze().clone() for j in range(min_expert, max_expert)]
-            # print(f"w13_list_slice[0].shape: {w13_list_slice[0].shape}, device: {w13_list_slice[0].device}, dtype: {w13_list_slice[0].dtype}")
-            # print(f"w2_list_slice[0].shape: {w2_list_slice[0].shape}, device: {w2_list_slice[0].device}, dtype: {w2_list_slice[0].dtype}")
-            # print(f"hidden_states.shape: {x.shape}, device: {x.device}, dtype: {x.dtype}")
-            # print(f"topk_ids.shape: {topk_ids.shape}, device: {topk_ids.device}, dtype: {topk_ids.dtype}")
-            # print(f"topk_weights.shape: {topk_weights.shape}, device: {topk_weights.device}, dtype: {topk_weights.dtype}")
-            # print(f"min_expert: {min_expert}, max_expert: {max_expert}")
-            final_hidden_states += torch.ops.hpu.mixture_of_experts(hidden_states=x,
-                                         expert_routing_table=topk_ids.to(torch.int64),
-                                         router_weights=topk_weights.to(x.dtype),
-                                         w12=w13_list_slice,
-                                         w3=w2_list_slice,
-                                         permuted_weights=True,
-                                         activation="silu",
-                                         experts_min=min_expert,
-                                         experts_max=max_expert - 1)
-            # print(f"final_hidden_states.shape: {final_hidden_states.shape}, device: {final_hidden_states.device}, dtype: {final_hidden_states.dtype}")
-            htorch.core.mark_step()
-            # print(f"done mark step {i}")
-        return final_hidden_states.view(-1, x.shape[1])
+            topk_weights_across_dp = get_forward_context(
+            ).dp_metadata.topk_weights_across_dp
+            topk_weights = layer.multicast_fn(topk_weights,
+                                              cu_tokens_across_dp_cpu,
+                                              topk_weights_across_dp)
+        topk_ids = topk_ids.view(*x.shape[:-1], -1)
+        topk_weights = topk_weights.view(*x.shape[:-1], -1)
+        return torch.ops.hpu.mixture_of_experts(hidden_states=x,
+                                                expert_routing_table=topk_ids,
+                                                router_weights=topk_weights,
+                                                w12=self.w1_list,
+                                                w3=self.w2_list,
+                                                permuted_weights=True,
+                                                activation="silu",
+                                                experts_min=self.experts_min,
+                                                experts_max=self.experts_max).view(*input_shape)
 
     def forward_cpu(
         self,
