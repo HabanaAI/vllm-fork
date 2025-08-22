@@ -387,3 +387,20 @@ python3 vllm/benchmarks/benchmark_throughput.py \
   --enable-lora \
   --lora-path yard1/llama-2-7b-sql-lora-test
   ```
+
+### Benchmark with Multiple Images per Text Prompt for multi-modal
+
+To test with multiple images per text prompt, you have to set `--limit-mm-per-prompt`.
+You have to make sure the model supports multiple and the number of images. Example command:
+
+```bash
+python3 benchmark_throughput.py \
+--model llava-hf/llava-1.5-7b-hf \
+--backend vllm-chat \
+--dataset-name hf \
+--dataset-path lmarena-ai/vision-arena-bench-v0.1 \
+--hf-split train \  
+--hf-subset "chart2text(cauldron)" \  
+--num-prompts 10 \
+--limit-mm-per-prompt image=2
+```
