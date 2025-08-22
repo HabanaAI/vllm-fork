@@ -17,11 +17,11 @@ Help() {
     echo "u  URL of the server, str, default=127.0.0.1"
     echo "p  Port number for the server, int, default=30001"
     echo "d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'"
-    echo "i  Input range, str, format='input_min,input_max', default='4,1024'"
+    echo "i  Input range, str, format='input_min,input_max', default='4,16384'"
     echo "o  Output range, str, format='output_min,output_max', default='4,2048'"
-    echo "t  max_num_batched_tokens for vllm, int, default=8192"
-    echo "l  max_model_len for vllm, int, default=4096"
-    echo "b  max_num_seqs for vllm, int, default=128"
+    echo "t  max_num_batched_tokens for vllm, int, default=20480"
+    echo "l  max_model_len for vllm, int, default=20480"
+    echo "b  max_num_seqs for vllm, int, default=32"
     echo "e  number of scheduler steps, int, default=1"
     echo "r  reduce warmup graphs, str, format='max_bs, max_seq', default=None"
     echo "c  Cache HPU recipe to the specified path, str, default=None"
@@ -43,7 +43,7 @@ input_range=(4 16384)
 output_range=(4 2048)
 max_num_batched_tokens=20480
 max_model_len=20480
-max_num_seqs=64
+max_num_seqs=32
 cache_path=""
 skip_warmup=false
 profile=false
@@ -88,8 +88,8 @@ while getopts hw:n:m:u:p:d:i:o:t:l:b:e:c:r:sfza flag; do
         cache_path=$OPTARG ;;
     r) # reduce warmup graphs
         partial_warmup="true"	    
-	max_warmup_bs=${OPTARG%%,*}
-	max_warmup_seq=${OPTARG##*,} ;;
+        max_warmup_bs=${OPTARG%%,*}
+        max_warmup_seq=${OPTARG##*,} ;;
     s) # skip_warmup
         skip_warmup=true ;;
     f) # enable profiling
@@ -130,10 +130,6 @@ echo "Starting vllm server for ${model_name} from ${model_path} with input_range
 case_name=serve_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_steps${scheduler_steps}_$(date +%F-%H-%M-%S)
 
 set_config
-
-if [ "$partial_warmup" = "true" ]; then
-    set_partial_warmup
-fi
 
 ${NUMA_CTL} \
 python3 -m vllm.entrypoints.openai.api_server \

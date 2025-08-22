@@ -294,11 +294,13 @@ set_perf_tuning(){
 }
 
 set_partial_warmup(){
-    echo "VLLM_SKIP_LAZY_WARMUP is set to True"
-    export VLLM_SKIP_LAZY_WARMUP=true
-    export VLLM_PROMPT_SEQ_BUCKET_MAX=$max_warmup_seq
-    export VLLM_DECODE_BS_BUCKET_MAX=$max_warmup_bs
-    export VLLM_DECODE_BLOCK_BUCKET_MAX=$(( ( ($max_warmup_seq + $output_max) * $max_warmup_bs  / $block_size + $decode_block_step - 1 ) / $decode_block_step * $decode_block_step ))
+    if [ "$partial_warmup" = "true" ]; then
+        echo "VLLM_SKIP_LAZY_WARMUP is set to True"
+        export VLLM_SKIP_LAZY_WARMUP=true
+        export VLLM_PROMPT_SEQ_BUCKET_MAX=$max_warmup_seq
+        export VLLM_DECODE_BS_BUCKET_MAX=$max_warmup_bs
+        export VLLM_DECODE_BLOCK_BUCKET_MAX=$(( ( ($max_warmup_seq + $output_max) * $max_warmup_bs  / $block_size + $decode_block_step - 1 ) / $decode_block_step * $decode_block_step ))
+    fi
 }
 
 set_config(){
@@ -307,4 +309,5 @@ set_config(){
     set_common_env
     set_bucketing
     set_perf_tuning
+    set_partial_warmup
 }
