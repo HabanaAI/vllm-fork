@@ -772,6 +772,7 @@ model_example_map = {
     "mllama": load_mllama,
     "NVLM_D": load_nvlm_d,
     "ovis": load_ovis,
+    "ovis2_5": load_ovis2_5,
     "phi3_v": load_phi3v,
     "phi4_mm": load_phi4mm,
     "pixtral_hf": load_pixtral_hf,

@@ -13,9 +13,15 @@ from transformers.activations import ACT2FN
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_outputs import BaseModelOutputWithNoAttention
 
-from vllm.platforms import _Backend
+from vllm.platforms import _Backend, current_platform
 
 from .vision import get_vit_attn_backend
+
+is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    import habana_frameworks.torch.core as htcore
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 
 class VisionRotaryEmbedding(nn.Module):
@@ -267,10 +273,14 @@ class Siglip2Attention(nn.Module):
                 # (1, num_heads, seq_len, head_dim)
                 q_i, k_i, v_i = [x.transpose(1, 2) for x in (q_i, k_i, v_i)]
 
+                '''
                 output_i = F.scaled_dot_product_attention(q_i,
                                                           k_i,
                                                           v_i,
                                                           dropout_p=0.0)
+                '''
+                output_i = FusedSDPA.apply(q_i,k_i,v_i, None, 0.0,
+                                                   False, None)
                 # (1, num_heads, seq_len, head_dim) -> (seq_len, embed_dim)
                 output_i = output_i.transpose(1, 2).reshape(-1, self.embed_dim)
                 outputs.append(output_i)
@@ -467,12 +477,19 @@ class Siglip2Encoder(nn.Module):
         """
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
+        # NOTE: unique_consecutive is a dynamic operation
+        # we are using `remove_duplicates_cpu` instead
+        def remove_duplicates_cpu(a):
+            return [a[i] for i in range(len(a)) if i == 0 or a[i - 1] != a[i]]
+
+        cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
+
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=inputs_embeds.device,
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
-        cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
+        #cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = inputs_embeds.size()
         inputs_embeds = inputs_embeds.reshape(
@@ -504,6 +521,8 @@ class Siglip2Encoder(nn.Module):
         encoder_states = () if output_hidden_states else None
 
         hidden_states = inputs_embeds
+
+        htcore.mark_step()
         for index, block in enumerate(self.layers):
             if (not self.fullatt_block_indexes
                     or index in self.fullatt_block_indexes):
@@ -519,6 +538,7 @@ class Siglip2Encoder(nn.Module):
                 encoder_states += (hidden_states_[reverse_indices, :].reshape(
                     seq_len, -1), )
         # tokens = self.post_trunk_norm(tokens)
+        htcore.mark_step()
         hidden_states = hidden_states.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         hidden_states = hidden_states[reverse_indices, :].reshape(seq_len, -1)
