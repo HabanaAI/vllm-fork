@@ -531,17 +531,6 @@ class MooncakeStoreConnector(KVConnectorBase):
         hash_hex = hash_object.hexdigest()
         return int(hash_hex[:16], 16)
 
-    def wait_for_key(self, key, timeout_in_seconds):
-        if timeout_in_seconds is None:
-            # default to 10 minutes
-            timeout_in_seconds = 60 * 10
-        timeout = time.time() + timeout_in_seconds
-        while self.kv_store.is_exist(key) is False:
-            if time.time() > timeout:
-                return False
-            time.sleep(0.01)
-        return True
-
     def get_sampler_output_key(self, seq_group_to_sample):
         # Use first seq data for prompt tokens
         first_seq_data = next(iter(seq_group_to_sample.seq_data.values()))
@@ -596,7 +585,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             start_time = time.time()
             sampler_output_key = self.get_sampler_output_key(
                 seq_group_to_sample)
-            if not self.wait_for_key(sampler_output_key, 10):
+            if not self._wait_for_key(sampler_output_key):
                 logger.warning(
                     "Sampler output with key: %s is not ready in 10 seconds",
                     sampler_output_key)
