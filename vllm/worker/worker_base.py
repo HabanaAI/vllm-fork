@@ -329,6 +329,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             return None
 
         worker_input = WorkerInput.from_broadcasted_tensor_dict(broadcast_data)
+
         model_input = (
             self.model_runner.make_model_input_from_broadcasted_tensor_dict(
                 broadcast_data))
@@ -406,6 +407,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         inputs = self.prepare_input(execute_model_req)
 
+        S1 = time.perf_counter()
         # Need to keep worker running when executing dummy batch under DP
         # scenario
         if self.is_driver_worker:
@@ -419,7 +421,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             if "is_dummy_batch" in broadcast_data and broadcast_data[
                     "is_dummy_batch"]:
                 return SamplerOutput(outputs=[], sampled_token_ids=None)
-
+        S2 = time.perf_counter()
         if inputs is None:
             return None
 
@@ -455,6 +457,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         )
 
         model_execute_time = time.perf_counter() - start_time
+        S3 =  time.perf_counter()
         if not get_pp_group().is_last_rank:
             # output is IntermediateTensors
             assert isinstance(output, IntermediateTensors)
@@ -471,8 +474,10 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             for o in output:
                 o.model_execute_time = (orig_model_execute_time +
                                         model_execute_time)
-
+        S4 = time.perf_counter()
         # output is List[SamplerOutput]
+        if self.is_driver_worker:
+            logger.info(f'libin debug work_base execute_mode:{S4-start_time}|{model_input.input_tokens.shape=}| prepare_input:{S1-start_time}|broadcast:{S2-S1}|model_exe:{S3-S2}| output {S4-S3}')
         return output
 
     def _execute_model_spmd(

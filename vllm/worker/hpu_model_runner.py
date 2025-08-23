@@ -86,7 +86,8 @@ if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
 
 logger = init_logger(__name__)
-
+p_dict_list={}
+d_dict_list={}
 _TYPE_CACHE = {}
 # These values are assumed to be zero in several places.
 # Use caution when updating them!
@@ -3671,6 +3672,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         is_dummy_run: bool = False,
         is_pt_profiler_run: bool = False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        s1 = time.perf_counter()
         self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
@@ -3716,6 +3718,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             output = self._decode_sampler_outputs(
                 model_input) if self.is_driver_worker else []
             torch.hpu.synchronize()
+        s3 = time.perf_counter()
         if model_input.is_first_multi_step:
             # first multi-step
             if self.lora_config:
@@ -3766,6 +3769,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 lora_mask, lora_logits_mask = self.create_lora_mask(
                     input_tokens, model_input.lora_ids,
                     attn_metadata.is_prompt)
+            s4 = time.perf_counter()
             if model_input.multi_modal_kwargs is not None \
                 and 'embed_is_patch' in model_input.multi_modal_kwargs:
 
@@ -3798,7 +3802,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 model_input.multi_modal_kwargs[
                     'embed_is_patch'] = fix_embed_is_patch(
                         model_input.multi_modal_kwargs['embed_is_patch'])
-
+            s5 = time.perf_counter()
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -3832,6 +3836,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     {"bypass_hpu_graphs": not use_graphs})
 
             htorch.core.mark_step()
+
             if self.is_driver_worker:
                 model_event_name = ("model_"
                                     f"{phase}_"
@@ -3908,7 +3913,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bool(model_input.multi_modal_kwargs and \
                        'pixel_values' in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
-
+                s6 = time.perf_counter()
+                input_id_s = execute_model_kwargs['input_ids'].shape
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
@@ -3927,10 +3933,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             )
                         if warmup_mode and bypass_model_exec:
                             return []
-
+                    s7 = time.perf_counter()
                     with self.profiler.record_event('internal',
                                                     model_event_name,
                                                     args=profiler_args):
+
                         hidden_states = self.model.forward(
                             **execute_model_kwargs,
                             selected_token_indices=sampling_metadata.
@@ -3942,7 +3949,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 get_tp_group().barrier()
                 else:
                     logger.debug("Bypassing model execution")
-
+                s8 = time.perf_counter()
                 # Sending KV cache in distributed KV cache transfer setting
                 # TODO: update send operation to blocking one.
                 if self.need_send_kv(model_input, kv_caches, warmup_mode):
@@ -3981,6 +3988,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # of logits depends on the sampled results
                     # we obtain the actual sampled results in advance
                     self._patch_prev_output()
+                s9 = time.perf_counter()
                 # Compute the logits.
                 with self.profiler.record_event('internal',
                                                 ('compute_logits_'
@@ -3993,8 +4001,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
+
                 if self.do_mark_step:
                     htorch.core.mark_step()
+                s10 = time.perf_counter()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
@@ -4015,6 +4025,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         logits=logits,
                         sampling_metadata=sampling_metadata,
                     )
+
                     if num_steps > 1:
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(
@@ -4030,6 +4041,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_inputs.append(model_input)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+                s11 = time.perf_counter()
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
                     model_input.async_callback()
@@ -4135,13 +4147,62 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if model_input.is_prompt:
                         output.prefill_hidden_states = hidden_states
                     output.hidden_states = hidden_states
+                s12 = time.perf_counter()
+                before_input=s3-s1
+                input=s4-s3
+                before_mm=s6-s4
+                mm=s7-s6
+                fwd=s8-s7
+                patch=s9-s8
+                logits=s10-s9
+                outputt=s12-s10
+                total = s12 - s1
+                global p_dict_list, d_dict_list
+                if input_id_s[1] == 1:
+                    dict_list = d_dict_list                    
+                    #sample = 0
+                else:
+                    dict_list = p_dict_list
 
+                if self.is_driver_worker:
+                    if 'bs' in dict_list.keys():
+
+                        dict_list['bs']=int(input_id_s[0]) +  int(dict_list['bs'])
+                        dict_list['before_input'] = dict_list['before_input'] + before_input
+                        dict_list['input'] = dict_list['input'] + input
+                        dict_list['before_mm'] = dict_list['before_mm'] + before_mm
+                        dict_list['mm'] = dict_list['mm'] + mm
+                        dict_list['fwd'] = dict_list['fwd'] + fwd
+                        dict_list['patch'] = dict_list['patch'] + patch
+                        dict_list['logits'] = dict_list['logits'] + logits
+                        #dict_list['sample'] = dict_list['sample'] + sample
+                        dict_list['outputt'] = dict_list['outputt'] + outputt
+                        dict_list['total'] = dict_list['total'] + total
+                    else:
+                        dict_list['bs']=int(input_id_s[0])
+                        dict_list['before_input'] = before_input
+                        dict_list['input'] = input
+                        dict_list['before_mm'] = before_mm
+                        dict_list['mm'] =  mm
+                        dict_list['fwd'] =  fwd
+                        dict_list['patch'] =  patch
+                        dict_list['logits'] =  logits
+                        #dict_list['sample'] = sample
+                        dict_list['outputt'] = outputt
+                        dict_list['total'] =  total
                 if use_delayed_sampling:
                     if self.is_driver_worker:
+                        logger.info(f'libin debug | {input_id_s=}| {before_input=}| {input=}| {before_mm=}| {mm=}| {fwd=}| {patch=}| {logits=}| {outputt=}')
+                        logger.info(f'libin debug SUM {is_prompt=}| {dict_list['total']=}|{dict_list['bs']=}| {dict_list['before_input']=}| {dict_list['input']=}| {dict_list['before_mm']=}| {dict_list['mm']=}| {dict_list['fwd']=}| {dict_list['patch']=}| {dict_list['logits']=}| {dict_list['outputt']=}')
+                    
+
                         return [fake_output]
                     else:
                         return []
-
+                if self.is_driver_worker:
+                    logger.info(f'libin debug D| {input_id_s=}| {before_input=}| {input=}| {before_mm=}| {mm=}| {fwd=}| {patch=}| {logits=}| {outputt=}')
+                    logger.info(f'libin debug SUM-D| {d_dict_list['total']=}|{d_dict_list['input_ids']=}| {d_dict_list['before_input']=}| {d_dict_list['input']=}| {d_dict_list['before_mm']=}| {d_dict_list['mm']=}| {d_dict_list['fwd']=}| {d_dict_list['patch']=}| {d_dict_list['logits']=}| {d_dict_list['outputt']=}')
+                    
                 return [output] if self.is_driver_worker else []
             else:
                 return []
