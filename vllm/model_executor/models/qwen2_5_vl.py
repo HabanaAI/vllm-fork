@@ -1048,9 +1048,6 @@ class Qwen2_5_VLProcessingInfo(Qwen2VLProcessingInfo):
         if fps is not None:
             kwargs["fps"] = fps
 
-        if current_platform.is_hpu():
-            min_pixels = 112 * 112
-
         return self.ctx.get_hf_processor(
             Qwen2_5_VLProcessor,
             image_processor=self.get_image_processor(
