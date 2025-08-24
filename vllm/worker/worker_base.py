@@ -477,7 +477,11 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         S4 = time.perf_counter()
         # output is List[SamplerOutput]
         if self.is_driver_worker:
-            logger.info(f'libin debug work_base execute_mode:{S4-start_time}|{model_input.input_tokens.shape=}| prepare_input:{S1-start_time}|broadcast:{S2-S1}|model_exe:{S3-S2}| output {S4-S3}')
+            if model_input.input_tokens.shape[1] == 1:
+                is_prompt = False
+            else:
+                is_prompt = True
+            logger.info(f'libin debug work_base execute_mode:{is_prompt=}|{S4-start_time}|{model_input.input_tokens.shape=}| prepare_input:{S1-start_time}|broadcast:{S2-S1}|model_exe:{S3-S2}| output {S4-S3}')
         return output
 
     def _execute_model_spmd(

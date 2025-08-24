@@ -619,6 +619,7 @@ class HpuModelAdapter(torch.nn.Module):
 
     def compute_input_embeddings_for_mm_optimized(self, warmup_mode, **kwargs):
         input_ids = kwargs['input_ids']
+
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
@@ -713,7 +714,7 @@ class HpuModelAdapter(torch.nn.Module):
         if self._rotary_prepare_cos_sin is not None and not self.model_is_mrope:
             self._rotary_prepare_cos_sin(
                 kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
-        if self.model_is_mrope or self.is_mm_optimized:
+        if self.model_is_mrope or (self.is_mm_optimized and kwargs['attn_metadata'].is_prompt):
             # inputs_embeds was computed on execute_model
             # now we always want to use the inputs_embeds
             # even if the prompt is text only
@@ -3915,8 +3916,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     execute_model_kwargs['attn_metadata'] = attn_metadata
                 s6 = time.perf_counter()
                 input_id_s = execute_model_kwargs['input_ids'].shape
+                    
                 if not bypass_model_exec:
-                    if self.model_is_mrope or self.is_mm_optimized:
+                    if self.model_is_mrope or (self.is_mm_optimized and is_prompt):
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode and not is_pt_profiler_run:
@@ -3926,6 +3928,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 list(self.graphed_multimodal_buckets)
                             # set is unhasable and causes friction with
                             # hpu graphs, hence turning it to a list
+                    
                         execute_model_kwargs = \
                             self.model.compute_input_embeddings_for_mrope_mm_optimized(
                                 warmup_mode,
@@ -4200,8 +4203,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     else:
                         return []
                 if self.is_driver_worker:
-                    logger.info(f'libin debug D| {input_id_s=}| {before_input=}| {input=}| {before_mm=}| {mm=}| {fwd=}| {patch=}| {logits=}| {outputt=}')
-                    logger.info(f'libin debug SUM-D| {d_dict_list['total']=}|{d_dict_list['input_ids']=}| {d_dict_list['before_input']=}| {d_dict_list['input']=}| {d_dict_list['before_mm']=}| {d_dict_list['mm']=}| {d_dict_list['fwd']=}| {d_dict_list['patch']=}| {d_dict_list['logits']=}| {d_dict_list['outputt']=}')
+                    logger.info(f'libin debug | {input_id_s=}| {before_input=}| {input=}| {before_mm=}| {mm=}| {fwd=}| {patch=}| {logits=}| {outputt=}')
+                    logger.info(f'libin debug SUM {is_prompt=}| {dict_list['total']=}|{dict_list['before_input']=}| {dict_list['input']=}| {dict_list['before_mm']=}| {dict_list['mm']=}| {dict_list['fwd']=}| {dict_list['patch']=}| {dict_list['logits']=}| {dict_list['outputt']=}')
                     
                 return [output] if self.is_driver_worker else []
             else:
