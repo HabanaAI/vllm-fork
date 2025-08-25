@@ -157,6 +157,8 @@ class Proxy:
         self.router.post("/instances/add",
                          dependencies=[Depends(self.api_key_authenticate)
                                        ])(self.add_instance_endpoint)
+        self.router.get("/v1/models",
+                         response_class=JSONResponse)(self.get_models)
 
     async def validate_json_request(self, raw_request: Request):
         content_type = raw_request.headers.get("content-type", "").lower()
@@ -335,6 +337,19 @@ class Proxy:
             "decode_nodes": self.decode_instances,
         }
         return status
+
+    async def get_models(self, request:Request):
+        instance = None
+        if len(self.prefill_instances) > 0:
+            instance = self.prefill_instances[0]
+        if instance != None:
+            try:
+                response = requests.get(f"http://{instance}/v1/models")
+                return response.json()
+            except requests.RequestException as e:
+                raise ValueError(
+                    f"Error communicating with {instance}: {str(e)}") from e
+        return JSONResponse(content={})
 
     def get_total_token_length(self, prompt):
         fake_len = 100
