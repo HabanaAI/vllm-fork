@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import itertools
+import os
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
@@ -9,7 +10,6 @@ from typing import (TYPE_CHECKING, Any, Callable, ClassVar, Optional, Union,
                     cast, overload)
 
 import cloudpickle
-import os
 import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
@@ -271,12 +271,12 @@ class LLM:
                                            warmup=warmup,
                                            active=steps,
                                            repeat=repeat)
-        activities = [ torch.profiler.ProfilerActivity.CPU ]
+        activities = [torch.profiler.ProfilerActivity.CPU]
         if current_platform.is_cuda():
             activities.append(torch.profiler.ProfilerActivity.CUDA)
         elif current_platform.is_hpu():
             activities.append(torch.profiler.ProfilerActivity.HPU)
-        
+
         profiler = torch.profiler.profile(
             schedule=schedule,
             activities=activities,

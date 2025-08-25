@@ -10,9 +10,10 @@ import tempfile
 import time
 from collections import defaultdict
 from collections.abc import Generator
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
-from functools import wraps
+
 import filelock
 import gguf
 import huggingface_hub.constants
@@ -22,6 +23,7 @@ from huggingface_hub import HfFileSystem, hf_hub_download, snapshot_download
 from safetensors.torch import load_file, safe_open, save_file
 from tqdm.auto import tqdm
 
+import vllm.envs as envs
 from vllm.config import LoadConfig, ModelConfig
 from vllm.distributed import get_tensor_model_parallel_rank
 from vllm.logger import init_logger
@@ -29,7 +31,6 @@ from vllm.model_executor.layers.quantization import (QuantizationConfig,
                                                      get_quantization_config)
 from vllm.platforms import current_platform
 from vllm.utils import PlaceholderModule
-import vllm.envs as envs
 
 try:
     from runai_model_streamer import SafetensorsStreamer
