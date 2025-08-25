@@ -1450,10 +1450,6 @@ class Qwen2_5_VLForConditionalGeneration(nn.Module, SupportsMultiModal,
             )
 
         if video_input is not None:
-            if is_hpu:
-                logger.warning("Video inputs have not been enabled yet, "
-                               "ignoring video inputs")
-                return inputs_embeds
             video_embeds = self._process_video_input(video_input)
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids,
