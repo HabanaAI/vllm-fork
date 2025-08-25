@@ -3203,19 +3203,24 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # we obtain the actual sampled results in advance
                     self._patch_prev_output()
 
-                # Compute the logits.
-                with self.profiler.record_event(
-                        'internal',
-                    ('compute_logits_'
-                     f"{self.model_type}_"
-                     f'{"prompt" if is_prompt else "decode"}_bs'
-                     f'{batch_size}_'
-                     f'seq{seq_len}'),
-                        args=profiler_args):
-                    if num_steps == 1:
-                        sampling_metadata.selected_token_indices = None
-                    logits = self.model.compute_logits(hidden_states,
-                                                       sampling_metadata)
+                if num_steps == 1:
+                    sampling_metadata.selected_token_indices = None
+
+                if need_send_kv and self.skip_prefill_sampling:
+                    # If skip sampling, don't compute the logits
+                    logits = None
+                else:
+                    # Compute the logits.
+                    with self.profiler.record_event(
+                            'internal',
+                        ('compute_logits_'
+                         f"{self.model_type}_"
+                         f'{"prompt" if is_prompt else "decode"}_bs'
+                         f'{batch_size}_'
+                         f'seq{seq_len}'),
+                            args=profiler_args):
+                        logits = self.model.compute_logits(hidden_states,
+                                                           sampling_metadata)
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
