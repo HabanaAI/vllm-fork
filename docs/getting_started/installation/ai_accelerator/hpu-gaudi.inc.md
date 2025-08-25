@@ -504,6 +504,9 @@ If you encounter device out-of-memory issues or want to attempt inference with h
 - Tweak `gpu_memory_utilization` knob. This will decrease the allocation of KV cache, leaving some headroom for capturing graphs with larger batch size. By default, `gpu_memory_utilization` is set to 0.9. It attempts to allocate ~90% of HBM left for KV cache after short profiling run. Note that this reduces the number of KV cache blocks you have available, and therefore reduces the effective maximum number of tokens handled at a given time.
 - If this method is not efficient, you can disable `HPUGraph` completely. With HPU Graphs disabled, you are trading latency and throughput at lower batches for potentially higher throughput on higher batches. You can do that by adding `--enforce-eager` flag to the server (for online inference), or by passing `enforce_eager=True` argument to LLM constructor (for offline inference).
 
+> [!TIP]
+> In case you observe performance degradation with respect to time to first token (TTFT) metric, set `--generation-config vllm` argument. Also make sure you have correct value set for the `--max-model-len` argument, as described in the `Environment variables` section of this document.
+
 ## Changelog
 
 ### 1.19.0
