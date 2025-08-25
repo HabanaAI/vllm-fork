@@ -16,7 +16,7 @@ jobs:
       pr_sha: ${{ steps.extract_pr.outputs.pr_sha }}
     steps:
       - name: 'Checkout Repository'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: habana_main
           fetch-depth: 0
@@ -43,7 +43,7 @@ jobs:
       if: always() && !contains(fromJSON('["skipped","cancelled"]'), needs.read_codeowners.result)
       steps:
         - name: Checkout Repository
-          uses: actions/checkout@v4
+          uses: actions/checkout@v5
           with:
             fetch-depth: 0
             token: ${{ secrets.GH_PAT }}
