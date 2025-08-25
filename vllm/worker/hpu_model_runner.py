@@ -65,7 +65,7 @@ from vllm.sequence import (CompletionSequenceGroupOutput, ExecuteModelRequest,
                            IntermediateTensors, Logprob, SequenceData,
                            SequenceGroupMetadata, SequenceOutput)
 from vllm.utils import (SharedDict, bind_kv_cache, is_fake_hpu,
-                        is_pin_memory_available, make_tensor_with_pad)
+                        is_pin_memory_available, make_tensor_with_pad, LayerBlockType, STR_DTYPE_TO_TORCH_DTYPE)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -1939,6 +1939,50 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                              True, False, 0, 1, True, True)
         return
 
+    def prepare_warmup_kv_cache(
+            self,
+            seq_group_metadata_list: List[SequenceGroupMetadata],
+            kv_cache_shared_dict):
+        def hash_list(input):
+            import hashlib
+            import numpy as np
+            input_bytes = np.array(input).tobytes()
+            hash_object = hashlib.blake2b(input_bytes)
+            hash_hex = hash_object.hexdigest()
+            return int(hash_hex[:16], 16)
+
+        hidden_size = self.model_config.get_hidden_size()
+        dtype = self.model_config.dtype
+
+        # num_attention_layers = 61
+        # num_kv_heads = 1
+        # k_head_size = 64
+        # v_head_size = 512
+        # head_size = k_head_size + v_head_size
+
+        num_attention_layers = self.model_config.get_num_layers_by_block_type(
+            self.parallel_config, LayerBlockType.attention)
+        num_kv_heads = self.model_config.get_num_kv_heads(self.parallel_config)
+        head_size = self.model_config.get_head_size()
+        if self.cache_config.cache_dtype == "auto":
+            cache_dtype = self.model_config.dtype
+        else:
+            cache_dtype = STR_DTYPE_TO_TORCH_DTYPE[self.cache_config.cache_dtype]
+
+        for seq_group_metadata in seq_group_metadata_list:
+            first_seq_data = next(iter(seq_group_metadata.seq_data.values()))
+            prefix = hash_list(first_seq_data.prompt_token_ids)
+            slen = len(first_seq_data.prompt_token_ids)
+            num_blocks = (slen + self.block_size - 1) // self.block_size
+            kv_cache_shape = (num_attention_layers, num_blocks * self.block_size,
+                              num_kv_heads, head_size)
+            kv_cache = torch.zeros(
+                kv_cache_shape, dtype=cache_dtype, device="hpu")
+            hidden_states = torch.zeros(
+                (1, hidden_size), dtype=dtype, device="hpu")
+            kv_cache_shared_dict.add_item(
+                prefix, [kv_cache, hidden_states])
+
     def warmup_scenario(self,
                         batch_size,
                         seq_len,
@@ -2006,6 +2050,16 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature) for i, b in enumerate(blocks)
             ]
+
+        # Prepare the KV cache and hidden states to be used by warmup
+        kv_cache_shared_dict = None
+        if (self.vllm_config.kv_transfer_config is not None
+                and self.vllm_config.kv_transfer_config.is_kv_consumer
+                and (not is_profile_run)
+                and is_prompt):
+            kv_cache_shared_dict = SharedDict()
+            self.prepare_warmup_kv_cache(seqs, kv_cache_shared_dict)
+
         if not is_dummy_run:
             torch.hpu.synchronize()
         profiler = None
@@ -2029,6 +2083,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 additional_inputs = {
                     "previous_hidden_states": previous_hidden_states
                 }
+            additional_inputs["kv_cache_shared_dict"] = kv_cache_shared_dict
             if time_index == 0:
                 if self.is_driver_worker:
                     broadcast_tensor_dict(
@@ -2078,6 +2133,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 torch.hpu.synchronize()
             if profiler:
                 profiler.step()
+        if kv_cache_shared_dict is not None:
+            del kv_cache_shared_dict
         if profiler:
             profiler.stop()
         self.profiler.end()
@@ -2508,9 +2565,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             model_input: input to the model executable
             kv_caches: vLLM's paged memory
         """
-        if warmup_mode:
-            return False
-
         if self.vllm_config.kv_transfer_config is None:
             return False
 
@@ -2534,9 +2588,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             model_input: input to the model executable
             kv_caches: vLLM's paged memory
         """
-        if warmup_mode:
-            return False
-
         if self.vllm_config.kv_transfer_config is None:
             return False
 
@@ -2943,7 +2994,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bypass_model_exec = True
                         htorch.core.mark_step()
                         for idx, slen in enumerate(seq_lens):
-                            if slen == 1:
+                            if slen == 1 and not warmup_mode:
                                 hidden_states_list.append(
                                     hidden_states_list[0])
                                 # skip the seq with only one token
@@ -2982,7 +3033,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                         hidden_states = \
                                             tensor_model_parallel_all_reduce(
                                             hidden_states)
-                                    kv_cache_shared_dict.remove_item(prefix)
+                                    if not warmup_mode:
+                                        kv_cache_shared_dict.remove_item(
+                                            prefix)
                             else:
                                 # read fetched kv cache flag from rank 0
                                 fetched_status_dict = \
@@ -3167,12 +3220,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                              kv_caches,
                                              hidden_states,
                                              )
-                        self.pd_executor_pool.submit(
-                            send_kv,
-                            input_tokens_list,
-                            kv_caches_send_list,
-                            hidden_states_list,
-                        )
+                        if not warmup_mode:
+                            self.pd_executor_pool.submit(
+                                send_kv,
+                                input_tokens_list,
+                                kv_caches_send_list,
+                                hidden_states_list,
+                            )
 
                     if self.use_async_kv_transfer_in_pd:
                         async_send_kv_caches(hidden_states)
