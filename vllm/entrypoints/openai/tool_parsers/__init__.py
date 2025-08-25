@@ -14,11 +14,22 @@ from .llama_tool_parser import Llama3JsonToolParser
 from .mistral_tool_parser import MistralToolParser
 from .phi4mini_tool_parser import Phi4MiniJsonToolParser
 from .pythonic_tool_parser import PythonicToolParser
+from .seed_oss_tool_parser import SeedOssToolParser
 
 __all__ = [
-    "ToolParser", "ToolParserManager", "Granite20bFCToolParser",
-    "GraniteToolParser", "Hermes2ProToolParser", "MistralToolParser",
-    "Internlm2ToolParser", "Llama3JsonToolParser", "JambaToolParser",
-    "Llama4PythonicToolParser", "PythonicToolParser", "Phi4MiniJsonToolParser",
-    "DeepSeekV3ToolParser", "Glm4MoeModelToolParser",
+    "ToolParser",
+    "ToolParserManager",
+    "Granite20bFCToolParser",
+    "GraniteToolParser",
+    "Hermes2ProToolParser",
+    "MistralToolParser",
+    "Internlm2ToolParser",
+    "Llama3JsonToolParser",
+    "JambaToolParser",
+    "Llama4PythonicToolParser",
+    "PythonicToolParser",
+    "Phi4MiniJsonToolParser",
+    "DeepSeekV3ToolParser",
+    "Glm4MoeModelToolParser",
+    "SeedOssToolParser",
 ]
