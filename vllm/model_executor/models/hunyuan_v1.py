@@ -225,13 +225,13 @@ class HunYuanAttention(nn.Module):
                 q.view(-1, self.num_heads, self.head_dim).contiguous())
             k_by_head = self.key_layernorm(
                 k.view(-1, self.num_kv_heads, self.head_dim).contiguous())
-            
+
             q = q_by_head.view(q.shape)
             k = k_by_head.view(k.shape)
 
         attn_output = self.attn(q, k, v)
         # For o_proj
-#       attn_output = attn_output.view(q.shape[0], -1)
+        #       attn_output = attn_output.view(q.shape[0], -1)
         output, _ = self.o_proj(attn_output)
         return output, (ori_k, v)
 
@@ -938,4 +938,3 @@ class HunYuanDenseV1ForCausalLM(HunYuanV1Base):
 
 class HunYuanMoEV1ForCausalLM(HunYuanV1Base):
     pass
-  

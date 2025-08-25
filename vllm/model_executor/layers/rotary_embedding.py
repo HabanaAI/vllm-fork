@@ -565,7 +565,7 @@ class DynamicNTKAlphaRotaryEmbedding(RotaryEmbedding):
 
     Based on the original RotaryEmbedding implementation.
     """
-  
+
     def __init__(
         self,
         head_size: int,
@@ -579,7 +579,7 @@ class DynamicNTKAlphaRotaryEmbedding(RotaryEmbedding):
         self.scaling_alpha = scaling_alpha
         super().__init__(head_size, rotary_dim, max_position_embeddings, base,
                          is_neox_style, dtype)
-      
+
     def _compute_cos_sin_cache(self) -> torch.Tensor:
         # For Hunyuan DynamicNTKAlphaRotaryEmbedding
         max_len = self.max_position_embeddings
@@ -587,7 +587,7 @@ class DynamicNTKAlphaRotaryEmbedding(RotaryEmbedding):
                                                 (self.rotary_dim - 2))
         inv_freq = self._compute_inv_freq(base)
         t = torch.arange(max_len, dtype=torch.float)
-      
+
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
         cos = freqs.cos()
         sin = freqs.sin()
@@ -1030,7 +1030,8 @@ class DeepseekScalingRotaryEmbedding(RotaryEmbedding):
             rope_mode = RotaryPosEmbeddingMode.PAIRWISE
             cos = cos.repeat_interleave(2, dim=-1).unsqueeze(-2)
             sin = sin.repeat_interleave(2, dim=-1).unsqueeze(-2)
-        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0, rope_mode)
+        query_rot = apply_rotary_pos_emb(query_rot, cos, sin, None, 0,
+                                         rope_mode)
         key_rot = apply_rotary_pos_emb(key_rot, cos, sin, None, 0, rope_mode)
 
         if self.rotary_dim < self.head_size:

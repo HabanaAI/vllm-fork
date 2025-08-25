@@ -947,7 +947,8 @@ def grouped_topk(
 
         scores_tmp = scores.clone().reshape(num_token, num_expert_group, -1)
         top1_val, top1_idx = torch.max(scores_tmp, dim=-1)
-        scores_tmp.scatter_(-1, top1_idx.unsqueeze(-1), torch.finfo(scores.dtype).min)
+        scores_tmp.scatter_(-1, top1_idx.unsqueeze(-1),
+                            torch.finfo(scores.dtype).min)
         group_scores, top2_idx = torch.max(scores_tmp, dim=-1)
         group_scores.add_(top1_val)
     else:
@@ -960,15 +961,18 @@ def grouped_topk(
             _, group_idx = torch.max(group_scores, dim=-1)
             group_mask.scatter_(1, group_idx.unsqueeze(-1), 1)
             if i < topk_group - 1:
-                group_scores.scatter_(1, group_idx.unsqueeze(-1), torch.finfo(scores.dtype).min)
+                group_scores.scatter_(1, group_idx.unsqueeze(-1),
+                                      torch.finfo(scores.dtype).min)
     else:
-        group_idx = torch.topk(group_scores, k=topk_group, dim=-1,
+        group_idx = torch.topk(group_scores,
+                               k=topk_group,
+                               dim=-1,
                                sorted=False)[1]  # [n, top_k_group]
         group_mask = torch.zeros_like(group_scores)  # [n, n_group]
         group_mask.scatter_(1, group_idx, 1)  # [n, n_group]
 
     tmp_scores = scores.reshape(num_token, num_expert_group, -1) + \
-                     ((1 - group_mask) * torch.finfo(scores.dtype).min).unsqueeze(-1)
+                ((1 - group_mask) * torch.finfo(scores.dtype).min).unsqueeze(-1)
     tmp_scores = tmp_scores.reshape(num_token, -1)
 
     if e_score_correction_bias is not None:
