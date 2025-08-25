@@ -231,7 +231,6 @@ class HunYuanAttention(nn.Module):
 
         attn_output = self.attn(q, k, v)
         # For o_proj
-        #       attn_output = attn_output.view(q.shape[0], -1)
         output, _ = self.o_proj(attn_output)
         return output, (ori_k, v)
 
