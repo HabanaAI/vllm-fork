@@ -558,11 +558,10 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 
                 # Set bias for each expert if available
                 if hasattr(layer, 'w13_bias') and hasattr(layer, 'w2_bias'):
-                    if hasattr(layer.moe_op, 'w13_bias_list') and hasattr(layer.moe_op, 'w2_bias_list'):
-                        layer.moe_op.w13_bias_list[expert_id].set_bias(
-                            layer.w13_bias.data[expert_id])
-                        layer.moe_op.w2_bias_list[expert_id].set_bias(
-                            layer.w2_bias.data[expert_id])                
+                    layer.moe_op.w13_list[expert_id].set_bias(
+                        layer.w13_bias.data[expert_id])
+                    layer.moe_op.w2_list[expert_id].set_bias(
+                        layer.w2_bias.data[expert_id])                 
 
     def apply(
         self,
