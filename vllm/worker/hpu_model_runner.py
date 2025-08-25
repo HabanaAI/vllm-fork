@@ -813,6 +813,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.max_model_len = self.scheduler_config.max_model_len
         self.max_num_batched_tokens = \
             self.scheduler_config.max_num_batched_tokens
+        self.max_seq_len_to_capture = self.model_config.max_seq_len_to_capture
         self.block_size = self.cache_config.block_size
         self.use_merged_prefill = VLLM_MERGED_PREFILL
         assert not (self.scheduler_config.use_padding_aware_scheduling
@@ -1148,6 +1149,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def _use_graphs(self, batch_size, seq_len, is_prompt, num_patches=None):
         if self.enforce_eager:
+            return False
+        if is_prompt and batch_size * seq_len > self.max_seq_len_to_capture:
             return False
         if self.skip_warmup:
             return True
@@ -2567,6 +2570,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         for idx, (batch_size, seq_len) in enumerate(buckets):
             # Graph memory usage is proportional to seq dimension in a batch
             batch_seq = batch_size * seq_len if is_prompt else batch_size
+
+            if batch_seq > self.max_seq_len_to_capture:
+                captured_all = False
+                continue
+
             mem_estimate = batch_seq / total_batch_seq * total_mem
             if mem_estimate >= available_mem:
                 captured_all = False
