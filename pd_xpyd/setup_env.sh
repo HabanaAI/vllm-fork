@@ -16,6 +16,9 @@ dpkg -i doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
 apt-get update
 apt-get -y install doca-ofed
 
+echo "4. setup neural-compressor ..........................."
+pip install git+https://github.com/hlin99/neural-compressor.git@r1_woq_moe
+
 ibdev2netdev
 #mlx5_0 port 1 ==> ens108np0 (Up)
 #mlx5_1 port 1 ==> ens9f0np0 (Up)

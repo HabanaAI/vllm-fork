@@ -31,8 +31,32 @@ echo "Using Mooncake config: $MOONCAKE_CONFIG_PATH"
 
 source "$BASH_DIR"/dp_p_env.sh
 
-#unset VLLM_SKIP_WARMUP
-#export PT_HPU_RECIPE_CACHE_CONFIG=./_prefill_cache,false,16384
+timestamp=$(date +"%Y%m%d_%H%M%S")
+log_dir="xpyd_logs"
+mkdir -p "$log_dir"
+log_file="$log_dir/prefill_${timestamp}.log"
 
-python3 -m vllm.entrypoints.openai.api_server --model $model_path --port 8100 --max-model-len $model_len --gpu-memory-utilization $VLLM_GPU_MEMORY_UTILIZATION -tp 8  --max-num-seqs $max_num_seqs --trust-remote-code --disable-async-output-proc --disable-log-requests --max-num-batched-tokens $max_num_batched_tokens --use-padding-aware-scheduling --use-v2-block-manager --distributed_executor_backend mp --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}'
+if [ "$INC_FP8" -eq 1 ]; then
+  kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"
+  echo "<prefill>it's inc fp8 kv cache mode"
+else
+  kv_cache_dtype_arg=""
+  echo "<prefill>it's bf16 kv cache mode"
+fi
 
+python3 -m vllm.entrypoints.openai.api_server \
+  --model "$model_path" \
+  --port 8100 \
+  --max-model-len "$model_len" \
+  --gpu-memory-utilization "$VLLM_GPU_MEMORY_UTILIZATION" \
+  -tp 8 \
+  --max-num-seqs "$max_num_seqs" \
+  --trust-remote-code \
+  --disable-async-output-proc \
+  --disable-log-requests \
+  --max-num-batched-tokens "$max_num_batched_tokens" \
+  --use-padding-aware-scheduling \
+  --use-v2-block-manager \
+  --distributed_executor_backend mp \
+  $kv_cache_dtype_arg \
+  --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}' 2>&1 | tee "$log_file"

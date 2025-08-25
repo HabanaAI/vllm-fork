@@ -1,5 +1,6 @@
 #set +x
-export MODEL_PATH=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
+BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$BASH_DIR"/pd_env.sh
 
 if [ -z "$1" ]; then
     echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
@@ -81,7 +82,7 @@ done
 
 if [ "$BENCHMARK_MODE" == "1" ]; then
     CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark.py \
-        --model $MODEL_PATH \
+        --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
         --port 8868 \
@@ -92,15 +93,18 @@ if [ "$BENCHMARK_MODE" == "1" ]; then
 else
 
     CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo.py \
-        --model $MODEL_PATH \
+        --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
         --port 8868"
 fi
 
-if [ "$FIRST_TOKEN_FROM_P" = "true" ]; then
-    CMD="$CMD --generator_on_p_node"
-fi
+timestamp=$(date +"%Y%m%d_%H%M%S")
+log_dir="xpyd_logs"
+mkdir -p "$log_dir"
+log_file="$log_dir/ProxyServer_${timestamp}.log"
+
+CMD="$CMD 2>&1 | tee $log_file"
 
 echo "Running: $CMD"
 eval $CMD

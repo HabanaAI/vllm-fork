@@ -47,10 +47,10 @@ def log_info_red(msg):
     logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
 
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60,
-                                        connect=60,
-                                        sock_read=1200,
-                                        sock_connect=30)
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=60 * 60 * 60,
+                                        connect=60000,
+                                        sock_read=120000,
+                                        sock_connect=3000)
 
 
 async def P_first_token_generator(generator_p,
