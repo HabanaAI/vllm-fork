@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import argparse
-import asyncio
 import ipaddress
 import itertools
 import json
@@ -8,69 +7,102 @@ import logging
 import os
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
-from datetime import datetime
 from typing import Callable, Optional
 
 import aiohttp
 import requests
 import uvicorn
+from colorlog.escape_codes import escape_codes
 from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
 from fastapi.responses import JSONResponse, StreamingResponse
+from transformers import AutoTokenizer
 
-AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
-logger = logging.getLogger()
-logging.basicConfig(level=logging.INFO)
+formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
+                              "%Y-%m-%d %H:%M:%S")
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
+logger.propagate = False
+
+
+def log_info_blue(msg):
+    logger.info("%s%s%s", escape_codes['cyan'], msg, escape_codes['reset'])
+
+
+def log_info_green(msg):
+    logger.info("%s%s%s", escape_codes['green'], msg, escape_codes['reset'])
+
+
+def log_info_yellow(msg):
+    logger.info("%s%s%s", escape_codes['yellow'], msg, escape_codes['reset'])
+
+
+def log_info_red(msg):
+    logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
+
+
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60,
+                                        connect=60,
+                                        sock_read=1200,
+                                        sock_connect=30)
 
 
 async def P_first_token_generator(generator_p,
                                   generator_d,
                                   callback_owner=None,
                                   prefill_instance: str = None,
-                                  decode_instance: str = None):
+                                  decode_instance: str = None,
+                                  req_len: int = None):
     first_decode = True
     async for chunk in generator_p:
         yield chunk
-    print(
-        f"P:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]prefill finished:",
-        prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance)
+        callback_owner.on_done(prefill_instance=prefill_instance,
+                               req_len=req_len)
 
     async for chunk in generator_d:
         if first_decode:
             first_decode = False
             continue
         yield chunk
-    print(
-        f"P:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]decode finished:",
-        decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance)
+        callback_owner.on_done(decode_instance=decode_instance,
+                               req_len=req_len)
 
 
 async def D_first_token_generator(generator_p,
                                   generator_d,
                                   callback_owner=None,
                                   prefill_instance: str = None,
-                                  decode_instance: str = None):
+                                  decode_instance: str = None,
+                                  req_len: int = None):
     async for _ in generator_p:
         continue
-    print(
-        f"D:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]prefill finished:",
-        prefill_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(prefill_instance=prefill_instance)
+        callback_owner.on_done(prefill_instance=prefill_instance,
+                               req_len=req_len)
 
     async for chunk in generator_d:
         yield chunk
-    print(
-        f"D:[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]decode finished:",
-        decode_instance)
     if callback_owner and hasattr(callback_owner, "on_done"):
-        callback_owner.on_done(decode_instance=decode_instance)
+        callback_owner.on_done(decode_instance=decode_instance,
+                               req_len=req_len)
 
+async def D_first_token_generator_benchmark(generator_d,
+                                  callback_owner=None,
+                                  decode_instance: str = None,
+                                  req_len: int = None):
+    async for chunk in generator_d:
+        yield chunk
+    if callback_owner and hasattr(callback_owner, "on_done"):
+        callback_owner.on_done(decode_instance=decode_instance,
+                               req_len=req_len)
 
 class SchedulingPolicy(ABC):
 
@@ -93,10 +125,7 @@ class Proxy:
                      [Request], StreamingResponse]] = None,
                  custom_create_chat_completion: Optional[Callable[
                      [Request], StreamingResponse]] = None,
-                 generator_on_p_node: bool = False,
-                 benchmark_mode: bool = False,
-                 repeat_p_request: int = 1,
-                 repeat_d_times: int = 100):
+                 generator_on_p_node: bool = False):
         self.prefill_instances = prefill_instances
         self.decode_instances = decode_instances
         self.prefill_cycler = itertools.cycle(prefill_instances)
@@ -107,20 +136,20 @@ class Proxy:
         self.custom_create_chat_completion = custom_create_chat_completion
         self.router = APIRouter()
         self.setup_routes()
-        self.generator = (P_first_token_generator
-                          if generator_on_p_node else D_first_token_generator)
-        self.benchmark_mode = benchmark_mode
-        self.repeat_p_request = repeat_p_request
-        self.repeat_d_times = repeat_d_times
+        self.generator = D_first_token_generator_benchmark
+        self.tokenizer = AutoTokenizer.from_pretrained(model)
 
     def on_done(self,
                 prefill_instance: str = None,
-                decode_instance: str = None):
-        self.schedule_completion(prefill_instance, decode_instance)
+                decode_instance: str = None,
+                req_len: int = None):
+        self.schedule_completion(prefill_instance,
+                                 decode_instance,
+                                 req_len=req_len)
 
     def setup_routes(self):
         self.router.post(
-            "/v1/completions",
+            "/v1/prefill/completions",
             dependencies=[
                 Depends(self.validate_json_request)
             ])(self.custom_create_completion if self.
@@ -136,6 +165,11 @@ class Proxy:
         self.router.post("/instances/add",
                          dependencies=[Depends(self.api_key_authenticate)
                                        ])(self.add_instance_endpoint)
+        self.router.post(
+            "/v1/decode/completions",
+            dependencies=[
+                Depends(self.validate_json_request)
+            ])(self.create_completion_decode)
 
     async def validate_json_request(self, raw_request: Request):
         content_type = raw_request.headers.get("content-type", "").lower()
@@ -250,53 +284,6 @@ class Proxy:
             logger.error("Error in add_instance_endpoint: %s", str(e))
             raise HTTPException(status_code=500, detail=str(e)) from e
 
-    async def forward_request_benchmark_mode(self,
-                                             url,
-                                             data,
-                                             use_chunked=True):
-        async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-            headers = {
-                "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
-            }
-            try:
-                async with session.post(url=url, json=data,
-                                        headers=headers) as response:
-                    if (200 <= response.status < 300 or 
-                            400 <= response.status < 500):
-                        if use_chunked:
-                            chunks = []
-                            async for chunk_bytes in ( 
-                                response.content.iter_chunked(1024)):
-                                chunks.append(chunk_bytes)
-                            return b"".join(chunks)
-                        else:
-                            content = await response.read()
-                            return content
-                    else:
-                        error_content = await response.text()
-                        try:
-                            error_content = json.loads(error_content)
-                        except json.JSONDecodeError:
-                            pass  # leave error_content as str
-                        logger.error("Request failed with status %s: %s",
-                                     response.status, error_content)
-                        raise HTTPException(
-                            status_code=response.status,
-                            detail=
-                            f"Request failed with status"
-                            f"{response.status}: {error_content}",
-                        )
-            except aiohttp.ClientError as e:
-                logger.error("ClientError occurred: %s", str(e))
-                raise HTTPException(
-                    status_code=502,
-                    detail=
-                    "Bad Gateway: Error communicating with upstream server.",
-                ) from e
-            except Exception as e:
-                logger.error("Unexpected error: %s", str(e))
-                raise HTTPException(status_code=500, detail=str(e)) from e
-
     async def forward_request(self, url, data, use_chunked=True):
         async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
             headers = {
@@ -305,11 +292,10 @@ class Proxy:
             try:
                 async with session.post(url=url, json=data,
                                         headers=headers) as response:
-                    if (200 <= response.status < 300 
-                        or 400 <= response.status < 500):
+                    if 200 <= response.status < 300 or 400 <= response.status < 500:  # noqa: E501
                         if use_chunked:
-                            async for chunk_bytes in ( 
-                                response.content.iter_chunked(1024)):
+                            async for chunk_bytes in response.content.iter_chunked(  # noqa: E501
+                                    1024):
                                 yield chunk_bytes
                         else:
                             content = await response.read()
@@ -341,14 +327,18 @@ class Proxy:
 
     def schedule(self,
                  cycler: itertools.cycle,
+                 is_prompt: int = None,
                  request_len: Optional[int] = None) -> str:
-        return self.scheduling_policy.schedule(cycler, request_len)
+        return self.scheduling_policy.schedule(cycler, is_prompt, request_len)
 
     def schedule_completion(self,
                             prefill_instance: str = None,
-                            decode_instance: str = None):
+                            decode_instance: str = None,
+                            req_len: int = None):
         self.scheduling_policy.schedule_completion(
-            prefill_instance=prefill_instance, decode_instance=decode_instance)
+            prefill_instance=prefill_instance,
+            decode_instance=decode_instance,
+            req_len=req_len)
 
     async def get_status(self):
         status = {
@@ -359,76 +349,100 @@ class Proxy:
         }
         return status
 
-    def handle_benchmark_mode_requests(self, request):
-        if self.benchmark_mode != 1:
-            return
+    def get_total_token_length(self, prompt):
+        fake_len = 100
+        if isinstance(prompt, str):
+            return len(self.tokenizer(prompt)["input_ids"])
+        elif isinstance(prompt, list):
+            if all(isinstance(p, str) for p in prompt):
+                return sum(len(self.tokenizer(p)["input_ids"]) for p in prompt)
+            elif (all(isinstance(p, list) and 
+                all(isinstance(x, int) for x in p) for p in prompt)):
+                # Already tokenized
+                return sum(len(p) for p in prompt)
+            else:
+                logger.error(
+                    "Unsupported prompt format: %s / nested types. Value: %r",
+                    type(prompt), prompt
+                )
+                return fake_len
+        else:
+            logger.error("Unsupported prompt type: %s", type(prompt))
+            return fake_len
 
-        if self.repeat_p_request == 0:
-            print(
-                f"Trigger repeating p request, d times={self.repeat_d_times}")
-            for counter in range(self.repeat_d_times):
-                print(f"Repeat time: {counter}")
-                decode_instance = self.schedule(self.decode_cycler)
-                if not decode_instance:
-                    raise HTTPException(status_code=503,
-                                        detail="No decode instances available")
-                try:
-                    asyncio.create_task(
-                        self.forward_request_benchmark_mode(
-                            f"http://{decode_instance}/v1/completions",
-                            request))
-                except HTTPException as http_exc:
-                    self.remove_instance_endpoint("decode", decode_instance)
-                    raise http_exc
-        self.repeat_p_request -= 1
-
-    async def create_completion(self, raw_request: Request):
+    async def create_completion_decode(self, raw_request: Request):
         try:
             request = await raw_request.json()
 
-            # Perform kv recv and decoding stage
-            self.handle_benchmark_mode_requests(request)
+            prompt = request.get("prompt")
+            total_length = self.get_total_token_length(prompt)
+            decode_instance = self.schedule(self.decode_cycler,
+                                            is_prompt=False,
+                                            request_len=total_length)
 
-            if len(self.prefill_instances) > 0:
-                kv_prepare_request = request.copy()
-                kv_prepare_request["max_tokens"] = 1
-
-                print("create_completion, request_len=",
-                      len(kv_prepare_request['prompt']))
-                prefill_instance = self.schedule(
-                    self.prefill_cycler,
-                    request_len=len(kv_prepare_request['prompt']))
-                value = b''
-                try:
-                    async for chunk in self.forward_request(
-                            f"http://{prefill_instance}/v1/completions",
-                            kv_prepare_request):
-                        value += chunk
-                except HTTPException as http_exc:
-                    self.remove_instance_endpoint("prefill", prefill_instance)
-                    raise http_exc
-
-            decode_instance = self.schedule(self.decode_cycler)
-            value = value.strip().decode("utf-8").removesuffix(
-                "data: [DONE]").encode("utf-8")
-
-            async def streaming_response(value):
-                if value:
-                    yield value
-                else:
-                    yield b""
-
-            generator_p = streaming_response(value)
             try:
                 generator_d = self.forward_request(
                     f"http://{decode_instance}/v1/completions", request)
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            final_generator = self.generator(generator_p, generator_d, self,
-                                             prefill_instance, decode_instance)
-            response = StreamingResponse(final_generator)
+            final_generator = self.generator(generator_d,
+                                             self,
+                                             decode_instance,
+                                             req_len=total_length)
+            response = StreamingResponse(final_generator,
+                                         media_type="application/json")
             return response
+        except Exception:
+            import sys
+            exc_info = sys.exc_info()
+            print(exc_info)
+
+    async def create_completion(self, raw_request: Request):
+        try:
+            request = await raw_request.json()
+
+            if len(self.prefill_instances) > 0:
+                kv_prepare_request = request.copy()
+                kv_prepare_request["max_tokens"] = 1
+
+                start_time = time.time()
+                prompt = kv_prepare_request.get("prompt")
+                total_length = self.get_total_token_length(prompt)
+                end_time = time.time()
+
+                log_info_green(
+                    f"create_completion -- prompt length: {total_length}, "
+                    f"tokenizer took "
+                    f"{(end_time - start_time) * 1000:.2f} ms")
+                prefill_instance = self.schedule(self.prefill_cycler,
+                                                 is_prompt=True,
+                                                 request_len=total_length)
+                value = b''
+                try:
+                    async for chunk in self.forward_request(
+                            f"http://{prefill_instance}/v1/completions",
+                            kv_prepare_request):
+                        value += chunk
+                    
+                    value = value.strip().decode("utf-8").removesuffix(
+                        "data: [DONE]").encode("utf-8")
+
+                    async def streaming_response(value):
+                        if value:
+                            yield value
+                        else:
+                            yield b""
+
+                    generator_p = streaming_response(value)
+                    response = StreamingResponse(generator_p,
+                                         media_type="application/json")
+                    response.timeout = None
+                    return response
+                except HTTPException as http_exc:
+                    self.remove_instance_endpoint("prefill", prefill_instance)
+                    raise http_exc
+
         except Exception:
             import sys
 
@@ -444,11 +458,19 @@ class Proxy:
             kv_prepare_request = request.copy()
             kv_prepare_request["max_tokens"] = 1
 
+            start_time = time.time()
             # prefill stage
             total_length = sum(
-                len(msg['content']) for msg in kv_prepare_request['messages'])
-            print("Total content length:", total_length)
+                self.get_total_token_length(msg['content'])
+                for msg in kv_prepare_request['messages'])
+            end_time = time.time()
+            log_info_green(
+                f"create_chat_completion -- prompt length: {total_length}, "
+                f"tokenizer took "
+                f"{(end_time - start_time) * 1000:.2f} ms")
+
             prefill_instance = self.schedule(self.prefill_cycler,
+                                             is_prompt=True,
                                              request_len=total_length)
 
             value = b''
@@ -461,9 +483,9 @@ class Proxy:
                 self.remove_instance_endpoint("prefill", prefill_instance)
                 raise http_exc
             # Perform kv recv and decoding stage
-            self.handle_benchmark_mode_requests(request)
-
-            decode_instance = self.schedule(self.decode_cycler)
+            decode_instance = self.schedule(self.decode_cycler,
+                                            is_prompt=False,
+                                            request_len=total_length)
             value = value.strip().decode("utf-8").removesuffix(
                 "data: [DONE]").encode("utf-8")
 
@@ -481,9 +503,14 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            final_generator = self.generator(generator_p, generator_d, self,
-                                             prefill_instance, decode_instance)
-            response = StreamingResponse(final_generator)
+            final_generator = self.generator(generator_p,
+                                             generator_d,
+                                             self,
+                                             prefill_instance,
+                                             decode_instance,
+                                             req_len=total_length)
+            response = StreamingResponse(final_generator,
+                                         media_type="application/json")
             return response
         except Exception:
             exc_info = sys.exc_info()
@@ -491,7 +518,7 @@ class Proxy:
             print("Error occurred in disagg proxy server")
             print(error_messages)
             return StreamingResponse(content=iter(error_messages),
-                                     media_type="text/event-stream")
+                                     media_type="application/json")
 
     def remove_instance_endpoint(self, instance_type, instance):
         with self.scheduling_policy.lock:
@@ -527,7 +554,10 @@ class LoadBalancedScheduler(SchedulingPolicy):
                  decode_instances: list[str]):
         self.prefill_utils_counter = [0] * len(prefill_instances)
         self.prefill_bs_counter = [0] * len(prefill_instances)
+        self.decode_kv_utils_counter = [0] * len(
+            decode_instances)  #KV cache utils
         self.decode_bs_counter = [0] * len(decode_instances)
+
         self.prefill_instances = prefill_instances
         self.decode_instances = decode_instances
         print(" LoadBalancedScheduler, prefill/decode instance is = ",
@@ -536,43 +566,68 @@ class LoadBalancedScheduler(SchedulingPolicy):
               self.prefill_instances)
         print(" LoadBalancedScheduler, self.decode_instances =",
               self.decode_instances)
+        self.prefill_schedule_index = 0
+        self.prefill_schedule_completion_index = 0
+        self.decode_schedule_index = 0
+        self.decode_schedule_completion_index = 0
+
         super().__init__()
 
     def schedule(self,
                  cycler: itertools.cycle,
+                 is_prompt: int = None,
                  request_len: Optional[int] = None) -> str:
         with self.lock:
-            if request_len:
+            if is_prompt:
                 min_value = min(self.prefill_utils_counter)
                 min_index = self.prefill_utils_counter.index(min_value)
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
-                print(
-                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-                    f"schedule prefill! scheduling prefill instance... "
-                    f"min_value={min_value}, min_index={min_index}"
-                )
+                self.prefill_schedule_index += 1
+                log_info_yellow(
+                    f"<schedule prefill {self.prefill_schedule_index}> "
+                    f"instance = {min_index}, min_tokens = {min_value}")
                 return self.prefill_instances[min_index]
             else:
                 min_value = min(self.decode_bs_counter)
-                min_index = self.decode_bs_counter.index(min_value)
+
+                if min_value == 0:
+                    min_index = self.decode_bs_counter.index(min_value)
+                else:
+                    min_indices = [
+                        i for i, val in enumerate(self.decode_bs_counter)
+                        if val == min_value
+                    ]
+                    min_index = min(
+                        min_indices,
+                        key=lambda i: self.decode_kv_utils_counter[i])
+
                 self.decode_bs_counter[min_index] += 1
-                print(
-                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-                    f"schedule decode! scheduling decode instance... "
-                    f"min_value={min_value}, min_index={min_index}"
-                )
+                self.decode_kv_utils_counter[min_index] += request_len
+                self.decode_schedule_index += 1
+                log_info_blue(
+                    f"<schedule decode {self.decode_schedule_index}> "
+                    f"instance = {min_index}, min_batch = {min_value}")
+                log_info_blue(f"<schedule decode> "
+                              f"decode_bs_counter: {self.decode_bs_counter}")
+                log_info_blue(
+                    f"<schedule decode> "
+                    f"decode_kv_utils_counter: {self.decode_kv_utils_counter}")
+
                 return self.decode_instances[min_index]
 
     def schedule_completion(self,
                             prefill_instance: str = None,
-                            decode_instance: str = None):
+                            decode_instance: str = None,
+                            req_len: int = None):
         with self.lock:
             if prefill_instance:
-                print(
-                    " LoadBalance->schedule_completion prefill_instance =",
-                    prefill_instance)
                 index = self.prefill_instances.index(prefill_instance)
+                self.prefill_schedule_completion_index += 1
+                log_info_yellow(f"<Prefill completed "
+                                f"{self.prefill_schedule_completion_index}> "
+                                f"instance = {index}, req_len={req_len}")
+
                 self.prefill_bs_counter[index] -= 1
                 all_zero = True
                 for index, _ in enumerate(self.prefill_instances):
@@ -580,16 +635,39 @@ class LoadBalancedScheduler(SchedulingPolicy):
                         all_zero = False
                         break
                 if all_zero:
-                    print("all bs is 0, clear entire entries")
+                    log_info_red("<Prefill in idle state>")
                     for index, _ in enumerate(self.prefill_instances):
                         self.prefill_utils_counter[index] = 0
+                else:
+                    index = self.prefill_instances.index(prefill_instance)
+                    self.prefill_utils_counter[index] -= req_len
 
             if decode_instance:
-                print(
-                    " LoadBalance->schedule_completion decode_instance =",
-                    decode_instance)
                 index = self.decode_instances.index(decode_instance)
+                self.decode_schedule_completion_index += 1
+                log_info_blue(f"<Decode completed "
+                              f"{self.decode_schedule_completion_index}> "
+                              f"instance = {index}, req_len={req_len}")
+
                 self.decode_bs_counter[index] -= 1
+                all_zero = True
+                for index, _ in enumerate(self.decode_instances):
+                    if self.decode_bs_counter[index] != 0:
+                        all_zero = False
+                        break
+                if all_zero:
+                    log_info_red("<Decode in idle state>")
+                    self.decode_kv_utils_counter = [0] * len(
+                        self.decode_instances)
+                else:
+                    index = self.decode_instances.index(decode_instance)
+                    self.decode_kv_utils_counter[index] -= req_len
+                    log_info_blue(
+                        f"<schedule_completion decode> "
+                        f"decode_bs_counter: {self.decode_bs_counter}")
+                    log_info_blue(f"<schedule_completion decode> "
+                                  f"decode_kv_utils_counter: "
+                                  f"{self.decode_kv_utils_counter}")
 
 
 class ProxyServer:
@@ -615,9 +693,6 @@ class ProxyServer:
             custom_create_completion=create_completion,
             custom_create_chat_completion=create_chat_completion,
             generator_on_p_node=args.generator_on_p_node,
-            benchmark_mode=args.benchmark_mode,
-            repeat_p_request=args.repeat_p_request,
-            repeat_d_times=args.repeat_d_times,
         )
 
     def validate_parsed_serve_args(self, args: argparse.Namespace):
@@ -717,27 +792,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Use Round Robin scheduling for load balancing",
     )
-
-    parser.add_argument(
-        "--benchmark_mode",
-        action="store_true",
-        help="benchmark mode, single P for multiple D ",
-    )
-
-    parser.add_argument(
-        "--repeat_p_request",
-        type=int,
-        default=1,
-        help="the number of p request to repeat",
-    )
-
-    parser.add_argument(
-        "--repeat_d_times",
-        type=int,
-        default=100,
-        help="the times to repeat on d node",
-    )
-
     args = parser.parse_args()
     if args.roundrobin:
         proxy_server = ProxyServer(args=args)
