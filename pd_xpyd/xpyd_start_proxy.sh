@@ -99,9 +99,12 @@ else
         --port 8868"
 fi
 
-if [ "$FIRST_TOKEN_FROM_P" = "true" ]; then
-    CMD="$CMD --generator_on_p_node"
-fi
+timestamp=$(date +"%Y%m%d_%H%M%S")
+log_dir="xpyd_logs"
+mkdir -p "$log_dir"
+log_file="$log_dir/ProxyServer_${timestamp}.log"
+
+CMD="$CMD 2>&1 | tee $log_file"
 
 echo "Running: $CMD"
 eval $CMD
