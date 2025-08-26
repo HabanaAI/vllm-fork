@@ -580,7 +580,8 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
-                indices = torch.arange(start_idx, end_idx).to(pixel_values.device)
+                indices = torch.arange(start_idx,
+                                       end_idx).to(pixel_values.device)
                 batch_sliced_pixel_values = torch.index_select(pixel_values,
                                                                dim=0,
                                                                index=indices)
@@ -647,9 +648,10 @@ class Gemma3ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP,
             if not is_hpu:
                 vision_embeddings = self.get_multimodal_embeddings(**kwargs)
 
-                inputs_embeds = self.get_input_embeddings(input_ids,
-                                                        vision_embeddings)
-                if (vision_embeddings is not None) and len(vision_embeddings) != 0:
+                inputs_embeds = self.get_input_embeddings(
+                    input_ids, vision_embeddings)
+                if (vision_embeddings 
+                        is not None) and len(vision_embeddings) != 0:
                     kwargs = self.prepare_attn_masks(
                         input_ids,
                         positions,
