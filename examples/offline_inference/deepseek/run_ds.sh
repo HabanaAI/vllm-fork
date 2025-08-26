@@ -2,7 +2,7 @@
 
 # Default model path
 FP8_MODEL_PATH="/mnt/weka/data/pytorch/DeepSeek-R1/"
-
+# FP8_MODEL_PATH="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207"
 # Default options
 USE_SCALAR_FORMAT=false
 ENABLE_PATCHING=false
@@ -35,9 +35,9 @@ fi
 
 # Enable patching if --patching is set
 if [ "$ENABLE_PATCHING" = true ]; then
-    export RUNTIME_SCALE_PATCH=1
+    export RUNTIME_SCALE_PATCHING=1
 else
-    export RUNTIME_SCALE_PATCH=0
+    export RUNTIME_SCALE_PATCHING=0
 fi
 
 export CALC_SCALE_WITH_CGUID=1
@@ -51,6 +51,7 @@ echo "Using quantization config: ${QUANT_CONFIG}"
 echo "Using scale format: ${scale_format}"
 echo "Using patching: ${ENABLE_PATCHING}"
 echo "World size: ${WORLD_SIZE}"
+echo "RUNTIME_SCALE_PATCHING: ${RUNTIME_SCALE_PATCHING}"
 
 # Logging setup
 timestamp=$(date +%Y%m%d_%H%M%S)
