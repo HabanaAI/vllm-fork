@@ -613,4 +613,4 @@ The following steps address Out of Memory related errors:
 - To maximize the memory available for the KV cache, you can disable `HPUGraph` completely. With HPU Graphs disabled, you are trading latency and throughput at lower batches for potentially higher throughput on higher batches. You can do that by adding `--enforce-eager` flag to the server (for online inference), or by passing `enforce_eager=True` argument to LLM constructor (for offline inference).
 
 > [!TIP]
-> In case there is performance degradation in the Time to First Token (TTFT) metric, set the `--generation-config` vllm argument. Also, make sure that the `--max-model-len` argument is set correctly, as described in the Environment Variables section of this document.
+> In case there is performance degradation in the Time to First Token (TTFT) metric, set the `--generation-config vllm` argument. Also, make sure that the `--max-model-len` argument is set correctly, as described in the Environment Variables section of this document.
