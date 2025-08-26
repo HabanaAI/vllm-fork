@@ -67,6 +67,8 @@ do
     --use-padding-aware-scheduling
     --use-v2-block-manager
     --distributed_executor_backend mp
+    --enable-reasoning
+    --reasoning-parser deepseek_r1
     $kv_cache_dtype_arg
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
