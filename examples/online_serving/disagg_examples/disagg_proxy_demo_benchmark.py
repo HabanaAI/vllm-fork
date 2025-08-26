@@ -425,8 +425,17 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            final_generator = self.generator(generator_p, generator_d, self,
-                                             prefill_instance, decode_instance)
+
+            if request.get("stream", False):
+                generator_class = self.generator
+            else:
+                # For stream=False request, cannot use P first token
+                generator_class = D_first_token_generator
+            final_generator = generator_class(generator_p,
+                                              generator_d,
+                                              self,
+                                              prefill_instance,
+                                              decode_instance)
             response = StreamingResponse(final_generator)
             return response
         except Exception:
@@ -481,8 +490,17 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            final_generator = self.generator(generator_p, generator_d, self,
-                                             prefill_instance, decode_instance)
+
+            if request.get("stream", False):
+                generator_class = self.generator
+            else:
+                # For stream=False request, cannot use P first token
+                generator_class = D_first_token_generator
+            final_generator = generator_class(generator_p,
+                                              generator_d,
+                                              self,
+                                              prefill_instance,
+                                              decode_instance)
             response = StreamingResponse(final_generator)
             return response
         except Exception:
