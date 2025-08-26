@@ -797,6 +797,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_workers=1)
         self.use_async_kv_transfer_in_pd = envs.VLLM_USE_ASYNC_TRANSFER_IN_PD
         logger.info("will use async pd: %s", self.use_async_kv_transfer_in_pd)
+        self.skip_prefill_sampling = envs.VLLM_SKIP_PREFILL_SAMPLING
+        logger.info("will skip prefill sampling: %s", self.skip_prefill_sampling)
 
         # PD
         self.kv_conf = self.vllm_config.kv_transfer_config
@@ -3080,8 +3082,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # torch.hpu.synchronize()
                 # Sending KV cache in distributed KV cache transfer setting
                 # NOTE: the send operation is non-blocking
-
-                if self.need_send_kv(model_input, kv_caches, warmup_mode):
+                need_send_kv = self.need_send_kv(model_input, kv_caches, warmup_mode)
+                if need_send_kv:
                     cur_time = time.time()
 
                     def sync_send_kv_caches(hidden_states):
@@ -3201,19 +3203,24 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # we obtain the actual sampled results in advance
                     self._patch_prev_output()
 
-                # Compute the logits.
-                with self.profiler.record_event(
-                        'internal',
-                    ('compute_logits_'
-                     f"{self.model_type}_"
-                     f'{"prompt" if is_prompt else "decode"}_bs'
-                     f'{batch_size}_'
-                     f'seq{seq_len}'),
-                        args=profiler_args):
-                    if num_steps == 1:
-                        sampling_metadata.selected_token_indices = None
-                    logits = self.model.compute_logits(hidden_states,
-                                                       sampling_metadata)
+                if num_steps == 1:
+                    sampling_metadata.selected_token_indices = None
+
+                if need_send_kv and self.skip_prefill_sampling:
+                    # If skip sampling, don't compute the logits
+                    logits = None
+                else:
+                    # Compute the logits.
+                    with self.profiler.record_event(
+                            'internal',
+                        ('compute_logits_'
+                         f"{self.model_type}_"
+                         f'{"prompt" if is_prompt else "decode"}_bs'
+                         f'{batch_size}_'
+                         f'seq{seq_len}'),
+                            args=profiler_args):
+                        logits = self.model.compute_logits(hidden_states,
+                                                           sampling_metadata)
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
@@ -3239,27 +3246,33 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             is_prev_output_patched = True
                             self._patch_prev_output()
 
-                with self.profiler.record_event(
-                        'internal', ('sample_'
-                                     f"{self.model_type}_"
-                                     f'{"prompt" if is_prompt else "decode"}_'
-                                     f'bs{batch_size}_'
-                                     f'seq{seq_len}'),
-                        args=profiler_args):
-                    output = self.model.sample(
-                        logits=logits,
-                        sampling_metadata=sampling_metadata,
-                    )
-                    if num_steps > 1:
-                        output = output.sampled_token_ids
-                        self.cached_step_outputs.append(output)
-                    if use_delayed_sampling and self.is_driver_worker:
-                        if not is_prev_output_patched:
-                            self._patch_prev_output()
-                        output = self._pad_to_max_num_seqs(
-                            output.sampled_token_ids, DUMMY_TOKEN_ID)
-                        self.cached_step_outputs.append(output)
-                        self.cached_step_inputs.append(model_input)
+                if need_send_kv and self.skip_prefill_sampling:
+                    # prefill and skip prefill sampling return dummy output
+                    output = self._delayed_sampler_outputs(model_input)
+                else:
+                    with self.profiler.record_event(
+                            'internal', ('sample_'
+                                         f"{self.model_type}_"
+                                         f'{"prompt" if is_prompt else "decode"}_'
+                                         f'bs{batch_size}_'
+                                         f'seq{seq_len}'),
+                            args=profiler_args):
+                        output = self.model.sample(
+                            logits=logits,
+                            sampling_metadata=sampling_metadata,
+                        )
+
+                if num_steps > 1:
+                    output = output.sampled_token_ids
+                    self.cached_step_outputs.append(output)
+                if use_delayed_sampling and self.is_driver_worker:
+                    if not is_prev_output_patched:
+                        self._patch_prev_output()
+                    output = self._pad_to_max_num_seqs(
+                        output.sampled_token_ids, DUMMY_TOKEN_ID)
+                    self.cached_step_outputs.append(output)
+                    self.cached_step_inputs.append(model_input)
+
                 htorch.core.mark_step()
                 if model_input.async_callback is not None:
                     model_input.async_callback()
