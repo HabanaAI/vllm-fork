@@ -6,6 +6,7 @@ Verified models:
 - deepseek-ai/DeepSeek-R1-0528
 - deepseek-ai/DeepSeek-R1
 - moonshotai/Kimi-K2-Instruct
+- deepseek-ai/DeepSeek-V3.1
 
 ## Table of Contents
 
@@ -42,9 +43,9 @@ Verified models:
 
 ## Hardware Requirements
 
-* DeepSeek-R1-0528 or DeepSeek-R1 
+* DeepSeek-R1-0528 or DeepSeek-R1 or DeepSeek-V3.1
 
-  * DeepSeek-R1-0528 or DeepSeek-R1 has 671B parameters with FP8 precision and takes up about 642GB memory. Single-node 8\*Gaudi2 OAM (768GB memory in total) is enough to accommodate the model weights and required KV cache with limited context length (<=32k). 
+  * DeepSeek-R1-0528 or DeepSeek-R1 or DeepSeek-V3.1 has 671B parameters with FP8 precision and takes up about 642GB memory. Single-node 8\*Gaudi2 OAM (768GB memory in total) is enough to accommodate the model weights and required KV cache with limited context length (<=32k). 
 
   * To support higher concurrency and longer token lengths, 2-node 8\*Gaudi2 servers are recommended. 
 
@@ -56,8 +57,8 @@ The following table outlines the mininum requirements for each hardware componen
 
 |Model| Servers | CPU per Node | Accelerators per Node | RAM per Node | Storage per Node | Frontend Networking per Node <br>(In-band Management/Storage) | Backend Networking per Node <br>(Compute, w/ RDMA) |
 |---| -------------- | --------------------------------------------------- | -------------------- | ------------- | ------------------------------------------------------ | -- | -- |
-|DeepSeek-R1-0528/DeepSeek-R1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
-|DeepSeek-R1-0528/DeepSeek-R1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
 |Kimi-K2-Instruct| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
 
 ### Set CPU to Performance Mode
@@ -83,7 +84,7 @@ sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_
 ## Model Weights Downloading and Conversion
 
 ### Start Docker Container on the Gaudi Server
-Assume that the original model weight files are downloaded and converted in the folder /mnt/disk4, which should have at least 1.5TB disk space for DeepSeek-R1-0528/DeepSeek-R1, and at least 2TB for Kimi-K2-Instruct. 
+Assume that the original model weight files are downloaded and converted in the folder /mnt/disk4, which should have at least 1.5TB disk space for DeepSeek-R1-0528, DeepSeek-R1 or DeepSeek-V3.1, and at least 2TB for Kimi-K2-Instruct. 
 > [!NOTE]
 > * Make sure the pulled docker image aligns with the corresponding Gaudi driver and OS version. The default one used in this guide is for Gaudi driver/firmware 1.20.1 and Ubuntu 22.04, referring to [Use Intel(R)Gaudi Containers](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Docker_Installation.html#use-intel-gaudi-containers) for other images.
 
@@ -113,6 +114,11 @@ git clone https://www.modelscope.cn/deepseek-ai/DeepSeek-R1-0528.git /data/hf_mo
 git clone https://huggingface.co/moonshotai/Kimi-K2-Instruct /data/hf_models/Kimi-K2-Instruct
 # Option2: Download Kimi-K2-Instruct from ModelScope
 git clone https://www.modelscope.cn/moonshotai/Kimi-K2-Instruct.git /data/hf_models/Kimi-K2-Instruct
+
+# Option1: Download DeepSeek-V3.1 from HuggingFace
+git clone https://huggingface.co/deepseek-ai/DeepSeek-V3.1.git /data/hf_models/DeepSeek-V3.1
+# Option2: Download DeepSeek-V3.1 from ModelScope
+git clone https://www.modelscope.cn/deepseek-ai/DeepSeek-V3.1.git /data/hf_models/DeepSeek-V3.1
 ```
 
 ### Convert the Model
@@ -133,6 +139,9 @@ python scripts/convert_for_g2.py -i /data/hf_models/DeepSeek-R1-0528 -o /data/hf
 
 # Conversion for Kimi-K2-Instruct
 python scripts/convert_for_g2.py -i /data/hf_models/Kimi-K2-Instruct -o /data/hf_models/Kimi-K2-Instruct-G2
+
+# Conversion for DeepSeek-V3.1
+python scripts/convert_for_g2.py -i /data/hf_models/DeepSeek-V3.1 -o /data/hf_models/DeepSeek-V3.1-G2
 ```
 
 The conversion is finished when the message below is shown. The converted model weight files are saved in your specified folder, like /data/hf_models/DeepSeek-R1-G2, and we will use this converted model to host vLLM service. 
@@ -190,6 +199,13 @@ For example, if you want to run DeepSeek-R1-0528, with tp-size 8, you can downlo
 ```bash
 cd vllm-fork
 huggingface-cli download Yi30/ds-r1-0528-default-pile-g2-0529  --local-dir ./scripts/nc_workspace_measure_kvcache
+```
+
+##### 1.1 Calibrate DeepSeek-V3.1 model
+For DeepSeek-V3.1, please use the command below to calibrate the model. After the command is done, the DeepSeek-V3.1 measurement files are generated in the folder "scripts/nc_workspace_measure_kvcache".
+```bash
+cd vllm-fork
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
 ```
 
 #### 2. Configure environment variables. (Optional)
@@ -291,6 +307,8 @@ h  Help info
 ```bash
 bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
+Note: for DeepSeek-V3.1, please remove the parameters "--enable-reasoning --reasoning-parser deepseek_r1" in the file "start_vllm.sh" if the client uses non-thinking mode. 
+
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
 ```bash
@@ -419,6 +437,13 @@ For case running DeepSeek-R1-0528 with tp-size 16, we have downloaded and kept t
 cd vllm-fork
 cp -r ./scripts/measure_kvcache/ds-r1-0528-g2-tp16 ./scripts/nc_workspace_measure_kvcache
 ```
+
+###### 1.1 Calibrate DeepSeek-V3.1 model to both head and worker node according to target model.
+For DeepSeek-V3.1, please use the command below to calibrate the model. After the command is done, the DeepSeek-V3.1 measurement files are generated in the folder "vllm-fork/scripts/nc_workspace_measure_kvcache". After the measure files are generated, you may copy them to the folder vllm-fork/scripts/nc_workspace_measure_kvcache" of other worker nodes.
+```bash
+cd vllm-fork
+bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
+
 
 ##### 2. Configure environment variables.
 
