@@ -314,6 +314,8 @@ Specified using `--task generate`.
 | `DeepseekForCausalLM`                             | DeepSeek                                            | `deepseek-ai/deepseek-llm-67b-base`, `deepseek-ai/deepseek-llm-7b-chat` etc.                                                                                                 |                        | ✅︎                          |
 | `DeepseekV2ForCausalLM`                           | DeepSeek-V2                                         | `deepseek-ai/DeepSeek-V2`, `deepseek-ai/DeepSeek-V2-Chat` etc.                                                                                                               |                        | ✅︎                          |
 | `DeepseekV3ForCausalLM`                           | DeepSeek-V3                                         | `deepseek-ai/DeepSeek-V3-Base`, `deepseek-ai/DeepSeek-V3` etc.                                                                                                               |                        | ✅︎                          |
+| `Ernie4_5ForCausalLM`                            | Ernie4.5                                            | `baidu/ERNIE-4.5-0.3B-PT`,etc.                                                                                                               |                        | ✅︎                          | ✅︎                     |
+| `Ernie4_5_MoeForCausalLM`                         | Ernie4.5MoE                                         | `baidu/ERNIE-4.5-21B-A3B-PT`,  `baidu/ERNIE-4.5-300B-A47B-PT`, etc.                                                                                                               |                        | ✅︎                          | ✅︎                     |
 | `ExaoneForCausalLM`                               | EXAONE-3                                            | `LGAI-EXAONE/EXAONE-3.0-7.8B-Instruct`, etc.                                                                                                                                 | ✅︎                     | ✅︎                          |
 | `FalconForCausalLM`                               | Falcon                                              | `tiiuae/falcon-7b`, `tiiuae/falcon-40b`, `tiiuae/falcon-rw-7b`, etc.                                                                                                         |                        | ✅︎                          |
 | `FalconMambaForCausalLM`                          | FalconMamba                                         | `tiiuae/falcon-mamba-7b`, `tiiuae/falcon-mamba-7b-instruct`, etc.                                                                                                            |                        | ✅︎                          |
@@ -371,7 +373,6 @@ Specified using `--task generate`.
 | `XverseForCausalLM`                               | XVERSE                                              | `xverse/XVERSE-7B-Chat`, `xverse/XVERSE-13B-Chat`, `xverse/XVERSE-65B-Chat`, etc.                                                                                            | ✅︎                     | ✅︎                          |
 | `MiniMaxText01ForCausalLM`                        | MiniMax-Text                                        | `MiniMaxAI/MiniMax-Text-01`, etc.                                                                                                                                            |                        |                             |
 | `Zamba2ForCausalLM`                               | Zamba2                                              | `Zyphra/Zamba2-7B-instruct`, `Zyphra/Zamba2-2.7B-instruct`, `Zyphra/Zamba2-1.2B-instruct`, etc.                                                                              |                        |                             |
-
 !!! note
     Currently, the ROCm version of vLLM supports Mistral and Mixtral only for context lengths up to 4096.
 
@@ -556,10 +557,10 @@ Specified using `--task generate`.
 | `SmolVLMForConditionalGeneration`            | SmolVLM2                                                                 | T + I                                                                 | `SmolVLM2-2.2B-Instruct`                                                                                                                                | ✅︎                     |                           | ✅︎                      |
 | `TarsierForConditionalGeneration`                | Tarsier                                                                  | T + I<sup>E+</sup>                                                                                                     | `omni-search/Tarsier-7b`,`omni-search/Tarsier-34b`                                                                                                           |                      | ✅︎                      | ✅︎                   |
 
-<sup>^</sup> You need to set the architecture name via `--hf-overrides` to match the one in vLLM.  
-&nbsp;&nbsp;&nbsp;&nbsp;• For example, to use DeepSeek-VL2 series models:  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`--hf-overrides '{"architectures": ["DeepseekVLV2ForCausalLM"]}'`  
-<sup>E</sup> Pre-computed embeddings can be inputted for this modality.  
+<sup>^</sup> You need to set the architecture name via `--hf-overrides` to match the one in vLLM.
+&nbsp;&nbsp;&nbsp;&nbsp;• For example, to use DeepSeek-VL2 series models:
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`--hf-overrides '{"architectures": ["DeepseekVLV2ForCausalLM"]}'`
+<sup>E</sup> Pre-computed embeddings can be inputted for this modality.
 <sup>+</sup> Multiple items can be inputted per text prompt for this modality.
 
 !!! warning
