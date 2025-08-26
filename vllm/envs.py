@@ -617,6 +617,14 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: int(os.getenv("VLLM_DP_MASTER_PORT", "0")),
 
     # Optimization level for data parallel
+    # Note that this is for hpu backend
+    # | VLLM_DP_OPT | DP Aware Padding | AllGather and ReduceScatter | FP8 Communication |
+    # | ----------- | ---------------- | --------------------------- | ----------------- |
+    # | 0           | False            | False                       | False             |
+    # | 1           | False            | False                       | False             |
+    # | 2           | True             | False                       | False             |
+    # | 3(default)  | True             | True                        | False             |
+    # | 4           | True             | True                        | True              |
     "VLLM_DP_OPT":
     lambda: int(os.getenv("VLLM_DP_OPT", "3")),
 
