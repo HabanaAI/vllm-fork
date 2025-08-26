@@ -107,7 +107,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                       == QuantizationStrategy.TENSOR)
         per_channel = (
             self.weight_quant.strategy == QuantizationStrategy.CHANNEL
-            and self.input_quant.strategy == QuantizationStrategy.TOKEN)
+            and (self.input_quant.strategy == QuantizationStrategy.TOKEN or
+                self.input_quant.strategy == QuantizationStrategy.TENSOR)
+        )
         if not (per_tensor or per_channel):
             raise ValueError(
                 "For FP8 Fused MoE layers, we require per tensor "
@@ -115,10 +117,6 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                 f"{self.weight_quant}, {self.input_quant}")
 
         self.static_input_scales = not self.input_quant.dynamic
-        if self.static_input_scales and per_channel:
-            raise ValueError(
-                "For FP8 Fused MoE layer, we require either per tensor or "
-                "channelwise, dynamic per token quantization.")
 
         # For GPUs that lack FP8 hardware support, we can leverage the Marlin
         # kernel for fast weight-only FP8 quantization
