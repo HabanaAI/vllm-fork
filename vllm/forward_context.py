@@ -118,7 +118,8 @@ def set_forward_context(attn_metadata: Any,
             hidden_size = vllm_config.model_config.get_hidden_size()
             device = attn_metadata.slot_mapping.device
             router_logits_dtype = vllm_config.model_config.dtype
-            hidden_states_dtype = torch.float8_e4m3fn if activation_scheme == "static" else router_logits_dtype
+            hidden_states_dtype = torch.float8_e4m3fn if\
+                (activation_scheme == "static" and envs.VLLM_DP_OPT > 3) else router_logits_dtype
             hidden_states_across_dp = torch.empty((request_batch_size * dp_size, padded_seq_length, hidden_size),\
                 device=device, dtype=hidden_states_dtype)
             topk_ids_across_dp = torch.empty((batchsize * dp_size, num_experts_per_tok),\

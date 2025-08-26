@@ -907,7 +907,7 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
-            if self.activation_scheme != "static" or self.dp_opt < 1:
+            if self.activation_scheme != "static" or self.dp_opt < 4:
                 hidden_states_across_dp = get_forward_context(
                 ).dp_metadata.hidden_states_across_dp
                 hidden_states = self.multicast_fn(hidden_states,

@@ -911,7 +911,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         ep_rank=0,
     ):
-        if self.quant_config.activation_scheme == "static" and layer.dp_size > 1 and layer.dp_opt > 0:
+        if self.quant_config.activation_scheme == "static" and layer.dp_size > 1 and layer.dp_opt > 3:
             x_scale = layer.w13_input_scale.data
             x = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
             cu_tokens_across_dp_cpu = get_forward_context(
@@ -1015,7 +1015,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
         def do_dynamic_moe_with_static_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, moe_n_slice, n_expert_slice, w13_weight_scale_inv_fp8, w2_weight_scale_inv_fp8):
             x_scale = layer.w13_input_scale.data
-            if layer.dp_size == 1 or layer.dp_opt < 1:
+            if layer.dp_size == 1 or layer.dp_opt < 4:
                 x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
             else:
                 x_fp8 = x
