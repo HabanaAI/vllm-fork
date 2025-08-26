@@ -43,9 +43,9 @@ Verified models:
 
 ## Hardware Requirements
 
-* DeepSeek-R1-0528 or DeepSeek-R1 or deepseek-ai/DeepSeek-V3.1
+* DeepSeek-R1-0528 or DeepSeek-R1 or DeepSeek-V3.1
 
-  * DeepSeek-R1-0528 or DeepSeek-R1 has 671B parameters with FP8 precision and takes up about 642GB memory. Single-node 8\*Gaudi2 OAM (768GB memory in total) is enough to accommodate the model weights and required KV cache with limited context length (<=32k). 
+  * DeepSeek-R1-0528 or DeepSeek-R1 or DeepSeek-V3.1 has 671B parameters with FP8 precision and takes up about 642GB memory. Single-node 8\*Gaudi2 OAM (768GB memory in total) is enough to accommodate the model weights and required KV cache with limited context length (<=32k). 
 
   * To support higher concurrency and longer token lengths, 2-node 8\*Gaudi2 servers are recommended. 
 
@@ -57,8 +57,8 @@ The following table outlines the mininum requirements for each hardware componen
 
 |Model| Servers | CPU per Node | Accelerators per Node | RAM per Node | Storage per Node | Frontend Networking per Node <br>(In-band Management/Storage) | Backend Networking per Node <br>(Compute, w/ RDMA) |
 |---| -------------- | --------------------------------------------------- | -------------------- | ------------- | ------------------------------------------------------ | -- | -- |
-|DeepSeek-R1-0528/DeepSeek-R1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
-|DeepSeek-R1-0528/DeepSeek-R1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
 |Kimi-K2-Instruct| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
 
 ### Set CPU to Performance Mode
@@ -84,7 +84,7 @@ sudo echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_
 ## Model Weights Downloading and Conversion
 
 ### Start Docker Container on the Gaudi Server
-Assume that the original model weight files are downloaded and converted in the folder /mnt/disk4, which should have at least 1.5TB disk space for DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1, and at least 2TB for Kimi-K2-Instruct. 
+Assume that the original model weight files are downloaded and converted in the folder /mnt/disk4, which should have at least 1.5TB disk space for DeepSeek-R1-0528, DeepSeek-R1 or DeepSeek-V3.1, and at least 2TB for Kimi-K2-Instruct. 
 > [!NOTE]
 > * Make sure the pulled docker image aligns with the corresponding Gaudi driver and OS version. The default one used in this guide is for Gaudi driver/firmware 1.20.1 and Ubuntu 22.04, referring to [Use Intel(R)Gaudi Containers](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Docker_Installation.html#use-intel-gaudi-containers) for other images.
 
@@ -304,11 +304,11 @@ h  Help info
 ```
 
 ### Launch vLLM Serving with TP=8
-For DeepSeek-V3.1, please remove the parameters "--enable-reasoning --reasoning-parser deepseek_r1" in the file "start_vllm.sh" if the client uses non-thinking mode. 
-
 ```bash
 bash start_vllm.sh -w /data/hf_models/DeepSeek-R1-G2 -q -u 0.0.0.0 -p 8688 -b 128 -l 16384 -c /data/warmup_cache
 ```
+Note: for DeepSeek-V3.1, please remove the parameters "--enable-reasoning --reasoning-parser deepseek_r1" in the file "start_vllm.sh" if the client uses non-thinking mode. 
+
 
 It takes more than 1 hour to load and warm up the model for the first time. After completion, a typical output would be like below. The warmup time will be accelerated if the warmup cache is re-used. vLLM server is ready to serve when the log below appears.
 ```bash
