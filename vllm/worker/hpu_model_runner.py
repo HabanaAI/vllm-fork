@@ -1224,9 +1224,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
-                    if not disable_mark_scales_as_const:
-                        htcore.hpu_initialize(self.model,
-                                              mark_only_scales_as_const=True)
+                    if config.scale_format.lower() == 'const' and not disable_mark_scales_as_const:
+                        htcore.hpu_inference_initialize(self.model, mark_scales=True, mark_non_scales=True)
                     if torch.distributed.is_initialized():
                         torch.distributed.barrier()
                 self.inc_initialized_successfully = True

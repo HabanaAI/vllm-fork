@@ -323,6 +323,12 @@ class Fp8LinearMethod(LinearMethodBase):
             weight = F.pad(weight, (0, num_pad), "constant", 0)[..., :-num_pad]
             torch.cuda.empty_cache()
         return weight
+    
+    def dequant_fp8_weight(self, layer) -> torch.Tensor:
+        if hasattr(self.quant_config, "weight_block_size"):
+            return self.dequant_block_fp8_weight(layer)
+        else:
+            raise NotImplementedError("Implemented block-wise dequantization only.")
 
     def dequant_block_fp8_weight(self, layer) -> torch.Tensor:
         if hasattr(layer, "updated_fp8_weight") and layer.updated_fp8_weight:
