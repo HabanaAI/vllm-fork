@@ -767,11 +767,15 @@ class NixlConnectorWorker:
         elif self.device_type == "hpu":
             if self.use_mla:
                 # MLA case.
+                # habana kv_cache with MLA (num_blocks * block_size, head_size)
                 use_mla = True
                 self.num_blocks = first_kv_cache[0].shape[0] // self.block_size
-                block_rank = 2  # [block_size, latent_dim]
-                block_shape = first_kv_cache[0].shape[-block_rank:]
+                # Reshape to (num_blocks, block_size, head_size)
+                reshaped_cache = first_kv_cache[0].view(-1, self.block_size, first_kv_cache[0].shape[-1])
+                # Now extract block_shape
+                block_shape = reshaped_cache.shape[1:]  # (block_size, head_size)
                 block_size, kv_latent_dim = block_shape
+                # head size in bytes.
                 self.slot_size_bytes = kv_elem_size * kv_latent_dim
             else:
                 # habana kv_cache: [2, num_blocks*block_size, kv_heads, head_dim]
@@ -1032,7 +1036,7 @@ class NixlConnectorWorker:
         assert self.copy_blocks is not None
 
         local_block_ids = meta.local_block_ids
-        self.copy_blocks(self.block_size, self.host_xfer_buffers, self.device_kv_caches,
+        self.copy_blocks(self.use_mla, self.block_size, self.host_xfer_buffers, self.device_kv_caches,
                          local_block_ids, local_block_ids, "h2d")
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -1052,7 +1056,7 @@ class NixlConnectorWorker:
                     "local_block_ids: %s. ", req_id,
                     ",".join(map(str, meta.local_block_ids)))
             # blocking
-            self.copy_blocks(self.block_size, self.device_kv_caches, self.host_xfer_buffers,
+            self.copy_blocks(self.use_mla, self.block_size, self.device_kv_caches, self.host_xfer_buffers,
                              meta.local_block_ids, meta.local_block_ids, "d2h")
 
     def get_finished(self) -> tuple[set[str], set[str]]:

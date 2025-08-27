@@ -2529,6 +2529,7 @@ def _make_src_and_dst_indices(
     return src_slot_mapping, dst_slot_mapping
 
 def copy_kv_blocks(
+    use_mla: int,
     block_size: int,
     src_kv_caches: dict[str, torch.Tensor],
     dst_kv_caches: dict[str, torch.Tensor],
@@ -2564,11 +2565,13 @@ def copy_kv_blocks(
 
         if direction == "d2h" and use_hpu_buffer:
             hpu_buffer[i][0]=key_cache.index_select_(0,  src_slot_mapping)
-            hpu_buffer[i][1]=value_cache.index_select_(0,  src_slot_mapping)
+            if not use_mla:
+                hpu_buffer[i][1]=value_cache.index_select_(0,  src_slot_mapping)
         else:
             #import remote_pdb;remote_pdb.set_trace()      
             dst_kv_caches[layer_name][0].index_put_((dst_slot_mapping,), key_cache.index_select(0, src_slot_mapping).to(target_device))
-            dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))                                      
+            if not use_mla:
+                dst_kv_caches[layer_name][1].index_put_((dst_slot_mapping,), value_cache.index_select(0, src_slot_mapping).to(target_device))
         i = i+1
         
         #dst_kv_caches[layer_name][0][dst_slot_mapping] = key_cache[src_slot_mapping].to(target_device)
