@@ -266,7 +266,9 @@ class HpuModelAdapter:
         self.layer_names = layer_names
         enforce_eager = vllm_config.model_config.enforce_eager
         self.dp_awared_padding = \
-            self.vllm_config.parallel_config.data_parallel_size > 1
+            self.vllm_config.parallel_config.data_parallel_size > 1\
+                and envs.VLLM_DP_OPT > 1
+        logger.info(f"Data Parallel Aware Padding: {self.dp_awared_padding}")
         self.is_pooler = hasattr(self.model, "_pooler")
         self.is_causal = True
         if self.is_pooler:
@@ -771,7 +773,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # Data Parallel
         self.dp_size = vllm_config.parallel_config.data_parallel_size
-        self.dp_awared_padding = self.dp_size > 1
+        self.dp_awared_padding = self.dp_size > 1 and envs.VLLM_DP_OPT > 1
 
         self._set_gc_threshold()
         self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',

@@ -81,6 +81,13 @@ class HpuPlatform(Platform):
                     "To override that behavior, please set "
                     "VLLM_WORKER_MULTIPROC_METHOD=fork explicitly.")
                 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+        
+        is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1'
+        if is_lazy and envs.VLLM_DP_SIZE > 1 and envs.VLLM_DP_OPT < 2:
+            logger.info(
+                "Data Parallel: Forcing enforce eager to be True when VLLM_DP_OPT "
+                "is not greater than 1.")
+            vllm_config.model_config.enforce_eager = True
 
     @classmethod
     def is_pin_memory_available(cls):
