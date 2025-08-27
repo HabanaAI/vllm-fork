@@ -1018,7 +1018,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.multi_modal_input_mapper = self.mm_registry \
             .create_input_mapper(self.model_config)
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
-        self.is_mm_optimized = is_mm_optimized(self.model_config)
+        self.is_mm_optimized = False
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
@@ -1491,9 +1491,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                        non_blocking=True)
 
     def add_vision_buckets_to_mrope_mm_optimized(self):
+        model = self.get_model()
+        self.is_mm_optimized = is_mm_optimized(model)
         if self.model_is_mrope or self.is_mm_optimized:
-            self.get_model().vision_buckets = VisionBuckets(
-                self.is_mm_optimized)
+            model.vision_buckets = VisionBuckets(self.is_mm_optimized)
 
     def _prepare_prompt(
         self,
@@ -2803,11 +2804,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
 
-        # Using batch_size 1 is profile multimodal models
         if self.model_is_mrope or self.is_mm_optimized:
+            # Using batch_size 1 is profile multimodal models
             max_batch_size = 1
-
-        if self.model_is_mrope or self.is_mm_optimized:
             model = self.get_model()
             self.multimodal_buckets = model.vision_buckets.multimodal_buckets
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
