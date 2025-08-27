@@ -35,7 +35,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=60 * 60 * 60,
                                         connect=60000,
                                         sock_read=120000,
-                                        sock_connect=3000)
+                                        sock_connect=30000)
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
@@ -432,7 +432,13 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            response = StreamingResponse(generator)
+
+            media_type = (
+                "text/event-stream"
+                if request.get("stream", False)
+                else "application/json"
+            )
+            response = StreamingResponse(generator, media_type=media_type)
             return response
         except Exception:
             import sys
@@ -471,7 +477,13 @@ class Proxy:
             except HTTPException as http_exc:
                 self.remove_instance_endpoint("decode", decode_instance)
                 raise http_exc
-            response = StreamingResponse(content=generator)
+
+            media_type = (
+                "text/event-stream"
+                if request.get("stream", False)
+                else "application/json"
+            )
+            response = StreamingResponse(content=generator, media_type=media_type)
             return response
         except Exception:
             exc_info = sys.exc_info()

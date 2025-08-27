@@ -50,7 +50,7 @@ def log_info_red(msg):
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=60 * 60 * 60,
                                         connect=60000,
                                         sock_read=120000,
-                                        sock_connect=3000)
+                                        sock_connect=30000)
 
 
 async def P_first_token_generator(generator_p,
@@ -419,8 +419,13 @@ class Proxy:
                                               prefill_instance,
                                               decode_instance,
                                               req_len=total_length)
+            media_type = (
+                "text/event-stream"
+                if request.get("stream", False)
+                else "application/json"
+            )
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type=media_type)
             return response
         except Exception:
             import sys
@@ -494,8 +499,13 @@ class Proxy:
                                               prefill_instance,
                                               decode_instance,
                                               req_len=total_length)
+            media_type = (
+                "text/event-stream"
+                if request.get("stream", False)
+                else "application/json"
+            )
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type=media_type)
             return response
         except Exception:
             exc_info = sys.exc_info()
