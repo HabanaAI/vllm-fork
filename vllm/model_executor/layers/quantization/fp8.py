@@ -35,6 +35,7 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
     requantize_with_max_scale)
 from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 from vllm.model_executor.parameter import (BlockQuantScaleParameter,
+                                           ChannelQuantScaleParameter,
                                            ModelWeightParameter,
                                            PerTensorScaleParameter)
 from vllm.model_executor.utils import set_weight_attrs
@@ -276,9 +277,10 @@ class Fp8LinearMethod(LinearMethodBase):
         if self.quant_config.is_checkpoint_fp8_serialized:
             # WEIGHT SCALE
             if not self.block_quant:
-                scale = PerTensorScaleParameter(
-                    data=torch.empty(len(output_partition_sizes),
+                scale = ChannelQuantScaleParameter(
+                    data=torch.empty(output_size_per_partition,
                                      dtype=torch.float32),
+                    output_dim=0,
                     weight_loader=weight_loader,
                 )
                 scale[:] = torch.finfo(torch.float32).min
@@ -387,7 +389,7 @@ class Fp8LinearMethod(LinearMethodBase):
 
             # If using w8a8, torch._scaled_mm needs per tensor, so
             # requantize the logical shards as a single weight.
-            if not self.use_marlin:
+            if not self.use_marlin and not current_platform.is_hpu():
                 # Dequant -> Quant with max scale so we can run per tensor.
                 if current_platform.is_fp8_fnuz():
                     weight, weight_scale, input_scale = \
@@ -453,6 +455,16 @@ class Fp8LinearMethod(LinearMethodBase):
                 bias=bias,
                 cutlass_block_fp8_supported=self.cutlass_block_fp8_supported,
                 use_aiter_and_is_supported=self.use_aiter_and_is_supported,
+            )
+
+        if current_platform.is_hpu() and self.quant_config.activation_scheme == "static":
+            return hpu_ops.apply_fp8_linear_hpu(
+                input=x,
+                weight=layer.weight,
+                weight_scale=layer.weight_scale,
+                input_scale=layer.input_scale,
+                bias=bias,
+                trans_B=False,
             )
 
         return self.fp8_linear.apply(input=x,
@@ -577,10 +589,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             # Allocate 2 scales for w1 and w3 respectively.
             # They will be combined to a single scale after weight loading.
             w13_weight_scale = torch.nn.Parameter(torch.ones(
-                num_experts, 2, dtype=torch.float32),
+                num_experts, 2 * intermediate_size_per_partition, dtype=torch.float32),
                                                   requires_grad=False)
             w2_weight_scale = torch.nn.Parameter(torch.ones(
-                num_experts, dtype=torch.float32),
+                num_experts, hidden_size, dtype=torch.float32),
                                                  requires_grad=False)
             layer.register_parameter("w13_weight_scale", w13_weight_scale)
             layer.register_parameter("w2_weight_scale", w2_weight_scale)
@@ -613,7 +625,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         extra_weight_attrs.update(
             {"quant_method": FusedMoeWeightScaleSupported.BLOCK.
              value} if self.block_quant else
-            {"quant_method": FusedMoeWeightScaleSupported.TENSOR.value})
+            {"quant_method": FusedMoeWeightScaleSupported.CHANNEL.value})
         # If loading fp8 checkpoint, pass the weight loaders.
         # If loading an fp16 checkpoint, do not (we will quantize in
         #   process_weights_after_loading()
