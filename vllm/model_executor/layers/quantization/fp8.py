@@ -33,13 +33,14 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
     cutlass_fp8_supported, maybe_create_device_identity,
     normalize_e4m3fn_to_e4m3fnuz, per_tensor_dequantize,
     requantize_with_max_scale)
+from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 from vllm.model_executor.parameter import (BlockQuantScaleParameter,
                                            ModelWeightParameter,
                                            PerTensorScaleParameter)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
-from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
+
 if current_platform.is_hpu():
     import vllm_hpu_extension.ops as hpu_ops
     from vllm_hpu_extension.ops import scaled_fp8_quant

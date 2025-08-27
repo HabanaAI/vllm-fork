@@ -26,10 +26,10 @@ from vllm.model_executor.layers.quantization.utils.marlin_utils_fp8 import (
     prepare_moe_fp8_layer_for_marlin)
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
     all_close_1d, normalize_e4m3fn_to_e4m3fnuz, per_tensor_dequantize)
+from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
-from vllm.model_executor.model_loader.weight_utils import gaudi_weight_wrapper
 
 logger = init_logger(__name__)
 
@@ -107,7 +107,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                       == QuantizationStrategy.TENSOR)
         per_channel = (
             self.weight_quant.strategy == QuantizationStrategy.CHANNEL
-            and self.input_quant.strategy == QuantizationStrategy.TOKEN)
+            and (self.input_quant.strategy == QuantizationStrategy.TOKEN or
+                self.input_quant.strategy == QuantizationStrategy.TENSOR)
+        )
         if not (per_tensor or per_channel):
             raise ValueError(
                 "For FP8 Fused MoE layers, we require per tensor "
@@ -115,10 +117,6 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                 f"{self.weight_quant}, {self.input_quant}")
 
         self.static_input_scales = not self.input_quant.dynamic
-        if self.static_input_scales and per_channel:
-            raise ValueError(
-                "For FP8 Fused MoE layer, we require either per tensor or "
-                "channelwise, dynamic per token quantization.")
 
         # For GPUs that lack FP8 hardware support, we can leverage the Marlin
         # kernel for fast weight-only FP8 quantization
