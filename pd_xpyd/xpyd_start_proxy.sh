@@ -3,51 +3,57 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_env.sh
 
 if [ -z "$1" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with default mode P=1, D=2, TP size=1, false"
+    echo "please input P instance number, D instance number, TP size of D instance, advanced/basic/benchmark proxy mode"
+    echo "run with default mode P=1, D=2, TP size=1, advanced"
     P_INSTANCE_NUMBER=1
     D_INSTANCE_NUMBER=2
     NUM_DECODE=8
-    FIRST_TOKEN_FROM_P=false
 else
     P_INSTANCE_NUMBER=$1
 fi
 
 if [ -z "$2" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with P=$P_INSTANCE_NUMBER, D=2, TP size=1, false"
+    echo "please input P instance number, D instance number, TP size of D instance, advanced/basic/benchmark proxy mode"
+    echo "run with P=$P_INSTANCE_NUMBER, D=2, TP size=1, advanced"
     D_INSTANCE_NUMBER=2
     TP_SIZE=1
     NUM_DECODE=$((8 / TP_SIZE))
-    FIRST_TOKEN_FROM_P=false
 else
     D_INSTANCE_NUMBER=$2
 fi
 
 if [ -z "$3" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=1, false"
+    echo "please input P instance number, D instance number, TP size of D instance, advanced/basic/benchmark proxy mode"
+    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=1, advanced"
     TP_SIZE=1
     NUM_DECODE=$((8 / TP_SIZE))
-    FIRST_TOKEN_FROM_P=false
 else
     TP_SIZE=$3
     NUM_DECODE=$((8 / TP_SIZE))
 fi
 
-if [ -z "$4" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=$TP_SIZE, false"
-    FIRST_TOKEN_FROM_P=false
-else
-    FIRST_TOKEN_FROM_P=$4
+PROXY_MODE=0
+
+if [ "$4" == "benchmark" ]; then
+    PROXY_MODE=2
+    echo " Benchmark mode enabled"
 fi
 
-BENCHMARK_MODE=0
+if [ "$4" == "basic" ]; then
+    PROXY_MODE=1
+    echo " Basic mode enabled"
+fi
+
+# For backward compatibility.....
 
 if [ "$5" == "benchmark" ]; then
-    BENCHMARK_MODE=1
+    PROXY_MODE=2
     echo " Benchmark mode enabled"
+fi
+
+if [ "$5" == "basic" ]; then
+    PROXY_MODE=1
+    echo " Basic mode enabled"
 fi
 
 #For OAM
@@ -80,8 +86,8 @@ for ((i=0; i<P_INSTANCE_NUMBER; i++)); do
     PREFILL_ARGS="$PREFILL_ARGS ${IP}:${PORT}"
 done
 
-if [ "$BENCHMARK_MODE" == "1" ]; then
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo_benchmark.py \
+if [ "$PROXY_MODE" == 2 ]; then
+    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_benchmark.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \
@@ -90,9 +96,14 @@ if [ "$BENCHMARK_MODE" == "1" ]; then
         --repeat_d_times 639 \
         --benchmark_mode"
 
+elif [ "$PROXY_MODE" == 0 ]; then
+    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_advanced.py \
+        --model $model_path \
+        --prefill $PREFILL_ARGS \
+        --decode $DECODE_ARGS \
+        --port 8868"
 else
-
-    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_demo.py \
+    CMD="python3 ./examples/online_serving/disagg_examples/disagg_proxy_basic.py \
         --model $model_path \
         --prefill $PREFILL_ARGS \
         --decode $DECODE_ARGS \

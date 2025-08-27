@@ -17,7 +17,7 @@ import uvicorn
 from colorlog.escape_codes import escape_codes
 from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
 from transformers import AutoTokenizer
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
@@ -50,7 +50,7 @@ def log_info_red(msg):
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=60 * 60 * 60,
                                         connect=60000,
                                         sock_read=120000,
-                                        sock_connect=3000)
+                                        sock_connect=30000)
 
 
 async def P_first_token_generator(generator_p,
@@ -157,6 +157,141 @@ class Proxy:
         self.router.post("/instances/add",
                          dependencies=[Depends(self.api_key_authenticate)
                                        ])(self.add_instance_endpoint)
+        self.router.get("/health", response_class=PlainTextResponse)(self.get_health)
+        self.router.get("/ping", response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/ping", response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/tokenize", response_class=JSONResponse)(self.post_tokenize)
+        self.router.post("/detokenize", response_class=JSONResponse)(self.post_detokenize)
+        self.router.get("/v1/models", response_class=JSONResponse)(self.get_models)
+        self.router.get("/version", response_class=JSONResponse)(self.get_version)
+        self.router.post("/v1/embeddings", response_class=JSONResponse)(self.post_embeddings)
+        self.router.post("/pooling", response_class=JSONResponse)(self.post_pooling)
+        self.router.post("/score", response_class=JSONResponse)(self.post_score)
+        self.router.post("/v1/score", response_class=JSONResponse)(self.post_scorev1)
+        self.router.post("/rerank", response_class=JSONResponse)(self.post_rerank)
+        self.router.post("/v1/rerank", response_class=JSONResponse)(self.post_rerankv1)
+        self.router.post("/v2/rerank", response_class=JSONResponse)(self.post_rerankv2)
+        self.router.post("/invocations", response_class=JSONResponse)(self.post_invocations)
+
+    async def get_from_instance(self, path: str, is_full_instancelist: int = 0):
+        if not self.prefill_instances:
+            return JSONResponse(content={"error": "No instances available"}, status_code=500)
+
+        if is_full_instancelist == 0:
+            instances = [self.prefill_instances[0]]
+        else:
+            instances = self.prefill_instances + self.decode_instances
+
+        results = {}
+        async with aiohttp.ClientSession() as session:
+            for inst in instances:
+                url = f"http://{inst}{path}"
+                try:
+                    async with session.get(url) as resp:
+                        try:
+                            data = await resp.json()
+                            dtype = "json"
+                        except aiohttp.ContentTypeError:
+                            data = await resp.text()
+                            dtype = "text"
+                        results[inst] = {
+                            "status": resp.status,
+                            "type": dtype,
+                            "data": data
+                        }
+                except Exception as e:
+                    results[inst] = {
+                        "status": 500,
+                        "error": str(e)
+                    }
+                    print(f"Failed to fetch {url}: {e}, continue...")
+
+        return JSONResponse(content=results, status_code=200)
+
+    async def get_version(self):
+        return await self.get_from_instance("/version")
+
+    async def get_models(self):
+        return await self.get_from_instance("/v1/models")
+
+    async def get_health(self):
+        return await self.get_from_instance("/health", is_full_instancelist=1)
+
+    async def get_ping(self):
+        return await self.get_from_instance("/ping", is_full_instancelist=1)
+
+    async def post_to_instance(
+        self,
+        request: Request,
+        path: str,
+        json_template: dict
+    ):
+        body = await request.json()
+
+        missing = [k for k in json_template.keys() if k not in body]
+        if missing:
+            return JSONResponse(
+                {"error": f"Missing required fields: {', '.join(missing)}"},
+                status_code=400
+            )
+
+        payload = json_template.copy()
+        payload.update(body)
+
+        url = f"http://{self.prefill_instances[0]}{path}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as resp:
+                    try:
+                        content = await resp.json()
+                    except aiohttp.ContentTypeError:
+                        content = {"raw": await resp.text()}
+                    return JSONResponse(content, status_code=resp.status)
+        except Exception as e:
+            return JSONResponse(
+                {"error": f"Failed to fetch {url}, reason: {str(e)}"},
+                status_code=500
+            )
+
+    async def post_detokenize(self, request: Request):
+        json_template = {"model": "", "tokens": []}
+        return await self.post_to_instance(request, "/detokenize", json_template)
+
+    async def post_tokenize(self, request: Request):
+        json_template = {"model": "", "prompt": ""}
+        return await self.post_to_instance(request, "/tokenize", json_template)
+
+    async def post_embeddings(self, request: Request):
+        json_template = {"model": "", "input": ""}
+        return await self.post_to_instance(request, "/v1/embeddings", json_template)
+
+    async def post_pooling(self, request: Request):
+        json_template = {"model": "", "messages": ""}
+        return await self.post_to_instance(request, "/pooling", json_template)
+
+    async def post_score(self, request: Request):
+        json_template = {"model": "", "text_1": "", "text_2": "", "predictions": ""}
+        return await self.post_to_instance(request, "/score", json_template)
+
+    async def post_scorev1(self, request: Request):
+        json_template = {"model": "", "text_1": "", "text_2": "", "predictions": ""}
+        return await self.post_to_instance(request, "/v1/score", json_template)
+
+    async def post_rerank(self, request: Request):
+        json_template = {"model": "", "query": "", "documents": ""}
+        return await self.post_to_instance(request, "/rerank", json_template)
+
+    async def post_rerankv1(self, request: Request):
+        json_template = {"model": "", "query": "", "documents": ""}
+        return await self.post_to_instance(request, "/v1/rerank", json_template)
+
+    async def post_rerankv2(self, request: Request):
+        json_template = {"model": "", "query": "", "documents": ""}
+        return await self.post_to_instance(request, "/v2/rerank", json_template)
+
+    async def post_invocations(self, request: Request):
+        json_template = {"model": "", "prompt": ""}
+        return await self.post_to_instance(request, "/invocations", json_template)
 
     async def validate_json_request(self, raw_request: Request):
         content_type = raw_request.headers.get("content-type", "").lower()
@@ -419,8 +554,13 @@ class Proxy:
                                               prefill_instance,
                                               decode_instance,
                                               req_len=total_length)
+            media_type = (
+                "text/event-stream"
+                if request.get("stream", False)
+                else "application/json"
+            )
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type=media_type)
             return response
         except Exception:
             import sys
@@ -494,8 +634,13 @@ class Proxy:
                                               prefill_instance,
                                               decode_instance,
                                               req_len=total_length)
+            media_type = (
+                "text/event-stream"
+                if request.get("stream", False)
+                else "application/json"
+            )
             response = StreamingResponse(final_generator,
-                                         media_type="application/json")
+                                         media_type=media_type)
             return response
         except Exception:
             exc_info = sys.exc_info()
