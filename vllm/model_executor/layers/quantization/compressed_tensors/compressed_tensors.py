@@ -621,9 +621,9 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
         return scheme.apply_weights(layer, x, bias=bias)
 
     def dequant_fp8_weight(self, layer: "CompressedTensorsW8A8Fp8") -> torch.Tensor:
-        if layer.strategy == QuantizationStrategy.CHANNEL:
+        if layer.scheme.strategy == QuantizationStrategy.CHANNEL.value:
             dequant_weight = layer.weight.to(layer.weight_scale.dtype) * layer.weight_scale.squeeze()
-            return dequant_weight.to(torch.bfloat16)
+            return dequant_weight.to(torch.bfloat16).t()
         else:
             raise NotImplementedError("Implemented per-channel dequantization only")
 
