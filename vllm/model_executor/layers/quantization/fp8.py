@@ -11,6 +11,7 @@ import vllm.envs as envs
 import os
 from vllm import _custom_ops as ops
 from vllm.distributed import get_tensor_model_parallel_world_size
+from vllm.distributed.parallel_state import get_dp_group
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import (FusedMoE, FusedMoEMethodBase,
@@ -771,8 +772,13 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         "Found input_scales that are not equal for "
                         "fp8 MoE layer. Using the maximum across experts "
                         "for each layer.")
+                local_w13_input_scale = layer.w13_input_scale.max()
+                if layer.dp_size > 1 and layer.dp_opt > 3:
+                    torch.distributed.all_reduce(local_w13_input_scale,\
+                        op=torch.distributed.ReduceOp.MAX,\
+                            group=get_dp_group().device_group)
                 layer.w13_input_scale = torch.nn.Parameter(
-                    layer.w13_input_scale.max(), requires_grad=False)
+                    local_w13_input_scale, requires_grad=False)
                 layer.w2_input_scale = torch.nn.Parameter(
                     layer.w2_input_scale.max(), requires_grad=False)
             # If rocm, normalize the weights and scales to e4m3fnuz
