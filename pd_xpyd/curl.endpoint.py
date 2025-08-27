@@ -2,7 +2,7 @@ import requests
 
 # vLLM API 基础 URL
 BASE_URL = "http://10.239.129.9:8868"
-MODEL_PATH = "/mnt/disk2/hf_models/DeepSeek-R1-G2/"
+MODEL_PATH = "/mnt/disk2/hf_models/DeepSeek-R1-G2-static/"
 # Endpoint 列表
 endpoints = [
     ("/openapi.json", ["GET", "HEAD"]),
