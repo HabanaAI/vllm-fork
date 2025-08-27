@@ -184,6 +184,44 @@ class MQLLMEngineClient(EngineClient):
         except Exception as e:
             self._set_errored(e)
 
+    # async def get_stats(self) -> Dict:
+    #     """Get engine statistics for load balancing"""
+    #     request = RPCGetStatsRequest()
+
+    #     # Create queue for response
+    #     queue: asyncio.Queue = asyncio.Queue()
+    #     self.output_queues[request.request_id] = queue
+
+    #     # Send request
+    #     request_bytes = pickle.dumps(request)
+    #     await self.input_socket.send_multipart((request_bytes,), copy=False)
+
+    #     # Wait for response
+    #     try:
+    #         response = await asyncio.wait_for(queue.get(), timeout=1.0)
+
+    #         if isinstance(response, BaseException):
+    #             raise response
+    #         elif isinstance(response, RPCGetStatsResponse):
+    #             return {
+    #                 'num_running': response.num_running,
+    #                 'num_waiting': response.num_waiting,
+    #                 'num_swapped': response.num_swapped,
+    #                 'kv_cache_usage': response.kv_cache_usage,
+    #                 'gpu_memory_usage': response.gpu_memory_usage,
+    #                 'rank': response.rank
+    #             }
+    #         else:
+    #             raise ValueError(f"Unexpected response type: {type(response)}")
+    #     finally:
+    #         self.output_queues.pop(request.request_id, None)
+
+    # def set_rank(self, rank: int, dp_size: int):
+    #     """Set the DP rank for this engine"""
+    #     request = RPCSetRankRequest(rank=rank, dp_size=dp_size)
+    #     # Fire and forget
+    #     self.input_socket.send_multipart((pickle.dumps(request),), copy=False)
+
     async def run_output_handler_loop(self):
         """Get RequestOutputs from Engine and stream to Request Queues"""
 
@@ -270,7 +308,6 @@ class MQLLMEngineClient(EngineClient):
 
     async def setup(self):
         """Setup the client before it starts sending server requests."""
-
         # Start output_loop
         if self.output_loop is None:
             # only generate once to avoid multiple concurrent output_loops
@@ -284,7 +321,6 @@ class MQLLMEngineClient(EngineClient):
         with self.get_data_socket() as socket:
             # Wait until server is ready.
             response = await self._wait_for_server_rpc(socket)
-
             self.tracing_flag = response.tracing_enabled
 
             # Start health_loop.

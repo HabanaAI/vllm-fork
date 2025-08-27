@@ -49,7 +49,14 @@ class DPMetadata:
                                          device="cpu",
                                          dtype=torch.int32)
         from vllm.distributed.parallel_state import get_dp_group
-        dist.all_reduce(num_tokens_tensor, group=get_dp_group().cpu_group)
+        if current_platform.is_hpu():
+            # HPU: reduce on device
+            t = num_tokens_tensor.to("hpu")
+            dist.all_reduce(t, group=get_dp_group().device_group)
+            num_tokens_tensor = t.to("cpu")
+        else:
+            # CUDA path (with Gloo CPU group available)
+            dist.all_reduce(num_tokens_tensor, group=get_dp_group().cpu_group)
         return num_tokens_tensor
 
     @staticmethod
@@ -153,38 +160,62 @@ def set_forward_context(attn_metadata: Any,
                                              device="cpu",
                                              dtype=torch.int32)
             from vllm.distributed.parallel_state import get_dp_group
-            dist.all_reduce(num_tokens_tensor, group=get_dp_group().cpu_group)
+            if current_platform.is_hpu():
+                # HPU: reduce on device
+                t = num_tokens_tensor.to("hpu")
+                dist.all_reduce(t, group=get_dp_group().device_group)
+                num_tokens_tensor = t.to("cpu")
+            else:
+                # CUDA path (with Gloo CPU group available)
+                dist.all_reduce(num_tokens_tensor,
+                                group=get_dp_group().cpu_group)
         cu_tokens_across_dp_cpu = torch.cumsum(num_tokens_tensor, dim=0)
+        max_tokens_across_dp_cpu = torch.max(num_tokens_tensor)
 
         assert current_platform is not None, "current_platform is None"  # noqa
-        if current_platform.is_hpu():  # noqa
-            num_experts_per_tok = 0
-            num_experts_per_tok = getattr(
-                vllm_config.model_config.hf_text_config, "num_experts_per_tok",
-                0)
-            assert num_experts_per_tok > 0, \
-                "No expert found in the model config.\
-                    Please check the model config."
+        if current_platform.is_hpu():
+            # Only take the MoE path if this is actually an MoE model
+            num_experts_per_tok = int(
+                getattr(vllm_config.model_config.hf_text_config,
+                        "num_experts_per_tok", 0))
+            is_moe = num_experts_per_tok > 0
+            if is_moe:
+                request_batch_size = attn_metadata.slot_mapping.size(0)
+                padded_seq_length = attn_metadata.slot_mapping.size(1)
+                hidden_size = vllm_config.model_config.get_hidden_size()
+                device = attn_metadata.slot_mapping.device
+                dtype = vllm_config.model_config.dtype
 
-            request_batch_size = attn_metadata.slot_mapping.size(0)
-            padded_seq_length = attn_metadata.slot_mapping.size(1)
-            hidden_size = vllm_config.model_config.get_hidden_size()
-            device = attn_metadata.slot_mapping.device
-            dtype = vllm_config.model_config.dtype
-            hidden_states_across_dp = torch.empty(
-                (request_batch_size * dp_size, padded_seq_length, hidden_size),
-                device=device,
-                dtype=dtype)
-            topk_ids_across_dp = torch.empty((batchsize * dp_size,\
-                num_experts_per_tok), device=device, dtype=torch.int64)
-            topk_weights_across_dp = torch.empty((batchsize * dp_size,\
-                num_experts_per_tok), device=device, dtype=dtype)
-            hidden_states = torch.empty((batchsize, hidden_size),\
-                device=device, dtype=dtype)
-            dp_metadata = DPMetadata(cu_tokens_across_dp_cpu,
-                                     hidden_states_across_dp,
-                                     topk_ids_across_dp,
-                                     topk_weights_across_dp, hidden_states)
+                hidden_states_across_dp = torch.empty(
+                    (request_batch_size * dp_size, padded_seq_length,
+                     hidden_size),
+                    device=device,
+                    dtype=dtype)
+                topk_ids_across_dp = torch.empty(
+                    (batchsize * dp_size, num_experts_per_tok),
+                    device=device,
+                    dtype=torch.int64)
+                topk_weights_across_dp = torch.empty(
+                    (batchsize * dp_size, num_experts_per_tok),
+                    device=device,
+                    dtype=dtype)
+                hidden_states = torch.empty((batchsize, hidden_size),
+                                            device=device,
+                                            dtype=dtype)
+                dp_metadata = DPMetadata(
+                    max_tokens_across_dp_cpu=max_tokens_across_dp_cpu,
+                    cu_tokens_across_dp_cpu=cu_tokens_across_dp_cpu,
+                    hidden_states_across_dp=hidden_states_across_dp,
+                    topk_ids_across_dp=topk_ids_across_dp,
+                    topk_weights_across_dp=topk_weights_across_dp,
+                    hidden_states=hidden_states,
+                )
+            else:
+                # Non-MoE on HPU: populate the standard fields only
+                dp_metadata = DPMetadata(
+                    max_tokens_across_dp_cpu=max_tokens_across_dp_cpu,
+                    cu_tokens_across_dp_cpu=cu_tokens_across_dp_cpu,
+                )
         else:
             dp_metadata = DPMetadata.make(vllm_config.parallel_config,
                                           attn_metadata, num_tokens or 0,
@@ -216,7 +247,6 @@ def set_forward_context(attn_metadata: Any,
             # we use synchronous scheduling right now,
             # adding a sync point here should not affect
             # scheduling of the next batch
-            from vllm.platforms import current_platform
             synchronize = current_platform.synchronize
             if synchronize is not None:
                 synchronize()

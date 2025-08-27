@@ -231,7 +231,6 @@ class OpenAIServingChat(OpenAIServing):
 
                 trace_headers = (None if raw_request is None else await
                                  self._get_trace_headers(raw_request.headers))
-
                 if isinstance(sampling_params, BeamSearchParams):
                     generator = self.engine_client.beam_search(
                         prompt=engine_prompt,
@@ -263,7 +262,6 @@ class OpenAIServingChat(OpenAIServing):
             return self.chat_completion_stream_generator(
                 request, result_generator, request_id, model_name,
                 conversation, tokenizer, request_metadata)
-
         try:
             return await self.chat_completion_full_generator(
                 request, result_generator, request_id, model_name,

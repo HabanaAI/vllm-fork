@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import partial
 from http import HTTPStatus
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Optional, List
 
 import prometheus_client
 import regex as re
@@ -33,6 +33,7 @@ from starlette.concurrency import iterate_in_threadpool
 from starlette.datastructures import State
 from starlette.routing import Mount
 from typing_extensions import assert_never
+import torch.distributed as dist
 
 import vllm.envs as envs
 from vllm.config import VllmConfig
@@ -103,6 +104,11 @@ from vllm.utils import (Device, FlexibleArgumentParser, get_open_zmq_ipc_path,
 from vllm.v1.metrics.prometheus import get_prometheus_registry
 from vllm.version import __version__ as VLLM_VERSION
 
+# START: Data Parallelism Imports
+import hashlib
+import time
+# END: Data Parallelism Imports
+
 TIMEOUT_KEEP_ALIVE = 5  # seconds
 
 prometheus_multiproc_dir: tempfile.TemporaryDirectory
@@ -160,6 +166,30 @@ async def build_async_engine_client(
         yield engine
 
 
+def run_mp_engine_with_device(vllm_config, usage_context, ipc_path,
+                              disable_log_stats, disable_log_requests,
+                              engine_alive, rank):
+    # This function is the target for each independent engine process.
+    # We pin the process to a specific device.
+    os.environ["HABANA_VISIBLE_DEVICES"] = str(rank)
+
+    # Unset any inherited distributed environment variables
+    # to ensure this process starts in its own isolated world.
+    os.environ.pop("MASTER_ADDR", None)
+    os.environ.pop("MASTER_PORT", None)
+    os.environ.pop("RANK", None)
+    os.environ.pop("WORLD_SIZE", None)
+    os.environ.pop("LOCAL_RANK", None)
+
+    try:
+        run_mp_engine(vllm_config, usage_context, ipc_path, disable_log_stats,
+                      disable_log_requests, engine_alive)
+        print(f"[PID {os.getpid()}] ENGINE COMPLETED SUCCESSFULLY", flush=True)
+    except Exception as e:
+        print(f"[PID {os.getpid()}] ENGINE FAILED: {e}", flush=True)
+        raise
+
+
 @asynccontextmanager
 async def build_async_engine_client_from_engine_args(
     engine_args: AsyncEngineArgs,
@@ -173,6 +203,100 @@ async def build_async_engine_client_from_engine_args(
 
     Returns the Client or None if the creation failed.
     """
+    # Use engine_args instead of args
+    dp_size = getattr(engine_args, 'data_parallel_size', 1)
+    # ===================================================================
+    # START: DATA PARALLELISM LOGIC (Corrected and Integrated)
+    # ===================================================================
+    if dp_size > 1:
+        # 1. Set up multiprocessing context and prometheus directory
+        logger.info(f"Initializing Data Parallelism with {dp_size} engines.")
+        if "PROMETHEUS_MULTIPROC_DIR" not in os.environ:
+            global prometheus_multiproc_dir
+            prometheus_multiproc_dir = tempfile.TemporaryDirectory()
+            os.environ[
+                "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name
+
+        try:
+            multiprocessing.set_start_method("spawn", force=True)
+        except RuntimeError:
+            pass  # Already set
+        context = multiprocessing.get_context("spawn")
+
+        # 2. Launch all engine subprocesses
+        engine_processes: List[multiprocessing.Process] = []
+        engine_clients: List[MQLLMEngineClient] = []
+
+        for rank in range(dp_size):
+            # Create a dedicated, isolated config for each worker.
+            # Each worker will think it's a single, standalone engine.
+            worker_config = engine_args.create_engine_config()
+            worker_config.parallel_config.data_parallel_size = 1
+            worker_config.parallel_config.world_size = 1
+            ipc_path = get_open_zmq_ipc_path()
+            engine_alive = context.Value('b', True, lock=False)
+
+            process = context.Process(
+                target=run_mp_engine_with_device,
+                args=(worker_config, UsageContext.OPENAI_API_SERVER, ipc_path,
+                      engine_args.disable_log_stats,
+                      engine_args.disable_log_requests, engine_alive, rank),
+                daemon=True,
+                name=f"vllm-independent-engine-{rank}")
+            process.start()
+            engine_processes.append(process)
+            logger.info(
+                f"Launched engine process with PID {process.pid} for rank {rank}"
+            )
+
+            client = MQLLMEngineClient(ipc_path=ipc_path,
+                                       engine_config=worker_config,
+                                       engine_pid=process.pid)
+            engine_clients.append(client)
+
+        # 3. Concurrently wait for all clients to be ready (solves deadlock)
+        try:
+            setup_tasks = [client.setup() for client in engine_clients]
+            await asyncio.gather(*setup_tasks)
+            logger.info("All data parallel engine clients are ready.")
+
+            # This wrapper will distribute requests in a round-robin fashion.
+            from typing import AsyncGenerator
+
+            class DPEngineClient:
+
+                def __init__(self, clients):
+                    self.clients = clients
+                    self.current = 0
+
+                async def generate(self, *args, **kwargs) -> AsyncGenerator:
+                    # Pick the next engine in the cycle for the next request.
+                    client = self.clients[self.current]
+                    self.current = (self.current + 1) % len(self.clients)
+
+                    # Forward the request to the chosen engine and stream results.
+                    async for result in client.generate(*args, **kwargs):
+                        yield result
+
+                def __getattr__(self, name):
+                    return getattr(self.clients[0], name)
+
+            yield DPEngineClient(engine_clients)
+
+        finally:
+            # 4. Cleanup logic
+            logger.info("Shutting down all data parallel engines.")
+            for client in engine_clients:
+                client.close()
+            for process in engine_processes:
+                process.terminate()
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.kill()
+        return
+    # ===================================================================
+    # END: DATA PARALLELISM LOGIC
+    # ===================================================================
 
     # Create the EngineConfig (determines if we can use V1).
     usage_context = UsageContext.OPENAI_API_SERVER
@@ -228,7 +352,7 @@ async def build_async_engine_client_from_engine_args(
             # Make TemporaryDirectory for prometheus multiprocessing
             # Note: global TemporaryDirectory will be automatically
             #   cleaned up upon exit.
-            global prometheus_multiproc_dir
+            # global prometheus_multiproc_dir
             prometheus_multiproc_dir = tempfile.TemporaryDirectory()
             os.environ[
                 "PROMETHEUS_MULTIPROC_DIR"] = prometheus_multiproc_dir.name

@@ -4,7 +4,7 @@
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Mapping, Optional, Union, overload
+from typing import List, Mapping, Optional, Union, overload, Dict, Any
 
 from typing_extensions import deprecated
 
@@ -167,14 +167,40 @@ class RPCAdapterLoadedResponse:
     request_id: str
 
 
+@dataclass
+class RPCGetStatsRequest:
+    """Request engine statistics for load balancing"""
+    request_id: str = "stats"
+
+
+@dataclass
+class RPCGetStatsResponse:
+    """Engine statistics response"""
+    request_id: str
+    num_running: int
+    num_waiting: int
+    num_swapped: int
+    kv_cache_usage: float
+    gpu_memory_usage: float
+    rank: int
+
+
+# @dataclass
+# class RPCSetRankRequest:
+#     """Set the DP rank for this engine"""
+#     rank: int
+#     dp_size: int
+
 RPC_REQUEST_T = Union[RPCProcessRequest, RPCAbortRequest, RPCStartupRequest,
                       RPCUProfileRequest, RPCLoadAdapterRequest,
                       RPCResetMultiModalCacheRequest,
                       RPCResetPrefixCacheRequest, RPCSleepRequest,
-                      RPCWakeUpRequest, RPCIsSleepingRequest]
+                      RPCWakeUpRequest, RPCIsSleepingRequest,
+                      RPCGetStatsRequest]  # Added these two
 
 REQUEST_OUTPUTS_T = Union[List[RequestOutput], RPCAdapterLoadedResponse,
-                          RPCIsSleepingResponse, RPCError]
+                          RPCIsSleepingResponse, RPCError,
+                          RPCGetStatsResponse]  # Added this one
 
 
 def ENGINE_DEAD_ERROR(

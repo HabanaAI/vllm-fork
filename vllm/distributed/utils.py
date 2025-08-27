@@ -23,7 +23,7 @@ from torch.distributed.distributed_c10d import (Backend, PrefixStore,
                                                 _get_default_timeout,
                                                 _unregister_process_group)
 from torch.distributed.rendezvous import rendezvous
-
+from vllm.platforms import current_platform
 import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.utils import get_tcp_uri, is_torch_equal_or_newer
@@ -490,8 +490,28 @@ def stateless_init_torch_distributed_process_group(
     always formed with process 1, 2, ..., 8, and the additional communication
     channel is formed with process 9 and 10.
     """
+    # When world_size > 1 and we're in a data parallel setup,
+    # we need to use the environment variables for rendezvous
+    # When using the api_server.py launcher, these env vars will be set.
+    if "MASTER_ADDR" in os.environ and "MASTER_PORT" in os.environ:
+        import torch.distributed as dist
+
+        # This is the ONLY path that should be taken.
+        # It correctly uses the environment for a stable rendezvous.
+        if current_platform.is_hpu():
+            backend = "hccl"
+        else:
+            backend = "gloo"
+        dist.init_process_group(
+            backend=backend,  # Use the correct backend for HPU
+            init_method="env://",  # Use the environment variables
+        )
+        return dist.group.WORLD
+
+    # Always use TCP init method to maintain stateless behavior
     init_method = get_tcp_uri(host, port)
     backend = Backend(backend)  # it is basically string
+    # print(f"------> {backend=} This is after Backend(backend)")
     timeout = _get_default_timeout(backend)
 
     store, rank, world_size = next(
@@ -511,7 +531,7 @@ def stateless_init_torch_distributed_process_group(
                                        group_rank=group_rank,
                                        group_size=group_size,
                                        timeout=timeout)
-    from vllm.platforms import current_platform
+
     return current_platform.stateless_init_device_torch_dist_pg(
         backend=backend,
         prefix_store=prefix_store,

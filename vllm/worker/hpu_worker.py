@@ -483,6 +483,7 @@ def init_worker_distributed_environment(
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+
     parallel_config = vllm_config.parallel_config
     backend = hpu_backend_string()
     init_distributed_environment(parallel_config.world_size,
@@ -495,6 +496,7 @@ def init_worker_distributed_environment(
                                       parallel_config.pipeline_parallel_size)
 
     if parallel_config.pipeline_parallel_size > 1:
+        print(f"----> parallel_config.pipeline_parallel_size > 1")
         # torch-ccl xpu need a collective API warm up
         # before calling send/recv API
         get_pp_group().all_reduce(torch.zeros(1).to('hpu'))
@@ -509,19 +511,32 @@ def init_worker_distributed_environment(
                 "parallel_config.data_parallel_size "
                 f"({torch_world_size} vs. {expected_size}).")
     elif not distributed_init_method:
+        print(f"----> not distributed_init_method")
         raise ValueError(
             "distributed_init_method must be set if torch.distributed "
             "is not already initialized")
     else:
         backend = hpu_backend_string()
-        torch.distributed.init_process_group(
-            backend=backend,
-            world_size=parallel_config.world_size,
-            rank=rank,
-            init_method=distributed_init_method,
-        )
+        print(f"----> else hpu_backend_string = {backend=}")
+        # Always use env:// when environment variables are set
+        if "MASTER_ADDR" in os.environ and "MASTER_PORT" in os.environ:
+            torch.distributed.init_process_group(
+                backend=backend,
+                init_method="env://",
+            )
+        else:
+            torch.distributed.init_process_group(
+                backend=backend,
+                world_size=parallel_config.world_size,
+                rank=rank,
+                init_method=distributed_init_method,
+            )
+            # world_size=parallel_config.world_size,
+            # rank=rank,
 
-    # A small all_reduce for warmup & checking conformance.
+
+#             init_method=distributed_init_method,
+# A small all_reduce for warmup & checking conformance.
     device = hpu_device_string()
     dummy_tensor_hpu = torch.ones(1).to(device)
     torch.distributed.all_reduce(dummy_tensor_hpu)
@@ -530,6 +545,9 @@ def init_worker_distributed_environment(
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
     ensure_kv_transfer_initialized(vllm_config)
+    print(
+        f"[PID {os.getpid()}] SUCCESS: init_worker_distributed_environment completed. {rank=}",
+        flush=True)
 
 
 def raise_if_cache_size_invalid(num_gpu_blocks, block_size, max_model_len,

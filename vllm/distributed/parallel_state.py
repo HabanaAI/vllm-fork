@@ -24,6 +24,7 @@ If you only need to use the distributed environment without model/pipeline
 """
 import contextlib
 import gc
+import os
 import pickle
 import weakref
 from collections import namedtuple
@@ -922,18 +923,34 @@ def init_distributed_environment(
     from vllm.config import get_current_vllm_config
     config = get_current_vllm_config()
     if config is not None and config.parallel_config.data_parallel_size > 1:
-        parallel_config = config.parallel_config
-        # adjust to take into account data parallelism
-        # offset the rank by the data parallel rank
-        rank = parallel_config.data_parallel_rank * world_size + rank
-        # adjust the world size to take into account data parallelism
-        world_size = parallel_config.world_size_across_dp
-        ip = parallel_config.data_parallel_master_ip
-        port = parallel_config.get_next_dp_init_port()
-        distributed_init_method = get_distributed_init_method(ip, port)
-        logger.info(
-            "Adjusting world_size=%d rank=%d distributed_init_method=%s for DP",
-            world_size, rank, distributed_init_method)
+        if "MASTER_ADDR" in os.environ and "MASTER_PORT" in os.environ:
+            distributed_init_method = "env://"
+            rank = int(os.environ["RANK"])
+            world_size = int(os.environ["WORLD_SIZE"])
+            local_rank = int(os.environ["LOCAL_RANK"])
+            logger.info(
+                "Using 'env://' for DP initialization. "
+                "world_size=%d rank=%d local_rank=%d", world_size, rank,
+                local_rank)
+            print(
+                f"[init_dist] about to init, env:// "
+                f"MASTER_ADDR={os.environ.get('MASTER_ADDR')} "
+                f"MASTER_PORT={os.environ.get('MASTER_PORT')} "
+                f"RANK={rank} WORLD_SIZE={world_size} LOCAL_RANK={local_rank}",
+                flush=True)
+        else:
+            parallel_config = config.parallel_config
+            # adjust to take into account data parallelism
+            # offset the rank by the data parallel rank
+            rank = parallel_config.data_parallel_rank * world_size + rank
+            # adjust the world size to take into account data parallelism
+            world_size = parallel_config.world_size_across_dp
+            ip = parallel_config.data_parallel_master_ip
+            port = parallel_config.get_next_dp_init_port()
+            distributed_init_method = get_distributed_init_method(ip, port)
+            logger.info(
+                "Adjusting world_size=%d rank=%d distributed_init_method=%s for DP",
+                world_size, rank, distributed_init_method)
     if not torch.distributed.is_initialized():
         assert distributed_init_method is not None, (
             "distributed_init_method must be provided when initializing "
@@ -944,6 +961,7 @@ def init_distributed_environment(
             init_method=distributed_init_method,
             world_size=world_size,
             rank=rank)
+
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816
