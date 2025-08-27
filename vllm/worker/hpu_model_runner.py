@@ -1018,19 +1018,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.multi_modal_input_mapper = self.mm_registry \
             .create_input_mapper(self.model_config)
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
-        #TODO: This used to be initizlied in some other place, need to validate
-        #If this would work both for Qwen and Gemma.
-        '''
-        @property
-        def model_is_mrope(self) -> bool:
-            self._model_is_mrope = getattr(self, '_model_is_mrope', None)
-            if self._model_is_mrope is None:
-                config = self.model_config.hf_config
-                self._model_is_mrope = uses_mrope(config)
-            return self._model_is_mrope
-        '''
-        self.is_mm_optimized = is_mm_optimized(model)
-        self.model_is_mrope = uses_mrope(model_config)
+        self.is_mm_optimized = is_mm_optimized(self.model_config)
+        self.model_is_mrope = uses_mrope(self.model_config)
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
@@ -1495,9 +1484,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                        non_blocking=True)
 
     def add_vision_buckets_to_mrope_mm_optimized(self):
-        if self.mm_registry is not None:
-            if self.model_is_mrope or self.is_mm_optimized:
-                model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+        if self.model_is_mrope or self.is_mm_optimized:
+            model.vision_buckets = VisionBuckets(self.is_mm_optimized)
 
     def _prepare_prompt(
         self,
@@ -2807,7 +2795,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
         # Using batch_size 1 is profile multimodal models
-        max_batch_size = max_batch_size if self.mm_registry is None else 1
+        if self.model_is_mrope or self.is_mm_optimized:
+            max_batch_size =  1
 
         if self.model_is_mrope or self.is_mm_optimized:
             model = self.get_model()
