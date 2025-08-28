@@ -95,7 +95,7 @@ if TYPE_CHECKING:
     VLLM_DP_SIZE: int = 1
     VLLM_DP_MASTER_IP: str = ""
     VLLM_DP_MASTER_PORT: int = 0
-    VLLM_DP_OPT: int = 3
+    VLLM_DP_OPT: int = 4
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
     VLLM_SKIP_PREFILL_SAMPLING: bool = False
 
@@ -624,10 +624,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # | 0           | False            | False                       | False             |
     # | 1           | False            | False                       | False             |
     # | 2           | True             | False                       | False             |
-    # | 3(default)  | True             | True                        | False             |
-    # | 4           | True             | True                        | True              |
+    # | 3           | True             | True                        | False             |
+    # | 4(default)  | True             | True                        | True              |
     "VLLM_DP_OPT":
-    lambda: int(os.getenv("VLLM_DP_OPT", "3")),
+    lambda: int(os.getenv("VLLM_DP_OPT", "4")),
 
     # When running pipeline parallelism on multiple nodes the primary
     # communication channel for parallel communications may not be able
