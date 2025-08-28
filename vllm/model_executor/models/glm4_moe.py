@@ -396,7 +396,6 @@ class Glm4MoeModel(nn.Module):
                 prefix=f"{prefix}.embed_tokens")
         else:
             self.embed_tokens = PPMissingLayer()
-        import os
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
             lambda prefix: Glm4MoeDecoderLayer(
