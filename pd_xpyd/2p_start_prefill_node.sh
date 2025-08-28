@@ -6,5 +6,9 @@ export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g12}.json
 
 source "$BASH_DIR"/dp_p_env.sh
 
+ray stop --force
+
+sleep 3s
+
 ray start --address="${2:-10.239.129.9:6886}"
 

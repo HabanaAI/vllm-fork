@@ -11,8 +11,11 @@ export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g10}.json
 
 source "$BASH_DIR"/dp_p_env.sh
 
-ray start --head --port=6886
+ray stop --force
 
+sleep 3s
+
+ray start --head --port=6886
 
 while true; do
     read -p "Continue? (y): " answer

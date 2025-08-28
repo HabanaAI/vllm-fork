@@ -10,6 +10,10 @@ unset VLLM_USE_V1
 unset VLLM_DP_MASTER_IP
 unset VLLM_DP_MASTER_PORT
 
+ray stop --force
+
+sleep 3s
+
 ray start --address="${2:-10.239.129.81:8826}"
 
 
