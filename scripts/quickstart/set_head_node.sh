@@ -3,9 +3,16 @@
 # set -x
 # parameters to be changed
 # set IP address of header node
-export VLLM_HOST_IP=
+export VLLM_HOST_IP=10.112.242.154
 # set NIC interface name of worker IP address
-export GLOO_SOCKET_IFNAME=
+export GLOO_SOCKET_IFNAME=enx6c1ff7015630
+
+export HCCL_OVER_OFI=1
+export HCCL_GAUDI_DIRECT=1
+export HCCL_SOCKET_IFNAME=enp24s0f0np0
+export LD_LIBRARY_PATH=/opt/libfabric/lib
+
+export VLLM_SKIP_WARMUP=true
 
 # warmup cache folder
 export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k_1k_20k_16k,false,32768

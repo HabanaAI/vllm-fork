@@ -30,7 +30,7 @@ export VLLM_EP_SIZE=8
 export VLLM_DELAYED_SAMPLING="false"
 export VLLM_MLA_PERFORM_MATRIX_ABSORPTION=0
 
-export VLLM_USE_ASYNC_TRANSFER_IN_PD=1
+export VLLM_USE_ASYNC_TRANSFER_IN_PD=0
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
 
 block_size=128
@@ -58,7 +58,8 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 INC_FP8=0
 
 if [ "$INC_FP8" -eq 1 ]; then
-  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+  #model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+  model_path=/host/mnt/disk001/HF_Models/DeepSeek-R1
 else
   model_path=/host/mnt/disk002/HF_Models/DeepSeek-R1-Gaudi3/
 fi

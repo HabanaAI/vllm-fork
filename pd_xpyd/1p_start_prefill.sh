@@ -12,7 +12,10 @@ BENCHMARK_MODE=0
 export VLLM_TORCH_PROFILER_DIR=./profiles
 export VLLM_PROFILER_ENABLED=full
 export VLLM_PROFILE_CONFIG_PATH=profile_config.json
+export HABANA_PROFILE_WRITE_HLTV=1
+export HABANA_PROFILE=profile_api_with_nics
 
+echo $2
 if [ "$2" == "benchmark" ]; then
     BENCHMARK_MODE=1
     sed -i 's/export VLLM_USE_ASYNC_TRANSFER_IN_PD=.*/export VLLM_USE_ASYNC_TRANSFER_IN_PD=0/' $BASH_DIR/pd_env.sh
@@ -65,8 +68,8 @@ python3 -m vllm.entrypoints.openai.api_server \
   --gpu-memory-utilization "$VLLM_GPU_MEMORY_UTILIZATION" \
   -tp 8 \
   --max-num-seqs "$max_num_seqs" \
-  --trust-remote-code \
   --disable-async-output-proc \
+  --trust-remote-code \
   --disable-log-requests \
   --max-num-batched-tokens "$max_num_batched_tokens" \
   --use-padding-aware-scheduling \
@@ -74,3 +77,4 @@ python3 -m vllm.entrypoints.openai.api_server \
   --distributed_executor_backend mp \
   $kv_cache_dtype_arg \
   --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_producer"}' 2>&1 | tee "$log_file"
+  

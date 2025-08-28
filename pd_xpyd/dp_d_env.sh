@@ -13,12 +13,19 @@ export VLLM_GRAPH_PROMPT_RATIO=0
 export VLLM_DELAYED_SAMPLING="true"
 
 # params
-model_len=8192
-max_num_batched_tokens=8192
-max_num_seqs=32
+#model_len=16384
+#max_num_batched_tokens=16384
+#max_num_seqs=512
+#input_min=2048
+#input_max=3584
+#output_max=1024
+
+model_len=40960
+max_num_batched_tokens=40960
+max_num_seqs=256
 input_min=128
-input_max=8192
-output_max=8192
+input_max=32768
+output_max=4096
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
@@ -27,16 +34,16 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 
 set_bucketing
 
+
+export VLLM_DECODE_BS_BUCKET_STEP=1
+export VLLM_DECODE_BLOCK_BUCKET_STEP=2
+
 export VLLM_PROMPT_BS_BUCKET_MIN=1
 export VLLM_PROMPT_BS_BUCKET_STEP=1
 export VLLM_PROMPT_BS_BUCKET_MAX=1
 export VLLM_PROMPT_SEQ_BUCKET_MIN=1
 export VLLM_PROMPT_SEQ_BUCKET_STEP=128
 export VLLM_PROMPT_SEQ_BUCKET_MAX=1
-
-#export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
-export VLLM_DECODE_BS_BUCKET_STEP=16
-export VLLM_DECODE_BLOCK_BUCKET_STEP=64
 
 echo " environments are reseted "
 

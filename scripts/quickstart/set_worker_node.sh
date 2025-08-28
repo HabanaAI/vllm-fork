@@ -2,9 +2,24 @@
 
 # set -x
 # set IP address of worker node
-export VLLM_HOST_IP=
+export VLLM_HOST_IP=10.112.242.153
 # set NIC interface name of worker IP address
-export GLOO_SOCKET_IFNAME=
+export GLOO_SOCKET_IFNAME=enx0826ae300b44
+
+export HCCL_OVER_OFI=1
+export HCCL_GAUDI_DIRECT=1
+export HCCL_SOCKET_IFNAME=enp24s0f0np0
+export LD_LIBRARY_PATH=/opt/libfabric/lib
+
+export VLLM_TORCH_PROFILER_DIR=./profiles
+export VLLM_PROFILER_ENABLED=full
+export VLLM_PROFILE_CONFIG_PATH=/root/profile_config.json
+export HABANA_PROFILE_WRITE_HLTV=1
+export HABANA_PROFILE=profile_api_with_nics
+
+
+export VLLM_SKIP_WARMUP=true
+
 
 #warmup cache folder
 export PT_HPU_RECIPE_CACHE_CONFIG=/data/cache/cache_32k_1k_20k_16k,false,32768
