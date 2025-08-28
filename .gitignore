@@ -202,3 +202,7 @@ benchmarks/*.json
 # Linting
 actionlint
 shellcheck*/
+vllm-infqps-*.json
+Inc_fp8_*
+*.hltv
+#HabanaFusedOpLazy_*.pbtxt
