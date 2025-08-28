@@ -78,10 +78,10 @@ DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
 
 ### 5. Start decode servers(s): source dp0_xp2d_start_decode.sh / source dp1_xp2d_start_decode.sh
 
-### 6. Start proxy server: bash xpyd_start_proxy.sh x y z false
+### 6. Start proxy server: bash xpyd_start_proxy.sh x y
 
 ```bash
-# note: x for prefill nodes number, y for decode nodes number, z for decode tp size, false for first token from decode
+# note: x for prefill nodes number, y for decode nodes number
 ```
 
 ### 7. Launch client command for inference. --host ip is the proxy server ip
