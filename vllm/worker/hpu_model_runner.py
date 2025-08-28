@@ -1231,7 +1231,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
-                logger.info(f"INC MODEL: {self.model}")
             elif not is_fake_hpu():
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
