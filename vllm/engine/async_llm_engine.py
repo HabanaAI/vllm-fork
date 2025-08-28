@@ -196,6 +196,7 @@ class RequestTracker:
                     **engine_add_request_kwargs) -> AsyncStream:
         """Add a request to be sent to the engine on the next background
         loop iteration."""
+        s1 = time.perf_counter()
         if request_id in self._request_streams:
             raise KeyError(f"Request {request_id} already exists.")
 
@@ -208,8 +209,8 @@ class RequestTracker:
 
         self.new_requests_event.set()
 
-        if verbose:
-            logger.info("Added request %s.", request_id)
+        if True: #verbose:
+            logger.info("libin debug Added request %s time takes:%f.", request_id, time.perf_counter()-s1)
 
         return stream
 
@@ -281,6 +282,7 @@ class _AsyncLLMEngine(LLMEngine):
         """
         # these are cached outputs from previous iterations. None if on first
         # iteration
+        s1 = time.perf_counter()
         cached_outputs = self.cached_scheduler_outputs[virtual_engine]
         seq_group_metadata_list = cached_outputs.seq_group_metadata_list
         scheduler_outputs = cached_outputs.scheduler_outputs
@@ -323,10 +325,10 @@ class _AsyncLLMEngine(LLMEngine):
                     allow_async_output_proc)
         else:
             finished_requests_ids = list()
-
+        s2 = time.perf_counter()
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
-
+        s3 = s4 = s5 = 0
         if not scheduler_outputs.is_empty():
 
             # Check if we have a cached last_output from the previous iteration.
@@ -352,11 +354,11 @@ class _AsyncLLMEngine(LLMEngine):
             if allow_async_output_proc:
                 execute_model_req.async_callback = self.async_callbacks[
                     virtual_engine]
-
+            s3 = time.perf_counter()
             # Execute the model.
             outputs = await self.model_executor.execute_model_async(
                 execute_model_req)
-
+            s4 = time.perf_counter()
             # we need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
             if self.scheduler_config.is_multi_step:
@@ -365,7 +367,7 @@ class _AsyncLLMEngine(LLMEngine):
             if len(ctx.output_queue) > 0:
                 self._process_model_outputs(ctx=ctx)
             outputs = []
-
+        s5 =  time.perf_counter()
         # Finish the current step for all the sequence groups.
         if self.scheduler_config.is_multi_step:
             for seq_group in seq_group_metadata_list:
@@ -410,13 +412,14 @@ class _AsyncLLMEngine(LLMEngine):
         else:
             # Multi-step case
             return ctx.request_outputs
-
+        s6 =  time.perf_counter()
         if not self.has_unfinished_requests():
             # Drain async postprocessor (if exists)
             if len(ctx.output_queue) > 0:
                 self._process_model_outputs(ctx=ctx)
             assert len(ctx.output_queue) == 0
-
+        s7 =  time.perf_counter()
+        logger.info("libin debug async step total:{s7-s1=} | remain:{s2-s1=}| req:{s4-s3=}| exe:{s5-s4=}| o1:{s6-s5=}| o2:{s7-s6}| {execute_model_req=}")
         return ctx.request_outputs
 
     async def stop_remote_worker_execution_loop_async(self) -> None:
@@ -774,7 +777,7 @@ class AsyncLLMEngine(EngineClient):
         """Kick the engine to process the waiting requests.
 
         Returns True if there are in-progress requests."""
-
+        s1 = time.perf_counter()
         new_requests, aborted_requests = (
             self._request_tracker.get_new_and_aborted_requests())
 
@@ -782,6 +785,7 @@ class AsyncLLMEngine(EngineClient):
             # Add the request into the vLLM engine's waiting queue.
             try:
                 await self.engine.add_request_async(**new_request)
+                s2 = time.perf_counter()
             except ValueError as e:
                 # TODO: use a vLLM specific error for failed validation
                 self._request_tracker.process_exception(
@@ -794,7 +798,7 @@ class AsyncLLMEngine(EngineClient):
             await self._engine_abort(aborted_requests)
 
         request_outputs = await self.engine.step_async(virtual_engine)
-
+        s3 = time.perf_counter()
         # Put the outputs into the corresponding streams.
         # If used as a callback, then already invoked inside
         # LLMEngine's _process_model_outputs
@@ -805,7 +809,8 @@ class AsyncLLMEngine(EngineClient):
             # requests are finished
             all_finished = all(request_output.finished
                                for request_output in request_outputs)
-
+        s4 = time.perf_counter()
+        logger.info(f"libin debug engine_step add_req:{s2-s1}| step:{s3-s2}| output:{s4-s3}")
         return not all_finished
 
     def process_request_outputs(self, request_outputs) -> bool:

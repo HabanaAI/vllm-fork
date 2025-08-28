@@ -212,7 +212,7 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
     ) -> List[SamplerOutput]:
         if not self.tp_driver_workers:
             return await self.driver_exec_model(execute_model_req)
-
+        s1 = time.perf_counter()
         if self.pp_locks is None:
             # This locks each pipeline parallel stage so multiple virtual
             # engines can't execute on the same stage at the same time
@@ -222,20 +222,26 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
                 asyncio.Lock()
                 for _ in range(self.parallel_config.pipeline_parallel_size)
             ]
-
+        s2 = time.perf_counter()
         tasks = [
             asyncio.create_task(
                 _run_task_with_lock(self.driver_exec_model, self.pp_locks[0],
                                     execute_model_req))
         ]
+        s3 = time.perf_counter()
         for pp_rank, driver_worker in enumerate(self.tp_driver_workers,
                                                 start=1):
+            s4= time.perf_counter()
             tasks.append(
                 asyncio.create_task(
                     _run_task_with_lock(driver_worker.execute_method_async,
                                         self.pp_locks[pp_rank],
                                         "execute_model", execute_model_req)))
+            s5= time.perf_counter()
+            logger.info(f"libin debug _driver {pp_ranker=} | {driver_worker=} | time:{s5-s4} | {threading.get_ident()}")
         results = await asyncio.gather(*tasks)
+        s6 = time.perf_counter()
+        logger.info(f"libin debug _driver total:{s6-s1}| gather:{s6-s5}| task:{s3-s2}| lock:{s2-s1}| {threading.get_ident()}")
 
         # Only the last PP stage has the final results.
         return results[-1]

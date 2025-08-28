@@ -13,7 +13,7 @@ import gc
 import itertools
 import math
 import os
-import time
+import time,threading
 from array import array
 from contextlib import suppress
 from enum import Enum, IntEnum
@@ -3669,6 +3669,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         is_dummy_run: bool = False,
         is_pt_profiler_run: bool = False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        s1 = time.perf_counter()
+        s9=0
         self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
@@ -3714,6 +3716,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             output = self._decode_sampler_outputs(
                 model_input) if self.is_driver_worker else []
             torch.hpu.synchronize()
+        s2= time.perf_counter()
         if model_input.is_first_multi_step:
             # first multi-step
             if self.lora_config:
@@ -3722,20 +3725,26 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 self.set_active_loras(model_input.lora_requests,
                                       model_input.lora_mapping)
             # Rank!=0 workers has is_prompt==None
+            s3 =s4 =0
             if use_delayed_sampling and not model_input.is_prompt and \
                     model_input.input_tokens.size(1) == 1:
                 if self.is_driver_worker:
                     model_kwargs_broadcast_data = {
                         "input_tokens": model_input.input_tokens
                     }
+                    s3= time.perf_counter()
                     broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+                    s4= time.perf_counter()
                     input_tokens = model_input.input_tokens
 
                 else:
+                    s3= time.perf_counter()
                     model_kwargs_broadcast_data = broadcast_tensor_dict(src=0)
+                    s4= time.perf_counter()
                     input_tokens = model_kwargs_broadcast_data["input_tokens"]
             else:
                 input_tokens = model_input.input_tokens
+
             input_positions = model_input.input_positions
             attn_metadata = model_input.attn_metadata
             sampling_metadata = model_input.sampling_metadata
@@ -3796,7 +3805,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 model_input.multi_modal_kwargs[
                     'embed_is_patch'] = fix_embed_is_patch(
                         model_input.multi_modal_kwargs['embed_is_patch'])
-
+            input_s = input_tokens.shape
             execute_model_kwargs = {
                 "input_ids": input_tokens,
                 "positions": input_positions,
@@ -3830,6 +3839,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     {"bypass_hpu_graphs": not use_graphs})
 
             htorch.core.mark_step()
+            s6=time.perf_counter()
             if self.is_driver_worker:
                 model_event_name = ("model_"
                                     f"{phase}_"
@@ -3859,7 +3869,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             for i in range(num_steps):
                 if i != 0 and not self.is_driver_worker:
+                    t1 = time.perf_counter()
                     broadcast_data = broadcast_tensor_dict(src=0)
+                    logger.info(f"libin debug broadcast tasks receive:{time.perf_counter()-t1}")
                     if 'early_exit' in broadcast_data and broadcast_data[
                             'early_exit']:
                         return [output] if num_steps == 1 else []
@@ -3906,7 +3918,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bool(model_input.multi_modal_kwargs and \
                        'pixel_values' in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
+                s7=time.perf_counter()
+                from habana_frameworks.torch.hpu.metrics import metric_global
+                gc_metric = metric_global("graph_compilation")
 
+                logger.info(f"libin debug gc1 {self.is_driver_worker=} {gc_metric=} {threading.get_ident()}")
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if 'pixel_values' in execute_model_kwargs and \
@@ -3965,8 +3981,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     return [fake_output]
 
                 if not get_pp_group().is_last_rank:
+                   
                     return hidden_states
+                s8 = time.perf_counter()
 
+                gc_metric = metric_global("graph_compilation")
+
+                logger.info(f"libin debug gc2 {self.is_driver_worker=} {gc_metric=} {threading.get_ident()}")
                 # In case there are any logits processors pending
                 # we need to sync with host earlier
                 if use_delayed_sampling \
@@ -3993,6 +4014,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                        sampling_metadata)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
@@ -4028,9 +4050,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_inputs.append(model_input)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+                s9 = time.perf_counter()
+
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
                     model_input.async_callback()
+                
                 if i < num_steps - 1:
                     if i == 0:
                         if model_input.async_callback is not None:
@@ -4101,7 +4126,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         "attn_metadata": vars(result.attn_metadata),
                         "lora_mask": lora_mask,
                     }
+                    sb1 = time.perf_counter()
                     broadcast_tensor_dict(model_kwargs_broadcast_data, src=0)
+                    logger.info(f"libin debug broadcast takes:{time.perf_counter()-sb1} {self.is_driver_worker=} {is_prompt=}")
                 else:
                     try_revert_dummy_output_tokens()
 
@@ -4133,13 +4160,17 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if model_input.is_prompt:
                         output.prefill_hidden_states = hidden_states
                     output.hidden_states = hidden_states
-
+                s10 = time.perf_counter()
                 if use_delayed_sampling:
+                    s10 = time.perf_counter()
                     if self.is_driver_worker:
+                        logger.info(f"libin debug execute_model 1st step drvier time:{s10-s1}| {input_s=} | before_b:{s2-s1} broadcast:{s4-s3}| model:{s8-s7} | sample:{s9-s8}")
                         return [fake_output]
                     else:
+                        logger.info(f"libin debug execute_model 1st step non-drvier time:{s10-s1}| {input_s=} | before_b:{s2-s1} broadcast:{s4-s3}| model:{s8-s7} | sample:{s9-s8}")
                         return []
 
+                logger.info(f"libin debug execute_model final time:{s10-s1}| {input_s=} | before_b:{s2-s1} broadcast:{s4-s3}| model:{s8-s7} | sample:{s9-s8}| {input_s=}")
                 return [output] if self.is_driver_worker else []
             else:
                 return []

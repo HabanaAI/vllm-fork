@@ -317,7 +317,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         """ Get the worker input from the broadcasted tensor dict. """
         assert self.do_metadata_broadcast
         assert not self.is_driver_worker
+        s1 = time.perf_counter()
         broadcast_data = broadcast_tensor_dict(src=0)
+        logger.info(f"libin debug _get_worker_input_from_broadcast from input takes {time.perf_counter()-s1}")
         if not broadcast_data:
             return None
 
@@ -357,7 +359,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             broadcast_data = worker_input.as_broadcastable_tensor_dict()
             broadcast_data.update(model_input.as_broadcastable_tensor_dict())
             broadcast_data.update(kwargs)
+            s1 = time.perf_counter()
             broadcast_tensor_dict(broadcast_data, src=0)
+            logger.info("libin debug _get_driver_input_and_broadcast broadcast take {time.perf_counter()-s1}")
 
         if execute_model_req.async_callback:
             model_input = dataclasses.replace(  # type: ignore
@@ -405,7 +409,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         start_time = time.perf_counter()
 
         inputs = self.prepare_input(execute_model_req)
-
+        s0 = time.perf_counter()
         # Need to keep worker running when executing dummy batch under DP
         # scenario
         if self.is_driver_worker:
@@ -419,7 +423,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             if "is_dummy_batch" in broadcast_data and broadcast_data[
                     "is_dummy_batch"]:
                 return SamplerOutput(outputs=[], sampled_token_ids=None)
-
+        s =time.perf_counter()
         if inputs is None:
             return None
 
@@ -454,7 +458,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             **kwargs,
         )
 
-        model_execute_time = time.perf_counter() - start_time
+        model_execute_time = time.perf_counter() - s
         if not get_pp_group().is_last_rank:
             # output is IntermediateTensors
             assert isinstance(output, IntermediateTensors)
@@ -471,6 +475,10 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             for o in output:
                 o.model_execute_time = (orig_model_execute_time +
                                         model_execute_time)
+        per_step_time = time.perf_counter() -  start_time
+        #is_prompt = execute_model_req.seq_group_metadata_list[0].is_prompt
+        #request_id = execute_model_req.seq_group_metadata_list[0].request_id
+        logger.info(f"libin debug execute_mode {self.is_driver_worker=}| {per_step_time=}| p1:{s0-start_time} | p2:{s-s0}| {model_execute_time=}") #| {is_prompt=}| {request_id=}")
 
         # output is List[SamplerOutput]
         return output
