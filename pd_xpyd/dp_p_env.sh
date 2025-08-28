@@ -38,6 +38,8 @@ env | grep VLLM_PROMPT_SEQ
 env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 
+export VLLM_SKIP_PREFILL_SAMPLING=1
+
 export VLLM_SKIP_WARMUP=True
 export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
