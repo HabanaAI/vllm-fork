@@ -517,6 +517,31 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         self.use_static_moe = os.environ.get("VLLM_USE_STATIC_MOE", "0") in ["1", "true"]
         self.optimize_with_partial_experts = os.environ.get("VLLM_OPTIMIZE_WITH_PARTIAL_EXPERTS", "0") in ["1", "true"]
 
+        chunk_env = os.environ.get("PT_HPU_MOE_THRESHOLD")
+        if chunk_env is not None and int(chunk_env) != 0:
+            self.chunk_size = int(chunk_env)
+            self.chunk_size_enabled = 1
+        else:
+            self.chunk_size = 0
+            self.chunk_size_enabled = 0
+        self.chunk_size64 = int(os.environ.get("PT_HPU_MOE_CHUNK64", 0))
+        self.chunk_size128 = int(os.environ.get("PT_HPU_MOE_CHUNK128", 0))
+        self.chunk_size256 = int(os.environ.get("PT_HPU_MOE_CHUNK256", 0))
+        self.chunk_size512 = int(os.environ.get("PT_HPU_MOE_CHUNK512", 0))
+        self.chunk_size1024 = int(os.environ.get("PT_HPU_MOE_CHUNK1024", 0))
+        self.chunk_size2048 = int(os.environ.get("PT_HPU_MOE_CHUNK2048", 0))
+
+        print("=== MoE Chunk Config ===")
+        print(f"chunk_size_enabled : {self.chunk_size_enabled}")
+        print(f"chunk_size         : {self.chunk_size}")
+        print(f"chunk_size64       : {self.chunk_size64}")
+        print(f"chunk_size128      : {self.chunk_size128}")
+        print(f"chunk_size256      : {self.chunk_size256}")
+        print(f"chunk_size512      : {self.chunk_size512}")
+        print(f"chunk_size1024     : {self.chunk_size1024}")
+        print(f"chunk_size2048     : {self.chunk_size2048}")
+        print("========================")
+
     def create_weights(self, layer: Module, num_experts: int, hidden_size: int,
                        intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
@@ -1043,6 +1068,26 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                                   topk_weights_across_dp)
 
             batched_tokens = x.shape[0]
+            if self.chunk_size_enabled:
+                if self.chunk_size64 != 0 and batched_tokens < self.chunk_size64:
+                    chunk_size = 64
+                elif self.chunk_size128 != 0 and batched_tokens < self.chunk_size128:
+                    chunk_size = 128
+                elif self.chunk_size256 != 0 and batched_tokens < self.chunk_size256:
+                    chunk_size = 256
+                elif self.chunk_size512 != 0 and batched_tokens < self.chunk_size512:
+                    chunk_size = 512
+                elif self.chunk_size1024 != 0 and batched_tokens < self.chunk_size1024:
+                    chunk_size = 1024
+                elif self.chunk_size2048 != 0 and batched_tokens < self.chunk_size2048:
+                    chunk_size = 2048
+                else:
+                    chunk_size = self.chunk_size
+
+                kwargs = {
+                    "chunk_size": chunk_size,
+                    "total_experts": 256,
+                }
 
             if batched_tokens > self.moe_slice_length:
                 final_hidden_states_list = []
@@ -1066,6 +1111,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         activation="silu",
                         experts_min=ep_shift,
                         experts_max=(num_experts + ep_shift - 1),
+                        **(kwargs if self.chunk_size_enabled == 1 else {}),
                     )
                     final_hidden_states_list.append(current_hidden_states)
                 final_hidden_states = torch.cat(final_hidden_states_list, dim=0)
@@ -1084,6 +1130,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     activation="silu",
                     experts_min=ep_shift,
                     experts_max=(num_experts + ep_shift - 1),
+                    **(kwargs if self.chunk_size_enabled == 1 else {}),
                 )
             return final_hidden_states.view(-1, x.shape[1])
 
