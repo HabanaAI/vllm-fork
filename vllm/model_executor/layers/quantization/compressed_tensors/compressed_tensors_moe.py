@@ -107,9 +107,8 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                       == QuantizationStrategy.TENSOR)
         per_channel = (
             self.weight_quant.strategy == QuantizationStrategy.CHANNEL
-            and (self.input_quant.strategy == QuantizationStrategy.TOKEN or
-                self.input_quant.strategy == QuantizationStrategy.TENSOR)
-        )
+            and (self.input_quant.strategy == QuantizationStrategy.TOKEN
+                 or self.input_quant.strategy == QuantizationStrategy.TENSOR))
         if not (per_tensor or per_channel):
             raise ValueError(
                 "For FP8 Fused MoE layers, we require per tensor "
