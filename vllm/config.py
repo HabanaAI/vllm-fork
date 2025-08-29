@@ -7,6 +7,7 @@ import enum
 import hashlib
 import inspect
 import json
+import os
 import textwrap
 import uuid
 import warnings
@@ -856,6 +857,14 @@ class ModelConfig:
             "awq_marlin", "fbgemm_fp8", "compressed-tensors", "experts_int8",
             "quark", "modelopt_fp4", "bitblas", "gptq_bitblas"
         ]
+
+        from vllm.platforms import current_platform
+        if self.quantization is None and current_platform.is_hpu(
+        ) and os.getenv("QUANT_CONFIG", None) is not None:
+            logger.warning_once(
+                'Using INC as QUANT_CONFIG is set for the unquantized model.')
+            self.quantization = 'inc'
+
         if self.quantization is not None:
             self.quantization = cast(QuantizationMethods, self.quantization)
 
@@ -1525,6 +1534,9 @@ class CacheConfig:
     def __post_init__(self) -> None:
         self.swap_space_bytes = self.swap_space * GiB_bytes
 
+        from vllm.platforms import current_platform
+        if current_platform.is_hpu():
+            self._maybe_set_cache_dtype_for_inc()
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()
@@ -1533,6 +1545,31 @@ class CacheConfig:
         # convert cache_config to dict(key: str, value: str) for prometheus
         # metrics info
         return {key: str(value) for key, value in self.__dict__.items()}
+
+    def _maybe_set_cache_dtype_for_inc(self) -> None:
+        inc_quant_config = os.getenv("QUANT_CONFIG", None)
+        if inc_quant_config is None:
+            return
+        assert os.path.isfile(
+            inc_quant_config
+        ), f"INC QUANT_CONFIG file not found: {inc_quant_config}"
+        with open(inc_quant_config) as config_file:
+            try:
+                quant_cfg = json.load(config_file)
+                block_list = quant_cfg.get('blocklist', None)
+                if block_list is not None and (
+                        any('cache' in x.lower()
+                            for x in block_list.get('types', []))
+                        or any('cache' in x.lower()
+                               for x in block_list.get('names', []))):
+                    pass
+                else:
+                    logger.warning_once(
+                        'Using fp8 kv-cache according to INC QUANT_CONFIG.')
+                    self.cache_dtype = 'fp8_inc'
+            except json.JSONDecodeError:
+                logger.error('Failed to parse QUANT_CONFIG JSON.')
+                return
 
     def _verify_args(self) -> None:
         if self.cpu_offload_gb < 0:
@@ -4442,6 +4479,14 @@ class VllmConfig:
                 self.model_config, self.load_config)
 
         from vllm.platforms import current_platform
+        if self.quant_config is not None and current_platform.is_hpu(
+        ) and os.environ.get("QUANT_CONFIG",
+                             None) is not None and self.quant_config.get_name(
+                             ) != 'inc' and self.load_config.device != 'cpu':
+            logger.warning_once(
+                'Loading weights to CPU for INC with the quantized model.')
+            self.load_config.device = 'cpu'
+
         if self.model_config is not None and \
             self.scheduler_config.chunked_prefill_enabled and \
             self.model_config.dtype == torch.float32 and \
