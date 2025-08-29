@@ -396,7 +396,6 @@ class Glm4MoeModel(nn.Module):
                 prefix=f"{prefix}.embed_tokens")
         else:
             self.embed_tokens = PPMissingLayer()
-
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
             lambda prefix: Glm4MoeDecoderLayer(
@@ -507,6 +506,8 @@ class Glm4MoeModel(nn.Module):
                     continue
                 if is_pp_missing_parameter(name, self):
                     continue
+                if name not in params_dict:
+                    continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
@@ -527,6 +528,10 @@ class Glm4MoeModel(nn.Module):
                     name_mapped = name.replace(weight_name, param_name)
 
                     if is_pp_missing_parameter(name_mapped, self):
+                        continue
+                    if name_mapped not in params_dict:
+                        # This may happen since we only have experts on
+                        # some layers
                         continue
                     param = params_dict[name_mapped]
                     # We should ask the weight loader to return success or not
@@ -558,6 +563,8 @@ class Glm4MoeModel(nn.Module):
                         continue
 
                     if is_pp_missing_parameter(name, self):
+                        continue
+                    if name not in params_dict:
                         continue
                     param = params_dict[name]
                     weight_loader = getattr(param, "weight_loader",

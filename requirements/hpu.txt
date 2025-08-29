@@ -8,3 +8,4 @@ triton==3.1.0
 setuptools>=77.0.3
 setuptools-scm>=8
 vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@aice/v1.22.0
+neural_compressor_pt @ git+https://github.com/intel/neural-compressor.git@aice/v122
