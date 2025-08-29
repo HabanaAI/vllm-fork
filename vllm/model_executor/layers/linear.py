@@ -259,8 +259,8 @@ class LinearBase(torch.nn.Module):
         self, ) -> Optional[Callable[[torch.nn.Module], torch.Tensor]]:
         if self.quant_method is not None:
             quant_method = self.quant_method
-            if hasattr(quant_method, "dequant_block_fp8_weight"):
-                return quant_method.dequant_block_fp8_weight
+            if hasattr(quant_method, "dequant_fp8_weight"):
+                return quant_method.dequant_fp8_weight
         return None
 
 
