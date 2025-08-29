@@ -14,6 +14,7 @@ from typing import Set, Tuple, Union
 
 import torch
 
+import vllm.envs as envs
 from vllm.config import CacheConfig, LoRAConfig, SchedulerConfig
 from vllm.core.interfaces import AllocStatus, BlockSpaceManager
 from vllm.distributed import get_kv_transfer_group
@@ -464,10 +465,12 @@ class Scheduler:
         # Thread safe Queue for sequence groups to fetch for KV cache
         self.fetching_queue: Queue[SequenceGroup] = Queue()
         # Thread safe Queue for sequence groups done for fetching
-        self.fetching_done: Queue[SequenceGroup] = Queue()
+        self.fetching_done: Queue[(SequenceGroup, bool)] = Queue()
         # Record all sequence groups in fetching
         # it will be accessed only in scheduler thread
         self.fetching: Deque[SequenceGroup] = deque()
+        self.abort_request_kv_cache_miss = \
+            envs.VLLM_ABORT_REQUEST_KV_CACHE_MISS
         self.fetching_thread = threading.Thread(target=self._fetch_kv_thread, )
         if self.need_fetch_kv:
             from vllm_hpu_extension.profiler import HabanaHighLevelProfiler
@@ -579,18 +582,23 @@ class Scheduler:
             prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
                 hash_prefix)
             if kv_cache is not None:
+                fetching_success = True
                 put_to_shared_dict(prefix, kv_cache, hidden_states)
-            self.fetching_done.put(seq_group)
+            else:
+                fetching_success = False
+            self.fetching_done.put((seq_group, fetching_success))
             self.fetching_queue.task_done()
             self.scheduler_profiler.end()
 
     def _process_fetching_done(self):
         while not self.fetching_done.empty():
-            seq_group = self.fetching_done.get_nowait()
+            seq_group, fetching_success = self.fetching_done.get_nowait()
             self.waiting.append(seq_group)
             # Since the fetching is done and put to waiting
             # remove from fetching
             self.fetching.popleft()
+            if self.abort_request_kv_cache_miss and not fetching_success:
+                self.abort_seq_group(seq_group.request_id)
 
         if len(self.waiting) == 0 and len(self.running) == 0 and len(
                 self.swapped) == 0 and len(self.fetching) != 0:

@@ -3065,6 +3065,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
+                if self.dp_size > 1:
+                    # Need to align bypass among DP ranks
+                    bypass_model_exec = bool(align_dp_groups(
+                        bypass_model_exec, torch.distributed.ReduceOp.MAX))
                 if not bypass_model_exec:
                     with self.profiler.record_event('internal',
                                                     model_event_name,
