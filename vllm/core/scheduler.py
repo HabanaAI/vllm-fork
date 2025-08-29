@@ -1475,6 +1475,12 @@ class Scheduler:
 
     def _schedule(self) -> SchedulerOutputs:
         """Schedule queued requests."""
+        if not self.need_fetch_kv:
+            if self.scheduler_config.chunked_prefill_enabled:
+                return self._schedule_chunked_prefill()
+            else:
+                return self._schedule_default()
+
         # Processed requests which have done fetching KV cache
         # appending to the waiting queue
         aborted_seq_groups = self._process_fetching_done()
@@ -1482,7 +1488,6 @@ class Scheduler:
             scheduler_outputs = self._schedule_chunked_prefill()
         else:
             scheduler_outputs = self._schedule_default()
-
         scheduler_outputs.aborted_seq_groups = aborted_seq_groups
         return scheduler_outputs
 
