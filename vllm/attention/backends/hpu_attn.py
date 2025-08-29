@@ -472,6 +472,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             None if HPUFusedSDPA is None else ModuleFusedSDPA(HPUFusedSDPA)
         )
         self.prefill_impl = get_config().prompt_attn_impl
+        if not os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA"):
+            self.prefill_impl = "naive_impl"
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
             assert (
