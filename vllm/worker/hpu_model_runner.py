@@ -2979,7 +2979,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "num_crops": torch.zeros([img_args], dtype=torch.int32)
             }
 
-        image_token_id = self.get_model().config.image_token_id
+        image_token_id = self.get_model().config.im_patch_id \
+                         if self.get_model().config.model_type == "ernie4_5_moe_vl" \
+                         else self.get_model().config.image_token_id
         prompt_token_ids_image = [image_token_id] * num_image_tokens
         prompt_token_ids = [0] * (
             seq_len - len(prompt_token_ids_image)) + prompt_token_ids_image

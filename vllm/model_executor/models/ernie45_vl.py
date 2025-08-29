@@ -175,13 +175,13 @@ class Ernie4_5_VisionAttention(nn.Module):
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
         if self.attn_backend not in {
                 _Backend.FLASH_ATTN, _Backend.TORCH_SDPA, _Backend.XFORMERS,
-                _Backend.ROCM_AITER_FA
+                # _Backend.ROCM_AITER_FA
         }:
             raise RuntimeError(
                 f"Ernie45-VL does not support {self.attn_backend} backend now."
             )
         self.is_flash_attn_backend = self.attn_backend in {
-            _Backend.FLASH_ATTN, _Backend.ROCM_AITER_FA
+            _Backend.FLASH_ATTN, #_Backend.ROCM_AITER_FA
         }
 
     def split_qkv(self, qkv: torch.Tensor) -> tuple[torch.Tensor, ...]:
@@ -263,10 +263,14 @@ class Ernie4_5_VisionAttention(nn.Module):
                 v_i = v[:, start_idx:end_idx]
                 q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                  for x in [q_i, k_i, v_i])
-                output_i = F.scaled_dot_product_attention(q_i,
-                                                          k_i,
-                                                          v_i,
-                                                          dropout_p=0.0)
+                if is_hpu:
+                    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
+                else:
+                    output_i = F.scaled_dot_product_attention(q_i,
+                                                              k_i,
+                                                              v_i,
+                                                              dropout_p=0.0)
                 output_i = rearrange(output_i, "b h s d -> b s h d ")
                 outputs.append(output_i)
             context_layer = torch.cat(outputs, dim=1)
@@ -1455,6 +1459,36 @@ class Ernie4_5_VLMoeForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds = merge_multimodal_embeddings(input_ids, inputs_embeds,
                                                     multimodal_embeddings,
                                                     [self.config.im_patch_id])
+        return inputs_embeds
+
+    def get_input_embeddings_v0(
+        self,
+        input_ids: torch.Tensor,
+        image_input: Optional[Ernie4_5_VLImageInputs] = None,
+        video_input: Optional[Ernie4_5_VLVideoInputs] = None,
+    ) -> torch.Tensor:
+        inputs_embeds = self.get_input_embeddings(input_ids)
+        if image_input is not None:
+            image_embeds = self._process_image_input(image_input)
+            inputs_embeds = merge_multimodal_embeddings(
+                input_ids,
+                inputs_embeds,
+                image_embeds,
+                placeholder_token_id=self.config.image_token_id,
+            )
+
+        if video_input is not None:
+            if is_hpu:
+                logger.warning("Video inputs have not been enabled yet, "
+                               "ignoring video inputs")
+                return inputs_embeds
+            video_embeds = self._process_video_input(video_input)
+            inputs_embeds = merge_multimodal_embeddings(
+                input_ids,
+                inputs_embeds,
+                video_embeds,
+                placeholder_token_id=self.config.video_token_id,
+            )
         return inputs_embeds
 
     def forward(
