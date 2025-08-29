@@ -90,7 +90,13 @@ logger = init_logger(__name__)
 _TYPE_CACHE = {}
 # These values are assumed to be zero in several places.
 # Use caution when updating them!
-_PAD_SLOT_ID = 0
+
+# ON Gaudi3, The slot_id of zero-padding causes a performance issue, since 0 is
+# considered a valid index. We can set this value to -1 so that the kernel
+# ignores these indices. However, until all models are thoroughly tested,
+# we are keeping the default value as 0.
+_PAD_SLOT_ID = int(os.getenv('VLLM_PAD_SLOT_ID', '0'))
+_DUMMY_SLOT_ID = 0
 _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
@@ -1589,7 +1595,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 encoder_seq_lens.append(encoder_seq_len)
                 # Build slot mapping
                 if seq_group_metadata.cross_block_table is None:
-                    cross_slot_mapping.extend([_PAD_SLOT_ID] * encoder_seq_len)
+                    cross_slot_mapping.extend([_DUMMY_SLOT_ID] *
+                                              encoder_seq_len)
                 else:
                     for i in range(0, encoder_seq_len):
                         block_number = seq_group_metadata.cross_block_table[
@@ -1638,7 +1645,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
                 # yet. In this case, we just use a dummy slot mapping.
-                slot_mapping.append([_PAD_SLOT_ID] * seq_len)
+                slot_mapping.append([_DUMMY_SLOT_ID] * seq_len)
                 continue
 
             # Compute the slot mapping.
@@ -1881,7 +1888,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         lora_ids: List[int] = []
 
         dummy_slots = itertools.cycle(
-            range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
+            range(_DUMMY_SLOT_ID, _DUMMY_SLOT_ID + self.block_size))
 
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
