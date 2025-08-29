@@ -471,10 +471,11 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.fused_scaled_dot_product_attention = (
             None if HPUFusedSDPA is None else ModuleFusedSDPA(HPUFusedSDPA)
         )
-        # self.prefill_impl = get_config().prompt_attn_impl
-        self.prefill_impl = 'naive_impl'
+        self.prefill_impl = get_config().prompt_attn_impl
+        if not os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA"):
+            self.prefill_impl = "naive_impl"
         self.use_contiguous_pa = get_config().use_contiguous_pa
-        '''if alibi_slopes is not None:
+        if alibi_slopes is not None:
             assert (
                 self.prefill_impl != "flex_impl"
             ), "Prefill with Flex Attention not supported with alibi slopes!"
@@ -483,7 +484,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             ), "Prefill with FusedSDPA not supported with alibi slopes!"
             assert (
                 self.use_contiguous_pa
-            ), "Non-contiguous PA not supported with alibi slopes!"'''
+            ), "Non-contiguous PA not supported with alibi slopes!"
 
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
@@ -657,14 +658,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_metadata.sliding_window_right,
                     )
                     common_args["window_size"] = window_size
-                    # TODO: Currently HPU doesn't support GQA for FusedSDPA
-                    # with causal + window, so repeat KV so QKV are all the
-                    # same shape.
-                    if query_shape != kv_shape:
-                        repeat_kv = self.num_heads // self.num_kv_heads
-                        key = key.repeat_interleave(repeat_kv, dim=1)
-                        value = value.repeat_interleave(repeat_kv, dim=1)
-                        kv_shape = query_shape
+            # TODO: Currently HPU doesn't support GQA for FusedSDPA
+            # with causal + window/sinks, so repeat KV so QKV are all the
+            # same shape.
+            if self.prefill_impl == "fsdpa_impl" and query_shape != kv_shape:
+                repeat_kv = self.num_heads // self.num_kv_heads
+                key = key.repeat_interleave(repeat_kv, dim=1)
+                value = value.repeat_interleave(repeat_kv, dim=1)
+                kv_shape = query_shape
 
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
