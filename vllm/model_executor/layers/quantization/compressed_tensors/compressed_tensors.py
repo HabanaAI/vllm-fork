@@ -620,8 +620,7 @@ class CompressedTensorsLinearMethod(LinearMethodBase):
             raise ValueError("A scheme must be defined for each layer")
         return scheme.apply_weights(layer, x, bias=bias)
 
-    def dequant_fp8_weight(self,
-                           layer: "CompressedTensorsW8A8Fp8") -> torch.Tensor:
+    def dequant_fp8_weight(self, layer: torch.nn.Module) -> torch.Tensor:
         if layer.scheme.strategy == QuantizationStrategy.CHANNEL.value:
             dequant_weight = layer.weight.to(
                 layer.weight_scale.dtype) * layer.weight_scale.squeeze()
