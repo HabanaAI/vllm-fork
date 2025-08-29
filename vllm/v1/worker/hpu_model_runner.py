@@ -1693,8 +1693,8 @@ class HPUModelRunner:
                         is_prompt=True)
                     self.profiler.record_counter(self.event_start, counters)
             self.maybe_wait_for_kv_save(scheduler_output.scheduled_new_reqs)
-            finished_sending, finished_recving = (
-                self.get_finished_kv_transfers(scheduler_output))
+            #finished_sending, finished_recving = (
+                #self.get_finished_kv_transfers(scheduler_output))
             if self.is_driver_worker and self.profiler.enabled:
                 self.profiler_counter_helper.reset_prompt_seq_stats()
 
@@ -1788,7 +1788,8 @@ class HPUModelRunner:
         prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
         all_req_ids = pd_info.decode_req_ids + pd_info.prompt_req_ids
         logprobs = None
-
+        finished_sending, finished_recving = (
+                self.get_finished_kv_transfers(scheduler_output))
         model_runner_output = ModelRunnerOutput(
             req_ids=all_req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,

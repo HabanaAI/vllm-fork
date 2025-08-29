@@ -1119,7 +1119,7 @@ class NixlConnectorWorker:
                 xfer_state = self.nixl_wrapper.check_xfer_state(handle)
                 if xfer_state == "DONE":
                     xfer_end_time = time.perf_counter()
-                    logger.debug(f"buke _pop_done_transfers: {req_id=}|{handle=}|{xfer_end_time=}|{xfer_end_time-_xfer_stime=}")
+                    logger.info(f"_pop_done_transfers: {req_id=}|{handle=}|{xfer_end_time=}|{xfer_end_time-_xfer_stime=}")
                     self.nixl_wrapper.release_xfer_handle(handle)
                 elif xfer_state == "PROC":
                     in_progress = True
