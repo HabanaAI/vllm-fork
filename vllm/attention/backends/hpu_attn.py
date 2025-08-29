@@ -472,7 +472,8 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             None if HPUFusedSDPA is None else ModuleFusedSDPA(HPUFusedSDPA)
         )
         self.prefill_impl = get_config().prompt_attn_impl
-        if not os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA"):
+        if os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA") == '0' or os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA") == 'False' \
+                                                              or os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA") == 'false':
             self.prefill_impl = "naive_impl"
         self.use_contiguous_pa = get_config().use_contiguous_pa
         if alibi_slopes is not None:
@@ -667,6 +668,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 value = value.repeat_interleave(repeat_kv, dim=1)
                 kv_shape = query_shape
 
+            #print('prompt_mask: ', attn_bias.to('cpu'))
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
