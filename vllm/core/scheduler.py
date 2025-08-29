@@ -246,6 +246,8 @@ class SchedulerOutputs:
     # The number of requests in the running queue
     running_queue_size: int
     preempted: int
+    # Sequence groups that are going to be aborted.
+    aborted_seq_groups: List[SequenceGroup] = None
 
     def __post_init__(self):
         # Swap in and swap out should never happen at the same time.
@@ -591,6 +593,7 @@ class Scheduler:
             self.scheduler_profiler.end()
 
     def _process_fetching_done(self):
+        aborted_seq_groups = []
         while not self.fetching_done.empty():
             seq_group, fetching_success = self.fetching_done.get_nowait()
             self.waiting.append(seq_group)
@@ -599,12 +602,15 @@ class Scheduler:
             self.fetching.popleft()
             if self.abort_request_kv_cache_miss and not fetching_success:
                 self.abort_seq_group(seq_group.request_id)
+                aborted_seq_groups.append(seq_group)
 
         if len(self.waiting) == 0 and len(self.running) == 0 and len(
                 self.swapped) == 0 and len(self.fetching) != 0:
             # This is to avoid the empty engine step from too busy
             # There is no better way to do this under the current structure
             time.sleep(0.001)
+
+        return aborted_seq_groups
 
     def shutdown(self):
         """Shutdown the scheduler."""
@@ -1471,11 +1477,14 @@ class Scheduler:
         """Schedule queued requests."""
         # Processed requests which have done fetching KV cache
         # appending to the waiting queue
-        self._process_fetching_done()
+        aborted_seq_groups = self._process_fetching_done()
         if self.scheduler_config.chunked_prefill_enabled:
-            return self._schedule_chunked_prefill()
+            scheduler_outputs = self._schedule_chunked_prefill()
         else:
-            return self._schedule_default()
+            scheduler_outputs = self._schedule_default()
+
+        scheduler_outputs.aborted_seq_groups = aborted_seq_groups
+        return scheduler_outputs
 
     def _can_append_slots(self, seq_group: SequenceGroup,
                           enable_chunking: bool) -> bool:
