@@ -1391,24 +1391,8 @@ class LLMEngine:
                 virtual_engine].get_and_reset_finished_requests_ids()
 
             if scheduler_outputs.aborted_seq_groups:
-                for aborted_seq_group in scheduler_outputs.aborted_seq_groups:
-                    # Append a dummy output token
-                    seq = aborted_seq_group.first_seq
-                    seq.append_token_id(-1, {-1: Logprob(0.0)})
-
-                    request_output = RequestOutputFactory.create(
-                        aborted_seq_group,
-                        self.seq_id_to_seq_group,
-                        use_cache=False,
-                    )
-                    if request_output:
-                        ctx.request_outputs.append(request_output)
-
-                # Immediately process request outputs if callback is given
-                if (ctx.request_outputs
-                        and self.process_request_outputs_callback is not None):
-                    self.process_request_outputs_callback(ctx.request_outputs)
-                    ctx.request_outputs.clear()
+                self._process_abort_seq_groups(
+                    ctx, scheduler_outputs.aborted_seq_groups)
 
             # Maybe switch from async mode to sync mode
             if not allow_async_output_proc and len(ctx.output_queue) > 0:
@@ -2102,3 +2086,24 @@ class LLMEngine:
                 sampling_params.logits_processors.extend(logits_processors)
 
         return sampling_params
+
+    def _process_abort_seq_groups(self, ctx: SchedulerContext,
+                                  aborted_seq_groups: List[SequenceGroup]):
+        for aborted_seq_group in aborted_seq_groups:
+            # Append a dummy output token
+            seq = aborted_seq_group.first_seq
+            seq.append_token_id(-1, {-1: Logprob(0.0)})
+
+            request_output = RequestOutputFactory.create(
+                aborted_seq_group,
+                self.seq_id_to_seq_group,
+                use_cache=False,
+            )
+            if request_output:
+                ctx.request_outputs.append(request_output)
+
+        # Immediately process request outputs if callback is given
+        if (ctx.request_outputs
+                and self.process_request_outputs_callback is not None):
+            self.process_request_outputs_callback(ctx.request_outputs)
+            ctx.request_outputs.clear()
