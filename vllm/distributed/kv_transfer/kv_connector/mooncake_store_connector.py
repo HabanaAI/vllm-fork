@@ -474,14 +474,10 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         load_kvcache_key = f"{prefix}_0"
         load_hidden_key = f"{prefix}_hidden_0"
-        remote_kv = None
-        if self._wait_for_key(load_kvcache_key):
-            remote_kv = self.kv_store.get_tensor(load_kvcache_key,
-                                                 dtype=self.dtype)
+        remote_kv = self.kv_store.get_tensor(load_kvcache_key,
+                                             dtype=self.dtype)
         # hidden_states always use bf16.
-        hidden = None
-        if self._wait_for_key(load_hidden_key):
-            hidden = self.kv_store.get_tensor(load_hidden_key)
+        hidden = self.kv_store.get_tensor(load_hidden_key)
 
         if remote_kv is None or hidden is None:
             # didn't find any match.
@@ -501,6 +497,9 @@ class MooncakeStoreConnector(KVConnectorBase):
                 return False
             time.sleep(0.01)
         return True
+
+    def is_key_exist(self, prefix: str) -> bool:
+        return self.kv_store.is_exist(prefix)
 
     @staticmethod
     def tensor_hash(tensor: torch.Tensor) -> int:
