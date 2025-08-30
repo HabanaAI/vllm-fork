@@ -1,6 +1,7 @@
 # ==-------------------------------------------------------------------------==
 # VLLM-HPU-EXT PATCH Start
 # ==-------------------------------------------------------------------------==
+import os
 import torch
 from typing import Callable, Optional, Tuple
 import habana_frameworks.torch as htorch
@@ -66,7 +67,11 @@ class MoeFP8Matmul(torch.nn.Module):
 
 class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
     def __init__(
-        self, num_experts: int, experts_min: int = 0, experts_max: int = 8
+        self,
+        num_experts: int,
+        global_num_experts: int = 0,
+        experts_min: int = 0,
+        experts_max: int = 8,
     ):
         super().__init__()
         self.w13_list = torch.nn.ModuleList(
@@ -75,9 +80,29 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
         self.w2_list = torch.nn.ModuleList(
             [MoeFP8Matmul() for _ in range(num_experts)]
         )
+        self.enable_moe_chunk = (
+            os.environ.get("VLLM_SUPPORT_MOE_CHUNK", "false").lower() == "true"
+        )
         self.num_experts = num_experts
+        self.global_num_experts = global_num_experts
         self.experts_min = experts_min
         self.experts_max = experts_max
+
+    def _get_extra_kwargs(self, tokens_num: int):
+        if self.enable_moe_chunk:
+            if tokens_num <= 1536:
+                chunk_size = 64
+            elif tokens_num > 1536 and tokens_num <= 4096:
+                chunk_size = 256
+            else:
+                chunk_size = 512
+            kwargs = {
+                "chunk_size": chunk_size,
+                "total_experts": self.global_num_experts,
+            }
+        else:
+            kwargs = {}
+        return kwargs
 
     def forward(
         self,
@@ -89,6 +114,8 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
         max_expert = self.experts_max
         w13_list_slice = []
         w2_list_slice = []
+        tokens_num, _ = x.shape
+        kwargs = self._get_extra_kwargs(tokens_num)
         for j in range(self.num_experts):
             w13_list_slice.append(self.w13_list[j].get_dequant_weight())
             w2_list_slice.append(self.w2_list[j].get_dequant_weight())
@@ -103,6 +130,7 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
             activation="silu",
             experts_min=min_expert,
             experts_max=max_expert,
+            **kwargs,
         )
         htorch.core.mark_step()
         return final_hidden_states
