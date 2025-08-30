@@ -603,6 +603,8 @@ class Scheduler:
             if self.abort_request_kv_cache_miss and not fetching_success:
                 self.abort_seq_group(seq_group.request_id)
                 aborted_seq_groups.append(seq_group)
+                logger.warning("KV cache miss for request: %s. Abort now.",
+                               seq_group.request_id)
 
         if len(self.waiting) == 0 and len(self.running) == 0 and len(
                 self.swapped) == 0 and len(self.fetching) != 0:

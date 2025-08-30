@@ -49,7 +49,7 @@ from vllm.sampling_params import RequestOutputKind, SamplingParams
 from vllm.sequence import (ExecuteModelRequest, ParallelSampleSequenceGroup,
                            PoolingSequenceGroupOutput, Sequence, SequenceGroup,
                            SequenceGroupBase, SequenceGroupMetadata,
-                           SequenceGroupOutput, SequenceStatus, Logprob)
+                           SequenceGroupOutput, SequenceStatus)
 from vllm.tracing import (SpanAttributes, SpanKind, extract_trace_context,
                           init_tracer)
 from vllm.transformers_utils.detokenizer import Detokenizer
@@ -2090,10 +2090,6 @@ class LLMEngine:
     def _process_abort_seq_groups(self, ctx: SchedulerContext,
                                   aborted_seq_groups: List[SequenceGroup]):
         for aborted_seq_group in aborted_seq_groups:
-            # Append a dummy output token
-            seq = aborted_seq_group.first_seq
-            seq.append_token_id(-1, {-1: Logprob(0.0)})
-
             request_output = RequestOutputFactory.create(
                 aborted_seq_group,
                 self.seq_id_to_seq_group,
