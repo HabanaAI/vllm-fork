@@ -98,6 +98,7 @@ if TYPE_CHECKING:
     VLLM_DP_OPT: int = 4
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
     VLLM_SKIP_PREFILL_SAMPLING: bool = False
+    VLLM_ABORT_REQUEST_KV_CACHE_MISS: bool = True
 
 
 def get_default_cache_root():
@@ -641,6 +642,8 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: bool(int(os.getenv("VLLM_USE_ASYNC_TRANSFER_IN_PD", "0"))),
     "VLLM_SKIP_PREFILL_SAMPLING":
     lambda: bool(int(os.getenv("VLLM_SKIP_PREFILL_SAMPLING", "0"))),
+    "VLLM_ABORT_REQUEST_KV_CACHE_MISS":
+    lambda: bool(int(os.getenv("VLLM_ABORT_REQUEST_KV_CACHE_MISS", "1"))),
 }
 
 # end-env-vars-definition
