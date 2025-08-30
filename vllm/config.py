@@ -923,11 +923,14 @@ class ModelConfig:
                     f"({quant_method}) does not match the quantization "
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
-        elif current_platform.is_hpu() and \
+
+        if current_platform.is_hpu() and \
             os.getenv("QUANT_CONFIG", None) is not None:
-            logger.info_once(
-                'Using INC as QUANT_CONFIG is set for the unquantized model.')
-            self.quantization = 'inc'
+            os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
+            if quant_cfg is None:
+                logger.info_once('Enable INC as QUANT_CONFIG is set '
+                                 'for an unquantized model.')
+                self.quantization = 'inc'
 
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
@@ -1561,9 +1564,8 @@ class CacheConfig:
                                for x in block_list.get('names', []))):
                     pass
                 else:
-                    logger.info_once(
-                        'Using fp8 kv-cache according to the INC QUANT_CONFIG.'
-                    )
+                    logger.info_once('Using fp8 kv-cache according to the '
+                                     'blocklist in INC QUANT_CONFIG.')
                     self.cache_dtype = 'fp8_inc'
             except json.JSONDecodeError:
                 logger.error('Failed to parse QUANT_CONFIG JSON.')
@@ -4486,8 +4488,8 @@ class VllmConfig:
                 htexp.synDeviceType.synDeviceGaudi2
             if is_quantized_weights and use_inc and is_gaudi2:
                 logger.info_once(
-                    'Using INC with a quantized model on Gaudi2. ',
-                    'Set weights_load_device to CPU and ',
+                    'Using INC with a quantized model on Gaudi2. '
+                    'Set weights_load_device to CPU and '
                     'enable conversion from fp8_e4m3fn to fp8_e4m3fnuz')
                 os.environ["VLLM_HPU_CONVERT_TO_FP8UZ"] = "true"
                 self.load_config.device = 'cpu'
