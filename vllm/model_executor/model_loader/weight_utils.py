@@ -795,7 +795,8 @@ def maybe_remap_kv_scale_name(name: str, params_dict: dict) -> Optional[str]:
 def gaudi_weight_wrapper(weight_loader):
     """Wrapper for Gaudi weight conversion."""
 
-    FP8_SCALE_FACTOR = 2.0
+    fp8_e4m3fnuz_max = torch.finfo(torch.float8_e4m3fnuz).max
+    fp8_e4m3fn_max = torch.finfo(torch.float8_e4m3fn).max
 
     def wrapper(*args, **kwargs):
         # args[0] is parameter, args[1] is loaded_weight
@@ -803,10 +804,12 @@ def gaudi_weight_wrapper(weight_loader):
         # so we can detect it by dtype
         loaded_weight = args[1]
         if loaded_weight.dtype == torch.float8_e4m3fn:
-            loaded_weight.data = (loaded_weight.data.float() /
-                                  FP8_SCALE_FACTOR).to(torch.float8_e4m3fn)
+            loaded_weight.data = (loaded_weight.data.float() *
+                                  fp8_e4m3fnuz_max / fp8_e4m3fn_max).to(
+                                      torch.float8_e4m3fn)
         else:
-            loaded_weight.data = (loaded_weight.data * FP8_SCALE_FACTOR)
+            loaded_weight.data = (loaded_weight.data * fp8_e4m3fn_max /
+                                  fp8_e4m3fnuz_max)
         args = (args[0], loaded_weight) + args[2:]
         weight_loader(*args, **kwargs)
 
