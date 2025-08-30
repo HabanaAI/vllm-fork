@@ -1216,7 +1216,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                     disable_mark_scales_as_const = os.getenv(
                         "VLLM_DISABLE_MARK_SCALES_AS_CONST",
-                        "false") in ("1", "true")
+                        "true") in ("1", "true")
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", ""))
                     self._inc_preprocess()
