@@ -99,6 +99,7 @@ if TYPE_CHECKING:
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
     VLLM_SKIP_PREFILL_SAMPLING: bool = False
     VLLM_ABORT_REQUEST_KV_CACHE_MISS: bool = True
+    VLLM_KV_CACHE_WAIT_TIMEOUT: float = 10.0
 
 
 def get_default_cache_root():
@@ -644,6 +645,10 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: bool(int(os.getenv("VLLM_SKIP_PREFILL_SAMPLING", "0"))),
     "VLLM_ABORT_REQUEST_KV_CACHE_MISS":
     lambda: bool(int(os.getenv("VLLM_ABORT_REQUEST_KV_CACHE_MISS", "1"))),
+    # The longest time in seconds waiting for KV cache available.
+    # Default to 10 seconds.
+    "VLLM_KV_CACHE_WAIT_TIMEOUT":
+    lambda: float(os.getenv("VLLM_KV_CACHE_WAIT_TIMEOUT", "10.0")),
 }
 
 # end-env-vars-definition

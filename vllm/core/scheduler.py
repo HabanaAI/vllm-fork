@@ -473,8 +473,7 @@ class Scheduler:
         self.fetching: Deque[SequenceGroup] = deque()
         self.abort_request_kv_cache_miss = \
             envs.VLLM_ABORT_REQUEST_KV_CACHE_MISS
-        # TODO: read from env
-        self.wait_for_key_timeout = 10
+        self.wait_for_key_timeout = envs.VLLM_KV_CACHE_WAIT_TIMEOUT
         self.fetching_thread = threading.Thread(target=self._fetch_kv_thread, )
         if self.need_fetch_kv:
             from vllm_hpu_extension.profiler import HabanaHighLevelProfiler
