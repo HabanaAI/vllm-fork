@@ -473,6 +473,8 @@ class Scheduler:
         self.fetching: Deque[SequenceGroup] = deque()
         self.abort_request_kv_cache_miss = \
             envs.VLLM_ABORT_REQUEST_KV_CACHE_MISS
+        # TODO: read from env
+        self.wait_for_key_timeout = 10
         self.fetching_thread = threading.Thread(target=self._fetch_kv_thread, )
         if self.need_fetch_kv:
             from vllm_hpu_extension.profiler import HabanaHighLevelProfiler
@@ -554,7 +556,7 @@ class Scheduler:
             kv_cache, hidden_states = get_kv_transfer_group(
             ).recv_kv_caches_and_hidden_states_cpu(prefix)
 
-            return prefix, kv_cache, hidden_states
+            return kv_cache, hidden_states
 
         def put_to_shared_dict(prefix, kv_cache, hidden_states):
             # Store the kv_cache and hidden_states in the shared dict.
@@ -572,25 +574,84 @@ class Scheduler:
                     end_time_stamp - start_time_stamp, start_time_stamp,
                     end_time_stamp)
 
-        while True:
-            seq_group = self.fetching_queue.get()
-            if seq_group is None:
-                # This is a shutdown signal
-                logger.info("The fetching thread is shutting down.")
-                return
-
-            self.scheduler_profiler.start('internal', 'fetching_kv')
-            hash_prefix = hash_list(seq_group.prompt_token_ids)
-            prefix, kv_cache, hidden_states = get_kv_and_hidden_states(
-                hash_prefix)
-            if kv_cache is not None:
-                fetching_success = True
-                put_to_shared_dict(prefix, kv_cache, hidden_states)
+        def fetch_kv(seq_group, key_prefix, ready):
+            if ready:
+                # kv and hidden states cache is ready
+                self.scheduler_profiler.start('internal', 'fetching_kv')
+                # get call will not wait for key anymore
+                kv_cache, hidden_states = get_kv_and_hidden_states(
+                    key_prefix)
+                if kv_cache is not None:
+                    fetching_success = True
+                    put_to_shared_dict(key_prefix, kv_cache, hidden_states)
+                else:
+                    fetching_success = False
+                self.scheduler_profiler.end()
             else:
+                # not ready, timeout
                 fetching_success = False
             self.fetching_done.put((seq_group, fetching_success))
             self.fetching_queue.task_done()
-            self.scheduler_profiler.end()
+
+        def is_key_ready(key_prefix):
+            # the key prefix is an integer
+            return get_kv_transfer_group().is_key_exist(str(key_prefix))
+
+        def wait_for_ready(wait_list: List[Tuple[SequenceGroup, int, float]]):
+            shut_down = False
+            while True:
+                # try to get any new fetching requests
+                current_time = time.time()
+                while not self.fetching_queue.empty():
+                    seq_group = self.fetching_queue.get_nowait()
+                    if seq_group is None:
+                        # special care to shutting down signal
+                        shut_down = True
+                    else:
+                        key_prefix = hash_list(seq_group.prompt_token_ids)
+                        timeout = current_time + self.wait_for_key_timeout
+                        wait_list.append((seq_group, key_prefix, timeout))
+
+                # check ready and timeout for the wait list
+                for i, wait_item in enumerate(wait_list):
+                    _, key_prefix, timeout = wait_item
+                    if is_key_ready(key_prefix):
+                        return i, True, shut_down
+                    if current_time > timeout:
+                        return i, False, shut_down
+
+                # since we don't have responsive poll
+                # have to sleep for next round of check
+                time.sleep(0.005)
+
+        def run_fetching_loop():
+            wait_list: List[Tuple[SequenceGroup, int, float]] = []
+            while True:
+                seq_group = self.fetching_queue.get()
+                if seq_group is None:
+                    # This is a shutdown signal
+                    logger.info("The fetching thread is shutting down.")
+                    return
+                key_prefix = hash_list(seq_group.prompt_token_ids)
+                if is_key_ready(key_prefix):
+                    fetch_kv(seq_group, key_prefix, True)
+                    continue
+
+                # run responsive waiting loop if the key is not ready
+                timeout = time.time() + self.wait_for_key_timeout
+                wait_list.append((seq_group, key_prefix, timeout))
+                shut_down = False
+                while wait_list:
+                    index, ready, shut_down = wait_for_ready(wait_list)
+                    seq_group, key_prefix, _ = wait_list[index]
+                    # remove the ready or timeout item from wait_list
+                    del wait_list[index]
+                    fetch_kv(seq_group, key_prefix, ready)
+                if shut_down:
+                    logger.info("The fetching thread is shutting down.")
+                    return
+
+        run_fetching_loop()
 
     def _process_fetching_done(self):
         aborted_seq_groups = []
