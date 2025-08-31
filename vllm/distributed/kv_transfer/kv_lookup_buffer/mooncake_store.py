@@ -231,7 +231,6 @@ class MooncakeStore(KVLookupBufferBase):
         end_get = time.time()
         if data:
             tensor = torch.frombuffer(data, dtype=dtype)
-            shape = (61, -1, 1, 576) if shape is None else shape
             tensor = tensor.view(shape)
             end_from_buffer = time.time()
             logger.debug("from buffer time: %f , get time: %f",
