@@ -469,9 +469,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
-        # TODO GPT-OSS: Update the code so that we create bias weights only for the models 
-        # that use bias in the MoE layer for e.g. GPT-OSS.
-        
         # Fused gate_up_proj (column parallel)
         # Fused gate_up_proj (column parallel)
         w13_weight = torch.nn.Parameter(torch.empty(
@@ -483,13 +480,16 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                                         requires_grad=False)
         layer.register_parameter("w13_weight", w13_weight)
         set_weight_attrs(w13_weight, extra_weight_attrs)
-        w13_bias = torch.nn.Parameter(torch.zeros(
-            num_experts,
-            2 * intermediate_size_per_partition,
-            dtype=params_dtype),
-                                        requires_grad=False)
-        layer.register_parameter("w13_bias", w13_bias)
-        set_weight_attrs(w13_bias, extra_weight_attrs)
+        
+        if layer.model_type in ["gpt_oss"]:
+            w13_bias = torch.nn.Parameter(torch.zeros(
+                num_experts,
+                2 * intermediate_size_per_partition,
+                dtype=params_dtype),
+                                            requires_grad=False)
+            layer.register_parameter("w13_bias", w13_bias)
+            set_weight_attrs(w13_bias, extra_weight_attrs)
+            
         # down_proj (row parallel)
         w2_weight = torch.nn.Parameter(torch.empty(
             num_experts,
@@ -499,12 +499,14 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                                        requires_grad=False)
         layer.register_parameter("w2_weight", w2_weight)
         set_weight_attrs(w2_weight, extra_weight_attrs)
-        w2_bias = torch.nn.Parameter(torch.zeros(num_experts,
-                                                    hidden_size,
-                                                    dtype=params_dtype),
-                                        requires_grad=False)
-        layer.register_parameter("w2_bias", w2_bias)
-        set_weight_attrs(w2_bias, extra_weight_attrs)
+        
+        if layer.model_type in ["gpt_oss"]:
+            w2_bias = torch.nn.Parameter(torch.zeros(num_experts,
+                                                        hidden_size,
+                                                        dtype=params_dtype),
+                                            requires_grad=False)
+            layer.register_parameter("w2_bias", w2_bias)
+            set_weight_attrs(w2_bias, extra_weight_attrs)
 
     def _maybe_pad_weight(self, weight: torch.Tensor) -> torch.Tensor:
         # Pad the weight tensor. This is an optimization on ROCm platform, which
@@ -812,9 +814,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 e_score_correction_bias=e_score_correction_bias)
         else:
             import torch.nn.functional as F
-            topk_weights = F.softmax(router_logits, dim=-1, dtype=torch.float32)
-            topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
-            topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
+            if layer.model_type in ["gpt_oss"]:
+                topk_weights, topk_ids = torch.topk(router_logits, top_k, dim=-1)
+                topk_weights = F.softmax(topk_weights, dim=-1, dtype=torch.float32)
+            else:
+                topk_weights = F.softmax(router_logits, dim=1, dtype=torch.float32)
+                topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
+                topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
         topk_ids = topk_ids.to(torch.int64)
         topk_weights = topk_weights.to(x.dtype)
         if layer.dp_size > 1:
@@ -979,6 +985,8 @@ class FusedMoE(torch.nn.Module):
         self.params_dtype = params_dtype
 
         vllm_config = get_current_vllm_config()
+        # Get the model type to decide usage of bias initialization and Custom MoE op
+        self.model_type = getattr(vllm_config.model_config.hf_config, "model_type")
         self.moe_parallel_config: FusedMoEParallelConfig = (
             FusedMoEParallelConfig.make(
                 tp_size_=(tp_size if tp_size is not None else
