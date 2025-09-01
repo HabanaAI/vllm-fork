@@ -1,6 +1,6 @@
 #! /bin/bash
 
-model_path=/models/Llama-2-7b-chat-hf
+model_path=/models/GLM-4.5-Air-FP8
 host=127.0.0.1
 port=30001
 data_path=/models/ShareGPT_V3_unfiltered_cleaned_split.json
