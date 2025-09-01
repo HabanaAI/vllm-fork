@@ -1210,6 +1210,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if self._is_quant_with_inc():
                 logger.info("Preparing model with INC..")
+
+                def move_all_params_to_hpu(model):
+                    model = model.to("hpu")
+                    # that does not handle the PatchedMoeFP8Matmul
+                    for _, module in model.named_modules():
+                        if hasattr(module, 'weight') \
+                            and module.weight.device.type == 'cpu':
+                            module.weight = module.weight.to('hpu')
+                        if hasattr(module, 'bias') \
+                            and module.bias is not None \
+                            and module.bias.device.type == 'cpu':
+                            module.bias.data = module.bias.data.to('hpu')
+                    torch.hpu.synchronize()
+                    return model
+
                 with HabanaMemoryProfiler() as m_inc:
                     from neural_compressor.torch.quantization import (
                         FP8Config, convert, prepare)
@@ -1221,6 +1236,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         os.getenv("QUANT_CONFIG", ""))
                     self._inc_preprocess()
                     if config.measure:
+                        self.model = move_all_params_to_hpu(self.model)
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
