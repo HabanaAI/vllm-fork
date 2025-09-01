@@ -669,14 +669,20 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         with compile_only_mode_context_false():
             if self.model_is_mrope:
-                image_input = self.model._parse_and_validate_image_input(
-                    **kwargs)
-                video_input = self.model._parse_and_validate_video_input(
-                    **kwargs)
-                inputs_embeds = self.model.get_input_embeddings_v0(
-                    input_ids,
-                    image_input=image_input,
-                    video_input=video_input)
+                if self.model.config.model_type == 'qwen2_5_omni_thinker':
+                    multimodal_embeddings = \
+                      self.model.get_multimodal_embeddings_v0(**kwargs)
+                    inputs_embeds = self.model.get_input_embeddings_v0(
+                        input_ids, multimodal_embeddings)
+                else:
+                    image_input = self.model._parse_and_validate_image_input(
+                        **kwargs)
+                    video_input = self.model._parse_and_validate_video_input(
+                        **kwargs)
+                    inputs_embeds = self.model.get_input_embeddings_v0(
+                        input_ids,
+                        image_input=image_input,
+                        video_input=video_input)
                 input_ids = None
                 kwargs.update({
                     'inputs_embeds': inputs_embeds,
