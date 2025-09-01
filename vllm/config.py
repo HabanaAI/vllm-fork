@@ -1563,7 +1563,7 @@ class CacheConfig:
                         or any('cache' in x.lower()
                                for x in block_list.get('names', []))):
                     pass
-                else:
+                elif quant_cfg.get('mode', '').lower() == 'quantize':
                     logger.info_once('Using fp8 kv-cache according to the '
                                      'blocklist in INC QUANT_CONFIG.')
                     self.cache_dtype = 'fp8_inc'
@@ -4487,12 +4487,14 @@ class VllmConfig:
             is_gaudi2 = htexp._get_device_type() == \
                 htexp.synDeviceType.synDeviceGaudi2
             if is_quantized_weights and use_inc and is_gaudi2:
-                logger.info_once(
-                    'Using INC with a quantized model on Gaudi2. '
-                    'Set weights_load_device to CPU and '
-                    'enable conversion from fp8_e4m3fn to fp8_e4m3fnuz')
-                os.environ["VLLM_HPU_CONVERT_TO_FP8UZ"] = "true"
-                self.load_config.device = 'cpu'
+                logger.info_once('Using INC with a quantized model on Gaudi2.')
+                if os.getenv('VLLM_HPU_CONVERT_TO_FP8UZ', None) is None:
+                    logger.info_once(
+                        'Enable conversion from fp8_e4m3fn to fp8_e4m3fnuz')
+                    os.environ["VLLM_HPU_CONVERT_TO_FP8UZ"] = "true"
+                if self.load_config.device != 'cpu':
+                    logger.info_once('Reset weights_load_device to CPU.')
+                    self.load_config.device = 'cpu'
 
         if self.model_config is not None and \
             self.scheduler_config.chunked_prefill_enabled and \
