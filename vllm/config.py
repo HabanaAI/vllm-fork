@@ -7,6 +7,7 @@ import enum
 import hashlib
 import inspect
 import json
+import os
 import textwrap
 import uuid
 import warnings
@@ -850,12 +851,14 @@ class ModelConfig:
         return quant_cfg
 
     def _verify_quantization(self) -> None:
+        from vllm.platforms import current_platform
         supported_quantization = QUANTIZATION_METHODS
         optimized_quantization_methods = [
             "fp8", "marlin", "modelopt", "gptq_marlin_24", "gptq_marlin",
             "awq_marlin", "fbgemm_fp8", "compressed-tensors", "experts_int8",
             "quark", "modelopt_fp4", "bitblas", "gptq_bitblas"
         ]
+
         if self.quantization is not None:
             self.quantization = cast(QuantizationMethods, self.quantization)
 
@@ -921,12 +924,19 @@ class ModelConfig:
                     f"method specified in the `quantization` argument "
                     f"({self.quantization}).")
 
+        if current_platform.is_hpu() and \
+            os.getenv("QUANT_CONFIG", None) is not None:
+            os.environ["PT_HPU_WEIGHT_SHARING"] = "0"
+            if quant_cfg is None:
+                logger.info_once('Enable INC as QUANT_CONFIG is set '
+                                 'for an unquantized model.')
+                self.quantization = 'inc'
+
         if self.quantization is not None:
             if self.quantization not in supported_quantization:
                 raise ValueError(
                     f"Unknown quantization method: {self.quantization}. Must "
                     f"be one of {supported_quantization}.")
-            from vllm.platforms import current_platform
             current_platform.verify_quantization(self.quantization)
             if self.quantization not in optimized_quantization_methods:
                 logger.warning(
@@ -1525,6 +1535,9 @@ class CacheConfig:
     def __post_init__(self) -> None:
         self.swap_space_bytes = self.swap_space * GiB_bytes
 
+        from vllm.platforms import current_platform
+        if current_platform.is_hpu():
+            self._maybe_set_cache_dtype_for_inc()
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()
@@ -1533,6 +1546,30 @@ class CacheConfig:
         # convert cache_config to dict(key: str, value: str) for prometheus
         # metrics info
         return {key: str(value) for key, value in self.__dict__.items()}
+
+    def _maybe_set_cache_dtype_for_inc(self) -> None:
+        inc_quant_config = os.getenv("QUANT_CONFIG", None)
+        if inc_quant_config is None:
+            return
+        assert os.path.isfile(inc_quant_config), \
+            f"INC QUANT_CONFIG file not found: {inc_quant_config}"
+        with open(inc_quant_config) as config_file:
+            try:
+                quant_cfg = json.load(config_file)
+                block_list = quant_cfg.get('blocklist', None)
+                if block_list is not None and (
+                        any('cache' in x.lower()
+                            for x in block_list.get('types', []))
+                        or any('cache' in x.lower()
+                               for x in block_list.get('names', []))):
+                    pass
+                elif quant_cfg.get('mode', '').lower() == 'quantize':
+                    logger.info_once('Using fp8 kv-cache according to the '
+                                     'blocklist in INC QUANT_CONFIG.')
+                    self.cache_dtype = 'fp8_inc'
+            except json.JSONDecodeError:
+                logger.error('Failed to parse QUANT_CONFIG JSON.')
+                return
 
     def _verify_args(self) -> None:
         if self.cpu_offload_gb < 0:
@@ -4442,6 +4479,23 @@ class VllmConfig:
                 self.model_config, self.load_config)
 
         from vllm.platforms import current_platform
+        if current_platform.is_hpu():
+            import habana_frameworks.torch.utils.experimental as htexp
+            is_quantized_weights = self.quant_config is not None and \
+                self.quant_config.get_name() != 'inc'
+            use_inc = os.environ.get("QUANT_CONFIG", None) is not None
+            is_gaudi2 = htexp._get_device_type() == \
+                htexp.synDeviceType.synDeviceGaudi2
+            if is_quantized_weights and use_inc and is_gaudi2:
+                logger.info_once('Using INC with a quantized model on Gaudi2.')
+                if os.getenv('VLLM_HPU_CONVERT_TO_FP8UZ', None) is None:
+                    logger.info_once(
+                        'Enable conversion from fp8_e4m3fn to fp8_e4m3fnuz')
+                    os.environ["VLLM_HPU_CONVERT_TO_FP8UZ"] = "true"
+                if self.load_config.device != 'cpu':
+                    logger.info_once('Reset weights_load_device to CPU.')
+                    self.load_config.device = 'cpu'
+
         if self.model_config is not None and \
             self.scheduler_config.chunked_prefill_enabled and \
             self.model_config.dtype == torch.float32 and \
