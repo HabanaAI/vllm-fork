@@ -706,7 +706,8 @@ class HpuModelAdapter(torch.nn.Module):
         if self._rotary_prepare_cos_sin is not None and not self.model_is_mrope:
             self._rotary_prepare_cos_sin(
                 kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
-        if self.model_is_mrope or self.is_mm_optimized:
+        if self.model_is_mrope or (self.is_mm_optimized
+                                    and kwargs['attn_metadata'].is_prompt):
             # inputs_embeds was computed on execute_model
             # now we always want to use the inputs_embeds
             # even if the prompt is text only
@@ -3820,7 +3821,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
-                    if self.model_is_mrope or self.is_mm_optimized:
+                    if self.model_is_mrope or (self.is_mm_optimized
+                                               and is_prompt):
                         if 'pixel_values' in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode and not is_pt_profiler_run:
