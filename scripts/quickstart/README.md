@@ -397,7 +397,7 @@ pip install -e vllm-fork/
 ```bash
 # set IP address of head node
 export VLLM_HOST_IP=192.168.1.101
-# set NIC interface name of worker IP address
+# set NIC interface name of node IP address
 export GLOO_SOCKET_IFNAME=enx6c1ff7012f87
 ```
 
