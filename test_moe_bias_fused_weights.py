@@ -79,6 +79,23 @@ def test_hpu_vs_native_moe_implementation():
             hidden_states = hidden_states.to('hpu')
             router_logits = router_logits.to('hpu')
         
+        # Create a dummy vllm_config with nested model_config.hf_config.model_type
+        class DummyHFConfig:
+            def __init__(self):
+                self.model_type = "gpt_oss"
+
+        class DummyModelConfig:
+            def __init__(self):
+                self.hf_config = DummyHFConfig()
+
+        class DummyVllmConfig:
+            def __init__(self):
+                self.model_config = DummyModelConfig()
+                self.parallel_config = type('PC', (), {"enable_expert_parallel": False})()
+
+        import vllm.model_executor.layers.fused_moe.layer as moe_layer_mod
+        moe_layer_mod.get_current_vllm_config = lambda: DummyVllmConfig()
+        
         # Create MoE layer with explicit parameters
         moe_layer = FusedMoE(
             num_experts=num_experts,
