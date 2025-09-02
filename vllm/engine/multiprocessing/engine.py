@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from typing import Iterator, List, Optional, Union
 
 import cloudpickle
-import zmq
+import zmq,time,os
 
 from vllm import AsyncEngineArgs, SamplingParams
 from vllm.config import VllmConfig
@@ -158,9 +158,9 @@ class MQLLMEngine:
     def start(self):
         try:
             try:
-                logger.debug("Starting Startup Loop.")
+                logger.info("Starting Startup Loop.")
                 self.run_startup_loop()
-                logger.debug("Starting Engine Loop.")
+                logger.info("Starting Engine Loop.")
                 self.run_engine_loop()
             except Exception as e:
                 logger.exception(repr(e))
@@ -211,6 +211,7 @@ class MQLLMEngine:
         """Core busy loop of the LLMEngine."""
 
         while True:
+            s1 = time.perf_counter()
             if not self.engine.has_unfinished_requests():
                 # Poll until there is work to do.
                 if self.engine.vllm_config.kv_transfer_config is not None\
@@ -232,16 +233,18 @@ class MQLLMEngine:
                         self.engine.do_log_stats()
                         logger.debug(
                             "Waiting for new requests in engine loop.")
-
+            s2 = time.perf_counter()
             # Handle any input from the client.
             self.handle_new_input()
-
+            s3 = time.perf_counter()
             # Engine step.
             request_outputs = self.engine_step()
-
+            s4 = time.perf_counter()
+            logger.info(f"libin debug engine loop  total:{s4-s1}| waiting:{s2-s1}| input:{s3-s2}| step:{s4-s3}")
             # Send request outputs (if async, done in engine_step callback).
             if not self.use_async_sockets:
                 self._send_outputs(request_outputs)
+            logger.info(f"libin debug engine loop  total:{s4-s1}| waiting:{s2-s1}| input:{s3-s2}| step:{s4-s3}")
 
     def engine_step(self) -> List[RequestOutput]:
         """Engine step wrapper with error handling."""
@@ -388,6 +391,8 @@ class MQLLMEngine:
         - A response from loading a lora adapter
         """
         if outputs:
+            s1 = time.perf_counter()
+            logger.info(f"libin _send_outputs start for {len(outputs)} {outputs[0].request_id=} {s1=}")
             try:
                 from ray.exceptions import RayTaskError
 
@@ -401,6 +406,9 @@ class MQLLMEngine:
 
             output_bytes = pickle.dumps(outputs)
             self.output_socket.send_multipart((output_bytes, ), copy=False)
+            s2 = time.perf_counter()
+            logger.info(f"libin _send_outputs time {s2=} {s2-s1=}")
+            [print(o.request_id) for o in outputs]
 
     def _send_healthy(self):
         """Send HEALTHY message to RPCClient."""

@@ -361,7 +361,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             broadcast_data.update(kwargs)
             s1 = time.perf_counter()
             broadcast_tensor_dict(broadcast_data, src=0)
-            logger.info("libin debug _get_driver_input_and_broadcast broadcast take {time.perf_counter()-s1}")
+            logger.info(f"libin debug _get_driver_input_and_broadcast broadcast take {time.perf_counter()-s1}")
 
         if execute_model_req.async_callback:
             model_input = dataclasses.replace(  # type: ignore

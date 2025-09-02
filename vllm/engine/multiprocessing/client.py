@@ -10,7 +10,7 @@ from typing import (Any, AsyncGenerator, Dict, Iterator, List, Mapping,
 
 import cloudpickle
 import psutil
-import zmq
+import zmq,time
 import zmq.asyncio
 from typing_extensions import deprecated
 from zmq import Frame  # type: ignore[attr-defined]
@@ -189,6 +189,7 @@ class MQLLMEngineClient(EngineClient):
 
         try:
             while True:
+                request_id = None
                 # Poll, checking for ENGINE_DEAD
                 while await self.output_socket.poll(timeout=VLLM_RPC_TIMEOUT
                                                     ) == 0:
@@ -200,8 +201,9 @@ class MQLLMEngineClient(EngineClient):
                             queue_j.put_nowait(
                                 ENGINE_DEAD_ERROR(self._errored_with))
                         return
-
+                s1 = time.perf_counter()
                 message: Frame = await self.output_socket.recv(copy=False)
+                s2 = time.perf_counter()
                 request_outputs = pickle.loads(message.buffer)
 
                 is_error = isinstance(request_outputs,
@@ -257,7 +259,8 @@ class MQLLMEngineClient(EngineClient):
                 else:
                     for request_output in request_outputs:
                         self._add_output(request_output)
-
+                s3 = time.perf_counter()
+                logger.info(f"libin debug client after output:{s3-s2} | output:{s2-s1} for {request_id=}")
         except asyncio.CancelledError:
             logger.debug("Shutting down MQLLMEngineClient output handler.")
 
@@ -601,7 +604,7 @@ class MQLLMEngineClient(EngineClient):
     ) -> Union[AsyncGenerator[RequestOutput, None], AsyncGenerator[
             PoolingRequestOutput, None]]:
         """Send an RPCGenerateRequest to the RPCServer and stream responses."""
-
+        s1 = time.perf_counter()
         # If already dead, error out.
         if self._errored_with is not None:
             raise ENGINE_DEAD_ERROR(self._errored_with)
@@ -625,12 +628,12 @@ class MQLLMEngineClient(EngineClient):
                     model_config=self.model_config,
                     reasoning_backend=self.decoding_config.reasoning_backend,
                 )
-
+        s2 = time.perf_counter()
         # 1) Create output queue for this requests.
         queue: asyncio.Queue[Union[RequestOutput,
                                    BaseException]] = asyncio.Queue()
         self.output_queues[request_id] = queue
-
+        s3 = time.perf_counter()
         try:
             # 2) Detach logits processors so that they can be pickled
             # separately (may require cloudpickle which is slower)
@@ -657,8 +660,9 @@ class MQLLMEngineClient(EngineClient):
             # 3) Send the RPCGenerateRequest to the MQLLMEngine.
             parts = (request_bytes,
                      lp_bytes) if lp_bytes else (request_bytes, )
+            s4 = time.perf_counter()
             await self.input_socket.send_multipart(parts, copy=False)
-
+            s5 = time.perf_counter()
             # 4) Stream the RequestOutputs from the output queue. Note
             # that the output_loop pushes RequestOutput objects to this
             # queue after pulling them from the zmq socket.
@@ -678,7 +682,9 @@ class MQLLMEngineClient(EngineClient):
                     await self.abort(request_id)
         finally:
             self.output_queues.pop(request_id)
-
+        s6 = time.perf_counter()
+        logger.info(f"libin debug client _process_request total:{s6-s1}| before_q:{s2-s1}| create_q:{s3-s2}| before_req:{s4-s3}| send_req:{s5-s4}| output:{s6-s5}")
+        
     async def start_profile(self) -> None:
         """Start profiling the engine"""
 

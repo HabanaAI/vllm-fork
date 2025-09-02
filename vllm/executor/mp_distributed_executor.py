@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
-import os
+import os,time
 from typing import Any, Callable, List, Optional, Union
 
 import cloudpickle
@@ -180,19 +180,22 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
                 worker.execute_method(sent_method, *args, **kwargs)
                 for worker in self.non_driver_workers
             ]
-
+        s1=time.perf_counter()
         # Start all remote workers first.
         worker_outputs = [
             worker.execute_method(sent_method, *args, **kwargs)
             for worker in self.workers
         ]
-
+        s2=time.perf_counter()
         driver_worker_output = run_method(self.driver_worker, sent_method,
                                           args, kwargs)
-
+        s3=time.perf_counter()
         # Get the results of the workers.
-        return [driver_worker_output
+        ret = [driver_worker_output
                 ] + [output.get() for output in worker_outputs]
+        s4=time.perf_counter()
+        logger.info(f"libin debug run_worker {sent_method=}| output:{s2-s1}| run_method:{s3-s2}| result:{s4-s3}")
+        return ret
 
     def check_health(self) -> None:
         """Raises an error if engine is unhealthy."""
@@ -238,10 +241,10 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
                                         self.pp_locks[pp_rank],
                                         "execute_model", execute_model_req)))
             s5= time.perf_counter()
-            logger.info(f"libin debug _driver {pp_ranker=} | {driver_worker=} | time:{s5-s4} | {threading.get_ident()}")
+            logger.info(f"libin debug _driver_execute_model_async {pp_ranke=} | {driver_worker=} | time:{s5-s4} | {threading.get_ident()}")
         results = await asyncio.gather(*tasks)
         s6 = time.perf_counter()
-        logger.info(f"libin debug _driver total:{s6-s1}| gather:{s6-s5}| task:{s3-s2}| lock:{s2-s1}| {threading.get_ident()}")
+        logger.info(f"libin debug _driver_execute_model_async total:{s6-s1}| gather:{s6-s5}| task:{s3-s2}| lock:{s2-s1}| {threading.get_ident()}")
 
         # Only the last PP stage has the final results.
         return results[-1]

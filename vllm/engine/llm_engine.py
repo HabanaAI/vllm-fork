@@ -1018,7 +1018,7 @@ class LLMEngine:
 
         if len(ctx.output_queue) == 0:
             return None
-
+        s1 = time.perf_counter()
         # Get pending async postprocessor
         if request_id:
             # When we process only one request, no pop is required
@@ -1236,7 +1236,7 @@ class LLMEngine:
 
             # Tracing
             self.do_tracing(scheduler_outputs, finished_before)
-
+        logger.info(f"libin debug _process_model_outputs time:{time.perf_counter()-s1}")
         return None
 
     def _advance_to_next_step(
@@ -1337,6 +1337,7 @@ class LLMEngine:
                 break
         ```
         """
+        s1 = time.perf_counter()
         if self.parallel_config.pipeline_parallel_size > 1:
             raise NotImplementedError(
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
@@ -1415,7 +1416,8 @@ class LLMEngine:
 
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
-
+        s2 = time.perf_counter()
+        s3=s4 =0
         if not scheduler_outputs.is_empty():
 
             # Check if we have a cached last_output from the previous iteration.
@@ -1440,7 +1442,7 @@ class LLMEngine:
             if allow_async_output_proc:
                 execute_model_req.async_callback = self.async_callbacks[
                     virtual_engine]
-
+            s3 = time.perf_counter()
             try:
                 outputs = self.model_executor.execute_model(
                     execute_model_req=execute_model_req)
@@ -1458,7 +1460,7 @@ class LLMEngine:
                     allow_async_output_proc=allow_async_output_proc)
                 # Raise so the caller is notified that this request failed
                 raise
-
+            s4 = time.perf_counter()
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
             if self.scheduler_config.is_multi_step:
@@ -1475,12 +1477,12 @@ class LLMEngine:
                 self._process_model_outputs(ctx=ctx)
             # No outputs in this case
             outputs = []
-
+        s5 = time.perf_counter()
         # Finish the current step for all the sequence groups.
         if self.scheduler_config.is_multi_step:
             for seq_group in seq_group_metadata_list:
                 seq_group.finish_step()
-
+        s6 = time.perf_counter()
         if not self._has_remaining_steps(seq_group_metadata_list):
             # clear the cache if we have finished all the steps.
             if self.scheduler_config.is_multi_step:
@@ -1520,7 +1522,7 @@ class LLMEngine:
         else:
             # Multi-step case
             return ctx.request_outputs
-
+        s7 = time.perf_counter()
         if not self.has_unfinished_requests():
             # Drain async postprocessor (if exists)
             if len(ctx.output_queue) > 0:
@@ -1535,6 +1537,8 @@ class LLMEngine:
             logger.debug("Stopping remote worker execution loop.")
             self.model_executor.stop_remote_worker_execution_loop()
 
+        s8 = time.perf_counter()
+        logger.info(f"libin debug llm_engine step  total:{s8-s1}| before_req:{s2-s1}| req:{s3-s2} | exe:{s4-s3}| {s8-s7=}| {s7-s6=}| {s6-s5=}")
         return ctx.request_outputs
 
     def _abort_and_cache_schedule(
