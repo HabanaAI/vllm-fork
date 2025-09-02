@@ -41,7 +41,7 @@ original_logprobs_120 = [
         -2.046875,
         -1.65625,
     ]
-PT_PROFILE = False
+
 
 def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rtol: float, atol: float ) -> list[str]:
     if PT_PROFILE:
@@ -84,6 +84,10 @@ def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rt
             print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
 if __name__ == "__main__":
+    # Enable PyTorch profiling when PT_PROFILE env var is set to one of the values (1,true,yes,on)
+    _pt_profile_env = os.getenv("PT_PROFILE", "0")
+    PT_PROFILE = _pt_profile_env.lower() in ("1", "true", "yes", "on")
+
     max_num_seqs = 128
     if RUN_20B_MODEL:
         llm = LLM(MODEL_PATH,
