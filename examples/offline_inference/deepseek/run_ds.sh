@@ -2,11 +2,14 @@
 
 # Default model path
 FP8_MODEL_PATH="/mnt/weka/data/pytorch/DeepSeek-R1/"
+FP8_MODEL_PATH="/mnt/weka/llm/Qwen3-30B-A3B-FP8/"
+FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-30B-A3B"
+FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-32B"
 # FP8_MODEL_PATH="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207"
 # Default options
 USE_SCALAR_FORMAT=false
 ENABLE_PATCHING=false
-
+ENABLE_MEASURE=false
 # Parse command-line arguments
 for arg in "$@"; do
     case $arg in
@@ -16,6 +19,10 @@ for arg in "$@"; do
             ;;
         --patching)
             ENABLE_PATCHING=true
+            shift
+            ;;
+        --m)
+            ENABLE_MEASURE=true
             shift
             ;;
         *)
@@ -33,6 +40,11 @@ else
     scale_format="const"
 fi
 
+if [ "$ENABLE_MEASURE" = true ]; then
+    export QUANT_CONFIG="./quant_configs/inc_measure.json"
+    echo "Measurement mode enabled."
+
+fi
 # Enable patching if --patching is set
 if [ "$ENABLE_PATCHING" = true ]; then
     export RUNTIME_SCALE_PATCHING=1
@@ -45,6 +57,7 @@ export VLLM_SKIP_WARMUP=true
 export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
 
 WORLD_SIZE=8
+WORLD_SIZE=1
 
 echo "Using model path: ${FP8_MODEL_PATH}"
 echo "Using quantization config: ${QUANT_CONFIG}"
@@ -66,5 +79,8 @@ PT_HPU_LAZY_MODE=1 \
     --max_num_seqs 1 \
     --tp_size "${WORLD_SIZE}" \
     --ep_size "${WORLD_SIZE}" \
-    --dummy \
+    --enforce_eager \
     --max_model_len 8192 2>&1 | tee "${LOG_FILE}"
+    
+    
+    # --dummy \

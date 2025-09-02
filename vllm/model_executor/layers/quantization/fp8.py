@@ -156,7 +156,7 @@ class Fp8Config(QuantizationConfig):
             return name.replace(".prob_output_scale", ".attn.prob_scale")
         # If no matches, return None
         return None
-
+import loguru
 
 class Fp8LinearMethod(LinearMethodBase):
     """Linear method for FP8.
@@ -345,6 +345,9 @@ class Fp8LinearMethod(LinearMethodBase):
     def dequant_block_fp8_weight(self, layer) -> torch.Tensor:
         if hasattr(layer, "updated_fp8_weight") and layer.updated_fp8_weight:
             return layer.weight
+        loguru.logger.warning(
+            f"dequant layer weight, shape: {layer.weight.shape}, device : {layer.weight.device}, dtype: {layer.weight.dtype}, weight_scale_inv shape: {layer.weight_scale_inv.shape}, weight_scale_inv dtype: {layer.weight_scale_inv.dtype} weight_scale_inv device: {layer.weight_scale_inv.device}"
+        )
         dequant_weight = hpu_ops.dequant_block_fp8_weight_naive(
             layer.weight,
             layer.weight_scale_inv.data,
