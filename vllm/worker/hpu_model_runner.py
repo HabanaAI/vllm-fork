@@ -707,7 +707,7 @@ class HpuModelAdapter(torch.nn.Module):
             self._rotary_prepare_cos_sin(
                 kwargs['positions'], recompute_cos_sin=self.recompute_cos_sin)
         if self.model_is_mrope or (self.is_mm_optimized
-                                    and kwargs['attn_metadata'].is_prompt):
+                                   and kwargs['attn_metadata'].is_prompt):
             # inputs_embeds was computed on execute_model
             # now we always want to use the inputs_embeds
             # even if the prompt is text only
