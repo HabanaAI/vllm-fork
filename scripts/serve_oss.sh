@@ -3,14 +3,16 @@ model_path=/software/users/yiliu4/HF_HOME/lmsys/gpt-oss-20b-bf16
 
 timestamp=$(date +%Y%m%d-%H%M%S)
 log_file=server.$timestamp.log
-tp_size=1
+tp_size=8
+VLLM_BUILD=1.23.0.248 \
 VLLM_ENABLE_FUSED_MOE_WITH_BIAS=1 \
 VLLM_SKIP_WARMUP=true \
 VLLM_PROMPT_USE_FUSEDSDPA=0 \
     PT_HPU_LAZY_MODE=1 \
         vllm serve $model_path \
-        --tensor-parallel-size 1 \
+        --tensor-parallel-size $tp_size \
         --dtype bfloat16 \
         --max-model-len  2048 \
+        --port 8688 \
         --disable-log-requests \
         --max_num_seqs 128 2>&1 | tee $log_file

@@ -1,0 +1,19 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "allowlist": {
+        "types": [],
+        "names": [
+        ]
+    },
+    "blocklist": {
+        "types": [
+        ],
+        "names": [
+            "lm_head",
+            "mlp\\.gate\\b"
+        ]
+    },
+    "dump_stats_path": "./gpt_oss/inc_output"
+}
