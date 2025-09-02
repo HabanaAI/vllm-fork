@@ -1110,41 +1110,44 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
         results = []
         # process each image one by one
         for img_idx in range(grid_thw.shape[0]):
-            img_shape = grid_thw[img_idx, :].unsqueeze(0)
+            img_shape = grid_thw[img_idx, :].unsqueeze(0).clone()
+            # For video, we process frames separately
+            grid_t = grid_thw[img_idx, 0]
+            img_shape[0, 0] = 1
             curr_img_size = img_shape.prod()
+            for _ in torch.arange(0, grid_t):
+                pixel_values_curr_img = pixel_values[offset:offset +
+                                                     curr_img_size, :]
 
-            pixel_values_curr_img = pixel_values[offset:offset +
-                                                 curr_img_size, :]
+                offset += curr_img_size
+                pixel_values_curr_img_padded, img_shape_padded = \
+                    self.pad_multimodal_data(
+                        pixel_values_curr_img,
+                        img_shape,
+                        vision_buckets=vision_buckets
+                    )
 
-            offset += curr_img_size
-            pixel_values_curr_img_padded, img_shape_padded = \
-                self.pad_multimodal_data(
-                    pixel_values_curr_img,
-                    img_shape,
-                    vision_buckets=vision_buckets
-                )
+                pixel_values_curr_img_padded, rot_pos_emb, \
+                    cu_seqlens, _, window_index = self.pre_attn(
+                        pixel_values_curr_img_padded, img_shape_padded)
 
-            pixel_values_curr_img_padded, rot_pos_emb, \
-                cu_seqlens, _, window_index = self.pre_attn(
-                    pixel_values_curr_img_padded, img_shape_padded)
+                # Create full attention block mask before VisionTransformer
+                # to save memory/time
+                fullatt_block_attn_mask = \
+                    create_block_diagonal_attention_mask_outerprod(cu_seqlens)
+                assert pixel_values_curr_img_padded.shape[0] == cu_seqlens[
+                    -1] == rot_pos_emb.shape[0]
 
-            # Create full attention block mask before VisionTransformer
-            # to save memory/time
-            fullatt_block_attn_mask = \
-                create_block_diagonal_attention_mask_outerprod(cu_seqlens)
-            assert pixel_values_curr_img_padded.shape[0] == cu_seqlens[
-                -1] == rot_pos_emb.shape[0]
+                htcore.mark_step()
+                hidden_states = self.forward(pixel_values_curr_img_padded,
+                                            rotary_pos_emb=rot_pos_emb,
+                                            fullattn_mask=fullatt_block_attn_mask)
+                htcore.mark_step()
 
-            htcore.mark_step()
-            hidden_states = self.forward(pixel_values_curr_img_padded,
-                                         rotary_pos_emb=rot_pos_emb,
-                                         fullattn_mask=fullatt_block_attn_mask)
-            htcore.mark_step()
-
-            image_embeds = self.post_attn(hidden_states, window_index)
-            # slice image_embeds to remove the padded parts
-            pad_index = img_shape_padded[0].prod() // self.spatial_merge_unit
-            results += [image_embeds[:pad_index, :]]
+                image_embeds = self.post_attn(hidden_states, window_index)
+                # slice image_embeds to remove the padded parts
+                pad_index = img_shape_padded[0].prod() // self.spatial_merge_unit
+                results += [image_embeds[:pad_index, :]]
         results_cat = torch.concat(results)
         image_embeds = results_cat
         return image_embeds
