@@ -648,8 +648,8 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
     ):
         offset = 0
         audio_outputs = []
-        for feature_len in audio_feature_lengths:
-            input_feature = input_features[offset:offset + feature_len]
+        for i, feature_len in enumerate(audio_feature_lengths):
+            input_feature = input_features[:, offset:offset + feature_len]
             offset = offset + feature_len
             padded_feature, padded_mask, padded_mask_after_cnn, \
               padded_aftercnn_lens, attention_mask = \
@@ -661,7 +661,7 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
                                           attention_mask)
             audio_features = self.post_attn(audio_features,
                                             padded_aftercnn_lens,
-                                            audio_feat_lengths)
+                                            audio_feat_lengths[i:i + 1])
             audio_outputs.append(audio_features)
         return torch.cat(audio_outputs, dim=0)
 
