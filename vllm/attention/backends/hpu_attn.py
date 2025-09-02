@@ -471,10 +471,12 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         self.fused_scaled_dot_product_attention = (
             None if HPUFusedSDPA is None else ModuleFusedSDPA(HPUFusedSDPA)
         )
-        # self.prefill_impl = get_config().prompt_attn_impl
-        self.prefill_impl = 'naive_impl'
+        self.prefill_impl = get_config().prompt_attn_impl
+        if os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA") == '0' or os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA") == 'False' \
+                                                              or os.environ.get("VLLM_PROMPT_USE_FUSEDSDPA") == 'false':
+            self.prefill_impl = "naive_impl"
         self.use_contiguous_pa = get_config().use_contiguous_pa
-        '''if alibi_slopes is not None:
+        if alibi_slopes is not None:
             assert (
                 self.prefill_impl != "flex_impl"
             ), "Prefill with Flex Attention not supported with alibi slopes!"
@@ -483,7 +485,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             ), "Prefill with FusedSDPA not supported with alibi slopes!"
             assert (
                 self.use_contiguous_pa
-            ), "Non-contiguous PA not supported with alibi slopes!"'''
+            ), "Non-contiguous PA not supported with alibi slopes!"
 
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
@@ -643,7 +645,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             )
 
             common_args = self.common_attention_args(
-                block_list, key_cache, value_cache, attn_metadata.block_size
+                block_list, key_cache, value_cache, attn_metadata.block_size, self.sinks
             )
 
             if self.sliding_window:
@@ -657,15 +659,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         attn_metadata.sliding_window_right,
                     )
                     common_args["window_size"] = window_size
-                    # TODO: Currently HPU doesn't support GQA for FusedSDPA
-                    # with causal + window, so repeat KV so QKV are all the
-                    # same shape.
-                    if query_shape != kv_shape:
-                        repeat_kv = self.num_heads // self.num_kv_heads
-                        key = key.repeat_interleave(repeat_kv, dim=1)
-                        value = value.repeat_interleave(repeat_kv, dim=1)
-                        kv_shape = query_shape
+            # TODO: Currently HPU doesn't support GQA for FusedSDPA
+            # with causal + window/sinks, so repeat KV so QKV are all the
+            # same shape.
+            if self.prefill_impl == "fsdpa_impl" and query_shape != kv_shape:
+                repeat_kv = self.num_heads // self.num_kv_heads
+                key = key.repeat_interleave(repeat_kv, dim=1)
+                value = value.repeat_interleave(repeat_kv, dim=1)
+                kv_shape = query_shape
 
+            #print('prompt_mask: ', attn_bias.to('cpu'))
             out = ops.prompt_attention(
                 impl=self.prefill_impl,
                 query=query.view(query_shape),
@@ -705,6 +708,9 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         dtype=self.alibi_slopes.dtype,
                     )
 
+            if self.sinks is not None:
+                self.sinks_decode = self.sinks.reshape(self.sinks.shape[0], 1)
+                self.sinks_decode = torch.nn.functional.pad(self.sinks_decode, (0, attn_metadata.block_size - 1, 0, 0), "constant", -torch.inf)
             output = HPUPagedAttention.forward_decode(
                 query=query,
                 block_mapping=block_mapping,
@@ -712,14 +718,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_groups=block_groups,
                 position_bias=self.position_bias,
                 **self.common_attention_args(
-                    block_list, key_cache, value_cache, attn_metadata.block_size
+                    block_list, key_cache, value_cache, attn_metadata.block_size, self.sinks_decode
                 ),
             )
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
     def common_attention_args(
-        self, block_list=None, key_cache=None, value_cache=None, block_size=None
+        self, block_list=None, key_cache=None, value_cache=None, block_size=None, sinks = None
     ):
         return {
             "scale": self.scale,
@@ -735,7 +741,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             "key_cache": key_cache,
             "value_cache": value_cache,
             "block_size": block_size,
-            "sinks": self.sinks,
+            "sinks": sinks,
         }
 
     def forward_encoder_decoder(
