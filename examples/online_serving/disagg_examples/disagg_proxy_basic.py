@@ -486,16 +486,7 @@ class Proxy:
             )
 
     def remove_instance_endpoint(self, instance_type, instance):
-        with self.scheduling_policy.lock:
-            if (instance_type == "decode"
-                    and instance in self.decode_instances):
-                self.decode_instances.remove(instance)
-                self.decode_cycler = itertools.cycle(self.decode_instances)
-            if (instance_type == "prefill"
-                    and instance in self.prefill_instances):
-                self.prefill_instances.remove(instance)
-                self.prefill_cycler = itertools.cycle(self.decode_instances)
-
+        return
 
 class RoundRobinSchedulingPolicy(SchedulingPolicy):
 
