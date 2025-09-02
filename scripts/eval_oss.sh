@@ -20,7 +20,8 @@ task_name="gsm8k"
 
 
 lm-eval --model local-completions \
-    --model_args pretrained=${model_path},base_url=http://localhost:8688/v1/completions,max_length=8192,max_gen_toks=4096,num_concurrent=128 \
+    --model_args pretrained=${model_path},base_url=http://localhost:8688/v1/completions,max_length=8192,max_gen_toks=4096 \
     --tasks ${task_name} \
-    --batch_size 128 \
+    --batch_size 32 \
+    --limit 32 \
     --gen_kwargs="max_length=8192,max_gen_toks=4096" 

@@ -12,7 +12,8 @@ VLLM_PROMPT_USE_FUSEDSDPA=0 \
         vllm serve $model_path \
         --tensor-parallel-size $tp_size \
         --dtype bfloat16 \
-        --max-model-len  2048 \
         --port 8688 \
+        --max-model-len  8192 \
         --disable-log-requests \
+        --max_num_seqs 128 \
         --max_num_seqs 128 2>&1 | tee $log_file
