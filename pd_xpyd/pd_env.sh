@@ -13,7 +13,7 @@ export LD_LIBRARY_PATH=$LIBFABRIC_ROOT/lib:$LD_LIBRARY_PATH
 
 export PT_HPU_LAZY_MODE=1
 
-ray stop --force
+#ray stop --force
 
 # DO NOT change unless you fully understand its purpose
 export HABANA_VISIBLE_DEVICES="ALL"
