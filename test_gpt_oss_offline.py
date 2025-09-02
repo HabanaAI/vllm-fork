@@ -1,4 +1,5 @@
 import os
+import sys
 import vllm
 from vllm.distributed import cleanup_dist_env_and_memory
 from vllm.entrypoints.llm import LLM
@@ -43,15 +44,10 @@ original_logprobs_120 = [
     ]
 
 
-def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rtol: float, atol: float ) -> list[str]:
-    if PT_PROFILE:
+def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rtol: float, atol: float, max_num_seqs:int) -> list[str]:
         prompts = [
             "Roses are red, violets",
-        ] * 128
-    else:
-        prompts = [
-            "Roses are red, violets",
-        ]
+            ] * max_num_seqs
 
     sampling_params = vllm.SamplingParams(temperature=0,
                                           max_tokens=20,
@@ -84,11 +80,12 @@ def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rt
             print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
 if __name__ == "__main__":
+    DEFAULT_MAX_NUM_SEQS = 1
+    max_num_seqs = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_MAX_NUM_SEQS
     # Enable PyTorch profiling when PT_PROFILE env var is set to one of the values (1,true,yes,on)
     _pt_profile_env = os.getenv("PT_PROFILE", "0")
     PT_PROFILE = _pt_profile_env.lower() in ("1", "true", "yes", "on")
 
-    max_num_seqs = 128
     if RUN_20B_MODEL:
         llm = LLM(MODEL_PATH,
                         max_num_seqs=8 if not PT_PROFILE else max_num_seqs,
@@ -112,18 +109,18 @@ if __name__ == "__main__":
             )
             _profiler.start()
             do_sample(llm, original_output=original_output,
-                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01)
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
             _profiler.step()
             do_sample(llm, original_output=original_output,
-                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01)
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
             _profiler.step()
             do_sample(llm, original_output=original_output,
-                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01)
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
             _profiler.step()
             _profiler.stop()
         else:
             do_sample(llm, original_output=original_output,
-                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01)
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
 
     else:
         llm = LLM(MODEL_PATH_120,
@@ -135,5 +132,4 @@ if __name__ == "__main__":
                         tensor_parallel_size=4,
                         )
         do_sample(llm, original_output=original_output_120,
-                  original_logprobs=original_logprobs_120, rtol=1e-01, atol=3e-01)
- 
+                  original_logprobs=original_logprobs_120, rtol=1e-01, atol=3e-01, max_num_seqs=max_num_seqs)
