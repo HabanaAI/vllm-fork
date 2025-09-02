@@ -176,6 +176,7 @@ Supports a wide range of validated models including LLaMa, Mistral, and Qwen fam
      --runtime=habana \
      -e HABANA_VISIBLE_DEVICES=all \
      -p 8000:8000 \
+     -e HF_HOME='mnt/hf_cache'
      --name vllm-server \
      <docker image name>
    ```
