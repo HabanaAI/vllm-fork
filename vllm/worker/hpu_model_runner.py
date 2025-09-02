@@ -148,6 +148,34 @@ class VisionBuckets:
         return str(self.multimodal_buckets)
 
 
+class AudioBuckets:
+    '''
+    This class is used to bucket audio tokens
+    '''
+
+    def __init__(self):
+        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS_AUDIO', "")
+        if envvar == 'None':
+            self.multimodal_buckets = None
+        else:
+            if envvar == "":
+                self.multimodal_buckets = list(range(0, 12801, 1600))
+            else:
+                self.multimodal_buckets = [int(i) for i in envvar.split(',')]
+
+    def get_multimodal_bucket(self, curr_num_audio_patches):
+        if self.multimodal_buckets is not None:
+            for mm_bucket in self.multimodal_buckets:
+                if curr_num_audio_patches <= mm_bucket:
+                    return mm_bucket
+            return curr_num_audio_patches
+        else:
+            return 0
+
+    def __repr__(self):
+        return str(self.multimodal_buckets)
+
+
 class Singleton(type):
     _instances: Dict[type, object] = {}
 
@@ -368,6 +396,10 @@ class HpuModelAdapter(torch.nn.Module):
                 logger.info("[Multimodal] Wrapping Visual Model")
                 self.model.visual = htorch.hpu.wrap_in_hpu_graph(
                     self.model.visual, disable_tensor_cache=True)
+            if self.model_is_mrope and hasattr(self.model, 'audio_tower'):
+                logger.info("[Multimodal] Wrapping Audio Model")
+                self.model.audio_tower = htorch.hpu.wrap_in_hpu_graph(
+                    self.model.audio_tower)
 
             if self.is_mm_optimized:
                 if hasattr(self.model, 'vision_tower'):
@@ -1456,10 +1488,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _get_mrope_positions_and_delta(self, seq_data, mm_kwargs, context_len):
         image_grid_thw = mm_kwargs.get("image_grid_thw", None)
         video_grid_thw = mm_kwargs.get("video_grid_thw", None)
+        audio_feature_lengths = mm_kwargs.get("audio_feature_lengths", None)
         second_per_grid_ts = mm_kwargs.get("second_per_grid_ts", None)
-        assert image_grid_thw is not None or video_grid_thw is not None, (
+        assert image_grid_thw is not None or video_grid_thw is not None or \
+          audio_feature_lengths is not None, (
             "mrope embedding type requires multi-modal input mapper "
-            "returns 'image_grid_thw' or 'video_grid_thw'.")
+            "returns 'image_grid_thw' or 'video_grid_thw' or "
+            "audio_feature_lengths.")
         hf_config = self.model_config.hf_config
         token_ids = seq_data.get_token_ids()
         mrope_positions, mrope_position_delta = \
@@ -1470,6 +1505,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 video_grid_thw=video_grid_thw,
                 second_per_grid_ts=second_per_grid_ts,
                 context_len=context_len,
+                audio_feature_lengths=audio_feature_lengths,
             )
         assert mrope_positions is not None
         return mrope_positions, mrope_position_delta
@@ -1527,6 +1563,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.is_mm_optimized = is_mm_optimized(model)
         if self.model_is_mrope or self.is_mm_optimized:
             model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+            model.audio_buckets = AudioBuckets()
 
     def _prepare_prompt(
         self,
