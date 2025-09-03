@@ -22,6 +22,7 @@ model_map = {
     'llama3-70b': '/mnt/weka/data/pytorch/llama3/Meta-Llama-3-70B-Instruct/',
     'llama3.1-8b': '/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B/',
     'llama3.1-70b': '/software/users/kzawora/models/meta-llama/Meta-Llama-3.1-70B-Instruct/',
+    'qwen3-30b': 'Qwen/Qwen3-30B-A3B'
 }
  
 def get_conversation():
@@ -38,9 +39,9 @@ def main():
     parser = argparse.ArgumentParser(
                     prog='vllm_offline_test',
                     description='Tests vLLM offline mode')
-    parser.add_argument('-n', '--batch-size', type=int, default=4)
+    parser.add_argument('-n', '--batch-size', type=int, default=128)
     parser.add_argument('-w', '--world-size', type=int, default=1)
-    parser.add_argument('-m', '--model', type=str, default="llama3.1-8b")
+    parser.add_argument('-m', '--model', type=str, default="qwen3-30b")
 #    parser.add_argument('-m', '--model', type=str, default="llama3-8b")
     parser.add_argument('-e', '--enforce-eager', action='store_true')
     parser.add_argument('-p', '--profiling', action='store_true')
