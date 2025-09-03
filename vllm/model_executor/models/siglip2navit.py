@@ -275,13 +275,13 @@ class Siglip2Attention(nn.Module):
                 q_i, k_i, v_i = [x.transpose(1, 2) for x in (q_i, k_i, v_i)]
 
                 if is_hpu:
-                    output_i = FusedSDPA.apply(q_i,k_i,v_i, None, 0.0,
-                                                   False, None)
+                    output_i = FusedSDPA.apply(q_i,k_i,v_i, None, 0.0, False,
+                                               None)
                 else:
                     output_i = F.scaled_dot_product_attention(q_i,
-                                                          k_i,
-                                                          v_i,
-                                                          dropout_p=0.0)
+                                                              k_i,
+                                                              v_i,
+                                                              dropout_p=0.0)
                 # (1, num_heads, seq_len, head_dim) -> (seq_len, embed_dim)
                 output_i = output_i.transpose(1, 2).reshape(-1, self.embed_dim)
                 outputs.append(output_i)
@@ -478,13 +478,14 @@ class Siglip2Encoder(nn.Module):
         """
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
+
         # NOTE: unique_consecutive is a dynamic operation
         # we are using `remove_duplicates_cpu` instead
         def remove_duplicates_cpu(a):
             return [a[i] for i in range(len(a)) if i == 0 or a[i - 1] != a[i]]
 
         if is_hpu:
-          cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
+            cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
 
 
         cu_window_seqlens = torch.tensor(
@@ -493,7 +494,7 @@ class Siglip2Encoder(nn.Module):
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
         if not is_hpu:
-          cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
+            cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = inputs_embeds.size()
         inputs_embeds = inputs_embeds.reshape(

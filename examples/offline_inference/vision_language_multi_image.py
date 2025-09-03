@@ -459,6 +459,7 @@ def load_ovis(question: str, image_urls: list[str]) -> ModelRequestData:
         image_data=[fetch_image(url) for url in image_urls],
     )
 
+
 # ovis2_5
 def load_ovis2_5(question: str, image_urls: list[str]) -> ModelRequestData:
     model_name = "AIDC-AI/Ovis2.5-2B"

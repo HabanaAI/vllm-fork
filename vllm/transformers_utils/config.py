@@ -91,6 +91,7 @@ _CONFIG_ATTRS_MAPPING: dict[str, str] = {
     "llm_config": "text_config",
 }
 
+
 class ConfigFormat(str, enum.Enum):
     AUTO = "auto"
     HF = "hf"
@@ -241,6 +242,7 @@ def _uses_mrope(config: PretrainedConfig) -> bool:
         return False
 
     return "mrope_section" in rope_scaling
+
 
 def _maybe_remap_hf_config_attrs(config: PretrainedConfig) -> PretrainedConfig:
     """Remap config attributes to match the expected names."""

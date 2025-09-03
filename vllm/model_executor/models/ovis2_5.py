@@ -392,6 +392,7 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
                                         info=Ovis2_5ProcessingInfo,
                                         dummy_inputs=Ovis2_5DummyInputsBuilder)
 class Ovis2_5(nn.Module, SupportsMultiModal):
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config

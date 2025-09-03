@@ -804,7 +804,6 @@ def ovis2_5_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
             videos = [[Image.fromarray(frame) for frame in vid]
                       for vid in videos]
 
-        import pdb;pdb.set_trace()
         prompt_start_and_end = {
             "qwen2": ("<|im_start|>user\n", "<|im_end|>\n"),
             "llama":
