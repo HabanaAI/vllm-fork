@@ -1,3 +1,5 @@
+import os
+import sys
 import vllm
 from vllm.distributed import cleanup_dist_env_and_memory
 from vllm.entrypoints.llm import LLM
@@ -41,53 +43,92 @@ original_logprobs_120 = [
         -1.65625,
     ]
 
-def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rtol: float, atol: float ) -> list[str]:
-    prompts = [
-        "Roses are red, violets",
-    ]
+
+def do_sample(llm: LLM, original_output: str, original_logprobs: list[float], rtol: float, atol: float, max_num_seqs:int) -> list[str]:
+        prompts = [
+            "Roses are red, violets",
+            ] * max_num_seqs
+
     sampling_params = vllm.SamplingParams(temperature=0,
-                                          max_tokens=256,
-                                          logprobs=1,)
+                                          max_tokens=20,
+                                          logprobs=1 if not PT_PROFILE else None,)
     outputs = llm.generate(
         prompts,
         sampling_params)
 
-    # Print the outputs.
-    generated_texts: list[str] = []
-    logprobs: list[float] = []
-    for output in outputs:
-        for probs in output.outputs[0].logprobs:
-            logprobs.append(list(probs.values())[0].logprob)
-        prompt = output.prompt
-        generated_text = output.outputs[0].text
-        generated_texts.append(generated_text)
-        print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+    if not PT_PROFILE:
+        # Print the outputs.
+        generated_texts: list[str] = []
+        logprobs: list[float] = []
+        for output in outputs:
+            for probs in output.outputs[0].logprobs:
+                logprobs.append(list(probs.values())[0].logprob)
+            prompt = output.prompt
+            generated_text = output.outputs[0].text
+            generated_texts.append(generated_text)
+            print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
-    assert prompts[0]+generated_texts[0] == original_output, "Generated text does not match the expected output."
-    assert np.allclose(np.array(logprobs[:-1]),np.array(original_logprobs),rtol=rtol, atol=atol), "Logprobs do not match the expected values."
-    return generated_texts
-
+        assert prompts[0]+generated_texts[0] == original_output, "Generated text does not match the expected output."
+        assert np.allclose(np.array(logprobs[:-1]),np.array(original_logprobs),rtol=rtol, atol=atol), "Logprobs do not match the expected values."
+        return generated_texts
+    else:
+        generated_texts: list[str] = []
+        for output in outputs:
+            prompt = output.prompt
+            generated_text = output.outputs[0].text
+            generated_texts.append(generated_text)
+            print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
 
 if __name__ == "__main__":
+    DEFAULT_MAX_NUM_SEQS = 1
+    max_num_seqs = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_MAX_NUM_SEQS
+    # Enable PyTorch profiling when PT_PROFILE env var is set to one of the values (1,true,yes,on)
+    _pt_profile_env = os.getenv("PT_PROFILE", "0")
+    PT_PROFILE = _pt_profile_env.lower() in ("1", "true", "yes", "on")
+
     if RUN_20B_MODEL:
         llm = LLM(MODEL_PATH,
-                        max_num_seqs=8,
+                        max_num_seqs=8 if not PT_PROFILE else max_num_seqs,
                         dtype='bfloat16',
                         enforce_eager=False,
-                        max_model_len=20,
-                        max_num_batched_tokens=512,
+                        max_model_len=512,
+                        max_num_batched_tokens=2048,
                         tensor_parallel_size=1,
                         )
-        do_sample(llm, original_output=original_output,
-                  original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01)
+        if PT_PROFILE:
+            import torch
+            schedule = torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=1)
+            activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.HPU]
+            _profiler = torch.profiler.profile(
+                schedule=schedule,
+                activities=activities,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler("./"),
+                record_shapes=False,
+                with_stack=False,
+            )
+            _profiler.start()
+            do_sample(llm, original_output=original_output,
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
+            _profiler.step()
+            do_sample(llm, original_output=original_output,
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
+            _profiler.step()
+            do_sample(llm, original_output=original_output,
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
+            _profiler.step()
+            _profiler.stop()
+        else:
+            do_sample(llm, original_output=original_output,
+                    original_logprobs=original_logprobs, rtol=1e-01, atol=1e-01, max_num_seqs=max_num_seqs)
+
     else:
         llm = LLM(MODEL_PATH_120,
                         max_num_seqs=8,
                         dtype='bfloat16',
                         enforce_eager=False,
-                        max_model_len=20,
-                        max_num_batched_tokens=512,
+                        max_model_len=512,
+                        max_num_batched_tokens=2048,
                         tensor_parallel_size=4,
                         )
         do_sample(llm, original_output=original_output_120,
-                  original_logprobs=original_logprobs_120, rtol=1e-01, atol=3e-01)
+                  original_logprobs=original_logprobs_120, rtol=1e-01, atol=3e-01, max_num_seqs=max_num_seqs)
