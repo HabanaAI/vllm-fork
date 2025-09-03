@@ -591,8 +591,8 @@ class Scheduler:
             # the key prefix is an integer
             return get_kv_transfer_group().is_key_exist(str(key_prefix))
 
-        def wait_for_ready(wait_list: List[Tuple[SequenceGroup, int, float]],
-                           shut_down=False):
+        def wait_for_ready(wait_list: List[Tuple[SequenceGroup, int, float]]):
+            shut_down = False
             while True:
                 # try to get any new fetching requests
                 current_time = time.time()
@@ -636,8 +636,7 @@ class Scheduler:
                 wait_list.append((seq_group, key_prefix, timeout))
                 shut_down = False
                 while wait_list:
-                    index, ready, shut_down = wait_for_ready(wait_list,
-                                                             shut_down)
+                    index, ready, shut_down = wait_for_ready(wait_list)
                     seq_group, key_prefix, _ = wait_list[index]
                     # remove the ready or timeout item from wait_list
                     del wait_list[index]
