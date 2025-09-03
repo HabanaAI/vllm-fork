@@ -273,14 +273,14 @@ class Siglip2Attention(nn.Module):
                 # (1, num_heads, seq_len, head_dim)
                 q_i, k_i, v_i = [x.transpose(1, 2) for x in (q_i, k_i, v_i)]
 
-                '''
-                output_i = F.scaled_dot_product_attention(q_i,
+                if is_hpu:
+                    output_i = FusedSDPA.apply(q_i,k_i,v_i, None, 0.0,
+                                                   False, None)
+                else:
+                    output_i = F.scaled_dot_product_attention(q_i,
                                                           k_i,
                                                           v_i,
                                                           dropout_p=0.0)
-                '''
-                output_i = FusedSDPA.apply(q_i,k_i,v_i, None, 0.0,
-                                                   False, None)
                 # (1, num_heads, seq_len, head_dim) -> (seq_len, embed_dim)
                 output_i = output_i.transpose(1, 2).reshape(-1, self.embed_dim)
                 outputs.append(output_i)
@@ -482,14 +482,17 @@ class Siglip2Encoder(nn.Module):
         def remove_duplicates_cpu(a):
             return [a[i] for i in range(len(a)) if i == 0 or a[i - 1] != a[i]]
 
-        cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
+        if is_hpu:
+          cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
+
 
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=inputs_embeds.device,
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
-        #cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
+        if not is_hpu:
+          cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = inputs_embeds.size()
         inputs_embeds = inputs_embeds.reshape(
