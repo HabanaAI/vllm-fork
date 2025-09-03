@@ -1,4 +1,5 @@
 # Running DeepseekV3ForCausalLM architecture models with deepseek_r1 branch
+**[中文](README.zh.md)**
 
 This guide provides the step-by-step instructions on deploying and running DeepseekV3ForCausalLM architecture models with vLLM serving framework on Intel® Gaudi® HPUs. It covers the hardware requirements, software prerequisites, model weights downloading and conversion, environment setup, model serving deployment and performance and accuracy benchmarking on single-node and multi-node 8\*Gaudi servers. 
 
@@ -540,8 +541,7 @@ ray start --address='HEAD_NODE_IP:port'
 ray start --address='192.168.1.101:8850'
 ```
 
-If you meet the error message like "ray.exceptions.RaySystemError: System error: No module named 'vllm'", please set the variable below. "/workspace/vllm-fork" is your vLLM source code folder. 
-"/workspace/vllm-fork" is your vLLM source code folder and pelase update to your folder path. 
+If you meet the error message like "ray.exceptions.RaySystemError: System error: No module named 'vllm'", please set the variable below. It is assumed that "/workspace/vllm-fork" is your vLLM source code folder. If not, please update to your folder path. 
 ```bash
 echo 'PYTHONPATH=$PYTHONPATH:/workspace/vllm-fork' | tee -a /etc/environment
 source /etc/environment

@@ -209,7 +209,7 @@ cd vllm-fork
 bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
 ```
 
-#### 2. 配置环境变量。（可选）
+#### 2. 配置环境变量（可选）
 
 下载测量文件后，您需要配置一些环境变量以使 INC 量化生效。
 
@@ -542,14 +542,12 @@ ray start --address='192.168.1.101:8850'
 ```
 
 
-如果您遇到错误消息如 "ray.exceptions.RaySystemError: System error: No module named 'vllm'"，请设置以下变量。"/workspace/vllm-fork" 是您的 vLLM 源代码文件夹。
-"/workspace/vllm-fork" 是您的 vLLM 源代码文件夹，请更新为您的文件夹路径。
-bash
+如果您遇到错误消息如 "ray.exceptions.RaySystemError: System error: No module named 'vllm'"，请设置以下变量。这里假设"/workspace/vllm-fork" 是您的 vLLM 源代码文件夹，如果不是，请更新为您的文件夹路径。
+```bash
 echo 'PYTHONPATH=$PYTHONPATH:/workspace/vllm-fork' | tee -a /etc/environment
 source /etc/environment
+```
 
-
----
 
 ### 在头节点上启动 vLLM
 示例命令如下所示。在 2 个节点上完成 32k 上下文长度的预热可能需要几个小时。
