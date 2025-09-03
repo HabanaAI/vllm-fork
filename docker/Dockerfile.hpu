@@ -20,6 +20,6 @@ RUN python3 -m pip install -e tests/vllm_test_utils
 
 WORKDIR /workspace/
 
-RUN ln -s /workspace/vllm/tests && ln -s /workspace/vllm/examples && ln -s /workspace/vllm/benchmarks
+RUN ln -s /workspace/vllm/tests && ln -s /workspace/vllm/examples && ln -s /workspace/vllm/benchmarks && ln -s /workspace/vllm/.buildkite
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
