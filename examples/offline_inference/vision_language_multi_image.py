@@ -482,7 +482,6 @@ def load_ovis2_5(question: str, image_urls: list[str]) -> ModelRequestData:
         messages, tokenize=False, add_generation_prompt=True
     )
 
-    import pdb;pdb.set_trace()
     return ModelRequestData(
         engine_args=engine_args,
         prompt=prompt,

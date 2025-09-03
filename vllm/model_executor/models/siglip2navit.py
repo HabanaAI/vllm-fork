@@ -215,7 +215,8 @@ class Siglip2Attention(nn.Module):
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
         if self.attn_backend not in {
-                _Backend.FLASH_ATTN, _Backend.TORCH_SDPA,
+                _Backend.FLASH_ATTN,
+                _Backend.TORCH_SDPA,
         }:
             self.attn_backend = _Backend.TORCH_SDPA
         self.is_flash_attn_backend = self.attn_backend in {

@@ -801,7 +801,7 @@ def ovis2_5_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
             videos = []
         else:
             videos = [videos] if isinstance(videos, np.ndarray) else videos
-            videos = [[PIL.Image.fromarray(frame) for frame in vid]
+            videos = [[Image.fromarray(frame) for frame in vid]
                       for vid in videos]
 
         import pdb;pdb.set_trace()
