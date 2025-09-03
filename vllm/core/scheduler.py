@@ -476,6 +476,9 @@ class Scheduler:
         self.wait_for_key_timeout = envs.VLLM_KV_CACHE_WAIT_TIMEOUT
         self.fetching_thread = threading.Thread(target=self._fetch_kv_thread, )
         if self.need_fetch_kv:
+            from vllm_hpu_extension.profiler import HabanaHighLevelProfiler
+            self.scheduler_profiler = HabanaHighLevelProfiler(
+                "scheduler_instance_0")
             self.fetching_thread.start()
         # Sequence groups in the WAITING state.
         # Contain new prefill or preempted requests.
@@ -573,6 +576,7 @@ class Scheduler:
         def fetch_kv(seq_group, key_prefix, ready):
             if ready:
                 # kv and hidden states cache is ready
+                self.scheduler_profiler.start('internal', 'fetching_kv')
                 # get call will not wait for key anymore
                 kv_cache, hidden_states = get_kv_and_hidden_states(
                     key_prefix)
@@ -581,6 +585,7 @@ class Scheduler:
                     put_to_shared_dict(key_prefix, kv_cache, hidden_states)
                 else:
                     fetching_success = False
+                self.scheduler_profiler.end()
             else:
                 # not ready, timeout
                 fetching_success = False

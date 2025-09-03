@@ -3059,7 +3059,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             sync_recv_kv_caches(model, model_input,
                                                 attn_metadata, kv_caches)
                     now = time.time()
-                    logger.debug("KV recv time: %f s", now - cur_time)
+                    logger.info("KV transfer recv time: %s", now - cur_time)
 
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
@@ -3084,9 +3084,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # torch.hpu.synchronize()
                 # Sending KV cache in distributed KV cache transfer setting
                 # NOTE: the send operation is non-blocking
-                need_send_kv = self.need_send_kv(model_input, kv_caches,
-                                                 warmup_mode)
+                need_send_kv = self.need_send_kv(model_input, kv_caches, warmup_mode)
                 if need_send_kv:
+                    cur_time = time.time()
 
                     def sync_send_kv_caches(hidden_states):
                         get_kv_transfer_group(
@@ -3154,10 +3154,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                     def send_kv(input_tokens_list, kv_caches_send_list,
                                 hidden_states_list):
+                        cur_time = time.time()
                         get_kv_transfer_group(
                         ).send_kv_caches_and_hidden_states_cpu(
                             input_tokens_list, kv_caches_send_list,
                             hidden_states_list)
+                        now = time.time()
+                        logger.info("KV send time: %s", now - cur_time)
 
                     def async_send_kv_caches(hidden_states):
                         (input_tokens_list,
@@ -3175,15 +3178,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             hidden_states_list,
                         )
 
-                    if get_world_group().rank == 0:
-                        # send only on rank 0, avoid fetching for others
-                        cur_time = time.time()
-                        if self.use_async_kv_transfer_in_pd:
-                            async_send_kv_caches(hidden_states)
-                        else:
-                            sync_send_kv_caches(hidden_states)
-                        now = time.time()
-                        logger.debug("KV send time: %f s", now - cur_time)
+                    if self.use_async_kv_transfer_in_pd:
+                        async_send_kv_caches(hidden_states)
+                    else:
+                        sync_send_kv_caches(hidden_states)
+
+                    now = time.time()
+                    logger.info("KV send time: %f", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
