@@ -724,12 +724,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.scheduler_config.max_num_batched_tokens
         self.max_seq_len_to_capture = self.model_config.max_seq_len_to_capture
         self.block_size = self.cache_config.block_size
-        self.hidden_size = self.model_config.get_hidden_size()
-        self.head_size = self.model_config.get_head_size()
-        self.num_layers = self.model_config.get_num_layers(
-            self.parallel_config)
-        self.num_kv_heads = self.model_config.get_num_kv_heads(
-            self.parallel_config)
 
         self.pin_memory = is_pin_memory_available()
         self.kv_cache_dtype = self.cache_config.cache_dtype
@@ -2949,6 +2943,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         seq_lens = seq_lens_tensor.tolist()  #2D list
                         hidden_states_list = []
                         start_block_idx = 0
+                        k_v_head_size = 576
                         bypass_model_exec = True
                         htorch.core.mark_step()
                         for idx, slen in enumerate(seq_lens):
@@ -2961,10 +2956,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                           1) // self.block_size
                             end_block_idx = start_block_idx + num_blocks
 
-                            kv_cache_shape = (self.num_layers,
-                                              num_blocks * self.block_size,
-                                              self.num_kv_heads,
-                                              self.head_size)
+                            kv_cache_shape = (61, num_blocks * self.block_size,
+                                              1, k_v_head_size)
                             if get_tensor_model_parallel_rank() == 0:
                                 current_tokens = input_tokens_tensor_cpu[
                                     idx][:slen]
@@ -3006,7 +2999,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                         dtype=torch.bfloat16,
                                         device="hpu")
                                     hidden_states = torch.zeros(
-                                        (1, self.hidden_size),
+                                        (1, 7168),
                                         dtype=torch.bfloat16,
                                         device="hpu")
                                     kv_cache_for_cur_seq = \
@@ -3032,13 +3025,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 dtype=torch.int32)
                             htorch.core.mark_step()
                             # write to kv cache
-                            for i in range(self.num_layers):
+                            for i in range(61):
                                 kv_cache_current_layer = kv_caches[i]
                                 key_cache_current_layer = \
                                     kv_cache_current_layer[0]
 
                                 key = kv_cache_for_cur_seq[i].squeeze(-2).view(
-                                    -1, self.block_size, self.head_size)
+                                    -1, self.block_size, k_v_head_size)
                                 self.cache_k(key, key_cache_current_layer,
                                              block_indices_tensor, None)
 
@@ -3117,6 +3110,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         seq_lens = model_input.attn_metadata.seq_lens
                         start_layer = model.model.start_layer
                         end_layer = model.model.end_layer
+                        num_kv_heads = 1
+                        k_v_head_size = 576
                         kv_caches_send_list = []
                         hidden_states_list = []
                         input_tokens_list = []
@@ -3138,7 +3133,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             for layer_id in range(start_layer, end_layer):
                                 kv_cache = kv_caches[layer_id - start_layer]
                                 key_cache = kv_cache[0].reshape(
-                                    -1, self.num_kv_heads, self.head_size)
+                                    -1, num_kv_heads, k_v_head_size)
 
                                 keys.append(
                                     key_cache.index_select(

@@ -41,13 +41,10 @@ class MooncakeStoreConnector(KVConnectorBase):
         self.tp_size = config.parallel_config.tensor_parallel_size
         self.local_tp_rank = local_rank
         self.rank = rank
-        self.block_size = config.cache_config.block_size
-        self.hidden_size = config.model_config.get_hidden_size()
-        self.head_size = config.model_config.get_head_size()
-        self.num_layers = config.model_config.get_num_layers(
-            config.parallel_config)
-        self.num_kv_heads = config.model_config.get_num_kv_heads(
-            config.parallel_config)
+        self.k_head_size = 64
+        self.v_head_size = 512
+        self.k_v_head_size = self.k_head_size + self.v_head_size
+        self.block_size = 128
         max_num_blocks = 1000
         self.block_indice_place_holder = torch.zeros(max_num_blocks,
                                                      dtype=torch.int,
@@ -82,8 +79,11 @@ class MooncakeStoreConnector(KVConnectorBase):
             dtype = torch.bfloat16
         self.dtype = dtype
         self.padding_k_tensor = torch.zeros(
-            (self.block_size, self.head_size), dtype=dtype, device="hpu")
+            (self.block_size, self.k_v_head_size), dtype=dtype, device="hpu")
+        self.padding_v_tensor = torch.zeros(
+            (self.block_size, self.v_head_size), dtype=dtype, device="hpu")
         self.cache_k = VLLMKVCache()
+        self.cache_v = VLLMKVCache()
 
     def close(self) -> None:
         """Close the buffer and release resources.
@@ -257,7 +257,8 @@ class MooncakeStoreConnector(KVConnectorBase):
         # For each sequence in the batch, we will pack kv together, so we send
         # 0. current_tokens [seq_len]
         # 1. bool mask [seq_len]
-        # 2. key [num_layers, seq_len, num_kv_heads, head_size]
+        # 2. key [num_layers, seq_len, num_kv_heads,
+        # (k_head_size + v_head_size)], [61, seq_len, 1, 576]
         # 3. empty tensor
         # 4. hidden_or_intermediate_states [1, hidden_size]
         count = 0
@@ -279,7 +280,7 @@ class MooncakeStoreConnector(KVConnectorBase):
             for layer_id in range(start_layer, end_layer):
                 kv_cache = kv_caches[layer_id - start_layer]
                 key_cache = kv_cache[0].reshape(-1, num_kv_heads,
-                                                self.head_size)
+                                                self.k_v_head_size)
 
                 keys.append(
                     key_cache.index_select(0,
@@ -327,7 +328,8 @@ class MooncakeStoreConnector(KVConnectorBase):
         # so we recv
         # 0. current_tokens [seq_len]
         # 1. bool mask [seq_len]
-        # 2. key_values [num_layers, seq_len, num_kv_heads, head_size]
+        # 2. key_values [num_layers, seq_len, num_kv_heads,
+        # (k_head_size + v_head_size)], [61, seq_len, 1, 576]
         # 3. empty tensor
         # 4. hidden_or_intermediate_states [1, hidden_size]
         for idx, slen in enumerate(seq_lens):
@@ -366,13 +368,11 @@ class MooncakeStoreConnector(KVConnectorBase):
             load_key_prefix = self.tensor_hash(current_tokens)
             # For deepseek, we only need recv first rank
             load_kvcache_key = f"{load_key_prefix}_kv"
-            shape = (self.num_layers, num_blocks * self.block_size,
-                     self.head_size)
+            shape = (61, num_blocks * 128, self.k_v_head_size)
             remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape,
                                                  self.dtype)
             hidden_key = f"{load_key_prefix}_hs"
-            hidden = self.kv_store.get_unsafe(hidden_key,
-                                              shape=(1, self.hidden_size))
+            hidden = self.kv_store.get_unsafe(hidden_key, shape=(1, 7168))
 
             if remote_kv is None or hidden is None:
                 logger.warning("KV cache miss. Key prefix: %s",
@@ -404,7 +404,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                 key_cache = kv_cache[0]
 
                 key = keys[current_layer_idx].squeeze(-2).view(
-                    -1, self.block_size, self.head_size)
+                    -1, self.block_size, self.k_v_head_size)
 
                 # ====== D2D =======
                 self.cache_k(key,
@@ -470,13 +470,11 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         load_kvcache_key = f"{prefix}_kv"
         load_hidden_key = f"{prefix}_hs"
-        shape = (self.num_layers, -1, self.num_kv_heads, self.head_size)
         remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
-                                             shape=shape,
+                                             shape=None,
                                              dtype=self.dtype)
         # hidden_states always use bf16.
-        hidden = self.kv_store.get_unsafe(load_hidden_key,
-                                          shape=(1, self.hidden_size))
+        hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
 
         if remote_kv is None or hidden is None:
             logger.warning("KV cache miss. Key prefix: %s", prefix)
