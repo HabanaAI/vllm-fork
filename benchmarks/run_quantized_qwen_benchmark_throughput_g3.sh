@@ -1,0 +1,19 @@
+#!/bin/bash
+VLLM_PROMPT_BS_BUCKET_MIN=1 \
+VLLM_PROMPT_BS_BUCKET_STEP=1 \
+VLLM_PROMPT_BS_BUCKET_MAX=1 \
+VLLM_DECODE_BS_BUCKET_MIN=1 \
+VLLM_DECODE_BS_BUCKET_STEP=1 \
+VLLM_DECODE_BS_BUCKET_MAX=1 \
+VLLM_PROMPT_SEQ_BUCKET_MIN=256 \
+VLLM_PROMPT_SEQ_BUCKET_STEP=256 \
+VLLM_PROMPT_SEQ_BUCKET_MAX=1024 \
+VLLM_DECODE_BLOCK_BUCKET_MIN=256 \
+VLLM_DECODE_BLOCK_BUCKET_STEP=256 \
+VLLM_DECODE_BLOCK_BUCKET_MAX=1024 \
+PT_HPU_WEIGHT_SHARING=0 \
+VLLM_EXPONENTIAL_BUCKETING=false \
+QUANT_CONFIG=/software/data/vllm-benchmarks/inc/qwen3-30b-a3b/maxabs_quant_g3.json python benchmark_throughput.py  --model Qwen/Qwen3-30B-A3B  --device hpu  --seed 2024  --backend vllm  --dataset /mnt/weka/data/pytorch/llama2/ShareGPT_V3_unfiltered_cleaned_split.json  --num-prompts 1000  --dtype bfloat16  --max-model-len 4096  --max-num-batched-tokens 8192  --max-num-seqs 16 --use-padding-aware-scheduling --quantization inc --kv-cache-dtype fp8_inc --weights-load-device cpu
+#QUANT_CONFIG=/software/users/jczaja/measurements/llama-3.1-8B/meta-llama-3.1-8b/maxabs_quant_g3.json python benchmark_throughput.py  --model /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B/  --device hpu  --seed 2024  --backend vllm  --dataset /mnt/weka/data/pytorch/llama2/ShareGPT_V3_unfiltered_cleaned_split.json  --num-prompts 1000  --dtype bfloat16  --max-model-len 4096  --max-num-batched-tokens 8192  --max-num-seqs 128 --use-padding-aware-scheduling --quantization inc --kv-cache-dtype fp8_inc #--weights-load-device cpu  # OOM
+#QUANT_CONFIG=/software/users/jczaja/measurements/llama-3.1-8B/meta-llama-3.1-8b/maxabs_const_quant_g3.json python benchmark_throughput.py  --model /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B/  --device hpu  --seed 2024  --backend vllm  --dataset /mnt/weka/data/pytorch/llama2/ShareGPT_V3_unfiltered_cleaned_split.json  --num-prompts 1000  --dtype bfloat16  --max-model-len 4096  --max-num-batched-tokens 8192  --max-num-seqs 128 --use-padding-aware-scheduling --quantization inc --kv-cache-dtype fp8_inc #--weights-load-device cpu
+#RUNTIME_SCALE_PATCHING=1 \
