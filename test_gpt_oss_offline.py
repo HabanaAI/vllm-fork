@@ -94,7 +94,6 @@ if __name__ == "__main__":
                         max_model_len=512,
                         max_num_batched_tokens=2048,
                         tensor_parallel_size=1,
-                        block_size=127,
                         )
         if PT_PROFILE:
             import torch
@@ -127,7 +126,7 @@ if __name__ == "__main__":
                         max_num_seqs=8,
                         dtype='bfloat16',
                         enforce_eager=False,
-                        max_model_len=20,
+                        max_model_len=512,
                         max_num_batched_tokens=2048,
                         tensor_parallel_size=4,
                         )
