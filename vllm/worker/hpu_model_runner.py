@@ -52,6 +52,7 @@ from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
+from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.layers.sampler import (SampleResultArgsType,
@@ -1212,22 +1213,21 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 )
                 self.model = self.lora_manager.create_lora_manager(self.model)
 
+            def move_model_to_hpu(model):
+                import vllm_hpu_extension.ops as hpu_ops
+                model = model.to("hpu")
+                torch.hpu.synchronize()
+
+                # handle the PatchedMoeFP8Matmul
+                for _, module in model.named_modules():
+                    if isinstance(module, FusedMoE):
+                        module = hpu_ops.fp8_channel_moe_prepare_weights(
+                            module)
+                torch.hpu.synchronize()
+                return model
+
             if self._is_quant_with_inc():
                 logger.info("Preparing model with INC..")
-
-                def move_all_params_to_hpu(model):
-                    model = model.to("hpu")
-                    # that does not handle the PatchedMoeFP8Matmul
-                    for _, module in model.named_modules():
-                        if hasattr(module, 'weight') \
-                            and module.weight.device.type == 'cpu':
-                            module.weight = module.weight.to('hpu')
-                        if hasattr(module, 'bias') \
-                            and module.bias is not None \
-                            and module.bias.device.type == 'cpu':
-                            module.bias.data = module.bias.data.to('hpu')
-                    torch.hpu.synchronize()
-                    return model
 
                 with HabanaMemoryProfiler() as m_inc:
                     from neural_compressor.torch.quantization import (
@@ -1240,7 +1240,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         os.getenv("QUANT_CONFIG", ""))
                     self._inc_preprocess()
                     if config.measure:
-                        self.model = move_all_params_to_hpu(self.model)
+                        self.model = move_model_to_hpu(self.model)
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
@@ -1255,8 +1255,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
             elif not is_fake_hpu():
-                self.model = self.model.to("hpu")
-                htcore.mark_step()
+                with HabanaMemoryProfiler() as m_to_hpu:
+                    self.model = move_model_to_hpu(self.model)
+                logger.info("Moving model to HPU took %s",
+                            m_to_hpu.get_summary_string())
 
             self._maybe_init_alibi_biases()
             hidden_layer_markstep_interval = int(
@@ -2829,6 +2831,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.multimodal_buckets = model.vision_buckets.multimodal_buckets
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
             logger.info(logger_msg)
+
+        logger.info("Profile run with bs={}, seq_len={}", \
+                    max_batch_size, max_seq_len)
 
         self.warmup_scenario(
             batch_size=max_batch_size,
