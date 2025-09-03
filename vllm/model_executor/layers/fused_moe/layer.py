@@ -64,6 +64,8 @@ logger = init_logger(__name__)
 MOE_DP_CHUNK_SIZE = 256
 
 import os
+
+
 def _parse_bool_env(env_var: str, default: bool = False) -> bool:
     """Parse boolean environment variable with proper handling of various formats"""
     value = os.getenv(env_var)
@@ -469,27 +471,28 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
-        # TODO GPT-OSS: Update the code so that we create bias weights only for the models 
-        # that use bias in the MoE layer for e.g. GPT-OSS.
-        
         # Fused gate_up_proj (column parallel)
         # Fused gate_up_proj (column parallel)
-        w13_weight = torch.nn.Parameter(torch.empty(
-            num_experts,
-            #hidden_size,
-            2 * intermediate_size_per_partition,
-            hidden_size,
-            dtype=params_dtype),
-                                        requires_grad=False)
+        w13_weight = torch.nn.Parameter(
+            torch.empty(
+                num_experts,
+                #hidden_size,
+                2 * intermediate_size_per_partition,
+                hidden_size,
+                dtype=params_dtype),
+            requires_grad=False)
         layer.register_parameter("w13_weight", w13_weight)
         set_weight_attrs(w13_weight, extra_weight_attrs)
-        w13_bias = torch.nn.Parameter(torch.zeros(
-            num_experts,
-            2 * intermediate_size_per_partition,
-            dtype=params_dtype),
-                                        requires_grad=False)
-        layer.register_parameter("w13_bias", w13_bias)
-        set_weight_attrs(w13_bias, extra_weight_attrs)
+
+        if layer.model_type in ["gpt_oss"]:
+            w13_bias = torch.nn.Parameter(torch.zeros(
+                num_experts,
+                2 * intermediate_size_per_partition,
+                dtype=params_dtype),
+                                          requires_grad=False)
+            layer.register_parameter("w13_bias", w13_bias)
+            set_weight_attrs(w13_bias, extra_weight_attrs)
+
         # down_proj (row parallel)
         w2_weight = torch.nn.Parameter(torch.empty(
             num_experts,
@@ -499,12 +502,14 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                                        requires_grad=False)
         layer.register_parameter("w2_weight", w2_weight)
         set_weight_attrs(w2_weight, extra_weight_attrs)
-        w2_bias = torch.nn.Parameter(torch.zeros(num_experts,
-                                                    hidden_size,
-                                                    dtype=params_dtype),
-                                        requires_grad=False)
-        layer.register_parameter("w2_bias", w2_bias)
-        set_weight_attrs(w2_bias, extra_weight_attrs)
+
+        if layer.model_type in ["gpt_oss"]:
+            w2_bias = torch.nn.Parameter(torch.zeros(num_experts,
+                                                     hidden_size,
+                                                     dtype=params_dtype),
+                                         requires_grad=False)
+            layer.register_parameter("w2_bias", w2_bias)
+            set_weight_attrs(w2_bias, extra_weight_attrs)
 
     def _maybe_pad_weight(self, weight: torch.Tensor) -> torch.Tensor:
         # Pad the weight tensor. This is an optimization on ROCm platform, which
@@ -526,8 +531,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         # Padding the bias for better performance on ROCm (if bias exists)
         if hasattr(layer, 'w13_bias') and hasattr(layer, 'w2_bias'):
             layer.w13_bias.data = self._maybe_pad_weight(layer.w13_bias.data)
-            layer.w2_bias.data = self._maybe_pad_weight(layer.w2_bias.data)        
-            
+            layer.w2_bias.data = self._maybe_pad_weight(layer.w2_bias.data)
+
         # Lazy import to avoid importing triton.
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
             shuffle_weights)
@@ -555,13 +560,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                     layer.w13_weight.data[expert_id])
                 layer.moe_op.w2_list[expert_id].set_weight(
                     layer.w2_weight.data[expert_id])
-                
+
                 # Set bias for each expert if available
                 if hasattr(layer, 'w13_bias') and hasattr(layer, 'w2_bias'):
                     layer.moe_op.w13_list[expert_id].set_bias(
                         layer.w13_bias.data[expert_id])
                     layer.moe_op.w2_list[expert_id].set_bias(
-                        layer.w2_bias.data[expert_id])                 
+                        layer.w2_bias.data[expert_id])
 
     def apply(
         self,
@@ -720,28 +725,29 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         topk_weights = gating_output.softmax(dim=-1, dtype=torch.float)
         topk_weights, selected_experts = topk_weights.topk(topk, dim=-1)
         if renormalize:
-            topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+            topk_weights = topk_weights / topk_weights.sum(dim=-1,
+                                                           keepdim=True)
         topk_weights = topk_weights.to(dtype)
 
         if expert_map is not None:
             selected_experts = expert_map[selected_experts]
 
-
         # Prepare tensors for batch processing
         batch_size = hidden_states.shape[0]
-        
+
         # Repeat hidden states for all experts
 
-        repeated_hidden_states = hidden_states.unsqueeze(0).repeat(num_experts, 1, 1)
-        
+        repeated_hidden_states = hidden_states.unsqueeze(0).repeat(
+            num_experts, 1, 1)
+
         # Batch matrix multiply for gate_up projection
 
-        
         # Split gate and up projections
-        gate_up = torch.bmm(repeated_hidden_states, w1.transpose(-2, -1)) + w1_bias.unsqueeze(1)
+        gate_up = torch.bmm(repeated_hidden_states, w1.transpose(
+            -2, -1)) + w1_bias.unsqueeze(1)
 
         #gate = gate_up[:, :, :intermediate_size]
-        #up = gate_up[:, :, intermediate_size:] 
+        #up = gate_up[:, :, intermediate_size:]
         gate, up = gate_up[..., ::2], gate_up[..., 1::2]
 
         # Apply SiLU activation to gate
@@ -749,18 +755,19 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         gate = gate.clamp(min=None, max=7.0)
         up = up.clamp(min=-7.0, max=7.0)
         glu = gate * torch.sigmoid(gate * 1.702)
-        gated = (up + 1) * glu 
+        gated = (up + 1) * glu
         # Element-wise multiplication (gating)
         #gated = up * gate
 
-        
         # Batch matrix multiply for down projection
-        expert_outputs = torch.bmm(gated,w2.transpose(-2, -1)) + w2_bias.unsqueeze(1)
+        expert_outputs = torch.bmm(gated, w2.transpose(
+            -2, -1)) + w2_bias.unsqueeze(1)
         # Apply expert weights based on routing
         final_hidden_states = torch.zeros_like(hidden_states)
         for expert_idx in range(num_experts):
             expert_mask = (selected_experts == expert_idx)
-            expert_weights = (topk_weights * expert_mask).sum(dim=-1, keepdim=True)
+            expert_weights = (topk_weights * expert_mask).sum(dim=-1,
+                                                              keepdim=True)
             final_hidden_states += expert_outputs[expert_idx] * expert_weights
 
         return final_hidden_states.view(orig_shape)  # type: ignore
@@ -784,18 +791,17 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         activation: str = "silu",
         **kwargs,
     ):
-        import os
         if not _parse_bool_env("VLLM_ENABLE_FUSED_MOE_WITH_BIAS", False):
             return self.fused_moe(hidden_states=x,
-                                    w1=layer.w13_weight,
-                                    w2=layer.w2_weight,
-                                    w1_bias=layer.w13_bias,
-                                    w2_bias=layer.w2_bias,
-                                    topk=top_k,
-                                    gating_output=router_logits,
-                                    global_num_experts=global_num_experts,
-                                    expert_map=expert_map,
-                                    renormalize=renormalize)
+                                  w1=layer.w13_weight,
+                                  w2=layer.w2_weight,
+                                  w1_bias=layer.w13_bias,
+                                  w2_bias=layer.w2_bias,
+                                  topk=top_k,
+                                  gating_output=router_logits,
+                                  global_num_experts=global_num_experts,
+                                  expert_map=expert_map,
+                                  renormalize=renormalize)
         input_shape = x.shape
         x = x.view(-1, x.shape[-1])
         if use_grouped_topk or custom_routing_function is not None:
@@ -812,9 +818,21 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 e_score_correction_bias=e_score_correction_bias)
         else:
             import torch.nn.functional as F
-            topk_weights = F.softmax(router_logits, dim=-1, dtype=torch.float32)
-            topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
-            topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
+            if layer.model_type in ["gpt_oss"]:
+                topk_weights, topk_ids = torch.topk(router_logits,
+                                                    top_k,
+                                                    dim=-1)
+                topk_weights = F.softmax(topk_weights,
+                                         dim=-1,
+                                         dtype=torch.float32)
+            else:
+                topk_weights = F.softmax(router_logits,
+                                         dim=1,
+                                         dtype=torch.float32)
+                topk_weights, topk_ids = torch.topk(topk_weights,
+                                                    top_k,
+                                                    dim=-1)
+                topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
         topk_ids = topk_ids.to(torch.int64)
         topk_weights = topk_weights.to(x.dtype)
         if layer.dp_size > 1:
@@ -979,6 +997,8 @@ class FusedMoE(torch.nn.Module):
         self.params_dtype = params_dtype
 
         vllm_config = get_current_vllm_config()
+        # Get the model type to decide usage of bias initialization and Custom MoE op
+        self.model_type = vllm_config.model_config.hf_config.model_type
         self.moe_parallel_config: FusedMoEParallelConfig = (
             FusedMoEParallelConfig.make(
                 tp_size_=(tp_size if tp_size is not None else
@@ -1072,7 +1092,7 @@ class FusedMoE(torch.nn.Module):
             moe_quant_params["intermediate_size_full"] = intermediate_size
 
         self.quant_method.create_weights(layer=self, **moe_quant_params)
-        
+
         if is_hpu:
             num_experts = self.local_num_experts
             ep_shift = self.ep_rank * num_experts
@@ -1082,7 +1102,7 @@ class FusedMoE(torch.nn.Module):
 
             experts_min, experts_max = ep_shift, num_experts + ep_shift - 1
             # Check if bias parameters exist in the layer
-            has_bias = hasattr(self, 'w13_bias') and hasattr(self, 'w2_bias')       
+            has_bias = hasattr(self, 'w13_bias') and hasattr(self, 'w2_bias')
             if quant_config is None or isinstance(self.quant_method,
                                                   UnquantizedFusedMoEMethod):
                 moe_op = VllmMixtureOfExpertsOp(
