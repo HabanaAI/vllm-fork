@@ -388,6 +388,8 @@ _MULTIMODAL_EXAMPLE_MODELS = {
     "Ovis": _HfExamplesInfo("AIDC-AI/Ovis2-1B", trust_remote_code=True,
                             extras={"1.6-llama": "AIDC-AI/Ovis1.6-Llama3.2-3B",
                                     "1.6-gemma": "AIDC-AI/Ovis1.6-Gemma2-9B"}),  # noqa: E501
+    "Ovis2_5": _HfExamplesInfo("AIDC-AI/Ovis2.5-2B",
+                               trust_remote_code=True),
     "Phi4MMForCausalLM": _HfExamplesInfo("microsoft/Phi-4-multimodal-instruct",
                                         trust_remote_code=True),
     "PixtralForConditionalGeneration": _HfExamplesInfo("mistralai/Pixtral-12B-2409",  # noqa: E501
