@@ -9,12 +9,15 @@
     },
     "blocklist": {
         "types": [
+            "FusedMoE",
+            "MoeMatmul",
+            "VllmMixtureOfExpertsOp"
         ],
         "names": [
             "lm_head",
             "mlp\\.gate\\b"
-
         ]
     },
-    "dump_stats_path": "./nc_workspace_measure_kvache/inc_measure_output"
+    "dump_stats_path": "./scripts/inc_unit_scale"
 }
+

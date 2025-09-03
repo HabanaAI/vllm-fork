@@ -1,7 +1,7 @@
 {
     "mode": "QUANTIZE",
     "observer": "maxabs",
-    "scale_method": "unit_scale",
+    "scale_method": "maxabs_hw",
     "scale_format": "const",
     "allowlist": {
         "types": [],
@@ -13,8 +13,7 @@
         "names": [
             "lm_head",
             "mlp\\.gate\\b"
-
         ]
     },
-    "dump_stats_path": "./nc_workspace_measure_kvache/inc_measure_output"
+    "dump_stats_path": "./gpt_oss_120b/inc_output"
 }
