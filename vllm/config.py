@@ -4483,11 +4483,10 @@ class VllmConfig:
             import habana_frameworks.torch.utils.experimental as htexp
             is_quantized_weights = self.quant_config is not None and \
                 self.quant_config.get_name() != 'inc'
-            use_inc = os.environ.get("QUANT_CONFIG", None) is not None
             is_gaudi2 = htexp._get_device_type() == \
                 htexp.synDeviceType.synDeviceGaudi2
-            if is_quantized_weights and use_inc and is_gaudi2:
-                logger.info_once('Using INC with a quantized model on Gaudi2.')
+            if is_quantized_weights and is_gaudi2:
+                logger.info_once('Loading fp8 quantized model to Gaudi2.')
                 if os.getenv('VLLM_HPU_CONVERT_TO_FP8UZ', None) is None:
                     logger.info_once(
                         'Enable conversion from fp8_e4m3fn to fp8_e4m3fnuz')
