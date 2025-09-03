@@ -157,7 +157,3 @@ class KVConnectorBase(ABC):
     ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForHPUWithSamplingMetadata"]:
         raise NotImplementedError
-
-    @abstractmethod
-    def is_key_exist(self, prefix: str) -> bool:
-        raise NotImplementedError

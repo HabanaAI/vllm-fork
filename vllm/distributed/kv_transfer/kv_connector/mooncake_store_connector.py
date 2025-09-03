@@ -254,10 +254,6 @@ class MooncakeStoreConnector(KVConnectorBase):
             self.kv_store.put_unsafe(store_kvcache_key,
                                      kv_caches_send_list[idx])
             self.kv_store.put_unsafe(store_hidden_key, hidden_states_list[idx])
-            # Put a separate signal key to avoid duplicated GC problem
-            # caused by is_exist and get call on the same key
-            # Not needed when we move to pure eviction solution
-            self.kv_store.put_bytes(str(store_key_prefix), b'OK')
         logger.info("[rank %d]: KV send DONE. send %d, takes %f s", self.rank,
                     len(input_tokens_list),
                     time.time() - start_time)
@@ -479,11 +475,15 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         load_kvcache_key = f"{prefix}_0"
         load_hidden_key = f"{prefix}_hidden_0"
-        remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
-                                             shape=None,
-                                             dtype=self.dtype)
+        remote_kv = None
+        if self._wait_for_key(load_kvcache_key):
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
+                                                 shape=None,
+                                                 dtype=self.dtype)
         # hidden_states always use bf16.
-        hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
+        hidden = None
+        if self._wait_for_key(load_hidden_key):
+            hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
 
         if remote_kv is None or hidden is None:
             # didn't find any match.
@@ -503,9 +503,6 @@ class MooncakeStoreConnector(KVConnectorBase):
                 return False
             time.sleep(0.01)
         return True
-
-    def is_key_exist(self, prefix: str) -> bool:
-        return self.kv_store.is_exist(prefix)
 
     @staticmethod
     def tensor_hash(tensor: torch.Tensor) -> int:

@@ -110,6 +110,3 @@ class KVTransferAgent:
                "ModelInputForHPUWithSamplingMetadata"]:
         return self.connector.recv_kv_caches_and_hidden_states_hpu(
             model_executable, model_input, attn_metadata, kv_caches)
-
-    def is_key_exist(self, prefix: str) -> bool:
-        return self.connector.is_key_exist(prefix)
