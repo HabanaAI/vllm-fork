@@ -787,6 +787,7 @@ def ovis_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
     hf_model.processor = processor
     return hf_model
 
+
 def ovis2_5_patch_hf_runner(hf_model: HfRunner) -> HfRunner:
     """Patches and returns an instance of the HfRunner to use for Ovis2."""
     hf_model.model.get_output_embeddings = lambda: \
