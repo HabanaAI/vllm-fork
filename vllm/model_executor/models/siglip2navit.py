@@ -487,7 +487,6 @@ class Siglip2Encoder(nn.Module):
         if is_hpu:
             cu_window_seqlens = remove_duplicates_cpu(cu_window_seqlens)
 
-
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=inputs_embeds.device,
