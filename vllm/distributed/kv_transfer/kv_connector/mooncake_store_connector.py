@@ -482,7 +482,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                                                  dtype=self.dtype)
         # hidden_states always use bf16.
         hidden = None
-        if self._wait_for_key(load_kvcache_key):
+        if self._wait_for_key(load_hidden_key):
             hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
 
         if remote_kv is None or hidden is None:

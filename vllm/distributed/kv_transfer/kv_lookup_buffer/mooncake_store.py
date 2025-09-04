@@ -240,21 +240,6 @@ class MooncakeStore(KVLookupBufferBase):
             return tensor
         return None
 
-    def put_bytes(self, key: str, value: bytes,) -> None:
-        """Put bytes data to Mooncake Store"""
-        try:
-            self.store.put(key, value)
-        except TypeError as err:
-            logger.error("Failed to put value into Mooncake Store: %s", err)
-            raise TypeError("Mooncake Store Put Type Error.") from err
-
-    def get_bytes(self, key: str) -> bytes:
-        try:
-            return self.store.get(key)
-        except TypeError as err:
-            logger.error("Failed to get value from Mooncake Store: %s", err)
-            raise TypeError("Mooncake Store Get Type Error.") from err
-
     def is_exist(self, key: str) -> bool:
         """Check if the key exists in the Mooncake Store"""
         return self.store.isExist(key) == 1
