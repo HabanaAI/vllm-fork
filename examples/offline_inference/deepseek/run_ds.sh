@@ -2,8 +2,8 @@
 
 # Default model path
 FP8_MODEL_PATH="/mnt/weka/data/pytorch/DeepSeek-R1/"
-FP8_MODEL_PATH="/mnt/weka/llm/Qwen3-30B-A3B-FP8/"
-FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-30B-A3B"
+# FP8_MODEL_PATH="/mnt/weka/llm/Qwen3-30B-A3B-FP8/"
+# FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-30B-A3B"
 # FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-32B"
 # FP8_MODEL_PATH="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207"
 # Default options
@@ -58,7 +58,7 @@ export VLLM_SKIP_WARMUP=true
 
 
 WORLD_SIZE=8
-WORLD_SIZE=1
+# WORLD_SIZE=1
 
 echo "Using model path: ${FP8_MODEL_PATH}"
 echo "Using quantization config: ${QUANT_CONFIG}"
@@ -73,7 +73,9 @@ LOG_FILE="inc_quant.${scale_format}.${timestamp}.log"
 
 # Run the Python script
 
-
+PT_HPU_LAZY_MODE=1 \
+PT_HPU_WEIGHT_SHARING=0 \
+VLLM_EXPONENTIAL_BUCKETING=false \
 PT_HPU_LAZY_MODE=1 \
     python deepseek_example.py \
     --model "${FP8_MODEL_PATH}" \
@@ -82,8 +84,20 @@ PT_HPU_LAZY_MODE=1 \
     --max_num_seqs 1 \
     --tp_size "${WORLD_SIZE}" \
     --ep_size "${WORLD_SIZE}" \
-    --enforce_eager \
-    --max_model_len 8192 2>&1 | tee "${LOG_FILE}"
+    --max_model_len 2048 2>&1 | tee "${LOG_FILE}"
     
     
     # --dummy \
+    
+    
+
+# def update_tensor_shape(tensor):
+#     import torch
+#     # if the tensor numel is 1, create a pure tensor
+#     if tensor.numel() == 1:
+#         return torch.tensor(tensor.item())
+#     return tensor
+
+# def scale_to_cpu(scale_tensor):
+#     scale_tensor = update_tensor_shape(scale_tensor)
+#     return scale_tensor.to("cpu")

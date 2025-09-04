@@ -2,7 +2,7 @@
     "mode": "QUANTIZE",
     "observer": "maxabs",
     "scale_format": "scalar",
-    "scale_method": "MAXABS_ARBITRARY",
+    "scale_method": "maxabs_hw",
     "allowlist": {
         "types": [],
         "names": [
