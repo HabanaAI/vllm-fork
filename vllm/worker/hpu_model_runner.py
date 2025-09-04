@@ -2829,7 +2829,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
             logger.info(logger_msg)
 
-        logger.info("Profile run with bs={}, seq_len={}", \
+        logger.info("Profile run with bs=%s, seq_len=%s", \
                     max_batch_size, max_seq_len)
 
         self.warmup_scenario(
