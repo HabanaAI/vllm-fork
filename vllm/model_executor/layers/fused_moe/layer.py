@@ -495,6 +495,7 @@ class FusedMoE(torch.nn.Module):
                 experts_min, experts_max = 0, self.local_num_experts
                 moe_op = VllmMixtureOfExpertsOpFP8(
                     num_expert_per_group,
+                    self.global_num_experts,
                     experts_min + ep_shift,
                     experts_max - 1 + ep_shift,
                 )
