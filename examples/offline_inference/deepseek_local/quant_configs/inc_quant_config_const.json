@@ -1,0 +1,21 @@
+{
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "MAXABS_ARBITRARY",
+    "scale_format": "const",
+    "allowlist": {
+        "types": [],
+        "names": [
+        ]
+    },
+    "blocklist": {
+        "types": [
+            "VLLMKVCache"
+        ],
+        "names": [
+            "lm_head",
+            "mlp\\.gate\\b"
+        ]
+    },
+    "dump_stats_path": "./ds_r1/inc_output"
+}

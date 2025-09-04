@@ -1,0 +1,19 @@
+{
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "unit_scale",
+    "allowlist": {
+        "types": [],
+        "names": [
+        ]
+    },
+    "blocklist": {
+        "types": [
+            "VLLMKVCache"
+        ],
+        "names": [
+            "lm_head"
+        ]
+    },
+    "dump_stats_path": "./inc_output_unit_scale"
+}

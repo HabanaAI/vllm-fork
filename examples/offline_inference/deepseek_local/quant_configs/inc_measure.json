@@ -1,0 +1,17 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "allowlist": {
+        "types": [],
+        "names": [
+        ]
+    },
+    "blocklist": {
+        "types": [
+        ],
+        "names": [
+        ]
+    },
+    "dump_stats_path": "./ds_r1/inc_output"
+}
