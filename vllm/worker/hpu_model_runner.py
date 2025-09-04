@@ -1220,7 +1220,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 # handle the PatchedMoeFP8Matmul
                 for _, module in model.named_modules():
-                    if isinstance(module, FusedMoE):
+                    if isinstance(module, FusedMoE) \
+                        and module.quant_config is not None:
                         module = hpu_ops.fp8_channel_moe_prepare_weights(
                             module)
                 torch.hpu.synchronize()
@@ -2832,7 +2833,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger_msg = "Multimodal bucket : " + str(self.multimodal_buckets)
             logger.info(logger_msg)
 
-        logger.info("Profile run with bs={}, seq_len={}", \
+        logger.info("Profile run with bs=%s, seq_len=%s", \
                     max_batch_size, max_seq_len)
 
         self.warmup_scenario(

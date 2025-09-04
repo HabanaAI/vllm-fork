@@ -984,7 +984,7 @@ class ModelConfig:
 
             self.enforce_eager = True
 
-    def _verify_with_expert_parallelism(self) -> None:
+    def _verify_with_expert_parallelism(self) -> bool:
         num_expert_names = [
             "moe_num_experts",  # Dbrx
             "num_experts",  # Jamba
@@ -997,9 +997,12 @@ class ModelConfig:
             if num_experts > 0:
                 break
         if num_experts < 1:
-            raise ValueError(
+            logger.warning_once(
                 "Number of experts in the model must be greater than 0 "
                 "when expert parallelism is enabled.")
+            return False
+        else:
+            return True
 
     def verify_dual_chunk_attention_config(
         self,
@@ -1068,8 +1071,10 @@ class ModelConfig:
                 " must be divisible by tensor parallel size "
                 f"({tensor_parallel_size}).")
 
-        if parallel_config.enable_expert_parallel:
-            self._verify_with_expert_parallelism()
+        if parallel_config.enable_expert_parallel \
+            and not self._verify_with_expert_parallelism():
+            parallel_config.enable_expert_parallel = False
+            logger.warning_once("Disabled expert parallelism.")
 
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         if pipeline_parallel_size > 1:
