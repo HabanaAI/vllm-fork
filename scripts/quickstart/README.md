@@ -1,4 +1,5 @@
 # Running DeepseekV3ForCausalLM architecture models with deepseek_r1 branch
+**[中文](README.zh.md)**
 
 This guide provides the step-by-step instructions on deploying and running DeepseekV3ForCausalLM architecture models with vLLM serving framework on Intel® Gaudi® HPUs. It covers the hardware requirements, software prerequisites, model weights downloading and conversion, environment setup, model serving deployment and performance and accuracy benchmarking on single-node and multi-node 8\*Gaudi servers. 
 
@@ -53,13 +54,13 @@ Verified models:
   
   * Kimi-K2-Instruct has 1T parameters with FP8 precision, needs 2-node 8\*Gaudi2 servers to accommodate the model weights.
 
-The following table outlines the mininum requirements for each hardware component of each node to achieve high-performance inference.
+The following table outlines the minimum requirements for each hardware component of each node to achieve high-performance inference.
 
 |Model| Servers | CPU per Node | Accelerators per Node | RAM per Node | Storage per Node | Frontend Networking per Node <br>(In-band Management/Storage) | Backend Networking per Node <br>(Compute, w/ RDMA) |
 |---| -------------- | --------------------------------------------------- | -------------------- | ------------- | ------------------------------------------------------ | -- | -- |
-|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
-|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
-|Kimi-K2-Instruct| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Minimum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Minimum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|Kimi-K2-Instruct| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Minimum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
 
 ### Set CPU to Performance Mode
 Please change the CPU setting to be performance optimization mode in BIOS setup and execute the command below in OS to make sure get the best CPU performance. 
@@ -167,7 +168,7 @@ git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
 pip install -e vllm-fork/
 ```
 ### HCCL Demo Test
-Download HCCL Demo, compile and execute the hccl_demo test. Make sure the HCCL demo test passes on 8 HPU. For detailed info, pelease refer to [HCCL Demo](https://github.com/HabanaAI/hccl_demo)
+Download HCCL Demo, compile and execute the hccl_demo test. Make sure the HCCL demo test passes on 8 HPU. For detailed info, please refer to [HCCL Demo](https://github.com/HabanaAI/hccl_demo)
 ```bash
 git clone https://github.com/HabanaAI/hccl_demo.git
 cd hccl_demo
@@ -397,7 +398,7 @@ pip install -e vllm-fork/
 ```bash
 # set IP address of head node
 export VLLM_HOST_IP=192.168.1.101
-# set NIC interface name of worker IP address
+# set NIC interface name of node IP address
 export GLOO_SOCKET_IFNAME=enx6c1ff7012f87
 ```
 
@@ -443,7 +444,7 @@ For DeepSeek-V3.1, please use the command below to calibrate the model. After th
 ```bash
 cd vllm-fork
 bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
-
+```
 
 ##### 2. Configure environment variables.
 
@@ -540,8 +541,7 @@ ray start --address='HEAD_NODE_IP:port'
 ray start --address='192.168.1.101:8850'
 ```
 
-If you meet the error message like "ray.exceptions.RaySystemError: System error: No module named 'vllm'", please set the variable below. "/workspace/vllm-fork" is your vLLM source code folder. 
-"/workspace/vllm-fork" is your vLLM source code folder and pelase update to your folder path. 
+If you meet the error message like "ray.exceptions.RaySystemError: System error: No module named 'vllm'", please set the variable below. It is assumed that "/workspace/vllm-fork" is your vLLM source code folder. If not, please update to your folder path. 
 ```bash
 echo 'PYTHONPATH=$PYTHONPATH:/workspace/vllm-fork' | tee -a /etc/environment
 source /etc/environment
