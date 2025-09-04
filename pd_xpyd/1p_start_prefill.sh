@@ -4,7 +4,7 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
 BENCHMARK_MODE=0
 
-if [ "$2" == "benchmark" ]; then
+if [ "$3" == "benchmark" ]; then
     BENCHMARK_MODE=1
     sed -i 's/export VLLM_USE_ASYNC_TRANSFER_IN_PD=.*/export VLLM_USE_ASYNC_TRANSFER_IN_PD=0/' $BASH_DIR/pd_env.sh
     echo " Benchmark mode enabled"
@@ -13,16 +13,15 @@ else
     echo " Normal mode enabled"
 fi
 
-if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
+if [ "$2" == "master" ]; then
     if [ "$BENCHMARK_MODE" == "1" ]; then
-	source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark
- 	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark"
+        source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark
+        echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark"
     else
-	source "$BASH_DIR"/start_etcd_mooncake_master.sh
-	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
+        source "$BASH_DIR"/start_etcd_mooncake_master.sh
+        echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
     fi
 fi
-
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g10}.json
