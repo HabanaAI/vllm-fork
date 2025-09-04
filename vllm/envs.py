@@ -99,7 +99,9 @@ if TYPE_CHECKING:
     VLLM_USE_ASYNC_TRANSFER_IN_PD: bool = False
     VLLM_SKIP_PREFILL_SAMPLING: bool = False
     VLLM_ABORT_REQUEST_KV_CACHE_MISS: bool = True
+    VLLM_KV_CACHE_RESPONSIVE_FETCHING: bool = False
     VLLM_KV_CACHE_WAIT_TIMEOUT: float = 10.0
+    VLLM_KV_CACHE_FETCHING_LOOK_AHEAD = 10
 
 
 def get_default_cache_root():
@@ -645,10 +647,20 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     lambda: bool(int(os.getenv("VLLM_SKIP_PREFILL_SAMPLING", "0"))),
     "VLLM_ABORT_REQUEST_KV_CACHE_MISS":
     lambda: bool(int(os.getenv("VLLM_ABORT_REQUEST_KV_CACHE_MISS", "1"))),
+    # Responsive fetching will try to queue into new requests
+    # even if the previous requests is waiting for its kv cache.
+    # Sometimes, the waiting may due to kv cache miss thus
+    # preventing new requests to be queued if we do sequentially.
+    "VLLM_KV_CACHE_RESPONSIVE_FETCHING":
+    lambda: bool(int(os.getenv("VLLM_KV_CACHE_RESPONSIVE_FETCHING", "0"))),
     # The longest time in seconds waiting for KV cache available.
     # Default to 10 seconds.
     "VLLM_KV_CACHE_WAIT_TIMEOUT":
     lambda: float(os.getenv("VLLM_KV_CACHE_WAIT_TIMEOUT", "10.0")),
+    # The number of requests looking ahead for fetching for
+    # responsive fetching
+    "VLLM_KV_CACHE_FETCHING_LOOK_AHEAD":
+    lambda: bool(int(os.getenv("VLLM_KV_CACHE_FETCHING_LOOK_AHEAD", "10"))),
 }
 
 # end-env-vars-definition

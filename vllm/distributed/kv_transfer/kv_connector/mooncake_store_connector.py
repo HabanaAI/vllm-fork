@@ -8,7 +8,7 @@ database-style KVStore.
 """
 import hashlib
 import time
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
 
@@ -474,10 +474,14 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         load_kvcache_key = f"{prefix}_0"
         load_hidden_key = f"{prefix}_hidden_0"
-        remote_kv = self.kv_store.get_tensor(load_kvcache_key,
-                                             dtype=self.dtype)
+        remote_kv = None
+        if self._wait_for_key(load_kvcache_key):
+            remote_kv = self.kv_store.get_tensor(load_kvcache_key,
+                                                 dtype=self.dtype)
         # hidden_states always use bf16.
-        hidden = self.kv_store.get_tensor(load_hidden_key)
+        hidden = None
+        if self._wait_for_key(load_kvcache_key):
+            hidden = self.kv_store.get_tensor(load_hidden_key)
 
         if remote_kv is None or hidden is None:
             # didn't find any match.
@@ -486,6 +490,30 @@ class MooncakeStoreConnector(KVConnectorBase):
             return None, None
 
         return remote_kv, hidden
+
+    def recv_kv_caches_or_hidden_states_cpu(
+            self, prefix: str, is_kv: bool = True) -> Optional[torch.Tensor]:
+        """Receive KV caches or hidden states from the KV store."""
+        if prefix is None:
+            raise ValueError("Prefix cannot be None.")
+
+        if is_kv:
+            load_kvcache_key = f"{prefix}_0"
+            remote_kv = self.kv_store.get_tensor(load_kvcache_key,
+                                                 dtype=self.dtype)
+            if remote_kv is None:
+                logger.warning("KV cache miss for key: %s", load_kvcache_key)
+            return remote_kv
+        else:
+            # hidden_states always use bf16.
+            load_hidden_key = f"{prefix}_hidden_0"
+            hidden = self.kv_store.get_tensor(load_hidden_key)
+
+            if hidden is None:
+                # didn't find any match.
+                logger.warning("Hidden states cache miss for key: %s",
+                               load_hidden_key)
+            return hidden
 
     def _wait_for_key(self, key, timeout_in_seconds=None):
         if timeout_in_seconds is None:
