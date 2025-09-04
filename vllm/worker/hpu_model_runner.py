@@ -1216,7 +1216,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 # handle the PatchedMoeFP8Matmul
                 for _, module in model.named_modules():
-                    if isinstance(module, FusedMoE):
+                    if isinstance(module, FusedMoE) \
+                        and module.quant_config is not None:
                         module = hpu_ops.fp8_channel_moe_prepare_weights(
                             module)
                 torch.hpu.synchronize()
