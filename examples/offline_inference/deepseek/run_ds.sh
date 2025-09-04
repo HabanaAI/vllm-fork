@@ -4,7 +4,7 @@
 FP8_MODEL_PATH="/mnt/weka/data/pytorch/DeepSeek-R1/"
 FP8_MODEL_PATH="/mnt/weka/llm/Qwen3-30B-A3B-FP8/"
 FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-30B-A3B"
-FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-32B"
+# FP8_MODEL_PATH="/software/users/yiliu4/HF_HOME/Qwen/Qwen3-32B"
 # FP8_MODEL_PATH="/mnt/disk3/yiliu4/DeepSeek-R1-G2-INC-424-Converter207"
 # Default options
 USE_SCALAR_FORMAT=false
@@ -52,9 +52,10 @@ else
     export RUNTIME_SCALE_PATCHING=0
 fi
 
-export CALC_SCALE_WITH_CGUID=1
+# export CALC_SCALE_WITH_CGUID=1
+# export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
 export VLLM_SKIP_WARMUP=true
-export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
+
 
 WORLD_SIZE=8
 WORLD_SIZE=1
@@ -71,6 +72,8 @@ timestamp=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="inc_quant.${scale_format}.${timestamp}.log"
 
 # Run the Python script
+
+
 PT_HPU_LAZY_MODE=1 \
     python deepseek_example.py \
     --model "${FP8_MODEL_PATH}" \
