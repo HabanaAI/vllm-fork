@@ -660,7 +660,7 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # The number of requests looking ahead for fetching for
     # responsive fetching
     "VLLM_KV_CACHE_FETCHING_LOOK_AHEAD":
-    lambda: bool(int(os.getenv("VLLM_KV_CACHE_FETCHING_LOOK_AHEAD", "10"))),
+    lambda: int(os.getenv("VLLM_KV_CACHE_FETCHING_LOOK_AHEAD", "10")),
 }
 
 # end-env-vars-definition
