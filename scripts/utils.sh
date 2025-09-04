@@ -6,7 +6,7 @@ original_env=( $(env) )
 
 # get device name
 device=$(hl-smi -Q name -f csv | tail -n 1)
-available_modules=$(hl-smi -Q module_id -f csv | tail -n +2 | sort)
+available_modules=($(hl-smi -Q module_id -f csv | tail -n +2 | sort | tr '\n' ' '))
 
 # HPU specific constants
 BLOCK_SIZE=128
