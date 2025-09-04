@@ -480,7 +480,7 @@ class MooncakeStoreConnector(KVConnectorBase):
                                                  dtype=self.dtype)
         # hidden_states always use bf16.
         hidden = None
-        if self._wait_for_key(load_kvcache_key):
+        if self._wait_for_key(load_hidden_key):
             hidden = self.kv_store.get_tensor(load_hidden_key)
 
         if remote_kv is None or hidden is None:
