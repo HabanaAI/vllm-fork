@@ -80,44 +80,45 @@ The command output is like below.
 ```
 Start a vLLM server for a huggingface model on Gaudi.
 
-Usage: bash start_gaudi_vllm_server.sh <-w> [-n:m:a:d:i:p:o:b:g:u:e:lc:sf] [-h]
+Usage: bash start_gaudi_vllm_server.sh <-w> [-t:m:a:d:i:p:o:b:g:u:e:lc:sf] [-h]
 Options:
-w  Weights of the model, str, could be model id in huggingface or local path.
-     DO NOT change the model name as some of the parameters depend on it.
-n  Number of HPUs to use, [1-8], default=1. Used to set TP and EP size.
-m  Module IDs of the HPUs to use, comma separated int in [0-7], default=None
-     Used to select HPUs and to set NUMA accordingly. It's recommended to set
-     for cases with 4 or less HPUs.
-a  API server URL, str, 'IP:PORT', default=127.0.0.1:30001
-d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
-i  Input range, str, format='input_min,input_max', default='4,1024'
-     Make sure the range cover all the possible lengths from the benchmark/client.
-p  Max number of prefill sequences, int, default=8192/input_min
-     Used to control the max batch size for prefill to optimize the TTFT.
-o  Output range, str, format='output_min,output_max', default='4,2048'
-     Make sure the range cover all the possible lengths from the benchmark/client.
-b  max-num-seqs for vLLM, int, default=128
-     Used to control the max batch size for decoding phase.
-     It is recommended to set this value according to the 'Maximum concurrency'
-     reported by a test run.
-g  max-seq-len-to-capture for vLLM, int, default=8192
-     Used to control the maximum batched tokens to be captured in HPUgraph.
-     Reduce this value could decrease memory usage, but not smaller than 2048.
-u  gpu-memory-utilization, float, default=0.9
-     Used to control the GPU memory utilization. Reduce this value if OOM occurs.
-e  Extra vLLM server parameters, str, default=None
-     Extra parameters that will pass to the vLLM server.
-l  Use linear bucketing or not, bool, default=false
-     The exponential bucketing is used by default to reduce number of buckets.
-     Turn on to switch to linear bucketing that introduce less padding, and more
-     buckets and thus longer warmup time.
-c  Cache HPU recipe to the specified path, str, default=None
-     The recipe cache could be reused to reduce the warmup time.
-s  Skip warmup or not, bool, default=false
-     Skip warmup to reduce startup time. Used in debug/dev environment only.
-     DO NOT use in production environment.
-f  Enable high-level profiler or not, bool, default=false
-h  Help info
+-w  Weights of the model, str, could be model id in huggingface or local path.
+    DO NOT change the model name as some of the parameters depend on it.
+-t  tensor-parallel-size for vLLM, int, default=1.
+    Also used to set EP size if it's enable by --enable-expert-parallel
+-m  Module IDs of the HPUs to use, comma separated int in [0-7], default=None
+    Used to select HPUs and to set NUMA accordingly. It's recommended to set
+    for cases with 4 or less HPUs.
+-a  API server URL, str, 'IP:PORT', default=127.0.0.1:30001
+-d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
+-i  Input range, str, format='input_min,input_max', default='4,1024'
+    Make sure the range cover all the possible lengths from the benchmark/client.
+-p  Max number of prefill sequences, int, default=8192/input_min
+    Used to control the max batch size for prefill to optimize the TTFT.
+-o  Output range, str, format='output_min,output_max', default='4,2048'
+    Make sure the range cover all the possible lengths from the benchmark/client.
+-b  max-num-seqs for vLLM, int, default=128
+    Used to control the max batch size for decoding phase.
+    It is recommended to set this value according to the 'Maximum concurrency'
+    reported by a test run.
+-g  max-seq-len-to-capture for vLLM, int, default=8192
+    Used to control the maximum batched tokens to be captured in HPUgraph.
+    Reduce this value could decrease memory usage, but not smaller than 2048.
+-u  gpu-memory-utilization, float, default=0.9
+    Used to control the GPU memory utilization. Reduce this value if OOM occurs.
+-e  Extra vLLM server parameters, str, default=None
+    Extra parameters that will pass to the vLLM server.
+-l  Use linear bucketing or not, bool, default=false
+    The exponential bucketing is used by default to reduce number of buckets.
+    Turn on to switch to linear bucketing that introduce less padding, and more
+    buckets and thus longer warmup time.
+-c  Cache HPU recipe to the specified path, str, default=None
+    The recipe cache could be reused to reduce the warmup time.
+-s  Skip warmup or not, bool, default=false
+    Skip warmup to reduce startup time. Used in debug/dev environment only.
+    DO NOT use in production environment.
+-f  Enable high-level profiler or not, bool, default=false
+-h  Help info
 ```
 
 Here is a recommended example to start vLLM service on Qwen2-72B-Instruct model with 4 cards. Intel(R) Gaudi(R) module ID 0,1,2,3 are selected, input length range is 800 ~ 1024, output length range is 400 ~ 512, data type is BF16 and the vLLM service port is 30001.
@@ -126,8 +127,8 @@ The model weight are the standard models files which can be downloaded from [Hug
 ``` bash
 bash start_gaudi_vllm_server.sh \
     -w "/models/Qwen2-72B-Instruct" \
-    -n 4 \
-    -m 0,1,2,3 \ 
+    -t 4 \
+    -m 0,1,2,3 \
     -a 127.0.0.1:30001 \
     -d bfloat16 \
     -i 800,1024 \
@@ -289,16 +290,14 @@ The extra parameter is like "-c [cache_files_path]" and the full example command
 ``` bash
 bash start_gaudi_vllm_server.sh \
     -w "/models/Qwen2-72B-Instruct" \
-    -n 4 \
-    -m 0,1,2,3 \ 
-    -b 128 \
+    -t 4 \
+    -m 0,1,2,3 \
+    -a "127.0.0.1:30001" \
+    -d bfloat16 \
     -i 800,1024 \
     -o 400,512 \
-    -l 4096 \
-    -t 8192 \
-    -d bfloat16 \
-    -c /data/Qwen2-72B-cache \
-    -p 30001
+    -b 128 \
+    -c /data/Qwen2-72B-cache
 ```
 
 ### skip warm-up for online serving
@@ -307,16 +306,14 @@ You may and the parameter "-s" to skip the warm-up. vLLM server can be started v
 ``` bash
 bash start_gaudi_vllm_server.sh \
     -w "/models/Qwen2-72B-Instruct" \
-    -n 4 \
-    -m 0,1,2,3 \ 
-    -b 128 \
+    -t 4 \
+    -m 0,1,2,3 \
+    -a "127.0.0.1:30001" \
+    -d bfloat16 \
     -i 800,1024 \
     -o 400,512 \
-    -l 4096 \
-    -t 8192 \
-    -d bfloat16 \
-    -s \
-    -p 30001
+    -b 128 \
+    -s
 ```
 
 ### For offline benchmark:
