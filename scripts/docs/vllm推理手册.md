@@ -418,3 +418,69 @@ bash start_gaudi_vllm_server.sh \
     -p 30001 \
     -c /data/8B_warmup_cache
 ```
+
+### 3.3 多模态模型
+
+如果要做音频处理，需要安装音频相关的库。
+```bash
+pip install vllm[audio]
+```
+
+#### 3.3.1 Qwen系列多模态模型
+**启动服务**\
+**Qwen2-VL**: Support Image and Video inputs
+```bash
+VLLM_GRAPH_RESERVED_MEM=0.5 PT_HPU_LAZY_MODE=1 vllm serve \
+    Qwen/Qwen2-VL-7B-Instruct \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --dtype bfloat16 \
+    --limit-mm-per-prompt '{"video":5, "image":5}'
+```
+**Qwen2-Audio**: Support Audio inputs
+```bash
+VLLM_GRAPH_RESERVED_MEM=0.5 PT_HPU_LAZY_MODE=1 vllm serve \
+    Qwen/Qwen2-Audio-7B-Instruct \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --dtype bfloat16 \
+    --limit-mm-per-prompt '{"audio":5}'
+```
+**Qwen2.5-VL**: Support Image and Video inputs
+```bash
+VLLM_GRAPH_RESERVED_MEM=0.5 PT_HPU_LAZY_MODE=1 vllm serve \
+    Qwen/Qwen2.5-VL-7B-Instruct \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --dtype bfloat16 \
+    --limit-mm-per-prompt '{"video":5, "image":5}'
+```
+**Qwen2.5-Omni**: Support Image, Video and Audio inputs
+```bash
+VLLM_GRAPH_RESERVED_MEM=0.5 PT_HPU_LAZY_MODE=1 vllm serve \
+    Qwen/Qwen2.5-Omni-7B \
+    --port 8000 \
+    --host 127.0.0.1 \
+    --dtype bfloat16 \
+    --limit-mm-per-prompt '{"audio":5, "video":5, "image":5}'
+```
+- `--limit-mm-per-prompt` 设置每个prompt中每种多模态数据的最大个数
+- `VLLM_GRAPH_RESERVED_MEM=0.5` 多模态推理需要额外的设备内存。可以通过该环境变量分配更多的设备内存给hpu_graph
+
+**问题解答：**\
+如果server端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT`
+`VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为5/30/10
+
+#### 3.3.2 client 端请求格式样例
+多模态client端请求格式可以参考脚本
+    [openai_chat_completion_client_for_multimodal.py](../examples/online_serving/openai_chat_completion_client_for_multimodal.py)
+
+脚本使用命令：
+```bash
+python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
+    -c multi-image
+python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
+    -c video
+python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
+    -c audio
+```
