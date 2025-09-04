@@ -44,14 +44,14 @@ cd vllm-fork/.cd/
 
    - `MODEL` - Select a model from the table above.
    - `HF_TOKEN` - Your Hugging Face token (generate one at <https://huggingface.co>).
-   - `DOCKER_IMAGE` - The vLLM Docker image URL from Gaudi or local repository.
+   - `DOCKER_IMAGE` - The vLLM Docker image URL from Gaudi or local repository. When using the Gaudi repository, please select Docker images with the vllm-installer* prefix in the file name.
 
    **Example usage:**
 
    ```bash
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
-   DOCKER_IMAGE="<docker image url>" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
    docker compose up
    ```
 
