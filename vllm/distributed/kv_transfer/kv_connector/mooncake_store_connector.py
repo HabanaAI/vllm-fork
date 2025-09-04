@@ -251,9 +251,9 @@ class MooncakeStoreConnector(KVConnectorBase):
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
             store_hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
 
-            self.kv_store.put_unsafe(store_kvcache_key,
+            self.kv_store.put_tensor(store_kvcache_key,
                                      kv_caches_send_list[idx])
-            self.kv_store.put_unsafe(store_hidden_key, hidden_states_list[idx])
+            self.kv_store.put_tensor(store_hidden_key, hidden_states_list[idx])
         logger.info("[rank %d]: KV send DONE. send %d, takes %f s", self.rank,
                     len(input_tokens_list),
                     time.time() - start_time)
@@ -313,12 +313,12 @@ class MooncakeStoreConnector(KVConnectorBase):
             kvcache_to_sent = keys.cpu()
             logger.debug("kv cache reshape time: %s", time.time() - start_time)
             store_kvcache_key = f"{store_key_prefix}_{self.rank}"
-            self.kv_store.put_unsafe(store_kvcache_key, kvcache_to_sent)
+            self.kv_store.put_tensor(store_kvcache_key, kvcache_to_sent)
 
             logger.debug("put kv cache key: %s", store_kvcache_key)
 
             hidden_key = f"{store_key_prefix}_hidden_{self.rank}"
-            self.kv_store.put(
+            self.kv_store.put_tensor(
                 hidden_key,
                 hidden_or_intermediate_states[idx].unsqueeze(0).cpu())
             # ==== graph should end here ======
@@ -396,15 +396,14 @@ class MooncakeStoreConnector(KVConnectorBase):
             load_key_prefix = self.tensor_hash(current_tokens)
             # For deepseek, we only need recv first rank
             load_kvcache_key = f"{load_key_prefix}_0"
-            shape = (61, num_blocks * 128, self.k_v_head_size)
             remote_kv = None
             if self._wait_for_key(load_kvcache_key):
-                remote_kv = self.kv_store.get_unsafe(load_kvcache_key, shape,
+                remote_kv = self.kv_store.get_tensor(load_kvcache_key,
                                                      self.dtype)
             hidden_key = f"{load_key_prefix}_hidden_0"
             hidden = None
             if self._wait_for_key(hidden_key):
-                hidden = self.kv_store.get(hidden_key)
+                hidden = self.kv_store.get_tensor(hidden_key)
 
             if remote_kv is None or hidden is None:
                 # didn't find any match.
@@ -477,13 +476,12 @@ class MooncakeStoreConnector(KVConnectorBase):
         load_hidden_key = f"{prefix}_hidden_0"
         remote_kv = None
         if self._wait_for_key(load_kvcache_key):
-            remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
-                                                 shape=None,
+            remote_kv = self.kv_store.get_tensor(load_kvcache_key,
                                                  dtype=self.dtype)
         # hidden_states always use bf16.
         hidden = None
         if self._wait_for_key(load_hidden_key):
-            hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
+            hidden = self.kv_store.get_tensor(load_hidden_key)
 
         if remote_kv is None or hidden is None:
             # didn't find any match.

@@ -29,4 +29,4 @@ etcd --listen-client-urls http://0.0.0.0:2379 \
      --advertise-client-urls http://localhost:2379 \
      >etcd.log 2>&1 &
 
-mooncake_master -max_threads 64 -port 50001 --v=1 >mooncake_master.log 2>&1 &
+mooncake_master -max_threads 64 -port 50001 -eviction_high_watermark_ratio 0.8 -eviction_ratio 0.2 --v=1 >mooncake_master.log 2>&1 &
