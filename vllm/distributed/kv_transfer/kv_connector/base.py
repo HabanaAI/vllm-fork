@@ -8,7 +8,7 @@ The class provides two primary abstract methods:
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
 
@@ -156,6 +156,11 @@ class KVConnectorBase(ABC):
         attn_metadata: object, kv_caches: List[torch.Tensor]
     ) -> Tuple[Union[torch.Tensor, IntermediateTensors], bool,
                "ModelInputForHPUWithSamplingMetadata"]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def recv_kv_caches_or_hidden_states_cpu(
+            self, prefix: str, is_kv: bool = True) -> Optional[torch.Tensor]:
         raise NotImplementedError
 
     @abstractmethod

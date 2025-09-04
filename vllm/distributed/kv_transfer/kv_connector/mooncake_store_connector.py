@@ -8,7 +8,7 @@ database-style KVStore.
 """
 import hashlib
 import time
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
 
@@ -254,10 +254,6 @@ class MooncakeStoreConnector(KVConnectorBase):
             self.kv_store.put_unsafe(store_kvcache_key,
                                      kv_caches_send_list[idx])
             self.kv_store.put_unsafe(store_hidden_key, hidden_states_list[idx])
-            # Put a separate signal key to avoid duplicated GC problem
-            # caused by is_exist and get call on the same key
-            # Not needed when we move to pure eviction solution
-            self.kv_store.put_bytes(str(store_key_prefix), b'OK')
         logger.info("[rank %d]: KV send DONE. send %d, takes %f s", self.rank,
                     len(input_tokens_list),
                     time.time() - start_time)
@@ -479,11 +475,15 @@ class MooncakeStoreConnector(KVConnectorBase):
 
         load_kvcache_key = f"{prefix}_0"
         load_hidden_key = f"{prefix}_hidden_0"
-        remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
-                                             shape=None,
-                                             dtype=self.dtype)
+        remote_kv = None
+        if self._wait_for_key(load_kvcache_key):
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
+                                                 shape=None,
+                                                 dtype=self.dtype)
         # hidden_states always use bf16.
-        hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
+        hidden = None
+        if self._wait_for_key(load_kvcache_key):
+            hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
 
         if remote_kv is None or hidden is None:
             # didn't find any match.
@@ -492,6 +492,31 @@ class MooncakeStoreConnector(KVConnectorBase):
             return None, None
 
         return remote_kv, hidden
+
+    def recv_kv_caches_or_hidden_states_cpu(
+            self, prefix: str, is_kv: bool = True) -> Optional[torch.Tensor]:
+        """Receive KV caches or hidden states from the KV store."""
+        if prefix is None:
+            raise ValueError("Prefix cannot be None.")
+
+        if is_kv:
+            load_kvcache_key = f"{prefix}_0"
+            remote_kv = self.kv_store.get_unsafe(load_kvcache_key,
+                                                 shape=None,
+                                                 dtype=self.dtype)
+            if remote_kv is None:
+                logger.warning("KV cache miss for key: %s", load_kvcache_key)
+            return remote_kv
+        else:
+            # hidden_states always use bf16.
+            load_hidden_key = f"{prefix}_hidden_0"
+            hidden = self.kv_store.get_unsafe(load_hidden_key, shape=(1, 7168))
+
+            if hidden is None:
+                # didn't find any match.
+                logger.warning("Hidden states cache miss for key: %s",
+                               load_hidden_key)
+            return hidden
 
     def _wait_for_key(self, key, timeout_in_seconds=None):
         if timeout_in_seconds is None:
