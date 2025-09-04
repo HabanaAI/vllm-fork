@@ -175,26 +175,52 @@ huggingface-cli download NeelNanda/pile-10k --repo-type dataset
 or pass the dataset ID.
 
 #### 2. Enter vllm-hpu-externsion/calibration folder and do calibration
-The example below is to calibrate Qwen2.5-72B-Instruct model for 2 Gaudi cards. The quantization files are copied into "quantization" folder.
+The calibration steps are integrated to the `calibrate_model.sh`.
+
+``` bash
+# to print the help info
+bash calibrate_model.sh -h
+```
+
+The output help info is like below.
+
+``` bash
+Calibrate given MODEL_PATH for FP8 inference
+
+usage: calibrate_model.sh <options>
+
+  -m    - [required] huggingface stub or local directory of the MODEL_PATH
+  -d    - [required] path to source dataset (details in README)
+  -o    - [required] path to output directory for fp8 measurements
+  -b    - batch size to run the measurements at (default: 32)
+  -l    - limit number of samples in calibration dataset
+  -t    - tensor parallel size to run at (default: 1); NOTE: if t > 8 then we need a multi-node setup
+  -r    - rank of unified measurements, it should be smaller than original rank number and should be a factor of the original rank number
+  -u    - use expert parallelism (default: False), expert parallelism unification rule is unique, card 1 expert measurement will be extended to card 0 if unified to x from 2x cards number
+  -e    - set this flag to enable enforce_eager execution
+```
+
+The example below is to calibrate Qwen2.5-72B-Instruct model for 2 Gaudi cards. The measured data will be saved  into the `quantization` folder.
 
 ```bash
 cd vllm-hpu-extension/calibration
 MODEL=/models/Qwen2.5-72B-Instruct
 HPU_SIZE=2
-./calibrate_model.sh -m $MODEL -d NeelNanda/pile-10k  -o quantization -t $HPU_SIZE
+./calibrate_model.sh \
+     -m $MODEL \
+     -d NeelNanda/pile-10k \
+     -o quantization
+     -t $HPU_SIZE
 ```
 
 For Qwen3-235B-A22B, the calibration process needs 8 HPUs to load the original bfloat16 weights. Then the fp8 inference could run on 4 HPUs. Thus the measurements should be unified as follow:
 
 ``` bash
-bash calibrate_model.sh -m /models/Qwen3-235B-A22B -d NeelNanda/pile-10k -o Qwen3-235B-A22B -t 8 -b 256 -r 4 -u
-```
-
-Where the detailed descriptions could be print by:
-
-``` bash
-# to print the help info
-bash calibrate_model.sh -h
+bash calibrate_model.sh \
+     -m /models/Qwen3-235B-A22B \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t 8 -b 256 -r 4 -u
 ```
 
 #### 3. Make the Quantization folder
@@ -207,7 +233,7 @@ mkdir quantization
 Copy the converted quantization files into the quantization folder:
 
 ```bash
-cp -r converted_quantization/* quantization/
+cp -r vllm-hpu-extension/calibration/quantization/* quantization/
 ```
 
 Note: Ensure that the subdirectory names under quantization match the modelPath suffixes in models.conf.
@@ -217,15 +243,13 @@ It will take much more time to do warm-up with FP8 precision. Suggest creating t
 ```bash
 bash start_gaudi_vllm_server.sh \
     -w "/models/Qwen2.5-72B-Instruct" \
-    -n 2 \
-    -m 0,1 \ 
-    -b 128 \
+    -t 2 \
+    -m 0,1 \
+    -a "127.0.0.1:30001" \
+    -d fp8 \
     -i 800,1024 \
     -o 400,512 \
-    -l 4096 \
-    -t 8192 \
-    -d fp8 \
-    -p 30001 \
+    -b 128 \
     -c /vllm_cache/Qwen2.5-32B-Instruct/
 ```
 
