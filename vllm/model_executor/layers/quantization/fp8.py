@@ -515,6 +515,28 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         self.enable_dmoe_dynamic_scale = os.environ.get("VLLM_DMOE_DYNAMIC_SCALE", False) in ["1", "true"]
         self.use_static_moe = os.environ.get("VLLM_USE_STATIC_MOE", "0") in ["1", "true"]
         self.optimize_with_partial_experts = os.environ.get("VLLM_OPTIMIZE_WITH_PARTIAL_EXPERTS", "0") in ["1", "true"]
+        self.enable_moe_chunk = os.environ.get('VLLM_SUPPORT_MOE_CHUNK',
+                                                'false').lower() == 'true'
+        self.chunk_size_list = [
+            int(x)
+            for x in os.environ.get(
+                "PT_HPU_MOE_CHUNK", "64,128,512,1024,1536,2048,4096"
+            ).split(",")
+            if x.strip()
+        ]
+        self.token_boundary_list = [
+            int(x)
+            for x in os.environ.get(
+                "PT_HPU_MOE_TOKEN_BOUNDARY", "64,64,1536,1536,2048,2048,4096"
+            ).split(",")
+            if x.strip()
+        ]
+        assert len(self.chunk_size_list) == len(self.token_boundary_list), (
+            f"chunk_size_list({len(self.chunk_size_list)}) and "
+            f"token_boundary_list({len(self.token_boundary_list)}) must be the same length"
+        )
+        logger.info("token_boundary_list is:%s",self.token_boundary_list)
+        logger.info("chunk_size_list is:%s",self.chunk_size_list)
 
     def create_weights(self, layer: Module, num_experts: int, hidden_size: int,
                        intermediate_size_per_partition: int,
@@ -1037,6 +1059,17 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                                                   topk_weights_across_dp)
 
             batched_tokens = x.shape[0]
+            kwargs = {}
+            if self.enable_moe_chunk:
+                chunk_size = self.chunk_size_list[-1]
+                for idx, threshold in enumerate(self.token_boundary_list):
+                    if batched_tokens <= threshold:
+                        chunk_size = self.chunk_size_list[idx]
+                        break
+                kwargs = {
+                    "chunk_size": chunk_size,
+                    "total_experts": 256,
+                }
 
             if batched_tokens > self.moe_slice_length:
                 final_hidden_states_list = []
@@ -1060,6 +1093,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         activation="silu",
                         experts_min=ep_shift,
                         experts_max=(num_experts + ep_shift - 1),
+                        **kwargs
                     )
                     final_hidden_states_list.append(current_hidden_states)
                 final_hidden_states = torch.cat(final_hidden_states_list, dim=0)
@@ -1078,6 +1112,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     activation="silu",
                     experts_min=ep_shift,
                     experts_max=(num_experts + ep_shift - 1),
+                    **kwargs
                 )
             return final_hidden_states.view(-1, x.shape[1])
 
