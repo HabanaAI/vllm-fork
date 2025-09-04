@@ -1,4 +1,4 @@
-model_name: "/mnt/weka/llm/google/gemma-3-4b-it"
+model_name: "/path/to/ovis/2/5/9b"
 tasks:
 - name: "gsm8k"
   metrics:
