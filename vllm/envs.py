@@ -620,13 +620,13 @@ environment_variables: Dict[str, Callable[[], Any]] = {
 
     # Optimization level for data parallel
     # Note that this is for hpu backend
-    # | VLLM_DP_OPT | DP Aware Padding | AllGather and ReduceScatter | FP8 Communication |
-    # | ----------- | ---------------- | --------------------------- | ----------------- |
-    # | 0           | False            | False                       | False             |
-    # | 1           | False            | False                       | False             |
-    # | 2           | True             | False                       | False             |
-    # | 3           | True             | True                        | False             |
-    # | 4(default)  | True             | True                        | True              |
+    # | VLLM_DP_OPT | DP Aware Padding | AllGather and ReduceScatter | FP8 Communication | Local TopK        |
+    # | ----------- | ---------------- | --------------------------- | ----------------- | ----------------- |
+    # | 0           | False            | False                       | False             | False             |
+    # | 1           | True             | False                       | False             | False             |
+    # | 2           | True             | True                        | False             | False             |
+    # | 3           | True             | True                        | True              | False             |
+    # | 4 (default) | True             | True                        | True              | True              |
     "VLLM_DP_OPT":
     lambda: int(os.getenv("VLLM_DP_OPT", "4")),
 
