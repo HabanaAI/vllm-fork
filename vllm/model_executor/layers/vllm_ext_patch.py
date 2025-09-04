@@ -1,10 +1,13 @@
 # ==-------------------------------------------------------------------------==
 # VLLM-HPU-EXT PATCH Start
 # ==-------------------------------------------------------------------------==
+import logging
 import os
 import torch
 from typing import Callable, Optional, Tuple
 import habana_frameworks.torch as htorch
+
+logging.basicConfig(level=logging.INFO)
 
 
 class MoeFP8Matmul(torch.nn.Module):
@@ -101,6 +104,10 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
             f"chunk_size_list({len(self.chunk_size_list)}) and "
             f"token_boundary_list({len(self.token_boundary_list)}) must be the same length"
         )
+        logger = logging.getLogger()
+        logger.info("token_boundary_list is:%s",self.token_boundary_list)
+        logger.info("chunk_size_list is:%s",self.chunk_size_list)
+
         self.num_experts = num_experts
         self.global_num_experts = global_num_experts
         self.experts_min = experts_min
