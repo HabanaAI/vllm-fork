@@ -7,7 +7,7 @@ ray
 triton==3.1.0
 setuptools>=77.0.3
 setuptools-scm>=8
-vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@873f77162aa669540bf3bd9693d58e78c77952a0
+vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@cb90763f774689acebccde4d6d7f45f038373dc9
 
 # Dependencies for HPU vllm docker image
 datasets
