@@ -96,13 +96,13 @@ class MooncakeStore(KVLookupBufferBase):
             self.config = MooncakeStoreConfig.load_from_env()
             logger.info("Mooncake Configuration loaded successfully.")
 
-            self.store.setup(self.config.local_hostname,
-                             self.config.metadata_server,
-                             self.config.global_segment_size,
-                             self.config.local_buffer_size,
-                             self.config.protocol, self.config.device_name,
-                             self.config.master_server_address)
-
+            result = self.store.setup(
+                self.config.local_hostname,
+                self.config.metadata_server,
+                self.config.global_segment_size,
+                self.config.local_buffer_size,
+                self.config.protocol, self.config.device_name,
+                self.config.master_server_address)
         except ValueError as e:
             logger.error("Configuration loading failed: %s", e)
             raise
@@ -110,6 +110,14 @@ class MooncakeStore(KVLookupBufferBase):
             logger.error(
                 "An error occurred while loading the configuration: %s", exc)
             raise
+
+        if result != 0:
+            error_msg = ("Failed to setup Mooncake store. "
+                         f"ErrorCode: {result}. "
+                         "Please make sure Mooncake master is "
+                         "running and check the configuration.")
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
     def insert(self, input_tokens: torch.Tensor, roi: torch.Tensor,
                key: torch.Tensor, value: torch.Tensor,
