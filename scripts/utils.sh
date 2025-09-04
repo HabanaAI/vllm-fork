@@ -265,6 +265,8 @@ set_perf_tuning(){
         echo "VLLM_PROFILER_ENABLED is set to true"
         export VLLM_PROFILER_ENABLED=true
         export VLLM_PROFILE_FILE=${case_name}_profile.json
+    else
+        extra_params+=("--disable-log-requests")
     fi
 
     if [ "$disable_zero_padding" == "true" ]; then
