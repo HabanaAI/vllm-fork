@@ -54,13 +54,13 @@ Verified models:
   
   * Kimi-K2-Instruct has 1T parameters with FP8 precision, needs 2-node 8\*Gaudi2 servers to accommodate the model weights.
 
-The following table outlines the mininum requirements for each hardware component of each node to achieve high-performance inference.
+The following table outlines the minimum requirements for each hardware component of each node to achieve high-performance inference.
 
 |Model| Servers | CPU per Node | Accelerators per Node | RAM per Node | Storage per Node | Frontend Networking per Node <br>(In-band Management/Storage) | Backend Networking per Node <br>(Compute, w/ RDMA) |
 |---| -------------- | --------------------------------------------------- | -------------------- | ------------- | ------------------------------------------------------ | -- | -- |
-|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
-|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
-|Kimi-K2-Instruct| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Mininum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 1-node Gaudi2D | 2\* 3rd or newer Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Minimum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | Not Required |
+|DeepSeek-R1-0528/DeepSeek-R1/DeepSeek-V3.1| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Minimum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
+|Kimi-K2-Instruct| 2-node Gaudi2D | 2\* 3rd or 4th Gen Intel® Xeon® Scalable Processors | 8\* HL-225D 96GB OAM | Minimum 1.5TB | **OS:** At least 480GB SATA/SAS/NVMe SSD, <br> **Data:** At least 2TB NVMe SSD | At least 1\* 10GbE/25GbE NIC <br> or 1\* NVIDIA® 200G BlueField-2 DPU/ConnectX-6 Dx SmartNIC | 4\* or 8\* NVIDIA® HDR-200G ConnectX-6 Dx SmartNIC/HCA or NDR-400G ConnectX-7 SmartNIC/HCA |
 
 ### Set CPU to Performance Mode
 Please change the CPU setting to be performance optimization mode in BIOS setup and execute the command below in OS to make sure get the best CPU performance. 
@@ -168,7 +168,7 @@ git clone -b "deepseek_r1" https://github.com/HabanaAI/vllm-fork.git
 pip install -e vllm-fork/
 ```
 ### HCCL Demo Test
-Download HCCL Demo, compile and execute the hccl_demo test. Make sure the HCCL demo test passes on 8 HPU. For detailed info, pelease refer to [HCCL Demo](https://github.com/HabanaAI/hccl_demo)
+Download HCCL Demo, compile and execute the hccl_demo test. Make sure the HCCL demo test passes on 8 HPU. For detailed info, please refer to [HCCL Demo](https://github.com/HabanaAI/hccl_demo)
 ```bash
 git clone https://github.com/HabanaAI/hccl_demo.git
 cd hccl_demo
@@ -444,7 +444,7 @@ For DeepSeek-V3.1, please use the command below to calibrate the model. After th
 ```bash
 cd vllm-fork
 bash scripts/run_inc_calib.sh --model /data/hf_models/DeepSeek-V3.1-G2
-
+```
 
 ##### 2. Configure environment variables.
 
