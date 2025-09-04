@@ -605,7 +605,7 @@ _I = TypeVar(
     "_I",
     MultiModalKwargsItem,
     Optional[MultiModalKwargsItem],
-    default=MultiModalKwargsItem,
+    #default=MultiModalKwargsItem,
 )
 
 
