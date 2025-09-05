@@ -576,24 +576,25 @@ class Scheduler:
                     end_time_stamp)
 
         def run_sequential_fetching_loop():
-            seq_group = self.fetching_queue.get()
-            if seq_group is None:
-                # This is a shutdown signal
-                logger.info("The fetching thread is shutting down.")
-                return
+            while True:
+                seq_group = self.fetching_queue.get()
+                if seq_group is None:
+                    # This is a shutdown signal
+                    logger.info("The fetching thread is shutting down.")
+                    return
 
-            self.scheduler_profiler.start('internal', 'fetching_kv')
-            hash_prefix = hash_list(seq_group.prompt_token_ids)
-            kv_cache, hidden_states = get_kv_and_hidden_states(
-                hash_prefix)
-            if kv_cache is not None:
-                fetching_success = True
-                put_to_shared_dict(hash_prefix, kv_cache, hidden_states)
-            else:
-                fetching_success = False
-            self.fetching_done.put((seq_group, fetching_success))
-            self.fetching_queue.task_done()
-            self.scheduler_profiler.end()
+                self.scheduler_profiler.start('internal', 'fetching_kv')
+                hash_prefix = hash_list(seq_group.prompt_token_ids)
+                kv_cache, hidden_states = get_kv_and_hidden_states(
+                    hash_prefix)
+                if kv_cache is not None:
+                    fetching_success = True
+                    put_to_shared_dict(hash_prefix, kv_cache, hidden_states)
+                else:
+                    fetching_success = False
+                self.fetching_done.put((seq_group, fetching_success))
+                self.fetching_queue.task_done()
+                self.scheduler_profiler.end()
 
         def finish_fetching(seq_group, key_prefix, success, data):
             if success:
