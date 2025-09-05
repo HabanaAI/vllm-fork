@@ -1,0 +1,7 @@
+model_name: "/path/to/internvl/3/5/14b"
+dtype: "bfloat16"
+max_model_len: 16384
+max_num_seqs: 32
+num_prompts: 4
+limit_mm_per_prompt_image: 5
+trust_remote_code: True
