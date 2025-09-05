@@ -264,31 +264,47 @@ bash benchmark_throughput.sh -h
 The command output is like below.
 
 ```
-Benchmark vllm throughput for a huggingface model on Gaudi.
+Benchmark vLLM throughput for a huggingface model on Gaudi.
 
-Syntax: bash benchmark_throughput.sh <-w> [-n:m:d:i:o:r:j:t:l:b:c:sfza] [-h]
+Syntax: bash benchmark_throughput.sh <-w> [-t:m:d:i:o:r:j:t:l:b:c:sfza] [-h]
 options:
-w  Weights of the model, could be model id in huggingface or local path
-n  Number of HPU to use, [1-8], default=1
-m  Module IDs of the HPUs to use, [0-7], default=None
-d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
-i  Input length, int, default=1024
-o  Output length, int, default=512
-r  Ratio for min input/output length to generate an uniform distributed input/out length, float, default=1.0
-j  Json path of the ShareGPT dataset, str, default=None
-t  max_num_batched_tokens for vllm, int, default=8192
-l  max_model_len for vllm, int, default=4096
-b  max_num_seqs for vllm, int, default=128
-p  number of prompts, int, default=1000
-e  number of scheduler steps, int, default=1
-c  Cache HPU recipe to the specified path, str, default=None
-s  Skip warmup or not, bool, default=false
-f  Enable profiling or not, bool, default=false
-z  Disable zero-padding, bool, default=false
-a  Disable FusedFSDPA, bool, default=false
-h  Help info
-
-Note: set -j <sharegpt json path> will override -i, -o and -r
+-w  Weights of the model, str, could be model id in huggingface or local path.
+    DO NOT change the model name as some of the parameters depend on it.
+-t  Number of HPUs to use, [1-8], default=1. Used to set TP and EP size.
+-m  Module IDs of the HPUs to use, comma separated int in [0-7], default=None
+    Used to select HPUs and to set NUMA accordingly. It's recommended to set
+    for cases with 4 or less HPUs.
+-d  Data type, str, ['bfloat16'|'float16'|'fp8'|'awq'|'gptq'], default='bfloat16'
+-i  Input length, int, default=1024
+-p  Max number of prefill sequences, int, default=8192/input_min
+-o  Output length, int, default=512
+-b  max_num_seqs for vllm, int, default=128
+    Used to control the max batch size for decoding phase.
+    It is recommended to set this value according to the 'Maximum concurrency'
+    reported by a test run.
+-r  random-range-ratio for benchmark_throughput.py, float, default=0.0
+    The result range is [length * (1 - range_ratio), length * (1 + range_ratio)].
+-j  Json path of the ShareGPT dataset, str, default=None
+    set -j <sharegpt json path> will override -i, -o and -r
+-n  Number of prompts, int, default=max_num_seqs*4
+-g  max-seq-len-to-capture for vLLM, int, default=8192
+    Used to control the maximum batched tokens to be captured in HPUgraph.
+    Reduce this value could decrease memory usage, but not smaller than 2048.
+-u  gpu-memory-utilization, float, default=0.9
+    Used to control the GPU memory utilization. Reduce this value if OOM occurs.
+-e  Extra vLLM server parameters, str, default=None
+    Extra parameters that will pass to the vLLM engine.
+-l  Use linear bucketing or not, bool, default=false
+    The exponential bucketing is used by default to reduce number of buckets.
+    Turn on to switch to linear bucketing that introduce less padding, and more
+    buckets and thus longer warmup time.
+-c  Cache HPU recipe to the specified path, str, default=None
+    The recipe cache could be reused to reduce the warmup time.
+-s  Skip warmup or not, bool, default=false
+    Skip warmup to reduce startup time. Used in debug/dev environment only.
+    DO NOT use in production environment.
+-f  Enable high-level profiler or not, bool, default=false
+-h  Help info
 ```
 
 Run offline benchmark with the ShareGPT dataset

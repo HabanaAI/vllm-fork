@@ -74,39 +74,46 @@ set_common_env(){
         export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     fi
 
-    # memory usage tuning
-    export VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-"0.9"}
-    export VLLM_GRAPH_RESERVED_MEM=${VLLM_GRAPH_RESERVED_MEM:-"0.2"}
-    export VLLM_GRAPH_PROMPT_RATIO=${VLLM_GRAPH_PROMPT_RATIO:-"0.8"}
-
     # performance tuning
+    export VLLM_GRAPH_RESERVED_MEM=${VLLM_GRAPH_RESERVED_MEM:-"0.1"}
     export VLLM_DELAYED_SAMPLING=${VLLM_DELAYED_SAMPLING:-"true"}
     export VLLM_ZERO_PADDING=${VLLM_ZERO_PADDING:-"true"}
-
-    # MoE specific
-    export VLLM_EP_SIZE=${VLLM_EP_SIZE:-"${num_hpu}"}
-    export VLLM_DYNAMIC_MOE_MIN_TOKENS=${VLLM_DYNAMIC_MOE_MIN_TOKENS:-"256"}
-    export VLLM_DYNAMIC_MOE_MIN_EXPERTS_SINGLEHPU=${VLLM_DYNAMIC_MOE_MIN_EXPERTS_SINGLEHPU:-"32"}
-
-    # profiler
-    export VLLM_PROFILER_ENABLED=${VLLM_PROFILER_ENABLED:-"false"}
-    export VLLM_ENGINE_PROFILER_ENABLED=${VLLM_ENGINE_PROFILER_ENABLED:-"false"}
-    export VLLM_ENGINE_PROFILER_WARMUP_STEPS=${VLLM_ENGINE_PROFILER_WARMUP_STEPS:-"0"}
-    export VLLM_ENGINE_PROFILER_STEPS=${VLLM_ENGINE_PROFILER_STEPS:-"1"}
-    export VLLM_ENGINE_PROFILER_REPEAT=${VLLM_ENGINE_PROFILER_REPEAT:-"1"}
+    export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-"true"}
 
     # network
-    default_host_ip=$( hostname -I | awk '{print $1}' )
+    default_host_ip=${host:-$(hostname -I | awk '{print $1}')}
     default_ifname=$( ip -br addr show to ${default_host_ip} | awk '{print $1}' )
     export VLLM_HOST_IP=${VLLM_HOST_IP:-"${default_host_ip}"}
     export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-"${default_ifname}"}
     export HCCL_SOCKET_IFNAME=${HCCL_SOCKET_IFNAME:-"${default_ifname}"}
+}
 
-    # misc
-    export VLLM_WORKER_MULTIPROC_METHOD=${VLLM_WORKER_MULTIPROC_METHOD:-"spawn"}
-    export TOKENIZERS_PARALLELISM=${TOKENIZERS_PARALLELISM:-"true"}
-    export RAY_IGNORE_UNHANDLED_ERRORS=${RAY_IGNORE_UNHANDLED_ERRORS:-"1"}
-    export VLLM_RAY_DISABLE_LOG_TO_DRIVER=${VLLM_RAY_DISABLE_LOG_TO_DRIVER:-"1"}
+# set max_num_batched_tokens and max_model_len based on input/output ranges
+set_length(){
+    model_name=$(basename "$weights_path")
+    model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+
+    max_num_batched_tokens=$(( $input_max + $output_max ))
+    if [ "$max_num_batched_tokens" -lt $PREFERED_BATCHED_TOKENS ]; then
+        max_num_batched_tokens=$PREFERED_BATCHED_TOKENS
+    fi
+    # Ceiling max_num_batched_tokens to a multiple of BLOCK_SIZE
+    max_num_batched_tokens=$( ceil $max_num_batched_tokens $BLOCK_SIZE )
+
+    if [ "$max_num_prefill_seqs" == "" ]; then
+        # Ceiling input_min to a multiple of BLOCK_SIZE
+        input_min_ceil=$( ceil $input_min $BLOCK_SIZE )
+        max_num_prefill_seqs=$(( $max_num_batched_tokens / $input_min_ceil ))
+        max_num_prefill_seqs=$( max $max_num_prefill_seqs 1 )
+    fi
+
+    max_model_len=$(( $input_max + $output_max ))
+    # Ceiling max_model_len to a multiple of BLOCK_SIZE
+    max_model_len=$( ceil $max_model_len $BLOCK_SIZE )
+
+    if [ "$input_min" == "$input_max" ]; then
+        disable_zero_padding=true
+    fi
 }
 
 # set up numactl for the specified module IDs
@@ -252,7 +259,7 @@ set_linear_bucketing(){
 set_perf_tuning(){
     if [ "$cache_path" != "" ]; then
         echo "HPU recipe cache will be saved to $cache_path"
-        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,16384
+        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,40960,false
         mkdir -p "${cache_path}"
     fi
 
@@ -317,6 +324,8 @@ set_perf_tuning(){
 }
 
 set_config(){
+    set_common_env
+    set_length
     set_module_ids
     set_dtype
     if [ "$use_linear_bucketing" == "true" ]; then
@@ -326,6 +335,5 @@ set_config(){
 
     new_env=( $(env) )
     # report out the changed env
-    echo "Changed environment variables:"
-    comm -13 <(printf "%s\n" "${original_env[@]}" | sort) <(printf "%s\n" "${new_env[@]}" | sort)
+    changed_env=$(comm -13 <(printf "%s\n" "${original_env[@]}" | sort) <(printf "%s\n" "${new_env[@]}" | sort))
 }
