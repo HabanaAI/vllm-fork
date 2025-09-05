@@ -1231,8 +1231,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         image_token_id = kwargs["image_token_id"]
         assert isinstance(image_token_id, torch.Tensor)
- 
         self.img_context_token_id = image_token_id.flatten().unique().item()
+
         if pixel_values_flat is not None:
             if not isinstance(pixel_values_flat, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
@@ -1244,6 +1244,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
             pixel_values_flat = flatten_bn(pixel_values_flat, concat=True)
             image_num_patches = flatten_bn(image_num_patches, concat=True)
+
             return InternVLImagePixelInputs(
                 type="pixel_values",
                 pixel_values_flat=self._validate_pixel_values(
@@ -1306,7 +1307,9 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             return image_input["data"]
 
         assert self.vision_model is not None
+
         image_embeds = self.extract_feature(image_input["pixel_values_flat"])
+
         num_patches = image_input["num_patches"]
 
         # Only one image in the current batch
@@ -1326,6 +1329,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
     def _parse_and_validate_multimodal_inputs(self, **kwargs: object) -> dict:
         modalities = {}
+
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
         for input_key in kwargs:
