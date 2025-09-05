@@ -183,8 +183,7 @@ class Ovis2_5ProcessingInfo(BaseProcessingInfo):
         )
 
     def get_image_pad_token(self) -> str:
-        hf_text_config = self.get_hf_config().get_text_config()
-        text_model_type = hf_text_config.model_type
+        text_model_type = self.get_hf_config().llm_config.model_type
         return IMAGE_PAD_TOKEN_MAP.get(text_model_type)
 
     def get_image_processor(self) -> BaseImageProcessor:
@@ -444,7 +443,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         self.vte = VisualEmbedding(config.visual_vocab_size,
                                    config.hidden_size)
 
-        text_model_type = self.config.get_text_config().model_type
+        text_model_type = self.config.llm_config.model_type
         self.image_pad_token_id = IMAGE_PAD_TOKEN_ID_MAP[text_model_type]
 
         self.make_empty_intermediate_tensors = (
