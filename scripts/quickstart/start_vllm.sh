@@ -31,7 +31,7 @@ max_num_seqs=128
 host=0.0.0.0
 max_model_len=16384
 
-KV_CACHE_DTYPE=auto
+KV_CACHE_DTYPE=fp8_inc
 
 while getopts hw:u:p:l:b:c:sq flag; do
     case $flag in
