@@ -67,7 +67,8 @@ done
 # INC FP8 quantization
 if [ "$inc_fp8_quant" = "true" ]; then
     export INC_MEASUREMENT_DUMP_PATH_PREFIX=$(realpath "$BASH_DIR/../..")
-    export QUANT_CONFIG=$(realpath "$BASH_DIR/../quant_configs/inc_quant_per_channel_bf16kv.json")
+    #export QUANT_CONFIG=$(realpath "$BASH_DIR/../quant_configs/inc_quant_per_channel_bf16kv.json")
+    export QUANT_CONFIG="/host/mnt/disk002/kf/vllm-fork_pd/pd_xpyd/inc_dsr1_full_pile/deepseek-r1/maxabs_quant_g3.json"
     export VLLM_REQUANT_FP8_INC=1
     export VLLM_ENABLE_RUNTIME_DEQUANT=1
     export VLLM_HPU_MARK_SCALES_AS_CONST=false

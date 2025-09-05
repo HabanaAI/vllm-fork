@@ -13,9 +13,9 @@ export VLLM_GRAPH_PROMPT_RATIO=1
 model_len=32768
 max_num_batched_tokens=16384
 max_num_seqs=16
-input_min=128
-input_max=32768
-output_max=32768
+input_min=3500
+input_max=3500
+output_max=1000
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
@@ -24,7 +24,7 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 
 set_bucketing
 
-export VLLM_PROMPT_SEQ_BUCKET_STEP=1024
+export VLLM_PROMPT_SEQ_BUCKET_STEP=512
 
 export VLLM_DECODE_BS_BUCKET_MIN=1
 export VLLM_DECODE_BS_BUCKET_STEP=1
@@ -48,7 +48,7 @@ export VLLM_USE_V1=0
 export VLLM_TTFT_TRACE=true
 export VLLM_TTFT_TRACE_STACK=true
 
-export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_p,false,16384
+export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_p,false,16384
 
 if [ "$INC_FP8" -eq 1 ]; then
   export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp8ep8.json

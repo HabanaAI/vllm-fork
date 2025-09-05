@@ -48,7 +48,9 @@ export VLLM_USE_V1=0
 export VLLM_TTFT_TRACE=true
 export VLLM_TTFT_TRACE_STACK=true
 
-export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_p,false,16384
+#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_p,false,16384
+export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_p,false,16384
+
 
 if [ "$INC_FP8" -eq 1 ]; then
   export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp8ep8.json

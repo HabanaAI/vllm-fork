@@ -1508,32 +1508,25 @@ class LLMEngine:
                 print(f"Exception type during profile config file open: {type(Exception).__name__}")
                 self._profile_cfg = None
 
-        # Start condition: in-flight equals target and current step index equals target
+        # Start condition: in-flight equals target and current block size equals target
         if (not self._profile_started) and self._profile_cfg is not None:
             # Compute current in-flight requests (running queue size)
             current_inflight = sum(len(s.running) for s in self.scheduler)
-            # Compute the minimum generated token position among decode sequences
-            # in the currently scheduled batch, ignoring sequences that have not
-            # emitted any token yet (out_len == 0), to avoid the value sticking at 0
-            # when new requests join.
-            min_generated_pos = None
+            # Compute the total number of blocks used by sequences in the current batch
+            current_batch_blocks = 0
             try:
-                for scheduled in scheduler_outputs.scheduled_seq_groups:
-                    seq_group = scheduled.seq_group
-                    if seq_group.is_prefill():
-                        continue
-                    for seq in seq_group.get_seqs():
-                        out_len = seq.get_output_len()
-                        if out_len <= 0:
-                            continue
-                        if min_generated_pos is None or out_len < min_generated_pos:
-                            min_generated_pos = out_len
+                unique_blocks = set()
+                for seq_group_metadata in seq_group_metadata_list:
+                    for seq_id in seq_group_metadata.seq_data.keys():
+                        block_table = seq_group_metadata.block_tables.get(seq_id, [])
+                        unique_blocks.update(block_table)
+                current_batch_blocks = len(unique_blocks)
             except Exception:
-                # Leave as None on any structure mismatch
-                pass
+                # Leave as 0 on any structure mismatch
+                current_batch_blocks = 0
             try:
                 target_inflight = int(self._profile_cfg.get("inflight", -1))
-                target_start_step = int(self._profile_cfg.get("start_step", -1))
+                target_block_size = int(self._profile_cfg.get("block_size", -1))
                 profile_steps = int(self._profile_cfg.get("steps", 0))
                 profile_ranks_raw = self._profile_cfg.get("profile_ranks", None)
                 allowed_ranks = None
@@ -1553,7 +1546,7 @@ class LLMEngine:
                     if isinstance(role_single, str):
                         allowed_roles = {role_single.upper()}
             except Exception:
-                target_inflight = target_start_step = -1
+                target_inflight = target_block_size = -1
                 profile_steps = 0
                 allowed_ranks = None
                 allowed_roles = None
@@ -1591,22 +1584,25 @@ class LLMEngine:
             else:
                 role_allowed = (want_p or want_d)
             # Debug print for tracking profiler start conditions
-            #if rank_allowed and role_allowed:
-            #    print(
-            #        f"[Profiler Debug] Checking start conditions: "
-            #        f"target_inflight={target_inflight}, "
-            #        f"target_start_step={target_start_step}, "
-            #        f"profile_steps={profile_steps}, "
-            #        f"current_inflight={current_inflight}, "
-            #        f"min_generated_pos={min_generated_pos}, "
-            #        f"_profile_started={self._profile_started}"
-            #    )
+            if True:  # Enable debug prints
+                print(
+                    f"[Profiler Debug] Checking start conditions: "
+                    f"target_inflight={target_inflight}, "
+                    f"target_block_size={target_block_size}, "
+                    f"profile_steps={profile_steps}, "
+                    f"current_inflight={current_inflight}, "
+                    f"current_batch_blocks={current_batch_blocks}, "
+                    f"_profile_started={self._profile_started}, "
+                    f"disagg={is_disagg}, role={this_role}, is_decode_role={is_decode_role}, "
+                    f"rank_allowed={current_rank in (allowed_ranks or {current_rank})}, "
+                    f"role_allowed={role_allowed}"
+                )
             # Start when:
             #  - rank allowed, role allowed, profile_steps > 0
             #  - inflight equals target
-            #  - D-path requires token-index match; P-path does not
-            d_ok = (min_generated_pos is not None and target_start_step >= 0 and min_generated_pos == target_start_step)
-            p_ok = True  # no token-index gating for P
+            #  - D-path requires block-size match; P-path does not
+            d_ok = (current_batch_blocks > 0 and target_block_size >= 0 and current_batch_blocks == target_block_size)
+            p_ok = True  # no block-size gating for P
             start_allowed = False
             if is_disagg:
                 # On D node, require D condition; on P node, require P condition
@@ -1625,7 +1621,7 @@ class LLMEngine:
                 print(
                     f"[Profiler Debug] Profiler start triggered on rank {current_rank} (role={this_role}, disagg={is_disagg}): "
                     f"current_inflight={current_inflight}, "
-                    f"min_generated_pos={min_generated_pos}, "
+                    f"current_batch_blocks={current_batch_blocks}, "
                     f"profile_steps={profile_steps}"
                 , flush=True)
                 profiler_obj = self._get_hpu_profiler()

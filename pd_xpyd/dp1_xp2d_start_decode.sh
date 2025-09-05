@@ -18,4 +18,9 @@ export HCCL_GAUDI_DIRECT=1
 export HCCL_SOCKET_IFNAME=enp24s0f0np0
 export LD_LIBRARY_PATH=/opt/libfabric/lib
 
+timestamp=$(date +"%Y%m%d_%H%M%S")
+log_dir="xpyd_logs"
+mkdir -p "$log_dir"
+log_file="$log_dir/decode1_${timestamp}.log"
+
 source "$BASH_DIR"/dp_start_decode.sh G3D-sys04 16 $TP_SIZE 1 "10.112.242.153"
