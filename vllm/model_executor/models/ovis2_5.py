@@ -641,29 +641,3 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
     def get_language_model(self) -> torch.nn.Module:
         return self.llm
-
-    # 让 vLLM 的分层/PP/KV 绑定只看 LLM 的 decoder 层
-    def get_decoder_layers(self):
-        lm = self.get_language_model()
-        # Qwen3 常见路径：model.layers
-        if hasattr(lm, "model") and hasattr(lm.model, "layers"):
-            return lm.model.layers
-        # 其它常见布局的兜底（按需保留）
-        for path in ("layers", "transformer.h", "decoder.layers"):
-            cur = lm
-            ok = True
-            for attr in path.split("."):
-                if not hasattr(cur, attr):
-                    ok = False
-                    break
-                cur = getattr(cur, attr)
-            if ok:
-                return cur
-        raise RuntimeError("Cannot locate LLM decoder layers for KV cache")
-
-    # vLLM 的 PP/KV 接口通常会优先调用这两个（SupportsPP）
-    def get_num_layers(self) -> int:
-        return len(self.get_decoder_layers())
-
-    def get_layer(self, idx: int) -> torch.nn.Module:
-        return self.get_decoder_layers()[idx]
