@@ -1,10 +1,10 @@
 # 1.0 Embedding & Rerank 部署手册
 
+本文档详细介绍如何在 HPU（Habana Processing Unit）上部署 TEI（Text Embeddings Inference）embedding & Rerank 服务，包括资源分配、Docker 部署、参数配置、测试验证等方面。
+
 ## 1.1 Embedding 模型（单卡部署）
 
 ### 1.1.1 TEI 部署指南
-
-本文档详细介绍如何在 HPU（Habana Processing Unit）上部署 TEI（Text Embeddings Inference）embedding 服务，包括资源分配、Docker 部署、参数配置、测试验证等方面。
 
 #### 资源分配
 
@@ -18,6 +18,22 @@ Intel 在 Gaudi 基础镜像基础上编译了 TEI 镜像，可用于部署 RAG 
 
 ```bash
 docker pull ghcr.io/huggingface/text-embeddings-inference:hpu-latest
+```
+
+对于特定版本的驱动，如需编译镜像，请使用如下命令编译
+
+```bash
+git clone https://github.com/huggingface/text-embeddings-inference.git
+cd text-embeddings-inference
+# 如果需要修改基础镜像，请修改 Dockerfile-intel
+# FROM vault.habana.ai/gaudi-docker/1.21.3/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:1.21.3-57 AS hpu  #将该镜像替换为驱动要求版本镜像，保存
+#build image
+ulimit=65536
+export platform=hpu
+
+#如果不需要设置代理，请去掉HTTPS_PROXY的设置。
+docker build . --ulimit nofile=65535:65535 --build-arg HTTPS_PROXY=http://child-mu.intel.com:912  -f Dockerfile-intel --build-arg PLATFORM=$platform -t tei_hpu
+
 ```
 
 ### 1.1.3 部署参数说明
@@ -102,7 +118,7 @@ client_batch：最大客户端并发值，默认64，一般不需要调节
 **步骤 3：启动服务**
 
 ```bash
- docker run -d --name tei-embedding-serving   --runtime=habana   -p ${TEI_EMBEDDING_PORT:-12003}:80   -v "${DATA_PATH:-./data}:/data"   --shm-size 2g   -e host_ip=${host_ip}   -e HABANA_VISIBLE_DEVICES=${id:-0}   -e OMPI_MCA_btl_vader_single_copy_mechanism=none   -e MAX_WARMUP_SEQUENCE_LENGTH=${warmup_length:-512}   -e MAX_WARMUP_BATCH_SIZE=${warmup_batch:-16}   -e MAX_CLIENT_BATCH_SIZE=${client_batch:-64}   -e MAX_BATCH_REQUESTS=${warmup_batch:-16} ghcr.io/huggingface/text-embeddings-inference:hpu-latest --model-id /data/${EMBEDDING_MODEL_ID} --dtype bfloat16 --auto-truncate
+ docker run -d --name tei-embedding-serving   --runtime=habana   -p ${TEI_EMBEDDING_PORT:-12003}:80   -v "${DATA_PATH:-./data}:/data"   --shm-size 2g   -e host_ip=${host_ip}   -e HABANA_VISIBLE_DEVICES=${id:-0}   -e OMPI_MCA_btl_vader_single_copy_mechanism=none   -e MAX_WARMUP_SEQUENCE_LENGTH=${warmup_length:-512}   -e MAX_WARMUP_BATCH_SIZE=${warmup_batch:-16}   -e MAX_CLIENT_BATCH_SIZE=${client_batch:-64}   -e MAX_BATCH_REQUESTS=${warmup_batch:-16} tei_hpu:latest --model-id /data/${EMBEDDING_MODEL_ID} --dtype bfloat16 --auto-truncate
 ```
 
 **步骤 4：确认服务就绪**
@@ -136,14 +152,17 @@ docker logs tei-embedding-serving | grep "Ready"
 
 #### 1.1.5.2 基本功能测试
 
+TEI embedding 服务支持 openAI/v1/embeddings API 兼容格式，也支持自定义 embed API 格式。
+
 ```bash
 export no_proxy="localhost, 127.0.0.1, ::1"
 
-# 测试embedding接口
+# 测试 TEI 自定义 embed API 格式
 curl -X POST http://localhost:12003/embed \
   -H "Content-Type: application/json" \
   -d '{"inputs":"这是一个测试文本"}'
 
+ #测试 TEI openAI/v1/embeddings API 兼容格式
 curl -X POST http://localhost:12003/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{"input":"这是一个测试文本"}'
@@ -151,7 +170,6 @@ curl -X POST http://localhost:12003/v1/embeddings \
 
 ### 1.1.7 其他文档和资料
 
-TEI embedding 服务支持 openAI/v1/embeddings API 兼容格式，也支持自定义 embed API 格式。  
 API swagger 文档链接：
 
 - https://huggingface.github.io/text-embeddings-inference
@@ -231,7 +249,7 @@ client_batch：最大客户端并发值，默认32，一般不需要调节
 启动 docker 实例
 
 ```bash
- docker run -d --name tei-reranking-serving --runtime=habana -p ${TEI_RERANKING_PORT:-12007}:80 -v "${DATA_PATH:-./data}:/data" --shm-size 2g -e host_ip=${host_ip} -e HABANA_VISIBLE_DEVICES=${id:-0}   -e OMPI_MCA_btl_vader_single_copy_mechanism=none   -e MAX_WARMUP_SEQUENCE_LENGTH=${warmup_length:-512}   -e MAX_WARMUP_BATCH_SIZE=${warmup_batch:-32}   -e MAX_CLIENT_BATCH_SIZE=${client_batch:-32}   -e MAX_BATCH_REQUESTS=${warmup_batch:-32}   ghcr.io/huggingface/text-embeddings-inference:hpu-latest --model-id /data/${RERANK_MODEL_ID} --dtype bfloat16 --auto-truncate
+ docker run -d --name tei-reranking-serving --runtime=habana -p ${TEI_RERANKING_PORT:-12007}:80 -v "${DATA_PATH:-./data}:/data" --shm-size 2g -e host_ip=${host_ip} -e HABANA_VISIBLE_DEVICES=${id:-0}   -e OMPI_MCA_btl_vader_single_copy_mechanism=none   -e MAX_WARMUP_SEQUENCE_LENGTH=${warmup_length:-512}   -e MAX_WARMUP_BATCH_SIZE=${warmup_batch:-32}   -e MAX_CLIENT_BATCH_SIZE=${client_batch:-32}   -e MAX_BATCH_REQUESTS=${warmup_batch:-32}  tei_hpu:latest --model-id /data/${RERANK_MODEL_ID} --dtype bfloat16 --auto-truncate
 ```
 
 ### 1.2.5 健康检查
