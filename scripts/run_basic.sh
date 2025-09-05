@@ -25,10 +25,11 @@ if [[ $basename == *"120b"* ]]; then
     is_120b=true
 fi
 
-
+export VLLM_BUILD=1.23.0.248
 export QUANT_CONFIG=./quant_configs/inc_unit_scale.json
 export QUANT_CONFIG=./quant_configs/inc_quant.json
 export QUANT_CONFIG=./quant_configs/inc_measure.json
+
 nprompts=512
 nprompts=4
 # is 120b
@@ -50,9 +51,8 @@ fi
 
 
 
-export VLLM_BUILD=1.23.0.248
-# QUANT_CONFIG=${QUANT_CONFIG_FILE} \
-# VLLM_BUILD=1.23.0.248 \
+
+
 
 
 
@@ -72,5 +72,6 @@ VLLM_SKIP_WARMUP=true  python run_example_tp.py \
     --tokenizer $model_path \
     --fp8_kv_cache \
     --nprompts $nprompts 2>&1 | tee $LOG_FILE
+
 
 

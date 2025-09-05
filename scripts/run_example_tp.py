@@ -259,8 +259,8 @@ if __name__ == "__main__":
             model=model, 
             tokenizer=args.tokenizer,
             trust_remote_code=True,
+            max_model_len=args.max_model_len,
             dtype="bfloat16",
-            max_model_len=16384,
             gpu_memory_utilization=0.8,
             **param
         )
