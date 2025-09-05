@@ -3483,11 +3483,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     seq_data.output_token_ids_array[-1] = real_out
                     seq_data._cached_all_token_ids[-1] = real_out
                 else:
-                    logger.debug('Last token {} is not patched by {}',
+                    logger.debug('Last token %s is not patched by %s',
                                  last_token, real_out)
                 assert seq_data.output_token_ids_array[-1] != DUMMY_TOKEN_ID
                 assert seq_data._cached_all_token_ids[-1] != DUMMY_TOKEN_ID
             else:
-                logger.debug('Skip patching with {} as last token is empty',
+                logger.debug('Skip patching with %s as last token is empty',
                              real_out)
         self.has_patched_prev_output = True
