@@ -238,7 +238,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 
         topk_ids = topk_ids.to(torch.int32)
         topk_weights = topk_weights.to(x.dtype)
-        if layer.dp_size > 1:
+        if layer.dp_size > 1 and layer.dp_opt > 3:
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
@@ -480,7 +480,7 @@ class FusedMoE(torch.nn.Module):
         self.custom_routing_function = custom_routing_function
         self.dp_opt = envs.VLLM_DP_OPT
         self.multicast_fn = self.hpu_multicast\
-            if (is_hpu and self.dp_opt > 2) else self.naive_multicast
+            if (is_hpu and self.dp_opt > 1) else self.naive_multicast
         if is_hpu:
             if VLLM_REQUANT_FP8_INC:
                 ep_shift = self.ep_rank * self.local_num_experts
@@ -907,7 +907,14 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
-            if self.activation_scheme != "static" or self.dp_opt < 4:
+            if self.dp_opt < 4:
+                router_logits_across_dp = get_forward_context(
+                ).dp_metadata.router_logits_across_dp
+                router_logits = self.multicast_fn(router_logits,
+                                                  cu_tokens_across_dp_cpu,
+                                                  router_logits_across_dp)
+
+            if self.activation_scheme != "static" or self.dp_opt < 3:
                 hidden_states_across_dp = get_forward_context(
                 ).dp_metadata.hidden_states_across_dp
                 hidden_states = self.multicast_fn(hidden_states,
@@ -936,7 +943,7 @@ class FusedMoE(torch.nn.Module):
             **quant_kwargs)
 
         if self.dp_size > 1:
-            if self.dp_opt < 3:
+            if self.dp_opt < 2:
                 start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
                     self.dp_rank - 1]
                 end = cu_tokens_across_dp_cpu[self.dp_rank]
