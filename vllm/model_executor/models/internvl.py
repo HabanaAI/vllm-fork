@@ -1135,12 +1135,14 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
     def extract_feature(self, pixel_values: torch.Tensor) -> torch.Tensor:
         
         if is_hpu:
-            batch_breakdown = greedy_plan(pixel_values.shape[0], \
-                    self.vision_buckets.multimodal_buckets)
+            if self.vision_buckets.multimodal_buckets:
+                batch_breakdown = greedy_plan(pixel_values.shape[0], \
+                        self.vision_buckets.multimodal_buckets)
+            else:
+                batch_breakdown = [pixel_values.shape[0]]
 
             start_idx = 0
             vit_embeds_minibatches = []
-            print(f"libin debug {batch_breakdown=}")
 
             for i in batch_breakdown:
                 end_idx = start_idx + i
@@ -1231,8 +1233,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         assert isinstance(image_token_id, torch.Tensor)
  
         self.img_context_token_id = image_token_id.flatten().unique().item()
-        [print(f"libin debug _parse_and_validate_image_input {p.shape=}") for p in pixel_values_flat]
-        [print(f"libin debug _parse_and_validate_image_input {n=}") for n in image_num_patches]
         if pixel_values_flat is not None:
             if not isinstance(pixel_values_flat, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
@@ -1244,7 +1244,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
             pixel_values_flat = flatten_bn(pixel_values_flat, concat=True)
             image_num_patches = flatten_bn(image_num_patches, concat=True)
-
             return InternVLImagePixelInputs(
                 type="pixel_values",
                 pixel_values_flat=self._validate_pixel_values(
@@ -1307,9 +1306,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             return image_input["data"]
 
         assert self.vision_model is not None
-        print(f"libin debug _process_image_input {image_input.keys()=}")
         image_embeds = self.extract_feature(image_input["pixel_values_flat"])
-        print(f"libin debug _process_image_input {image_input["pixel_values_flat"].shape=}, {image_embeds.shape=}")
         num_patches = image_input["num_patches"]
 
         # Only one image in the current batch
@@ -1322,7 +1319,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         feature_size = image_embeds.shape[1]
         image_embeds = image_embeds.view(-1,
                                          self.config.text_config.hidden_size)
-        print(f"libin debug image_embeds shape {image_embeds=}")
         image_feature_sizes = [
             num_patches * feature_size for num_patches in num_patches
         ]
@@ -1330,7 +1326,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
     def _parse_and_validate_multimodal_inputs(self, **kwargs: object) -> dict:
         modalities = {}
-        print(f"libin debug _parse_and_validate_multimodal_inputs {kwargs.keys()=}")
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
         for input_key in kwargs:
@@ -1357,8 +1352,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         return self.language_model
 
     def get_multimodal_embeddings(
-            self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
-
+            self, **kwargs: object) -> Optional[MultiModalEmbeddings]: 
         if is_hpu:
             self.graphed_multimodal_buckets = kwargs.pop(
                 'graphed_multimodal_buckets', [])
@@ -1376,7 +1370,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             if modality == "images":
                 image_input = modalities["images"]
                 vision_embeddings = self._process_image_input(image_input)
-                #print(f"libin debug get_multimodal_embeddings {vision_embeddings.shape=}")
                 multimodal_embeddings += vision_embeddings
             if modality == "videos":
                 video_input = modalities["videos"]
@@ -1405,7 +1398,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                 multimodal_embeddings,
                 context_token_ids,
             )
-        print(f"libin debug get_input_embeddings {inputs_embeds.shape=}")
         return inputs_embeds
 
     def forward(

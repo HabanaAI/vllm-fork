@@ -122,7 +122,7 @@ class VisionBuckets:
                 if is_batch_based:
                     if 'InternVLChatModel' in str(type(model)):
                         multimodal_buckets = list(range(model.config.min_dynamic_patch,
-                                                        model.config.max_dynamic_patch + 1))
+                                                        model.config.max_dynamic_patch + 2)) #As use_thumbnail is true
                     else:
                         multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
@@ -379,7 +379,7 @@ class HpuModelAdapter(torch.nn.Module):
             if self.is_mm_optimized:
                 if hasattr(self.model, 'vision_tower'):
                     self.model.vision_tower = htorch.hpu.wrap_in_hpu_graph(
-                        self.model.vision_tower, disable_tensor_cache=True)
+                        self.model.vision_tower, disable_tensor_cache=False)
                 if hasattr(self.model, 'multi_modal_projector'):
                     self.model.multi_modal_projector = \
                             htorch.hpu.wrap_in_hpu_graph( \
@@ -389,7 +389,7 @@ class HpuModelAdapter(torch.nn.Module):
                     self.model.vision_model = htorch.hpu.wrap_in_hpu_graph(
                         self.model.vision_model, disable_tensor_cache=True)
                 if hasattr(self.model, 'mlp1'):
-                    self.model.vision_model = htorch.hpu.wrap_in_hpu_graph(
+                    self.model.mlp1 = htorch.hpu.wrap_in_hpu_graph(
                         self.model.mlp1, disable_tensor_cache=True)
 
         self._rotary_embed_module = self._get_rotary_embedding_module(
@@ -1084,7 +1084,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     and not self.lora_config)
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
-        
+
     def _set_gc_threshold(self) -> None:
         """
         Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -1508,7 +1508,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         self.is_mm_optimized = is_mm_optimized(model)
         if self.model_is_mrope or self.is_mm_optimized:
-            model.vision_buckets = VisionBuckets(self.is_mm_optimized, model)
+            model.vision_buckets = VisionBuckets(self.is_mm_optimized, model)      
 
     def _prepare_prompt(
         self,
@@ -2716,20 +2716,25 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
-            if hasattr(self.model.model.config, 'mm_tokens_per_image'): 
-                mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
-            else:
-                mm_tokens_per_image = 256
-            num_image_tokens = mm_tokens_per_image * img_args
-            multi_modal_data = {
-                "pixel_values": pixel_values,
-                "num_crops": torch.zeros([img_args], dtype=torch.int32)
-            }
-        if hasattr(self.get_model().config, 'image_token_id'):
-            image_token_id = self.get_model().config.image_token_id
-        else:
-            image_token_id = 151667 #TODO: how to get from InternVLProcessor
 
+            if hasattr(self.model.model.config, 'mm_tokens_per_image'): 
+                image_token_id = self.get_model().config.image_token_id
+                mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
+                multi_modal_data = {
+                    "pixel_values": pixel_values,
+                    "num_crops": torch.zeros([img_args], dtype=torch.int32),
+                }
+            elif 'InternVLChatModel' in str(type(self.model.model)):
+                mm_tokens_per_image = self.model.model.num_image_token
+                image_token_id = 151667 #TODO: how to get from InternVLProcessor
+                multi_modal_data = {
+                    "pixel_values_flat": pixel_values,
+                    "image_num_patches": torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
+                    "image_token_id": torch.tensor(image_token_id, dtype=torch.int64),
+                }
+            else:
+                logger.warning("No support for other models yet")
+            num_image_tokens = mm_tokens_per_image * img_args
         prompt_token_ids = [image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
@@ -3550,7 +3555,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def _get_img_args_from_model_input(self, model_input):
         if (not self.model_is_mrope and not self.is_mm_optimized) or \
             not model_input.multi_modal_kwargs or \
-            'pixel_values' not in model_input.multi_modal_kwargs:
+            ('pixel_values' or 'pixel_values_flat') not in model_input.multi_modal_kwargs:
             return None
         if self.model_is_mrope:
             pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
@@ -3828,18 +3833,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
-
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
                     attn_metadata = self.model._update_use_window_sdpa(
                         execute_model_kwargs['attn_metadata'], seq_len,
                         bool(model_input.multi_modal_kwargs and \
-                       'pixel_values' in model_input.multi_modal_kwargs))
+                       ('pixel_values' or 'pixel_values_flat' )in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
-
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
-                        if 'pixel_values' in execute_model_kwargs and \
+                        if ('pixel_values' or 'pixel_values_flat') in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode and not is_pt_profiler_run:
                                 bypass_model_exec = True
