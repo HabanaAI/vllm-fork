@@ -433,10 +433,6 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
             prefix=maybe_prefix(prefix, "llm"),
         )
 
-        # 保证视觉侧用普通 SDPA，不走 MLA
-        if hasattr(config.vit_config, "_attn_implementation"):
-            config.vit_config._attn_implementation = "torch_sdpa"
-
         self.visual_tokenizer = VisualTokenizer(
             config=config.vit_config,
             visual_vocab_size=config.visual_vocab_size,
