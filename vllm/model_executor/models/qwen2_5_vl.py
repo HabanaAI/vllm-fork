@@ -981,8 +981,12 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             )
 
         # windows attention
-        window_index, cu_window_seqlens = self.get_window_index(
-            padded_grid_thw_cpu)
+        window_index, _ = self.get_window_index(padded_grid_thw_cpu)
+        cu_window_seqlens = torch.arange(
+            0,
+            padded_grid_thw_cpu.prod(-1).sum() + 1,
+            self.vit_merger_window_size * self.vit_merger_window_size * \
+              self.spatial_merge_size)
 
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
