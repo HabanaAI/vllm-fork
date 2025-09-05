@@ -22,13 +22,17 @@ pip install lm_eval[api]
 ```
 
 ### Calibration (Optional)
-This step is optional, as we have attached the calibration results in this folder.
+This step is not required, as calibration results are already provided in this folder.
 
 ### Evaluation Accuray
+> [!NOTE]
+> Make sure to run the commands under `vllm-fork/scripts`, otherwise the measurement files will not load correctly.
+
 ```bash
-# 120b FP8
 cd vllm-fork/scripts
+# 120b FP8
 bash eval_oss_inc.sh
 
 # 120b BF16
+bash eval_oss.sh
 ```
