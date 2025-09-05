@@ -10,7 +10,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Optional, TypedDict, TypeVar, Union
-
+import os
 import numpy.typing as npt
 import torch
 import torch.nn as nn
@@ -35,12 +35,14 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         BaseProcessingInfo, PromptReplacement,
                                         PromptUpdate, PromptUpdateDetails)
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.tokenizer import AnyTokenizer
 
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
-from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
+from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
+                    init_vllm_registered_model,
                     maybe_prefix, merge_multimodal_embeddings)
 
 IMG_START = '<img>'
@@ -50,6 +52,8 @@ IMG_CONTEXT = '<IMG_CONTEXT>'
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
+is_hpu = current_platform.is_hpu()
+is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
 
 class InternVLImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
@@ -1062,6 +1066,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         self.visual_token_mask = None
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
+        if is_hpu:
+            self.graphed_multimodal_buckets = None
 
     def _patch_quant_config(self, config: PretrainedConfig,
                             quant_config: QuantizationConfig):
@@ -1127,16 +1133,59 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         return x
 
     def extract_feature(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        vit_embeds = self.vision_model(pixel_values=pixel_values)
-        vit_embeds = vit_embeds[:, 1:, :]
+        
+        if is_hpu:
+            batch_breakdown = greedy_plan(pixel_values.shape[0], \
+                    self.vision_buckets.multimodal_buckets)
 
-        h = w = int(vit_embeds.shape[1]**0.5)
-        vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], h, w, -1)
-        vit_embeds = self.pixel_shuffle(vit_embeds,
-                                        scale_factor=self.downsample_ratio)
-        vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], -1,
-                                        vit_embeds.shape[-1])
-        vit_embeds = self.mlp1(vit_embeds)
+            start_idx = 0
+            vit_embeds_minibatches = []
+            print(f"libin debug {batch_breakdown=}")
+
+            for i in batch_breakdown:
+                end_idx = start_idx + i
+                batch_sliced_pixel_values = \
+                        pixel_values[start_idx:end_idx, ...]
+                if is_lazy:
+                    vit_embeds_minibatch = \
+                        self.vision_model(
+                            pixel_values=batch_sliced_pixel_values,
+                            bypass_hpu_graphs=i
+                            not in self.graphed_multimodal_buckets
+                            and len(self.graphed_multimodal_buckets) > 0)
+                else:
+                    vit_embeds_minibatch = \
+                        self.vision_model(
+                            pixel_values=batch_sliced_pixel_values) #torch.Size([12, 1025, 1024])
+                
+                vit_embeds_minibatch = vit_embeds_minibatch[:, 1:, :]
+
+                h = w = int(vit_embeds_minibatch.shape[1]**0.5)
+                vit_embeds_minibatch = vit_embeds_minibatch.reshape(vit_embeds_minibatch.shape[0], h, w, -1)
+                vit_embeds_minibatch = self.pixel_shuffle(vit_embeds_minibatch,
+                                            scale_factor=self.downsample_ratio)
+                vit_embeds_minibatch = vit_embeds_minibatch.reshape(vit_embeds_minibatch.shape[0], -1,
+                                            vit_embeds_minibatch.shape[-1])
+
+                if is_lazy:
+                    vit_embeds_minibatches += [self.mlp1(vit_embeds_minibatch,
+                                                        bypass_hpu_graphs=i
+                                                        not in self.graphed_multimodal_buckets
+                                                        and len(self.graphed_multimodal_buckets) > 0)]
+                else:
+                    vit_embeds_minibatches += [self.mlp1(vit_embeds_minibatch)]
+                start_idx = end_idx
+            vit_embeds =torch.cat(vit_embeds_minibatches, dim=0)
+        else:
+            vit_embeds = self.vision_model(pixel_values=pixel_values) #torch.Size([13, 3, 448, 448])
+            vit_embeds = vit_embeds[:, 1:, :] #torch.Size([13, 1025, 1024]) torch.Size([13, 1024, 1024])
+            h = w = int(vit_embeds.shape[1]**0.5) #32
+            vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], h, w, -1) # torch.Size([13, 32, 32, 1024]) (13, 32, 32, -1)
+            vit_embeds = self.pixel_shuffle(vit_embeds,
+                                            scale_factor=self.downsample_ratio)#torch.Size([13, 16, 16, 4096])
+            vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], -1,
+                                            vit_embeds.shape[-1])
+            vit_embeds = self.mlp1(vit_embeds) #torch.Size([13, 256, 4096]) => torch.Size([13, 256, 5120])
         return vit_embeds
 
     def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
@@ -1180,8 +1229,10 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         image_token_id = kwargs["image_token_id"]
         assert isinstance(image_token_id, torch.Tensor)
+ 
         self.img_context_token_id = image_token_id.flatten().unique().item()
-
+        [print(f"libin debug _parse_and_validate_image_input {p.shape=}") for p in pixel_values_flat]
+        [print(f"libin debug _parse_and_validate_image_input {n=}") for n in image_num_patches]
         if pixel_values_flat is not None:
             if not isinstance(pixel_values_flat, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
@@ -1256,9 +1307,9 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             return image_input["data"]
 
         assert self.vision_model is not None
-
+        print(f"libin debug _process_image_input {image_input.keys()=}")
         image_embeds = self.extract_feature(image_input["pixel_values_flat"])
-
+        print(f"libin debug _process_image_input {image_input["pixel_values_flat"].shape=}, {image_embeds.shape=}")
         num_patches = image_input["num_patches"]
 
         # Only one image in the current batch
@@ -1271,6 +1322,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         feature_size = image_embeds.shape[1]
         image_embeds = image_embeds.view(-1,
                                          self.config.text_config.hidden_size)
+        print(f"libin debug image_embeds shape {image_embeds=}")
         image_feature_sizes = [
             num_patches * feature_size for num_patches in num_patches
         ]
@@ -1278,7 +1330,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
     def _parse_and_validate_multimodal_inputs(self, **kwargs: object) -> dict:
         modalities = {}
-
+        print(f"libin debug _parse_and_validate_multimodal_inputs {kwargs.keys()=}")
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
         for input_key in kwargs:
@@ -1307,6 +1359,9 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
     def get_multimodal_embeddings(
             self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
 
+        if is_hpu:
+            self.graphed_multimodal_buckets = kwargs.pop(
+                'graphed_multimodal_buckets', [])
         modalities = self._parse_and_validate_multimodal_inputs(**kwargs)
         if not modalities:
             return None
@@ -1321,6 +1376,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             if modality == "images":
                 image_input = modalities["images"]
                 vision_embeddings = self._process_image_input(image_input)
+                #print(f"libin debug get_multimodal_embeddings {vision_embeddings.shape=}")
                 multimodal_embeddings += vision_embeddings
             if modality == "videos":
                 video_input = modalities["videos"]
@@ -1349,6 +1405,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                 multimodal_embeddings,
                 context_token_ids,
             )
+        print(f"libin debug get_input_embeddings {inputs_embeds.shape=}")
         return inputs_embeds
 
     def forward(
