@@ -112,7 +112,7 @@ class VisionBuckets:
     This class is used to bucket image tokens
     '''
 
-    def __init__(self, is_batch_based):
+    def __init__(self, is_batch_based, model):
         self.is_batch_based = is_batch_based
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == 'None':
@@ -120,7 +120,14 @@ class VisionBuckets:
         else:
             if envvar == "":
                 if is_batch_based:
-                    multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
+                    if 'InternVLChatModel' in str(type(model)):
+                        multimodal_buckets = list(
+                            range(model.config.min_dynamic_patch,
+                                  model.config.max_dynamic_patch +
+                                  2))  #As use_thumbnail is true
+                    else:
+                        multimodal_buckets = [1, 2, 4,
+                                              8]  # batch sizes for gemma3
                 else:
                     multimodal_buckets = [
                         1600, 3136, 4096, 6400, 7744, 9216, 12544
@@ -159,9 +166,10 @@ class Singleton(type):
 
 
 def is_mm_optimized(model):
-    return 'Gemma3ForConditionalGeneration' in str(type(model.model)) \
-        if hasattr(model, 'model') else \
-        'Gemma3ForConditionalGeneration' in str(type(model))
+    mm_models = ['Gemma3ForConditionalGeneration', 'InternVLChatModel']
+
+    return any(m in str(type(model.model)) for m in mm_models) if hasattr(model, 'model') \
+        else any(m in str(type(model)) for m in mm_models)
 
 
 def pad_flat_tensor(tensor, desired_size):
@@ -345,6 +353,7 @@ class HpuModelAdapter(torch.nn.Module):
         model_config = getattr(self.model, "config", None)
 
         self.model_is_mrope = uses_mrope(model_config)
+
         self.is_mm_optimized = is_mm_optimized(self.model)
         text_config = vllm_config.model_config.hf_config.get_text_config()
         self.interleaved_sliding_window = getattr(
@@ -379,6 +388,12 @@ class HpuModelAdapter(torch.nn.Module):
                             htorch.hpu.wrap_in_hpu_graph( \
                             self.model.multi_modal_projector, \
                             disable_tensor_cache=True)
+                if hasattr(self.model, 'vision_model'):
+                    self.model.vision_model = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.vision_model, disable_tensor_cache=True)
+                if hasattr(self.model, 'mlp1'):
+                    self.model.mlp1 = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.mlp1, disable_tensor_cache=True)
 
         self._rotary_embed_module = self._get_rotary_embedding_module(
             self.model)
@@ -622,10 +637,12 @@ class HpuModelAdapter(torch.nn.Module):
     def compute_input_embeddings_for_mm_optimized(self, **kwargs):
         input_ids = kwargs['input_ids']
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
+
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
 
-        if vision_embeddings is not None:
+        if vision_embeddings is not None and hasattr(self.model,
+                                                     'prepare_attn_masks'):
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
             kwargs = self.model.prepare_attn_masks(
@@ -1495,7 +1512,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         self.is_mm_optimized = is_mm_optimized(model)
         if self.model_is_mrope or self.is_mm_optimized:
-            model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+            model.vision_buckets = VisionBuckets(self.is_mm_optimized, model)
 
     def _prepare_prompt(
         self,
@@ -1626,7 +1643,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(3):
                         seq_data_mrope_positions[idx] \
                             .extend(mrope_positions[idx])
-
                 multi_modal_kwargs_list.append(mm_kwargs)
 
                 for modality, placeholder_map in placeholder_maps.items():
@@ -2704,14 +2720,28 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         else:
             s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
-            num_image_tokens = self.model.model.config.mm_tokens_per_image \
-                    * img_args
-            multi_modal_data = {
-                "pixel_values": pixel_values,
-                "num_crops": torch.zeros([img_args], dtype=torch.int32)
-            }
 
-        image_token_id = self.get_model().config.image_token_id
+            if hasattr(self.model.model.config, 'mm_tokens_per_image'):
+                image_token_id = self.get_model().config.image_token_id
+                mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
+                multi_modal_data = {
+                    "pixel_values": pixel_values,
+                    "num_crops": torch.zeros([img_args], dtype=torch.int32),
+                }
+            elif 'InternVLChatModel' in str(type(self.model.model)):
+                mm_tokens_per_image = self.model.model.num_image_token
+                image_token_id = 151667  #TODO: how to get from InternVLProcessor
+                multi_modal_data = {
+                    "pixel_values_flat":
+                    pixel_values,
+                    "image_num_patches":
+                    torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
+                    "image_token_id":
+                    torch.tensor(image_token_id, dtype=torch.int64),
+                }
+            else:
+                logger.warning("No support for other models yet")
+            num_image_tokens = mm_tokens_per_image * img_args
         prompt_token_ids = [image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
@@ -3532,7 +3562,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def _get_img_args_from_model_input(self, model_input):
         if (not self.model_is_mrope and not self.is_mm_optimized) or \
             not model_input.multi_modal_kwargs or \
-            'pixel_values' not in model_input.multi_modal_kwargs:
+            ('pixel_values' or 'pixel_values_flat') not in model_input.multi_modal_kwargs:
             return None
         if self.model_is_mrope:
             pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
@@ -3810,18 +3840,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     'real_seq_len': model_input.seq_lens,
                     'real_batch_size': real_batch_size
                 }
-
                 #Need to set the window_slide mask at this point to decide
                 if is_prompt:
                     attn_metadata = self.model._update_use_window_sdpa(
                         execute_model_kwargs['attn_metadata'], seq_len,
                         bool(model_input.multi_modal_kwargs and \
-                       'pixel_values' in model_input.multi_modal_kwargs))
+                       ('pixel_values' or 'pixel_values_flat' )in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
-
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
-                        if 'pixel_values' in execute_model_kwargs and \
+                        if ('pixel_values' or 'pixel_values_flat') in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode and not is_pt_profiler_run:
                                 bypass_model_exec = True
