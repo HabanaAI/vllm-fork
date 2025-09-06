@@ -121,10 +121,13 @@ class VisionBuckets:
             if envvar == "":
                 if is_batch_based:
                     if 'InternVLChatModel' in str(type(model)):
-                        multimodal_buckets = list(range(model.config.min_dynamic_patch,
-                                                        model.config.max_dynamic_patch + 2)) #As use_thumbnail is true
+                        multimodal_buckets = list(
+                            range(model.config.min_dynamic_patch,
+                                  model.config.max_dynamic_patch +
+                                  2))  #As use_thumbnail is true
                     else:
-                        multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
+                        multimodal_buckets = [1, 2, 4,
+                                              8]  # batch sizes for gemma3
                 else:
                     multimodal_buckets = [
                         1600, 3136, 4096, 6400, 7744, 9216, 12544
@@ -638,7 +641,8 @@ class HpuModelAdapter(torch.nn.Module):
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
 
-        if vision_embeddings is not None and hasattr(self.model, 'prepare_attn_masks'):
+        if vision_embeddings is not None and hasattr(self.model,
+                                                     'prepare_attn_masks'):
             input_ids = kwargs['input_ids']
             positions = kwargs['positions']
             kwargs = self.model.prepare_attn_masks(
@@ -1508,7 +1512,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         self.is_mm_optimized = is_mm_optimized(model)
         if self.model_is_mrope or self.is_mm_optimized:
-            model.vision_buckets = VisionBuckets(self.is_mm_optimized, model)      
+            model.vision_buckets = VisionBuckets(self.is_mm_optimized, model)
 
     def _prepare_prompt(
         self,
@@ -2717,7 +2721,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
 
-            if hasattr(self.model.model.config, 'mm_tokens_per_image'): 
+            if hasattr(self.model.model.config, 'mm_tokens_per_image'):
                 image_token_id = self.get_model().config.image_token_id
                 mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
                 multi_modal_data = {
@@ -2726,11 +2730,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 }
             elif 'InternVLChatModel' in str(type(self.model.model)):
                 mm_tokens_per_image = self.model.model.num_image_token
-                image_token_id = 151667 #TODO: how to get from InternVLProcessor
+                image_token_id = 151667  #TODO: how to get from InternVLProcessor
                 multi_modal_data = {
-                    "pixel_values_flat": pixel_values,
-                    "image_num_patches": torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
-                    "image_token_id": torch.tensor(image_token_id, dtype=torch.int64),
+                    "pixel_values_flat":
+                    pixel_values,
+                    "image_num_patches":
+                    torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
+                    "image_token_id":
+                    torch.tensor(image_token_id, dtype=torch.int64),
                 }
             else:
                 logger.warning("No support for other models yet")

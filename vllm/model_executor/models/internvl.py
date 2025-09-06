@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Optional, TypedDict, TypeVar, Union
 import os
+
 import numpy.typing as npt
 import torch
 import torch.nn as nn
@@ -42,8 +43,8 @@ from vllm.transformers_utils.tokenizer import AnyTokenizer
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)
 from .utils import (AutoWeightsLoader, flatten_bn, greedy_plan,
-                    init_vllm_registered_model,
-                    maybe_prefix, merge_multimodal_embeddings)
+                    init_vllm_registered_model, maybe_prefix,
+                    merge_multimodal_embeddings)
 
 IMG_START = '<img>'
 IMG_END = '</img>'
@@ -1158,36 +1159,39 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                 else:
                     vit_embeds_minibatch = \
                         self.vision_model(
-                            pixel_values=batch_sliced_pixel_values) #torch.Size([12, 1025, 1024])
-                
+                            pixel_values=batch_sliced_pixel_values)
+
                 vit_embeds_minibatch = vit_embeds_minibatch[:, 1:, :]
 
                 h = w = int(vit_embeds_minibatch.shape[1]**0.5)
-                vit_embeds_minibatch = vit_embeds_minibatch.reshape(vit_embeds_minibatch.shape[0], h, w, -1)
-                vit_embeds_minibatch = self.pixel_shuffle(vit_embeds_minibatch,
-                                            scale_factor=self.downsample_ratio)
-                vit_embeds_minibatch = vit_embeds_minibatch.reshape(vit_embeds_minibatch.shape[0], -1,
-                                            vit_embeds_minibatch.shape[-1])
+                vit_embeds_minibatch = vit_embeds_minibatch.reshape(
+                    vit_embeds_minibatch.shape[0], h, w, -1)
+                vit_embeds_minibatch = self.pixel_shuffle(
+                    vit_embeds_minibatch, scale_factor=self.downsample_ratio)
+                vit_embeds_minibatch = vit_embeds_minibatch.reshape(
+                    vit_embeds_minibatch.shape[0], -1,
+                    vit_embeds_minibatch.shape[-1])
 
                 if is_lazy:
-                    vit_embeds_minibatches += [self.mlp1(vit_embeds_minibatch,
-                                                        bypass_hpu_graphs=i
-                                                        not in self.graphed_multimodal_buckets
-                                                        and len(self.graphed_multimodal_buckets) > 0)]
+                    vit_embeds_minibatches += [
+                        self.mlp1(vit_embeds_minibatch,
+                                  bypass_hpu_graphs=i
+                                  not in self.graphed_multimodal_buckets
+                                  and len(self.graphed_multimodal_buckets) > 0)]
                 else:
                     vit_embeds_minibatches += [self.mlp1(vit_embeds_minibatch)]
                 start_idx = end_idx
-            vit_embeds =torch.cat(vit_embeds_minibatches, dim=0)
+            vit_embeds = torch.cat(vit_embeds_minibatches, dim=0)
         else:
-            vit_embeds = self.vision_model(pixel_values=pixel_values) #torch.Size([13, 3, 448, 448])
-            vit_embeds = vit_embeds[:, 1:, :] #torch.Size([13, 1025, 1024]) torch.Size([13, 1024, 1024])
-            h = w = int(vit_embeds.shape[1]**0.5) #32
-            vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], h, w, -1) # torch.Size([13, 32, 32, 1024]) (13, 32, 32, -1)
+            vit_embeds = self.vision_model(pixel_values=pixel_values)
+            vit_embeds = vit_embeds[:, 1:, :]
+            h = w = int(vit_embeds.shape[1]**0.5)
+            vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], h, w, -1)
             vit_embeds = self.pixel_shuffle(vit_embeds,
-                                            scale_factor=self.downsample_ratio)#torch.Size([13, 16, 16, 4096])
+                                            scale_factor=self.downsample_ratio)
             vit_embeds = vit_embeds.reshape(vit_embeds.shape[0], -1,
                                             vit_embeds.shape[-1])
-            vit_embeds = self.mlp1(vit_embeds) #torch.Size([13, 256, 4096]) => torch.Size([13, 256, 5120])
+            vit_embeds = self.mlp1(vit_embeds)
         return vit_embeds
 
     def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
@@ -1356,7 +1360,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         return self.language_model
 
     def get_multimodal_embeddings(
-            self, **kwargs: object) -> Optional[MultiModalEmbeddings]: 
+            self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
         if is_hpu:
             self.graphed_multimodal_buckets = kwargs.pop(
                 'graphed_multimodal_buckets', [])
