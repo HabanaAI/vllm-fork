@@ -167,7 +167,7 @@ class Singleton(type):
 
 def is_mm_optimized(model):
     mm_models = ['Gemma3ForConditionalGeneration', 'InternVLChatModel']
-    
+
     return any(m in str(type(model.model)) for m in mm_models) if hasattr(model, 'model') \
         else any(m in str(type(model)) for m in mm_models)
 

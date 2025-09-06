@@ -1177,7 +1177,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                         self.mlp1(vit_embeds_minibatch,
                                   bypass_hpu_graphs=i
                                   not in self.graphed_multimodal_buckets
-                                  and len(self.graphed_multimodal_buckets) > 0)]
+                                  and len(self.graphed_multimodal_buckets) > 0)
+                        ]
                 else:
                     vit_embeds_minibatches += [self.mlp1(vit_embeds_minibatch)]
                 start_idx = end_idx
