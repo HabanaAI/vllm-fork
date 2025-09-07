@@ -84,14 +84,15 @@ class MQLLMEngine:
         # output is immediately pickled and send over the socket, which frees
         # the python object to be reused again.
         kwargs['use_cached_outputs'] = True
+        # add args to hint if we are using a multi-model engine
+        if not kwargs.get('is_multi_models_engine', False):
+            self.engine = LLMEngine(*args, **kwargs)
+            self.log_requests = log_requests
 
-        self.engine = LLMEngine(*args, **kwargs)
-        self.log_requests = log_requests
-
-        self.use_async_sockets = use_async_sockets
-        if self.use_async_sockets:
-            self.engine.process_request_outputs_callback = \
-                self._async_socket_engine_callback
+            self.use_async_sockets = use_async_sockets
+            if self.use_async_sockets:
+                self.engine.process_request_outputs_callback = \
+                    self._async_socket_engine_callback
 
         self.ctx = zmq.Context()  # type: ignore[attr-defined]
 
@@ -452,7 +453,8 @@ def signal_handler(*_) -> None:
 
 def run_mp_engine(vllm_config: VllmConfig, usage_context: UsageContext,
                   ipc_path: str, disable_log_stats: bool,
-                  disable_log_requests: bool, engine_alive):
+                  disable_log_requests: bool, engine_alive,
+                  engine_args) -> None:
     try:
         # Ensure we can serialize transformer config before spawning
         maybe_register_config_serialize_by_value()

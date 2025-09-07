@@ -30,6 +30,7 @@ else:
 
 import vllm.envs as envs
 from vllm.config import ModelConfig
+from vllm.engine.multiprocessing.mm_engine import RPCModelResponse
 from vllm.engine.protocol import EngineClient
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -52,6 +53,7 @@ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               EmbeddingCompletionRequest,
                                               EmbeddingRequest,
                                               EmbeddingResponse, ErrorResponse,
+                                              ModelConfigRequest,
                                               PoolingResponse, RerankRequest,
                                               ScoreRequest, ScoreResponse,
                                               TokenizeChatRequest,
@@ -59,7 +61,8 @@ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               TokenizeResponse,
                                               TranscriptionRequest,
                                               TranscriptionResponse)
-from vllm.entrypoints.openai.serving_models import OpenAIServingModels
+from vllm.entrypoints.openai.serving_models import (BaseModelPath,
+                                                    OpenAIServingModels)
 from vllm.entrypoints.openai.tool_parsers import ToolParser
 # yapf: enable
 from vllm.inputs.data import EmbedsPrompt as EngineEmbedsPrompt
@@ -394,6 +397,35 @@ class OpenAIServing:
 
         except Exception as e:
             return self.create_error_response(str(e))
+
+    async def update_model_config(self, request: ModelConfigRequest) -> str:
+        models = [model.id for model in request.models] \
+            if request.models else []
+        request_id = f"mdlcfg-{random_uuid()}"
+        if hasattr(self.engine_client, "update_model_config"):
+            ret = await self.engine_client.update_model_config(
+                request_id, models)
+        else:
+            ret = None
+        if isinstance(ret, RPCModelResponse):
+            new_models = ret.new_models
+            closed_models = ret.closed_models
+            new_models = new_models if new_models else []
+            closed_models = closed_models if closed_models else []
+
+            to_delete = []
+            for model in closed_models:
+                for i, base_model in enumerate(self.models.base_model_paths):
+                    if base_model.name == model:
+                        to_delete.append(i)
+            for i in to_delete:
+                del self.models.base_model_paths[i]
+            for model in new_models:
+                self.models.base_model_paths.append(
+                    BaseModelPath(name=model, model_path=model))
+
+            ret = ret.text
+        return ret
 
     def create_error_response(
             self,

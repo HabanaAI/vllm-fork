@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-service
+spec:
+  ports:
+  - name: {{ .Release.Name }}-http
+    port: {{ .Values.service.port }}
+    protocol: TCP
+    targetPort: {{ .Values.service.targetPort }}
+  # The label selector should match the deployment labels
+  selector:
+    app: vllm-hpu-app
+  sessionAffinity: None
+  type: ClusterIP
