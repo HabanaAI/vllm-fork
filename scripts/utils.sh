@@ -192,6 +192,7 @@ set_dtype(){
             echo Running with dtype="$dtype"
             export QUANT_CONFIG=${QUANT_CONFIG:-"$BASH_DIR/quantization/${model_name_lower}/maxabs_quant_g2.json"}
             export PT_HPU_LAZY_MODE=1   # INC must run in lazy mode
+            export PT_HPU_WEIGHT_SHARING=0
             ;;
         "awq")
             echo Running with AWQ
