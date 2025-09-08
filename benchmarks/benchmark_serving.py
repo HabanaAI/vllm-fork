@@ -1124,6 +1124,7 @@ if __name__ == "__main__":
         default=1280,
         help=
         "Image width, used only for random-image sampling.",
+        "If single-image-path is not None, --random-image-width/--random-image-height will be ignored."
     )
     random_image_group.add_argument(
         "--random-image-height",
@@ -1131,12 +1132,14 @@ if __name__ == "__main__":
         default=720,
         help=
         "Image height, used only for random-image sampling.",
+        "If single-image-path is not None, --random-image-width/--random-image-height will be ignored."
     )
     random_image_group.add_argument(
         "--single-image-path",
         type=str,
         default=None,
-        help="Repeat using one image to do the benchmark.",
+        help="Repeat using one image to do the benchmark in random-image sampling.",
+             "If single-image-path is not None, --random-image-width/--random-image-height will be ignored."
     )
         
     args = parser.parse_args()

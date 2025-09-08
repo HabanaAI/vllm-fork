@@ -721,14 +721,14 @@ class VisionArenaDataset(HuggingFaceDataset):
                 raise ValueError(
                     f"Unsupported dataset path: {self.dataset_path}")
             prompt = parser_fn(item)
-            mm_content = process_image(item["images"][0])            
+            mm_content = process_image(item["images"][0])
             prompt_len = len(tokenizer(prompt).input_ids)
             if enable_multimodal_chat:
                 # Note: when chat is enabled the request prompt_len is no longer
                 # accurate and we will be using request output to count the
                 # actual prompt len
                 prompt = self.apply_multimodal_chat_transformation(
-                    prompt, mm_content)              
+                    prompt, mm_content)
             sampled_requests.append(
                 SampleRequest(
                     prompt=prompt,
@@ -745,7 +745,7 @@ class VisionArenaDataset(HuggingFaceDataset):
 # -----------------------------------------------------------------------------
 class RandomImageDataset(BenchmarkDataset):
     """
-    Random Dataset.
+    Random Image Dataset.
     """
     DEFAULT_INPUT_LEN = 1024
     DEFAULT_OUTPUT_LEN = 128
