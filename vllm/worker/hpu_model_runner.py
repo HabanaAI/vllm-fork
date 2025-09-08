@@ -2817,9 +2817,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return
 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        kv_caches = [None] * num_layers
-
         import os
+        if num_layers == 0:
+            lm = self.get_model().get_language_model()
+            num_layers = len(lm.model.layers)  # 或按你的实际路径取
+            if os.getenv("RANK", "0") == "0":
+                print(f"[profile_run] override num_layers -> {num_layers}")
+        kv_caches = [None] * num_layers
 
         def _rank0():
             return os.getenv("RANK", "0") == "0"
