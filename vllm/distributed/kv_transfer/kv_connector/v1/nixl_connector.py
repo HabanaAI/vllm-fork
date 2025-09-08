@@ -5,7 +5,7 @@ import logging
 import math
 import queue
 import threading
-import time
+import time,os
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator
@@ -570,6 +570,7 @@ class NixlConnectorWorker:
 
         encoder = msgspec.msgpack.Encoder()
         encoded_data = encoder.encode(metadata)
+        logger.info(f"libin debug my role {os.getenv('MY_ROLE')} _nixl_handshake_listener send {metadata.kv_caches_base_addr=}")
         size_in_bytes = len(encoded_data)
         logger.debug("Size of encoded NixlAgentMetadata: %s bytes",
                      str(size_in_bytes))
@@ -607,8 +608,8 @@ class NixlConnectorWorker:
         tp_ratio = self._tp_size[self.engine_id] // remote_tp_size
         p_remote_rank = self.tp_rank // tp_ratio
         path = make_zmq_path("tcp", host, port + p_remote_rank)
-        logger.debug("Querying metadata on path: %s at remote rank %s", path,
-                     p_remote_rank)
+        logger.info("libin debug my role %s Querying metadata on path: %s at remote rank %s tp_ratio %s tp_rank %s", os.getenv('MY_ROLE'), path,
+                     p_remote_rank, tp_ratio, self.tp_rank)
 
         # Send query for the request.
         with zmq_ctx(zmq.REQ, path) as sock:
@@ -617,8 +618,8 @@ class NixlConnectorWorker:
             decoder = msgspec.msgpack.Decoder(NixlAgentMetadata)
             metadata = decoder.decode(metadata_bytes)
             got_metadata_time = time.perf_counter()
-            logger.debug("NIXL handshake: get metadata took: %s",
-                         got_metadata_time - start_time)
+            logger.info("libin debug my role %s NIXL handshake: get metadata took: %s", os.getenv('MY_ROLE'),
+                         metadata.kv_caches_base_addr)
 
             # Ensure engine id matches.
             if metadata.engine_id != expected_engine_id:
@@ -630,7 +631,7 @@ class NixlConnectorWorker:
             remote_agent_name = self.add_remote_agent(metadata, p_remote_rank,
                                                       remote_tp_size)
             setup_agent_time = time.perf_counter()
-            logger.debug("NIXL handshake: add agent took: %s",
+            logger.info("libin debug my role %s NIXL handshake: add agent took: %s", os.getenv('MY_ROLE'),
                          setup_agent_time - got_metadata_time)
 
         # Remote rank -> agent name.
@@ -643,6 +644,8 @@ class NixlConnectorWorker:
         NOT directly supported by NIXL (e.g., tpu)
         """
         xfer_buffers: dict[str, torch.Tensor] = {}
+        kv_shape = None
+        kv_dtype = None
         try:
             for layer_name, kv_cache in kv_caches.items():
                 if self.device_type == "hpu":
@@ -662,6 +665,7 @@ class NixlConnectorWorker:
             raise
 
         self.host_xfer_buffers = xfer_buffers
+        logger.info(f"libin debug initialize_host_xfer_buffer{kv_shape=} {kv_dtype=}")
 
     def set_host_xfer_buffer_ops(self, copy_operation: CopyBlocksOp):
         """Assign copy (d2h, h2d) operations when host buffer is used."""
@@ -779,11 +783,11 @@ class NixlConnectorWorker:
         # block size in bytes
         self.block_len = kv_elem_size * math.prod(block_shape)
         logger.info(
-            "Registering KV_Caches. use_mla: %s, kv_buffer_device: %s, "
+            "libin debug register_kv_caches my role:%s, Registering KV_Caches. use_mla: %s, kv_buffer_device: %s, "
             "use_host_buffer: %s, num_blocks: %s, block_shape: %s, "
-            "per_layer_kv_cache_shape: %s", use_mla, self.kv_buffer_device,
+            "per_layer_kv_cache_shape: %s, slot_size_bytes: %s, block_len:%s ", os.getenv('MY_ROLE'), use_mla, self.kv_buffer_device,
             self.use_host_buffer, self.num_blocks, block_shape,
-            first_kv_cache[0].shape)
+            first_kv_cache[0].shape,self.slot_size_bytes, self.block_len)
         self.dst_num_blocks[self.engine_id] = self.num_blocks
         self.device_kv_caches = kv_caches
         kv_caches_base_addr = []
@@ -812,6 +816,7 @@ class NixlConnectorWorker:
         self.kv_caches_base_addr[self.engine_id] = kv_caches_base_addr
         self.num_regions = len(caches_data)
         self.num_layers = len(xfer_buffers.keys())
+        logger.info(f"libin debug register_kv_caches my role:{os.getenv('MY_ROLE')}, {self.num_regions=} {len(cache_list)=} {self.num_layers =} {self.kv_caches_base_addr[self.engine_id]=}")
 
         # TODO(mgoin): remove this once we have hybrid memory allocator
         # Optimization for models with local attention (Llama 4)
@@ -835,7 +840,7 @@ class NixlConnectorWorker:
 
         descs = self.nixl_wrapper.get_reg_descs(caches_data,
                                                 self.nixl_memory_type)
-        logger.debug("Registering descs: %s", caches_data)
+        logger.info("libin debug register_kv_caches my role %s Registering descs: %s",os.getenv('MY_ROLE'), caches_data)
         self.nixl_wrapper.register_memory(descs)
         logger.debug("Done registering descs")
         self._registered_descs.append(descs)
@@ -848,14 +853,15 @@ class NixlConnectorWorker:
             # could create fewer, but then _get_block_descs_ids needs to
             # select agent_meta.num_blocks instead of self.num_blocks for
             # local descr, and that makes handling regular flow less clean.
+            #import remote_pdb;remote_pdb.set_trace()
             for block_id in range(self.num_blocks):
                 block_offset = block_id * self.block_len
                 addr = base_addr + block_offset
                 # (addr, len, device id)
                 # TODO: does device_id matter to DRAM?
                 blocks_data.append((addr, self.block_len, self.tp_rank))
-        logger.debug("Created %s blocks for src engine %s and rank %s",
-                     len(blocks_data), self.engine_id, self.tp_rank)
+        logger.info("libin debug register_kv_caches my role %s Created %s blocks with block_len %s for src engine %s and rank %s, kv_caches_base_addr %s",
+                     os.getenv('MY_ROLE'), len(blocks_data), self.block_len, self.engine_id, self.tp_rank, (self.kv_caches_base_addr[self.engine_id]))
 
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
                                                  self.nixl_memory_type)
@@ -879,7 +885,7 @@ class NixlConnectorWorker:
             name="nixl_handshake_listener")
         self._nixl_handshake_listener_t.start()
         ready_event.wait()  # Wait for listener ZMQ socket to be ready.
-
+        logger.info(f"libin debug register_kv_caches my role {os.getenv('MY_ROLE')=} , {self.src_xfer_side_handle=}")
     def add_remote_agent(self,
                          nixl_agent_meta: NixlAgentMetadata,
                          remote_tp_rank: int = 0,
@@ -922,11 +928,14 @@ class NixlConnectorWorker:
         Regarding MLA case, the cache is replicated across TP workers so the rank_offset will just always be 0
         so that the whole cache is shared by "tp_ratio" D TP workers.
         """ # noqa: E501
+        #import remote_pdb;remote_pdb.set_trace()
         engine_id = nixl_agent_meta.engine_id
         # TODO re-evaluate refreshing for scaling/recovery
+        logger.info(f"libin debug add_remote_agent 0 my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} {self.tp_rank=} {nixl_agent_meta.kv_caches_base_addr=}")
         if remote_tp_rank in self._remote_agents.get(engine_id, {}):
+            logger.info(f"libin debug add_remote_agent return my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} remote agent {self._remote_agents[engine_id][remote_tp_rank]}")
             return self._remote_agents[engine_id][remote_tp_rank]
-
+        logger.info(f"libin debug add_remote_agent 1 my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} {self.tp_rank=} {nixl_agent_meta.kv_caches_base_addr=}")
         if engine_id not in self._tp_size:
             self._tp_size[engine_id] = remote_tp_size
         else:
@@ -934,10 +943,10 @@ class NixlConnectorWorker:
         # We may eventually enable this after asserting equality in cache
         # layout and close outputs.
         assert nixl_agent_meta.attn_backend_name == self.backend_name
-
+        logger.info(f"libin debug add_remote_agent 2 my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} {self.tp_rank=} {nixl_agent_meta.kv_caches_base_addr=}")
         remote_agent_name = self.nixl_wrapper.add_remote_agent(
             nixl_agent_meta.agent_metadata)
-
+        logger.info(f"libin debug add_remote_agent 3 my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} {self.tp_rank=} {nixl_agent_meta.kv_caches_base_addr=}")
         # Number of D TP workers reading from a single P TP worker. This is
         # 1 when P and D `--tensor-parallel-size` match.
         tp_ratio = divide(self._tp_size[self.engine_id],
@@ -945,11 +954,11 @@ class NixlConnectorWorker:
         assert tp_ratio > 0, "Decode TP cannot be smaller than prefill TP"
         assert not self._use_pallas_v1 or tp_ratio == 1, \
                "TPU (pallas_v1) DOES NOT support heterogeneous TP yet."
-
+        #import remote_pdb;remote_pdb.set_trace()
         # Handle tp_size>num_kv_heads: replicate KV cache.
         total_num_kv_heads = self.model_config.get_total_num_kv_heads()
         is_kv_replicated = self._tp_size[engine_id] // total_num_kv_heads >= 1
-
+        logger.info(f"libin debug add_remote_agent 4 my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} {self.tp_rank=} {nixl_agent_meta.kv_caches_base_addr=}")
         if self.use_mla or is_kv_replicated:
             # With MLA the only difference is in the number of blocks.
             remote_block_size = nixl_agent_meta.block_len // (
@@ -988,6 +997,7 @@ class NixlConnectorWorker:
         rank_offset = self.tp_rank % tp_ratio * self.block_len \
             if not (self.use_mla or is_kv_replicated) else 0
         # Register all remote blocks, but only the corresponding kv heads.
+        logger.info(f"libin debug add_remote_agent 5 my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} {self.tp_rank=} {nixl_agent_meta.kv_caches_base_addr=}")
         for base_addr in nixl_agent_meta.kv_caches_base_addr:
             for block_id in range(nixl_agent_meta.num_blocks):
                 block_offset = block_id * nixl_agent_meta.block_len
@@ -997,10 +1007,10 @@ class NixlConnectorWorker:
                 addr = base_addr + block_offset + rank_offset
                 # (addr, len, device id)
                 blocks_data.append((addr, self.block_len, remote_tp_rank))
-        logger.debug(
-            "Created %s blocks for dst engine %s with remote rank %s and "
-            "local rank %s", len(blocks_data), engine_id, remote_tp_rank,
-            self.tp_rank)
+        logger.info(
+            "libin debug add_remote_agent my role %s Created for dst engine %s with remote rank %s and "
+            "local rank %s, rank_offset %s, block_len %s agent_num_block %s  block data %s ", os.getenv('MY_ROLE'), engine_id, remote_tp_rank,
+            self.tp_rank, rank_offset, nixl_agent_meta.block_len, nixl_agent_meta.num_blocks, blocks_data )
 
         # Register with NIXL.
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
@@ -1008,6 +1018,8 @@ class NixlConnectorWorker:
         self.dst_xfer_side_handles[
             engine_id] = self.nixl_wrapper.prep_xfer_dlist(
                 remote_agent_name, descs)
+        logger.info(
+            f"libin debug add_remote_agent my role {os.getenv('MY_ROLE')} {engine_id=} {self.dst_xfer_side_handles[engine_id]} {remote_agent_name} {descs}")
 
         return remote_agent_name
 
@@ -1032,7 +1044,7 @@ class NixlConnectorWorker:
 
         for req_id, meta in metadata.reqs_to_save.items():
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
+                logger.info(
                     "save_load_kv for request[%s] to host xfer buffer."
                     "local_block_ids: %s. ", req_id,
                     ",".join(map(str, meta.local_block_ids)))
@@ -1049,9 +1061,9 @@ class NixlConnectorWorker:
         done_sending = self._get_new_notifs()
         done_recving = self._pop_done_transfers(self._recving_transfers)
         if len(done_sending) > 0 or len(done_recving) > 0:
-            logger.debug(
-                "Rank %s, get_finished: %s requests done sending "
-                "and %s requests done recving", self.tp_rank,
+            logger.info(
+                "libin debug get_finished my role %s Rank %s, get_finished: %s requests done sending "
+                "and %s requests done recving", os.getenv('MY_ROLE'), self.tp_rank,
                 len(done_sending), len(done_recving))
 
         if self.use_host_buffer:
@@ -1068,7 +1080,7 @@ class NixlConnectorWorker:
             if now < expires:
                 break
             count = self.consumer_notification_counts_by_req.pop(req_id, 0)
-            logger.warning(
+            logger.info(
                 "Releasing expired KV blocks for request %s which were "
                 "retrieved by %d decode worker(s) within %d seconds.", req_id,
                 count, envs.VLLM_NIXL_ABORT_REQUEST_TIMEOUT)
@@ -1087,6 +1099,7 @@ class NixlConnectorWorker:
         for notifs in self.nixl_wrapper.get_new_notifs().values():
             for notif in notifs:
                 req_id, tp_ratio = notif.decode("utf-8").rsplit(":", 1)
+                logger.info(f"libin debug received notification,{req_id=} {tp_ratio=}")
                 if req_id not in self._reqs_to_send:
                     logger.error(
                         "Potentially invalid KV blocks for "
@@ -1101,6 +1114,7 @@ class NixlConnectorWorker:
                     notified_req_ids.add(req_id)
                     del self.consumer_notification_counts_by_req[req_id]
                     del self._reqs_to_send[req_id]
+                    logger.info(f"libin debug _get_new_notifs my role {os.getenv('MY_ROLE')} {req_id=}")
         return notified_req_ids
 
     def _pop_done_transfers(
@@ -1119,7 +1133,7 @@ class NixlConnectorWorker:
                 xfer_state = self.nixl_wrapper.check_xfer_state(handle)
                 if xfer_state == "DONE":
                     xfer_end_time = time.perf_counter()
-                    logger.info(f"_pop_done_transfers: {req_id=}|{handle=}|{xfer_end_time=}|{xfer_end_time-_xfer_stime=}")
+                    logger.info(f"{os.getenv('MY_ROLE')=}  _pop_done_transfers: {req_id=}|{handle=}|{xfer_end_time=}|{xfer_end_time-_xfer_stime=}")
                     self.nixl_wrapper.release_xfer_handle(handle)
                 elif xfer_state == "PROC":
                     in_progress = True
@@ -1139,7 +1153,7 @@ class NixlConnectorWorker:
         """
         for req_id, meta in metadata.reqs_to_recv.items():
             remote_engine_id = meta.remote_engine_id
-            logger.debug(
+            logger.info(
                 "start_load_kv for request %s from remote engine %s. "
                 "Num local_block_ids: %s. Num remote_block_ids: %s. ", req_id,
                 remote_engine_id, len(meta.local_block_ids),
@@ -1165,9 +1179,9 @@ class NixlConnectorWorker:
         self._reqs_to_send.update(metadata.reqs_to_send)
 
     def _read_blocks_for_req(self, req_id: str, meta: ReqMeta):
-        logger.debug(
-            "Remote agent %s available, calling _read_blocks for req %s",
-            meta.remote_engine_id, req_id)
+        logger.info(
+            "libin debug my_role: %s Remote agent %s available, calling _read_blocks for req %s, local_block_id %s remote_block_id %s", os.getenv('MY_ROLE'),
+            meta.remote_engine_id, req_id, meta.local_block_ids, meta.remote_block_ids)
         self._read_blocks(
             request_id=req_id,
             dst_engine_id=meta.remote_engine_id,
@@ -1200,6 +1214,7 @@ class NixlConnectorWorker:
         if num_local_blocks == 0:
             remote_rank = self.tp_rank // tp_ratio
             agent_name = self._remote_agents[dst_engine_id][remote_rank]
+            logger.info(f"libin debug my role: {os.getenv('MY_ROLE')}, send notification")
             self.nixl_wrapper.send_notif(agent_name, notif_msg=notif_id)
             return
 
@@ -1262,7 +1277,7 @@ class NixlConnectorWorker:
             remote_block_descs_ids,
             notif_msg=notif_id,
         )
-
+        logger.info(f"libin debug my role: {os.getenv('MY_ROLE')} {local_xfer_side_handle=} {remote_xfer_side_handle=} {remote_block_descs_ids=} {local_block_descs_ids=} start transfer")
         # Begin async xfer.
         self.nixl_wrapper.transfer(handle)
 
