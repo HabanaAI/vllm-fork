@@ -450,6 +450,55 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         self.make_empty_intermediate_tensors = (
             self.get_language_model().make_empty_intermediate_tensors)
 
+        import os
+
+        import torch
+
+        def _is_rank0():
+            return os.getenv("RANK", "0") == "0"
+
+        def _count_attn(mod: torch.nn.Module):
+            n = 0
+            for name, m in mod.named_modules():
+                cls = m.__class__.__name__.lower()
+                if "attn" in name.lower() or "attention" in cls:
+                    n += 1
+            return n
+
+        if _is_rank0():
+            # 文本 LLM 层路径（Qwen3 常用）
+            llm = self.get_language_model()
+            llm_layers = None
+            for path in ("model.layers", "layers", "transformer.h",
+                         "decoder.layers"):
+                cur = llm
+                ok = True
+                for attr in path.split("."):
+                    if not hasattr(cur, attr):
+                        ok = False
+                        break
+                    cur = getattr(cur, attr)
+                if ok:
+                    llm_layers = cur
+                    print(f"LLMdecoderpath:{path},layers={len(llm_layers)}")
+                    break
+            if llm_layers is None:
+                print("[Ovis2_5] !!! Cannot locate LLM decoder layers")
+
+            # 统计注意力层数量（帮助判断是否“扫到了”ViT）
+            try:
+                vit = self.visual_tokenizer.vit
+                print(f"[Ovis2_5] LLM attn count: {_count_attn(llm)}")
+                print(f"[Ovis2_5] ViT  attn count: {_count_attn(vit)}")
+            except Exception as e:
+                print(f"[Ovis2_5] ViT attn count: <error {e}>")
+
+            # 确认模型类型映射
+            try:
+                print(f"text_model_type={self.config.llm_config.model_type}")
+            except Exception as e:
+                print(f"[Ovis2_5] text_model_type: <error {e}>")
+
     def _parse_and_validate_image_input(
             self, **kwargs: object) -> Optional[OvisImagePatchInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
