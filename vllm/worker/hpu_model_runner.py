@@ -168,7 +168,8 @@ class Singleton(type):
 def is_mm_optimized(model):
     mm_models = ['Gemma3ForConditionalGeneration', 'InternVLChatModel']
 
-    return any(m in str(type(model.model)) for m in mm_models) if hasattr(model, 'model') \
+    return any(m in str(type(model.model)) for m in mm_models) \
+        if hasattr(model, 'model') \
         else any(m in str(type(model)) for m in mm_models)
 
 
@@ -2725,14 +2726,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
             if hasattr(self.model.model.config, 'mm_tokens_per_image'):
                 image_token_id = self.get_model().config.image_token_id
-                mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
+                mm_tokens_per_image = \
+                    self.model.model.config.mm_tokens_per_image
                 multi_modal_data = {
                     "pixel_values": pixel_values,
                     "num_crops": torch.zeros([img_args], dtype=torch.int32),
                 }
             elif 'InternVLChatModel' in str(type(self.model.model)):
                 mm_tokens_per_image = self.model.model.num_image_token
-                image_token_id = 151667  #TODO: how to get from InternVLProcessor
+                image_token_id = 151667
                 multi_modal_data = {
                     "pixel_values_flat":
                     pixel_values.to(torch.bfloat16),
@@ -3565,7 +3567,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def _get_img_args_from_model_input(self, model_input):
         if (not self.model_is_mrope and not self.is_mm_optimized) or \
             not model_input.multi_modal_kwargs or \
-            ('pixel_values' or 'pixel_values_flat') not in model_input.multi_modal_kwargs:
+            ('pixel_values') not in model_input.multi_modal_kwargs:
             return None
         if self.model_is_mrope:
             pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
@@ -3848,12 +3850,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     attn_metadata = self.model._update_use_window_sdpa(
                         execute_model_kwargs['attn_metadata'], seq_len,
                         bool(model_input.multi_modal_kwargs and \
-                       ('pixel_values' or 'pixel_values_flat' )in model_input.multi_modal_kwargs))
+                       ('pixel_values')in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
 
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
-                        if ('pixel_values' or 'pixel_values_flat') in execute_model_kwargs and \
+                        if ('pixel_values') in execute_model_kwargs and \
                                 self.is_mm_optimized:
                             if warmup_mode and not is_pt_profiler_run:
                                 bypass_model_exec = True
