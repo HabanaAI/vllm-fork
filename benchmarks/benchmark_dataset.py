@@ -721,14 +721,14 @@ class VisionArenaDataset(HuggingFaceDataset):
                 raise ValueError(
                     f"Unsupported dataset path: {self.dataset_path}")
             prompt = parser_fn(item)
-            mm_content = process_image(item["images"][0])
+            mm_content = process_image(item["images"][0])            
             prompt_len = len(tokenizer(prompt).input_ids)
             if enable_multimodal_chat:
                 # Note: when chat is enabled the request prompt_len is no longer
                 # accurate and we will be using request output to count the
                 # actual prompt len
                 prompt = self.apply_multimodal_chat_transformation(
-                    prompt, mm_content)
+                    prompt, mm_content)              
             sampled_requests.append(
                 SampleRequest(
                     prompt=prompt,
@@ -739,6 +739,65 @@ class VisionArenaDataset(HuggingFaceDataset):
         self.maybe_oversample_requests(sampled_requests, num_requests)
         return sampled_requests
 
+
+# -----------------------------------------------------------------------------
+# Random Dataset Implementation
+# -----------------------------------------------------------------------------
+class RandomDataset(HuggingFaceDataset):
+    """
+    Random Dataset.
+    """
+
+    DEFAULT_OUTPUT_LEN = 128
+    IS_MULTIMODAL = True
+    
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: Optional[int] = None,
+        enable_multimodal_chat: bool = False,
+        width = 1280,
+        height = 720,
+        img_path = None,
+        **kwargs,
+    ) -> list:
+        output_len = (output_len
+                      if output_len is not None else self.DEFAULT_OUTPUT_LEN)
+        sampled_requests = []
+
+        for i in range(num_requests):
+
+            if img_path is not None:
+                print("random data using img_path=",img_path)
+                image = Image.open(img_path).convert("RGB")
+            else:
+                print("random image height=",height)
+                print("random image width=",width)
+                arr = (np.random.rand(height, width, 3) * 255).astype(np.uint8)
+                image = Image.fromarray(arr, mode="RGB")
+        
+            mm_content = process_image(image)
+            prompt = "Describe this image."
+            
+            print()
+            print("prompt=",prompt) 
+            prompt_len = len(tokenizer(prompt).input_ids)
+            if enable_multimodal_chat:
+                # Note: when chat is enabled the request prompt_len is no longer
+                # accurate and we will be using request output to count the
+                # actual prompt len
+                prompt = self.apply_multimodal_chat_transformation(
+                    prompt, mm_content)            
+            sampled_requests.append(
+                SampleRequest(
+                    prompt=prompt,
+                    prompt_len=prompt_len,
+                    expected_output_len=output_len,
+                    multi_modal_data=mm_content,
+                ))
+        self.maybe_oversample_requests(sampled_requests, num_requests)
+        return sampled_requests
 
 # -----------------------------------------------------------------------------
 # Instruct Coder Dataset Implementation

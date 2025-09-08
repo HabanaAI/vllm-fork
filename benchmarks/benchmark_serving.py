@@ -634,7 +634,20 @@ def main(args: argparse.Namespace):
             tokenizer=tokenizer,
             output_len=args.hf_output_len,
         )
-
+    elif args.dataset_name == "random_image":       
+        input_requests = RandomDataset(
+            dataset_path=args.dataset_path,
+            dataset_subset=args.hf_subset,
+            dataset_split=args.hf_split,
+            random_seed=args.seed,
+        ).sample(
+            num_requests=args.num_prompts,
+            tokenizer=tokenizer,
+            output_len=args.hf_output_len,
+            img_path = args.single_image_path,
+            width = args.random_image_width,
+            height = args.random_image_height,            
+        )        
     else:
         # For datasets that follow a similar structure, use a mapping.
         dataset_mapping = {
@@ -805,7 +818,7 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf"],
+        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf","random_image"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument("--dataset-path",
@@ -1104,6 +1117,28 @@ if __name__ == "__main__":
                         "launching the server. For each request, the "
                         "script chooses a LoRA module at random.")
 
+    random_image_group = parser.add_argument_group("random_image dataset options")
+    random_image_group.add_argument(
+        "--random-image-width",
+        type=int,
+        default=1280,
+        help=
+        "Image width, used only for random-image sampling.",
+    )
+    random_image_group.add_argument(
+        "--random-image-height",
+        type=int,
+        default=720,
+        help=
+        "Image height, used only for random-image sampling.",
+    )
+    random_image_group.add_argument(
+        "--single-image-path",
+        type=str,
+        default=None,
+        help="Repeat using one image to do the benchmark.",
+    )
+        
     args = parser.parse_args()
 
     main(args)
