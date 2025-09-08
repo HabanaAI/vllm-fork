@@ -32,7 +32,7 @@ ulimit=65536
 export platform=hpu
 
 #如果不需要设置代理，请去掉HTTPS_PROXY的设置。
-docker build . --ulimit nofile=65535:65535 --build-arg HTTPS_PROXY=http://child-mu.intel.com:912  -f Dockerfile-intel --build-arg PLATFORM=$platform -t tei_hpu
+docker build . --ulimit nofile=65535:65535 --build-arg HTTPS_PROXY=${HTTPS_PROXY} -f Dockerfile-intel --build-arg PLATFORM=$platform -t tei_hpu
 
 ```
 
@@ -102,6 +102,8 @@ git clone https://www.modelscope.cn/Xorbits/bge-large-zh-v1.5.git /model/bge-lar
 export EMBEDDING_MODEL_ID=bge-large-zh-v1.5
 #DATA_PATH 为host 映射入docker内的物理卷，应配置为存放权重目录
 export DATA_PATH=/model/
+#Gaudi Device id
+export id=0
 ```
 
 可选变量
