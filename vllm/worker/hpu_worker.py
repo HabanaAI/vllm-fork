@@ -476,7 +476,6 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         logger.info(msg)
         self._warm_up_model()
 
-
 #   def _init_cache_engine(self):
 #       assert self.cache_config.num_gpu_blocks is not None
 #       self.cache_engine = [
@@ -568,16 +567,58 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         else:
             bind_kv_cache(ctx, self.hpu_cache)
 
+
+#   def _warm_up_model(self) -> None:
+#       # NOTE(kzawora): We should use virtual engine index here
+#       # for pipeline parallelism. Using 0 for now.
+#       if not isinstance(self.model_runner, HPUPoolingModelRunner):
+#           assert self.hpu_cache is not None
+#           self.model_runner.warmup_model(self.hpu_cache[0])
+#       else:
+#           self.model_runner.warmup_model(None)
+#       # Reset the seed to ensure that the random state is not affected by
+#       # the model initialization and profiling.
+#       set_random_seed(self.model_config.seed)
+
+# 顶部确保有：
+# from vllm.utils import bind_kv_cache
+# import os
+
     def _warm_up_model(self) -> None:
-        # NOTE(kzawora): We should use virtual engine index here
-        # for pipeline parallelism. Using 0 for now.
+        # 1) HPUCacheEngine 里先保证 KV 真分配好了（避免列表里有 None）
+        if hasattr(self, "cache_engine"):
+            for ce in self.cache_engine:
+                if hasattr(ce, "ensure_allocated"):
+                    ce.ensure_allocated()
+                elif hasattr(ce, "initialize_kv_cache"):
+                    ce.initialize_kv_cache()
+                elif hasattr(ce, "allocate_gpu_cache"):
+                    # 某些分支用这个名字
+                    ce.allocate_gpu_cache(self.cache_config.num_gpu_blocks)
+
+        # 2) 用真实的gpu kvcache重新绑定到forward_ctx,覆盖profile_run的占位绑定
+        ctx = self.compilation_config.static_forward_context
+        assert self.hpu_cache is not None
+        # 小检查（只在 rank0 打印一次），看看还有没有 None
+        if os.getenv("RANK", "0") == "0":
+            lens = [len(x) for x in self.hpu_cache]
+            none_counts = [
+                sum(1 for t in x if t is None) for x in self.hpu_cache
+            ]
+            print(
+                f"[_warm_up_model]gpu_cachelens={lens}none_counts={none_counts}"
+            )
+
+        bind_kv_cache(ctx, self.hpu_cache)
+
+        # 3) 再去做图预热（此时 decode 会拿到真实 KV，不再是 None）
         if not isinstance(self.model_runner, HPUPoolingModelRunner):
-            assert self.hpu_cache is not None
+            # NOTE(kzawora): 这里 VE index 用 0，PP 情况后面可扩展
             self.model_runner.warmup_model(self.hpu_cache[0])
         else:
             self.model_runner.warmup_model(None)
-        # Reset the seed to ensure that the random state is not affected by
-        # the model initialization and profiling.
+
+        # 4) 恢复随机种子，保持行为确定性
         set_random_seed(self.model_config.seed)
 
     @property
