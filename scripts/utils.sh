@@ -90,9 +90,6 @@ set_common_env(){
 
 # set max_num_batched_tokens and max_model_len based on input/output ranges
 set_length(){
-    model_name=$(basename "$weights_path")
-    model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
-
     max_num_batched_tokens=$(( $input_max + $output_max ))
     if [ "$max_num_batched_tokens" -lt $PREFERED_BATCHED_TOKENS ]; then
         max_num_batched_tokens=$PREFERED_BATCHED_TOKENS
