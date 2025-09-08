@@ -430,8 +430,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
         self.config: PretrainedConfig = config
         self.llm = init_vllm_registered_model(
-            vllm_config=vllm_config.with_hf_config(
-                config.llm_config.get_text_config()),
+            vllm_config=vllm_config.with_hf_config(config.llm_config),
             prefix=maybe_prefix(prefix, "llm"),
         )
 
