@@ -56,6 +56,7 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 is_hpu = current_platform.is_hpu()
 is_lazy = os.environ.get('PT_HPU_LAZY_MODE', '0') == '1' if is_hpu else False
 
+
 class InternVLImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
     pixel_values_flat: torch.Tensor
@@ -1177,7 +1178,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
                                   bypass_hpu_graphs=i
                                   not in self.graphed_multimodal_buckets
                                   and len(self.graphed_multimodal_buckets) > 0)
-                        ]
+                    ]
                 else:
                     vit_embeds_minibatches += [self.mlp1(vit_embeds_minibatch)]
                 start_idx = end_idx

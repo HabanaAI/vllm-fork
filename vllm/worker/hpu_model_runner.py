@@ -2739,7 +2739,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     "image_num_patches":
                     torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
                     "image_token_id":
-                    torch.tensor([image_token_id] * img_args, dtype=torch.int64),
+                    torch.tensor([image_token_id] * img_args,
+                                 dtype=torch.int64),
                 }
             else:
                 logger.warning("No support for other models yet")
