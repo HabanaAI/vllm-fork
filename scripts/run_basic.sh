@@ -13,9 +13,9 @@ echo "======================================================"
 
 echo "Start INC calibration with model ${FP8_MODEL_PATH}, log file ${LOG_FILE}"
 
-model_path="/software/users/yiliu4/HF_HOME/lmsys/gpt-oss-20b-bf16"
+model_path="/software/users/yiliu7/HF_HOME/lmsys/gpt-oss-20b-bf16"
 
-model_path="/software/users/yiliu4/HF_HOME/lmsys/gpt-oss-120b-bf16"
+# model_path="/software/users/yiliu7/HF_HOME/lmsys/gpt-oss-120b-bf16"
 
 tp_size=1
 ep_size=1
@@ -70,7 +70,6 @@ VLLM_SKIP_WARMUP=true  python run_example_tp.py \
     --max_num_seqs 1 \
     --max_model_len 2048 \
     --tokenizer $model_path \
-    --fp8_kv_cache \
     --nprompts $nprompts 2>&1 | tee $LOG_FILE
 
 
