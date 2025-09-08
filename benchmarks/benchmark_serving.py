@@ -54,7 +54,7 @@ from benchmark_dataset import (AIMODataset, ASRDataset, BurstGPTDataset,
                                ConversationDataset, HuggingFaceDataset,
                                InstructCoderDataset, MTBenchDataset,
                                RandomDataset, SampleRequest, ShareGPTDataset,
-                               SonnetDataset, VisionArenaDataset)
+                               SonnetDataset, VisionArenaDataset,RandomImageDataset)
 from benchmark_utils import convert_to_pytorch_benchmark_format, write_to_json
 
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
@@ -635,15 +635,15 @@ def main(args: argparse.Namespace):
             output_len=args.hf_output_len,
         )
     elif args.dataset_name == "random_image":       
-        input_requests = RandomDataset(
+        input_requests = RandomImageDataset(
             dataset_path=args.dataset_path,
-            dataset_subset=args.hf_subset,
-            dataset_split=args.hf_split,
             random_seed=args.seed,
         ).sample(
             num_requests=args.num_prompts,
             tokenizer=tokenizer,
-            output_len=args.hf_output_len,
+            input_len=args.random_input_len,
+            output_len=args.random_output_len,
+            range_ratio=args.random_range_ratio,
             img_path = args.single_image_path,
             width = args.random_image_width,
             height = args.random_image_height,            

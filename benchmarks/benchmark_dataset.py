@@ -741,48 +741,80 @@ class VisionArenaDataset(HuggingFaceDataset):
 
 
 # -----------------------------------------------------------------------------
-# Random Dataset Implementation
+# Random Image Dataset Implementation
 # -----------------------------------------------------------------------------
-class RandomDataset(HuggingFaceDataset):
+class RandomImageDataset(BenchmarkDataset):
     """
     Random Dataset.
     """
-
+    DEFAULT_INPUT_LEN = 1024
     DEFAULT_OUTPUT_LEN = 128
+    DEFAULT_RANGE_RATIO = 0.0
     IS_MULTIMODAL = True
     
     def sample(
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        input_len: int = DEFAULT_INPUT_LEN,
+        output_len: int = DEFAULT_OUTPUT_LEN,
+        range_ratio: float = DEFAULT_RANGE_RATIO,
         enable_multimodal_chat: bool = False,
         width = 1280,
         height = 720,
         img_path = None,
         **kwargs,
     ) -> list:
-        output_len = (output_len
-                      if output_len is not None else self.DEFAULT_OUTPUT_LEN)
+
         sampled_requests = []
-
-        for i in range(num_requests):
-
-            if img_path is not None:
-                print("random data using img_path=",img_path)
-                image = Image.open(img_path).convert("RGB")
-            else:
-                print("random image height=",height)
-                print("random image width=",width)
-                arr = (np.random.rand(height, width, 3) * 255).astype(np.uint8)
-                image = Image.fromarray(arr, mode="RGB")
-        
-            mm_content = process_image(image)
+         
+        if img_path is not None:
+            print("random data using image path:",img_path)
+            image = Image.open(img_path).convert("RGB")
             prompt = "Describe this image."
-            
-            print()
             print("prompt=",prompt) 
+        else:
+            arr = (np.random.rand(height, width, 3) * 255).astype(np.uint8)
+            image = Image.fromarray(arr, mode="RGB")
+            print("random image height=",height)
+            print("random image width=",width)
+
+            vocab_size = tokenizer.vocab_size
+            num_special_tokens = tokenizer.num_special_tokens_to_add()
+            real_input_len = input_len - num_special_tokens
+
+            prefix_token_ids = []
+
+            # New sampling logic: [X * (1 - b), X * (1 + b)]
+            input_low = int(real_input_len * (1 - range_ratio))
+            input_high = int(real_input_len * (1 + range_ratio))
+            output_low = int(output_len * (1 - range_ratio))
+            output_high = int(output_len * (1 + range_ratio))
+
+            # Add logging for debugging
+            logger.info("Sampling input_len from [%s, %s]", input_low, input_high)
+            logger.info("Sampling output_len from [%s, %s]", output_low,
+                        output_high)
+
+            input_lens = np.random.randint(input_low,
+                                        input_high + 1,
+                                        size=num_requests)
+            output_lens = np.random.randint(output_low,
+                                            output_high + 1,
+                                            size=num_requests)
+            offsets = np.random.randint(0, vocab_size, size=num_requests)
+                                        
+        for i in range(num_requests):
+            if img_path is None:
+                inner_seq = ((offsets[i] + i + np.arange(input_lens[i])) %
+                            vocab_size).tolist()
+                token_sequence = prefix_token_ids + inner_seq
+                prompt = tokenizer.decode(token_sequence) 
+                output_len = int(output_lens[i]) 
+                              
+            mm_content = process_image(image)
             prompt_len = len(tokenizer(prompt).input_ids)
+
             if enable_multimodal_chat:
                 # Note: when chat is enabled the request prompt_len is no longer
                 # accurate and we will be using request output to count the
