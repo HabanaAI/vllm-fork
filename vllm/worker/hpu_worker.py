@@ -476,19 +476,97 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         logger.info(msg)
         self._warm_up_model()
 
+
+#   def _init_cache_engine(self):
+#       assert self.cache_config.num_gpu_blocks is not None
+#       self.cache_engine = [
+#           HPUCacheEngine(self.cache_config, self.model_config,
+#                          self.parallel_config, self.device_config)
+#           for _ in range(self.parallel_config.pipeline_parallel_size)
+#       ]
+#       self.hpu_cache = [
+#           self.cache_engine[ve].gpu_cache
+#           for ve in range(self.parallel_config.pipeline_parallel_size)
+#       ]
+#       bind_kv_cache(self.compilation_config.static_forward_context,
+#                     self.hpu_cache)
+
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
+
+        # -------- 1) 兜底：保证 num_layers > 0 --------
+        num_layers = self.model_config.get_num_layers(self.parallel_config)
+        if not num_layers:
+            # 从模型里推断 Qwen3 的 decoder 层数
+            def _infer_llm_layers():
+                model = self.get_model()  # Ovis2_5 实例
+                lm = model.get_language_model()  # Qwen3 模型
+                # 常见路径：lm.model.layers
+                if hasattr(lm, "model") and hasattr(lm.model, "layers"):
+                    return len(lm.model.layers)
+                # 兜底其它布局
+                for path in ("layers", "transformer.h", "decoder.layers"):
+                    cur, ok = lm, True
+                    for attr in path.split("."):
+                        if not hasattr(cur, attr):
+                            ok = False
+                            break
+                        cur = getattr(cur, attr)
+                    if ok:
+                        return len(cur)
+                raise RuntimeError(
+                    "Cannot locate LLM decoder layers for KV cache")
+
+            num_layers = _infer_llm_layers()
+
+            # 把 override 写回 model_config（尽量不侵入；按你分支情况选其一）
+            # 下面几行是“能写哪儿就写哪儿”的容错式做法：
+            if hasattr(self.model_config, "arch_profile"):
+                self.model_config.arch_profile.num_layers = num_layers
+
+            if hasattr(self.model_config, "num_layers"):
+                self.model_config.num_layers = num_layers
+
+            # 放个私有覆盖字段，部分分支会读取：
+            self.model_config._override_num_layers = num_layers
+
+            if os.getenv("RANK", "0") == "0":
+                print(
+                    f"[_init_cache_engine] override num_layers -> {num_layers}"
+                )
+
+        # -------- 2) 构建 cache engine / gpu_cache --------
         self.cache_engine = [
             HPUCacheEngine(self.cache_config, self.model_config,
                            self.parallel_config, self.device_config)
             for _ in range(self.parallel_config.pipeline_parallel_size)
         ]
-        self.hpu_cache = [
-            self.cache_engine[ve].gpu_cache
-            for ve in range(self.parallel_config.pipeline_parallel_size)
-        ]
-        bind_kv_cache(self.compilation_config.static_forward_context,
-                      self.hpu_cache)
+        self.hpu_cache = [ce.gpu_cache for ce in self.cache_engine]
+
+        if os.getenv("RANK", "0") == "0":
+            try:
+                lens = [len(x) for x in self.hpu_cache]
+            except Exception:
+                lens = ["<n/a>"]
+            print(f"[_init_cache_engine] gpu_cache lens per VE: {lens}  "
+                  f"(pp_size={self.parallel_config.pipeline_parallel_size})")
+
+        # -------- 3) 绑定（有空列表则先用占位防止越界） --------
+        ctx = self.compilation_config.static_forward_context
+
+        # 检查是否有空的 gpu_cache（通常是层数没传递到 engine）
+        any_empty = any((len(lst) == 0) for lst in self.hpu_cache)
+        if any_empty:
+            if os.getenv("RANK", "0") == "0":
+                print(
+                    "[_init_cache_engine] WARNING: empty gpu_cache detected; "
+                    "binding placeholder list to avoid crash (please ensure "
+                    "model_config.get_num_layers() is wired to LLM)")
+            placeholder = [None] * int(num_layers)
+            bind_kv_cache(ctx, [placeholder] *
+                          self.parallel_config.pipeline_parallel_size)
+        else:
+            bind_kv_cache(ctx, self.hpu_cache)
 
     def _warm_up_model(self) -> None:
         # NOTE(kzawora): We should use virtual engine index here
