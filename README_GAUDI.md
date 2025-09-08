@@ -34,6 +34,10 @@ Runtime" section of [Docker Installation](https://docs.habana.ai/en/latest/Insta
 Make sure you have ``habanalabs-container-runtime`` package installed and that ``habana`` container runtime is registered.
 
 ### Red Hat Enterprise Linux for Use with Red Hat OpenShift AI
+> [!NOTE]
+> Prerequisite:
+Starting from the 1.22.x Intel Gaudi software version, the RHEL Docker image must be created manually before running the command.
+Additionally, the path to the Docker image must be updated in the Dockerfile.hpu.ubi file.
 
 ```
 $ docker build -f Dockerfile.hpu.ubi -t vllm-hpu-env  .
@@ -423,7 +427,7 @@ Additionally, there are HPU PyTorch Bridge environment variables impacting vLLM 
 # Quantization, FP8 Inference and Model Calibration Process
 
 > [!NOTE]
-> Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described in detail in [docs.habana.ai vLLM Inference Section](https://docs.habana.ai/en/v1.21.0/PyTorch/Inference_on_PyTorch/vLLM_Inference/vLLM_FP8_Inference.html).
+> Measurement files are required to run quantized models with vLLM on Gaudi accelerators. The FP8 model calibration procedure is described in detail in [docs.habana.ai vLLM Inference Section](https://docs.habana.ai/en/latest/PyTorch/vLLM_Inference/vLLM_FP8_Inference.html).
 An end-to-end example tutorial for quantizing a BF16 Llama 3.1 model to FP8 and then inferencing is provided in this [Gaudi-tutorials repository](https://github.com/HabanaAI/Gaudi-tutorials/blob/main/PyTorch/vLLM_Tutorials/FP8_Quantization_using_INC/FP8_Quantization_using_INC.ipynb).
 
 Once you have completed the model calibration process and collected the measurements, you can run FP8 inference with vLLM using the following command:
@@ -607,3 +611,6 @@ The following steps address Out of Memory related errors:
 - Decrease `max_num_seqs` or `max_num_batched_tokens` - This may reduce the number of concurrent requests in a batch, thereby requiring less KV cache space when overall usable memory is limited.
 - Increase `tensor_parallel_size` - This approach shards model weights, so each GPU has more memory available for KV cache.
 - To maximize the memory available for the KV cache, you can disable `HPUGraph` completely. With HPU Graphs disabled, you are trading latency and throughput at lower batches for potentially higher throughput on higher batches. You can do that by adding `--enforce-eager` flag to the server (for online inference), or by passing `enforce_eager=True` argument to LLM constructor (for offline inference).
+
+> [!TIP]
+> In case there is performance degradation in the Time to First Token (TTFT) metric, set the `--generation-config vllm` argument. Also, make sure that the `--max-model-len` argument is set correctly, as described in the Environment Variables section of this document.

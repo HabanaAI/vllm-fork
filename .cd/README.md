@@ -44,14 +44,14 @@ cd vllm-fork/.cd/
 
    - `MODEL` - Select a model from the table above.
    - `HF_TOKEN` - Your Hugging Face token (generate one at <https://huggingface.co>).
-   - `DOCKER_IMAGE` - The vLLM Docker image URL from Gaudi or local repository.
+   - `DOCKER_IMAGE` - The vLLM Docker image URL from Gaudi or local repository. When using the Gaudi repository, please select Docker images with the vllm-installer* prefix in the file name.
 
    **Example usage:**
 
    ```bash
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
-   DOCKER_IMAGE="<docker image url>" \
+   DOCKER_IMAGE="vault.habana.ai/gaudi-docker/1.22.0/ubuntu22.04/habanalabs/vllm-installer-2.7.1:latest" \
    docker compose up
    ```
 
@@ -128,7 +128,7 @@ cd vllm-fork/.cd/
    MODEL="Qwen/Qwen2.5-14B-Instruct" \
    HF_TOKEN="<your huggingface token>" \
    DOCKER_IMAGE="<docker image url>" \
-   VTENSOR_PARALLEL_SIZE=1 \
+   TENSOR_PARALLEL_SIZE=1 \
    MAX_MODEL_LEN=2048 \
    INPUT_TOK=128 \
    OUTPUT_TOK=128 \
@@ -152,15 +152,16 @@ cd vllm-fork/.cd/
 
    ```bash
    HF_TOKEN=<your huggingface token> \
-   VLLM_SERVER_CONFIG_FILE=server_configurations/server_text.yaml \
+   DOCKER_IMAGE="<docker image url>" \
+   VLLM_SERVER_CONFIG_FILE=server/server_scenarios_text.yaml \
    VLLM_SERVER_CONFIG_NAME=llama31_8b_instruct \
-   VLLM_BENCHMARK_CONFIG_FILE=benchmark_configurations/benchmark_text.yaml \
+   VLLM_BENCHMARK_CONFIG_FILE=benchmark/benchmark_scenarios_text.yaml \
    VLLM_BENCHMARK_CONFIG_NAME=llama31_8b_instruct \
    docker compose --profile benchmark up
    ```
 
    > [!NOTE]
-   > When using configuration files, you do not need to set the `MODEL` environment variable, as the model name is specified within the configuration file. However, you must still provide your `HF_TOKEN`.
+   > When using configuration files, you do not need to set the `MODEL` environment variable, as the model name is specified within the configuration file. However, you must still provide your `HF_TOKEN` and `DOCKER_IMAGE`.
 
 ### 7. Running the Server Directly with Docker
 
