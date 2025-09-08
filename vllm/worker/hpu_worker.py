@@ -342,6 +342,82 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         free_hpu_memory = torch.hpu.mem_get_info()[0]
 
         cache_block_size = self.get_cache_block_size_bytes()
+
+        if os.getenv("RANK", "0") == "0":
+            print(
+                "[HPU] cache_block_size=",
+                cache_block_size,
+                "block_tokens=",
+                getattr(self.cache_config, "block_size", None),
+                "kv_dtype=",
+                getattr(self.cache_config, "kv_cache_dtype", None),
+                "gpu_mem_util=",
+                self.cache_config.gpu_memory_utilization,
+            )
+
+        if not cache_block_size or cache_block_size <= 0:
+            # —— 兜底：从 LLM 配置推导 KV block 字节数 ——
+            try:
+                model = self.get_model()  # Ovis2_5 实例
+                lm = model.get_language_model()  # Qwen3 模型
+                cfg = getattr(lm, "config", None)
+
+                hidden_size = cfg.hidden_size
+                n_heads = cfg.num_attention_heads
+                n_kv_heads = getattr(cfg, "num_key_value_heads", n_heads)
+                head_size = hidden_size // n_heads
+
+                # 层数优先走模型配置；为空就从 LLM 解码层数取
+                try:
+                    num_layers = self.model_config.get_num_layers(
+                        self.parallel_config)
+                    if not num_layers:
+                        raise Exception()
+                except Exception:
+                    if hasattr(lm, "model") and hasattr(lm.model, "layers"):
+                        num_layers = len(lm.model.layers)
+                    else:
+                        for path in ("layers", "transformer.h",
+                                     "decoder.layers"):
+                            cur = lm
+                            ok = True
+                            for attr in path.split("."):
+                                if not hasattr(cur, attr):
+                                    ok = False
+                                    break
+                                cur = getattr(cur, attr)
+                            if ok:
+                                num_layers = len(cur)
+                                break
+
+                block_tokens = getattr(self.cache_config, "block_size",
+                                       16)  # 默认兜底 16
+
+                # 元素字节数：bf16/fp16=2，fp32=4；再稳一点做个兜底
+                kv_bytes = 2
+                try:
+                    dt = str(getattr(self.cache_config, "kv_cache_dtype",
+                                     "")).lower()
+                    kv_bytes = 2 if ("16" in dt or "bfloat16" in dt) else 4
+                except Exception:
+                    pass
+
+                # K + V 两份
+                cache_block_size = int(block_tokens * num_layers * n_kv_heads *
+                                       head_size * 2 * kv_bytes)
+
+                if os.getenv("RANK", "0") == "0":
+                    print(
+                        f"[HPU]fallbackcache_block_size={cache_block_size}bytes"
+                        f"(layers={num_layers}, kv_heads={n_kv_heads},\
+                        head_size={head_size}, "
+                        f"block_tokens={block_tokens}, bytes/elt={kv_bytes})")
+            except Exception as e:
+                if os.getenv("RANK", "0") == "0":
+                    print("[HPU] fallback cache_block_size failed:", repr(e))
+                # 仍为 0 就保守退 1，避免除零；后续会算出 very small blocks 数
+                cache_block_size = 1
+
         graph_reserved_mem = (float(
             os.environ.get('VLLM_GRAPH_RESERVED_MEM', '0.1'))
                               if not self.model_config.enforce_eager else 0)
