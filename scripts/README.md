@@ -5,10 +5,10 @@
 sudo pip uninstall neural_compressor_pt
 git clone https://github.com/intel/neural-compressor.git inc
 cd inc
-git checkout -b inc-oss
+git checkout inc-oss
 git log
 export INC_PT_ONLY=1
-python setup.py pt --user
+python setup.py pt develop --user
 
 ```
 
