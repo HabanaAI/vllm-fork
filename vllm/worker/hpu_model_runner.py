@@ -2816,14 +2816,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.kv_transfer_config.is_kv_consumer:
             return
 
-        num_layers = self.model_config.get_num_layers(self.parallel_config)
         import os
-        if num_layers == 0:
-            lm = self.get_model().get_language_model()
-            num_layers = len(lm.model.layers)  # 或按你的实际路径取
-            if os.getenv("RANK", "0") == "0":
-                print(f"[profile_run] override num_layers -> {num_layers}")
-        kv_caches = [None] * num_layers
 
         def _rank0():
             return os.getenv("RANK", "0") == "0"
@@ -2837,6 +2830,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         # —— 在 bind_kv_cache 之前插入 ——
         num_layers = self.model_config.get_num_layers(self.parallel_config)
+        if num_layers == 0:
+            lm = self.get_model().get_language_model()
+            num_layers = len(lm.model.layers)  # 或按你的实际路径取
+            if os.getenv("RANK", "0") == "0":
+                print(f"[profile_run] override num_layers -> {num_layers}")
         kv_caches = [None] * num_layers
 
         forward_ctx = self.vllm_config.compilation_config.static_forward_context
