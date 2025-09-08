@@ -7,10 +7,10 @@
 # Copyright (c) 2023 OpenGVLab
 # Licensed under The MIT License [see LICENSE for details]
 # --------------------------------------------------------
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Optional, TypedDict, TypeVar, Union
-import os
 
 import numpy.typing as npt
 import torch
@@ -1134,7 +1134,6 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         return x
 
     def extract_feature(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        
         if is_hpu:
             if self.vision_buckets.multimodal_buckets:
                 batch_breakdown = greedy_plan(pixel_values.shape[0], \

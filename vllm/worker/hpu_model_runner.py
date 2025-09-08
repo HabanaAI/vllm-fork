@@ -641,21 +641,24 @@ class HpuModelAdapter(torch.nn.Module):
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
 
-        if vision_embeddings is not None and hasattr(self.model,
-                                                     'prepare_attn_masks'):
-            input_ids = kwargs['input_ids']
-            positions = kwargs['positions']
-            kwargs = self.model.prepare_attn_masks(
-                mask_dtype=self.dtype,
-                **kwargs,
-            )
-            kwargs['input_ids'] = input_ids
-            kwargs['positions'] = positions
-            #input_ids = None
+        if vision_embeddings is not None:
+            if hasattr(self.model, 'prepare_attn_masks'):
+                input_ids = kwargs['input_ids']
+                positions = kwargs['positions']
+                kwargs = self.model.prepare_attn_masks(
+                    mask_dtype=self.dtype,
+                    **kwargs,
+                )
+                kwargs['input_ids'] = input_ids
+                kwargs['positions'] = positions
+                # done compute the visual tokens
+                kwargs.pop('pixel_values', None)
+            else:
+                kwargs.pop('pixel_values_flat', None)
+                kwargs.pop("image_num_patches", None)
+                kwargs.pop("image_token_id", None)
 
         kwargs.update({'inputs_embeds': inputs_embeds})
-        # done compute the visual tokens
-        kwargs.pop('pixel_values', None)
         return kwargs
 
     def compute_input_embeddings_for_mrope_mm_optimized(self, **kwargs):
@@ -707,7 +710,6 @@ class HpuModelAdapter(torch.nn.Module):
         virtual_engine = 0
         if 'virtual_engine' in kwargs:
             virtual_engine = kwargs.pop('virtual_engine')
-
         input_ids = kwargs['input_ids']
         global_attn_masks = kwargs.get("global_attn_masks") \
                 if kwargs.get("global_attn_masks") else None
@@ -2733,11 +2735,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 image_token_id = 151667  #TODO: how to get from InternVLProcessor
                 multi_modal_data = {
                     "pixel_values_flat":
-                    pixel_values,
+                    pixel_values.to(torch.bfloat16),
                     "image_num_patches":
                     torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
                     "image_token_id":
-                    torch.tensor(image_token_id, dtype=torch.int64),
+                    torch.tensor([image_token_id] * img_args, dtype=torch.int64),
                 }
             else:
                 logger.warning("No support for other models yet")
@@ -3847,6 +3849,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bool(model_input.multi_modal_kwargs and \
                        ('pixel_values' or 'pixel_values_flat' )in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
+
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if ('pixel_values' or 'pixel_values_flat') in execute_model_kwargs and \
