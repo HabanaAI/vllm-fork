@@ -641,7 +641,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
     ) -> torch.Tensor:
         inputs_embeds = self.llm.get_input_embeddings(input_ids)
-        if multimodal_embeddings is not None:
+        # 预热是 text-only，multimodal_embeddings 可能是 [] 或 None
+        if multimodal_embeddings:
             tmp = torch.concat(multimodal_embeddings, dim=0)
             inputs_embeds[input_ids == self.image_pad_token_id] = tmp
         return inputs_embeds
