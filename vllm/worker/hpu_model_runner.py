@@ -1227,6 +1227,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 torch.hpu.synchronize()
                 return model
 
+            with HabanaMemoryProfiler() as m_to_hpu:
+                self.model = move_model_to_hpu(self.model)
+            logger.info("Moving model to HPU took %s",
+                        m_to_hpu.get_summary_string())
+
             if self._is_quant_with_inc():
                 logger.info("Preparing model with INC..")
 
@@ -1241,7 +1246,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         os.getenv("QUANT_CONFIG", ""))
                     self._inc_preprocess()
                     if config.measure:
-                        self.model = move_model_to_hpu(self.model)
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
@@ -1255,11 +1259,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
-            elif not is_fake_hpu():
-                with HabanaMemoryProfiler() as m_to_hpu:
-                    self.model = move_model_to_hpu(self.model)
-                logger.info("Moving model to HPU took %s",
-                            m_to_hpu.get_summary_string())
 
             self._maybe_init_alibi_biases()
             hidden_layer_markstep_interval = int(
