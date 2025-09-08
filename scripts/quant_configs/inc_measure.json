@@ -11,9 +11,10 @@
         "types": [
         ],
         "names": [
+            "fused_scaled_dot_product_attention",
             "lm_head",
             "mlp\\.gate\\b"
         ]
     },
-    "dump_stats_path": "./gpt_oss_b120/inc_output"
+    "dump_stats_path": "./gpt_oss_20b/inc_output"
 }

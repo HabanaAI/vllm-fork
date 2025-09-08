@@ -1,14 +1,7 @@
 #!/bin/bash
 QUANT_CONFIG_FILE="./quant_configs/inc_unit_scale.json"
 timestamp=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="quant.pile.512.${timestamp}.log"
-
-
-
-echo "============ QUANT_CONFIG file content ==============="
-cat ${QUANT_CONFIG_FILE}
-echo "======================================================"
-
+LOG_FILE="calib.pile.512.${timestamp}.log"
 
 
 echo "Start INC calibration with model ${FP8_MODEL_PATH}, log file ${LOG_FILE}"
@@ -31,7 +24,7 @@ export QUANT_CONFIG=./quant_configs/inc_quant.json
 export QUANT_CONFIG=./quant_configs/inc_measure.json
 
 nprompts=512
-nprompts=4
+# nprompts=4
 # is 120b
 if [ "$is_120b" = true ]; then
     echo "Using model 120B, setting tp_size=4"
@@ -48,19 +41,11 @@ fi
 
 
 
-
-
-
-
-
-
-
-
 VLLM_ENABLE_FUSED_MOE_WITH_BIAS=1 \
 VLLM_DISABLE_MARK_SCALES_AS_CONST=1 \
 VLLM_LOGGING_LEVEL=DEBUG \
 PT_HPU_LAZY_MODE=1 \
-VLLM_PROMPT_USE_FUSEDSDPA=0 \
+VLLM_PROMPT_USE_FUSEDSDPA=1 \
 VLLM_SKIP_WARMUP=true  python run_example_tp.py \
     --tp_size $tp_size \
     --ep_size $ep_size \
