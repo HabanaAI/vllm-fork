@@ -1,6 +1,6 @@
 model_path=/mnt/disk5/lmsys/gpt-oss-20b-bf16
-model_path=/software/users/yiliu4/HF_HOME/lmsys/gpt-oss-20b-bf16
-model_path=/software/users/yiliu4/HF_HOME/lmsys/gpt-oss-120b-bf16
+model_path=/software/users/yiliu7/HF_HOME/lmsys/gpt-oss-20b-bf16
+model_path=/software/users/yiliu7/HF_HOME/lmsys/gpt-oss-120b-bf16
 basename=$(basename $model_path)
 taskname=gsm8k
 # taskname=gsm8k
