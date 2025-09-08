@@ -2728,38 +2728,119 @@ def get_mp_context():
     return multiprocessing.get_context(mp_method)
 
 
+#def bind_kv_cache(
+#       ctx: dict[str, Any],
+#       kv_cache: list[list[torch.Tensor]],  # [virtual_engine][layer_index]
+#) -> None:
+#   # Bind the kv_cache tensor to Attention modules, similar to
+#   # ctx[layer_name].kv_cache[ve]=kv_cache[ve][extract_layer_index(layer_name)]
+#   # Special things handled here:
+#   # 1. Some models have non-attention layers, e.g., Jamba
+#   # 2. Pipeline parallelism, each rank only has a subset of layers
+#   # 3. Encoder attention has no kv cache
+#   # 4. Encoder-decoder models, encoder-decoder attention and decoder-only
+#   #    attention of the same layer (e.g., bart's decoder.layers.1.self_attn
+#   #    and decoder.layers.1.encoder_attn) is mapped to the same kv cache
+#   #    tensor
+#   from vllm.attention import AttentionType
+#   from vllm.model_executor.models.utils import extract_layer_index
+#   layer_need_kv_cache = [
+#       layer_name for layer_name in ctx
+#       if (hasattr(ctx[layer_name], 'attn_type') and ctx[layer_name].attn_type
+#           in (AttentionType.DECODER, AttentionType.ENCODER_DECODER))
+#   ]
+#   layer_index_sorted = sorted(
+#       set(
+#           extract_layer_index(layer_name)
+#           for layer_name in layer_need_kv_cache))
+#   for layer_name in layer_need_kv_cache:
+#       kv_cache_idx = layer_index_sorted.index(
+#           extract_layer_index(layer_name))
+#       forward_ctx = ctx[layer_name]
+#       assert len(forward_ctx.kv_cache) == len(kv_cache)
+#       for ve, ve_kv_cache in enumerate(kv_cache):
+#           forward_ctx.kv_cache[ve] = ve_kv_cache[kv_cache_idx]
+
+
 def bind_kv_cache(
         ctx: dict[str, Any],
         kv_cache: list[list[torch.Tensor]],  # [virtual_engine][layer_index]
 ) -> None:
-    # Bind the kv_cache tensor to Attention modules, similar to
-    # ctx[layer_name].kv_cache[ve]=kv_cache[ve][extract_layer_index(layer_name)]
-    # Special things handled here:
-    # 1. Some models have non-attention layers, e.g., Jamba
-    # 2. Pipeline parallelism, each rank only has a subset of layers
-    # 3. Encoder attention has no kv cache
-    # 4. Encoder-decoder models, encoder-decoder attention and decoder-only
-    #    attention of the same layer (e.g., bart's decoder.layers.1.self_attn
-    #    and decoder.layers.1.encoder_attn) is mapped to the same kv cache
-    #    tensor
+    """
+    将每个 attention 层绑定到对应 VE 的 KV 缓存上。
+    加了若干健壮性检查，避免越界或 None 绑定。
+    """
+    import os
+
     from vllm.attention import AttentionType
     from vllm.model_executor.models.utils import extract_layer_index
+
+    n_ve = len(kv_cache)
+    if n_ve == 0:
+        raise RuntimeError(
+            "bind_kv_cache: empty kv_cache (no virtual engines).")
+
+    # 只绑定需要 KV 的注意力层（decoder 或 enc-dec），encoder-only 不绑定
     layer_need_kv_cache = [
         layer_name for layer_name in ctx
-        if (hasattr(ctx[layer_name], 'attn_type') and ctx[layer_name].attn_type
+        if (hasattr(ctx[layer_name], "attn_type") and ctx[layer_name].attn_type
             in (AttentionType.DECODER, AttentionType.ENCODER_DECODER))
     ]
-    layer_index_sorted = sorted(
-        set(
-            extract_layer_index(layer_name)
-            for layer_name in layer_need_kv_cache))
+
+    # 这些层的“层号”（可能有重复名；去重并排序，作为 kv_cache 的索引空间）
+    layer_index_sorted = sorted({
+        extract_layer_index(layer_name)
+        for layer_name in layer_need_kv_cache
+    })
+
+    # —— 基础一致性检查 —— #
+    # 每个 VE 的 kv_cache 至少应该覆盖到所有需要绑定的层数
+    for ve, ve_kv in enumerate(kv_cache):
+        if len(ve_kv) == 0:
+            raise RuntimeError(
+                f"bind_kv_cache: kv_cache[{ve}] is empty. "
+                f"Expected >= {len(layer_index_sorted)} entries.")
+
+    # —— 正式绑定 —— #
     for layer_name in layer_need_kv_cache:
-        kv_cache_idx = layer_index_sorted.index(
-            extract_layer_index(layer_name))
+        layer_idx = extract_layer_index(layer_name)
+        try:
+            kv_cache_idx = layer_index_sorted.index(layer_idx)
+        except ValueError:
+            # 理论不该发生，做个保护
+            if os.getenv("RANK", "0") == "0":
+                print(f"[bind_kv_cache] WARN: layer_idx {layer_idx} not in "
+                      f"sorted index set for {layer_name!r}, skip binding.")
+            continue
+
         forward_ctx = ctx[layer_name]
-        assert len(forward_ctx.kv_cache) == len(kv_cache)
-        for ve, ve_kv_cache in enumerate(kv_cache):
-            forward_ctx.kv_cache[ve] = ve_kv_cache[kv_cache_idx]
+
+        # 确保 forward_ctx.kv_cache 的 VE 数量与传入一致
+        if not hasattr(forward_ctx, "kv_cache") or len(
+                forward_ctx.kv_cache) != n_ve:
+            forward_ctx.kv_cache = [None] * n_ve
+
+        for ve, ve_kv in enumerate(kv_cache):
+            # 越界保护（常见于层数未正确初始化）：直接跳过并提示
+            if kv_cache_idx >= len(ve_kv):
+                if os.getenv("RANK", "0") == "0":
+                    print(
+                        f"[bind_kv_cache] WARN: ve={ve} layer={layer_name} "
+                        f"kv_pos={kv_cache_idx} out of len={len(ve_kv)} ->skip"
+                    )
+                continue
+
+            assigned = ve_kv[kv_cache_idx]
+
+            # 关键保护：禁止把 None 绑定到 attention（否则 decode 时会炸）
+            if assigned is None:
+                raise RuntimeError(
+                    f"bind_kv_cache: got None KV for ve={ve}, "
+                    f"layer={layer_name}, kv_pos={kv_cache_idx}. "
+                    "Ensure cache engine created real KVtensors before binding"
+                )
+
+            forward_ctx.kv_cache[ve] = assigned
 
 
 def run_method(obj: Any, method: Union[str, bytes, Callable], args: tuple[Any],
