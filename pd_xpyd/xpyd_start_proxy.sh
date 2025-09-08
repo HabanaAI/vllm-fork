@@ -3,49 +3,61 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_env.sh
 
 if [ -z "$1" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with default mode P=1, D=2, TP size=1, false"
+    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
+    echo "run with default mode P=1, D=2, TP size=1, false, 127"
     P_INSTANCE_NUMBER=1
     D_INSTANCE_NUMBER=2
     NUM_DECODE=8
     FIRST_TOKEN_FROM_P=false
+    REPEAT_D_TIMES=127
 else
     P_INSTANCE_NUMBER=$1
 fi
 
 if [ -z "$2" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with P=$P_INSTANCE_NUMBER, D=2, TP size=1, false"
+    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
+    echo "run with P=$P_INSTANCE_NUMBER, D=2, TP size=1, false, 127"
     D_INSTANCE_NUMBER=2
     TP_SIZE=1
     NUM_DECODE=$((8 / TP_SIZE))
     FIRST_TOKEN_FROM_P=false
+    REPEAT_D_TIMES=127
 else
     D_INSTANCE_NUMBER=$2
 fi
 
 if [ -z "$3" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=1, false"
+    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
+    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=1, false, 127"
     TP_SIZE=1
     NUM_DECODE=$((8 / TP_SIZE))
     FIRST_TOKEN_FROM_P=false
+    REPEAT_D_TIMES=127
 else
     TP_SIZE=$3
     NUM_DECODE=$((8 / TP_SIZE))
 fi
 
 if [ -z "$4" ]; then
-    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D"
-    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=$TP_SIZE, false"
+    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
+    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=$TP_SIZE, false, 127"
     FIRST_TOKEN_FROM_P=false
+    REPEAT_D_TIMES=127
 else
     FIRST_TOKEN_FROM_P=$4
 fi
 
+if [ -z "$5" ]; then
+    echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
+    echo "run with P=$P_INSTANCE_NUMBER, D=$D_INSTANCE_NUMBER, TP size=$TP_SIZE, $FIRST_TOKEN_FROM_P, 127"
+    REPEAT_D_TIMES=127
+else
+    REPEAT_D_TIMES=$5
+fi
+
 BENCHMARK_MODE=0
 
-if [ "$5" == "benchmark" ]; then
+if [ "$6" == "benchmark" ]; then
     BENCHMARK_MODE=1
     echo " Benchmark mode enabled"
 fi
@@ -89,7 +101,7 @@ if [ "$BENCHMARK_MODE" == "1" ]; then
         --decode $DECODE_ARGS \
         --port 8868 \
         --repeat_p_request 1 \
-        --repeat_d_times 95 \
+        --repeat_d_times $REPEAT_D_TIMES \
         --benchmark_mode"
 
 else

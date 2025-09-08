@@ -10,10 +10,10 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 BENCHMARK_MODE=0
 
 export VLLM_TORCH_PROFILER_DIR=./profiles
-export VLLM_PROFILER_ENABLED=full
+export VLLM_PROFILER_ENABLED=true
 export VLLM_PROFILE_CONFIG_PATH=profile_config.json
 export HABANA_PROFILE_WRITE_HLTV=1
-export HABANA_PROFILE=profile_api_with_nics
+export HABANA_PROFILE=profile_api
 
 echo $2
 if [ "$2" == "benchmark" ]; then

@@ -42,7 +42,8 @@ export PT_HPU_METRICS_GC_DETAILS=1
 #export GRAPH_VISUALIZATION=1
 
 #hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --gaudi2 --merged "hltv,csv"
-hl-prof-config --use-template profile_api_with_nics  --fuser on --trace-analyzer on
+#hl-prof-config --use-template profile_api_with_nics  --fuser on --trace-analyzer on
+hl-prof-config -b 16384 --trace-analyzer off --gaudi3
 
 
 #export HABANA_PROFILE=1

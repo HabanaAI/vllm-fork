@@ -49,10 +49,11 @@ else
 fi
 
 export VLLM_TORCH_PROFILER_DIR=./profiles
-export VLLM_PROFILER_ENABLED=full
+export VLLM_PROFILER_ENABLED=true
 export VLLM_PROFILE_CONFIG_PATH=profile_config.json
 export HABANA_PROFILE_WRITE_HLTV=1
-export HABANA_PROFILE=profile_api_with_nics
+#export HABANA_PROFILE=profile_api_with_nics
+export HABANA_PROFILE=profile_api
 
 
 for ((i=0; i<$DP_RANK; i++))
