@@ -11,6 +11,7 @@
         "types": [
         ],
         "names": [
+            "fused_scaled_dot_product_attention",
             "lm_head",
             "mlp\\.gate\\b"
         ]

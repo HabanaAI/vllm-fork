@@ -9,6 +9,7 @@
     },
     "blocklist": {
         "types": [
+            "VLLMKVCache"
         ],
         "names": [
             "fused_scaled_dot_product_attention",

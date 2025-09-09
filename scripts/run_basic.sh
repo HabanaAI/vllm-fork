@@ -20,9 +20,11 @@ fi
 
 export VLLM_BUILD=1.23.0.248
 export QUANT_CONFIG=./quant_configs/inc_unit_scale.json
-export QUANT_CONFIG=./quant_configs/inc_quant.json
-export QUANT_CONFIG=./quant_configs/inc_measure.json
+# export QUANT_CONFIG=./quant_configs/inc_quant.json
+# export QUANT_CONFIG=./quant_configs/inc_measure.json
 
+
+export INC_PT_ONLY=1
 nprompts=512
 # nprompts=4
 # is 120b
@@ -39,13 +41,16 @@ else
     ep_size=1
 fi
 
-
-
-VLLM_ENABLE_FUSED_MOE_WITH_BIAS=1 \
+# VLLM_PROMPT_USE_FUSEDSDPA=0 \
+# PT_HPU_GPT_MOE_WT_INTERLEAVED=1 \
+# VLLM_ENABLE_FUSED_MOE_WITH_BIAS=1 \
+PT_HPU_QKV_SLICE_SEQ_LEN_THLD=128 \
+PT_HPU_ENABLE_FUSED_SDPA_SINK=1 \
+PT_HPU_SDPA_QKV_SLICE_MODE_FWD=1 \
+PT_HPU_LAZY_MODE=1 \
 VLLM_DISABLE_MARK_SCALES_AS_CONST=1 \
 VLLM_LOGGING_LEVEL=DEBUG \
 PT_HPU_LAZY_MODE=1 \
-VLLM_PROMPT_USE_FUSEDSDPA=1 \
 VLLM_SKIP_WARMUP=true  python run_example_tp.py \
     --tp_size $tp_size \
     --ep_size $ep_size \
