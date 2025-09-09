@@ -10,12 +10,13 @@ import torch.nn.functional as F
 from typing_extensions import assert_never
 
 from vllm.config import ModelConfig, PoolerConfig
+from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.pooling_metadata import (PoolingMetadata,
                                                   PoolingTensors)
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
 from vllm.transformers_utils.config import (
     get_cross_encoder_activation_function)
-from vllm.model_executor.custom_op import CustomOp
+
 
 class PoolingType(IntEnum):
     """Enumeration for different types of pooling methods."""
