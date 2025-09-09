@@ -46,7 +46,7 @@ docker build . --ulimit nofile=65535:65535 --build-arg HTTPS_PROXY=${HTTPS_PROXY
 | DATA_PATH              | 模型数据根目录 | /model/               |
 | TEI_EMBEDDING_PORT     | 服务端口       | 12003                 |
 | host_ip                | 主机 IP 地址   | 10.239.241.85 or none |
-| HABANA_VISIBLE_DEVICES | HPU 设备 ID    | 2                     |
+| HABANA_VISIBLE_DEVICES | HPU 设备 ID    | 0                     |
 
 #### 模型特定参数
 
@@ -214,9 +214,9 @@ git clone https://www.modelscope.cn/BAAI/bge-reranker-large.git /model/bge-reran
 | ---------------------- | -------------- | ------------------ |
 | RERANK_MODEL_ID        | 模型路径名称   | bge-reranker-large |
 | DATA_PATH              | 模型数据根目录 | /model/            |
-| TEI_RERANKING_PORT     | 服务端口       | 12005              |
+| TEI_RERANKING_PORT     | 服务端口       | 12007              |
 | host_ip                | 主机 IP 地址   | 10.239.241.85      |
-| HABANA_VISIBLE_DEVICES | HPU 设备 ID    | 2                  |
+| HABANA_VISIBLE_DEVICES | HPU 设备 ID    | 0                  |
 
 #### 模型特定参数
 
