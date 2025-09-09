@@ -536,8 +536,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             f"chunk_size_list({len(self.chunk_size_list)}) and "
             f"token_boundary_list({len(self.token_boundary_list)}) must be the same length"
         )
-        logger.info("token_boundary_list is:%s",self.token_boundary_list)
-        logger.info("chunk_size_list is:%s",self.chunk_size_list)
+        if self.enable_moe_chunk:
+            logger.info("token_boundary_list is:%s",self.token_boundary_list)
+            logger.info("chunk_size_list is:%s",self.chunk_size_list)
 
     def create_weights(self, layer: Module, num_experts: int, hidden_size: int,
                        intermediate_size_per_partition: int,
