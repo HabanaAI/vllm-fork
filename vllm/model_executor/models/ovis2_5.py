@@ -503,6 +503,18 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
             except Exception as e:
                 print(f"[Ovis2_5] text_model_type: <error {e}>")
 
+            import types
+
+            # 让 vLLM 能拿到“文本侧”配置（Qwen3）
+            if not hasattr(config, "get_text_config"):
+                config.get_text_config = types.MethodType(
+                    lambda self: self.llm_config, config)
+            if not hasattr(config, "text_config"):
+                config.text_config = config.llm_config
+                # 一些代码会直接读 .text_config
+
+            vllm_config.model_config.hf_text_config = config.get_text_config()
+
     def _parse_and_validate_image_input(
             self, **kwargs: object) -> Optional[OvisImagePatchInputs]:
         pixel_values = kwargs.pop("pixel_values", None)

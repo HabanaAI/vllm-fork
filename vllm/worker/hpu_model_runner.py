@@ -2819,8 +2819,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         print('layers', num_layers)
-        print(self.model_config)
-        print(self.model_config.model)
+        print(self.model_config.hf_text_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
