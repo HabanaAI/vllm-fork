@@ -1,6 +1,6 @@
 model_path=/mnt/disk5/lmsys/gpt-oss-20b-bf16
 model_path=/software/users/yiliu7/HF_HOME/lmsys/gpt-oss-20b-bf16
-model_path=/software/users/yiliu7/HF_HOME/lmsys/gpt-oss-120b-bf16
+# model_path=/software/users/yiliu7/HF_HOME/lmsys/gpt-oss-120b-bf16
 basename=$(basename $model_path)
 taskname=gsm8k
 # taskname=gsm8k
@@ -13,7 +13,7 @@ output_log_file_name=lm_eval_output_${model_basename}_${taskname_str}
 task_name="gsm8k"
 # task_name="gsm8k_oss"
 limit=1500
-batch_size=32
+batch_size=128
 
 # export QUANT_CONFIG=./quant_configs/inc_unit_scale.json
 # export QUANT_CONFIG=./quant_configs/inc_quant.json
