@@ -686,22 +686,8 @@ class HpuModelAdapter(torch.nn.Module):
                 kwargs.pop('image_grid_thw', None)
                 return kwargs
             else:
-<<<<<<< HEAD
                 return self.compute_input_embeddings_for_mm_optimized(
                     warmup_mode, **kwargs)
-=======
-                image_input = self.model._parse_and_validate_image_input(
-                    **kwargs)
-                video_input = self.model._parse_and_validate_video_input(
-                    **kwargs)
-                inputs_embeds = self.model.get_input_embeddings_v0(
-                    input_ids,
-                    image_input=image_input,
-                    video_input=video_input)
-                input_ids = None
-
-        return inputs_embeds
->>>>>>> 90f9f24e8 (Supported HPU_graph lazy mode of rerank and score models on Gaudi for aice/v1.21.0 branch  (#1456))
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
