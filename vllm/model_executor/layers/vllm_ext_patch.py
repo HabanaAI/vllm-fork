@@ -1,9 +1,13 @@
 # ==-------------------------------------------------------------------------==
 # VLLM-HPU-EXT PATCH Start
 # ==-------------------------------------------------------------------------==
+import logging
+import os
 import torch
 from typing import Callable, Optional, Tuple
 import habana_frameworks.torch as htorch
+
+logging.basicConfig(level=logging.INFO)
 
 
 class MoeFP8Matmul(torch.nn.Module):
@@ -66,7 +70,11 @@ class MoeFP8Matmul(torch.nn.Module):
 
 class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
     def __init__(
-        self, num_experts: int, experts_min: int = 0, experts_max: int = 8
+        self,
+        num_experts: int,
+        global_num_experts: int = 0,
+        experts_min: int = 0,
+        experts_max: int = 8,
     ):
         super().__init__()
         self.w13_list = torch.nn.ModuleList(
@@ -75,9 +83,51 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
         self.w2_list = torch.nn.ModuleList(
             [MoeFP8Matmul() for _ in range(num_experts)]
         )
+        self.enable_moe_chunk = (
+            os.environ.get("VLLM_SUPPORT_MOE_CHUNK", "false").lower() == "true"
+        )
+        self.chunk_size_list = [
+            int(x)
+            for x in os.environ.get(
+                "PT_HPU_MOE_CHUNK", "64,128,512,1024,1536,2048,4096"
+            ).split(",")
+            if x.strip()
+        ]
+        self.token_boundary_list = [
+            int(x)
+            for x in os.environ.get(
+                "PT_HPU_MOE_TOKEN_BOUNDARY", "64,128,1536,1736,2048,3072,4096"
+            ).split(",")
+            if x.strip()
+        ]
+        assert len(self.chunk_size_list) == len(self.token_boundary_list), (
+            f"chunk_size_list({len(self.chunk_size_list)}) and "
+            f"token_boundary_list({len(self.token_boundary_list)}) must be the same length"
+        )
+        logger = logging.getLogger()
+        if self.enable_moe_chunk:
+            logger.info("token_boundary_list is:%s",self.token_boundary_list)
+            logger.info("chunk_size_list is:%s",self.chunk_size_list)
+
         self.num_experts = num_experts
+        self.global_num_experts = global_num_experts
         self.experts_min = experts_min
         self.experts_max = experts_max
+
+    def _get_extra_kwargs(self, tokens_num: int):
+        if self.enable_moe_chunk:
+            chunk_size = self.chunk_size_list[-1]
+            for idx, threshold in enumerate(self.token_boundary_list):
+                if tokens_num <= threshold:
+                    chunk_size = self.chunk_size_list[idx]
+                    break
+            kwargs = {
+                "chunk_size": chunk_size,
+                "total_experts": self.global_num_experts,
+            }
+        else:
+            kwargs = {}
+        return kwargs
 
     def forward(
         self,
@@ -89,6 +139,8 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
         max_expert = self.experts_max
         w13_list_slice = []
         w2_list_slice = []
+        tokens_num, _ = x.shape
+        kwargs = self._get_extra_kwargs(tokens_num)
         for j in range(self.num_experts):
             w13_list_slice.append(self.w13_list[j].get_dequant_weight())
             w2_list_slice.append(self.w2_list[j].get_dequant_weight())
@@ -103,6 +155,7 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
             activation="silu",
             experts_min=min_expert,
             experts_max=max_expert,
+            **kwargs,
         )
         htorch.core.mark_step()
         return final_hidden_states
