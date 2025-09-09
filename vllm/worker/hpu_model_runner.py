@@ -2821,6 +2821,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         print(self.model_config)
         print(self.model_config.hf_config)
         print(self.model_config.hf_text_config)
+        print(self.model_config.model)
         kv_caches = [None] * num_layers
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
