@@ -2759,6 +2759,7 @@ def bind_kv_cache(
         forward_ctx = ctx[layer_name]
         assert len(forward_ctx.kv_cache) == len(kv_cache)
         for ve, ve_kv_cache in enumerate(kv_cache):
+            print('\n\n\n', ve, '\n\n\n', kv_cache_idx, '\n\n\n')
             forward_ctx.kv_cache[ve] = ve_kv_cache[kv_cache_idx]
 
 
