@@ -505,7 +505,8 @@ class LLMEngine:
             engine_cls = V1LLMEngine
 
         return engine_cls.from_vllm_config(
-            vllm_config=vllm_config,
+            vllm_config=vllm_config.with_hf_config(
+                vllm_config.model_config.hf_config),
             usage_context=usage_context,
             stat_loggers=stat_loggers,
             disable_log_stats=engine_args.disable_log_stats,
