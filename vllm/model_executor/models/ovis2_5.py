@@ -17,7 +17,8 @@ from vllm.model_executor.models.ovis import (OvisImagePatchInputs,
                                              VisualEmbedding)
 from vllm.model_executor.models.siglip2navit import Siglip2NavitModel
 from vllm.model_executor.models.utils import (AutoWeightsLoader, flatten_bn,
-                                              init_vllm_registered_model)
+                                              init_vllm_registered_model,
+                                              maybe_prefix)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import (MultiModalDataDict, MultiModalFieldConfig,
@@ -429,8 +430,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
         self.config: PretrainedConfig = config
         self.llm = init_vllm_registered_model(
-            vllm_config=vllm_config.with_hf_config(config.llm_config),
-            #           prefix=maybe_prefix(prefix, "llm"),
+            vllm_config=vllm_config.with_hf_config(config),
+            prefix=maybe_prefix(prefix, "llm"),
         )
 
         self.visual_tokenizer = VisualTokenizer(
