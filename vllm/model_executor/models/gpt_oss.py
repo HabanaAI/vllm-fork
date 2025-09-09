@@ -8,7 +8,6 @@ import torch.distributed as dist
 from torch import nn
 from transformers import GptOssConfig
 
-from vllm import envs
 from vllm.attention import Attention, AttentionType
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
@@ -128,14 +127,7 @@ class OAIAttention(nn.Module):
         q = q.to(torch.bfloat16)
         k = k.to(torch.bfloat16)
         v = v.contiguous()
-        # print("qkv")
-        # print(q.shape)
-        #print(q[:,:7,:])
-        #print(k[:,:7,:])
-        #print(v[:,:7,:])
         attn_output = self.attn(q, k, v)
-        # print("Attn")
-        # print(attn_output[:,:7,:])
         output, _ = self.o_proj(attn_output)
 
         return output + hidden_states
@@ -175,8 +167,6 @@ class MLPBlock(torch.nn.Module):
         t = self.norm(x)
         g = self.router(t)
         t = self.experts(hidden_states=t, router_logits=g)
-        # print(t.shape)
-        # print(t[:,:7,:])
         return x + t
 
 
@@ -534,8 +524,10 @@ class GptOssForCausalLM(nn.Module):
                 else:
                     narrow_weight = weight[:, :,
                                            2 * tp_rank_start:2 * tp_rank_end]
-
-                narrow_weight = narrow_weight.permute(0, 2, 1).contiguous()
+                narrow_weight.contiguous()
+                gate_weight = narrow_weight[:, :, 0::2]
+                up_weight = narrow_weight[:, :, 1::2]
+                narrow_weight = torch.cat([gate_weight, up_weight], dim=2)
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)
@@ -550,7 +542,7 @@ class GptOssForCausalLM(nn.Module):
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
                     narrow_weight = weight[:, tp_rank_start:tp_rank_end, :]
-                narrow_weight = narrow_weight.permute(0, 2, 1).contiguous()
+                narrow_weight.contiguous()
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)
@@ -566,7 +558,9 @@ class GptOssForCausalLM(nn.Module):
                 else:
                     narrow_weight = weight[:,
                                            2 * tp_rank_start:2 * tp_rank_end]
-
+                gate_bias = narrow_weight[:, 0::2]
+                up_bias = narrow_weight[:, 1::2]
+                narrow_weight = torch.cat([gate_bias, up_bias], dim=1)
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)

@@ -471,20 +471,19 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
-        # Fused gate_up_proj (column parallel)
-        # Fused gate_up_proj (column parallel)
-        w13_weight = torch.nn.Parameter(
-            torch.empty(
-                num_experts,
-                #hidden_size,
-                2 * intermediate_size_per_partition,
-                hidden_size,
-                dtype=params_dtype),
-            requires_grad=False)
-        layer.register_parameter("w13_weight", w13_weight)
-        set_weight_attrs(w13_weight, extra_weight_attrs)
-
         if layer.model_type in ["gpt_oss"]:
+            # Fused gate_up_proj (column parallel)
+            w13_weight = torch.nn.Parameter(
+                torch.empty(
+                    num_experts,
+                    hidden_size,
+                    2 * intermediate_size_per_partition,
+                    # hidden_size,
+                    dtype=params_dtype),
+                requires_grad=False)
+            layer.register_parameter("w13_weight", w13_weight)
+            set_weight_attrs(w13_weight, extra_weight_attrs)
+
             w13_bias = torch.nn.Parameter(torch.zeros(
                 num_experts,
                 2 * intermediate_size_per_partition,
@@ -493,23 +492,44 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             layer.register_parameter("w13_bias", w13_bias)
             set_weight_attrs(w13_bias, extra_weight_attrs)
 
-        # down_proj (row parallel)
-        w2_weight = torch.nn.Parameter(torch.empty(
-            num_experts,
-            hidden_size,
-            intermediate_size_per_partition,
-            dtype=params_dtype),
-                                       requires_grad=False)
-        layer.register_parameter("w2_weight", w2_weight)
-        set_weight_attrs(w2_weight, extra_weight_attrs)
+            # down_proj (row parallel)
+            w2_weight = torch.nn.Parameter(
+                torch.empty(
+                    num_experts,
+                    # hidden_size,
+                    intermediate_size_per_partition,
+                    hidden_size,
+                    dtype=params_dtype),
+                requires_grad=False)
+            layer.register_parameter("w2_weight", w2_weight)
+            set_weight_attrs(w2_weight, extra_weight_attrs)
 
-        if layer.model_type in ["gpt_oss"]:
             w2_bias = torch.nn.Parameter(torch.zeros(num_experts,
                                                      hidden_size,
                                                      dtype=params_dtype),
                                          requires_grad=False)
             layer.register_parameter("w2_bias", w2_bias)
             set_weight_attrs(w2_bias, extra_weight_attrs)
+        else:
+            # Fused gate_up_proj (column parallel)
+            w13_weight = torch.nn.Parameter(torch.empty(
+                num_experts,
+                2 * intermediate_size_per_partition,
+                hidden_size,
+                dtype=params_dtype),
+                                            requires_grad=False)
+            layer.register_parameter("w13_weight", w13_weight)
+            set_weight_attrs(w13_weight, extra_weight_attrs)
+
+            # down_proj (row parallel)
+            w2_weight = torch.nn.Parameter(torch.empty(
+                num_experts,
+                hidden_size,
+                intermediate_size_per_partition,
+                dtype=params_dtype),
+                                           requires_grad=False)
+            layer.register_parameter("w2_weight", w2_weight)
+            set_weight_attrs(w2_weight, extra_weight_attrs)
 
     def _maybe_pad_weight(self, weight: torch.Tensor) -> torch.Tensor:
         # Pad the weight tensor. This is an optimization on ROCm platform, which
@@ -743,12 +763,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         # Batch matrix multiply for gate_up projection
 
         # Split gate and up projections
-        gate_up = torch.bmm(repeated_hidden_states, w1.transpose(
-            -2, -1)) + w1_bias.unsqueeze(1)
+        # gate_up = torch.bmm(repeated_hidden_states, w1.transpose(
+        #     -2, -1)) + w1_bias.unsqueeze(1)
+        gate_up = torch.bmm(repeated_hidden_states, w1) + w1_bias.unsqueeze(1)
 
-        #gate = gate_up[:, :, :intermediate_size]
-        #up = gate_up[:, :, intermediate_size:]
-        gate, up = gate_up[..., ::2], gate_up[..., 1::2]
+        gate = gate_up[:, :, :intermediate_size]
+        up = gate_up[:, :, intermediate_size:]
+        # gate, up = gate_up[..., ::2], gate_up[..., 1::2]
 
         # Apply SiLU activation to gate
         #gate = F.silu(gate)
@@ -760,8 +781,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         #gated = up * gate
 
         # Batch matrix multiply for down projection
-        expert_outputs = torch.bmm(gated, w2.transpose(
-            -2, -1)) + w2_bias.unsqueeze(1)
+        # expert_outputs = torch.bmm(gated, w2.transpose(
+        #     -2, -1)) + w2_bias.unsqueeze(1)
+        expert_outputs = torch.bmm(gated, w2) + w2_bias.unsqueeze(1)
         # Apply expert weights based on routing
         final_hidden_states = torch.zeros_like(hidden_states)
         for expert_idx in range(num_experts):
@@ -851,11 +873,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                                               topk_weights_across_dp)
         topk_ids = topk_ids.view(*x.shape[:-1], -1)
         topk_weights = topk_weights.view(*x.shape[:-1], -1)
+        permuted_weights = False if layer.model_type in ["gpt_oss"] else True
         return layer.moe_op(
             x,
             topk_ids,
             topk_weights,
-            permuted_weights=True,
+            permuted_weights=permuted_weights,
             activation=activation,
         ).view(*input_shape)
 
