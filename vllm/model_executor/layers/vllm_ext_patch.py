@@ -105,8 +105,9 @@ class VllmMixtureOfExpertsOpFP8(torch.nn.Module):
             f"token_boundary_list({len(self.token_boundary_list)}) must be the same length"
         )
         logger = logging.getLogger()
-        logger.info("token_boundary_list is:%s",self.token_boundary_list)
-        logger.info("chunk_size_list is:%s",self.chunk_size_list)
+        if self.enable_moe_chunk:
+            logger.info("token_boundary_list is:%s",self.token_boundary_list)
+            logger.info("chunk_size_list is:%s",self.chunk_size_list)
 
         self.num_experts = num_experts
         self.global_num_experts = global_num_experts
