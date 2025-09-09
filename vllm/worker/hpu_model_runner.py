@@ -781,7 +781,7 @@ class PreparePromptMetadata(NamedTuple):
     multi_modal_kwargs: Optional[Dict[str, BatchedTensorInputs]]
     slot_mapping: List[List[int]]
     lora_ids: List[int]
-    token_types: torch.Tensor
+    token_types: Optional[torch.Tensor]
 
     @classmethod
     def empty(cls):

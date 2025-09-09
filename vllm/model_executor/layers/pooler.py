@@ -392,11 +392,13 @@ class ClassifierPooler(CustomOp):
         if self.pooler is not None:
             pooled_output = self.pooler(hidden_states)
         else:
-            pooled_output = self.classifier(hidden_states)  #for Robert
+            pooled_output = self.classifier(
+                hidden_states)  #for some Robert based pooler models
 
         if self.pooler is not None:
             # apply classifier once on the full batch if possible
-            pooled_output = self.classifier(pooled_output)  #for Robert
+            pooled_output = self.classifier(
+                pooled_output)  #for some Robert based pooler models
 
         scores = self.default_activation_function(pooled_output).squeeze(-1)
 
