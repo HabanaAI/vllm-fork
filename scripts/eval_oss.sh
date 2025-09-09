@@ -44,14 +44,19 @@ else
     ep_size=1
 fi
 
+# VLLM_ENABLE_FUSED_MOE_WITH_BIAS=1 \
+# VLLM_DISABLE_MARK_SCALES_AS_CONST=1 \
+# VLLM_LOGGING_LEVEL=DEBUG \
+# PT_HPU_LAZY_MODE=1 \
+# VLLM_PROMPT_USE_FUSEDSDPA=0 \
 
+PT_HPU_QKV_SLICE_SEQ_LEN_THLD=128 \
+PT_HPU_ENABLE_FUSED_SDPA_SINK=1 \
+PT_HPU_SDPA_QKV_SLICE_MODE_FWD=1 \
+PT_HPU_LAZY_MODE=1 \
+VLLM_DISABLE_MARK_SCALES_AS_CONST=1 \
 INC_PT_ONLY=1 \
 VLLM_BUILD=1.23.0.248 \
-VLLM_ENABLE_FUSED_MOE_WITH_BIAS=1 \
-VLLM_DISABLE_MARK_SCALES_AS_CONST=1 \
-VLLM_LOGGING_LEVEL=DEBUG \
-PT_HPU_LAZY_MODE=1 \
-VLLM_PROMPT_USE_FUSEDSDPA=0 \
 VLLM_SKIP_WARMUP=true   \
 lm-eval --model vllm \
     --model_args "pretrained=${model_path},tensor_parallel_size=${tp_size},max_model_len=8192,max_num_seqs=32,gpu_memory_utilization=0.8,use_v2_block_manager=True,dtype=bfloat16,max_gen_toks=4096,disable_log_stats=True"\
