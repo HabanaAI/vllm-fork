@@ -7,8 +7,7 @@ from typing import Literal, Optional, TypedDict, Union
 
 import torch
 import torch.nn as nn
-from transformers import (BaseImageProcessor, BatchFeature, PretrainedConfig,
-                          Qwen3Config)
+from transformers import BaseImageProcessor, BatchFeature, PretrainedConfig
 
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.linear import ReplicatedLinear
@@ -431,7 +430,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
         self.config: PretrainedConfig = config
         self.llm = init_vllm_registered_model(
-            vllm_config=vllm_config.with_hf_config(Qwen3Config()),
+            vllm_config=vllm_config.with_hf_config(config.llm_config),
             prefix=maybe_prefix(prefix, "llm"),
         )
 
