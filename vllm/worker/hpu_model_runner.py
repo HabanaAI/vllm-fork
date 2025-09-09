@@ -1249,6 +1249,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
+                logger.info(f"INC model: {self.model}")
             elif not is_fake_hpu():
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
@@ -2852,6 +2853,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         return
 
     def _remove_duplicate_submodules(self):
+        return None
         model = self.get_model()
         if hasattr(model, "model"):
             for layer in self.get_model().model.layers:

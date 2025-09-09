@@ -1,0 +1,22 @@
+{
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "unit_scale",
+    "scale_format": "const",
+    "allowlist": {
+        "types": [],
+        "names": []
+    },
+    "blocklist": {
+        "types": [
+            "VLLMKVCache"
+        ],
+        "names": [
+            "fused_scaled_dot_product_attention",
+            "lm_head",
+            "mlp\\.gate\\b"
+
+        ]
+    },
+    "dump_stats_path": "./nc_workspace_measure_kvache/inc_measure_output"
+}

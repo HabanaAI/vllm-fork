@@ -1,0 +1,21 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "allowlist": {
+        "types": [],
+        "names": [
+        ]
+    },
+    "blocklist": {
+        "types": [
+            "VLLMKVCache"
+        ],
+        "names": [
+            "fused_scaled_dot_product_attention",
+            "lm_head",
+            "mlp\\.gate\\b"
+        ]
+    },
+    "dump_stats_path": "./gpt_oss_20b/inc_output"
+}
