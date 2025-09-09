@@ -433,6 +433,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
             vllm_config=vllm_config.with_hf_config(config.llm_config),
             prefix=maybe_prefix(prefix, "llm"),
         )
+        print('\n\n\n', self.llm, '\n\n\n')
 
         self.visual_tokenizer = VisualTokenizer(
             config=config.vit_config,
