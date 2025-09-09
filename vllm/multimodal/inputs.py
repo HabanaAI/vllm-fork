@@ -662,7 +662,7 @@ class MultiModalKwargsItems(UserDict[str, Sequence[_I]]):
 
         return super().__getitem__(modality)  # type: ignore[return-value]
 
-    def get_data(self, *, pin_memory: bool = False) -> "MultiModalKwargs":
+    def get_data(self) -> "MultiModalKwargs":
         elems_by_key = defaultdict[str, list[MultiModalFieldElem]](list)
         for modality, items in self.items():
             for i, item in enumerate(items):
@@ -674,8 +674,7 @@ class MultiModalKwargsItems(UserDict[str, Sequence[_I]]):
                     elems_by_key[key].append(elem)
 
         return MultiModalKwargs({
-            key:
-            elems[0].field.reduce_data(elems, pin_memory=pin_memory)
+            key: elems[0].field.reduce_data(elems)
             for key, elems in elems_by_key.items()
         })
 
