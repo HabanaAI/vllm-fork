@@ -434,7 +434,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             grids = kwargs.pop("grids", None)
         if pixel_values is None and indicator_tokens is None:
             return None
-
+        print(f"libin debug _parse_and_validate_visual_input 1 {pixel_values.shape=} {indicator_tokens.shape=} {grids.shape=}")
         if pixel_values is not None and indicator_tokens is not None:
             if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
@@ -443,8 +443,16 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             if not isinstance(indicator_tokens, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of indicator_tokens. "
                                  f"Got type: {type(indicator_tokens)}")
-
-            return OvisImagePatchInputs(
+                
+            indicator_tokens=flatten_bn(flatten_bn(indicator_tokens),
+                                            concat=True)
+            grids=flatten_bn(flatten_bn(grids), concat=True)
+            patches_per_image=[
+                    x.shape[0] // (self.config.vit_config.hidden_stride**2)
+                    for x in flatten_bn(pixel_values)
+                ]
+            flat_data=flatten_bn(flatten_bn(pixel_values), concat=True)
+            re = OvisImagePatchInputs(
                 type="image_patches",
                 flat_data=flatten_bn(flatten_bn(pixel_values), concat=True),
                 patches_per_image=[
@@ -455,6 +463,9 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
                                             concat=True),
                 grids=flatten_bn(flatten_bn(grids), concat=True),
             )
+            print(f"libin debug _parse_and_validate_visual_input 1 {flat_data.shape=} {indicator_tokens.shape=} {grids.shape=}")
+            [print(f"libin debug _parse_and_validate_visual_input {p.shape=}") for p in patches_per_image]
+            return re
 
         raise AssertionError("This line should be unreachable.")
 
@@ -467,14 +478,15 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
 
         indicator_per_image = list(
             map(lambda x: 2 if x > 1 else x + 2, patches_per_image))
-
+        print(f"libin debug process_image_input {image_patches_flat.shape=} {patches_per_image.shape=} {indicator_tokens.shape=} {grid_thws.shape} {len(indicator_per_image)=}")
         target_dtype = self.visual_tokenizer.dtype
         visual_tokens = self.visual_tokenizer(
             image_patches_flat.to(target_dtype), grid_thws)
 
         visual_embeds = self.vte(visual_tokens)  # 1:1 numeric eq.
         indicator_embeds = self.vte(indicator_tokens)
-
+        
+        print(f"libin debug process_image_input {visual_embeds.shape=} {indicator_embeds.shape=}")
         visual_embeds_per_image = visual_embeds.split(patches_per_image, dim=0)
         indicator_embeds_per_image = indicator_embeds.split(
             indicator_per_image)
@@ -514,9 +526,11 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
     ) -> torch.Tensor:
         inputs_embeds = self.llm.get_input_embeddings(input_ids)
+        print(f"libin debug get_input_embeddings {input_ids.shape=} {inputs_embeds.shape=}")
         if multimodal_embeddings is not None:
             tmp = torch.concat(multimodal_embeddings, dim=0)
             inputs_embeds[input_ids == self.image_pad_token_id] = tmp
+        print(f"libin debug get_input_embeddings done {inputs_embeds.shape=}")
         return inputs_embeds
 
     def forward(
@@ -534,19 +548,22 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
-
+            print(f"libin debug get_multimodal_embeddings done {vision_embeddings.shape=}")
             inputs_embeds = self.get_input_embeddings(input_ids,
                                                       vision_embeddings)
+            print(f"libin debug get_input_embeddings done {input_ids.shape=}")
             input_ids = None
 
         # up until here we have a inputs_embeds 100% numerical identity
         # between the OG HF Transformers implementation and ours
+        
         hidden_states = self.llm(
             input_ids=input_ids,
             positions=positions,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
         )
+        printf(f"libin debug finish forward {positions.shape=} {inputs_embeds.shape=} {hidden_states.shape=}")
         return hidden_states
 
     def compute_logits(
