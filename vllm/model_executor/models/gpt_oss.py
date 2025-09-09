@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import os
 from collections.abc import Iterable
 from typing import Optional
 
@@ -525,9 +526,11 @@ class GptOssForCausalLM(nn.Module):
                     narrow_weight = weight[:, :,
                                            2 * tp_rank_start:2 * tp_rank_end]
                 narrow_weight.contiguous()
-                gate_weight = narrow_weight[:, :, 0::2]
-                up_weight = narrow_weight[:, :, 1::2]
-                narrow_weight = torch.cat([gate_weight, up_weight], dim=2)
+                if os.getenv("PT_HPU_GPT_MOE_WT_INTERLEAVED",
+                             "").lower() in ("0", "false"):
+                    gate_weight = narrow_weight[:, :, 0::2]
+                    up_weight = narrow_weight[:, :, 1::2]
+                    narrow_weight = torch.cat([gate_weight, up_weight], dim=2)
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)
@@ -558,9 +561,11 @@ class GptOssForCausalLM(nn.Module):
                 else:
                     narrow_weight = weight[:,
                                            2 * tp_rank_start:2 * tp_rank_end]
-                gate_bias = narrow_weight[:, 0::2]
-                up_bias = narrow_weight[:, 1::2]
-                narrow_weight = torch.cat([gate_bias, up_bias], dim=1)
+                if os.getenv("PT_HPU_GPT_MOE_WT_INTERLEAVED",
+                             "").lower() in ("0", "false"):
+                    gate_bias = narrow_weight[:, 0::2]
+                    up_bias = narrow_weight[:, 1::2]
+                    narrow_weight = torch.cat([gate_bias, up_bias], dim=1)
                 param = params_dict[new_name]
 
                 param.copy_(narrow_weight)

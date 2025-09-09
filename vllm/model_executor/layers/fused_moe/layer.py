@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import importlib
+import os
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -62,16 +63,6 @@ logger = init_logger(__name__)
 # Note: this limit is somewhat arbitrary and might be changed later.
 # The size of the activations will be E x MOE_DP_CHUNK_SIZE x hidden_dim.
 MOE_DP_CHUNK_SIZE = 256
-
-import os
-
-
-def _parse_bool_env(env_var: str, default: bool = False) -> bool:
-    """Parse boolean environment variable with proper handling of various formats"""
-    value = os.getenv(env_var)
-    if value is None:
-        return default
-    return value.lower() in ("1", "true")
 
 
 @dataclass
@@ -767,9 +758,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         #     -2, -1)) + w1_bias.unsqueeze(1)
         gate_up = torch.bmm(repeated_hidden_states, w1) + w1_bias.unsqueeze(1)
 
-        gate = gate_up[:, :, :intermediate_size]
-        up = gate_up[:, :, intermediate_size:]
-        # gate, up = gate_up[..., ::2], gate_up[..., 1::2]
+        if os.getenv("PT_HPU_GPT_MOE_WT_INTERLEAVED",
+                     "").lower() in ("0", "false"):
+            gate = gate_up[:, :, :intermediate_size]
+            up = gate_up[:, :, intermediate_size:]
+        else:
+            gate, up = gate_up[..., ::2], gate_up[..., 1::2]
 
         # Apply SiLU activation to gate
         #gate = F.silu(gate)
@@ -813,17 +807,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         activation: str = "silu",
         **kwargs,
     ):
-        if not _parse_bool_env("VLLM_ENABLE_FUSED_MOE_WITH_BIAS", False):
-            return self.fused_moe(hidden_states=x,
-                                  w1=layer.w13_weight,
-                                  w2=layer.w2_weight,
-                                  w1_bias=layer.w13_bias,
-                                  w2_bias=layer.w2_bias,
-                                  topk=top_k,
-                                  gating_output=router_logits,
-                                  global_num_experts=global_num_experts,
-                                  expert_map=expert_map,
-                                  renormalize=renormalize)
         input_shape = x.shape
         x = x.view(-1, x.shape[-1])
         if use_grouped_topk or custom_routing_function is not None:
