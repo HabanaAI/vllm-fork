@@ -426,6 +426,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
+        text_cfg = config.llm_config.get_text_config()
+        vllm_config.model_config.hf_config = text_cfg
         quant_config = vllm_config.quant_config
 
         self.config: PretrainedConfig = config
