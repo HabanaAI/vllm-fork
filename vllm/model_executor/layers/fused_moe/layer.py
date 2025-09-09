@@ -658,7 +658,7 @@ class FusedMoE(torch.nn.Module):
         param_data = param.data
 
         # Input scales can be loaded directly and should be equal.
-        param_data[expert_id] = loaded_weight
+        param_data[expert_id] = loaded_weight.cpu()
 
     def _load_g_idx(self, shard_id: str, expert_data: torch.Tensor,
                     shard_dim: int, loaded_weight: torch.Tensor, tp_rank: int):

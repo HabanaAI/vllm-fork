@@ -269,6 +269,8 @@ def initialize_ray_cluster(
         ray_address: The address of the Ray cluster. If None, uses
             the default Ray cluster address.
     """
+    import time
+    time.sleep(2)
     assert_ray_available()
     from vllm.platforms import current_platform
 
@@ -284,6 +286,16 @@ def initialize_ray_cluster(
             ray.init(address=ray_address,
                      ignore_reinit_error=True,
                      num_gpus=parallel_config.world_size)
+    #elif current_platform.is_hpu():
+    #    # For HPU, try to connect to existing Ray instance first
+    #    # This allows pre-configured Ray clusters with HPU resources
+    #    try:
+    #        ray.init("auto", ignore_reinit_error=True)
+    #    except ConnectionError:
+    #        logger.warning(
+    #            "No existing RAY instance detected. "
+    #            "A new instance will be launched with current node resources.")
+    #        ray.init(address=ray_address, ignore_reinit_error=True)
     else:
         ray.init(address=ray_address, ignore_reinit_error=True)
 
@@ -339,6 +351,7 @@ def initialize_ray_cluster(
         current_ip = get_ip()
         current_node_id = ray.get_runtime_context().get_node_id()
         current_node_resource = available_resources_per_node()[current_node_id]
+        print("*"*50,current_node_resource)
         if current_node_resource.get(device_str, 0) < 1:
             raise ValueError(
                 f"Current node has no {device_str} available. "

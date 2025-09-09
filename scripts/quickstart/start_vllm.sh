@@ -80,7 +80,7 @@ fi
 
 if [ "$warmup_cache_path" != "" ]; then
     echo "HPU recipe cache will be saved to $warmup_cache_path"
-    export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},false,16384
+    export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},false,16384,false
     mkdir -p "${warmup_cache_path}"
 fi
 

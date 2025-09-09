@@ -233,6 +233,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
+        torch.hpu.synchronize()
         self.model_runner.load_model()
         if isinstance(self.model_runner, HPUPoolingModelRunner):
             # recipes we will use the extra memory for graphs/blocks

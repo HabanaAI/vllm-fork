@@ -3,6 +3,10 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
+# This is to avoid logic in torch.distributed.hccl.__init__.py _setup_module_id overwriting
+# this env var incorrectly
+export HLS_MODULE_ID=-1
+
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 export VLLM_GPU_MEMORY_UTILIZATION=0.9
@@ -62,7 +66,7 @@ env | grep VLLM_DECODE_BLOCK
 export VLLM_SKIP_WARMUP=True
 #unset VLLM_SKIP_WARMUP
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww33_inc_fp8_d,false,16384
-export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_d,false,16384
+export PT_HPU_RECIPE_CACHE_CONFIG=/host/mnt/disk002/kf/recipe_cache/ww33_inc_fp8_d,false,16384,false
 
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0
