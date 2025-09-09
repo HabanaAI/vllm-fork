@@ -2816,66 +2816,11 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.vllm_config.kv_transfer_config.is_kv_consumer:
             return
 
-        import os
-
-        def _rank0():
-            return os.getenv("RANK", "0") == "0"
-
-        def _ve_brief(ve):
-            # ve 里一般有 name/scope 等属性；都没有就用类名兜底
-            name = getattr(ve, "name", None)
-            scope = getattr(ve, "scope", None)
-            cls = ve.__class__.__name__
-            return f"name={name} scope={scope} class={cls}"
-
-        # —— 在 bind_kv_cache 之前插入 ——
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        if num_layers == 0:
-            lm = self.get_model().get_language_model()
-            num_layers = len(lm.model.layers)  # 或按你的实际路径取
-            if os.getenv("RANK", "0") == "0":
-                print(f"[profile_run] override num_layers -> {num_layers}")
         kv_caches = [None] * num_layers
-
-        forward_ctx = self.vllm_config.compilation_config.static_forward_context
-        attn_ves = getattr(forward_ctx, "attn_ves", [])
-
-        if _rank0():
-            print(f"[profile_run] num_layers={num_layers}  "
-                  f"pp_size={self.parallel_config.pipeline_parallel_size}  "
-                  f"attn_ves={len(attn_ves)}")
-            # 看前 10 个 ve 是谁（是否混入了 ViT/visual）
-            for i, ve in enumerate(list(attn_ves)[:10]):
-                print(f"[profile_run] attn_ves[{i}]: {_ve_brief(ve)}")
-            # 粗略数一下看起来像视觉侧的 ve
-            vis_like = sum(("vit" in str(getattr(ve, "name", "")).lower()) or (
-                "visual" in str(getattr(ve, "scope", "")).lower())
-                           for ve in attn_ves)
-            print(f"[profile_run] visual-like ve count ~ {vis_like}")
-
-        try:
-            bind_kv_cache(
-                forward_ctx,  # 刚才取出来的
-                [kv_caches] * self.parallel_config.pipeline_parallel_size)
-        except Exception as e:
-            if _rank0():
-                print(
-                    f"[profile_run]bind_kv_cache raised:{type(e).__name__}:{e}"
-                )
-                print(
-                    f"(reprint)num_layers={num_layers}attn_ves={len(attn_ves)}"
-                )
-                # 再多看几条末尾的 ve，是否大多来自 ViT
-                for i, ve in enumerate(list(attn_ves)[-5:]):
-                    print(
-                        f"[profile_run] tail attn_ves[-{5-i}]: {_ve_brief(ve)}"
-                    )
-            raise
-
-
-#       bind_kv_cache(
-#           self.vllm_config.compilation_config.static_forward_context,
-#           [kv_caches] * self.parallel_config.pipeline_parallel_size)
+        bind_kv_cache(
+            self.vllm_config.compilation_config.static_forward_context,
+            [kv_caches] * self.parallel_config.pipeline_parallel_size)
         max_seq_len = self.bucketing_manager.get_max_prompt_shape()
         max_batch_size = min(self.max_num_seqs,
                              self.max_num_batched_tokens // max_seq_len)
