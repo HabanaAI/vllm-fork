@@ -129,6 +129,9 @@ cache_path=${cache_path:-""}
 skip_warmup=${skip_warmup:-"false"}
 profile=${profile:-"false"}
 
+model_name=$(basename "$weights_path")
+model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
+
 echo "Starting vllm server for ${model_name} from ${weights_path} with:"
 echo "    device: ${num_hpu} HPUs with module_ids=${module_ids}"
 echo "    URL: ${host}:${port}"

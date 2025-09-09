@@ -70,6 +70,7 @@ max() {
 # set up common environment variables for vllm
 set_common_env(){
     # pytorch bridge
+    export PT_HPU_LAZY_MODE=${PT_HPU_LAZY_MODE:-"1"}   # change to '0' to use torch.compile
     if [ "$num_hpu" -gt 1 ]; then
         export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     fi
@@ -90,9 +91,6 @@ set_common_env(){
 
 # set max_num_batched_tokens and max_model_len based on input/output ranges
 set_length(){
-    model_name=$(basename "$weights_path")
-    model_name_lower=$(echo "$model_name" | tr '[:upper:]' '[:lower:]')
-
     max_num_batched_tokens=$(( $input_max + $output_max ))
     if [ "$max_num_batched_tokens" -lt $PREFERED_BATCHED_TOKENS ]; then
         max_num_batched_tokens=$PREFERED_BATCHED_TOKENS
@@ -191,7 +189,6 @@ set_dtype(){
         "fp8")
             echo Running with dtype="$dtype"
             export QUANT_CONFIG=${QUANT_CONFIG:-"$BASH_DIR/quantization/${model_name_lower}/maxabs_quant_g2.json"}
-            export PT_HPU_LAZY_MODE=1   # INC must run in lazy mode
             export PT_HPU_WEIGHT_SHARING=0
             ;;
         "awq")
