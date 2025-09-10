@@ -82,6 +82,9 @@ except (ImportError, ModuleNotFoundError):
 logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
+if is_hpu:
+    import habana_frameworks.torch as htorch
+
 
 def _qwen2_5_omni_thinker_field_config(hf_inputs: Mapping[str, torch.Tensor]):
     audio_feature_lengths = hf_inputs.get("audio_feature_lengths",
@@ -656,9 +659,19 @@ class Qwen2_5OmniAudioEncoderStaticShape(Qwen2_5OmniAudioEncoder):
                   self.pre_attn(input_feature,
                                 feature_len.unsqueeze(0),
                                 audio_buckets)
+
+            extra_forward_kwargs = {}
+            if htorch.utils.internal.is_lazy():
+                padded_shape = padded_feature.shape
+                padded_len = padded_shape[0] * padded_shape[2]
+                use_graph = audio_buckets.use_graph(padded_len)
+                extra_forward_kwargs.update(
+                    {"bypass_hpu_graphs": not use_graph})
+
             audio_features = self.forward(padded_feature, padded_aftercnn_lens,
                                           padded_mask, padded_mask_after_cnn,
-                                          attention_mask)
+                                          attention_mask,
+                                          **extra_forward_kwargs)
             audio_features = self.post_attn(audio_features,
                                             padded_aftercnn_lens,
                                             audio_feat_lengths[i:i + 1])

@@ -82,6 +82,7 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
 if is_hpu:
+    import habana_frameworks.torch as htorch
     import habana_frameworks.torch.core as htcore
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
@@ -881,10 +882,18 @@ class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
             assert pixel_values_curr_img_padded.shape[0] == \
                 rot_pos_emb.shape[0]
 
+            extra_forward_kwargs = {}
+            if htorch.utils.internal.is_lazy():
+                padded_len = pixel_values_curr_img_padded.shape[0]
+                use_graph = vision_buckets.use_graph(padded_len)
+                extra_forward_kwargs.update(
+                    {"bypass_hpu_graphs": not use_graph})
+
             htcore.mark_step()
             hidden_states = self.forward(pixel_values_curr_img_padded,
                                          rotary_pos_emb=rot_pos_emb,
-                                         fullattn_mask=fullatt_block_attn_mask)
+                                         fullattn_mask=fullatt_block_attn_mask,
+                                         **extra_forward_kwargs)
             htcore.mark_step()
 
             image_embeds = self.post_attn(hidden_states)

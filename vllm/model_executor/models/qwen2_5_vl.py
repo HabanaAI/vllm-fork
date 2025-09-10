@@ -77,6 +77,7 @@ logger = init_logger(__name__)
 is_hpu = current_platform.is_hpu()
 
 if is_hpu:
+    import habana_frameworks.torch as htorch
     import habana_frameworks.torch.core as htcore
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
@@ -981,8 +982,12 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             )
 
         # windows attention
-        window_index, cu_window_seqlens = self.get_window_index(
-            padded_grid_thw_cpu)
+        window_index, _ = self.get_window_index(padded_grid_thw_cpu)
+        cu_window_seqlens = torch.arange(
+            0,
+            padded_grid_thw_cpu.prod(-1).sum() + 1,
+            self.vit_merger_window_size * self.vit_merger_window_size * \
+              self.spatial_merge_size)
 
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
@@ -1109,13 +1114,21 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
                     attention_mask[0,0,:,:] * \
                         attention_mask[0,0,0,:].unsqueeze(1)
 
+                extra_forward_kwargs = {}
+                if htorch.utils.internal.is_lazy():
+                    padded_len = pixel_values_curr_img_padded.shape[0]
+                    use_graph = vision_buckets.use_graph(padded_len)
+                    extra_forward_kwargs.update(
+                        {"bypass_hpu_graphs": not use_graph})
+
                 htcore.mark_step()
                 hidden_states = self.forward(
                     pixel_values_curr_img_padded,
                     rotary_pos_emb=rot_pos_emb,
                     fullattn_mask=fullatt_block_attn_mask,
                     windowattn_mask=attention_mask,
-                    cu_window_seqlens=cu_window_seqlens)
+                    cu_window_seqlens=cu_window_seqlens,
+                    **extra_forward_kwargs)
                 htcore.mark_step()
 
                 image_embeds = self.post_attn(hidden_states, window_index,
