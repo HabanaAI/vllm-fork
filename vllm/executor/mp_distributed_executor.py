@@ -215,13 +215,13 @@ class MultiprocessingDistributedExecutor(DistributedExecutorBase):
         if not self.tp_driver_workers:
             return await self.driver_exec_model(execute_model_req)
 
+        from vllm.platforms import current_platform
         if self.pp_locks is None:
             # This locks each pipeline parallel stage so multiple virtual
             # engines can't execute on the same stage at the same time
             # We create the locks here to avoid creating them in the constructor
             # which uses a different asyncio loop.
             lock_type: Union[type[asyncio.Lock], type[nullcontext[Any]]]
-            from vllm.platforms import current_platform
             if current_platform.is_hpu():
                 #NOTE(Tanner): HPU manages its own locks
                 # to maximize PP concurrency.
