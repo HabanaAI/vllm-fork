@@ -20,8 +20,8 @@ latency_column_mapping = {
     # "P25": "P25 (s)",
     "P50": "Median latency (ms)",
     # "P75": "P75 (s)",
-    # "P90": "P90 (s)",
-    "P99": "P99 latency (ms)",
+    "P90": "P90 (s)",
+    #"P99": "P99 latency (ms)",
 }
 
 # throughput tests and the keys that will be printed into markdown
@@ -42,18 +42,18 @@ serving_column_mapping = {
     "test_name": "Test name",
     "gpu_type": "GPU",
     # "completed": "# of req.",
-    "request_throughput": "Tput (req/s)",
+    #"request_throughput": "Tput (req/s)",
     # "input_throughput": "Input Tput (tok/s)",
-    # "output_throughput": "Output Tput (tok/s)",
-    "mean_ttft_ms": "Mean TTFT (ms)",
+    "output_throughput": "Output Tput (tok/s)",
+    #"mean_ttft_ms": "Mean TTFT (ms)",
     "median_ttft_ms": "Median TTFT (ms)",
-    "p99_ttft_ms": "P99 TTFT (ms)",
+    "p90_ttft_ms": "P90 TTFT (ms)",
     # "mean_tpot_ms": "Mean TPOT (ms)",
-    # "median_tpot_ms": "Median",
-    # "p99_tpot_ms": "P99",
-    "mean_itl_ms": "Mean ITL (ms)",
-    "median_itl_ms": "Median ITL (ms)",
-    "p99_itl_ms": "P99 ITL (ms)",
+    "median_tpot_ms": "Median",
+    "p90_tpot_ms": "P90",
+    #"mean_itl_ms": "Mean ITL (ms)",
+    #"median_itl_ms": "Median ITL (ms)",
+    #"p99_itl_ms": "P99 ITL (ms)",
 }
 
 
@@ -187,7 +187,7 @@ if __name__ == "__main__":
         # The GPUs sometimes come in format of "GPUTYPE\nGPUTYPE\n...",
         # we want to turn it into "8xGPUTYPE"
         df["GPU"] = df["GPU"].apply(
-            lambda x: f"{len(x.split('\n'))}x{x.split('\n')[0]}"
+            lambda x: "{}x{}".format(len(x.split("\n")), x.split("\n")[0])
         )
 
     # get markdown tables
