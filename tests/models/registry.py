@@ -251,6 +251,7 @@ _TEXT_GENERATION_EXAMPLE_MODELS = {
     "RWForCausalLM": _HfExamplesInfo("tiiuae/falcon-40b"),
     "SeedOssForCausalLM": _HfExamplesInfo("ByteDance-Seed/Seed-OSS-36B-Instruct", # noqa: E501
                                           trust_remote_code=True),
+    "Qwen3ForSequenceClassification": _HfExamplesInfo("tomaarsen/Qwen3-Reranker-0.6B-seq-cls"),  # noqa: E501    
     "StableLMEpochForCausalLM": _HfExamplesInfo("stabilityai/stablelm-zephyr-3b",  # noqa: E501
                                                 v0_only=True),
     "StableLmForCausalLM": _HfExamplesInfo("stabilityai/stablelm-3b-4e1t",
