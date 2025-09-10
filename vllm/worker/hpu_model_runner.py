@@ -102,6 +102,9 @@ class VisionBuckets:
         else:
             multimodal_buckets = [int(i) for i in envvar.split(',')]
         self.multimodal_buckets = self._process_buckets(multimodal_buckets)
+        self.graphed_buckets = set()
+        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
+                                          'false').lower() == 'true'
 
     def _process_buckets(self, buckets):
         for bucket in buckets:
@@ -118,6 +121,11 @@ class VisionBuckets:
     def __repr__(self):
         return str(self.multimodal_buckets)
 
+    def use_graph(self, seq_len):
+        if self.skip_warmup and seq_len in self.multimodal_buckets:
+            return True
+        return seq_len in self.graphed_buckets
+
 
 class AudioBuckets:
     '''
@@ -130,6 +138,9 @@ class AudioBuckets:
             self.multimodal_buckets = list(range(0, 12801, 1600))
         else:
             self.multimodal_buckets = [int(i) for i in envvar.split(',')]
+        self.graphed_buckets = set()
+        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
+                                          'false').lower() == 'true'
 
     def get_multimodal_bucket(self, curr_num_audio_patches):
         for mm_bucket in self.multimodal_buckets:
@@ -139,6 +150,11 @@ class AudioBuckets:
 
     def __repr__(self):
         return str(self.multimodal_buckets)
+
+    def use_graph(self, seq_len):
+        if self.skip_warmup and seq_len in self.multimodal_buckets:
+            return True
+        return seq_len in self.graphed_buckets
 
 
 class Singleton(type):
@@ -1285,6 +1301,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         if supports_multimodal(model):
             model.vision_buckets = VisionBuckets()
+            model.vision_buckets.graphed_buckets = \
+                self.graphed_multimodal_buckets
 
     def add_audio_buckets_to_model(self):
         model = self.get_model()
