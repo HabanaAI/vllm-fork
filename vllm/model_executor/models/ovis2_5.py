@@ -431,7 +431,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         # 让 vLLM 能拿到“文本侧”配置（Qwen3）, 一些代码会直接读 .text_config
         if not hasattr(config, "text_config"):
             config.text_config = config.llm_config
-        # vllm_config.model_config.hf_text_config = config.get_text_config()
+        vllm_config.model_config.hf_text_config = config.get_text_config()
 
         self.config: PretrainedConfig = config
         self.llm = init_vllm_registered_model(
