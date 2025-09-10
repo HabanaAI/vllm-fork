@@ -183,8 +183,7 @@ class Ovis2_5ProcessingInfo(BaseProcessingInfo):
         )
 
     def get_image_pad_token(self) -> str:
-        hf_text_config = self.get_hf_config().llm_config.get_text_config()
-        print('\n\n\nhf:', hf_text_config, '\n\n\n')
+        hf_text_config = self.get_hf_config().get_text_config()
         text_model_type = hf_text_config.model_type
         return IMAGE_PAD_TOKEN_MAP.get(text_model_type)
 
