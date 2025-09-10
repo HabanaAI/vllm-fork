@@ -1001,7 +1001,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_attn_heads = self.model_config.get_num_attention_heads(
             self.parallel_config)
-        print('heads', num_attn_heads)
         needs_attn_backend = (num_attn_heads != 0
                               or self.model_config.is_attention_free)
         self.attn_backend = get_attn_backend(
@@ -2818,8 +2817,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return
 
         num_layers = self.model_config.get_num_layers(self.parallel_config)
-        print('layers', num_layers)
-        print(self.model_config.hf_text_config)
         kv_caches = [None] * num_layers
         bind_kv_cache(
             self.vllm_config.compilation_config.static_forward_context,
