@@ -446,6 +446,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
                                    config.hidden_size)
 
         text_model_type = self.config.llm_config.get_text_config().model_type
+        print('\n\n\ntext_model_type:', text_model_type)
         self.image_pad_token_id = IMAGE_PAD_TOKEN_ID_MAP[text_model_type]
 
         self.make_empty_intermediate_tensors = (
