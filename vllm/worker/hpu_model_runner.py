@@ -127,6 +127,9 @@ class VisionBuckets:
             else:
                 multimodal_buckets = [int(i) for i in envvar.split(',')]
             self.multimodal_buckets = self._process_buckets(multimodal_buckets)
+        self.graphed_buckets = set()
+        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
+                                          'false').lower() == 'true'
 
     def _process_buckets(self, buckets):
         if not self.is_batch_based:
@@ -147,6 +150,13 @@ class VisionBuckets:
     def __repr__(self):
         return str(self.multimodal_buckets)
 
+    def use_graph(self, seq_len):
+        if self.skip_warmup and \
+           self.multimodal_buckets is not None and \
+           seq_len in self.multimodal_buckets:
+            return True
+        return seq_len in self.graphed_buckets
+
 
 class AudioBuckets:
     '''
@@ -162,6 +172,9 @@ class AudioBuckets:
                 self.multimodal_buckets = list(range(0, 12801, 1600))
             else:
                 self.multimodal_buckets = [int(i) for i in envvar.split(',')]
+        self.graphed_buckets = set()
+        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
+                                          'false').lower() == 'true'
 
     def get_multimodal_bucket(self, curr_num_audio_patches):
         if self.multimodal_buckets is not None:
@@ -174,6 +187,13 @@ class AudioBuckets:
 
     def __repr__(self):
         return str(self.multimodal_buckets)
+
+    def use_graph(self, seq_len):
+        if self.skip_warmup and \
+           self.multimodal_buckets is not None and \
+           seq_len in self.multimodal_buckets:
+            return True
+        return seq_len in self.graphed_buckets
 
 
 class Singleton(type):
@@ -1563,6 +1583,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.is_mm_optimized = is_mm_optimized(model)
         if self.model_is_mrope or self.is_mm_optimized:
             model.vision_buckets = VisionBuckets(self.is_mm_optimized)
+            model.vision_buckets.graphed_buckets = \
+                self.graphed_multimodal_buckets
             model.audio_buckets = AudioBuckets()
 
     def _prepare_prompt(
