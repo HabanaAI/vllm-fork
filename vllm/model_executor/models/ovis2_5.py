@@ -435,8 +435,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         if not hasattr(config, "get_text_config"):
             config.get_text_config = types.MethodType(
                 lambda self: self.llm_config, config)
-        # if not hasattr(config, "text_config"):
-        #     config.text_config = config.llm_config
+        if not hasattr(config, "text_config"):
+            config.text_config = config.llm_config
         # 一些代码会直接读 .text_config
         vllm_config.model_config.hf_text_config = config.get_text_config()
 
