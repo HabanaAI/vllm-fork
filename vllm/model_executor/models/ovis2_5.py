@@ -429,6 +429,17 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
 
+        import types
+
+        # 让 vLLM 能拿到“文本侧”配置（Qwen3）
+        if not hasattr(config, "get_text_config"):
+            config.get_text_config = types.MethodType(
+                lambda self: self.llm_config, config)
+        if not hasattr(config, "text_config"):
+            config.text_config = config.llm_config
+            # 一些代码会直接读 .text_config
+        vllm_config.model_config.hf_text_config = config.get_text_config()
+
         self.config: PretrainedConfig = config
         self.llm = init_vllm_registered_model(
             vllm_config=vllm_config.with_hf_config(config.llm_config),
@@ -446,23 +457,11 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
                                    config.hidden_size)
 
         text_model_type = self.config.get_text_config().model_type
-        print('\n\n\ntext_model_type:', text_model_type)
+        print('\n\n\ntext_model_type:', text_model_type, '\n\n\n')
         self.image_pad_token_id = IMAGE_PAD_TOKEN_ID_MAP[text_model_type]
 
         self.make_empty_intermediate_tensors = (
             self.get_language_model().make_empty_intermediate_tensors)
-
-        import types
-
-        # 让 vLLM 能拿到“文本侧”配置（Qwen3）
-        if not hasattr(config, "get_text_config"):
-            config.get_text_config = types.MethodType(
-                lambda self: self.llm_config, config)
-        if not hasattr(config, "text_config"):
-            config.text_config = config.llm_config
-            # 一些代码会直接读 .text_config
-
-        vllm_config.model_config.hf_text_config = config.get_text_config()
 
     def _parse_and_validate_image_input(
             self, **kwargs: object) -> Optional[OvisImagePatchInputs]:
