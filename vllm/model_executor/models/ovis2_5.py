@@ -184,7 +184,7 @@ class Ovis2_5ProcessingInfo(BaseProcessingInfo):
 
     def get_image_pad_token(self) -> str:
         hf_text_config = self.get_hf_config().llm_config.get_text_config()
-        print('\n\n\nhf:', hf_text_config)
+        print('\n\n\nhf:', hf_text_config, '\n\n\n')
         text_model_type = hf_text_config.model_type
         return IMAGE_PAD_TOKEN_MAP.get(text_model_type)
 
@@ -429,20 +429,14 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
 
-        # import types
-
-        # 让 vLLM 能拿到“文本侧”配置（Qwen3）
-        # if not hasattr(config, "get_text_config"):
-        #     config.get_text_config = types.MethodType(
-        #         lambda self: self.llm_config, config)
+        # 让 vLLM 能拿到“文本侧”配置（Qwen3）, 一些代码会直接读 .text_config
         if not hasattr(config, "text_config"):
             config.text_config = config.llm_config
-        # 一些代码会直接读 .text_config
         vllm_config.model_config.hf_text_config = config.get_text_config()
 
         self.config: PretrainedConfig = config
         self.llm = init_vllm_registered_model(
-            vllm_config=vllm_config.with_hf_config(config.llm_config),
+            vllm_config=vllm_config.with_hf_config(config.text_config),
             prefix=maybe_prefix(prefix, "llm"),
         )
 
