@@ -461,7 +461,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
             config.text_config = config.llm_config
             # 一些代码会直接读 .text_config
 
-        # vllm_config.model_config.hf_text_config = config.get_text_config()
+        vllm_config.model_config.hf_text_config = config.get_text_config()
 
     def _parse_and_validate_image_input(
             self, **kwargs: object) -> Optional[OvisImagePatchInputs]:
