@@ -1,0 +1,1 @@
+{"method": "HOOKS","mode": "MEASURE","observer": "maxabs","allowlist": {"types": [], "names":  []},"blocklist": {"types": [], "names":  ["lm_head", "mlp\\.gate\\b"]},"quantize_weight": false,"dump_stats_path": "/workspace/vllm-hpu-extension/calibration/inc_dsr1_full_pile/deepseek-r1/g3/inc_output"}
