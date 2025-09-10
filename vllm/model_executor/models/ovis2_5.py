@@ -428,7 +428,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
 
-        # 让 vLLM 能拿到“文本侧”配置（Qwen3）, 一些代码会直接读 .text_config
+        # enable vLLM to access the 'text-side' configuration (Qwen3)
+        # some code will directly read .text_config and .hf_text_config
         if not hasattr(config, "text_config"):
             config.text_config = config.llm_config
         vllm_config.model_config.hf_text_config = config.get_text_config()
@@ -597,7 +598,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         multimodal_embeddings: Optional[MultiModalEmbeddings] = None,
     ) -> torch.Tensor:
         inputs_embeds = self.llm.get_input_embeddings(input_ids)
-        # 预热是 text-only，multimodal_embeddings 可能是 [] 或 None
+        # multimodal_embeddings may be [] or None
         if multimodal_embeddings:
             tmp = torch.concat(multimodal_embeddings, dim=0)
             inputs_embeds[input_ids == self.image_pad_token_id] = tmp
