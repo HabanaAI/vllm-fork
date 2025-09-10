@@ -451,15 +451,15 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         self.make_empty_intermediate_tensors = (
             self.get_language_model().make_empty_intermediate_tensors)
 
-        import types
+        # import types
 
-        # 让 vLLM 能拿到“文本侧”配置（Qwen3）
-        if not hasattr(config, "get_text_config"):
-            config.get_text_config = types.MethodType(
-                lambda self: self.llm_config, config)
-        if not hasattr(config, "text_config"):
-            config.text_config = config.llm_config
-            # 一些代码会直接读 .text_config
+        # # 让 vLLM 能拿到“文本侧”配置（Qwen3）
+        # if not hasattr(config, "get_text_config"):
+        #     config.get_text_config = types.MethodType(
+        #         lambda self: self.llm_config, config)
+        # if not hasattr(config, "text_config"):
+        #     config.text_config = config.llm_config
+        #     # 一些代码会直接读 .text_config
 
         vllm_config.model_config.hf_text_config = config.get_text_config()
 
