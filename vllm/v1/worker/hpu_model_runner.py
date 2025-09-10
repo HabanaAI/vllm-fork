@@ -933,10 +933,6 @@ class HPUModelRunner:
             # Must be prompt
             assert num_computed_tokens < num_prompt_tokens
             num_output_tokens = len(self.requests[req_id].output_token_ids)
-            if not has_kv_transfer_group(): #P case num_output_tokens has non 0 
-                assert num_output_tokens == 0, \
-                    f'req_id: {req_id}, {num_output_tokens}'
-
             prompt_req_ids.append(req_id)
             prompt_scheduled_tokens.append(num_scheduled_tokens)
         #logger.info(f'libin debug _get_prompts_and_decodes after 2nd_loop {os.getenv('RANK')} {num_reqs=} {len(prompt_req_ids)=}\
