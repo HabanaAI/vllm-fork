@@ -2801,9 +2801,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             image_h = img_args // 8
             image_grid_thw = torch.tensor(
                 [[1, image_h, int(img_args / image_h)]])
+            vision_feat_dim = (getattr(vision_config, "in_chans", 0) * \
+                               getattr(vision_config, "patch_size", 0) ** 2)
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
-                1176)  # TODO: figure out the variable name
+                vision_feat_dim if vision_feat_dim > 0 else 1176)  # channels * patch_size * patch_size
+
 
             assert pixel_values.shape[0] % 64 == 0, (
                 f"pixel_values must be sliced in 64 chunks, "
