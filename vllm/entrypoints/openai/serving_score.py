@@ -61,7 +61,7 @@ class ServingScores(OpenAIServing):
                                                None]] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
     ) -> list[PoolingRequestOutput]:
-        print('BOB: _embedding_score++')
+        logger.info('BOB: _embedding_score++')
 
         input_texts = texts_1 + texts_2
 
@@ -69,13 +69,13 @@ class ServingScores(OpenAIServing):
         tokenize_async = make_async(tokenizer.__call__,
                                     executor=self._tokenizer_executor)
 
-        print('BOB: _embedding_score 1')
+        logger.info('BOB: _embedding_score 1')
 
         tokenization_kwargs = tokenization_kwargs or {}
         tokenized_prompts = await asyncio.gather(
             *(tokenize_async(t, **tokenization_kwargs) for t in input_texts))
 
-        print('BOB: _embedding_score 2')
+        logger.info('BOB: _embedding_score 2')
 
         for tok_result, input_text in zip(tokenized_prompts, input_texts):
 
@@ -89,14 +89,14 @@ class ServingScores(OpenAIServing):
                 TokensPrompt(
                     prompt_token_ids=text_token_prompt["prompt_token_ids"]))
 
-        print('BOB: _embedding_score 3')
+        logger.info('BOB: _embedding_score 3')
 
         # Schedule the request and get the result generator.
         generators: list[AsyncGenerator[PoolingRequestOutput, None]] = []
         pooling_params = request.to_pooling_params()
 
-        print('BOB: _embedding_score 4')
-        print(f'BOB: {engine_prompts=}')
+        logger.info('BOB: _embedding_score 4')
+        logger.info('BOB: engine_prompts=%s', engine_prompts)
 
         for i, engine_prompt in enumerate(engine_prompts):
 
@@ -119,7 +119,7 @@ class ServingScores(OpenAIServing):
                     priority=request.priority,
                 ))
 
-        print('BOB: _embedding_score 5')
+        logger.info('BOB: _embedding_score 5')
 
         result_generator = merge_async_iterators(*generators)
 
@@ -132,7 +132,7 @@ class ServingScores(OpenAIServing):
         async for i, res in result_generator:
             embeddings[i] = res
 
-        print('BOB: _embedding_score 6')
+        logger.info('BOB: _embedding_score 6')
 
         emb_texts_1: list[PoolingRequestOutput] = []
         emb_texts_2: list[PoolingRequestOutput] = []
@@ -152,7 +152,7 @@ class ServingScores(OpenAIServing):
                                              embed_1=emb_texts_1,
                                              embed_2=emb_texts_2)
 
-        print('BOB: _embedding_score 7')
+        logger.info('BOB: _embedding_score 7')
 
         return final_res_batch
 
@@ -169,7 +169,7 @@ class ServingScores(OpenAIServing):
                                                None]] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
     ) -> list[PoolingRequestOutput]:
-        print('BOB: _cross_encoding_score++')
+        logger.info('BOB: _cross_encoding_score++')
 
         request_prompts: list[str] = []
         engine_prompts: list[TokensPrompt] = []
@@ -251,7 +251,7 @@ class ServingScores(OpenAIServing):
         raw_request: Optional[Request] = None,
         truncate_prompt_tokens: Optional[int] = None,
     ) -> list[PoolingRequestOutput]:
-        print('BOB: _run_scoring++')
+        logger.info('BOB: _run_scoring++')
 
         (
             lora_request,
@@ -316,7 +316,7 @@ class ServingScores(OpenAIServing):
 
         See https://sbert.net/docs/package_reference/cross_encoder
         """
-        print('BOB: create_score++')
+        logger.info('BOB: create_score++')
 
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
@@ -361,7 +361,7 @@ class ServingScores(OpenAIServing):
         https://github.com/infiniflow/ragflow/blob/main/rag/llm/rerank_model.py
         numerous clients use this standard.
         """
-        print('BOB: do_rerank++')
+        logger.info('BOB: do_rerank++')
 
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
@@ -400,7 +400,7 @@ class ServingScores(OpenAIServing):
         created_time: int,
         model_name: str,
     ) -> ScoreResponse:
-        print('BOB: request_output_to_score_response++')
+        logger.info('BOB: request_output_to_score_response++')
 
         items: list[ScoreResponseData] = []
         num_prompt_tokens = 0
@@ -437,7 +437,7 @@ class ServingScores(OpenAIServing):
         """
         Convert the output of do_rank to a RerankResponse
         """
-        print('BOB: request_output_to_rerank_response++')
+        logger.info('BOB: request_output_to_rerank_response++')
 
         results: list[RerankResult] = []
         num_prompt_tokens = 0
