@@ -824,25 +824,19 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         dtype="half",
         limit_mm_per_prompt={modality: 1},
     )
+    
     if modality == "image":
-        placeholder = "<image>"
+        vision_placeholder = "<|vision_start|><|image_pad|><|vision_end|>"
     elif modality == "video":
-        placeholder = "<video>"
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    print('\n\n\ntokenizer:', tokenizer)
-    
-    messages = [
-        [{"role": "user", "content": f"{placeholder}\n{question}"}]
-        for question in questions
+        vision_placeholder = "<|vision_start|><|video_pad|><|vision_end|>"
+    else:
+        raise ValueError("modality must be image or video")
+        
+    prompts = [
+        f"<|im_start|>user\n{vision_placeholder}\n{q}<|im_end|>\n<|im_start|>assistant\n"
+        for q in questions
     ]
-    print('\n\n\nmessages:', messages)
-    
-    prompts = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    print('\n\n\nprompts:', prompts)
-    
+
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
@@ -1420,3 +1414,4 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args()
     main(args)
+    
