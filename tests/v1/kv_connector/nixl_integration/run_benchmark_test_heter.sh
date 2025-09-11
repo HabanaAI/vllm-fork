@@ -13,6 +13,7 @@ set -xe
 MODELS=(
     "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/"
 )
+
 export VLLM_CONTIGUOUS_PA=true
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1000000
 export VLLM_RPC_TIMEOUT=1000000000
@@ -114,7 +115,7 @@ run_tests_for_model() {
     echo "Starting prefill instance $i on GPU $GPU_ID, port $PORT"
 
     # Build the command with or without model-specific args
-    BASE_CMD="HABANA_VISIBLE_DEVICES=1 MY_ROLE=PREFILL UCX_TLS=tcp VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
+    BASE_CMD="HABANA_VISIBLE_DEVICES=1 MY_ROLE=PREFILL UCX_TLS=rc,ud,ib VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
     --long_prefill_token_threshold 8192 \
     --max_num_batched_tokens 8192 \
@@ -148,7 +149,7 @@ run_tests_for_model() {
     echo "Starting decode instance $i on GPU $GPU_ID, port $PORT"
 
     # Build the command with or without model-specific args
-    BASE_CMD="HABANA_VISIBLE_DEVICES=2,3 MY_ROLE=DECODE UCX_TLS=tcp VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
+    BASE_CMD="HABANA_VISIBLE_DEVICES=2,3 MY_ROLE=DECODE UCX_TLS=rc,ud,ib VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
     --gpu-memory-utilization 0.3 \
     --tensor-parallel-size $DECODER_TP_SIZE \
