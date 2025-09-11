@@ -8,6 +8,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/libfabric/lib:/usr/lib/habanalabs/:
 export REQUIRED_VERSION=1.22.0
 export LIBFABRIC_ROOT=/opt/libfabric-1.22.0
 export LD_LIBRARY_PATH=$LIBFABRIC_ROOT/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 # HPU settings
 export PT_HPU_LAZY_MODE=1
@@ -50,7 +51,7 @@ INC_FP8=0
 BENCHMARK_MODE=0
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG END ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-if [ "$INC_FP8" -eq 1 ]; then
+if [ "$BENCHMARK_MODE" -eq 1 ]; then
     export VLLM_USE_ASYNC_TRANSFER_IN_PD=0
 fi
 
