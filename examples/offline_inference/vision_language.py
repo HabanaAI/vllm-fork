@@ -830,14 +830,19 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         placeholder = "<video>"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    print('\n\n\ntokenizer:', tokenizer)
+    
     messages = [
         [{"role": "user", "content": f"{placeholder}\n{question}"}]
         for question in questions
     ]
+    print('\n\n\nmessages:', messages)
+    
     prompts = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-
+    print('\n\n\nprompts:', prompts)
+    
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
