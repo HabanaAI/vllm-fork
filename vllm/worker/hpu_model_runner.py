@@ -2957,6 +2957,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             embed_dim = 1176
             if 'qwen3_vl' in self.get_model().config.model_type:
                 embed_dim = 1536
+            elif 'ernie4_5_moe_vl' in self.get_model().config.model_type:
+                # channels * patch_size * patch_size
+                vision_feat_dim = (getattr(vision_config, "in_chans", 0) * \
+                                   getattr(vision_config, "patch_size", 0) ** 2)
+                if vision_feat_dim > 0:
+                    embed_dim = vision_feat_dim
             pixel_values = torch.randn(
                 image_grid_thw[0].prod(),
                 embed_dim)  # TODO: figure out the variable name

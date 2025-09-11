@@ -263,7 +263,7 @@ class Ernie4_5_VisionAttention(nn.Module):
                 v_i = v[:, start_idx:end_idx]
                 q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
                                  for x in [q_i, k_i, v_i])
-                if is_hpu:
+                if current_platform.is_hpu():
                     from habana_frameworks.torch.hpex.kernels import FusedSDPA
                     output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0)
                 else:
@@ -1474,20 +1474,19 @@ class Ernie4_5_VLMoeForConditionalGeneration(nn.Module, SupportsMultiModal,
                 input_ids,
                 inputs_embeds,
                 image_embeds,
-                placeholder_token_id=self.config.image_token_id,
+                placeholder_token_id=self.config.im_patch_id,
             )
-
         if video_input is not None:
-            if is_hpu:
+            if current_platform.is_hpu():
                 logger.warning("Video inputs have not been enabled yet, "
                                "ignoring video inputs")
-                return inputs_embeds
+                return multimodal_embeddings
             video_embeds = self._process_video_input(video_input)
             inputs_embeds = merge_multimodal_embeddings(
                 input_ids,
                 inputs_embeds,
                 video_embeds,
-                placeholder_token_id=self.config.video_token_id,
+                placeholder_token_id=self.config.im_patch_id,
             )
         return inputs_embeds
 
