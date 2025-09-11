@@ -26,7 +26,7 @@ img = Image.open(requests.get(
 prompt = "<image>\nCalculate the sum of the numbers in the middle box in figure (c)."
 
 # 4) 生成（单图 -> images=[[img]]；与占位符一一对应）
-sampling_params = SamplingParams(max_tokens=512, temperature=0)
+sampling_params = SamplingParams(max_tokens=512)
 outputs = llm.generate(
     {
         "prompt": prompt,
