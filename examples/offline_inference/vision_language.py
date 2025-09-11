@@ -1344,6 +1344,7 @@ def main(args):
     questions = mm_input["questions"]
 
     req_data = model_example_map[model](questions, modality)
+    print('\nreq_data:',req_data)
 
     # Disable other modalities to save memory
     default_limits = {"image": 0, "video": 0, "audio": 0}
@@ -1363,6 +1364,7 @@ def main(args):
         if args.use_different_prompt_per_request
         else [req_data.prompts[0]]
     )
+    print('\nprompts:',prompts)
 
     # We set temperature to 0.2 so that outputs can be different
     # even when all prompts are identical when running batch inference.
@@ -1393,7 +1395,8 @@ def main(args):
                 }
                 for i in range(args.num_prompts)
             ]
-
+    print('\ninputs:',inputs)
+    
     # Add LoRA request if applicable
     lora_request = (
         req_data.lora_requests * args.num_prompts if req_data.lora_requests else None
