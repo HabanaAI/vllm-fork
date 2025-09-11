@@ -2893,6 +2893,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         model = self.get_model()
         if hasattr(model, "model"):
             for layer in self.get_model().model.layers:
+                if not hasattr(layer, "self_attn"):
+                    continue
                 self_attn = layer.self_attn
                 # delete attr kv_b_proj in self_attn,
                 # as they have been transferred to the MLAImpl.
@@ -2916,6 +2918,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         num_iters=3,
                         align_worker=False,
                         is_dummy_run=False) -> None:
+        logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario: start")
         phase = 'prompt' if is_prompt else 'decode'
         use_graphs = is_dummy_run or self._use_graphs()
 
@@ -2930,6 +2933,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # that will have unique loras, an therefore the max amount of memory
         # consumption create dummy lora request copies from the lora request
         # passed in, which contains a lora from the lora warmup path.
+        logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_01: {scenario_name}")
         dummy_lora_requests: List[LoRARequest] = []
         dummy_lora_requests_per_seq: List[LoRARequest] = []
         if self.lora_config and is_lora_profile_run:
@@ -2949,9 +2953,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     dummy_lora_requests[idx % len(dummy_lora_requests)]
                     for idx in range(batch_size)
                 ]
+        logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_02:")
         self.profiler.start('internal', scenario_name)
         times = num_iters if use_graphs or is_pt_profiler_run else 1
+        logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_03:")
         if is_prompt:
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_04:")
             seqs = [
                 self.create_dummy_seq_group_metadata(
                     i,
@@ -2963,7 +2970,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     temperature=temperature,
                     ctx=ctx) for i in range(batch_size)
             ]
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_05:")
         else:
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_06:")
             blocks = [ctx // batch_size for _ in range(batch_size)]
             blocks[0] += ctx % batch_size
             seqs = [
@@ -2976,17 +2985,23 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     temperature=temperature,
                     ctx=ctx) for i, b in enumerate(blocks)
             ]
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_07:")
         if not is_dummy_run:
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_08:")
             torch.hpu.synchronize()
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_09:")
         deferred_sampling = self.parallel_config.pipeline_parallel_size > 1 \
             and get_pp_group().is_last_rank
         profiler = None
         if is_pt_profiler_run and self.is_driver_worker:
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_10:")
             profiler = setup_profiler()
             profiler.start()
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_11:")
         for time_index in range(times):
             inputs = self.prepare_model_input_align_worker(
                 seqs, align_worker=align_worker)
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_12:")
             # Chendi: Necessary fix for warmup with TP>1
             if time_index == 0:
                 if self.is_driver_worker:
@@ -2994,15 +3009,19 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         {"input_tokens": inputs.input_tokens}, src=0)
                 else:
                     broadcast_tensor_dict(src=0)
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_13:")
             if is_prompt or self.is_single_step:
+                logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_14:")
                 intermediate_tensors = None
                 if not get_pp_group().is_first_rank:
+                    logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_15:")
                     intermediate_tensors = \
                         self.model.make_empty_intermediate_tensors(
                             batch_size=batch_size,
                             context_size=seq_len if is_prompt else 1,
                             dtype=self.model_config.dtype,
                             device=self.device)
+                logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_16:")
                 output = self.execute_model(inputs,
                                    kv_caches,
                                    intermediate_tensors=intermediate_tensors,
@@ -3010,13 +3029,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                    ctx_blocks=ctx,
                                    is_dummy_run=is_dummy_run,
                                    is_pt_profiler_run=is_pt_profiler_run)
+                logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_17:")
                 if deferred_sampling:
+                    logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_18:")
                     self.execute_sample(
                         hidden_states=output,
                         model_input=inputs,
                         num_steps=1,
                     )
+                    logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_19:")
             else:  # decode with multi-step
+                logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_20:")
                 inputs = dataclasses.replace(inputs,
                                              is_first_multi_step=True,
                                              is_last_step=False)
@@ -3047,15 +3070,26 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         model_input=inputs,
                         num_steps=2,
                     )
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_21:")
             if not is_dummy_run:
+                logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_22:")
                 torch.hpu.synchronize()
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_23:")
             if profiler:
+                logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_24:")
                 profiler.step()
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_25:")
         if profiler:
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_26:")
             profiler.stop()
+        logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_27:")
         self.profiler.end()
+        logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_28:")
         if not is_dummy_run:
+            logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario.info_29:")
             gc.collect()
+
+        logger.info(f"[PP={get_pp_group().rank_in_group}][TP={get_tp_group().rank_in_group}] HPUModelRunnerBase.warmup_scenario: end")
 
     def remove_all_loras(self):
         if not self.lora_manager:
