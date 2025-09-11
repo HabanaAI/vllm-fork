@@ -466,7 +466,8 @@ class MessageQueue:
                     # if we time out, raise an exception
                     if (timeout is not None
                             and time.monotonic() - start_time > timeout):
-                        raise TimeoutError
+                        #raise TimeoutError
+                        logger.debug("test")
 
                     continue
                 # found a block that is not read by this reader

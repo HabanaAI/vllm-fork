@@ -220,9 +220,10 @@ class NixlConnector(KVConnectorBase_V1):
 
     def wait_for_save(self):
         assert self.connector_worker is not None
-        assert isinstance(self._connector_metadata, NixlConnectorMetadata)
+        assert isinstance(self._connector_metadata, NixlConnectorMetadata) 
+        self.connector_worker.reshape_kv_to_hnd(self._connector_metadata)
         if self.connector_worker.use_host_buffer and \
-           self.connector_worker.copy_blocks:
+            self.connector_worker.copy_blocks:
             self.connector_worker.save_kv_to_host(self._connector_metadata)
 
 
@@ -618,8 +619,8 @@ class NixlConnectorWorker:
             decoder = msgspec.msgpack.Decoder(NixlAgentMetadata)
             metadata = decoder.decode(metadata_bytes)
             got_metadata_time = time.perf_counter()
-            logger.info("libin debug my role %s NIXL handshake: get metadata took: %s", os.getenv('MY_ROLE'),
-                         metadata.kv_caches_base_addr)
+            #logger.info("libin debug my role %s NIXL handshake: get metadata took: %s", os.getenv('MY_ROLE'),
+                         #metadata.kv_caches_base_addr)
 
             # Ensure engine id matches.
             if metadata.engine_id != expected_engine_id:
@@ -725,6 +726,7 @@ class NixlConnectorWorker:
         # will only affects the strides. For MLA instead, we make require no
         # such thing and resort to the standard layout.
         use_mla = len(first_kv_cache.shape) == 3 if self.device_type != "hpu" else False
+
         if self.device_type == "tpu":
             assert not use_mla, f"{self.kv_buffer_device} does not support MLA."
             assert self._use_pallas_v1, f"attn backend: {self.backend_name}"
@@ -782,12 +784,14 @@ class NixlConnectorWorker:
         # hybrid attn, etc
         # block size in bytes
         self.block_len = kv_elem_size * math.prod(block_shape)
+        '''
         logger.info(
             "libin debug register_kv_caches my role:%s, Registering KV_Caches. use_mla: %s, kv_buffer_device: %s, "
             "use_host_buffer: %s, num_blocks: %s, block_shape: %s, "
             "per_layer_kv_cache_shape: %s, slot_size_bytes: %s, block_len:%s ", os.getenv('MY_ROLE'), use_mla, self.kv_buffer_device,
             self.use_host_buffer, self.num_blocks, block_shape,
             first_kv_cache[0].shape,self.slot_size_bytes, self.block_len)
+        '''
         self.dst_num_blocks[self.engine_id] = self.num_blocks
         self.device_kv_caches = kv_caches
         kv_caches_base_addr = []
@@ -816,7 +820,7 @@ class NixlConnectorWorker:
         self.kv_caches_base_addr[self.engine_id] = kv_caches_base_addr
         self.num_regions = len(caches_data)
         self.num_layers = len(xfer_buffers.keys())
-        logger.info(f"libin debug register_kv_caches my role:{os.getenv('MY_ROLE')}, {self.num_regions=} {len(cache_list)=} {self.num_layers =} {self.kv_caches_base_addr[self.engine_id]=}")
+        #logger.info(f"libin debug register_kv_caches my role:{os.getenv('MY_ROLE')}, {self.num_regions=} {len(cache_list)=} {self.num_layers =} {self.kv_caches_base_addr[self.engine_id]=}")
 
         # TODO(mgoin): remove this once we have hybrid memory allocator
         # Optimization for models with local attention (Llama 4)
@@ -840,7 +844,7 @@ class NixlConnectorWorker:
 
         descs = self.nixl_wrapper.get_reg_descs(caches_data,
                                                 self.nixl_memory_type)
-        logger.info("libin debug register_kv_caches my role %s Registering descs: %s",os.getenv('MY_ROLE'), caches_data)
+        #logger.info("libin debug register_kv_caches my role %s Registering descs: %s",os.getenv('MY_ROLE'), caches_data)
         self.nixl_wrapper.register_memory(descs)
         logger.debug("Done registering descs")
         self._registered_descs.append(descs)
@@ -853,15 +857,15 @@ class NixlConnectorWorker:
             # could create fewer, but then _get_block_descs_ids needs to
             # select agent_meta.num_blocks instead of self.num_blocks for
             # local descr, and that makes handling regular flow less clean.
-            #import remote_pdb;remote_pdb.set_trace()
+
             for block_id in range(self.num_blocks):
                 block_offset = block_id * self.block_len
                 addr = base_addr + block_offset
                 # (addr, len, device id)
                 # TODO: does device_id matter to DRAM?
                 blocks_data.append((addr, self.block_len, self.tp_rank))
-        logger.info("libin debug register_kv_caches my role %s Created %s blocks with block_len %s for src engine %s and rank %s, kv_caches_base_addr %s",
-                     os.getenv('MY_ROLE'), len(blocks_data), self.block_len, self.engine_id, self.tp_rank, (self.kv_caches_base_addr[self.engine_id]))
+        #logger.info("libin debug register_kv_caches my role %s Created %s blocks with block_len %s for src engine %s and rank %s, kv_caches_base_addr %s",
+                     #os.getenv('MY_ROLE'), len(blocks_data), self.block_len, self.engine_id, self.tp_rank, (self.kv_caches_base_addr[self.engine_id]))
 
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
                                                  self.nixl_memory_type)
@@ -996,10 +1000,12 @@ class NixlConnectorWorker:
             engine_id] = nixl_agent_meta.kv_caches_base_addr
         rank_offset = self.tp_rank % tp_ratio * self.block_len \
             if not (self.use_mla or is_kv_replicated) else 0
+        #rank_offset =0
         # Register all remote blocks, but only the corresponding kv heads.
         logger.info(f"libin debug add_remote_agent 5 my role {os.getenv('MY_ROLE')} {remote_tp_rank=} {engine_id=} {self.tp_rank=} {nixl_agent_meta.kv_caches_base_addr=}")
         for base_addr in nixl_agent_meta.kv_caches_base_addr:
             for block_id in range(nixl_agent_meta.num_blocks):
+                
                 block_offset = block_id * nixl_agent_meta.block_len
                 # For each block, grab the heads chunk belonging to rank_i
                 # of size remote_nheads // tp_ratio, which correspond to
@@ -1007,19 +1013,20 @@ class NixlConnectorWorker:
                 addr = base_addr + block_offset + rank_offset
                 # (addr, len, device id)
                 blocks_data.append((addr, self.block_len, remote_tp_rank))
+        '''
         logger.info(
             "libin debug add_remote_agent my role %s Created for dst engine %s with remote rank %s and "
             "local rank %s, rank_offset %s, block_len %s agent_num_block %s  block data %s ", os.getenv('MY_ROLE'), engine_id, remote_tp_rank,
             self.tp_rank, rank_offset, nixl_agent_meta.block_len, nixl_agent_meta.num_blocks, blocks_data )
-
+        '''
         # Register with NIXL.
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
                                                  self.nixl_memory_type)
         self.dst_xfer_side_handles[
             engine_id] = self.nixl_wrapper.prep_xfer_dlist(
                 remote_agent_name, descs)
-        logger.info(
-            f"libin debug add_remote_agent my role {os.getenv('MY_ROLE')} {engine_id=} {self.dst_xfer_side_handles[engine_id]} {remote_agent_name} {descs}")
+        #logger.info(
+            #f"libin debug add_remote_agent my role {os.getenv('MY_ROLE')} {engine_id=} {self.dst_xfer_side_handles[engine_id]} {remote_agent_name} {descs}")
 
         return remote_agent_name
 
@@ -1029,6 +1036,9 @@ class NixlConnectorWorker:
         assert self.copy_blocks is not None
 
         local_block_ids = meta.local_block_ids
+        import torch
+        #fs = './decode1_'+str(self.tp_rank) +'.pt'
+        #torch.save(self.host_xfer_buffers, fs)
         self.copy_blocks(self.block_size, self.host_xfer_buffers, self.device_kv_caches,
                          local_block_ids, local_block_ids, "h2d")
         if logger.isEnabledFor(logging.DEBUG):
@@ -1036,7 +1046,51 @@ class NixlConnectorWorker:
                 "synced recved kv of request[%s] to device kv buffer,"
                 "local_block_ids: %s. ", req_id,
                 ",".join(map(str, meta.local_block_ids)))
+    def reshape_kv_to_hnd(self, metadata: NixlConnectorMetadata):
+        
+        for req_id, meta in metadata.reqs_to_save.items():
+            #import remote_pdb;remote_pdb.set_trace()
+            block_ids = meta.local_block_ids
+            for k, v in self.device_kv_caches.items():
+                gb, h, d = v[0].shape
+                indices = torch.tensor(block_ids, device=v[0].device)
+                gbhd = [int(gb/self.block_size), self.block_size, h, d] #[1926, 128, 8, 128]
+                for i in range(len(self.device_kv_caches[k])):
+                    logger.info(f"libin debug reshape {k=} {v[i].storage().data_ptr()=}")
+                    kv = v[i].reshape(gbhd)
+                    #import remote_pdb;remote_pdb.set_trace()
+                    logger.info(f"libin debug reshape after1 {k=}{kv.storage().data_ptr()=}")
 
+                    kv_selected  = torch.index_select(kv, 0, indices)
+                    bc, bs, h, d  = kv_selected.shape
+                    shape = int(bs*h/2*d)
+                    blocks = torch.chunk(kv_selected, 2, dim=2)
+                    vecs = [b.reshape([bc, shape]) for b in blocks]
+                    #import remote_pdb;remote_pdb.set_trace()
+                    kv_selected = torch.concat(vecs, dim=1).reshape(kv_selected.shape)
+                    kv.index_copy_(dim=0, index=indices, source=kv_selected)
+                    logger.info(f"libin debug reshape after2 {k=} {kv.storage().data_ptr()=}")
+
+        logger.info("libin reshape_kv_to_hnd done")
+    '''
+    def reshape_kv_to_nhd(self, metadata: NixlConnectorMetadata):
+        block_ids = metadata.local_block_ids
+        for k, v in self.host_xfer_buffers.items():
+            gb, h, d = v[0].shape #torch.Size([526208, 4, 128])
+            indices = torch.tensor(block_ids, device=v[0].device)
+            ghnd = [int(gb/self.block_size), h, self.block_size,  d] #[4111, 4, 128,  128]
+
+            for i in range(len(self.host_xfer_buffers[k])):
+                logger.info(f"libin debug reshape nhd {k=}  {v[i].shape=}{v[i].storage().data_ptr()=}")
+                kv = v[i].reshape(ghnd) # torch.Size([4111, 128, 4, 128])
+                logger.info(f"libin debug reshape nhd after1 {k=} {kv.shape=} {kv.storage().data_ptr()=}")
+
+                kv_selected = torch.index_select(kv, 0, indices)
+                kv.index_copy_(dim=0, index=indices, source=kv_selected)
+                logger.info(f"libin debug reshape nhd after2 {k=} {kv.storage().data_ptr()=}")
+
+        logger.info("libin reshape_kv_to_nhd done")    
+    '''
     def save_kv_to_host(self, metadata: NixlConnectorMetadata):
         """copy kv from device to host buffer."""
         assert self.use_host_buffer
@@ -1049,6 +1103,8 @@ class NixlConnectorWorker:
                     "local_block_ids: %s. ", req_id,
                     ",".join(map(str, meta.local_block_ids)))
             # blocking
+            #import torch
+            #torch.save(self.device_kv_caches, './prefill1.pt')
             self.copy_blocks(self.block_size, self.device_kv_caches, self.host_xfer_buffers,
                              meta.local_block_ids, meta.local_block_ids, "d2h")
 
@@ -1066,10 +1122,11 @@ class NixlConnectorWorker:
                 "and %s requests done recving", os.getenv('MY_ROLE'), self.tp_rank,
                 len(done_sending), len(done_recving))
 
-        if self.use_host_buffer:
-            for req_id in done_recving:
-                meta = self._recving_metadata.pop(req_id)
-                assert meta, f"{req_id} not found in recving_metadata list"
+        for req_id in done_recving:
+            meta = self._recving_metadata.pop(req_id)
+            assert meta, f"{req_id} not found in recving_metadata list"
+            #self.reshape_kv_to_nhd(meta)
+            if self.use_host_buffer:
                 self.sync_recved_kv_to_device(req_id, meta)
 
         # Handle timeout to avoid stranding blocks on remote.
@@ -1267,7 +1324,6 @@ class NixlConnectorWorker:
                 remote_block_descs_ids.extend(layer_remote_desc_ids)
 
         assert len(local_block_descs_ids) == len(remote_block_descs_ids)
-
         # Prepare transfer with Nixl.
         handle = self.nixl_wrapper.make_prepped_xfer(
             "READ",
@@ -1277,8 +1333,8 @@ class NixlConnectorWorker:
             remote_block_descs_ids,
             notif_msg=notif_id,
         )
-        logger.info(f"libin debug my role: {os.getenv('MY_ROLE')} {local_xfer_side_handle=} {remote_xfer_side_handle=} {remote_block_descs_ids=} {local_block_descs_ids=} start transfer")
-        # Begin async xfer.
+        logger.info(f"libin debug my role: {os.getenv('MY_ROLE')} {handle=} {local_xfer_side_handle=} {remote_xfer_side_handle=} {remote_block_descs_ids=} {local_block_descs_ids=} start transfer")
+        # Begin async xfer.st
         self.nixl_wrapper.transfer(handle)
 
         # Use handle to check completion in future step().

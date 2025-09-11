@@ -2556,10 +2556,12 @@ def copy_kv_blocks(
     global hpu_buffer
     #import remote_pdb;remote_pdb.set_trace()
     use_hpu_buffer = False # (len(src_slot_mapping) == hpu_buffer[0][0].size(0)) and (hpu_buffer is not None)
+ 
+
     for layer_name in src_kv_caches:
         key_cache = src_kv_caches[layer_name][0]
         value_cache = src_kv_caches[layer_name][1]
-        
+            
         if direction == "d2h" and use_hpu_buffer:
             hpu_buffer[i][0]=key_cache.index_select_(0,  src_slot_mapping)
             hpu_buffer[i][1]=value_cache.index_select_(0,  src_slot_mapping)
@@ -2578,4 +2580,4 @@ def copy_kv_blocks(
         
     torch.hpu.synchronize()
     
-    logger.info(f"copy_kv_blocks: copy takes {time.perf_counter() - start}|{direction=}|{os.getpid()=}|{block_size=}|{(src_slot_mapping)=}|{(dst_slot_mapping)=}")
+    logger.info(f"copy_kv_blocks: copy takes {time.perf_counter() - start}|{direction=}|{os.getpid()=}|{block_size=}|{(src_block_ids)=}|{(dst_block_ids)=}")
