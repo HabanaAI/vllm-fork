@@ -187,6 +187,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
         prompt: Optional[PromptType] = None,
         pooling_params: Optional[PoolingParams] = None,
         request_id: Optional[str] = None,
+        model: Optional[str] = None,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         priority: int = 0,
@@ -211,6 +212,8 @@ class MMLLMEngineClient(MQLLMEngineClient):
             The output `EmbeddingRequestOutput` objects from the LLMEngine
             for the request.
         """
+        print('BOB: encode++')
+
         if inputs is not None:
             prompt = inputs
         assert (prompt is not None and pooling_params is not None
@@ -223,7 +226,8 @@ class MMLLMEngineClient(MQLLMEngineClient):
                                   request_id,
                                   lora_request,
                                   trace_headers,
-                                  priority=priority))
+                                  priority=priority,
+                                  model=model))
 
     async def _process_request(
         self,
@@ -238,6 +242,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
     ) -> Union[AsyncGenerator[RequestOutput, None], AsyncGenerator[
             EmbeddingRequestOutput, None]]:
         """Send an RPCGenerateRequest to the RPCServer and stream responses."""
+        print('BOB: _process_request++')
 
         # If already dead, error out.
         if self._errored_with is not None:
@@ -258,6 +263,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
                     model_config=self.model_config,
                     reasoning_backend=self.decoding_config.reasoning_backend,
                 )
+        print('BOB: _process_request 1')
 
         # 1) Create output queue for this requests.
         queue: asyncio.Queue[Union[RequestOutput,
@@ -287,6 +293,7 @@ class MMLLMEngineClient(MQLLMEngineClient):
                     prompt_adapter_request=prompt_adapter_request,
                     priority=priority,
                 ))
+            print('BOB: _process_request 2')
 
             # 3) Send the RPCGenerateRequest to the MQLLMEngine.
             parts = (request_bytes,
@@ -310,5 +317,8 @@ class MMLLMEngineClient(MQLLMEngineClient):
                 # Request was canceled by the client.
                 if not finished and not self.errored:
                     await self.abort(request_id)
+            print('BOB: _process_request 3')
+
         finally:
+            print('BOB: _process_request 4')
             self.output_queues.pop(request_id)

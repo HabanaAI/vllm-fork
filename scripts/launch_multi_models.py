@@ -77,7 +77,7 @@ def launch_server(models, port, log_file="mm_vllm_server.log", timeout=300):
         "python3", "-m", "vllm.entrypoints.openai.mm_api_server", "--port",
         str(port), "--device", "hpu", "--dtype", "bfloat16",
         "--gpu-memory-utilization",
-        str(mem_ratio), "--use-v2-block-manager", "--max-model-len", "4096",
+        str(mem_ratio), "--use-v2-block-manager", "--max-model-len", "512",
         "--models"
     ]
     command += models

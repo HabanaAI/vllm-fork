@@ -134,14 +134,18 @@ class MMLLMEngine(MQLLMEngine):
                     logger.debug("Waiting for new requests in engine loop.")
 
             # Handle any input from the client.
+            print('BOB: handle_new_input+')
             self.handle_new_input()
 
             # Engine step.
+            print('BOB: engine_step+')
             request_outputs = self.engine_step()
 
+            print('BOB: _send_outputs+')
             # Send request outputs (if async, done in engine_step callback).
             if not self.use_async_sockets:
                 self._send_outputs(request_outputs)
+            print('BOB: _send_outputs-')
 
     def engine_step(self) -> List[RequestOutput]:
         """Engine step wrapper with error handling."""
@@ -170,13 +174,16 @@ class MMLLMEngine(MQLLMEngine):
                 request = pickle.loads(frames[0].buffer)
 
                 logger.info("request type is %s", str(type(request)))
+                print(f'BOB: len(frames)={len(frames)}, frames={frames}')
                 if isinstance(request, RPCProcessRequest):
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors
                         assert isinstance(request.params, SamplingParams)
                         lprocs = cloudpickle.loads(frames[1].buffer)
                         request.params.logits_processors = lprocs
+                    print('BOB: handle_new_input 1')
                     self._handle_process_request(request)
+                    print('BOB: handle_new_input 2')
                 elif isinstance(request, RPCAbortRequest):
                     self._handle_abort_request(request)
                 elif isinstance(request, RPCModelRequest):
@@ -197,6 +204,7 @@ class MMLLMEngine(MQLLMEngine):
 
     def _handle_process_request(self, request: RPCProcessRequest):
         """Handle RPCProcessRequest by adding it to the LLMEngine."""
+        print('BOB: _handle_process_request++')
         request_id = request.request_id
 
         if self._errored_with is not None:
@@ -207,7 +215,9 @@ class MMLLMEngine(MQLLMEngine):
 
         try:
             for engine in self.engines:
+                print(f'BOB: {engine.model_config.model=}, {request.model=}')
                 if engine.model_config.model == request.model:
+                    print('BOB: add_request...')
                     engine.add_request(
                         request_id=request_id,
                         prompt=request.prompt,
