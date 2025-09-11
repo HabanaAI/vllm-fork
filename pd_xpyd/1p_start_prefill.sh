@@ -1,26 +1,10 @@
 #!/bin/bash
-
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
-BENCHMARK_MODE=0
-
-if [ "$3" == "benchmark" ]; then
-    BENCHMARK_MODE=1
-    sed -i 's/export VLLM_USE_ASYNC_TRANSFER_IN_PD=.*/export VLLM_USE_ASYNC_TRANSFER_IN_PD=0/' $BASH_DIR/pd_env.sh
-    echo " Benchmark mode enabled"
-else
-    sed -i 's/export VLLM_USE_ASYNC_TRANSFER_IN_PD=.*/export VLLM_USE_ASYNC_TRANSFER_IN_PD=1/' $BASH_DIR/pd_env.sh
-    echo " Normal mode enabled"
-fi
-
-if [ "$2" == "master" ]; then
-    if [ "$BENCHMARK_MODE" == "1" ]; then
-        source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark
-        echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark"
-    else
-        source "$BASH_DIR"/start_etcd_mooncake_master.sh
-        echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
-    fi
+# for backward compatible. following nodes are started as mooncake master node
+if [ "$2" == "master" ] || [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
+    source "$BASH_DIR"/start_etcd_mooncake_master.sh
+    echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
 fi
 
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_${1:-g10}.json

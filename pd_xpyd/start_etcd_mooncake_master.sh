@@ -27,7 +27,7 @@ if [ -n "$XPYD_LOG" ]; then
 else
     # Run without logging
     echo "XPYD_LOG not set, running without logging..."
-    "${ETCD_CMD[@]}" &
-    "${MOON_CMD[@]}" &
+    "${ETCD_CMD[@]}" > /dev/null 2>&1 &
+    "${MOON_CMD[@]}" > /dev/null 2>&1 &
 fi
 
