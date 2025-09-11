@@ -825,25 +825,15 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         limit_mm_per_prompt={modality: 1},
     )
     
-    if modality == "image":
-        vision_placeholder = "<|vision_start|><|image_pad|><|vision_end|>"
-    elif modality == "video":
-        vision_placeholder = "<|vision_start|><|video_pad|><|vision_end|>"
-    else:
-        raise ValueError("modality must be image or video")
-        
-    prompts = [
-        f"<|im_start|>user\n{vision_placeholder}\n{q}<|im_end|>\n<|im_start|>assistant\n"
-        for q in questions
-    ]
-    
-    print('\n\n\n',prompts,'\n\n\n')
+    placeholder = "<image>" if modality == "image" else "<video>"
 
+    # 手写 Ovis 占位符，不用 chat template
+    prompts = [f"{placeholder}\n{q}" for q in questions]
+    
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
     )
-
 
 # PaliGemma
 def run_paligemma(questions: list[str], modality: str) -> ModelRequestData:
