@@ -836,6 +836,8 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         f"<|im_start|>user\n{vision_placeholder}\n{q}<|im_end|>\n<|im_start|>assistant\n"
         for q in questions
     ]
+    
+    print('\n\n\n',prompts,'\n\n\n')
 
     return ModelRequestData(
         engine_args=engine_args,
