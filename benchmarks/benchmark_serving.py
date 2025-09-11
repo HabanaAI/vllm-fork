@@ -67,6 +67,7 @@ from benchmark_dataset import (
     MTBenchDataset,
     NextEditPredictionDataset,
     RandomDataset,
+    RandomImageDataset,
     SampleRequest,
     ShareGPTDataset,
     SonnetDataset,
@@ -173,7 +174,6 @@ def calculate_metrics(
     for i in range(len(outputs)):
         if outputs[i].success:
             output_len = outputs[i].output_tokens
-
             if not output_len:
                 # We use the tokenizer to count the number of output tokens
                 # for some serving backends instead of looking at
@@ -722,7 +722,22 @@ def main(args: argparse.Namespace):
             tokenizer=tokenizer,
             output_len=args.hf_output_len,
         )
-
+        
+    elif args.dataset_name == "random_image":       
+        input_requests = RandomImageDataset(
+            dataset_path=args.dataset_path,
+            random_seed=args.seed,
+        ).sample(
+            num_requests=args.num_prompts,
+            tokenizer=tokenizer,
+            input_len=args.random_input_len,
+            output_len=args.random_output_len,
+            range_ratio=args.random_range_ratio,
+            img_path = args.bench_single_image_path,
+            width = args.random_image_width,
+            height = args.random_image_height,            
+        )
+            
     else:
         # For datasets that follow a similar structure, use a mapping.
         dataset_mapping = {
@@ -904,7 +919,7 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf", "custom"],
+        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf", "custom","random_image"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument(
@@ -1151,7 +1166,33 @@ if __name__ == "__main__":
             "input_len * (1 + range_ratio)]."
         ),
     )
-
+    
+    random_image_group = parser.add_argument_group("random_image dataset options")
+    random_image_group.add_argument(
+        "--random-image-width",
+        type=int,
+        default=1280,
+        help="Image width, used only for random-image sampling."
+        "If bench-single-image-path is not None,"
+        "--random-image-width/--random-image-height will be ignored."
+    )
+    random_image_group.add_argument(
+        "--random-image-height",
+        type=int,
+        default=720,
+        help="Image height, used only for random-image sampling."
+        "If bench-single-image-path is not None,"
+        "--random-image-width/--random-image-height will be ignored."
+    )
+    random_image_group.add_argument(
+        "--bench-single-image-path",
+        type=str,
+        default=None,
+        help="Repeat using one image to do the benchmark in random-image sampling."
+             "If bench-single-image-path is not None,"
+             "--random-image-width/--random-image-height will be ignored."
+    )
+    
     hf_group = parser.add_argument_group("hf dataset options")
     hf_group.add_argument(
         "--hf-subset", type=str, default=None, help="Subset of the HF dataset."
