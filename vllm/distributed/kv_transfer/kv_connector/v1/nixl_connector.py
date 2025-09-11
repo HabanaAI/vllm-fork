@@ -434,7 +434,7 @@ class NixlConnectorWorker:
             raise RuntimeError("NIXL is not available")
         logger.info("Initializing NIXL wrapper")
         logger.info("Initializing NIXL worker %s", engine_id)
-
+        self.decoder_tp_size = 2
         # Config.
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
@@ -1048,6 +1048,8 @@ class NixlConnectorWorker:
                 ",".join(map(str, meta.local_block_ids)))
     def reshape_kv_to_hnd(self, metadata: NixlConnectorMetadata):
         
+        #if self.decoder_tp_size == 1:
+            #return
         for req_id, meta in metadata.reqs_to_save.items():
             #import remote_pdb;remote_pdb.set_trace()
             block_ids = meta.local_block_ids
@@ -1063,7 +1065,7 @@ class NixlConnectorWorker:
 
                     kv_selected  = torch.index_select(kv, 0, indices)
                     bc, bs, h, d  = kv_selected.shape
-                    shape = int(bs*h/2*d)
+                    shape = int(bs*h/self.decoder_tp_size*d)
                     blocks = torch.chunk(kv_selected, 2, dim=2)
                     vecs = [b.reshape([bc, shape]) for b in blocks]
                     #import remote_pdb;remote_pdb.set_trace()
@@ -1072,25 +1074,7 @@ class NixlConnectorWorker:
                     logger.info(f"libin debug reshape after2 {k=} {kv.storage().data_ptr()=}")
 
         logger.info("libin reshape_kv_to_hnd done")
-    '''
-    def reshape_kv_to_nhd(self, metadata: NixlConnectorMetadata):
-        block_ids = metadata.local_block_ids
-        for k, v in self.host_xfer_buffers.items():
-            gb, h, d = v[0].shape #torch.Size([526208, 4, 128])
-            indices = torch.tensor(block_ids, device=v[0].device)
-            ghnd = [int(gb/self.block_size), h, self.block_size,  d] #[4111, 4, 128,  128]
-
-            for i in range(len(self.host_xfer_buffers[k])):
-                logger.info(f"libin debug reshape nhd {k=}  {v[i].shape=}{v[i].storage().data_ptr()=}")
-                kv = v[i].reshape(ghnd) # torch.Size([4111, 128, 4, 128])
-                logger.info(f"libin debug reshape nhd after1 {k=} {kv.shape=} {kv.storage().data_ptr()=}")
-
-                kv_selected = torch.index_select(kv, 0, indices)
-                kv.index_copy_(dim=0, index=indices, source=kv_selected)
-                logger.info(f"libin debug reshape nhd after2 {k=} {kv.storage().data_ptr()=}")
-
-        logger.info("libin reshape_kv_to_nhd done")    
-    '''
+    
     def save_kv_to_host(self, metadata: NixlConnectorMetadata):
         """copy kv from device to host buffer."""
         assert self.use_host_buffer
