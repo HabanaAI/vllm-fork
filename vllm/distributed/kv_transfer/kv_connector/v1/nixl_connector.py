@@ -221,7 +221,7 @@ class NixlConnector(KVConnectorBase_V1):
     def wait_for_save(self):
         assert self.connector_worker is not None
         assert isinstance(self._connector_metadata, NixlConnectorMetadata) 
-        self.connector_worker.reshape_kv_to_hnd(self._connector_metadata)
+        self.connector_worker.rewrite_kv_based_on_transfer_layout(self._connector_metadata)
         if self.connector_worker.use_host_buffer and \
             self.connector_worker.copy_blocks:
             self.connector_worker.save_kv_to_host(self._connector_metadata)
@@ -434,7 +434,7 @@ class NixlConnectorWorker:
             raise RuntimeError("NIXL is not available")
         logger.info("Initializing NIXL wrapper")
         logger.info("Initializing NIXL worker %s", engine_id)
-        self.decoder_tp_size = 2
+        self.decoder_tp_ratio = int(os.getenv('DECODER_TP_RATIO', 1))
         # Config.
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
@@ -1046,10 +1046,10 @@ class NixlConnectorWorker:
                 "synced recved kv of request[%s] to device kv buffer,"
                 "local_block_ids: %s. ", req_id,
                 ",".join(map(str, meta.local_block_ids)))
-    def reshape_kv_to_hnd(self, metadata: NixlConnectorMetadata):
+    def rewrite_kv_based_on_transfer_layout(self, metadata: NixlConnectorMetadata):
         
-        #if self.decoder_tp_size == 1:
-            #return
+        if self.decoder_tp_ratio == 1:
+            return
         for req_id, meta in metadata.reqs_to_save.items():
             #import remote_pdb;remote_pdb.set_trace()
             block_ids = meta.local_block_ids
@@ -1065,7 +1065,7 @@ class NixlConnectorWorker:
 
                     kv_selected  = torch.index_select(kv, 0, indices)
                     bc, bs, h, d  = kv_selected.shape
-                    shape = int(bs*h/self.decoder_tp_size*d)
+                    shape = int(bs*h/self.decoder_tp_ratio*d)
                     blocks = torch.chunk(kv_selected, 2, dim=2)
                     vecs = [b.reshape([bc, shape]) for b in blocks]
                     #import remote_pdb;remote_pdb.set_trace()
@@ -1073,7 +1073,7 @@ class NixlConnectorWorker:
                     kv.index_copy_(dim=0, index=indices, source=kv_selected)
                     logger.info(f"libin debug reshape after2 {k=} {kv.storage().data_ptr()=}")
 
-        logger.info("libin reshape_kv_to_hnd done")
+        logger.info("libin rewrite_kv_based_on_transfer_layout done")
     
     def save_kv_to_host(self, metadata: NixlConnectorMetadata):
         """copy kv from device to host buffer."""
