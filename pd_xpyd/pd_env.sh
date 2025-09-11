@@ -1,9 +1,6 @@
 #! /bin/bash
 
 # set -x
-
-export PATH=$PATH:/usr/local/lib/python3.10/dist-packages/mooncake/
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/python3.10/dist-packages/mooncake
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/libfabric/lib:/usr/lib/habanalabs/:/usr/local/lib/
 
 #For PCIE
@@ -34,6 +31,16 @@ export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
 block_size=128
 # DO NOT change ends...
 
+DEBUG_INFO=1
+# Check if DEBUG_INFO is set to 1
+if [ "$DEBUG_INFO" == "1" ]; then
+    # Set XPYD_LOG based on WORKSPACE_ROOT or default to /workspace
+    XPYD_LOG="${WORKSPACE_ROOT:-/workspace}/xpyd_logs"
+    echo "XPYD_LOG set to: $XPYD_LOG"
+    
+    # Create the log directory if it doesn't exist
+    mkdir -p "$XPYD_LOG"
+fi
 unset VLLM_HPU_LOG_STEP_GRAPH_COMPILATION PT_HPU_METRICS_GC_DETAILS GRAPH_VISUALIZATION
 export VLLM_HPU_LOG_STEP_GRAPH_COMPILATION=true
 export PT_HPU_METRICS_GC_DETAILS=1

@@ -5,10 +5,6 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/dp_d_env.sh
 
-timestamp=$(date +"%Y%m%d_%H%M%S")
-log_dir="xpyd_logs"
-mkdir -p "$log_dir"
-
 export MOONCAKE_CONFIG_PATH="$BASH_DIR"/mooncake_$1.json
 echo "MOONCAKE_CONFIG_PATH=$MOONCAKE_CONFIG_PATH"
 
@@ -72,19 +68,34 @@ do
     $kv_cache_dtype_arg
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
-  log_file="$log_dir/log_rank${RANK}_${timestamp}.log"
+  # Only define log_file if XPYD_LOG is set
+  if [ -n "$XPYD_LOG" ]; then
+    timestamp=$(date +"%Y%m%d_%H%M%S")
+    log_file="$XPYD_LOG/log_rank${RANK}_${timestamp}.log"
+  fi
 
   extra_env=()
 #  if [ "$i" -eq 0 ] && [ "$RANK" -eq 0 ]; then
 #    extra_env+=(VLLM_PROFILER_ENABLED=true)
 #  fi
 
+  # Execute command
   if [ "$DP_RANK" -ne 1 ]; then
-    echo "env VLLM_DP_RANK=$RANK ${CMD[*]}"
-    env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" 2>&1 | tee "$log_file" &
+    if [ -n "$XPYD_LOG" ]; then
+      echo "env VLLM_DP_RANK=$RANK ${CMD[*]} (logging to $log_file)"
+      env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" 2>&1 | tee "$log_file" &
+    else
+      echo "env VLLM_DP_RANK=$RANK ${CMD[*]} (no logging)"
+      env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${extra_env[@]}" "${CMD[@]}" &
+    fi
   else
-    echo "${CMD[*]}"
-    "${CMD[@]}" &
+    if [ -n "$XPYD_LOG" ]; then
+      echo "${CMD[*]} (logging to $log_file)"
+      "${CMD[@]}" 2>&1 | tee "$log_file" &
+    else
+      echo "${CMD[*]} (no logging)"
+      "${CMD[@]}" &
+    fi
   fi
 done
 
