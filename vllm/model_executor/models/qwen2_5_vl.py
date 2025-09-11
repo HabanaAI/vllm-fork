@@ -1033,35 +1033,63 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
 
     def pre_attn(self, x: torch.Tensor, grid_thw: torch.Tensor,
                  vision_buckets):
-        # patchify
-        hidden_states = x.to(device=self.device, dtype=self.dtype)
-        hidden_states = self.patch_embed(hidden_states)
+        seq_len = x.shape[0]
+        rot_pos_emb, cu_window_seqlens, window_index,attention_mask, _  = \
+            self.prepare_for_attn_cpu(seq_len, grid_thw, vision_buckets)
+        hidden_states, rot_pos_emb, attention_mask = self.pre_attn_hpu(
+            x, rot_pos_emb, attention_mask, window_index, grid_thw,
+            vision_buckets)
+        return hidden_states, rot_pos_emb, None, cu_window_seqlens, \
+               window_index, attention_mask.bool(), grid_thw
 
-        # compute position embedding
-        rotary_pos_emb = self.rot_pos_emb(grid_thw)
+    def prepare_for_attn_cpu(self, seq_len, grid_thw: torch.Tensor,
+                             vision_buckets):
+        grid_thw_cpu = grid_thw.to("cpu")
+        rotary_pos_emb = self.rot_pos_emb(grid_thw_cpu)
 
         # pad input tensors
-        attention_mask = \
-            torch.ones(hidden_states.shape[0],1).to(hidden_states.device)
-        rotary_pos_emb, _ = \
-            self.pad_multimodal_data(rotary_pos_emb,
-                                     grid_thw,
-                                     vision_buckets,
-                                     -100)
-        hidden_states, _ = self.pad_multimodal_data(hidden_states, grid_thw,
-                                                    vision_buckets, 0)
-        attention_mask, padded_grid_thw = self.pad_multimodal_data(
-            attention_mask, grid_thw, vision_buckets, 0)
+        attention_mask = torch.ones(seq_len, 1)
+        rotary_pos_emb, _ = self.pad_multimodal_data(rotary_pos_emb,
+                                                     grid_thw_cpu,
+                                                     vision_buckets, -100)
+
+        attention_mask, padded_grid_thw_cpu = self.pad_multimodal_data(
+            attention_mask, grid_thw_cpu, vision_buckets, 0)
 
         # windows attention
-        window_index, cu_window_seqlens = self.get_window_index(
-            padded_grid_thw)
+        window_index, _ = self.get_window_index(padded_grid_thw_cpu)
+        cu_window_seqlens = torch.arange(
+            0,
+            padded_grid_thw_cpu.prod(-1).sum() + 1,
+            self.vit_merger_window_size * self.vit_merger_window_size * \
+              self.spatial_merge_size)
+
+        cu_window_seqlens = torch.tensor(
+            cu_window_seqlens,
+            device=self.device,
+            dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32)
+
+        rotary_pos_emb = rotary_pos_emb.to(device=self.device,
+                                           dtype=self.dtype)
+        attention_mask = attention_mask.bool().to(device=self.device)
+
+        return (rotary_pos_emb, cu_window_seqlens, window_index,
+                attention_mask, grid_thw)
+
+    def pre_attn_hpu(self, x: torch.Tensor, rotary_pos_emb, attention_mask,
+                     window_index, grid_thw, vision_buckets):
+
+        hidden_states = x.to(device=self.device, dtype=self.dtype)
+        hidden_states = self.patch_embed(hidden_states)
+        hidden_states, _ = self.pad_multimodal_data(hidden_states, grid_thw,
+                                                    vision_buckets, 0)
 
         seq_len, _ = hidden_states.size()
         hidden_states = hidden_states.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         hidden_states = hidden_states[window_index, :, :]
         hidden_states = hidden_states.reshape(seq_len, -1)
+
         rotary_pos_emb = rotary_pos_emb.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         rotary_pos_emb = rotary_pos_emb[window_index, :, :]
@@ -1070,14 +1098,8 @@ class Qwen2_5_VisionTransformerStaticShape(Qwen2_5_VisionTransformer):
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         attention_mask = attention_mask[window_index, :]
         attention_mask = attention_mask.reshape(1, 1, 1, seq_len)
-        cu_window_seqlens = torch.arange(0,
-                                         seq_len+1,
-                                         self.vit_merger_window_size * \
-                                            self.vit_merger_window_size * \
-                                            self.spatial_merge_unit,
-                                         device=hidden_states.device)
-        return hidden_states, rotary_pos_emb, None, cu_window_seqlens, \
-               window_index, attention_mask.bool(), grid_thw
+
+        return hidden_states, rotary_pos_emb, attention_mask
 
     def forward(
         self,
