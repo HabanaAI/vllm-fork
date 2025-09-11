@@ -4,11 +4,9 @@
 
 original_env=( $(env) )
 
-# get device name
-device=$(hl-smi -Q name -f csv | tail -n 1)
-available_modules=($(hl-smi -Q module_id -f csv | tail -n +2 | sort | tr '\n' ' '))
-
 # HPU specific constants
+DEVICE_NAME=$(hl-smi -Q name -f csv | tail -n 1)
+AVAILABLE_MODULES=($(hl-smi -Q module_id -f csv | tail -n +2 | sort | tr '\n' ' '))
 BLOCK_SIZE=128
 PREFERED_BATCHED_TOKENS=8192
 PREFERED_NUM_SEQS=128
@@ -114,56 +112,65 @@ set_length(){
     fi
 }
 
-# set up numactl for the specified module IDs
+# set up numactl for the selected module IDs
 set_numactl(){
     if [ "$module_ids" != "None" ]; then
         # Check if module_ids is a comma-separated list of integers
         if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-            IFS="," read -r -a MODULES <<< "$module_ids"
+            IFS="," read -r -a selected_modules <<< "$module_ids"
         else
-            echo "The specified module IDs should be a comma-separated list of integers instead of $module_ids."
+            echo "The selected module IDs should be a comma-separated list of integers instead of $module_ids."
             return
         fi
     else
-        echo no modules specified, skip numactl
+        echo no modules selected, skip numactl
         return
     fi
 
-    HL_TOPO="hl-smi topo -c -N"
-    NODE_MEM=($( echo -e "$($HL_TOPO | grep "^[$(IFS="|" ; echo "${MODULES[*]}")]" | awk '{print $4}' | uniq)" ))
-    NODE_CPUS=($( echo -e "$($HL_TOPO | grep "^[$(IFS="|" ; echo "${MODULES[*]}")]" | awk '{print $2}' | uniq | sed 's/,//g')" ))
+    hl_topo_cmd="hl-smi topo -c -N"
+    memory_nodes=($( echo -e "$($hl_topo_cmd | grep "^[$(IFS="|" ; echo "${selected_modules[*]}")]" | awk '{print $4}' | uniq)" ))
+    cpu_nodes=($( echo -e "$($hl_topo_cmd | grep "^[$(IFS="|" ; echo "${selected_modules[*]}")]" | awk '{print $2}' | uniq | sed 's/,//g')" ))
 
-    if [ "${#NODE_MEM[@]}" -gt 1 ] || [ "${#NODE_CPUS[@]}" -gt 1 ];then
-        echo "The specified modules are not on the same NUMA node, skip numactl"
+    if [ "${#memory_nodes[@]}" -gt 1 ] || [ "${#cpu_nodes[@]}" -gt 1 ];then
+        echo "The selected modules are not on the same NUMA node, skip numactl"
         return
     fi
-    NUM_HPU_PER_NODE=$($HL_TOPO | grep -c "${NODE_CPUS[0]}")
+    memory_node=${memory_nodes[0]}
+    cpu_node=${cpu_nodes[0]}
+    num_hpu_per_node=$($hl_topo_cmd | grep -c "${cpu_node}")
 
-    CPUS_LOW=$(echo "${NODE_CPUS[0]}" | cut -d '-' -f 1)
-    CPUS_UP=$(echo "${NODE_CPUS[0]}" | cut -d '-' -f 2)
-    NUM_CPU_PER_HPU=$(echo "($CPUS_UP-$CPUS_LOW+1)/$NUM_HPU_PER_NODE" | bc)
+    cpus_lower=$(echo "${cpu_node}" | cut -d '-' -f 1)
+    cpus_upper=$(echo "${cpu_node}" | cut -d '-' -f 2)
+    num_cpu_per_hpu=$(echo "($cpus_upper-$cpus_lower+1)/$num_hpu_per_node" | bc)
 
-    CORES=()
-    for MODULE in "${MODULES[@]}"; do
-        MODULE_IDX=$(echo "$MODULE % $NUM_HPU_PER_NODE" | bc)
-        CORE_LOW=$(echo "$CPUS_LOW + ($NUM_CPU_PER_HPU * $MODULE_IDX)" | bc)
-        CORE_UP=$(echo "$CORE_LOW + $NUM_CPU_PER_HPU - 1" | bc)
-        CORES+=("$CORE_LOW-$CORE_UP")
+    selected_cores=()
+    for module_id in "${selected_modules[@]}"; do
+        local_idx=$(echo "$module_id % $num_hpu_per_node" | bc)
+        core_lower=$(echo "$cpus_lower + ($num_cpu_per_hpu * $local_idx)" | bc)
+        core_upper=$(echo "$core_lower + $num_cpu_per_hpu - 1" | bc)
+        selected_cores+=("$core_lower-$core_upper")
     done
-    CORES_STR=$(IFS="," ; echo "${CORES[*]}")
+    core_ids=$(IFS="," ; echo "${selected_cores[*]}")
 
-    NUMA_CTL="numactl -C $CORES_STR -p ${NODE_MEM[0]}"
-    echo "using '$NUMA_CTL' for module id: $module_ids"
+    NUMA_CTL_CMD="numactl -C $core_ids -p ${memory_node}"
+    echo "using '$NUMA_CTL_CMD' for module id: $module_ids"
 }
 
 set_module_ids(){
     if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-        IFS="," read -r -a MODULES <<< "$module_ids"
+        IFS="," read -r -a selected_modules <<< "$module_ids"
         # check if the length of module_ids is equal to num_hpu
-        if [ ${#MODULES[@]} -ne "$num_hpu" ]; then
+        if [ ${#selected_modules[@]} -ne "$num_hpu" ]; then
             echo "The number of module IDs should be equal to the number of HPUs."
             exit
         fi
+        # make sure all the selected module_ids are in AVAILABLE_MODULES
+        for module_id in "${selected_modules[@]}"; do
+            if [[ ! " ${AVAILABLE_MODULES[*]} " =~ " $module_id " ]]; then
+                echo "The selected module ID $module_id is not available. Available module IDs are: ${AVAILABLE_MODULES[*]}"
+                exit
+            fi
+        done
         if [ "$num_hpu" -gt 1 ]; then
             export HABANA_VISIBLE_MODULES=$module_ids
         else
@@ -173,11 +180,24 @@ set_module_ids(){
         # set up numactl based on module ids
         set_numactl
     elif [ "$module_ids" == "None" ]; then
-        echo "No module IDs specified, skip numactl"
-        NUMA_CTL=""
-        export HABANA_VISIBLE_MODULES=$(IFS="," ; echo "${available_modules[*]}")
+        echo "No module IDs selected, skip numactl"
+        NUMA_CTL_CMD=""
+        # if HABANA_VISIBLE_MODULES is not set or is 'all', use all available modules
+        if [ -z "$HABANA_VISIBLE_MODULES" ] || [ "$HABANA_VISIBLE_MODULES" == "all" ]; then
+            export HABANA_VISIBLE_MODULES=$(IFS="," ; echo "${AVAILABLE_MODULES[*]}")
+        else
+            # make sure all the visible module_ids are in AVAILABLE_MODULES
+            IFS="," read -r -a visible_modules <<< "$HABANA_VISIBLE_MODULES"
+            for module_id in "${visible_modules[@]}"; do
+                if [[ ! " ${AVAILABLE_MODULES[*]} " =~ " $module_id " ]]; then
+                    echo "The visible module ID $module_id in HABANA_VISIBLE_MODULES is not available."
+                    echo "Available module IDs are: ${AVAILABLE_MODULES[*]}"
+                    exit
+                fi
+            done
+        fi
     else
-        echo "The specified module IDs should be a comma-separated list of integers instead of $module_ids."
+        echo "The selected module IDs should be a comma-separated list of integers instead of $module_ids."
         exit
     fi
 }
