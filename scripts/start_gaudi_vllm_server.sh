@@ -139,7 +139,7 @@ echo "    input_range: [${input_min}, ${input_max}]"
 echo "    output_range: [${output_min}, ${output_max}]"
 echo "    max_num_seqs: ${max_num_seqs}"
 
-case_name=serve_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)
+case_name=serve_${model_name}_${dtype}_${DEVICE_NAME}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)
 log_file="${case_name}.log"
 
 set_config
@@ -147,7 +147,7 @@ set_config
 echo "Changed environment variables:" |& tee "${log_file}"
 echo -e "${changed_env}\n" |& tee -a "${log_file}"
 
-command_string=$(echo ${NUMA_CTL} \
+command_string=$(echo ${NUMA_CTL_CMD} \
 python3 -m vllm.entrypoints.openai.api_server \
     --block-size "${BLOCK_SIZE}" \
     --host "${host}" --port "${port}" \
@@ -164,9 +164,8 @@ python3 -m vllm.entrypoints.openai.api_server \
     --distributed_executor_backend "${dist_backend}" \
     "${extra_params[@]}")
 
-echo
-echo "Start a vLLM server for ${model_name} on Gaudi $device with command:" |& tee -a "${log_file}"
-echo "${command_string}" |& tee -a "${log_file}"
+echo "Start a vLLM server for ${model_name} on Gaudi $DEVICE_NAME with command:" |& tee -a "${log_file}"
+echo -e "${command_string}\n" |& tee -a "${log_file}"
 echo "The log will be saved to ${case_name}.log"
 
 eval "${command_string}" |& tee -a "${case_name}".log 2>&1
