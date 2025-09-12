@@ -1357,10 +1357,8 @@ def main(args):
     }
     llm = LLM(**engine_args)
     
-#   proc = llm.llm_engine.input_preprocessor.mm_processor
-#   print("MM processor:", type(proc).__name__)  # 期望看到 Ovis 相关名称
-    print("Architectures:", llm.llm_engine.model_config.hf_config.get("architectures"))
-    # 期望含 Ovis2_5ForCausalLM 或同名（若你加了 override 则更确定）
+    proc = llm.llm_engine.input_preprocessor.mm_processor
+    print("MM processor:", type(proc).__name__)  # 期望看到 Ovis 相关名称
     
 
     # Don't want to check the flag multiple times, so just hijack `prompts`.
