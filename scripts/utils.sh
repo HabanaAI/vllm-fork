@@ -6,7 +6,6 @@ original_env=( $(env) )
 
 # HPU specific constants
 DEVICE_NAME=$(hl-smi -Q name -f csv | tail -n 1)
-AVAILABLE_MODULES=($(hl-smi -Q module_id -f csv | tail -n +2 | sort | tr '\n' ' '))
 BLOCK_SIZE=128
 PREFERED_BATCHED_TOKENS=8192
 PREFERED_NUM_SEQS=128
@@ -157,6 +156,13 @@ set_numactl(){
 }
 
 set_module_ids(){
+    all_modules=($(hl-smi -Q module_id -f csv | tail -n +2 | sort | tr '\n' ' '))
+    # find all modules with 0% memory utilization
+    available_modules=($(hl-smi -Q module_id,utilization.memory -f csv | awk -F, '$2 ~ /0 %/ && NR > 1 {print $1}' | sort | tr '\n' ' '))
+    used_modules=($(comm -13 <(printf "%s\n" "${available_modules[@]}" | sort) <(printf "%s\n" "${all_modules[@]}" | sort)))
+    echo "All modules: ${all_modules[*]}"
+    echo "Available modules (0% memory utilization): ${available_modules[*]}"
+    echo "Used modules (non-zero memory utilization): ${used_modules[*]}"
     if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
         IFS="," read -r -a selected_modules <<< "$module_ids"
         # check if the length of module_ids is equal to num_hpu
@@ -164,10 +170,10 @@ set_module_ids(){
             echo "The number of module IDs should be equal to the number of HPUs."
             exit
         fi
-        # make sure all the selected module_ids are in AVAILABLE_MODULES
+        # make sure all the selected module_ids are in available_modules
         for module_id in "${selected_modules[@]}"; do
-            if [[ ! " ${AVAILABLE_MODULES[*]} " =~ " $module_id " ]]; then
-                echo "The selected module ID $module_id is not available. Available module IDs are: ${AVAILABLE_MODULES[*]}"
+            if [[ ! " ${available_modules[*]} " =~ " $module_id " ]]; then
+                echo "The selected module ID $module_id is not available. Available module IDs are: ${available_modules[*]}"
                 exit
             fi
         done
@@ -184,14 +190,14 @@ set_module_ids(){
         NUMA_CTL_CMD=""
         # if HABANA_VISIBLE_MODULES is not set or is 'all', use all available modules
         if [ -z "$HABANA_VISIBLE_MODULES" ] || [ "$HABANA_VISIBLE_MODULES" == "all" ]; then
-            export HABANA_VISIBLE_MODULES=$(IFS="," ; echo "${AVAILABLE_MODULES[*]}")
+            export HABANA_VISIBLE_MODULES=$(IFS="," ; echo "${available_modules[*]}")
         else
-            # make sure all the visible module_ids are in AVAILABLE_MODULES
+            # make sure all the visible module_ids are in available_modules
             IFS="," read -r -a visible_modules <<< "$HABANA_VISIBLE_MODULES"
             for module_id in "${visible_modules[@]}"; do
-                if [[ ! " ${AVAILABLE_MODULES[*]} " =~ " $module_id " ]]; then
+                if [[ ! " ${available_modules[*]} " =~ " $module_id " ]]; then
                     echo "The visible module ID $module_id in HABANA_VISIBLE_MODULES is not available."
-                    echo "Available module IDs are: ${AVAILABLE_MODULES[*]}"
+                    echo "Available module IDs are: ${available_modules[*]}"
                     exit
                 fi
             done

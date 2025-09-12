@@ -164,9 +164,8 @@ python3 -m vllm.entrypoints.openai.api_server \
     --distributed_executor_backend "${dist_backend}" \
     "${extra_params[@]}")
 
-echo
 echo "Start a vLLM server for ${model_name} on Gaudi $DEVICE_NAME with command:" |& tee -a "${log_file}"
-echo "${command_string}" |& tee -a "${log_file}"
+echo -e "${command_string}\n" |& tee -a "${log_file}"
 echo "The log will be saved to ${case_name}.log"
 
 eval "${command_string}" |& tee -a "${case_name}".log 2>&1

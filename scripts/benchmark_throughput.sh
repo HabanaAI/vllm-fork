@@ -183,7 +183,7 @@ python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     "${extra_params[@]}")
 
 echo "Benchmark throughput for ${model_name} on Gaudi ${DEVICE_NAME} with command:" |& tee -a "${log_file}"
-echo "${command_string}" |& tee -a "${log_file}"
+echo -e "${command_string}\n" |& tee -a "${log_file}"
 echo "The log will be saved to ${case_name}.log"
 
 eval "${command_string}" |& tee -a "${case_name}".log 2>&1
