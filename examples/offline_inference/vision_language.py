@@ -1356,10 +1356,6 @@ def main(args):
         "disable_mm_preprocessor_cache": args.disable_mm_preprocessor_cache,
     }
     llm = LLM(**engine_args)
-    
-    proc = llm.llm_engine.input_preprocessor.mm_processor
-    print("MM processor:", type(proc).__name__)  # 期望看到 Ovis 相关名称
-    
 
     # Don't want to check the flag multiple times, so just hijack `prompts`.
     prompts = (
