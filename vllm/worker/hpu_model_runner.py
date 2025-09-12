@@ -113,8 +113,8 @@ class VisionBuckets:
 
     def __init__(self, is_batch_based):
         self.is_batch_based = is_batch_based
-        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
-        if envvar == 'None':
+        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "").lower()
+        if envvar == 'none':
             self.multimodal_buckets = None
         else:
             if envvar == "":
@@ -164,8 +164,8 @@ class AudioBuckets:
     '''
 
     def __init__(self):
-        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS_AUDIO', "")
-        if envvar == 'None':
+        envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS_AUDIO', "").lower()
+        if envvar == 'none':
             self.multimodal_buckets = None
         else:
             if envvar == "":
