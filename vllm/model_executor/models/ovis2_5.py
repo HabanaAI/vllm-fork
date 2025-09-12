@@ -444,27 +444,23 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
                 raise ValueError("Incorrect type of indicator_tokens. "
                                  f"Got type: {type(indicator_tokens)}")
                 
-            indicator_tokens=flatten_bn(flatten_bn(indicator_tokens),
-                                            concat=True)
-            grids=flatten_bn(flatten_bn(grids), concat=True)
-            patches_per_image=[
+            indicator_tokens_ = flatten_bn(flatten_bn(indicator_tokens), concat=True)
+            grids_ = flatten_bn(flatten_bn(grids), concat=True)
+            patches_per_image_ = [
                     x.shape[0] // (self.config.vit_config.hidden_stride**2)
                     for x in flatten_bn(pixel_values)
                 ]
-            flat_data=flatten_bn(flatten_bn(pixel_values), concat=True)
+            flat_data_ = flatten_bn(flatten_bn(pixel_values), concat=True)
+
             re = OvisImagePatchInputs(
                 type="image_patches",
-                flat_data=flatten_bn(flatten_bn(pixel_values), concat=True),
-                patches_per_image=[
-                    x.shape[0] // (self.config.vit_config.hidden_stride**2)
-                    for x in flatten_bn(pixel_values)
-                ],
-                indicator_tokens=flatten_bn(flatten_bn(indicator_tokens),
-                                            concat=True),
-                grids=flatten_bn(flatten_bn(grids), concat=True),
+                flat_data=flat_data_,
+                patches_per_image=patches_per_image_,
+                indicator_tokens=indicator_tokens_,
+                grids=grids_,
             )
-            print(f"libin debug _parse_and_validate_visual_input 1 {flat_data.shape=} {indicator_tokens.shape=} {grids.shape=}")
-            [print(f"libin debug _parse_and_validate_visual_input {p.shape=}") for p in patches_per_image]
+            print(f"libin debug _parse_and_validate_visual_input 1 {flat_data_.shape=} {indicator_tokens_.shape=} {grids_.shape=}")
+            [print(f"libin debug _parse_and_validate_visual_input {p=}") for p in patches_per_image_]
             return re
 
         raise AssertionError("This line should be unreachable.")
@@ -478,7 +474,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
 
         indicator_per_image = list(
             map(lambda x: 2 if x > 1 else x + 2, patches_per_image))
-        print(f"libin debug process_image_input {image_patches_flat.shape=} {patches_per_image.shape=} {indicator_tokens.shape=} {grid_thws.shape} {len(indicator_per_image)=}")
+        print(f"libin debug process_image_input {image_patches_flat.shape=} patches_per_image={len(patches_per_image)} {indicator_tokens.shape=} {grid_thws.shape} {len(indicator_per_image)=}")
         target_dtype = self.visual_tokenizer.dtype
         visual_tokens = self.visual_tokenizer(
             image_patches_flat.to(target_dtype), grid_thws)
@@ -548,7 +544,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
             vision_embeddings = self.get_multimodal_embeddings(**kwargs)
-            print(f"libin debug get_multimodal_embeddings done {vision_embeddings.shape=}")
+            if vision_embeddings:
+                print(f"libin debug get_multimodal_embeddings done {vision_embeddings[0].shape=}")
             inputs_embeds = self.get_input_embeddings(input_ids,
                                                       vision_embeddings)
             print(f"libin debug get_input_embeddings done {input_ids.shape=}")
@@ -563,7 +560,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal):
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
         )
-        printf(f"libin debug finish forward {positions.shape=} {inputs_embeds.shape=} {hidden_states.shape=}")
+        print(f"libin debug finish forward {positions.shape=} {inputs_embeds.shape=} {hidden_states.shape=}")
         return hidden_states
 
     def compute_logits(
