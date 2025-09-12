@@ -815,25 +815,34 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
 # Ovis2_5
 def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "AIDC-AI/Ovis2.5-2B"
-
+    
     engine_args = EngineArgs(
         model=model_name,
         max_model_len=4096,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="half",
+        dtype="bfloat16",           # half 也行；Gaudi 上 bfloat16 更稳
         limit_mm_per_prompt={modality: 1},
+        # ⚠️ 不要在 Ovis 路线下加 Qwen2VL 的 override
+        # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},  # 如需强制，可打开这一行（见说明）
+        mm_processor_kwargs={"use_fast": True},  # 可选：去掉 slow processor 警告
     )
     
-    placeholder = "<image>" if modality == "image" else "<video>"
-
-    # 手写 Ovis 占位符，不用 chat template
+    # Ovis 占位符：<image>/<video>
+    if modality == "image":
+        placeholder = "<image>"
+    elif modality == "video":
+        placeholder = "<video>"
+    else:
+        raise ValueError("modality must be image or video")
+        
     prompts = [f"{placeholder}\n{q}" for q in questions]
     
     return ModelRequestData(
         engine_args=engine_args,
         prompts=prompts,
     )
+    
 
 # PaliGemma
 def run_paligemma(questions: list[str], modality: str) -> ModelRequestData:
@@ -1347,6 +1356,12 @@ def main(args):
         "disable_mm_preprocessor_cache": args.disable_mm_preprocessor_cache,
     }
     llm = LLM(**engine_args)
+    
+    proc = llm.llm_engine.input_preprocessor.mm_processor
+    print("MM processor:", type(proc).__name__)  # 期望看到 Ovis 相关名称
+    print("Architectures:", llm.llm_engine.model_config.hf_config.get("architectures"))
+    # 期望含 Ovis2_5ForCausalLM 或同名（若你加了 override 则更确定）
+    
 
     # Don't want to check the flag multiple times, so just hijack `prompts`.
     prompts = (
@@ -1365,10 +1380,14 @@ def main(args):
     assert args.num_prompts > 0
     if args.num_prompts == 1:
         # Single inference
-        inputs = {
-            "prompt": prompts[0],
-            "multi_modal_data": {modality: data},
-        }
+        if modality == "image":
+            mm = {"image": [data]}     # ← 包成列表
+        elif modality == "video":
+            mm = {"video": [data]}     # ← 同理（你的 data 是帧序列/元组）
+        else:
+            raise ValueError("modality must be image or video")
+            
+        inputs = {"prompt": prompts[0], "multi_modal_data": mm}
     else:
         # Batch inference
         if args.image_repeat_prob is not None:
@@ -1379,10 +1398,8 @@ def main(args):
         else:
             # Use the same image for all prompts
             inputs = [
-                {
-                    "prompt": prompts[i % len(prompts)],
-                    "multi_modal_data": {modality: data},
-                }
+                {"prompt": prompts[i % len(prompts)],
+                "multi_modal_data": {"image": [data]} if modality=="image" else {"video": [data]}}
                 for i in range(args.num_prompts)
             ]
     print('\ninputs:',inputs)
