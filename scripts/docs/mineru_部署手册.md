@@ -1,64 +1,63 @@
-## Run Docker Image
-Use the following commands to run a Docker image.
+## 启动容器
+使用下面命令启动容器
 ```bash
 $ docker pull vault.habana.ai/gaudi-docker/1.21.0/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
 $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.21.0/ubuntu22.04/habanalabs/pytorch-installer-2.6.0:latest
 ```
 
-## Install MinerU from source
+## 源码安装Mineru
 ```bash
 $ git clone https://github.com/yingjie-han/MinerU.git
 $ git checkout release-2.1.0-hpu
 $ pip install -e .[core]
 ```
 
-## Install optimum-habana from source
+## 源码安装optimum-habana
 ```bash
 $ git clone https://github.com/huggingface/optimum-habana
 $ cd optimum-habana && git checkout 48a2dae1709b50630c6fc93fdf76c52fdfb82566
 $ pip install -e .
 ```
 
-## Model Source Configuration
+## 模型源配置
+MinerU 默认在首次运行时自动从 HuggingFace 下载所需模型。若无法访问 HuggingFace，可通过以下方式切换模型源：
 
-MinerU automatically downloads required models from HuggingFace on first run. If HuggingFace is inaccessible, you can switch model sources:
-
-#### Switch to ModelScope Source
+#### 切换至 ModelScope 源
 
 ```bash
 mineru -p <input_path> -o <output_path> --source modelscope
 ```
 
-Or set environment variable:
+或设置环境变量：
 
 ```bash
 export MINERU_MODEL_SOURCE=modelscope
 mineru -p <input_path> -o <output_path>
 ```
 
-#### Using Local Models
+#### 使用本地模型
 
-##### 1. Download Models Locally
+##### 1. 下载模型到本地
 
 ```bash
 mineru-models-download --help
 ```
 
-Or use interactive command-line tool to select models:
+或使用交互式命令行工具选择模型下载：
 
 ```bash
 mineru-models-download
 ```
 
-After download, model paths will be displayed in current terminal and automatically written to `mineru.json` in user directory.
+下载完成后，模型路径会在当前终端窗口输出，并自动写入用户目录下的 mineru.json。
 
-##### 2. Parse Using Local Models
+##### 2. 使用本地模型进行解析
 
 ```bash
 mineru -p <input_path> -o <output_path> --source local
 ```
 
-Or enable via environment variable:
+或通过环境变量启用：
 
 ```bash
 export MINERU_MODEL_SOURCE=local
@@ -66,19 +65,19 @@ mineru -p <input_path> -o <output_path>
 ```
 
 
-## Runing pipeline on CPU
+## 在CPU上运行Mineru命令行
 ```bash
 $ mineru -p ./test.pdf -o ./ -m ocr
 ```
 
-## Runing pipeline on Gaudi
+## 在Gaudi上运行Mineru命令行
 
-### modify code in doclayout_yolo and ultralytics for hpu
+### 需要修改已安装的doclayout_yolo和ultralytics中的如下代码：
 ```bash
 vim /usr/local/lib/python3.10/dist-packages/doclayout_yolo/engine/predictor.py
 vim /usr/local/lib/python3.10/dist-packages/ultralytics/engine/predictor.py
 ```
-Change the device parameter in setup_model() as following:
+参照下面修改setup_model()函数中的device参数:
 
 ```bash
     def setup_model(self, model, verbose=True):
@@ -104,7 +103,7 @@ Change the device parameter in setup_model() as following:
 vim /usr/local/lib/python3.10/dist-packages/doclayout_yolo/nn/autobackend.py
 vim /usr/local/lib/python3.10/dist-packages/ultralytics/nn/autobackend.py
 ```
-Add the  hpu device branch in warmup() as following:
+参照如下修改warmup()，为其增加if self.device  == "hpu"分支:
 ```bash
     def warmup(self, imgsz=(1, 3, 640, 640)):
         """
@@ -125,7 +124,7 @@ Add the  hpu device branch in warmup() as following:
                 self.forward(im)  # warmup
 ```
 
-### Runing pipeline on hpu
+### 在hpu上用命令行运行mineru
 ```bash
 $ MINERU_DEVICE_MODE=hpu mineru -p ./test.pdf -o ./ -d hpu -m ocr
 ```
