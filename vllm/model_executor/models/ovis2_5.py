@@ -400,14 +400,14 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
     ) -> list[PromptReplacement]:
 
         def get_replacement_ovis(item_idx, modality: str):
+            # MultiModalKwargs 正确的取法：先按模态取“这一条”的字段集合
+            item = out_mm_kwargs.get_item(modality, item_idx)
             if modality == "image":
-                out_item = out_mm_kwargs["image"][item_idx]
-                grid = out_item["grids"].data
-            elif modality == "video":
-                out_item = out_mm_kwargs["video"][item_idx]
-                grid = out_item["video_grids"].data
+                grid = item["grids"].data              # 对应 _ovis2_5_field_config() 里的 'grids'
+            else:  # modality == "video"
+                grid = item["video_grids"].data        # 对应 'video_grids'
             hf_processor = self.info.get_hf_processor()
-            return hf_processor.construct_visual_placeholders(grid[0], )
+            return hf_processor.construct_visual_placeholders(grid[0])
 
         return [
             PromptReplacement(
@@ -649,3 +649,4 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
 
     def get_language_model(self) -> torch.nn.Module:
         return self.llm
+    
