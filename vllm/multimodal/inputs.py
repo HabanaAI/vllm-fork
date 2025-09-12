@@ -601,6 +601,7 @@ class MultiModalKwargsItem(UserDict[str, MultiModalFieldElem]):
         return next(iter(modalities))
 
 
+<<<<<<< HEAD
 _I = TypeVar(
     "_I",
     MultiModalKwargsItem,
@@ -686,6 +687,8 @@ MultiModalKwargsOptionalItems: TypeAlias = Union[
 ]
 
 
+=======
+>>>>>>> parent of 070b874f9 (update)
 # NOTE: UserDict is for V0 compatibility.
 # V1 should access individual items via `get_item`.
 class MultiModalKwargs(UserDict[str, NestedTensors]):
@@ -919,7 +922,7 @@ class MultiModalInputs(TypedDict):
     token_type_ids: NotRequired[list[int]]
     """The token type IDs of the prompt."""
 
-    mm_kwargs: MultiModalKwargsOptionalItems
+    mm_kwargs: MultiModalKwargs
     """Keyword arguments to be directly passed to the model after batching."""
 
     mm_hashes: Optional["MultiModalHashDict"]
@@ -952,4 +955,3 @@ class MultiModalEncDecInputs(MultiModalInputs):
 
     encoder_token_type_ids: NotRequired[list[int]]
     """The token type IDs of the encoder prompt."""
-    
