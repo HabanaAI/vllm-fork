@@ -402,8 +402,10 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
         def get_replacement_ovis(item_idx, modality: str):
             # MultiModalKwargs 正确的取法：先按模态取“这一条”的字段集合
             item = out_mm_kwargs.get_item(modality, item_idx)
+            print('item:', item)
             if modality == "image":
                 grid = item["grids"].data              # 对应 _ovis2_5_field_config() 里的 'grids'
+                print('grid:', grid)
             else:  # modality == "video"
                 grid = item["video_grids"].data        # 对应 'video_grids'
             hf_processor = self.info.get_hf_processor()
