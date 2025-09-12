@@ -156,13 +156,39 @@ set_numactl(){
 }
 
 set_module_ids(){
-    all_modules=($(hl-smi -Q module_id -f csv | tail -n +2 | sort | tr '\n' ' '))
-    # find all modules with 0% memory utilization
-    available_modules=($(hl-smi -Q module_id,utilization.memory -f csv | awk -F, '$2 ~ /0 %/ && NR > 1 {print $1}' | sort | tr '\n' ' '))
-    used_modules=($(comm -13 <(printf "%s\n" "${available_modules[@]}" | sort) <(printf "%s\n" "${all_modules[@]}" | sort)))
-    echo "All modules: ${all_modules[*]}"
-    echo "Available modules (0% memory utilization): ${available_modules[*]}"
-    echo "Used modules (non-zero memory utilization): ${used_modules[*]}"
+    module_to_index=()
+    all_modules=()
+    while IFS=',' read -r index module_id; do
+        [[ $index == "index" ]] && continue
+        index=$(echo $index | xargs)
+        module_id=$(echo $module_id | xargs)
+        all_modules+=("$module_id")
+        module_to_index[$module_id]=$index
+    done < <(hl-smi -Q index,module_id -f csv)
+
+    # sort all_modules
+    mapfile -t all_modules < <(printf "%s\n" "${all_modules[@]}" | sort -n)
+
+    used_modules=()
+    available_modules=()
+    for module_id in "${all_modules[@]}"; do
+        module_index=${module_to_index[$module_id]}
+        # check if the device is in-use
+        if [ -n "$(lsof /dev/accel/accel_controlD$module_index)" ]; then
+            used_modules+=("$module_id")
+        else
+            available_modules+=("$module_id")
+        fi
+    done
+
+    if [ ${#used_modules[@]} -eq 0 ]; then
+        echo available modules: ${available_modules[*]}
+    else
+        echo all modules: ${all_modules[*]}
+        echo modules in-use: ${used_modules[*]}
+        echo available modules: ${available_modules[*]}
+    fi
+
     if [[ $module_ids =~ ^[0-9]+(,[0-9]+)*$ ]]; then
         IFS="," read -r -a selected_modules <<< "$module_ids"
         # check if the length of module_ids is equal to num_hpu
