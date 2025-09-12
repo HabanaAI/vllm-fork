@@ -290,21 +290,12 @@ set_perf_tuning(){
         export VLLM_PROMPT_USE_FUSEDSDPA=true
     fi
 
-    # VLLM_FP32_SOFTMAX=true by default for model_type=qwen2* models.
-    # set VLLM_FP32_SOFTMAX=false for models without accuracy issue.
-    if [[ $model_name_lower == *"deepseek-r1-distill-qwen-14b"* \
-        || $model_name_lower == *"deepseek-r1-distill-qwen-32b"* \
-        || $model_name_lower == *"deepseek-r1-distill-llama-8b"* \
-        || $model_name_lower == *"deepseek-r1-distill-llama-70b"* \
-        || $model_name_lower == *"qwen3-8b"* \
-        || $model_name_lower == *"qwen3-14b"* \
-        || $model_name_lower == *"qwen3-32b"* \
-        || $model_name_lower == *"qwq-32b"* \
-        || $model_name_lower == *"qwen3-30b-a3b"* \
-        || $model_name_lower == *"qwen3-235b-a22b"* \
-        ]]; then
-        export VLLM_FP32_SOFTMAX=false
-        echo "Set VLLM_FP32_SOFTMAX=false for $model_name"
+    # VLLM_FP32_SOFTMAX=false by default, set to true for models with accuracy issues.
+    if [[ $model_name_lower == *"deepseek-r1-distill-qwen-7b"* \
+            || $model_name_lower == *"qwen2-7b-instruct"* \
+            || $model_name_lower == *"qwen2.5-7b-instruct"* ]]; then
+        export VLLM_FP32_SOFTMAX=true
+        echo "Set VLLM_FP32_SOFTMAX=true for $model_name"
     fi
 
     # check if 'experts' in the model's config.json
