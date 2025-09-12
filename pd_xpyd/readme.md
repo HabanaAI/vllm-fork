@@ -44,29 +44,14 @@ mlx5_9 port 1 ==> ens115np0 (Up)
 
 ```
 
-### 1. Adjust 1p_start_prefill.sh to automatically launch/stop etcd & mooncake master server. refer to following example:
-
-```bash
-if [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
-    if [ "$BENCHMARK_MODE" == "1" ]; then
-       	source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark
-       	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh benchmark"
-    else
-       	source "$BASH_DIR"/start_etcd_mooncake_master.sh
-       	echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
-    fi
-fi
-
-```
-
-### 2. Adjust dp0_xp2d_start_decode.sh, dp1_xp2d_start_decode.sh for decode node(DP16/2Nodes as an example)
+### 1. Adjust dp0_xp2d_start_decode.sh, dp1_xp2d_start_decode.sh for decode node(DP16/2Nodes as an example)
 
 ```bash
 last line: source "$BASH_DIR"/dp_start_decode.sh g13 16 $TP_SIZE 0 "10.239.129.81" 
 parameters are: machine, DP Size, TP Size, DP Index, DP Host IP
 ```
 
-### 3. Adjust proxy server, xpyd_start_proxy.sh
+### 2. Adjust proxy server, xpyd_start_proxy.sh
 
 ```bash
 # Adjust Prefill/Decode IPs
@@ -74,34 +59,33 @@ PREFILL_IPS=("10.239.129.9" "10.239.129.67" "10.239.129.21" "10.239.128.165" "10
 DECODE_IPS=("10.239.129.81" "10.239.129.165" "10.239.129.67" "10.239.129.21")
 ```
 
-### 4. Start prefill server(s): source 1p_start_prefill.sh $machine (note: the machine with etcd/mooncake master MUST be launched firstly)
+### 3. Start prefill server(s): 
 
-### 5. Start decode servers(s): source dp0_xp2d_start_decode.sh / source dp1_xp2d_start_decode.sh
+```bash
+source 1p_start_prefill.sh $machine master (master means the mooncake/etcd master will be launched on this node)
+source 1p_start_prefill.sh $machine (start prefill node without mooncake/ected master)
+```
 
-### 6. Start proxy server: bash xpyd_start_proxy.sh x y
+### 4. Start decode servers(s): source dp0_xp2d_start_decode.sh / source dp1_xp2d_start_decode.sh
+
+### 5. Start proxy server: bash xpyd_start_proxy.sh x y
 
 ```bash
 # note: x for prefill nodes number, y for decode nodes number
 ```
 
-### 7. Launch client command for inference. --host ip is the proxy server ip
+### 6. Launch client command for inference. --host ip is the proxy server ip
 
 ## Benchmark mode:
 
 ```bash
 # A benchmark mode is designed for easy & quick benchmarking with 1 prefill node for any large decode batch size
 benchmark bs1024, 2 decode nodes, tp size 1, as an example:
+step0: set BENCHMARK_MODE=1 in pd_env.sh
 step1: revise --repeat_d_times to 1023 (1024-1) in xpyd_start_proxy.sh
-step2: launch prefill server: source 1p_start_prefill.sh $machine benchmark 
+step2: launch prefill server as normal (only 1 server) 
 step3: launch decode server(s) as normal
-step4: launch proxy server: bash xpyd_start_proxy.sh 1 2 1 false benchmark 
+step4: launch proxy server: bash xpyd_start_proxy.sh 1 2 1 benchmark 
 step5: lanch client command with only 1 prompt
-python3 benchmarks/benchmark_serving.py --backend vllm --model /mnt/disk2/hf_models/DeepSeek-R1-G2-static/ --dataset-name sonnet --request-rate inf --host 10.239.129.9 --port 8868 --sonnet-input-len 2000 --sonnet-output-len 1000 --sonnet-prefix-len 100 --trust-remote-code --max-concurrency 1024 --num-prompts 1 --ignore-eos --burstiness 1000 --dataset-path benchmarks/sonnet.txt --save-result
-```
-```bash
-# note: If the vllm is is shared across nodes (i.e. one code base in nfs, and multi-nodes link to the same code base),
-		you can switch benchmark mode and normal mode automatically.
-#       If the vllm is not share, make sure VLLM_USE_ASYNC_TRANSFER_IN_PD in pd_env.sh is set to(mannually)
-		0 for benchmark mode 
-		1 for normal run mode
+python3 benchmarks/benchmark_serving.py --backend vllm --model /mnt/disk2/hf_models/DeepSeek-R1-G2/ --dataset-name sonnet --request-rate inf --host 10.239.129.9 --port 8868 --sonnet-input-len 2000 --sonnet-output-len 1000 --sonnet-prefix-len 100 --trust-remote-code --max-concurrency 1024 --num-prompts 1 --ignore-eos --burstiness 1000 --dataset-path benchmarks/sonnet.txt --save-result
 ```
