@@ -148,6 +148,7 @@ class VisualTokenizer(torch.nn.Module):
             print("[vis] first grid_thw =", grid_thws[0].tolist())
             
         features = self.vit(pixel_values, grid_thws)
+        print('\n\n\nfeatures:',features,'\n\n\n')
         # refer to qwen2.5-vl patchmerger
         seq_len, _ = features.shape
         features = features.reshape(seq_len // (self.config.hidden_stride**2),
