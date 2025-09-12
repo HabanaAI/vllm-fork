@@ -213,7 +213,7 @@ HPU_SIZE=2
      -t $HPU_SIZE
 ```
 
-For Qwen3-235B-A22B, the calibration process needs 8 HPUs to load the original bfloat16 weights. Then the fp8 inference could run on 4 HPUs. Thus the measurements should be unified as follow:
+For Qwen3-235B-A22B, the original bfloat16 weights could not fit into 4 HPUs. It is recommended to use [Qwen3-235B-A22B-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-FP8) to do the calibration with 8 HPUs and then unify the calibration data for 4 HPUs as follow:
 
 ``` bash
 bash calibrate_model.sh \
@@ -222,6 +222,9 @@ bash calibrate_model.sh \
      -o quantization \
      -t 8 -b 256 -r 4 -u
 ```
+
+Then the resault measurement data from the calibration could be used to run fp8 inference with 8 or 4 HPUs.
+> Note that `-u` must passed to the calibration script for MoE models except for [Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct).
 
 #### 3. Make the Quantization folder
 Create a quantization folder at the same level as start_gaudi_vllm_server.sh.
