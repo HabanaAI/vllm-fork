@@ -795,7 +795,7 @@ class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
         if padding_len <= 0:
             return pixel_values, image_grid_thw
 
-        logger.info("[MM_BUCKETING] Padding current number pixel {} to {}",
+        logger.info("[MM_BUCKETING] Padding current number pixel %s to %s ",
                     pixel_values.shape[0], desired_number_of_pixels)
 
         # needs to make sure padding_len is even
