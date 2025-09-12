@@ -406,7 +406,7 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
                 out_item = out_mm_kwargs["video"][item_idx]
                 grid = out_item["video_grids"].data
             hf_processor = self.info.get_hf_processor()
-            return hf_processor.construct_visual_placeholders(grid[0], )
+            return hf_processor.construct_visual_placeholders(grid)
 
         return [
             PromptReplacement(
