@@ -54,12 +54,12 @@ export VLLM_EP_SIZE=16
 
 # warmup settings
 export VLLM_SKIP_WARMUP=True
-export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
+#export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="true"
 export PT_HPU_MOE_CHUNK="64, 128"
-export PT_HPU_MOE_TOKEN_BOUNDARY="2048, 4096"
+export PT_HPU_MOE_TOKEN_BOUNDARY="2048, 4096" # to be fine tuned further
 
 # INC FP8 settings
 if [ "$INC_FP8" -eq 1 ]; then
