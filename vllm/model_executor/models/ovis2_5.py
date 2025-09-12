@@ -490,7 +490,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
                 ],
                 indicator_tokens=flatten_bn(flatten_bn(indicator_tokens),
                                             concat=True),
-                grids=(grids[:, 0, :] if isinstance(grids, torch.Tensor) and grids.dim() == 3 else grids).to(torch.long),
+                grids=(torch.as_tensor(grids, dtype=torch.long).view(-1, 3)),
             )
 
         raise AssertionError("This line should be unreachable.")
