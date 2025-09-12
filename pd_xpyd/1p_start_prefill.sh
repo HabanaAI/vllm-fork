@@ -32,6 +32,7 @@ CMD=(
     -tp 8
     --max-num-seqs "$max_num_seqs"
     --trust-remote-code
+    --disable-async-output-proc
     --disable-log-requests
     --max-num-batched-tokens "$max_num_batched_tokens"
     --use-padding-aware-scheduling
