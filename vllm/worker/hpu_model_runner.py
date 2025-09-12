@@ -3264,7 +3264,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f'({100 * len(graphed) / num_candidates:.1f}%) '
                f'used_mem:{format_bytes(total_mem)}')
         logger.info(msg)
-        if "Prompt" in phase and len(self.multimodal_buckets) > 0:
+        if "Prompt" in phase and self.multimodal_buckets is not None and \
+           len(self.multimodal_buckets) > 0:
             phase = "Graph/Multimodal"
             num_candidates = len(self.multimodal_buckets)
             mm_graphed = self.graphed_multimodal_buckets
