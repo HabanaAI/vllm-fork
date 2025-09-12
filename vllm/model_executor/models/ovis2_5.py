@@ -142,6 +142,11 @@ class VisualTokenizer(torch.nn.Module):
 
     def encode(self, pixel_values: torch.Tensor,
                grid_thws: torch.Tensor) -> torch.Tensor:
+        print("[vis] pixel_values.shape =", tuple(pixel_values.shape))
+        print("[vis] grid_thws.shape =", getattr(grid_thws, "shape", None))
+        if isinstance(grid_thws, torch.Tensor):
+            print("[vis] first grid_thw =", grid_thws[0].tolist())
+            
         features = self.vit(pixel_values, grid_thws)
         # refer to qwen2.5-vl patchmerger
         seq_len, _ = features.shape
@@ -409,7 +414,8 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
             else:  # modality == "video"
                 grid = item["video_grids"].data        # 对应 'video_grids'
             hf_processor = self.info.get_hf_processor()
-            return hf_processor.construct_visual_placeholders(grid[0])
+            g = grid[0] if hasattr(grid, "dim") and grid.dim() == 2 else grid
+            return hf_processor.construct_visual_placeholders(g)
 
         return [
             PromptReplacement(
@@ -484,7 +490,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
                 ],
                 indicator_tokens=flatten_bn(flatten_bn(indicator_tokens),
                                             concat=True),
-                grids=flatten_bn(flatten_bn(grids), concat=True),
+                grids=(grids[:, 0, :] if isinstance(grids, torch.Tensor) and grids.dim() == 3 else grids).to(torch.long),
             )
 
         raise AssertionError("This line should be unreachable.")
