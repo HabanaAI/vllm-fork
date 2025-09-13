@@ -1651,8 +1651,8 @@ class HPUModelRunner:
         decode_sampled_requests = []
         if not has_kv_transfer_group():
             assert not (num_prefills > 0 and num_decodes > 0)
-        with set_forward_context(None, self.vllm_config):        with set_forward_context(None, self.vllm_config):
-                self.maybe_setup_kv_connector(scheduler_output)
+        with set_forward_context(None, self.vllm_config):
+            self.maybe_setup_kv_connector(scheduler_output)
         finished_sending, finished_recving = set(), set()
 
         ######################### PREFILLS #########################
