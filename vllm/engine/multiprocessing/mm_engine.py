@@ -134,18 +134,14 @@ class MMLLMEngine(MQLLMEngine):
                     logger.debug("Waiting for new requests in engine loop.")
 
             # Handle any input from the client.
-            logger.info('BOB: handle_new_input+')
             self.handle_new_input()
 
             # Engine step.
-            logger.info('BOB: engine_step+')
             request_outputs = self.engine_step()
 
-            logger.info('BOB: _send_outputs+')
             # Send request outputs (if async, done in engine_step callback).
             if not self.use_async_sockets:
                 self._send_outputs(request_outputs)
-            logger.info('BOB: _send_outputs-')
 
     def engine_step(self) -> List[RequestOutput]:
         """Engine step wrapper with error handling."""
@@ -174,16 +170,13 @@ class MMLLMEngine(MQLLMEngine):
                 request = pickle.loads(frames[0].buffer)
 
                 logger.info("request type is %s", str(type(request)))
-                logger.info("BOB: len(frames) is %s", len(frames))
                 if isinstance(request, RPCProcessRequest):
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors
                         assert isinstance(request.params, SamplingParams)
                         lprocs = cloudpickle.loads(frames[1].buffer)
                         request.params.logits_processors = lprocs
-                    logger.info('BOB: handle_new_input 1')
                     self._handle_process_request(request)
-                    logger.info('BOB: handle_new_input 2')
                 elif isinstance(request, RPCAbortRequest):
                     self._handle_abort_request(request)
                 elif isinstance(request, RPCModelRequest):
@@ -204,9 +197,6 @@ class MMLLMEngine(MQLLMEngine):
 
     def _handle_process_request(self, request: RPCProcessRequest):
         """Handle RPCProcessRequest by adding it to the LLMEngine."""
-        logger.info('BOB: _handle_process_request++')
-        import traceback
-        traceback.print_stack()
 
         request_id = request.request_id
 
@@ -218,11 +208,7 @@ class MMLLMEngine(MQLLMEngine):
 
         try:
             for engine in self.engines:
-                logger.info(
-                    "BOB: engine.model_config.model = %s, request.model=%s",
-                    engine.model_config.model, request.model)
                 if engine.model_config.model == request.model:
-                    logger.info('BOB: add_request...')
                     engine.add_request(
                         request_id=request_id,
                         prompt=request.prompt,

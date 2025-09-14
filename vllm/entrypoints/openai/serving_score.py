@@ -61,21 +61,15 @@ class ServingScores(OpenAIServing):
                                                None]] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
     ) -> list[PoolingRequestOutput]:
-        logger.info('BOB: _embedding_score++')
-
         input_texts = texts_1 + texts_2
 
         engine_prompts: list[TokensPrompt] = []
         tokenize_async = make_async(tokenizer.__call__,
                                     executor=self._tokenizer_executor)
 
-        logger.info('BOB: _embedding_score 1')
-
         tokenization_kwargs = tokenization_kwargs or {}
         tokenized_prompts = await asyncio.gather(
             *(tokenize_async(t, **tokenization_kwargs) for t in input_texts))
-
-        logger.info('BOB: _embedding_score 2')
 
         for tok_result, input_text in zip(tokenized_prompts, input_texts):
 
@@ -89,14 +83,9 @@ class ServingScores(OpenAIServing):
                 TokensPrompt(
                     prompt_token_ids=text_token_prompt["prompt_token_ids"]))
 
-        logger.info('BOB: _embedding_score 3')
-
         # Schedule the request and get the result generator.
         generators: list[AsyncGenerator[PoolingRequestOutput, None]] = []
         pooling_params = request.to_pooling_params()
-
-        logger.info('BOB: _embedding_score 4')
-        logger.info('BOB: engine_prompts=%s', engine_prompts)
 
         for i, engine_prompt in enumerate(engine_prompts):
 
@@ -119,8 +108,6 @@ class ServingScores(OpenAIServing):
                     priority=request.priority,
                 ))
 
-        logger.info('BOB: _embedding_score 5')
-
         result_generator = merge_async_iterators(*generators)
 
         # Non-streaming response
@@ -131,8 +118,6 @@ class ServingScores(OpenAIServing):
 
         async for i, res in result_generator:
             embeddings[i] = res
-
-        logger.info('BOB: _embedding_score 6')
 
         emb_texts_1: list[PoolingRequestOutput] = []
         emb_texts_2: list[PoolingRequestOutput] = []
@@ -152,8 +137,6 @@ class ServingScores(OpenAIServing):
                                              embed_1=emb_texts_1,
                                              embed_2=emb_texts_2)
 
-        logger.info('BOB: _embedding_score 7')
-
         return final_res_batch
 
     async def _cross_encoding_score(
@@ -169,8 +152,6 @@ class ServingScores(OpenAIServing):
                                                None]] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
     ) -> list[PoolingRequestOutput]:
-        logger.info('BOB: _cross_encoding_score++')
-
         request_prompts: list[str] = []
         engine_prompts: list[TokensPrompt] = []
 
@@ -251,8 +232,6 @@ class ServingScores(OpenAIServing):
         raw_request: Optional[Request] = None,
         truncate_prompt_tokens: Optional[int] = None,
     ) -> list[PoolingRequestOutput]:
-        logger.info('BOB: _run_scoring++')
-
         (
             lora_request,
             prompt_adapter_request,
@@ -316,8 +295,6 @@ class ServingScores(OpenAIServing):
 
         See https://sbert.net/docs/package_reference/cross_encoder
         """
-        logger.info('BOB: create_score++')
-
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
@@ -361,8 +338,6 @@ class ServingScores(OpenAIServing):
         https://github.com/infiniflow/ragflow/blob/main/rag/llm/rerank_model.py
         numerous clients use this standard.
         """
-        logger.info('BOB: do_rerank++')
-
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
@@ -400,8 +375,6 @@ class ServingScores(OpenAIServing):
         created_time: int,
         model_name: str,
     ) -> ScoreResponse:
-        logger.info('BOB: request_output_to_score_response++')
-
         items: list[ScoreResponseData] = []
         num_prompt_tokens = 0
 
@@ -437,8 +410,6 @@ class ServingScores(OpenAIServing):
         """
         Convert the output of do_rank to a RerankResponse
         """
-        logger.info('BOB: request_output_to_rerank_response++')
-
         results: list[RerankResult] = []
         num_prompt_tokens = 0
         for idx, final_res in enumerate(final_res_batch):

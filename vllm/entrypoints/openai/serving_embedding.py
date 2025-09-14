@@ -49,7 +49,6 @@ class EmbeddingMixin(OpenAIServing):
         self,
         ctx: ServeContext,
     ) -> Optional[ErrorResponse]:
-        logger.info('BOB: _preprocess++')
         ctx = cast(EmbeddingServeContext, ctx)
         try:
             (
@@ -64,14 +63,11 @@ class EmbeddingMixin(OpenAIServing):
                 tokenizer = await self.engine_client.get_tokenizer(
                     ctx.lora_request)
 
-            logger.info('BOB: _preprocess 1')
             if ctx.prompt_adapter_request is not None:
                 raise NotImplementedError("Prompt adapter is not supported "
                                           "for embedding models")
 
             if isinstance(ctx.request, EmbeddingChatRequest):
-                logger.info('BOB: _preprocess 2')
-
                 (
                     _,
                     ctx.request_prompts,
@@ -92,7 +88,6 @@ class EmbeddingMixin(OpenAIServing):
                     add_special_tokens=ctx.request.add_special_tokens,
                 )
             else:
-                logger.info('BOB: _preprocess 3')
                 (ctx.request_prompts,
                  ctx.engine_prompts) = await self._preprocess_completion(
                      ctx.request,
@@ -110,8 +105,6 @@ class EmbeddingMixin(OpenAIServing):
         self,
         ctx: ServeContext,
     ) -> Union[EmbeddingResponse, ErrorResponse]:
-        logger.info('BOB: _build_response++')
-
         items: list[EmbeddingResponseData] = []
         num_prompt_tokens = 0
 
@@ -119,8 +112,6 @@ class EmbeddingMixin(OpenAIServing):
                                        ctx.final_res_batch)
 
         for idx, final_res in enumerate(final_res_batch_checked):
-            logger.info("BOB: idx=%s _build_response 1", idx)
-
             embedding_res = EmbeddingRequestOutput.from_base(final_res)
 
             item = EmbeddingResponseData(
@@ -132,8 +123,6 @@ class EmbeddingMixin(OpenAIServing):
 
             items.append(item)
             num_prompt_tokens += len(prompt_token_ids)
-
-        logger.info("BOB: items=%s_build_response 2", items)
 
         usage = UsageInfo(
             prompt_tokens=num_prompt_tokens,
@@ -184,8 +173,6 @@ class OpenAIServingEmbedding(EmbeddingMixin):
         model_name = self._get_model_name(request.model)
         request_id = (f"{self.request_id_prefix}-"
                       f"{self._base_request_id(raw_request)}")
-
-        logger.info("BOB: create_embedding request=%s", request)
 
         ctx = EmbeddingServeContext(
             request=request,

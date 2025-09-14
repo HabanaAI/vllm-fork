@@ -212,10 +212,6 @@ class MMLLMEngineClient(MQLLMEngineClient):
             The output `EmbeddingRequestOutput` objects from the LLMEngine
             for the request.
         """
-        logger.info('BOB: encode++ model=%s', model)
-        import traceback
-        traceback.print_stack()
-
         if inputs is not None:
             prompt = inputs
         assert (prompt is not None and pooling_params is not None
@@ -244,7 +240,6 @@ class MMLLMEngineClient(MQLLMEngineClient):
     ) -> Union[AsyncGenerator[RequestOutput, None], AsyncGenerator[
             EmbeddingRequestOutput, None]]:
         """Send an RPCGenerateRequest to the RPCServer and stream responses."""
-        logger.info('BOB: _process_request++')
 
         # If already dead, error out.
         if self._errored_with is not None:
@@ -265,7 +260,6 @@ class MMLLMEngineClient(MQLLMEngineClient):
                     model_config=self.model_config,
                     reasoning_backend=self.decoding_config.reasoning_backend,
                 )
-        logger.info('BOB: _process_request 1')
 
         # 1) Create output queue for this requests.
         queue: asyncio.Queue[Union[RequestOutput,
@@ -284,8 +278,6 @@ class MMLLMEngineClient(MQLLMEngineClient):
             else:
                 lp_bytes = None
 
-            logger.info('BOB: model=%s', model)
-
             request_bytes = pickle.dumps(
                 RPCProcessRequest(
                     prompt=prompt,
@@ -297,7 +289,6 @@ class MMLLMEngineClient(MQLLMEngineClient):
                     prompt_adapter_request=prompt_adapter_request,
                     priority=priority,
                 ))
-            logger.info('BOB: _process_request 2')
 
             # 3) Send the RPCGenerateRequest to the MQLLMEngine.
             parts = (request_bytes,
@@ -321,8 +312,6 @@ class MMLLMEngineClient(MQLLMEngineClient):
                 # Request was canceled by the client.
                 if not finished and not self.errored:
                     await self.abort(request_id)
-            logger.info('BOB: _process_request 3')
 
         finally:
-            logger.info('BOB: _process_request 4')
             self.output_queues.pop(request_id)
