@@ -251,7 +251,6 @@ def _prepare_seq_groups(
 
     for i, seq_group_metadata in enumerate(seq_group_metadata_list):
         seq_ids = seq_group_metadata.seq_data.keys()
-
         if cache is not None:
             sample_obj = cache.get_cached_seq_group_to_sample(len(seq_ids))
 

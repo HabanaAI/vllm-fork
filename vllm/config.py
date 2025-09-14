@@ -738,8 +738,8 @@ class ModelConfig:
                 " must be divisible by tensor parallel size "
                 f"({tensor_parallel_size}).")
 
-        if parallel_config.enable_expert_parallel:
-            self._verify_with_expert_parallelism()
+      #  if parallel_config.enable_expert_parallel:
+       #     self._verify_with_expert_parallelism()
 
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         if pipeline_parallel_size > 1:
@@ -3311,7 +3311,7 @@ class VllmConfig:
                                                        self.speculative_config,
                                                        self.device_config)
             self.model_config.verify_with_parallel_config(self.parallel_config)
-
+        print("self.parallel_config = ",self.parallel_config)
         if self.cache_config is not None:
             self.cache_config.verify_with_parallel_config(self.parallel_config)
 
@@ -3375,6 +3375,7 @@ class VllmConfig:
         current_platform.check_and_update_config(self)
 
         # If MLA is enabled, force disable chunked prefill and prefix caching
+        '''
         if self.model_config and self.model_config.use_mla:
             logger.info("MLA is enabled; forcing chunked prefill and prefix "
                         "caching to be disabled.")
@@ -3383,7 +3384,7 @@ class VllmConfig:
 
             if self.cache_config is not None:
                 self.cache_config.enable_prefix_caching = False
-
+        '''
         if not self.instance_id:
             self.instance_id = random_uuid()[:5]
 
