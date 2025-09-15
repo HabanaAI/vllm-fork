@@ -1180,7 +1180,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         image_token_id = kwargs["image_token_id"]
         assert isinstance(image_token_id, torch.Tensor)
-        self.img_context_token_id = image_token_id.flatten().unique().item()
+        # self.img_context_token_id = image_token_id.flatten().unique().item()  # Graph mode does not support unique() op
+        self.img_context_token_id = image_token_id[0]  # Assume image_token_id is unique
 
         if pixel_values_flat is not None:
             if not isinstance(pixel_values_flat, (torch.Tensor, list)):
@@ -1258,23 +1259,7 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         assert self.vision_model is not None
 
         image_embeds = self.extract_feature(image_input["pixel_values_flat"])
-
-        num_patches = image_input["num_patches"]
-
-        # Only one image in the current batch
-        if len(num_patches) == 1:
-            return (image_embeds.view(-1,
-                                      self.config.text_config.hidden_size), )
-
-        # NOTE: Image embeddings are split into separate tensors for each image
-        # by the size of each embedding.
-        feature_size = image_embeds.shape[1]
-        image_embeds = image_embeds.view(-1,
-                                         self.config.text_config.hidden_size)
-        image_feature_sizes = [
-            num_patches * feature_size for num_patches in num_patches
-        ]
-        return image_embeds.split(image_feature_sizes)
+        return image_embeds
 
     def _parse_and_validate_multimodal_inputs(self, **kwargs: object) -> dict:
         modalities = {}
@@ -1313,19 +1298,19 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
 
         # The result multimodal_embeddings is tuple of tensors, with each
         # tensor correspoending to a multimodal data item (image or video).
-        multimodal_embeddings: tuple[torch.Tensor, ...] = ()
-
+        # multimodal_embeddings: tuple[torch.Tensor, ...] = ()
+        multimodal_embeddings: list[torch.Tensor] = []
         # NOTE: It is important to iterate over the keys in this dictionary
         # to preserve the order of the modalities.
         for modality in modalities:
             if modality == "images":
                 image_input = modalities["images"]
                 vision_embeddings = self._process_image_input(image_input)
-                multimodal_embeddings += vision_embeddings
+                multimodal_embeddings.append(vision_embeddings)
             if modality == "videos":
                 video_input = modalities["videos"]
                 video_embeddings = self._process_image_input(video_input)
-                multimodal_embeddings += video_embeddings
+                multimodal_embeddings.append(video_embeddings)
 
         return multimodal_embeddings
 
