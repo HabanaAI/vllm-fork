@@ -100,7 +100,9 @@ def calculate_warmup_time(lines):
         return float("inf")
 
 
-def set_trial_value(prompt_seq_step, decode_bs, decode_block_step, block_size, args, print_only=False):
+def set_trial_value(prompt_bs_bucket_max, prompt_seq_step,
+                    decode_bs, decode_block_step,
+                    block_size, args, print_only=False):
     # calculate prompt related configs
     max_model_len = args.input_len + (args.output_len * args.n)
     first_block = int((decode_bs * args.input_len) / block_size)
@@ -109,9 +111,9 @@ def set_trial_value(prompt_seq_step, decode_bs, decode_block_step, block_size, a
     # max_num_batched_tokens = args.input_len * args.num_prompts
 
     if print_only:
-        print("  VLLM_PROMPT_BS_BUCKET_MIN = " + str(args.num_prompts))
-        print("  VLLM_PROMPT_BS_BUCKET_STEP = " + str(args.num_prompts))
-        print("  VLLM_PROMPT_BS_BUCKET_MAX = " + str(args.num_prompts))
+        # print("  VLLM_PROMPT_BS_BUCKET_MIN = " + str(args.num_prompts))
+        # print("  VLLM_PROMPT_BS_BUCKET_STEP = " + str(args.num_prompts))
+        print("  VLLM_PROMPT_BS_BUCKET_MAX = " + str(prompt_bs_bucket_max))
         print("  VLLM_PROMPT_SEQ_BUCKET_MIN = " + str(args.input_len))
         print("  VLLM_PROMPT_SEQ_BUCKET_STEP = " + str(prompt_seq_step))
         print("  VLLM_PROMPT_SEQ_BUCKET_MAX = " + str(max_model_len))
@@ -121,10 +123,12 @@ def set_trial_value(prompt_seq_step, decode_bs, decode_block_step, block_size, a
         print("  VLLM_DECODE_BLOCK_BUCKET_MIN = " + str(first_block))
         print("  VLLM_DECODE_BLOCK_BUCKET_STEP = " + str(decode_block_step))
         print("  VLLM_DECODE_BLOCK_BUCKET_MAX = " + str(last_block))
+        print("  max-num-seqs = " + str(prompt_bs_bucket_max + decode_bs))
     else:
-        os.environ["VLLM_PROMPT_BS_BUCKET_MIN"] = str(args.num_prompts)
-        os.environ["VLLM_PROMPT_BS_BUCKET_STEP"] = str(args.num_prompts)
-        os.environ["VLLM_PROMPT_BS_BUCKET_MAX"] = str(args.num_prompts)
+        # VLLM_PROMPT_BS_BUCKET_MIN, VLLM_PROMPT_BS_BUCKET_STEP use default values
+        # os.environ["VLLM_PROMPT_BS_BUCKET_MIN"] = str(args.num_prompts)
+        # os.environ["VLLM_PROMPT_BS_BUCKET_STEP"] = str(args.num_prompts)
+        os.environ["VLLM_PROMPT_BS_BUCKET_MAX"] = str(prompt_bs_bucket_max)
         os.environ["VLLM_PROMPT_SEQ_BUCKET_MIN"] = str(args.input_len)
         os.environ["VLLM_PROMPT_SEQ_BUCKET_STEP"] = str(prompt_seq_step)
         os.environ["VLLM_PROMPT_SEQ_BUCKET_MAX"] = str(max_model_len)
@@ -137,7 +141,11 @@ def set_trial_value(prompt_seq_step, decode_bs, decode_block_step, block_size, a
 
 
 def objective(trial, args):
-    prompt_seq_step = trial.suggest_int('prompt_seq_step',
+    prompt_bs_bucket_max = trial.suggest_int('prompt_bs_bucket_max',
+                                        args.prompt_bs_bucket_max_range[0],
+                                        args.prompt_bs_bucket_max_range[1],
+                                        step=args.prompt_bs_bucket_max_range[2])
+    prompt_seq_step: object = trial.suggest_int('prompt_seq_step',
                               args.prompt_seq_step_range[0],
                               args.prompt_seq_step_range[1],
                               step=args.prompt_seq_step_range[2])
@@ -151,9 +159,10 @@ def objective(trial, args):
                               step=args.decode_block_bucket_step_range[2])
     # currently only fixed block size: 128, 256 are supported
     block_size = trial.suggest_int('block_size', 128, 256, step=128)
-    set_trial_value(prompt_seq_step, decode_bs, decode_block_step, block_size, args)
+    set_trial_value(prompt_bs_bucket_max, prompt_seq_step, decode_bs, decode_block_step, block_size, args)
 
-    benchmark_cmd = construct_benchmark_cmd(args)
+    max_num_seqs = prompt_bs_bucket_max + decode_bs
+    benchmark_cmd = construct_benchmark_cmd(args, max_num_seqs)
     print(benchmark_cmd)
     log_file = f"bucket_tuning_offline_benchmark_{trial.number}.log"
     benchmark_cmd = benchmark_cmd + " 2>&1 | tee " + log_file
@@ -175,7 +184,7 @@ def objective(trial, args):
         print(f"Exception occurred: {e}")
     finally:
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)  # kill all processes in the group
         except Exception:
             pass
         logpipe.close()
@@ -183,18 +192,25 @@ def objective(trial, args):
     return throughput, warmup_time
 
 
-def construct_benchmark_cmd(args):
+def construct_benchmark_cmd(args, max_num_seqs):
     benchmark_cmd = ["python", "benchmark_throughput.py"]
     if hasattr(args, "input_len"):
         benchmark_cmd.extend(["--input-len", str(args.input_len)])
     if hasattr(args, "output_len"):
         benchmark_cmd.extend(["--output-len", str(args.output_len)])
-    if hasattr(args, "num_prompts"):
-        benchmark_cmd.extend(["--num-prompts", str(args.num_prompts)])
     if hasattr(args, "n"):
         benchmark_cmd.extend(["--n", str(args.n)])
+    # add max_num_seqs
+    if "--max-num-seqs" not in args.benchmark_throughput_args:
+        benchmark_cmd.extend(["--max-num-seqs", str(max_num_seqs)])
     benchmark_cmd.append(args.benchmark_throughput_args)
     return " ".join(benchmark_cmd)
+
+
+def validate_args(args):
+    # args.prompt_seq_step_range max should be less than total-model-len (input_len +
+    if args.prompt_seq_step_range[1] > (args.input_len + (args.output_len * args.n)):
+        raise ValueError("--prompt-seq-step-range max should be less than total model context length.")
 
 
 if __name__ == "__main__":
@@ -203,16 +219,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--task-name",
         type=str,
-        default="bucket_tuning",
+        default="bucket_tuning_offline",
         help="Study name for Optuna. To continue previous interrupted tuning, re-use the name. "
              "To start tuning from beginning, use a different task name.",
     )
     parser.add_argument(
-        "--decode-bs-range",
+        "--prompt-bs-bucket-max-range",
         nargs=3,
         type=int,
         required=True,
-        help="Tuning range for decode batch size in format of min max step",
+        help="Tuning range for VLLM_PROMPT_BS_BUCKET_MAX in format of min max step. "
     )
     parser.add_argument(
         "--prompt-seq-step-range",
@@ -227,6 +243,13 @@ if __name__ == "__main__":
         type=int,
         required=True,
         help="Tuning range for VLLM_DECODE_BLOCK_STEP in format of min max step. Suggest a factor of 128.",
+    )
+    parser.add_argument(
+        "--decode-bs-range",
+        nargs=3,
+        type=int,
+        required=True,
+        help="Tuning range for decode-bs-range in format of min max step.",
     )
 
     parser.add_argument(
@@ -264,9 +287,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n", type=int, default=1, help="Number of generated sequences per prompt."
     )
-    parser.add_argument(
-        "--num-prompts", type=int, default=1000, help="Number of prompts to process."
-    )
+
     # other benchmark_throughput cmd-line args
     parser.add_argument(
         "--benchmark-throughput-args",
@@ -276,6 +297,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    validate_args(args=args)
 
     # set env vars that are not tuned
     if os.getenv("VLLM_EXPONENTIAL_BUCKETING", default=True):  # make sure we are tuning linear bucket
@@ -302,8 +324,9 @@ if __name__ == "__main__":
     for i, best_trial in enumerate(study.best_trials):
         print("The {}-th Pareto solution was found at Trial#{}.".format(i, best_trial.number))
         print("  Params: {}".format(best_trial.params))
-        set_trial_value(best_trial.params["prompt_seq_step"], best_trial.params["decode_bs"],
-                        best_trial.params["decode_block_step"], best_trial.params["block_size"], args,
+        set_trial_value(best_trial.params["prompt_bs_bucket_max"], best_trial.params["prompt_seq_step"],
+                        best_trial.params["decode_bs"], best_trial.params["decode_block_step"],
+                        best_trial.params["block_size"], args,
                         print_only=True)
         best_values = best_trial.values
         print("  [Throughput(tokens/s), Warmup-Time(sec)]: {}".format(best_values))
