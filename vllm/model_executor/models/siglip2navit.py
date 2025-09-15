@@ -119,7 +119,9 @@ class Siglip2VisionEmbeddings(nn.Module):
                 self.position_embedding_size, self.position_embedding_size,
                 -1).unsqueeze(0).permute(0, 3, 1, 2)
             cnt = 0
-            for t, h, w in grid_thws.tolist():
+            for t_, h_, w_ in grid_thws.tolist():
+                t, h, w = int(t_), int(h_), int(w_)
+                print('t, h, w:', t, h, w)
                 volume = t * h * w
                 pe = F.interpolate(positional_embeddings,
                                    size=(h, w),
