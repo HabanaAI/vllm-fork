@@ -290,6 +290,7 @@ async def benchmark(
     max_concurrency: Optional[int],
     lora_modules: Optional[Iterable[str]],
     extra_body: Optional[dict],
+    intermediate_report_interval: Optional[int] = None,
 ):
     if backend in ASYNC_REQUEST_FUNCS:
         request_func = ASYNC_REQUEST_FUNCS[backend]
@@ -372,6 +373,36 @@ async def benchmark(
             return await request_func(request_func_input=request_func_input, pbar=pbar)
 
     benchmark_start_time = time.perf_counter()
+    completed_requests = 0
+    total_output_tokens = 0
+
+    async def limited_request_func_with_track(request_func_input, pbar):
+        nonlocal completed_requests, total_output_tokens
+        result = await limited_request_func(
+            request_func_input=request_func_input, pbar=pbar
+        )
+        completed_requests += 1
+
+        # Always needed for final output
+        if result.output_tokens is not None and result.output_tokens > 0:
+            output_len = result.output_tokens
+        else:
+            output_len = len(
+                tokenizer(result.generated_text, add_special_tokens=False).input_ids
+            )
+        total_output_tokens += output_len
+
+        if completed_requests % intermediate_report_interval == 0:
+            elapsed = time.perf_counter() - benchmark_start_time
+            req_throughput = completed_requests / elapsed if elapsed > 0 else 0
+            token_throughput = total_output_tokens / elapsed if elapsed > 0 else 0
+            print(
+                f"[Intermediate] Completed: {completed_requests}, Elapsed: {elapsed:.2f}s, "
+                f"Request Throughput: {req_throughput:.2f} req/s, "
+                f"Output Token Throughput: {token_throughput:.2f} tok/s"
+            )
+        return result
+
     tasks: list[asyncio.Task] = []
     async for request in get_request(input_requests, request_rate, burstiness):
         prompt, prompt_len, output_len, mm_content = (
@@ -397,9 +428,19 @@ async def benchmark(
             ignore_eos=ignore_eos,
             extra_body=extra_body,
         )
+        if (
+            intermediate_report_interval is not None
+            and intermediate_report_interval > 0
+        ):
+            limited_request_func_call = limited_request_func_with_track
+        else:
+            limited_request_func_call = limited_request_func
+
         tasks.append(
             asyncio.create_task(
-                limited_request_func(request_func_input=request_func_input, pbar=pbar)
+                limited_request_func_call(
+                    request_func_input=request_func_input, pbar=pbar
+                )
             )
         )
     outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
@@ -802,6 +843,7 @@ def main(args: argparse.Namespace):
             max_concurrency=args.max_concurrency,
             lora_modules=args.lora_modules,
             extra_body=sampling_params,
+            intermediate_report_interval=args.intermediate_report_interval,
         )
     )
 
@@ -1223,6 +1265,13 @@ if __name__ == "__main__":
         help="A subset of LoRA module names passed in when "
         "launching the server. For each request, the "
         "script chooses a LoRA module at random.",
+    )
+
+    parser.add_argument(
+        "--intermediate-report-interval",
+        type=int,
+        default=None,  # Default to None
+        help="If set, prints intermediate throughput every N completed requests.",
     )
 
     args = parser.parse_args()
