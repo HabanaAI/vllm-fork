@@ -97,6 +97,9 @@ class Siglip2VisionEmbeddings(nn.Module):
         """
 
         # Apply patch embeddings to already patchified pixel values
+        
+        print('grid in siglip:', grid_thws.shape)
+        
         target_dtype = self.patch_embedding.weight.dtype
         if isinstance(self.patch_embedding, LinearBase):
             patch_embeds = self.patch_embedding(
