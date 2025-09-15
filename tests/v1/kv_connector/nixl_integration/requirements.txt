@@ -1,4 +1,4 @@
 pytest
-nixl
+nixl==0.5.0
 lm-eval
 lm-eval[api]

@@ -1663,11 +1663,13 @@ class HPUModelRunner:
                 self.event_start = self.profiler.get_timestamp_us()
                 self.profiler.start("internal", "prefill")
                 htorch.core.mark_step()
+                logger.info(f"libin debug prefill  {os.getenv('MY_ROLE')=} {token_ids=}")
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,
                         self.kv_caches)
                 htorch.core.mark_step()
+                logger.info(f"libin debug  prefill {os.getenv('MY_ROLE')=} {logits_device=}")
 
                 with self.profiler.record_event('internal', "sampler"):
                     sampling_metadata = self._prepare_sampling(
@@ -1677,6 +1679,7 @@ class HPUModelRunner:
                         sampling_metadata=sampling_metadata)
                     prefill_sampled_token_ids.append(
                         sampler_output.sampled_token_ids.flatten())
+                    logger.info(f"libin debug prefill  {os.getenv('MY_ROLE')=} {sampler_output.sampled_token_ids=}")
                     prefill_sampled_requests.extend(logits_requests)
                 htorch.core.mark_step()
                 if self.is_driver_worker and self.profiler.enabled:
@@ -1692,6 +1695,16 @@ class HPUModelRunner:
                         prompt_batch_idx=idx,
                         is_prompt=True)
                     self.profiler.record_counter(self.event_start, counters)
+            '''
+            if self.is_driver_worker:
+                rank = 0
+            else:
+                rank = 1
+                
+            fs = './prefill_nopd_2_'+str(rank) +'.pt'
+            torch.save(self.kv_caches, fs)
+            exit()
+            '''
             self.maybe_wait_for_kv_save(scheduler_output.scheduled_new_reqs)
             #finished_sending, finished_recving = (
                 #self.get_finished_kv_transfers(scheduler_output))
@@ -1705,13 +1718,14 @@ class HPUModelRunner:
             self.profiler.start("internal", "decode")
             assert decode_data is not None
             htorch.core.mark_step()
+            logger.info(f"libin debug decode  {os.getenv('MY_ROLE')=} {decode_data.token_ids=}")
             _, logits_device = \
                 self._execute_model_generic(
                 decode_data.token_ids, decode_data.position_ids,
                 decode_data.attn_metadata, decode_data.logits_indices,
                 self.kv_caches, scheduler_output=scheduler_output)
             htorch.core.mark_step()
-
+            logger.info(f"libin debug  decode {os.getenv('MY_ROLE')=} {logits_device=}")
             with self.profiler.record_event('internal', "sampler"):
                 sampling_metadata = self._prepare_sampling(
                     batch_changed,
@@ -1724,6 +1738,7 @@ class HPUModelRunner:
                 decode_sampled_requests.extend(
                     self.input_batch.req_ids[:num_decodes])
             htorch.core.mark_step()
+            logger.info(f"libin debug  decode {os.getenv('MY_ROLE')=} {sampler_output.sampled_token_ids=}")
 
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
@@ -1752,6 +1767,7 @@ class HPUModelRunner:
             ]
             sampled_token_ids_list = torch.cat(
                 decode_sampled_token_ids + prefill_sampled_token_ids).tolist()
+            logger.info(f"libin debug  sampled_token_ids_list {os.getenv('MY_ROLE')=} {sampled_token_ids_list=}")    
             sampled_token_requests = \
                 decode_sampled_requests + prefill_sampled_requests
             max_req_index = max(self.input_batch.req_id_to_index.values())

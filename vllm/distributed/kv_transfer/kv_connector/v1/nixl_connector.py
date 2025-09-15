@@ -1036,9 +1036,10 @@ class NixlConnectorWorker:
         assert self.copy_blocks is not None
 
         local_block_ids = meta.local_block_ids
-        import torch
-        #fs = './decode1_'+str(self.tp_rank) +'.pt'
-        #torch.save(self.host_xfer_buffers, fs)
+        #import torch
+        #if os.getenv('MY_ROLE') == 'DECODE':
+        #    fs = './decode1p_2d_'+str(self.tp_rank) +'.pt'
+        #    torch.save(self.host_xfer_buffers, fs)
         self.copy_blocks(self.block_size, self.host_xfer_buffers, self.device_kv_caches,
                          local_block_ids, local_block_ids, "h2d")
         if logger.isEnabledFor(logging.DEBUG):
@@ -1047,9 +1048,13 @@ class NixlConnectorWorker:
                 "local_block_ids: %s. ", req_id,
                 ",".join(map(str, meta.local_block_ids)))
     def rewrite_kv_based_on_transfer_layout(self, metadata: NixlConnectorMetadata):
-        
+        #import torch
+
         if self.decoder_tp_ratio == 1:
             return
+        #if os.getenv('MY_ROLE') == 'PREFILL':
+            #fs = './prefill1p_2d'+str(self.tp_rank) +'.pt'
+            #torch.save(self.device_kv_caches, fs)
         for req_id, meta in metadata.reqs_to_save.items():
             #import remote_pdb;remote_pdb.set_trace()
             block_ids = meta.local_block_ids
@@ -1066,11 +1071,11 @@ class NixlConnectorWorker:
                     kv_selected  = torch.index_select(kv, 0, indices)
                     bc, bs, h, d  = kv_selected.shape
                     shape = int(bs*h/self.decoder_tp_ratio*d)
-                    blocks = torch.chunk(kv_selected, self.decoder_tp_ratio, dim=2)
-                    vecs = [b.reshape([bc, shape]) for b in blocks]
+                    blocks = torch.chunk(kv_selected, self.decoder_tp_ratio, dim=2) #[2,128,4,128]
+                    vecs = [b.reshape([bc, shape]) for b in blocks] #[2, 65536]
 
-                    kv_selected = torch.concat(vecs, dim=1).reshape(kv_selected.shape)
-                    kv.index_copy_(dim=0, index=indices, source=kv_selected)
+                    kv_selected = torch.concat(vecs, dim=1).reshape(kv_selected.shape) #[2, 131072]
+                    kv.index_copy_(dim=0, index=indices, source=kv_selected) 
                     logger.info(f"libin debug reshape after2 {k=} {kv_selected.shape=} {kv.storage().data_ptr()=}")
         torch.hpu.synchronize()
 
@@ -1089,7 +1094,8 @@ class NixlConnectorWorker:
                     ",".join(map(str, meta.local_block_ids)))
             # blocking
             #import torch
-            #torch.save(self.device_kv_caches, './prefill1.pt')
+            #fs = './prefill2p_'+str(self.tp_rank) +'.pt'
+            #torch.save(self.device_kv_caches, fs)
             self.copy_blocks(self.block_size, self.device_kv_caches, self.host_xfer_buffers,
                              meta.local_block_ids, meta.local_block_ids, "d2h")
 
