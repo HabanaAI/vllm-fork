@@ -3,8 +3,8 @@
 # Please configure the model path here, leave empty to skip test
 declare -A MODEL_PATHS=(
     ["DeepSeek-R1-Distill-Qwen-7B"]="/data/hf_models/DeepSeek-R1-Distill-Qwen-7B"
-    ["Qwen3-30B-A3B"]="" 
-    ["Qwen3-32B"]=""
+    ["Qwen3-30B-A3B"]="/data/hf_models/Qwen3-30B-A3B" 
+    ["Qwen3-32B"]="/data/hf_models/Qwen3-32B"
 )
 
 declare -A MODEL_CARDS=(
@@ -277,7 +277,7 @@ for model_name in "${!MODEL_PATHS[@]}"; do
     
     test_model "$model_name" "$model_path" "$num_cards"
     echo ""
-    sleep 10
+    sleep 5
 done
 
 # Generate final report
