@@ -356,6 +356,7 @@ class HpuModelAdapter(torch.nn.Module):
         self.use_merged_prefill = VLLM_MERGED_PREFILL
 
         model_config = getattr(self.model, "config", None)
+        self.model_type = getattr(model_config, "model_type", None)
         self.model_is_mrope = uses_mrope(model_config)
 
         # This applies exclusively to Qwen2/2.5-VL models
@@ -363,13 +364,17 @@ class HpuModelAdapter(torch.nn.Module):
         # models separately with HPU graph.
         # This is to ensure that we keeps
         # the static and dynamic parts distinct.
-        if htorch.utils.internal.is_lazy() and self.model_is_mrope:
-            logger.info("[Multimodal] Wrapping Visual Model")
-            self.model.visual = htorch.hpu.wrap_in_hpu_graph(
-                self.model.visual, disable_tensor_cache=True)
-            if hasattr(self.model, 'audio_tower'):
-                self.model.audio_tower = htorch.hpu.wrap_in_hpu_graph(
-                    self.model.audio_tower)
+        if htorch.utils.internal.is_lazy():
+            if self.model_is_mrope:
+                logger.info("[Multimodal] Wrapping Visual Model")
+                self.model.visual = htorch.hpu.wrap_in_hpu_graph(
+                    self.model.visual, disable_tensor_cache=True)
+                if hasattr(self.model, 'audio_tower'):
+                    self.model.audio_tower = htorch.hpu.wrap_in_hpu_graph(
+                        self.model.audio_tower)
+            elif self.model_type == "internvl_chat":
+                self.model.visual = htorch.hpu.wrap_in_hpu_graph(
+                    self.model.vision_model, disable_tensor_cache=True)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -584,7 +589,7 @@ class HpuModelAdapter(torch.nn.Module):
             LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         if self.layer_names is not None and not self.model_is_mrope:
             self._prepare_cos_sin(kwargs['positions'])
-        if self.model_is_mrope:
+        if self.model_is_mrope or self.model_type == "internvl_chat":
             # inputs_embeds was computed on execute_model
             # now we always want to use the inputs_embeds
             # even if the prompt is text only
@@ -2278,6 +2283,59 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         )
         return seq_group
 
+    def create_dummy_internvl_multi_modal_seq_group_metadata(self, group_id,
+                                                            num_patches,
+                                                            sampling_params,
+                                                            lora_request):
+        if not hasattr(self.get_model().config, "vision_config"):
+            raise ValueError("Expect internvl model to have vision_config")
+        model_config = self.get_model().config
+        vision_config = model_config.vision_config
+        downsample_ratio = model_config.downsample_ratio
+        num_channels = vision_config.num_channels
+        image_size = vision_config.image_size
+        patch_size = vision_config.patch_size
+        img_block_patch_num = (image_size // patch_size) ** 2
+        assert image_size % image_size == 0
+        assert num_patches % img_block_patch_num == 0, (
+            f"num_patches % image_block_patch_num should be 0, got {num_patches % img_block_patch_num}"
+        )
+        if num_patches == UNSET_NUM_PATCHES:
+            # Using the largest bucket
+            num_patches = self.get_model(
+            ).vision_buckets.multimodal_buckets[-1]
+
+        num_image_tokens = int(num_patches * (downsample_ratio**2))
+        image_token_id = 92546 # from tokenizer_config.json of internvl2-2b, for dummy input construction
+        prompt_token_ids = [image_token_id] * num_image_tokens
+        prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
+        placeholders_by_modality = {
+            'image':
+            [PlaceholderRange(offset=0, length=len(prompt_token_ids))]
+        }
+        seq_data = SequenceData(prompt_token_ids_array)
+
+        pixel_values = torch.randn(num_patches//img_block_patch_num, num_channels, image_size, image_size)
+
+        multi_modal_data = {
+            "pixel_values": pixel_values,
+            "image_num_patches": torch.Tensor([num_patches//img_block_patch_num]),
+            "image_token_id": torch.tensor(image_token_id, dtype=torch.long),
+        }
+        multi_modal_data = MultiModalKwargs(multi_modal_data)
+
+        seq_group = SequenceGroupMetadata(
+            request_id=str(group_id),
+            is_prompt=True,
+            seq_data={group_id: seq_data},
+            sampling_params=sampling_params,
+            block_tables=None,
+            lora_request=lora_request[group_id] if lora_request else None,
+            multi_modal_data=multi_modal_data,
+            multi_modal_placeholders=placeholders_by_modality,
+        )
+        return seq_group
+
     def create_dummy_seq_group_metadata(self,
                                         group_id,
                                         seq_len,
@@ -2291,13 +2349,24 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             sampling_params = SamplingParams(temperature=temperature)
             num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
-        if is_prompt and self.model_is_mrope and num_patches:
-            return self.create_dummy_multi_modal_seq_group_metadata(
-                group_id=group_id,
-                num_patches=num_patches,
-                sampling_params=sampling_params,
-                lora_request=lora_request,
-            )
+        if is_prompt and num_patches:
+            if self.model_is_mrope:
+                # qwen2vl series
+                return self.create_dummy_multi_modal_seq_group_metadata(
+                    group_id=group_id,
+                    num_patches=num_patches,
+                    sampling_params=sampling_params,
+                    lora_request=lora_request,
+                )
+            else:
+                # internvl
+                return self.create_dummy_internvl_multi_modal_seq_group_metadata(
+                    group_id=group_id,
+                    num_patches=num_patches,
+                    sampling_params=sampling_params,
+                    lora_request=lora_request,
+                )
+
         elif is_prompt:
             input_len = seq_len
             output_len = 0
@@ -3072,9 +3141,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         max_bucket_size = 0
         for pixel_values in pixel_values_list:
             assert isinstance(pixel_values, torch.Tensor)
-            curr_num_pixels = pixel_values.shape[-2]
-            bucket_size = model.vision_buckets.get_multimodal_bucket(
-                curr_num_pixels)
+            if model.config.model_type ==  "internvl_chat":
+                curr_num_patches = pixel_values.shape[0] * model.vision_buckets.img_block_patch_num
+                bucket_size = model.vision_buckets.get_multimodal_bucket(curr_num_patches)
+            else:
+                curr_num_pixels = pixel_values.shape[-2]
+                bucket_size = model.vision_buckets.get_multimodal_bucket(curr_num_pixels)
             max_bucket_size = max(max_bucket_size, bucket_size)
         return max_bucket_size
 
@@ -3320,6 +3392,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # done compute the visual tokens
                     execute_model_kwargs.pop('pixel_values', None)
                     execute_model_kwargs.pop('image_grid_thw', None)
+                elif self.get_model().config.model_type ==  "internvl_chat":
+                    multimodal_embeddings = self.model.model.get_multimodal_embeddings(**execute_model_kwargs)
+                    inputs_embeds = self.model.model.get_input_embeddings(
+                        execute_model_kwargs['input_ids'], multimodal_embeddings).clone()
+                    execute_model_kwargs.update({
+                        'inputs_embeds': inputs_embeds,
+                    })
+
+                    # done compute the visual tokens
+                    execute_model_kwargs.pop('pixel_values', None)
+                    execute_model_kwargs.pop('image_num_patches', None)
+                    execute_model_kwargs.pop('image_token_id', None)
+                    # return
 
                 with self.profiler.record_event('internal',
                                                 model_event_name,
