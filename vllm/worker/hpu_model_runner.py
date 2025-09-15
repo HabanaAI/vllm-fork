@@ -2250,7 +2250,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'image':
             [PlaceholderRange(offset=0, length=len(prompt_token_ids))]
         }
-        seq_data = SequenceData.from_seqs(prompt_token_ids)
         seq_data = SequenceData(prompt_token_ids_array)
 
         assert num_patches % 8 == 0, (
