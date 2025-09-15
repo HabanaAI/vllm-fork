@@ -515,7 +515,7 @@ class Siglip2Encoder(nn.Module):
             cu_seqlens_tmp = seqlens.cumsum(
                 0) * self.spatial_merge_unit + cu_window_seqlens[-1]
             cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
-            window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
+            window_index_id += (grid_t * llm_grid_h * llm_grid_w)#.item()
         window_index = torch.cat(window_index, dim=0)
 
         return window_index, cu_window_seqlens
