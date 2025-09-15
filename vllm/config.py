@@ -1300,11 +1300,7 @@ class ModelConfig:
             # Hybrid model Qwen3Next
             layer_types_value = getattr(self.hf_config, "layer_types", None)
             if layer_types_value is not None:
-                if getattr(block_type, "value", block_type) == "attention":
-                    return sum(t == "full_attention"
-                               for t in layer_types_value[start:end])
-                elif getattr(block_type, "value",
-                             block_type) == "linear_attention":
+                if getattr(block_type, "value", block_type) == "mamba":
                     return sum(t == "linear_attention"
                                for t in layer_types_value[start:end])
                 else:

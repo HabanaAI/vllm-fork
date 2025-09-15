@@ -51,7 +51,8 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, sharded_weight_loader)
-from vllm.model_executor.models.mamba_cache import MambaCacheParams
+from vllm.model_executor.models.mamba_cache import (MambaCacheManager,
+                                                    MambaCacheParams)
 from vllm.model_executor.models.qwen2_moe import Qwen2MoeMLP as Qwen3NextMLP
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.model_executor.utils import set_weight_attrs
@@ -59,7 +60,7 @@ from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import Qwen3NextConfig
 from vllm.triton_utils import tl, triton
-from vllm.utils import direct_register_custom_op
+from vllm.utils import LayerBlockType, direct_register_custom_op
 #from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
 
 from .interfaces import (HasInnerState, IsHybrid, MixtureOfExperts,
@@ -390,6 +391,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
     def _forward(
         self,
         hidden_states: torch.Tensor,
+        mamba_cache_params: MambaCacheParams,
         output: torch.Tensor,
     ):
         forward_context = get_forward_context()
@@ -399,7 +401,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             # V1 profile run
             return
 
-        assert isinstance(attn_metadata, dict)
+#        assert isinstance(attn_metadata, dict)
+        print("attn_metadata: " + str(attn_metadata))
+        self_kv_cache = self.kv_cache[forward_context.virtual_engine]
         attn_metadata = attn_metadata[self.prefix]
 #        assert isinstance(attn_metadata, GDNAttentionMetadata)
         has_initial_state = attn_metadata.has_initial_state
@@ -813,6 +817,7 @@ class Qwen3NextDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
         positions: torch.Tensor = None,
+        mamba_cache_params: MambaCacheParams = None,
         **kwargs: object,
     ):
         if residual is None:
@@ -826,6 +831,7 @@ class Qwen3NextDecoderLayer(nn.Module):
         if self.layer_type == "linear_attention":
             self.linear_attn(
                 hidden_states=hidden_states,
+                mamba_cache_params=mamba_cache_params,
                 output=self_attention_output,
             )
         elif self.layer_type == "full_attention":
@@ -917,6 +923,7 @@ class Qwen3NextModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
+        mamba_cache_params: MambaCacheParams,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -933,9 +940,10 @@ class Qwen3NextModel(nn.Module):
 
         for layer in self.layers:
             hidden_states, residual = layer(
-                positions=positions,
                 hidden_states=hidden_states,
                 residual=residual,
+                positions=positions,
+                mamba_cache_params=mamba_cache_params,
             )
 
         if not get_pp_group().is_last_rank:
@@ -1075,6 +1083,9 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
             # compatibility
             if not lora_config else lora_config.lora_vocab_padding_size,
         )
+
+        self.mamba_cache: Optional[MambaCacheManager] = None
+
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
                                                 config.vocab_size)
         self.make_empty_intermediate_tensors = (
@@ -1151,10 +1162,37 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ):
-        hidden_states = self.model(input_ids, positions, intermediate_tensors,
-                                   inputs_embeds)
+        if self.mamba_cache is None:
+            num_mamba_layers = self.model_config.get_num_layers_by_block_type(
+                self.vllm_config.parallel_config, LayerBlockType.mamba)
+
+            self.mamba_cache = MambaCacheManager(
+                self.vllm_config, self.lm_head.weight.dtype, self.lm_head.weight.device, num_mamba_layers,
+                *self.get_mamba_state_shape_from_config(self.vllm_config))
+
+        mamba_cache_params = self.mamba_cache.get_seqlen_agnostic_capture_inputs()
+
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!! mamba_cache_params: " + str(mamba_cache_params) + "  ??????????????")
+
+        hidden_states = self.model(input_ids, positions, mamba_cache_params,
+                                   intermediate_tensors, inputs_embeds)
 
         return hidden_states
+
+    def _get_mamba_cache_shape(
+            self) -> tuple[tuple[int, int], tuple[int, int]]:
+        world_size = get_tensor_model_parallel_world_size()
+        hidden_size = (self.config.mamba_num_heads *
+                       self.config.hidden_size_per_head)
+        conv_state_shape = (
+            hidden_size // world_size,
+            self.config.mamba_d_conv - 1,
+        )
+        temporal_state_shape = (
+            hidden_size // world_size,
+            self.config.mamba_d_state,
+        )
+        return conv_state_shape, temporal_state_shape
 
     @classmethod
     def get_mamba_state_dtype_from_config(
