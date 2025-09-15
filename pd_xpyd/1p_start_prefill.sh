@@ -45,7 +45,7 @@ CMD=(
 # Check if XPYD_LOG is set
 if [ -n "$XPYD_LOG" ]; then
     timestamp=$(date +"%Y%m%d_%H%M%S")
-    log_file="$XPYD_LOG/ProxyServer_${timestamp}.log"
+    log_file="$XPYD_LOG/Prefill_${timestamp}.log"
     echo "Logging to $log_file..."
 
     # Execute command and log stdout+stderr using tee
