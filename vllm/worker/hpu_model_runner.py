@@ -119,12 +119,11 @@ class VisionBuckets:
             self.multimodal_buckets = None
         else:
             if envvar == "":
-                import pdb;pdb.set_trace()
                 if 'InternVLChatModel' in str(type(model)):
                     multimodal_buckets = list(
                         range(model.config.min_dynamic_patch,
-                                model.config.max_dynamic_patch +
-                                2))  #As use_thumbnail is true
+                            model.config.max_dynamic_patch +
+                            2))  #As use_thumbnail is true
                 elif 'Gemma3ForConditionalGeneration' in str(type(model)):
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
@@ -3214,8 +3213,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if graphs:
                 self.graphed_buckets.add(cfg)
             if self.is_mm_run():
-                img_args = (int(seq_len) //
-                            self.mm_tokens_per_image
+                img_args = (int(seq_len) // self.mm_tokens_per_image
                             if self.is_mm_optimized else int(seq_len))
             self.warmup_scenario(
                 int(bs),
