@@ -122,8 +122,8 @@ class VisionBuckets:
                 if 'InternVLChatModel' in str(type(model)):
                     multimodal_buckets = list(
                         range(model.config.min_dynamic_patch,
-                            model.config.max_dynamic_patch +
-                            2))  #As use_thumbnail is true
+                              model.config.max_dynamic_patch +
+                              2))  #As use_thumbnail is true
                 elif 'Gemma3ForConditionalGeneration' in str(type(model)):
                     multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
