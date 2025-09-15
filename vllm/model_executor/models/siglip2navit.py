@@ -628,6 +628,33 @@ class Siglip2VisionTransformer(nn.Module):
             Tensor containing the spatial dimensions (height, width)
             of the input images.
         """
+        
+        # 1) 统一成 (N,3) + 放到正确 device/dtype
+        grid_thws = grid_thws.reshape(-1, 3).to(
+            device=pixel_values.device, dtype=torch.long
+        )
+        # 2) 过滤掉任何含 0 的占位行（pad 行）
+        mask = (grid_thws > 0).all(dim=1)
+        if not mask.all():
+            grid_thws = grid_thws[mask]
+        if grid_thws.numel() == 0:
+            raise ValueError("grid_thws becomes empty after filtering zeros.")
+            
+        # 3) 一致性检查：sum(t*h*w) 要和 patch 个数对齐
+        total_patches = int((grid_thws[:, 0] * grid_thws[:, 1] * grid_thws[:, 2]).sum().item())
+        if total_patches != pixel_values.shape[0]:
+            raise ValueError(
+                f"grid_thws implies {total_patches} patches, "
+                f"but pixel_values has {pixel_values.shape[0]}"
+            )
+            
+        # 4)（可选但推荐）stride 可整除性检查
+        hs = int(self.encoder.hidden_stride)  # 或 config.hidden_stride
+        if (grid_thws[:, 1] % hs).any() or (grid_thws[:, 2] % hs).any():
+            bad = grid_thws[((grid_thws[:,1] % hs) != 0) | ((grid_thws[:,2] % hs) != 0)]
+            raise ValueError(f"h/w not divisible by hidden_stride={hs}: bad rows={bad.tolist()}")
+            
+        
         hidden_states = self.embeddings(pixel_values, grid_thws)
 
         last_hidden_state = self.encoder(hidden_states, grid_thws)
@@ -691,3 +718,4 @@ class Siglip2NavitModel(torch.nn.Module):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+    
