@@ -45,6 +45,8 @@ env | grep VLLM_DECODE_BS
 env | grep VLLM_DECODE_BLOCK
 # ***************************************  bucketing ends ************************************* #
 
+SWAP_SPACE=64 # GB, memory per rank for preemption.swap.
+
 # decode specific settings
 export VLLM_DP_SIZE=2
 export VLLM_USE_V1=0

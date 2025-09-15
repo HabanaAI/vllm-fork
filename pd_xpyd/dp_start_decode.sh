@@ -65,6 +65,8 @@ do
     --distributed_executor_backend mp
     --enable-reasoning
     --reasoning-parser deepseek_r1
+    --preemption-mode swap
+    --swap-space "$SWAP_SPACE"
     $kv_cache_dtype_arg
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
