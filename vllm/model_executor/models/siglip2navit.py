@@ -447,7 +447,7 @@ class Siglip2Encoder(nn.Module):
     # copied from qwen2.5_vl
     def rot_pos_emb(self, grid_thw):
         pos_ids = []
-        for t, h, w in grid_thw:
+        for t, h, w in grid_thw.tolist():
             hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
             hpos_ids = hpos_ids.reshape(
                 h // self.hidden_stride,
@@ -483,7 +483,7 @@ class Siglip2Encoder(nn.Module):
         vit_merger_window_size = (self.window_size // self.hidden_stride //
                                   self.patch_size)
 
-        for grid_t, grid_h, grid_w in grid_thw:
+        for grid_t, grid_h, grid_w in grid_thw.tolist():
             llm_grid_h, llm_grid_w = (
                 grid_h // self.hidden_stride,  # number of patch after merge
                 grid_w // self.hidden_stride,
