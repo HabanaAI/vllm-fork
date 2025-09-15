@@ -90,7 +90,7 @@ DUMMY_TOKEN_ID = -1
 UNSET_NUM_PATCHES = 9999999
 
 
-class VisionBuckets:
+class DefaultVisionBuckets:
     '''
     This class is used to bucket image tokens
     '''
@@ -98,13 +98,17 @@ class VisionBuckets:
     def __init__(self):
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == "":
-            multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544]
+           multimodal_buckets = self._get_default_buckets()
         else:
             multimodal_buckets = [int(i) for i in envvar.split(',')]
         self.multimodal_buckets = self._process_buckets(multimodal_buckets)
         self.graphed_buckets = set()
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
+
+    def _get_default_buckets(self):
+        multimodal_buckets = [1600, 3136, 4096, 6400, 7744, 9216, 12544]
+        return multimodal_buckets
 
     def _process_buckets(self, buckets):
         for bucket in buckets:
@@ -1300,7 +1304,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def add_vision_buckets_to_model(self):
         model = self.get_model()
         if supports_multimodal(model):
-            model.vision_buckets = VisionBuckets()
+            if hasattr(model, "get_vision_buckets"):
+                model.vision_buckets = model.get_vision_buckets()  # customized vision bucket
+            else:
+                model.vision_buckets = DefaultVisionBuckets()
             model.vision_buckets.graphed_buckets = \
                 self.graphed_multimodal_buckets
 
