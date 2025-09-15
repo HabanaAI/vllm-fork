@@ -1048,6 +1048,9 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
             prefix=maybe_prefix(prefix, "vision_model"),
         )
 
+        if hasattr(config, "tie_word_embeddings") and hasattr(config.text_config, "tie_word_embeddings"):
+            config.text_config.tie_word_embeddings = config.tie_word_embeddings
+
         self.language_model = init_vllm_registered_model(
             vllm_config=vllm_config,
             hf_config=config.text_config,
