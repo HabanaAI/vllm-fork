@@ -216,7 +216,7 @@ class NixlConnector(KVConnectorBase_V1):
         assert self.connector_worker is not None
         assert isinstance(self._connector_metadata, NixlConnectorMetadata)
         self.connector_worker.start_load_kv(self._connector_metadata)
-        logger.info(f"libin debug start_load_kv return {os.getenv('RANK')}, takes {time.perf_counter() - s1}")
+        #logger.info(f"libin debug start_load_kv return {os.getenv('RANK')}, takes {time.perf_counter() - s1}")
 
     def wait_for_layer_load(self, layer_name: str) -> None:
         """NixlConnector does not do layerwise saving."""
@@ -449,7 +449,8 @@ class NixlConnectorWorker:
         # Config.
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
-
+        self.block_factor = 8 # A100.block_size/G2.block_size
+        self.block_shape = None
         # Agent.
         self.nixl_wrapper = NixlWrapper(str(uuid.uuid4()), None)
         # Map of engine_id -> {rank0: agent_name0, rank1: agent_name1..}.
@@ -786,6 +787,7 @@ class NixlConnectorWorker:
             block_shape[0] = block_shape[0] // self.num_blocks
             block_shape = torch.Size(block_shape)
             block_size, n_kv_heads, head_dim = block_shape[-3:]
+            self.block_shape = [block_size, n_kv_heads, head_dim]
             # head size in bytes.
             self.slot_size_bytes = kv_elem_size * n_kv_heads * head_dim
         else:
@@ -802,7 +804,7 @@ class NixlConnectorWorker:
             "per_layer_kv_cache_shape: %s", use_mla, self.kv_buffer_device,
             self.use_host_buffer, self.num_blocks, block_shape,
             first_kv_cache[0].shape)
-        self.dst_num_blocks[self.engine_id] = self.num_blocks
+        self.dst_num_blocks[self.engine_id] = self.num_blocks * self.block_factor
         self.device_kv_caches = kv_caches
         kv_caches_base_addr = []
         caches_data = []
@@ -870,15 +872,15 @@ class NixlConnectorWorker:
             # could create fewer, but then _get_block_descs_ids needs to
             # select agent_meta.num_blocks instead of self.num_blocks for
             # local descr, and that makes handling regular flow less clean.
-            for block_id in range(self.num_blocks):
-                block_offset = block_id * self.block_len
+            for block_id in range(self.num_blocks * self.block_factor):
+                block_offset = block_id * self.block_len // self.block_factor
                 addr = base_addr + block_offset
                 # (addr, len, device id)
                 # TODO: does device_id matter to DRAM?
-                blocks_data.append((addr, self.block_len, self.tp_rank))
+                blocks_data.append((addr, self.block_len//self.block_factor, self.tp_rank))
         logger.debug("Created %s blocks for src engine %s and rank %s",
                      len(blocks_data), self.engine_id, self.tp_rank)
-
+        print(f'buke: {blocks_data[0:10]=}')
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
                                                  self.nixl_memory_type)
         # NIXL_INIT_AGENT to be used for preparations of local descs.
@@ -955,7 +957,7 @@ class NixlConnectorWorker:
             assert self._tp_size[engine_id] == remote_tp_size
         # We may eventually enable this after asserting equality in cache
         # layout and close outputs.
-        assert nixl_agent_meta.attn_backend_name == self.backend_name
+        #assert nixl_agent_meta.attn_backend_name == self.backend_name
 
         remote_agent_name = self.nixl_wrapper.add_remote_agent(
             nixl_agent_meta.agent_metadata)
@@ -984,14 +986,14 @@ class NixlConnectorWorker:
                 # Account for joint KV in FlashInfer.
                 remote_block_size //= 2
 
-            assert nixl_agent_meta.block_len == self.block_len * tp_ratio, (
-                "Remote P worker KV layer cache must be of shape [2, N, "
-                "local_kv_heads*tp_ratio, block_size, head_dim] and same dtype."
-            )
+            #assert nixl_agent_meta.block_len == self.block_len * tp_ratio, (
+            #    "Remote P worker KV layer cache must be of shape [2, N, "
+            #    "local_kv_heads*tp_ratio, block_size, head_dim] and same dtype."
+            #)
 
-        assert self.block_size == remote_block_size, (
-            "Remote P worker with different block size is not supported "
-            f"{self.block_size=} {remote_block_size=}")
+        #assert self.block_size == remote_block_size, (
+        #    "Remote P worker with different block size is not supported "
+        #    f"{self.block_size=} {remote_block_size=}")
 
         # Create dst descs and xfer side handles. TP workers have same #blocks.
         if engine_id in self.dst_num_blocks:
@@ -1018,7 +1020,7 @@ class NixlConnectorWorker:
                 # self.block_len == remote_block_len//tp_ratio bytes.
                 addr = base_addr + block_offset + rank_offset
                 # (addr, len, device id)
-                blocks_data.append((addr, self.block_len, remote_tp_rank))
+                blocks_data.append((addr, nixl_agent_meta.block_len, remote_tp_rank))
         logger.debug(
             "Created %s blocks for dst engine %s with remote rank %s and "
             "local rank %s", len(blocks_data), engine_id, remote_tp_rank,
@@ -1081,6 +1083,24 @@ class NixlConnectorWorker:
                 "Rank %s, get_finished: %s requests done sending "
                 "and %s requests done recving", self.tp_rank,
                 len(done_sending), len(done_recving))
+        #import remote_pdb; remote_pdb.set_trace()
+        t1 = time.perf_counter()
+        remote_block_size = self.block_size // self.block_factor
+        block_size, n_kv_heads, head_dim = self.block_shape
+        for req_id in done_recving:
+            #print(req_id, self._recving_metadata)
+            meta = self._recving_metadata.pop(req_id)
+            for k, v in self.device_kv_caches.values():
+                local_block_ids = meta.local_block_ids
+                #print(f'buke {local_block_ids=}|{k.shape=}')
+                for block_idx in local_block_ids:
+                    #import remote_pdb; remote_pdb.set_trace() 
+                    k[block_idx*self.block_size: (1+block_idx)*self.block_size] = k[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
+                    v[block_idx*self.block_size: (1+block_idx)*self.block_size] = v[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
+            #import remote_pdb; remote_pdb.set_trace()
+            t2 = time.perf_counter()
+            tt = t2-t1
+            print(f'buke permute time:{tt}, {req_id=}|{self._recving_metadata=}')
         if self.use_host_buffer:
             for req_id in done_recving:
                 s2 = time.perf_counter()
@@ -1178,7 +1198,8 @@ class NixlConnectorWorker:
                 "Num local_block_ids: %s. Num remote_block_ids: %s. ", req_id,
                 remote_engine_id, len(meta.local_block_ids),
                 len(meta.remote_block_ids))
-            if self.use_host_buffer:
+            is_hetero = True
+            if is_hetero or self.use_host_buffer:
                 self._recving_metadata[req_id] = meta
             if remote_engine_id not in self._remote_agents:
                 # Initiate handshake with remote engine to exchange metadata.
@@ -1245,8 +1266,8 @@ class NixlConnectorWorker:
         # Partial prefix cache hit: just read uncomputed blocks.
         num_remote_blocks = len(remote_block_ids)
         assert num_local_blocks <= num_remote_blocks
-        if num_local_blocks < num_remote_blocks:
-            remote_block_ids = remote_block_ids[-num_local_blocks:]
+        #if num_local_blocks < num_remote_blocks:
+        #    remote_block_ids = remote_block_ids[-num_local_blocks:]
 
         # Get side handles.
         local_xfer_side_handle = self.src_xfer_side_handle
@@ -1259,12 +1280,19 @@ class NixlConnectorWorker:
         # Get descs ids.
         local_block_descs_ids: list[int] = []
         remote_block_descs_ids: list[int] = []
+        local_sub_block_ids: list[int] = []
+       
+        print('buke: ', remote_block_ids)
+        remote_block_ids = remote_block_ids[:(len(remote_block_ids)//self.block_factor)*self.block_factor]
+        for index in range(0, len(remote_block_ids)):
+            local_sub_block_ids.append(local_block_ids[index//self.block_factor]*self.block_factor + index)
+        print(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
         if not self.block_window_per_layer:
             # Default case: assume global attention
             remote_block_descs_ids = self._get_block_descs_ids(
                 dst_engine_id, remote_block_ids)
             local_block_descs_ids = self._get_block_descs_ids(
-                self.engine_id, local_block_ids)
+                self.engine_id, local_sub_block_ids)
         else:
             # TODO(mgoin): remove this once we have hybrid memory allocator
             # Optimization for models with local attention (Llama 4)
@@ -1303,6 +1331,7 @@ class NixlConnectorWorker:
         )
 
         # Begin async xfer.
+        print('buke ->>>> transfer start >>>---')
         self.nixl_wrapper.transfer(handle)
 
         # Use handle to check completion in future step().
