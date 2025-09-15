@@ -102,7 +102,7 @@ class AsyncMetricsCollector:
         if current_platform.Event is None:
             return None
 
-        if not (current_platform.is_hpu() or current_platform.is_cuda_alike()):
+        if not (current_platform.is_cuda_alike() or current_platform.is_hpu()):
             return None
 
         # If a copy was initiated in the previous call, collect and return.
