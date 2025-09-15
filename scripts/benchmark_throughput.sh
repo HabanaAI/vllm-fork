@@ -136,7 +136,7 @@ if [ "$json_path" != "" ]; then
     output_max=2048
     IO_FLAGS=(--dataset-name "sharegpt" --dataset-path "$json_path")
     echo "Benchmarking throughput for ${model_name} from ${weights_path} using ${num_prompts} random prompts from ${json_path} with max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
-    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_sharegpt_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
+    case_name="benchmark_throughput_${model_name}_${dtype}_${DEVICE_NAME}_sharegpt_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
 elif [ "$range_ratio" == "0.0" ]; then
     input_min=$input_len
     input_max=$input_len
@@ -145,7 +145,7 @@ elif [ "$range_ratio" == "0.0" ]; then
     disable_zero_padding=true
     IO_FLAGS=(--input-len "$input_len" --output-len "$output_len")
     echo "Benchmarking throughput for ${model_name} from ${weights_path} using ${num_prompts} fixed-length prompts with input_len=${input_len}, output_len=${output_len}, max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
-    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_len}_out${output_len}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
+    case_name="benchmark_throughput_${model_name}_${dtype}_${DEVICE_NAME}_in${input_len}_out${output_len}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
 else
     input_min=$(bc <<< "($input_len * ( 1 - $range_ratio) + 0.5) / 1")
     input_max=$(bc <<< "($input_len * ( 1 + $range_ratio) + 0.5) / 1")
@@ -153,7 +153,7 @@ else
     output_max=$(bc <<< "($output_len * ( 1 + $range_ratio) + 0.5) / 1")
     IO_FLAGS=(--dataset-name "random" --input-len "$input_len" --output-len "$output_len" --random-range-ratio "$range_ratio")
     echo "Benchmarking throughput for ${model_name} from ${weights_path} using ${num_prompts} random-length prompts with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
-    case_name="benchmark_throughput_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
+    case_name="benchmark_throughput_${model_name}_${dtype}_${DEVICE_NAME}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_$(date +%F-%H-%M-%S)"
 fi
 log_file="${case_name}.log"
 
@@ -162,7 +162,7 @@ set_config
 echo "Changed environment variables:" |& tee "${log_file}"
 echo -e "${changed_env}\n" |& tee -a "${log_file}"
 
-command_string=$(echo ${NUMA_CTL} \
+command_string=$(echo ${NUMA_CTL_CMD} \
 python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --backend vllm \
     --block-size "${BLOCK_SIZE}" \
@@ -182,8 +182,8 @@ python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --distributed_executor_backend "${dist_backend}" \
     "${extra_params[@]}")
 
-echo "Benchmark throughput for ${model_name} on Gaudi ${device} with command:" |& tee -a "${log_file}"
-echo "${command_string}" |& tee -a "${log_file}"
+echo "Benchmark throughput for ${model_name} on Gaudi ${DEVICE_NAME} with command:" |& tee -a "${log_file}"
+echo -e "${command_string}\n" |& tee -a "${log_file}"
 echo "The log will be saved to ${case_name}.log"
 
 eval "${command_string}" |& tee -a "${case_name}".log 2>&1
