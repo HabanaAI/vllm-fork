@@ -41,7 +41,8 @@ from vllm.transformers_utils.configs import (ChatGLMConfig, Cohere2Config,
                                              NemotronConfig, NVLM_D_Config,
                                              OvisConfig, RWConfig,
                                              SkyworkR1VChatConfig, SolarConfig,
-                                             Telechat2Config, UltravoxConfig)
+                                             Telechat2Config, UltravoxConfig,
+                                             Qwen3NextConfig)
 # yapf: enable
 from vllm.transformers_utils.utils import check_gguf_file
 from vllm.utils import resolve_obj_by_qualname
@@ -84,6 +85,7 @@ _CONFIG_REGISTRY: dict[str, type[PretrainedConfig]] = {
     "skywork_chat": SkyworkR1VChatConfig,
     "telechat": Telechat2Config,
     "ultravox": UltravoxConfig,
+    "qwen3_next": Qwen3NextConfig,
     **_CONFIG_REGISTRY_OVERRIDE_HF
 }
 
@@ -247,10 +249,6 @@ def uses_mrope(config: PretrainedConfig) -> bool:
 
 def thinker_uses_mrope(config: PretrainedConfig) -> bool:
     """Detect if the model contains a thinker config and it uses M-ROPE."""
-    thinker_text_config = getattr(config, "text_config", None)
-    if thinker_text_config is not None:
-        return uses_mrope(thinker_text_config)
-
     thinker_config = getattr(config, "thinker_config", None)
     if thinker_config is None:
         return False

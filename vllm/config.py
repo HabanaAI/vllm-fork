@@ -104,6 +104,9 @@ HfOverrides = Union[dict[str, Any], Callable[[PretrainedConfig],
                                              PretrainedConfig]]
 
 
+ModelDType = Literal["auto", "half", "float16", "bfloat16", "float", "float32"]
+MambaDType = Literal["auto", "float32"]
+
 @runtime_checkable
 class SupportsHash(Protocol):
 
@@ -984,7 +987,7 @@ class ModelConfig:
 
             self.enforce_eager = True
 
-    def _verify_with_expert_parallelism(self) -> bool:
+    def _verify_with_expert_parallelism(self) -> None:
         num_expert_names = [
             "moe_num_experts",  # Dbrx
             "num_experts",  # Jamba
@@ -997,12 +1000,9 @@ class ModelConfig:
             if num_experts > 0:
                 break
         if num_experts < 1:
-            logger.warning_once(
+            raise ValueError(
                 "Number of experts in the model must be greater than 0 "
                 "when expert parallelism is enabled.")
-            return False
-        else:
-            return True
 
     def verify_dual_chunk_attention_config(
         self,
@@ -1071,10 +1071,8 @@ class ModelConfig:
                 " must be divisible by tensor parallel size "
                 f"({tensor_parallel_size}).")
 
-        if parallel_config.enable_expert_parallel \
-            and not self._verify_with_expert_parallelism():
-            parallel_config.enable_expert_parallel = False
-            logger.warning_once("Disabled expert parallelism.")
+        if parallel_config.enable_expert_parallel:
+            self._verify_with_expert_parallelism()
 
         pipeline_parallel_size = parallel_config.pipeline_parallel_size
         if pipeline_parallel_size > 1:
@@ -1298,14 +1296,28 @@ class ModelConfig:
             if attn_type_list:
                 return sum(t == 1 for t in attn_type_list[start:end])
 
-            if layers_block_type_value is None and attn_type_list is None:
+            
+            # Hybrid model Qwen3Next
+            layer_types_value = getattr(self.hf_config, "layer_types", None)
+            if layer_types_value is not None:
+                if getattr(block_type, "value", block_type) == "attention":
+                    return sum(t == "full_attention"
+                               for t in layer_types_value[start:end])
+                elif getattr(block_type, "value",
+                             block_type) == "linear_attention":
+                    return sum(t == "linear_attention"
+                               for t in layer_types_value[start:end])
+                else:
+                    return sum(t == getattr(block_type, "value", block_type)
+                               for t in layer_types_value[start:end])
+
+            if (layers_block_type_value is None and attn_type_list is None
+                    and layer_types_value is None):
                 raise ValueError(
                     "The model is an hybrid without a"
-                    "layers_block_type or an attn_type_list in the hf_config,"
-                    "cannot determine the num of "
+                    "layers_block_type or an attn_type_list, or a layer_types "
+                    "in the hf_config, cannot determine the num of "
                     f"{block_type.value} layers")
-
-            return sum(t == 1 for t in attn_type_list[start:end])
 
     def get_multimodal_config(self) -> "MultiModalConfig":
         """
@@ -2573,10 +2585,12 @@ class SpeculativeConfig:
             if self.target_model_config and \
                 (self.target_model_config.hf_text_config.model_type \
                         == "deepseek_v3" or
-                    self.target_model_config.hf_text_config.model_type \
-                        == "mimo"):
+                    self.target_model_config.hf_text_config.model_type in
+                        ("mimo", "qwen3_next")):
                 # use the draft model from the same model:
                 self.model = self.target_model_config.model
+                if not self.quantization:
+                    self.quantization = self.target_model_config.quantization
             elif self.method in ("ngram", "[ngram]"):
                 self.model = "ngram"
             else:
