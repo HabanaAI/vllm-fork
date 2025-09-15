@@ -629,31 +629,37 @@ class Siglip2VisionTransformer(nn.Module):
             of the input images.
         """
         
-        # 1) 统一成 (N,3) + 放到正确 device/dtype
+        # ---- 必要但保守的检查：不丢数据，只规范&断言 ----
+        # 兼容 [B,1,1,3] / [N,1,1,3] / [N,3] 等形状
+        if grid_thws.ndim == 4 and grid_thws.shape[-1] == 3:
+            grid_thws = grid_thws[:, 0, 0, :]                 # -> [N,3]
         grid_thws = grid_thws.reshape(-1, 3).to(
             device=pixel_values.device, dtype=torch.long
+        )                                                    # -> [N,3] long
+        
+        # 打印一次关键调试信息（临时）
+        # print(f"[siglip] pixel_values={tuple(pixel_values.shape)}, "
+        #       f"grid_thws=\n{grid_thws.tolist()}")
+        
+        # 断言 1：t,h,w 都应 > 0（只断言，不过滤）
+        assert (grid_thws > 0).all(), \
+            f"[Siglip2] non-positive t/h/w in grid_thws: {grid_thws}"
+        
+        # 断言 2：补丁数相符
+        expected = int((grid_thws[:, 0] * grid_thws[:, 1] * grid_thws[:, 2]).sum().item())
+        got = int(pixel_values.shape[0])
+        assert expected == got, (
+            f"[Siglip2] patches mismatch: sum(t*h*w)={expected} "
+            f"but pixel_values rows={got}; grid_thws={grid_thws.tolist()}"
         )
-        # 2) 过滤掉任何含 0 的占位行（pad 行）
-        mask = (grid_thws > 0).all(dim=1)
-        if not mask.all():
-            grid_thws = grid_thws[mask]
-        if grid_thws.numel() == 0:
-            raise ValueError("grid_thws becomes empty after filtering zeros.")
-            
-        # 3) 一致性检查：sum(t*h*w) 要和 patch 个数对齐
-        total_patches = int((grid_thws[:, 0] * grid_thws[:, 1] * grid_thws[:, 2]).sum().item())
-        if total_patches != pixel_values.shape[0]:
-            raise ValueError(
-                f"grid_thws implies {total_patches} patches, "
-                f"but pixel_values has {pixel_values.shape[0]}"
-            )
-            
-        # 4)（可选但推荐）stride 可整除性检查
-        hs = int(self.encoder.hidden_stride)  # 或 config.hidden_stride
-        if (grid_thws[:, 1] % hs).any() or (grid_thws[:, 2] % hs).any():
-            bad = grid_thws[((grid_thws[:,1] % hs) != 0) | ((grid_thws[:,2] % hs) != 0)]
-            raise ValueError(f"h/w not divisible by hidden_stride={hs}: bad rows={bad.tolist()}")
-            
+        
+        # 断言 3：满足 hidden_stride 整除（否则后续 reshape 会炸）
+        hs = int(self.embeddings.hidden_stride)
+        assert (grid_thws[:, 1] % hs == 0).all() and (grid_thws[:, 2] % hs == 0).all(), (
+            f"[Siglip2] h/w must be multiples of hidden_stride={hs}, "
+            f"got grid_thws={grid_thws.tolist()}"
+        )
+        # ---- 检查到此为止，后续照常 ----
         
         hidden_states = self.embeddings(pixel_values, grid_thws)
 
