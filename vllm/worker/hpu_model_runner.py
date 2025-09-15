@@ -112,23 +112,23 @@ class VisionBuckets:
     This class is used to bucket image tokens
     '''
 
-    def __init__(self, is_batch_based, model):
-        self.is_batch_based = is_batch_based
+    def __init__(self, model):
+        self.is_batch_based = True
         envvar = os.environ.get('VLLM_MULTIMODAL_BUCKETS', "")
         if envvar == 'None':
             self.multimodal_buckets = None
         else:
             if envvar == "":
-                if is_batch_based:
-                    if 'InternVLChatModel' in str(type(model)):
-                        multimodal_buckets = list(
-                            range(model.config.min_dynamic_patch,
-                                  model.config.max_dynamic_patch +
-                                  2))  #As use_thumbnail is true
-                    else:
-                        multimodal_buckets = [1, 2, 4,
-                                              8]  # batch sizes for gemma3
+                import pdb;pdb.set_trace()
+                if 'InternVLChatModel' in str(type(model)):
+                    multimodal_buckets = list(
+                        range(model.config.min_dynamic_patch,
+                                model.config.max_dynamic_patch +
+                                2))  #As use_thumbnail is true
+                elif 'Gemma3ForConditionalGeneration' in str(type(model)):
+                    multimodal_buckets = [1, 2, 4, 8]  # batch sizes for gemma3
                 else:
+                    self.is_batch_based = False
                     multimodal_buckets = [
                         1600, 3136, 4096, 6400, 7744, 9216, 12544
                     ]
@@ -1091,6 +1091,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     and not self.lora_config)
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
+        self.mm_tokens_per_image = None
 
     def _set_gc_threshold(self) -> None:
         """
@@ -1512,10 +1513,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                        non_blocking=True)
 
     def add_vision_buckets_to_mrope_mm_optimized(self):
-        model = self.get_model()
-        self.is_mm_optimized = is_mm_optimized(model)
+        self.is_mm_optimized = is_mm_optimized(self.model)
         if self.model_is_mrope or self.is_mm_optimized:
-            model.vision_buckets = VisionBuckets(self.is_mm_optimized, model)
+            if hasattr(self.model.model.config, 'mm_tokens_per_image'):
+                self.image_token_id = self.model.config.image_token_id
+            elif 'InternVLChatModel' in str(type(self.model.model)):
+                self.mm_tokens_per_image = self.model.model.num_image_token
+            self.model.model.vision_buckets = VisionBuckets(self.model.model)
 
     def _prepare_prompt(
         self,
@@ -2724,16 +2728,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             s = self.model.model.config.vision_config.image_size
             pixel_values = torch.randn([img_args, 3, s, s])
 
-            if hasattr(self.model.model.config, 'mm_tokens_per_image'):
-                image_token_id = self.get_model().config.image_token_id
-                mm_tokens_per_image = \
-                    self.model.model.config.mm_tokens_per_image
+            if 'Gemma3ForConditionalGeneration' in str(type(self.model.model)):
                 multi_modal_data = {
                     "pixel_values": pixel_values,
                     "num_crops": torch.zeros([img_args], dtype=torch.int32),
                 }
             elif 'InternVLChatModel' in str(type(self.model.model)):
-                mm_tokens_per_image = self.model.model.num_image_token
                 image_token_id = 151667
                 multi_modal_data = {
                     "pixel_values_flat":
@@ -2745,7 +2745,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 }
             else:
                 logger.warning("No support for other models yet")
-            num_image_tokens = mm_tokens_per_image * img_args
+            num_image_tokens = self.mm_tokens_per_image * img_args
         prompt_token_ids = [image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
@@ -3215,7 +3215,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.graphed_buckets.add(cfg)
             if self.is_mm_run():
                 img_args = (int(seq_len) //
-                            self.model.model.config.mm_tokens_per_image
+                            self.mm_tokens_per_image
                             if self.is_mm_optimized else int(seq_len))
             self.warmup_scenario(
                 int(bs),
