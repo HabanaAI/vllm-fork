@@ -35,6 +35,7 @@ from vllm.transformers_utils.config import (
     maybe_register_config_serialize_by_value)
 from vllm.usage.usage_lib import UsageContext
 from vllm.worker.model_runner_base import InputProcessingError
+from vllm.worker.zerocopy_utils import SharedTensorPool
 
 logger = init_logger(__name__)
 
@@ -89,6 +90,13 @@ class MQLLMEngine:
 
         self.engine = LLMEngine(*args, **kwargs)
         self.log_requests = log_requests
+
+        self.enable_zero_copy = True  # Add config option
+        self.zero_copy_threshold = 1024 * 1024  # 1MB threshold
+        if self.enable_zero_copy:
+            self.tensor_pool = SharedTensorPool()
+            self.tensor_ref_counts = {}
+            self.tensor_ref_lock = threading.Lock()
 
         self.use_async_sockets = use_async_sockets
         if self.use_async_sockets:
@@ -275,6 +283,19 @@ class MQLLMEngine:
             self._send_outputs(rpc_err)
             raise e
 
+    def _reconstruct_tensors(self, request):
+        """Reconstruct tensors from shared memory references"""
+        if hasattr(request, 'tensor_metadata'):
+            for tensor_id, metadata in request.tensor_metadata.items():
+                # Reconstruct tensor from shared memory
+                tensor = self.tensor_pool.get_tensor(tensor_id, metadata)
+                # Replace the reference with actual tensor
+                if hasattr(request.prompt, 'multi_modal_data'):
+                    for key, value in request.prompt.multi_modal_data.items():
+                        if isinstance(value, tuple) and value[0] == '__shm__':
+                            if value[1] == tensor_id:
+                                request.prompt.multi_modal_data[key] = tensor
+
     def handle_new_input(self):
         """Handle new input from the socket"""
         try:
@@ -283,6 +304,11 @@ class MQLLMEngine:
                 request = pickle.loads(frames[0].buffer)
 
                 if isinstance(request, RPCProcessRequest):
+                    # Check for zero-copy tensors
+                    if hasattr(request,
+                               '__zero_copy__') and request.__zero_copy__:
+                        # Reconstruct tensors from shared memory
+                        self._reconstruct_tensors(request)
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors
                         assert isinstance(request.params, SamplingParams)

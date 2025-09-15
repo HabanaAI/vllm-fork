@@ -99,6 +99,12 @@ class MQLLMEngineClient(EngineClient):
         self.model_config = engine_config.model_config
         self.decoding_config = engine_config.decoding_config
 
+        self.enable_zero_copy = True
+        self.zero_copy_threshold = 1024 * 1024
+        if self.enable_zero_copy:
+            from vllm.worker.zerocopy_utils import SharedTensorPool
+            self.tensor_pool = SharedTensorPool()
+
         # Create the tokenizer group.
         self.tokenizer = init_tokenizer_from_configs(
             model_config=self.model_config,
@@ -589,6 +595,22 @@ class MQLLMEngineClient(EngineClient):
                                   trace_headers,
                                   priority=priority))
 
+    def _prepare_zero_copy(self, prompt):
+        """Prepare prompt for zero-copy transfer"""
+        tensor_metadata = {}
+
+        if hasattr(prompt, 'multi_modal_data') and prompt.multi_modal_data:
+            for key, value in prompt.multi_modal_data.items():
+                if isinstance(value, torch.Tensor):
+                    tensor_size = value.numel() * value.element_size()
+                    if tensor_size > self.zero_copy_threshold:
+                        tensor_id, metadata = self.tensor_pool.put_tensor(
+                            value)
+                        prompt.multi_modal_data[key] = ('__shm__', tensor_id)
+                        tensor_metadata[tensor_id] = metadata
+
+        return prompt, tensor_metadata
+
     async def _process_request(
         self,
         prompt: PromptType,
@@ -632,10 +654,13 @@ class MQLLMEngineClient(EngineClient):
         self.output_queues[request_id] = queue
 
         try:
+            # Process for zero-copy if applicable
+            tensor_metadata = {}
+            if self.enable_zero_copy and hasattr(prompt, 'multi_modal_data'):
+                prompt, tensor_metadata = self._prepare_zero_copy(prompt)
+
             # 2) Detach logits processors so that they can be pickled
-            # separately (may require cloudpickle which is slower)
             if isinstance(params, SamplingParams) and params.logits_processors:
-                # Defensive shallow copy
                 params = copy.copy(params)
                 logits_processors = params.logits_processors
                 params.logits_processors = None
@@ -643,16 +668,22 @@ class MQLLMEngineClient(EngineClient):
             else:
                 lp_bytes = None
 
-            request_bytes = pickle.dumps(
-                RPCProcessRequest(
-                    prompt=prompt,
-                    params=params,
-                    request_id=request_id,
-                    lora_request=lora_request,
-                    trace_headers=trace_headers,
-                    prompt_adapter_request=prompt_adapter_request,
-                    priority=priority,
-                ))
+            # Create request with zero-copy flag if needed
+            request = RPCProcessRequest(
+                prompt=prompt,
+                params=params,
+                request_id=request_id,
+                lora_request=lora_request,
+                trace_headers=trace_headers,
+                prompt_adapter_request=prompt_adapter_request,
+                priority=priority,
+            )
+
+            if tensor_metadata:
+                request.__zero_copy__ = True
+                request.tensor_metadata = tensor_metadata
+
+            request_bytes = pickle.dumps(request)
 
             # 3) Send the RPCGenerateRequest to the MQLLMEngine.
             parts = (request_bytes,
