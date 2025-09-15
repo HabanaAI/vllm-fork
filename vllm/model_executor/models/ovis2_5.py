@@ -147,7 +147,7 @@ class VisualTokenizer(torch.nn.Module):
         if isinstance(grid_thws, torch.Tensor):
             print("[vis] first grid_thw =", grid_thws[0].tolist())
             
-        features = self.vit(pixel_values, grid_thws)
+        features = self.vit(pixel_values, grid_thws.tolist())
         print('\n\n\nfeatures:',features,'\n\n\n')
         # refer to qwen2.5-vl patchmerger
         seq_len, _ = features.shape
