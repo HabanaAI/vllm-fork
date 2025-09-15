@@ -919,7 +919,8 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf", "custom","random_image"],
+        choices=["sharegpt", "burstgpt", "sonnet", "random", "hf", 
+                 "custom","random_image"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument(
