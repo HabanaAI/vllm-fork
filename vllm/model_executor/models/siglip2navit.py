@@ -499,8 +499,8 @@ class Siglip2Encoder(nn.Module):
                 grid_t, llm_grid_h, llm_grid_w
             )
             
-            pad_h = vit_merger_window_size-llm_grid_h % vit_merger_window_size
-            pad_w = vit_merger_window_size-llm_grid_w % vit_merger_window_size
+            pad_h = (-llm_grid_h) % vit_merger_window_size
+            pad_w = (-llm_grid_w) % vit_merger_window_size
             num_windows_h = (llm_grid_h + pad_h) // vit_merger_window_size
             num_windows_w = (llm_grid_w + pad_w) // vit_merger_window_size
             index_padded = F.pad(index, (0, pad_w, 0, pad_h), "constant", -100)
