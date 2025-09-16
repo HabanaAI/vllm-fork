@@ -347,14 +347,14 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         #  [b, sq, ng, np/ng * hn], [b, sq, ng, np/ng], [b, sq, ng, np/ng]
         (query, key, value, z) = torch.split(mixed_qkvz,
                                              split_arg_list_qkvz,
-                                             dim=2)
-        (b, a) = torch.split(mixed_ba, split_arg_list_ba, dim=2)
+                                             dim=3)
+        (b, a) = torch.split(mixed_ba, split_arg_list_ba, dim=3)
 
         # [b, sq, ng, np/ng * hn] -> [b, sq, np, hn]
-        value = value.reshape(value.size(0), -1, self.head_v_dim)
-        z = z.reshape(z.size(0), -1, self.head_v_dim)
-        b = b.reshape(b.size(0), self.num_v_heads // self.tp_size)
-        a = a.reshape(a.size(0), self.num_v_heads // self.tp_size)
+        value = value.reshape(value.size(0), value.size(1), -1, self.head_v_dim)
+        z = z.reshape(z.size(0), z.size(1), -1, self.head_v_dim)
+        b = b.reshape(b.size(0), b.size(1), self.num_v_heads // self.tp_size)
+        a = a.reshape(a.size(0), a.size(1), self.num_v_heads // self.tp_size)
 
         return query, key, value, z, b, a
 
@@ -379,27 +379,33 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        output: torch.Tensor,
-        cache_params: Optional[MambaCacheParams] = None,
-    ):
-        return torch.ops.vllm.gdn_attention(
-            hidden_states,
-            output,
-            self.prefix,
-        )
-
-    def _forward(
-        self,
-        hidden_states: torch.Tensor,
         mamba_cache_params: MambaCacheParams,
         output: torch.Tensor,
     ):
         forward_context = get_forward_context()
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
 
-        if attn_metadata is None:
+        if attn_metadata.block_mapping is None:
             # V1 profile run
             return
+
+        conv_state = mamba_cache_params[0][0][self.layer_idx]
+        ssm_state = mamba_cache_params[0][1][self.layer_idx]
+
+        projected_states, _ = self.in_proj(hidden_states)
+        projected_states_qkvz, projected_states_ba = torch.split(
+            projected_states,
+            [
+                self.projection_size_qkvz // self.tp_size,
+                self.projection_size_ba // self.tp_size
+            ],
+            dim=-1,
+        )
+        query, key, value, z, b, a = self.fix_query_key_value_ordering(
+            projected_states_qkvz, projected_states_ba)
+        query, key, value = (x.reshape(x.shape[0], x.shape[1], -1) for x in (query, key, value))
+        mixed_qkv = torch.cat((query, key, value), dim=-1)
+
 
 #        assert isinstance(attn_metadata, dict)
         print("attn_metadata: " + str(attn_metadata))
@@ -725,6 +731,9 @@ class Qwen3NextAttention(nn.Module):
             -1, self.num_kv_heads * self.head_dim)
 
         q, k = self.rotary_emb(positions, q, k)
+        
+        q = q.reshape(bs, seq, -1)
+        k = k.reshape(bs, seq, -1)
 
         attn_output = self.attn(q, k, v)
 
