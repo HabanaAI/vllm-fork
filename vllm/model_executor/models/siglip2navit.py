@@ -546,6 +546,8 @@ class Siglip2Encoder(nn.Module):
                 a plain tuple.
         """
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
+        print('rotary_pos_emb',rotary_pos_emb)
+        
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
         print('window:',window_index)
         print('cu_window_seqlens:',cu_window_seqlens,len(cu_window_seqlens))
@@ -561,10 +563,10 @@ class Siglip2Encoder(nn.Module):
 #           keep[1:] = cu_window_seqlens[1:] != cu_window_seqlens[:-1]
 #           cu_window_seqlens = cu_window_seqlens[keep]
         
-        print('cu_window_seqlens_after_numel:',cu_window_seqlens)
+#       print('cu_window_seqlens_after_numel:',cu_window_seqlens)
         
         seq_len, _ = inputs_embeds.size()
-        print('inputs_embeds:', inputs_embeds.shape)
+        print('inputs_embeds:', inputs_embeds, inputs_embeds.shape)
         inputs_embeds = inputs_embeds.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         print('merge_unit:', self.spatial_merge_unit, self.spatial_merge_unit)
@@ -582,7 +584,7 @@ class Siglip2Encoder(nn.Module):
         emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
         print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
-        print('position_embeddings:', len(position_embeddings[0]), len(position_embeddings[1]))
+        print('position_embeddings:',position_embeddings)
         
         print('grid_thws', grid_thws)
         cu_seqlens = torch.repeat_interleave(
@@ -662,10 +664,10 @@ class Siglip2VisionTransformer(nn.Module):
         
         
         hidden_states = self.embeddings(pixel_values, grid_thws)
-        print('hidden:',hidden_states.shape)
+        print('hidden:',hidden_states.shape, hidden_states)
 
         last_hidden_state = self.encoder(hidden_states, grid_thws)
-        print('last_hidden:',last_hidden_state.shape)
+        print('last_hidden:',last_hidden_state.shape, last_hidden_state)
         
         last_hidden_state = self.post_layernorm(last_hidden_state)
 
