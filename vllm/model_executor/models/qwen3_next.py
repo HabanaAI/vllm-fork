@@ -711,6 +711,7 @@ class Qwen3NextAttention(nn.Module):
         output: torch.Tensor,
         hidden_states: torch.Tensor,
     ):
+        bs, seq, _ = hidden_states.shape
         qkv, _ = self.qkv_proj(hidden_states)
 
         if self.attn_output_gate:
