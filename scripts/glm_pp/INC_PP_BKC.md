@@ -20,9 +20,9 @@ python $VLLM_HPU_EXT_PATH/calibration/step-6-expand-measurements.py --measuremen
 ```bash
 tp_size=4
 pp_size=2
-# export QUANT_CONFIG="./quant_configs/inc_quant.json"
 export INC_ENABLE_TP_RANK_INFO=1
-# export QUANT_CONFIG="./quant_configs/inc_quant_w2.json"
 export QUANT_CONFIG="./quant_configs/inc_quant_w4.json"
 bash run_pp_glm.sh
 ```
+> [!IMPORTANT]
+> For PP scenarios, please set `INC_ENABLE_TP_RANK_INFO=1` to obtain rank information from the TP group instead of the world group.
