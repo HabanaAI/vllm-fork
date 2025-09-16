@@ -1594,6 +1594,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     ) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
+        conv_state_indices: List[List[int]] = []
         input_mrope_positions: List[List[List[int]]] = []
         slot_mapping: List[List[int]] = []
         lora_index_mapping: List[List[int]] = []
@@ -1672,6 +1673,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
+            if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
+                conv_state_indices.append(list(range(seq_len - self.vllm_config.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
 
             token_types_ids = seq_group_metadata.token_type_ids
             token_types.append(token_types_ids) if token_types_ids else []
@@ -1855,6 +1858,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               dtype=torch.long,
                                               flat=self.use_merged_prefill)
 
+        if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
+            conv_state_indices = make_cpu_tensor(conv_state_indices,
+                                                 max_len=self.vllm_config.model_config.hf_config.linear_conv_kernel_dim,
+                                                 pad=0,
+                                                 dtype=torch.long,
+                                                 flat=self.use_merged_prefill)
+        print("!!!!!!!!!!!!!!!!!!!!!! conv_state_indices: " + str(conv_state_indices) + "  !!!!!!!!!!!!!!")
+
         slot_mapping = make_cpu_tensor(slot_mapping,
                                        max_len=max_prompt_len,
                                        pad=_PAD_SLOT_ID,
@@ -1917,6 +1928,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             encoder_seq_lens_tensor = self.move_to_device(
                 encoder_seq_lens_tensor)
 
+        if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
+            conv_state_indices = self.move_to_device(conv_state_indices)
+
         token_types_tensor = self.move_to_device(token_types_tensor)
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
@@ -1941,6 +1955,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_placeholder_index_maps=placeholder_index_maps,
             enable_kv_scales_calculation=False,
             input_positions=input_positions,
+            conv_state_indices=conv_state_indices,
         )
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
@@ -2769,6 +2784,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'window_block_groups',
             'window_attn_bias',
             'use_window_sdpa',
+            'conv_state_indices',
         ])
         return attention_metadata
 
@@ -2886,6 +2902,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         seq_data = SequenceData(prompt_token_ids_array)
         seq_data.output_token_ids = output_token_ids
+
         return SequenceGroupMetadata(request_id=str(group_id),
                                      is_prompt=(output_len == 0),
                                      seq_data={group_id: seq_data},
@@ -2933,6 +2950,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             is_pt_profiler_run=False,
             img_args=UNSET_IMG_ARGS if self.is_mm_run() else None,
             is_lora_profile_run=True,
+            is_dummy_run=True,
         )
 
         return
@@ -3919,6 +3937,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 "intermediate_tensors": intermediate_tensors,
                 "lora_mask": lora_mask,
                 "virtual_engine": model_input.virtual_engine,
+                "is_dummy_run": is_dummy_run,
                 **(model_input.multi_modal_kwargs or {}),
             }
             if previous_hidden_states is not None:

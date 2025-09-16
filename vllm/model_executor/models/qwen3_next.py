@@ -101,7 +101,6 @@ class Qwen3NextSparseMoeBlock(nn.Module):
 
         self.n_logical_experts = self.n_routed_experts
         self.n_redundant_experts = 0
-        print("!!!!!!!!!!!!!!!!!!!!!!!! self.ep_size = " + str(self.ep_size) + "       !!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         self.n_physical_experts = (self.n_logical_experts +
                                    self.n_redundant_experts)
         self.n_local_physical_experts = self.n_physical_experts // self.ep_size
@@ -345,6 +344,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         # [b, sq, ng, (hn + hn + np/ng * hn + np/ng + np/ng)]
         # --> [b, sq, ng, hn], [b, sq, ng, hn], [b, sq, ng, np/ng * hn],
         #  [b, sq, ng, np/ng * hn], [b, sq, ng, np/ng], [b, sq, ng, np/ng]
+#        print("??????????????? mixed_qkvz shape: " + str(mixed_qkvz.shape) + "  split_arg_list_qkvz: " + str(split_arg_list_qkvz))
+#        exit()
         (query, key, value, z) = torch.split(mixed_qkvz,
                                              split_arg_list_qkvz,
                                              dim=3)
@@ -381,13 +382,18 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         hidden_states: torch.Tensor,
         mamba_cache_params: MambaCacheParams,
         output: torch.Tensor,
+        is_dummy_run = None,
     ):
         forward_context = get_forward_context()
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
 
-        if attn_metadata.block_mapping is None:
-            # V1 profile run
-            return
+        print("???????????????????????? is_dummy_run: " + str(is_dummy_run))
+        if is_dummy_run:
+            return hidden_states
+
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! FLA !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("conv_state shape: " + str(mamba_cache_params[0][0].shape) + "  ssm_state shape: " + str(mamba_cache_params[0][1].shape) + "  state_indices_tensor shape: " + str(mamba_cache_params[1].shape))
+
 
         conv_state = mamba_cache_params[0][0][self.layer_idx]
         ssm_state = mamba_cache_params[0][1][self.layer_idx]
@@ -406,9 +412,60 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         query, key, value = (x.reshape(x.shape[0], x.shape[1], -1) for x in (query, key, value))
         mixed_qkv = torch.cat((query, key, value), dim=-1)
 
+        # 2. Convolution sequence transformation
+        print("!!!!!!!!!!!!!  self.conv1d.weight.shape: " + str(self.conv1d.weight.shape))
+        conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0),
+                                               self.conv1d.weight.size(2))
+        print("!!!!!!!!!!!!!  mixed_qkv shape: " + str(mixed_qkv.shape))
 
-#        assert isinstance(attn_metadata, dict)
-        print("attn_metadata: " + str(attn_metadata))
+        if torch.distributed.get_rank() == 0:
+            print("hidden_states shape: " + str(hidden_states.shape))
+            print("attn_metadata: " + str(attn_metadata))
+
+        # 2.2: process the remaining part
+        if attn_metadata.is_prompt:
+            # - "cache_indices" updates the conv_state cache in positions
+            #   pointed to by "mamba_cache_params.state_indices_tensor"
+            bs, seq, _ = hidden_states.shape
+            conv_state_indices = attn_metadata.conv_state_indices
+            for idx in range(bs):
+#                print("??????????????????  mixed_qkv[idx] shape: " + str(mixed_qkv[idx].shape) + "  conv_state_indices[idx]: " + str(conv_state_indices[idx]) + "  conv_state[idx] shape: " + str(conv_state[idx].shape))
+                prefill_conv_state = torch.index_select(mixed_qkv[idx], dim=0, index=conv_state_indices[idx])
+#                print("?????????????????? prefill_conv_state shape: " + str(prefill_conv_state.shape))
+                conv_state[idx].copy_(prefill_conv_state)
+            exit()
+
+
+            mixed_qkv_non_spec = causal_conv1d_fn(
+                mixed_qkv_non_spec.transpose(0, 1),
+                conv_weights,
+                self.conv1d.bias,
+                activation=self.activation,
+                conv_states=conv_state,
+                has_initial_state=has_initial_state,
+                cache_indices=non_spec_state_indices_tensor,
+                query_start_loc=non_spec_query_start_loc,
+            ).transpose(0, 1)
+        elif attn_metadata.num_decodes > 0:
+            mixed_qkv_non_spec = causal_conv1d_update(
+                mixed_qkv_non_spec,
+                conv_state,
+                conv_weights,
+                self.conv1d.bias,
+                self.activation,
+                conv_state_indices=non_spec_state_indices_tensor[:attn_metadata
+                                                                 .num_decodes],
+                validate_data=True,
+            )
+        else:
+            mixed_qkv_non_spec = None
+
+        query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
+            mixed_qkv_non_spec)
+
+
+
+
         self_kv_cache = self.kv_cache[forward_context.virtual_engine]
         attn_metadata = attn_metadata[self.prefix]
 #        assert isinstance(attn_metadata, GDNAttentionMetadata)
@@ -732,7 +789,7 @@ class Qwen3NextAttention(nn.Module):
             -1, self.num_kv_heads * self.head_dim)
 
         q, k = self.rotary_emb(positions, q, k)
-        
+
         q = q.reshape(bs, seq, -1)
         k = k.reshape(bs, seq, -1)
 
@@ -828,6 +885,7 @@ class Qwen3NextDecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
         positions: torch.Tensor = None,
         mamba_cache_params: MambaCacheParams = None,
+        is_dummy_run = None,
         **kwargs: object,
     ):
         if residual is None:
@@ -843,6 +901,7 @@ class Qwen3NextDecoderLayer(nn.Module):
                 hidden_states=hidden_states,
                 mamba_cache_params=mamba_cache_params,
                 output=self_attention_output,
+                is_dummy_run=is_dummy_run,
             )
         elif self.layer_type == "full_attention":
             self.self_attn(
@@ -936,6 +995,7 @@ class Qwen3NextModel(nn.Module):
         mamba_cache_params: MambaCacheParams,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
+        is_dummy_run = None,
     ) -> torch.Tensor:
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
@@ -954,6 +1014,7 @@ class Qwen3NextModel(nn.Module):
                 residual=residual,
                 positions=positions,
                 mamba_cache_params=mamba_cache_params,
+                is_dummy_run=is_dummy_run
             )
 
         if not get_pp_group().is_last_rank:
@@ -1172,6 +1233,8 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ):
+        is_dummy_run = kwargs.get('is_dummy_run')
+
         if self.mamba_cache is None:
             num_mamba_layers = self.model_config.get_num_layers_by_block_type(
                 self.vllm_config.parallel_config, LayerBlockType.mamba)
@@ -1182,10 +1245,8 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
 
         mamba_cache_params = self.mamba_cache.get_seqlen_agnostic_capture_inputs()
 
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!! mamba_cache_params: " + str(mamba_cache_params) + "  ??????????????")
-
         hidden_states = self.model(input_ids, positions, mamba_cache_params,
-                                   intermediate_tensors, inputs_embeds)
+                                   intermediate_tensors, inputs_embeds, is_dummy_run)
 
         return hidden_states
 
