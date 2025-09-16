@@ -50,6 +50,17 @@ class GraphCaptureContext:
     stream: torch.cuda.Stream
 
 
+@dataclass
+class DeferredRecvPayload:
+    """Metadata for a deferred recv operation."""
+    handle: Any
+    target_device: torch.device
+    key: str
+    orig_shape: Union[torch.Size, Tuple[int, ...]]
+    use_all_gather: bool
+    gather_group: Optional["GroupCoordinator"]
+
+
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
 
 
@@ -198,6 +209,7 @@ class GroupCoordinator:
     use_device_communicator: bool  # whether to use device communicator
     device_communicator: DeviceCommunicatorBase  # device communicator
     mq_broadcaster: Optional[Any]  # shared memory broadcaster
+    force_cpu_for_pp: bool  # force operations onto CPU/GLOO
 
     def __init__(
         self,
@@ -207,6 +219,7 @@ class GroupCoordinator:
         use_device_communicator: bool,
         use_message_queue_broadcaster: bool = False,
         group_name: Optional[str] = None,
+        force_cpu_for_pp: bool = False,
     ):
         group_name = group_name or "anonymous"
         self.unique_name = _get_unique_name(group_name)
@@ -262,6 +275,9 @@ class GroupCoordinator:
         if use_message_queue_broadcaster and self.world_size > 1:
             self.mq_broadcaster = MessageQueue.create_from_process_group(
                 self.cpu_group, 1 << 22, 6)
+
+        self.force_cpu_for_pp: bool = force_cpu_for_pp
+        self.last_send_td_handles: Dict[int, List[List[Any]]] = {}
 
         from vllm.platforms import current_platform
         self.use_custom_op_call = (current_platform.is_cuda_alike()
@@ -452,7 +468,7 @@ class GroupCoordinator:
                                                 group=self.device_group)
         return obj_list
 
-    def send_object(self, obj: Any, dst: int) -> None:
+    def send_object(self, obj: Any, dst: int) -> List[Any]:
         """Send the input object list to the destination rank."""
         """NOTE: `dst` is the local rank of the destination rank."""
 
@@ -471,16 +487,16 @@ class GroupCoordinator:
 
         # Send object size
 
-        torch.distributed.send(size_tensor,
-                               dst=self.ranks[dst],
-                               group=self.cpu_group)
+        handle_size = torch.distributed.isend(size_tensor,
+                                              dst=self.ranks[dst],
+                                              group=self.cpu_group)
 
         # Send object
-        torch.distributed.send(object_tensor,
-                               dst=self.ranks[dst],
-                               group=self.cpu_group)
+        handle_object = torch.distributed.isend(object_tensor,
+                                                dst=self.ranks[dst],
+                                                group=self.cpu_group)
 
-        return None
+        return [handle_size, handle_object]
 
     def recv_object(self, src: int) -> Any:
         """Receive the input object list from the source rank."""
@@ -495,9 +511,10 @@ class GroupCoordinator:
         size_tensor = torch.empty(1, dtype=torch.long, device="cpu")
 
         # Receive object size
-        rank_size = torch.distributed.recv(size_tensor,
-                                           src=self.ranks[src],
-                                           group=self.cpu_group)
+        handle_size = torch.distributed.irecv(size_tensor,
+                                              src=self.ranks[src],
+                                              group=self.cpu_group)
+        handle_size.wait()
 
         # Tensor to receive serialized objects into.
         object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -505,12 +522,10 @@ class GroupCoordinator:
             dtype=torch.uint8,
             device="cpu")
 
-        rank_object = torch.distributed.recv(object_tensor,
-                                             src=self.ranks[src],
-                                             group=self.cpu_group)
-
-        assert rank_object == rank_size, (
-            "Received object sender rank does not match the size sender rank.")
+        handle_object = torch.distributed.irecv(object_tensor,
+                                                src=self.ranks[src],
+                                                group=self.cpu_group)
+        handle_object.wait()
 
         obj = pickle.loads(object_tensor.numpy().tobytes())
 
@@ -530,8 +545,11 @@ class GroupCoordinator:
         if (not torch.distributed.is_initialized() or self.world_size == 1):
             return tensor_dict
 
-        group = self.device_group
-        metadata_group = self.cpu_group
+        if group is None:
+            group = self.cpu_group if self.force_cpu_for_pp else \
+                self.device_group
+        if not metadata_group:
+            metadata_group = self.cpu_group
         assert src < self.world_size, f"Invalid src rank ({src})"
 
         rank_in_group = self.rank_in_group
@@ -556,6 +574,15 @@ class GroupCoordinator:
                                                          src=self.ranks[src],
                                                          group=metadata_group,
                                                          async_op=True)
+                elif self.force_cpu_for_pp:
+                    # use metadata_group for CPU tensors
+                    orig_device = tensor.device
+                    tensor = tensor.to('cpu')
+                    handle = torch.distributed.broadcast(tensor,
+                                                         src=self.ranks[src],
+                                                         group=group,
+                                                         async_op=True)
+                    tensor = tensor.to(orig_device)
                 else:
                     # use group for GPU tensors
                     handle = torch.distributed.broadcast(tensor,
@@ -586,6 +613,16 @@ class GroupCoordinator:
                             src=self.ranks[src],
                             group=metadata_group,
                             async_op=True)
+                    elif self.force_cpu_for_pp:
+                        # use metadata_group for CPU tensors
+                        orig_device = tensor.device
+                        tensor = tensor.to('cpu')
+                        handle = torch.distributed.broadcast(
+                            tensor,
+                            src=self.ranks[src],
+                            group=group,
+                            async_op=True)
+                        tensor = tensor.to(orig_device)
                     else:
                         # use group for GPU tensors
                         handle = torch.distributed.broadcast(
@@ -631,10 +668,25 @@ class GroupCoordinator:
             tensor_dict,
             dict), f"Expecting a dictionary, got {type(tensor_dict)}"
         metadata_list, tensor_list = _split_tensor_dict(tensor_dict)
+        if self.ranks[dst] not in self.last_send_td_handles:
+            self.last_send_td_handles[self.ranks[dst]] = []
+
+        assert len(self.last_send_td_handles[self.ranks[dst]]) <= 1, (
+            f"Last send handles for rank {self.ranks[dst]} should"
+            " be empty or contain one element, but found "
+            f"{len(self.last_send_td_handles[self.ranks[dst]])} elements.")
+        if len(self.last_send_td_handles[self.ranks[dst]]) == 1:
+            for handle in self.last_send_td_handles[self.ranks[dst]][0]:
+                handle.wait()
+            del self.last_send_td_handles[self.ranks[dst]][0]
+
         # `metadata_list` lives in CPU memory.
         # `send_object_list` has serialization & deserialization,
         # all happening on CPU. Therefore, we can use the CPU group.
-        self.send_object(metadata_list, dst=dst)
+
+        self.last_send_td_handles[self.ranks[dst]] += [
+            self.send_object(metadata_list, dst=dst)
+        ]
         for tensor in tensor_list:
             if tensor.numel() == 0:
                 # Skip sending empty tensors.
@@ -645,27 +697,59 @@ class GroupCoordinator:
                     and tensor.numel() % all_gather_size == 0):
                 tensor = tensor.reshape(all_gather_size, -1)[all_gather_rank]
 
-            if tensor.is_cpu:
+            if self.force_cpu_for_pp:
                 # use metadata_group for CPU tensors
-                torch.distributed.send(tensor,
-                                       dst=self.ranks[dst],
-                                       group=metadata_group)
+                tensor = tensor.to('cpu')
+                self.last_send_td_handles[self.ranks[dst]][-1] += [
+                    torch.distributed.isend(tensor,
+                                            dst=self.ranks[dst],
+                                            group=metadata_group)
+                ]
+            elif tensor.is_cpu:
+                # use metadata_group for CPU tensors
+                self.last_send_td_handles[self.ranks[dst]][-1] += [
+                    torch.distributed.isend(tensor,
+                                            dst=self.ranks[dst],
+                                            group=metadata_group)
+                ]
             else:
                 # use group for GPU tensors
-                torch.distributed.send(tensor,
-                                       dst=self.ranks[dst],
-                                       group=group)
+                self.last_send_td_handles[self.ranks[dst]][-1] += [
+                    torch.distributed.isend(tensor,
+                                            dst=self.ranks[dst],
+                                            group=group)
+                ]
         return None
 
     def recv_tensor_dict(
         self,
         src: Optional[int] = None,
         all_gather_group: Optional["GroupCoordinator"] = None,
-    ) -> Optional[Dict[str, Union[torch.Tensor, Any]]]:
-        """Recv the input tensor dictionary.
-        NOTE: `src` is the local rank of the source rank.
+        deferred: bool = False,
+    ) -> Union[
+            None,
+            Dict[str, Union[torch.Tensor, Any]],
+            Tuple[Dict[str, Union[torch.Tensor, Any]],
+                  List[DeferredRecvPayload]],
+    ]:
+        """Receive a tensor dictionary, optionally deferring finalization.
+
+        If deferred is False, waits on recvs, moves tensors to their devices,
+        and performs optional all-gather to restore shapes. If True, returns
+        the partially filled tensor_dict plus deferred payloads.
+
+        Args:
+            src: Local rank of the source within the PP group. If None,
+                uses the previous rank in the group.
+            all_gather_group: Group used to all-gather tensor shards.
+            deferred: If True, return payloads for later finalization.
+
+        Returns:
+            - None when distributed is uninitialized or world_size == 1.
+            - tensor_dict when deferred is False.
+            - (tensor_dict, recv_payloads) when deferred is True.
         """
-        # Bypass the function if we are using only 1 GPU.
+        # Bypass when no distributed or single rank.
         if not torch.distributed.is_initialized() or self.world_size == 1:
             return None
 
@@ -683,11 +767,14 @@ class GroupCoordinator:
 
         recv_metadata_list = self.recv_object(src=src)
         tensor_dict: Dict[str, Any] = {}
+        recv_payloads: List[DeferredRecvPayload] = []
+
         for key, value in recv_metadata_list:
             if isinstance(value, TensorMetadata):
-                tensor = torch.empty(value.size,
-                                     dtype=value.dtype,
-                                     device=value.device)
+                tensor = torch.empty(
+                    value.size,
+                    dtype=value.dtype,
+                    device='cpu' if self.force_cpu_for_pp else value.device)
                 if tensor.numel() == 0:
                     # Skip broadcasting empty tensors.
                     tensor_dict[key] = tensor
@@ -697,31 +784,70 @@ class GroupCoordinator:
                 use_all_gather = (all_gather_group is not None
                                   and tensor.numel() % all_gather_size == 0)
 
+                orig_shape = tensor.shape
                 if use_all_gather:
-                    orig_shape = tensor.shape
                     tensor = tensor.reshape(all_gather_size,
                                             -1)[all_gather_rank]
 
-                if tensor.is_cpu:
+                if tensor.is_cpu or self.force_cpu_for_pp:
                     # use metadata_group for CPU tensors
-                    torch.distributed.recv(tensor,
-                                           src=self.ranks[src],
-                                           group=metadata_group)
+                    handle = torch.distributed.irecv(tensor,
+                                                     src=self.ranks[src],
+                                                     group=metadata_group)
                 else:
                     # use group for GPU tensors
-                    torch.distributed.recv(tensor,
-                                           src=self.ranks[src],
-                                           group=group)
-                if use_all_gather:
-                    # do the allgather
-                    tensor = all_gather_group.all_gather(  # type: ignore
-                        tensor, dim=0)
-                    tensor = tensor.reshape(orig_shape)
+                    handle = torch.distributed.irecv(tensor,
+                                                     src=self.ranks[src],
+                                                     group=group)
 
+                recv_payloads.append(
+                    DeferredRecvPayload(
+                        handle=handle,
+                        target_device=value.device,
+                        key=key,
+                        orig_shape=orig_shape,
+                        use_all_gather=use_all_gather,
+                        gather_group=all_gather_group,
+                    ))
                 tensor_dict[key] = tensor
             else:
                 tensor_dict[key] = value
-        return tensor_dict
+
+        if not deferred:
+            self.handle_deferred_recv_tensor_dict(tensor_dict, recv_payloads)
+            return tensor_dict
+
+        return tensor_dict, recv_payloads
+
+    def handle_deferred_recv_tensor_dict(
+        self,
+        tensors: Dict[str, Union[torch.Tensor, Any]],
+        payloads: Optional[List[DeferredRecvPayload]],
+    ) -> None:
+        """Finalize deferred recvs and update tensor_dict in-place.
+
+        Waits on each payload's handle, moves tensors to target devices,
+        and optionally all-gathers shards to restore original shapes.
+
+        Args:
+            tensors: Mapping from key to its (received) tensor or value.
+            payloads: Deferred recv payload collected during recv.
+        """
+        if not payloads:
+            return
+
+        for payload in payloads:
+            payload.handle.wait()
+            tensors[payload.key] = tensors[payload.key].to(
+                payload.target_device, non_blocking=True)
+
+        for payload in payloads:
+            tensor = tensors[payload.key]
+            if payload.use_all_gather and payload.gather_group is not None:
+                tensor = payload.gather_group.all_gather(tensor,
+                                                         dim=0)  # type: ignore
+                tensor = tensor.reshape(payload.orig_shape)
+            tensors[payload.key] = tensor
 
     def barrier(self):
         """Barrier synchronization among the group.
@@ -774,6 +900,7 @@ def init_world_group(ranks: List[int], local_rank: int,
         torch_distributed_backend=backend,
         use_device_communicator=False,
         group_name="world",
+        force_cpu_for_pp=envs.VLLM_PP_USE_CPU_COMS,
     )
 
 
@@ -784,7 +911,10 @@ def init_model_parallel_group(
     use_message_queue_broadcaster: bool = False,
     group_name: Optional[str] = None,
 ) -> GroupCoordinator:
-
+    force_cpu_for_pp = False
+    if group_name is not None:
+        force_cpu_for_pp = envs.VLLM_PP_USE_CPU_COMS \
+            if group_name.lower() == "pp" else False
     return GroupCoordinator(
         group_ranks=group_ranks,
         local_rank=local_rank,
@@ -792,6 +922,7 @@ def init_model_parallel_group(
         use_device_communicator=True,
         use_message_queue_broadcaster=use_message_queue_broadcaster,
         group_name=group_name,
+        force_cpu_for_pp=force_cpu_for_pp,
     )
 
 

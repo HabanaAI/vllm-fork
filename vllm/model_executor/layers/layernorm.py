@@ -107,6 +107,10 @@ class RMSNorm(CustomOp):
             self.weight = torch.ones(hidden_size)
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
+        if current_platform.is_hpu():
+            self.use_out_of_place_residual_add = True
+        else:
+            self.use_out_of_place_residual_add = False
 
     def forward_native(
         self,
@@ -176,7 +180,12 @@ class RMSNorm(CustomOp):
         if HPUFusedRMSNorm is None:
             return self.forward_native(x, residual)
         if residual is not None:
-            residual.add_(x)
+            if self.use_out_of_place_residual_add:
+                # NOTE(Tanner): Required to resolve empty tensor RTE with PP>1
+                # According to Xinyu this can be removed once we are on 1.22.0.
+                residual = residual + x
+            else:
+                residual.add_(x)
             x = residual
             x = HPUFusedRMSNorm.apply(x.float(), self.weight.float(),
                                       self.variance_epsilon)
