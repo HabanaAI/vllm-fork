@@ -205,6 +205,7 @@ class ServingScores(OpenAIServing):
                 engine_prompt,
                 pooling_params,
                 request_id_item,
+                model=request.model,
                 lora_request=lora_request,
                 trace_headers=trace_headers,
                 priority=request.priority,
