@@ -1,0 +1,23 @@
+{
+    "mode": "QUANTIZE",
+    "observer": "maxabs",
+    "scale_method": "unit_scale",
+    "allowlist": {
+        "types": [],
+        "names": [
+        ]
+    },
+    "blocklist": {
+        "types": [
+            "VLLMKVCache",
+            "Matmul",
+            "MoeMatmul",
+            "MoeFP8Matmul",
+            "FusedMoE"
+        ],
+        "names": [
+            "lm_head"
+        ]
+    },
+    "dump_stats_path": "./inc_output_unit_scale"
+}
