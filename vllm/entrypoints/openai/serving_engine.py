@@ -211,6 +211,7 @@ class OpenAIServing:
         *,
         request_logger: Optional[RequestLogger],
         return_tokens_as_token_ids: bool = False,
+        model_configs: Optional[ModelConfig] = None,
     ):
         super().__init__()
 
@@ -219,6 +220,7 @@ class OpenAIServing:
         self.max_model_len = model_config.max_model_len
 
         self.models = models
+        self.model_configs = model_configs
 
         self.request_logger = request_logger
         self.return_tokens_as_token_ids = return_tokens_as_token_ids

@@ -42,11 +42,13 @@ class ServingScores(OpenAIServing):
         models: OpenAIServingModels,
         *,
         request_logger: Optional[RequestLogger],
+        model_configs: Optional[ModelConfig] = None,
     ) -> None:
         super().__init__(engine_client=engine_client,
                          model_config=model_config,
                          models=models,
-                         request_logger=request_logger)
+                         request_logger=request_logger,
+                         model_configs=model_configs)
 
     async def _embedding_score(
         self,
@@ -262,7 +264,14 @@ class ServingScores(OpenAIServing):
 
         _validate_score_input_lens(texts_1, texts_2)
 
-        if self.model_config.is_cross_encoder:
+        # WA Current self.model_config is always the first model, which
+        # may not be the requested model
+        is_cross_encoder = self.model_config.is_cross_encoder
+        for model_cfg in self.model_configs:
+            if model_cfg.model == request.model:
+                is_cross_encoder = model_cfg.is_cross_encoder
+                break
+        if is_cross_encoder:
             return await self._cross_encoding_score(
                 tokenizer=tokenizer,
                 texts_1=texts_1,

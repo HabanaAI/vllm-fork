@@ -1157,6 +1157,10 @@ async def init_app_state(
     state.engine_client = engine_client
     state.log_stats = not args.disable_log_stats
     if isinstance(vllm_config, list):
+        model_configs = []
+        # TODO: Need apply model_configs to other non-score MiG servings
+        for cfg in vllm_config:
+            model_configs.append(cfg.model_config)
         # WA always use the first model
         vllm_config = vllm_config[0]
     state.vllm_config = vllm_config
@@ -1241,7 +1245,8 @@ async def init_app_state(
         engine_client,
         model_config,
         state.openai_serving_models,
-        request_logger=request_logger) if model_config.task in (
+        request_logger=request_logger,
+        model_configs=model_configs) if model_config.task in (
             "score", "embed", "pooling") else None
     state.openai_serving_classification = ServingClassification(
         engine_client,
@@ -1253,7 +1258,8 @@ async def init_app_state(
         engine_client,
         model_config,
         state.openai_serving_models,
-        request_logger=request_logger
+        request_logger=request_logger,
+        model_configs=model_configs,
     ) if model_config.task == "score" else None
     state.openai_serving_tokenization = OpenAIServingTokenization(
         engine_client,
