@@ -671,7 +671,8 @@ class Siglip2VisionTransformer(nn.Module):
         print('last_hidden:',last_hidden_state.shape, last_hidden_state)
         
         last_hidden_state = self.post_layernorm(last_hidden_state)
-
+        print('last_hidden_state:',last_hidden_state.shape, last_hidden_state)
+        
         return last_hidden_state
 
 
