@@ -689,11 +689,13 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_groups = attn_metadata.block_groups
                 block_mapping = attn_metadata.block_mapping
                 attn_bias = attn_metadata.attn_bias
+                sliding_window = False
             else:
                 block_list = attn_metadata.window_block_list
                 block_groups = attn_metadata.window_block_groups
                 block_mapping = attn_metadata.window_block_mapping
                 attn_bias = attn_metadata.window_attn_bias
+                sliding_window = True
 
             self.position_bias = None
             alibi_blocks = getattr(attn_metadata, "alibi_blocks", None)
@@ -718,14 +720,16 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_groups=block_groups,
                 position_bias=self.position_bias,
                 **self.common_attention_args(
-                    block_list, key_cache, value_cache, attn_metadata.block_size, self.sinks_decode
+                    block_list, key_cache, value_cache, attn_metadata.block_size, self.sinks_decode, sliding_window=sliding_window,
                 ),
             )
         # Reshape the output tensor.
-        return output.view(batch_size, seq_len, hidden_size)
+        output =  output.view(batch_size, seq_len, hidden_size)
+        # print(output)
+        return output
 
     def common_attention_args(
-        self, block_list=None, key_cache=None, value_cache=None, block_size=None, sinks = None
+        self, block_list=None, key_cache=None, value_cache=None, block_size=None, sinks = None, sliding_window=False
     ):
         return {
             "scale": self.scale,
@@ -742,6 +746,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             "value_cache": value_cache,
             "block_size": block_size,
             "sinks": sinks,
+            "sliding_window": sliding_window,
         }
 
     def forward_encoder_decoder(

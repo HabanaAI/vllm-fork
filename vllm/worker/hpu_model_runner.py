@@ -2062,13 +2062,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 indices[bid] = i
             padding_fn = lambda tensor, pad_value: gather_list(
                 tensor, indices, pad_value)
-            if self.interleaved_sliding_window is not None:
+            '''if self.interleaved_sliding_window is not None:
+                block_bucket_size = 2
                 window_indices: List[Any]
                 window_indices = [None] * block_bucket_size
                 for i, bid in enumerate(window_block_list):
                     window_indices[bid] = i
                 window_padding_fn = lambda tensor, pad_value: gather_list(
-                    tensor, window_indices, pad_value)
+                    tensor, window_indices, pad_value)'''
         else:
             block_bucket_size = self.bucketing_manager.find_decode_bucket(
                 len(seq_group_metadata_list), len(block_list))[2]
@@ -2087,9 +2088,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = padding_fn(block_usage, 1)
 
         if self.interleaved_sliding_window is not None:
-            window_block_list = window_padding_fn(window_block_list,
+            '''window_block_list = window_padding_fn(window_block_list,
                                                   _PAD_BLOCK_ID)
-            window_block_groups = window_padding_fn(window_block_groups, -1)
+            window_block_groups = window_padding_fn(window_block_groups, -1)'''
             #window_block_usage = window_padding_fn(window_block_usage, 1)
             window_block_usage = [
                 [1] if i == 0 else [block_usage[idx]]
