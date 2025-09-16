@@ -4316,9 +4316,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 CompletionSequenceGroupOutput(seq_outputs, None))
         return SamplerOutput(sampler_outputs)
 
-    def __del__(self):
-        self.shutdown_inc()
-
     def _patch_prev_output(self):
         if self.has_patched_prev_output:
             return
