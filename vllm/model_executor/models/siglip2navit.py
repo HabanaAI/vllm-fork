@@ -556,6 +556,8 @@ class Siglip2Encoder(nn.Module):
         """
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
+        print('window:',window_index)
+        print('window_seqlens:',cu_window_seqlens)
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=inputs_embeds.device,
@@ -569,8 +571,10 @@ class Siglip2Encoder(nn.Module):
             cu_window_seqlens = cu_window_seqlens[keep]
 
         seq_len, _ = inputs_embeds.size()
+        print('seq_len:', seq_len)
         inputs_embeds = inputs_embeds.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
+        print(self.spatial_merge_unit, self.spatial_merge_unit)
         inputs_embeds = inputs_embeds[window_index, :, :]
         inputs_embeds = inputs_embeds.reshape(seq_len, -1)
         rotary_pos_emb = rotary_pos_emb.reshape(
