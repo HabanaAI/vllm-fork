@@ -39,4 +39,6 @@ services:
       - PYTHONUNBUFFERED=1
     env_file:
       - ./benchmark/benchmark_user.env
+    volumes:
+      - ./logs:/root/scripts/logs
     command: ["benchmark", "--config-file", "${VLLM_BENCHMARK_CONFIG_FILE}", "--config-name", "${VLLM_BENCHMARK_CONFIG_NAME}"]
