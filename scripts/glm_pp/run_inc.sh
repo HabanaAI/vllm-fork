@@ -1,5 +1,4 @@
-
-#! /usr/bin
+#! /bin/bash
 
 pkill -9 python
 

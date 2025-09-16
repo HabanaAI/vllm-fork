@@ -1265,6 +1265,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.inc_initialized_successfully = True
                 logger.info("Preparing model with INC took %s",
                             m_inc.get_summary_string())
+                logger.debug(f"INC MODEL: {self.model}")
 
             self._maybe_init_alibi_biases()
             hidden_layer_markstep_interval = int(

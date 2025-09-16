@@ -1,3 +1,5 @@
+#! /bin/bash
+
 pkill -9 python
 
 export MAX_MODEL_LEN=8192
