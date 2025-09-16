@@ -478,29 +478,21 @@ class Siglip2Encoder(nn.Module):
 
     def get_window_index(self, grid_thw):
         window_index: list = []
-        # 👉 用张量在 HPU 上累计，而不是 Python list + .tolist()
-        cu_window_seqlens = torch.zeros(1, dtype=torch.int32, device=grid_thw.device)
+        cu_window_seqlens: list = [0]
         window_index_id = 0
         # patch (after merge) number in each window
         vit_merger_window_size = (self.window_size // self.hidden_stride //
                                   self.patch_size)
 
-        for grid_t_, grid_h_, grid_w_ in grid_thw:
-            grid_t = int(grid_t_.item())
-            grid_h = int(grid_h_.item())
-            grid_w = int(grid_w_.item())
+        for grid_t, grid_h, grid_w in grid_thw:
             llm_grid_h, llm_grid_w = (
                 grid_h // self.hidden_stride,  # number of patch after merge
                 grid_w // self.hidden_stride,
             )
-            
-            # 👉 指定 device，避免默认建在 CPU
-            index = torch.arange(grid_t * llm_grid_h * llm_grid_w, device=grid_thw.device).reshape(
-                grid_t, llm_grid_h, llm_grid_w
-            )
-            
-            pad_h = (-llm_grid_h) % vit_merger_window_size
-            pad_w = (-llm_grid_w) % vit_merger_window_size
+            index = torch.arange(grid_t * llm_grid_h * llm_grid_w).reshape(
+                grid_t, llm_grid_h, llm_grid_w)
+            pad_h = vit_merger_window_size - llm_grid_h % vit_merger_window_size
+            pad_w = vit_merger_window_size - llm_grid_w % vit_merger_window_size
             num_windows_h = (llm_grid_h + pad_h) // vit_merger_window_size
             num_windows_w = (llm_grid_w + pad_w) // vit_merger_window_size
             index_padded = F.pad(index, (0, pad_w, 0, pad_h), "constant", -100)
@@ -517,16 +509,14 @@ class Siglip2Encoder(nn.Module):
                 vit_merger_window_size,
                 vit_merger_window_size,
             )
-            seqlens = (index_padded != -100).sum([2, 3]).reshape(-1).to(torch.int32)
+            seqlens = (index_padded != -100).sum([2, 3]).reshape(-1)
             index_padded = index_padded.reshape(-1)
             index_new = index_padded[index_padded != -100]
             window_index.append(index_new + window_index_id)
-            
-            # 👉 纯张量拼接，避免 .tolist()
-            cu_seqlens_tmp = seqlens.cumsum(0) * self.spatial_merge_unit + cu_window_seqlens[-1]
-            cu_window_seqlens = torch.cat([cu_window_seqlens, cu_seqlens_tmp], dim=0)
-            
-            window_index_id += (grid_t * llm_grid_h * llm_grid_w)
+            cu_seqlens_tmp = seqlens.cumsum(
+                0) * self.spatial_merge_unit + cu_window_seqlens[-1]
+            cu_window_seqlens.extend(cu_seqlens_tmp.tolist())
+            window_index_id += (grid_t * llm_grid_h * llm_grid_w).item()
         window_index = torch.cat(window_index, dim=0)
 
         return window_index, cu_window_seqlens
@@ -557,11 +547,11 @@ class Siglip2Encoder(nn.Module):
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
         print('window:',window_index)
-        print('window_seqlens:',cu_window_seqlens)
+        print('window_seqlens:',cu_window_seqlens.shape)
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=inputs_embeds.device,
-            dtype=torch.int32,
+            dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
 #       cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
         # 相邻去重（不使用 unique_consecutive，避免 CPU fallback）
