@@ -28,11 +28,13 @@ class VisionRotaryEmbedding(nn.Module):
 
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
         super().__init__()
+        print(">> [VRE] __init__")
         inv_freq = 1.0 / (theta
                           **(torch.arange(0, dim, 2, dtype=torch.float) / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, seqlen: int) -> torch.Tensor:
+        print(">> [VRE] fwd")
         seq = torch.arange(seqlen,
                            device=self.inv_freq.device,
                            dtype=self.inv_freq.dtype)
@@ -44,6 +46,7 @@ class Siglip2VisionEmbeddings(nn.Module):
 
     def __init__(self, config: PretrainedConfig):
         super().__init__()
+        print(">> [S2VE] __init__")
         self.config = config
         self.embed_dim = config.hidden_size
         self.patch_size = config.patch_size
@@ -82,6 +85,7 @@ class Siglip2VisionEmbeddings(nn.Module):
     def forward(self,
                 pixel_values: torch.FloatTensor,
                 grid_thws: Optional[torch.LongTensor] = None) -> torch.Tensor:
+        print(">> [S2VE] fwd")
         """
         Args:
             pixel_values (`torch.FloatTensor`):
@@ -134,6 +138,7 @@ class Siglip2VisionEmbeddings(nn.Module):
 
 # copy from flash_attn/layers/rotary.py
 def rotate_half(x, interleaved=False):
+    print(">> [siglip2:rh] rotate_half")
     if not interleaved:
         x1, x2 = x.chunk(2, dim=-1)
         return torch.cat((-x2, x1), dim=-1)
@@ -145,6 +150,7 @@ def rotate_half(x, interleaved=False):
 
 
 def apply_rotary_emb_torch(x, cos, sin, interleaved=False):
+    print(">> [siglib2:apply rotary emb torch")
     """
     x: (batch_size, seqlen, nheads, headdim)
     cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
@@ -173,6 +179,7 @@ def apply_rotary_pos_emb(
     sin: torch.Tensor,
     is_flash_attn_backend: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    print(">> [siglib2:apply rotary_pos_emb")
     cos = cos.chunk(2, dim=-1)[0].contiguous()
     sin = sin.chunk(2, dim=-1)[0].contiguous()
     if is_flash_attn_backend:
@@ -192,6 +199,7 @@ class Siglip2Attention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        print(">> [S2A] __init__")
         self.config = config
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -231,6 +239,7 @@ class Siglip2Attention(nn.Module):
                                             torch.Tensor]] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Input shape: Batch x Time x Channel"""
+        print(">> [S2A] fwd")
 
         seq_length, embed_dim = hidden_states.shape
 
@@ -295,12 +304,14 @@ class Siglip2MLP(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        print(">> [S2M] __init__")
         self.config = config
         self.activation_fn = ACT2FN[config.hidden_act]
         self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
         self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        print(">> [S2M] fwd")
         hidden_states = self.fc1(hidden_states)
         hidden_states = self.activation_fn(hidden_states)
         hidden_states = self.fc2(hidden_states)
@@ -311,6 +322,7 @@ class Siglip2EncoderLayer(nn.Module):
 
     def __init__(self, config: PretrainedConfig):
         super().__init__()
+        print(">> [S2EL] __init__")
         self.embed_dim = config.hidden_size
         self.layer_norm1 = nn.LayerNorm(self.embed_dim,
                                         eps=config.layer_norm_eps)
@@ -321,6 +333,7 @@ class Siglip2EncoderLayer(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor, cu_seqlens: torch.Tensor,
                 position_embeddings: torch.Tensor) -> tuple[torch.FloatTensor]:
+        print(">> [S2EL] fwd")
         """
         Args:
             hidden_states (`torch.FloatTensor`):
@@ -355,6 +368,7 @@ class Siglip2Encoder(nn.Module):
 
     def __init__(self, config: PretrainedConfig):
         super().__init__()
+        print(">> [S2E] __init__")
         self.config = config
         self.layers = nn.ModuleList([
             Siglip2EncoderLayer(config)
@@ -377,6 +391,7 @@ class Siglip2Encoder(nn.Module):
 
     # copied from qwen2.5_vl
     def rot_pos_emb(self, grid_thw):
+        print(">> [S2E] rot pos emb")
         pos_ids = []
         for t, h, w in grid_thw:
             hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
@@ -407,6 +422,7 @@ class Siglip2Encoder(nn.Module):
         return rotary_pos_emb
 
     def get_window_index(self, grid_thw):
+        print(">> [S2E] get_window_index")
         window_index: list = []
         cu_window_seqlens: list = [0]
         window_index_id = 0
@@ -476,6 +492,7 @@ class Siglip2Encoder(nn.Module):
                 Whether or not to return a [`~utils.ModelOutput`] instead of
                 a plain tuple.
         """
+        print(">> [S2E] fwd")
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
 
@@ -554,6 +571,7 @@ class Siglip2VisionTransformer(nn.Module):
 
     def __init__(self, config: PretrainedConfig):
         super().__init__()
+        print(">> [S2VT] __init__")
         self.config = config
         embed_dim = config.hidden_size
 
@@ -580,6 +598,7 @@ class Siglip2VisionTransformer(nn.Module):
             Tensor containing the spatial dimensions (height, width)
             of the input images.
         """
+        print(">> [S2VT] fwd")
         hidden_states = self.embeddings(pixel_values, grid_thws)
 
         last_hidden_state, hidden_states = self.encoder(
@@ -598,6 +617,7 @@ class Siglip2NavitModel(torch.nn.Module):
 
     def __init__(self, config: PretrainedConfig):
         super().__init__()
+        print(">> [S2NM] __init__")
 
         self.vision_model = Siglip2VisionTransformer(config)
 
@@ -613,6 +633,7 @@ class Siglip2NavitModel(torch.nn.Module):
             BaseModelOutputWithNoAttention,
     ]:
 
+        print(">> [S2NM] fwd")
         if output_hidden_states is None:
             output_hidden_states = self.config.output_hidden_states
         if return_dict is None:

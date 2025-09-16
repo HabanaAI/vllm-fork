@@ -1251,6 +1251,9 @@ class BaseMultiModalProcessor(ABC, Generic[_I]):
         Call the HF processor on the prompt text and
         associated multi-modal data.
         """
+        print(">> [mm processing] call hf processor")
+        print(f">> [mm processing]   mm_data:{mm_data}")
+        print(f">> [mm processing]   info.ctx:{self.info.ctx}")
         return self.info.ctx.call_hf_processor(
             self.info.get_hf_processor(**mm_kwargs),
             dict(text=prompt, **mm_data),

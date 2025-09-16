@@ -3448,6 +3448,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             cfg = (batch_size, seq_len, phase)
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
+        if not seen:
+            print(f">> [cc] cfg:{cfg}")
         if not seen and not warmup_mode:
             logger.warning("Configuration: %s was not warmed-up!",
                            (phase.value, batch_size, seq_len,

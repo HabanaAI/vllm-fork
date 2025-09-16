@@ -10,6 +10,8 @@ from vllm.lora.request import LoRARequest
 from vllm.pooling_params import PoolingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import BeamSearchParams, SamplingParams
+import os
+from transformers import AutoTokenizer
 
 logger = init_logger(__name__)
 
@@ -20,6 +22,7 @@ class RequestLogger:
         super().__init__()
 
         self.max_log_len = max_log_len
+        self.tokenizer = AutoTokenizer.from_pretrained(os.getenv('VMODEL'))
 
     def log_inputs(
         self,
@@ -39,6 +42,11 @@ class RequestLogger:
 
             if prompt_token_ids is not None:
                 prompt_token_ids = prompt_token_ids[:max_log_len]
+
+        if prompt_token_ids == None and prompt is not None:
+            l_token_ids = self.tokenizer.encode(prompt)
+            print(f">>> prompt len: {len(prompt)}")
+            print(f">>> prompt token id len: {len(l_token_ids)}")
 
         logger.info(
             "Received request %s: prompt: %r, "

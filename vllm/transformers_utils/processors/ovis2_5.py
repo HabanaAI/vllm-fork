@@ -12,6 +12,9 @@ from transformers.image_utils import ImageInput
 from transformers.processing_utils import (ProcessingKwargs, ProcessorMixin,
                                            Unpack)
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
+from vllm.logger import init_logger
+logger = init_logger(__name__)
+
 
 __all__ = ['Ovis2_5Processor']
 IMAGE_TOKEN = "<image>"
@@ -168,6 +171,16 @@ class Ovis2_5Processor(ProcessorMixin):
             tokenizer_init_kwargs=self.tokenizer.init_kwargs,
             **kwargs,
         )
+
+        try:
+            logger.info(
+                ">> [ovis processor] __call__ images=%s videos=%s text=%s | images_kwargs=%s videos_kwargs=%s",
+                images is not None, videos is not None, text is not None,
+                output_kwargs.get("images_kwargs"), output_kwargs.get("videos_kwargs")
+            )
+        except Exception as e:
+            logger.info(">> [ovis processor] __call__ trace failed: %s", e)
+
         # Process all images first
         visual_features = {}
         output = BatchFeature()
@@ -255,6 +268,13 @@ class Ovis2_5Processor(ProcessorMixin):
             else:
                 replaced_and_tokenized_ids = torch.tensor([], dtype=torch.long)
             output["input_ids"] = replaced_and_tokenized_ids
+            try:
+                ids_len = int(replaced_and_tokenized_ids.shape[1]) if replaced_and_tokenized_ids.ndim == 2 else None
+                pv_shape = tuple(output["pixel_values"][0].shape) if "pixel_values" in output and len(output["pixel_values"])>0 else None
+                grid_0 = output["grids"][0].tolist() if "grids" in output and len(output["grids"])>0 else None
+                logger.info(">> [ovis processor] __call__ OUT input_ids_len=%s pixel_values[0].shape=%s grids[0]=%s", ids_len, pv_shape, grid_0)
+            except Exception as e:
+                logger.info(">> [ovis processor] __call__ OUT trace failed: %s", e)
 
             return output
         # If only images were provided
@@ -324,10 +344,17 @@ class Ovis2_5Processor(ProcessorMixin):
             beta = math.sqrt((height * width) / max_pixels)
             h_bar = math.floor(height / beta / factor) * factor
             w_bar = math.floor(width / beta / factor) * factor
+            logger.info(">> [ovis processor] smart_resize: clamp by max_pixels=%s: src=(%d,%d) factor=%d -> (%d,%d)",
+                            max_pixels, height, width, factor, h_bar, w_bar)
         elif h_bar * w_bar < min_pixels:
             beta = math.sqrt(min_pixels / (height * width))
             h_bar = math.ceil(height * beta / factor) * factor
             w_bar = math.ceil(width * beta / factor) * factor
+            logger.info(">> [ovis processor] smart_resize: bump by min_pixels=%s: src=(%d,%d) factor=%d -> (%d,%d)",
+                            min_pixels, height, width, factor, h_bar, w_bar)
+        else:
+            logger.info(">> [ovis processor] smart_resize: align to factor=%d: src=(%d,%d) -> (%d,%d)",
+                            factor, height, width, h_bar, w_bar)
         return h_bar, w_bar
 
     def get_token_value(self, tok):
@@ -362,6 +389,11 @@ class Ovis2_5Processor(ProcessorMixin):
         num_image_atoms = grid[0] * grid[1] * grid[2]
         num_image_atoms //= self.hidden_stride**2
         num_image_atoms //= self.temporal_patch_size
+        try:
+            logger.info(">> [ovis processor] construct_visual_placehoders: grid(t,h,w)=%s stride=%d tpatch=%d -> vision_tokens=%d (plus start/end)",
+                        tuple(grid), self.hidden_stride, self.temporal_patch_size, num_image_atoms)
+        except Exception:
+            pass
 
         # Create a new list with padding tokens inserted
         padded_placeholder_tokens = []
@@ -405,9 +437,13 @@ class Ovis2_5Processor(ProcessorMixin):
         ]
 
         width, height = images[0].size
+
+        logger.info(">> [ovis processor] preprocess_multidata: IN orig_size=(H=%d,W=%d) convert_to_rgb=%s min_pixels=%s max_pixels=%s patch=%d stride=%d tpatch=%d",
+                        height, width, convert_to_rgb, min_pixels, max_pixels, self.patch_size, self.hidden_stride, self.temporal_patch_size)
+
         resized_height, resized_width = height, width
         processed_images = []
-        for image in images:
+        for idx, image in enumerate(images):
             resized_height, resized_width = self.smart_resize(
                 height,
                 width,
@@ -416,8 +452,11 @@ class Ovis2_5Processor(ProcessorMixin):
                 max_pixels=max_pixels,
             )
             new_size = dict(height=resized_height, width=resized_width)
+            logger.info(">> [ovis processor] preprocess_multidata: image[%d] -> new_size=%s (passed to image_processor.preprocess)", idx, new_size)
             image_pt = self.image_processor.preprocess(
                 image, size=new_size, return_tensors="np")['pixel_values'][0]
+
+            logger.info(">> [ovis processor] preprocess_multidata: image[%d] preprocess OUT one_image_tensor.shape=%s", idx, tuple(image_pt.shape))
 
             processed_images.append(image_pt)
 
@@ -447,6 +486,14 @@ class Ovis2_5Processor(ProcessorMixin):
         flatten_patches = patches.reshape(
             grid_t * grid_h * grid_w, channel * self.temporal_patch_size *
             self.patch_size * self.patch_size)
+
+        try:
+            num_patches = int(grid_t * grid_h * grid_w)
+            vision_tokens = num_patches // (self.hidden_stride**2) // self.temporal_patch_size
+            logger.info(">> [ovis processor] preprocess_multidata: flatten OUT grid=(t=%d,h=%d,w=%d) num_patches=%d vision_tokens=%d flatten_patches.shape=%s",
+                            grid_t, grid_h, grid_w, num_patches, vision_tokens, tuple(flatten_patches.shape))
+        except Exception:
+            pass
 
         visual_placeholders = self.construct_visual_placeholders(
             [grid_t, grid_h, grid_w], is_video)
