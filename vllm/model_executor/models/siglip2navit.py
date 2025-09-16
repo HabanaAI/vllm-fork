@@ -599,6 +599,7 @@ class Siglip2Encoder(nn.Module):
             # for more information
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
+        cu_seqlens = torch.tensor([ 8140, 16280],dtype=torch.int32)
         print('cu_seqlens:', cu_seqlens)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
         print('cu_seqlens_after_pad:', cu_seqlens)
@@ -607,7 +608,7 @@ class Siglip2Encoder(nn.Module):
         print('reverse_indices:', reverse_indices)
 
         hidden_states = inputs_embeds
-        print('hidden_states', hidden_states.shape)
+        print('hidden_states:', hidden_states.shape)
         for index, block in enumerate(self.layers):
             if (not self.fullatt_block_indexes
                     or index in self.fullatt_block_indexes):
