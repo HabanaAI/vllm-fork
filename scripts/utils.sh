@@ -273,7 +273,10 @@ set_linear_bucketing(){
     prompt_bs_min=1
     prompt_bs_max=$(( $max_num_batched_tokens / $(ceil $input_min $block_size) ))
     prompt_bs_max=$( ceil $prompt_bs_max $prompt_bs_step )
-    prompt_bs_max=$( min $prompt_bs_max $max_num_seqs ) # consider max_num_prefill_seqs
+    prompt_bs_max=$( min $prompt_bs_max $max_num_seqs )
+    if [ -n "$max_num_prefill_seqs" ]; then
+        prompt_bs_max=$( min $prompt_bs_max $max_num_prefill_seqs )
+    fi
     prompt_bs_max=$( max $prompt_bs_max 1 )
     export VLLM_PROMPT_BS_BUCKET_MIN=${VLLM_PROMPT_BS_BUCKET_MIN:-$prompt_bs_min}
     export VLLM_PROMPT_BS_BUCKET_STEP=${VLLM_PROMPT_BS_BUCKET_STEP:-$prompt_bs_step}
@@ -296,10 +299,10 @@ set_linear_bucketing(){
 
     decode_block_step=$block_size
     decode_block_min=$( ceil_div $input_min $block_size )
-    decode_block_min=$( ceil_div $decode_block_min $decode_block_step )
+    decode_block_min=$( max $decode_block_min $decode_block_step )
     max_context_len=$(( $input_max + $output_max ))
-    max_context_blocks=$(( $(ceil_div $max_context_len $block_size) + 1 )) # todo: check if must +1
-    decode_block_max=$(( $max_context_blocks * $decode_bs_max))
+    max_context_blocks=$( ceil_div $max_context_len $block_size )
+    decode_block_max=$(( $max_context_blocks * $decode_bs_max ))
     decode_block_max=$( ceil $decode_block_max $decode_block_step )
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
     export VLLM_DECODE_BLOCK_BUCKET_STEP=${VLLM_DECODE_BLOCK_BUCKET_STEP:-$decode_block_step}
