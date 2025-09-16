@@ -2,10 +2,9 @@
 
 - https://github.com/intel/neural-compressor/tree/pp-glm
 
-### Calibration (Optional)
-
+### Calibration
 ```
-
+bash run_inc.sh 
 ```
 
 ### Post-Process
