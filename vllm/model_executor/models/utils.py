@@ -458,7 +458,7 @@ def _merge_multimodal_embeddings(
             flattened = _flatten_embeddings(multimodal_embeddings)
             inputs_embeds[is_multimodal] = flattened
         inputs_embeds = inputs_embeds.reshape(batch_size, seq_length,
-                                                  hidden_size)
+                                              hidden_size)
 
         return inputs_embeds
     num_expected_tokens = is_multimodal.sum().item()
