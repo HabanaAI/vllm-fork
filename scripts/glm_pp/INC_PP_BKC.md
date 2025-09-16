@@ -1,6 +1,7 @@
 ### Install
 
 - https://github.com/intel/neural-compressor/tree/pp-glm
+- https://github.com/HabanaAI/vllm-fork/tree/glm-pp/ (Inlcudes calibration scripts)
 
 ### Calibration
 
