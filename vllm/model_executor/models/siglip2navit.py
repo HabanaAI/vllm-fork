@@ -552,12 +552,7 @@ class Siglip2Encoder(nn.Module):
             device=inputs_embeds.device,
             dtype=torch.int32,
         )
-#       cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
-        # 相邻去重（避免 unique_consecutive 在 HPU Graph 里 CPU fallback）
-        if cu_window_seqlens.numel() > 1:
-            keep = torch.ones_like(cu_window_seqlens, dtype=torch.bool, device=cu_window_seqlens.device)
-            keep[1:] = cu_window_seqlens[1:] != cu_window_seqlens[:-1]
-            cu_window_seqlens = cu_window_seqlens[keep]
+        cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = inputs_embeds.size()
         inputs_embeds = inputs_embeds.reshape(
