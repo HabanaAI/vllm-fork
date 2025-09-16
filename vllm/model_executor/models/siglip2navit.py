@@ -582,7 +582,7 @@ class Siglip2Encoder(nn.Module):
         emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
         print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
-        print('position_embeddings:', position_embeddings)
+        print('position_embeddings:', len(position_embeddings[0], len(position_embeddings[1])))
         
         print('grid_thws', grid_thws)
         cu_seqlens = torch.repeat_interleave(
