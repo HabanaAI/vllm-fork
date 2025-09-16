@@ -582,7 +582,9 @@ class Siglip2Encoder(nn.Module):
         emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
         print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
-
+        print('position_embeddings:', position_embeddings.shape)
+        
+        print('grid_thws', grid_thws)
         cu_seqlens = torch.repeat_interleave(
             grid_thws[:, 1] * grid_thws[:, 2], grid_thws[:, 0]
         ).cumsum(
@@ -595,20 +597,24 @@ class Siglip2Encoder(nn.Module):
             # for more information
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
-        print('cu_seqlens:', cu_seqlens, cu_seqlens.shape)
+        print('cu_seqlens:', cu_seqlens)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
-        print('cu_seqlens_after_pad:', cu_seqlens, cu_seqlens.shape)
+        print('cu_seqlens_after_pad:', cu_seqlens)
 
         reverse_indices = torch.argsort(window_index)
         print('reverse_indices:', reverse_indices)
 
         hidden_states = inputs_embeds
+        print('hidden_states', hidden_states.shape)
         for index, block in enumerate(self.layers):
             if (not self.fullatt_block_indexes
                     or index in self.fullatt_block_indexes):
                 cu_seqlens_tmp = cu_seqlens
             else:
                 cu_seqlens_tmp = cu_window_seqlens
+            
+#           print('cu_seqlens_tmp:', cu_seqlens_tmp)
+            
             hidden_states = block(hidden_states, cu_seqlens_tmp,
                                   position_embeddings)
 
