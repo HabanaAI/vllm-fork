@@ -548,7 +548,7 @@ class Siglip2Encoder(nn.Module):
         rotary_pos_emb = self.rot_pos_emb(grid_thws)
         window_index, cu_window_seqlens = self.get_window_index(grid_thws)
         print('window:',window_index)
-        print('window_seqlens:',cu_window_seqlens)
+        print('cu_window_seqlens:',cu_window_seqlens)
         cu_window_seqlens = torch.tensor(
             cu_window_seqlens,
             device=inputs_embeds.device,
@@ -560,19 +560,27 @@ class Siglip2Encoder(nn.Module):
             keep = torch.ones_like(cu_window_seqlens, dtype=torch.bool, device=cu_window_seqlens.device)
             keep[1:] = cu_window_seqlens[1:] != cu_window_seqlens[:-1]
             cu_window_seqlens = cu_window_seqlens[keep]
-
+        
+        print('cu_window_seqlens_after_numel:',cu_window_seqlens)
+        
         seq_len, _ = inputs_embeds.size()
-        print('seq_len:', seq_len)
+        print('inputs_embeds:', inputs_embeds.shape)
         inputs_embeds = inputs_embeds.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
-        print(self.spatial_merge_unit, self.spatial_merge_unit)
+        print('merge_unit:', self.spatial_merge_unit, self.spatial_merge_unit)
         inputs_embeds = inputs_embeds[window_index, :, :]
         inputs_embeds = inputs_embeds.reshape(seq_len, -1)
+        print('inputs_embeds_after_reshape:', inputs_embeds.shape)
+        
+        print('rotary_pos_emb:', rotary_pos_emb.shape)
         rotary_pos_emb = rotary_pos_emb.reshape(
             seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
         rotary_pos_emb = rotary_pos_emb[window_index, :, :]
         rotary_pos_emb = rotary_pos_emb.reshape(seq_len, -1)
+        print('rotary_pos_emb_after_reshape:', rotary_pos_emb.shape)
+        
         emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
+        print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
 
         cu_seqlens = torch.repeat_interleave(
