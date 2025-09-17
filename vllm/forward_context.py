@@ -124,6 +124,7 @@ def set_forward_context(attn_metadata: Any,
             topk_ids_across_dp = None
             topk_weights_across_dp = None
             packed_bf16_buf_across_dp = None
+            import os
             if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('true', '1'):
                 per_rank_elems = request_batch_size * padded_seq_length * hidden_size + batchsize * num_experts_per_tok * 2
                 packed_bf16_buf_across_dp = torch.empty((per_rank_elems * dp_size),\
