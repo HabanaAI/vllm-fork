@@ -3179,7 +3179,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                              kv_caches,
                                              hidden_states,
                                              )
-                        if input_tokens_list is None:
+                        if not input_tokens_list:
                             return
                         self.pd_executor_pool.submit(
                             send_kv,
@@ -3510,10 +3510,28 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         indices = indices.unflatten(0, (-1, self.block_size))[:, 0]
         return indices
 
-    def fetch_kv_to_host_chunked(self, model, model_input, kv_caches,
-                                 hidden_states):
+    @staticmethod
+    def has_kv_to_send(model_input):
         seq_groups_to_sample = model_input.sampling_metadata.seq_groups
         if not seq_groups_to_sample:
+            return False
+
+        seq_lens = model_input.attn_metadata.seq_lens
+        for idx, slen in enumerate(seq_lens):
+            if slen == 1:
+                continue
+            # Only at the last chunk, we get full kv cache
+            seq_group_to_sample = seq_groups_to_sample[idx]
+            if not seq_group_to_sample.do_sample:
+                continue
+            # One or more needs to sample which indicates the last chunk
+            return True
+
+        return False
+
+    def fetch_kv_to_host_chunked(self, model, model_input, kv_caches,
+                                 hidden_states):
+        if not self.has_kv_to_send(model_input):
             return None, None, None
 
         torch.hpu.synchronize(
@@ -3526,6 +3544,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         input_tokens_list = []
         htorch.core.mark_step()
 
+        seq_groups_to_sample = model_input.sampling_metadata.seq_groups
         attn_metadata = model_input.attn_metadata
         # Need consider the context lens for chunked prefill
         context_lens_tensor = model_input.attn_metadata.context_lens_tensor
