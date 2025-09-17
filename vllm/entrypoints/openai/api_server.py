@@ -1233,6 +1233,11 @@ async def init_app_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
     ) if model_config.runner_type == "pooling" else None
+    model_support_embed = False
+    for model_config in model_configs:
+        if model_config.task == "embed":
+            model_support_embed = True
+            break
     state.openai_serving_embedding = OpenAIServingEmbedding(
         engine_client,
         model_config,
@@ -1240,27 +1245,36 @@ async def init_app_state(
         request_logger=request_logger,
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
-    ) if model_config.task == "embed" else None
+    ) if model_support_embed else None
+    model_support_score_embed = False
+    for model_config in model_configs:
+        if model_config.task in ("score", "embed", "pooling"):
+            model_support_score_embed = True
+            break
     state.openai_serving_scores = ServingScores(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
-        model_configs=model_configs) if model_config.task in (
-            "score", "embed", "pooling") else None
+        model_configs=model_configs) if model_support_score_embed else None
     state.openai_serving_classification = ServingClassification(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
     ) if model_config.task == "classify" else None
+    model_support_score = False
+    for model_config in model_configs:
+        if model_config.task == "score":
+            model_support_score = True
+            break
     state.jinaai_serving_reranking = ServingScores(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
         model_configs=model_configs,
-    ) if model_config.task == "score" else None
+    ) if model_support_score else None
     state.openai_serving_tokenization = OpenAIServingTokenization(
         engine_client,
         model_config,
