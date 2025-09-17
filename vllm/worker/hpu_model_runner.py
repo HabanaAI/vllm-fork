@@ -2961,7 +2961,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             end_block_idx = start_block_idx + num_blocks
 
                             kv_cache_shape = (61, num_blocks * self.block_size,
-                                              1, k_v_head_size)
+                                              k_v_head_size)
                             if get_tensor_model_parallel_rank() == 0:
                                 current_tokens = input_tokens_tensor_cpu[
                                     idx][:slen]
@@ -3034,7 +3034,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 key_cache_current_layer = \
                                     kv_cache_current_layer[0]
 
-                                key = kv_cache_for_cur_seq[i].squeeze(-2).view(
+                                key = kv_cache_for_cur_seq[i].view(
                                     -1, self.block_size, k_v_head_size)
                                 self.cache_k(key, key_cache_current_layer,
                                              block_indices_tensor, None)
