@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from typing import Iterator, List, Optional, Union
 
 import cloudpickle
+import threading
 import zmq
 
 from vllm import AsyncEngineArgs, SamplingParams
