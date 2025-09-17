@@ -1086,12 +1086,6 @@ class ModelConfig:
             if self.use_async_output_proc:
                 self.use_async_output_proc = False
 
-            if current_platform.is_hpu() and os.getenv("QUANT_CONFIG", None):
-                os.environ["INC_ENABLE_TP_RANK_INFO"] = "1"
-                logger.info_once(
-                    "Set INC_ENABLE_TP_RANK_INFO=1 for pipeline parallelism "
-                    "with INC on HPU.")
-
     def get_hf_config_sliding_window(
             self) -> Union[Optional[int], list[Optional[int]]]:
         """Get the sliding window size, or None if disabled."""
