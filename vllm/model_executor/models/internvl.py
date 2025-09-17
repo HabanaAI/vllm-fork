@@ -1239,7 +1239,8 @@ class InternVLChatModel(nn.Module, SupportsMultiModal, SupportsPP,
         if is_hpu:
             self.img_context_token_id = image_token_id.flatten()
         else:
-            self.img_context_token_id = image_token_id.flatten().unique().item()
+            self.img_context_token_id = image_token_id.flatten().unique().item(
+            )
         if pixel_values_flat is not None:
             if not isinstance(pixel_values_flat, (torch.Tensor, list)):
                 raise ValueError("Incorrect type of pixel values. "
