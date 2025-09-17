@@ -147,7 +147,7 @@ class OpenCVVideoBackend(VideoLoader):
         metadata = {
             "total_num_frames": total_frames_num,
             "fps": original_fps,
-            "duration": duration,
+            "fps": num_frames / duration,
             "video_backend": "opencv"
         }
 

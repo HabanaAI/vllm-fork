@@ -404,6 +404,12 @@ _MULTIMODAL_EXAMPLE_MODELS = {
     "Qwen2_5_VLForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen2.5-VL-3B-Instruct"),  # noqa: E501
     "Qwen2_5OmniModel": _HfExamplesInfo("Qwen/Qwen2.5-Omni-3B"),
     "Qwen2_5OmniForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen2.5-Omni-7B-AWQ"),  # noqa: E501
+    "Qwen3VLForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen3-VL-4B-Instruct", # noqa: E501
+                                                        max_model_len=4096,
+                                                        min_transformers_version="4.57"),  # noqa: E501
+    "Qwen3VLMoeForConditionalGeneration": _HfExamplesInfo("Qwen/Qwen3-VL-30B-A3B-Instruct", # noqa: E501
+                                                        max_model_len=4096,
+                                                        min_transformers_version="4.57"),
     "SkyworkR1VChatModel": _HfExamplesInfo("Skywork/Skywork-R1V-38B"),
     "SmolVLMForConditionalGeneration": _HfExamplesInfo("HuggingFaceTB/SmolVLM2-2.2B-Instruct"),  # noqa: E501
     "UltravoxModel": _HfExamplesInfo("fixie-ai/ultravox-v0_5-llama-3_2-1b",  # noqa: E501
