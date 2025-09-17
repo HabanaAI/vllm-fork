@@ -337,14 +337,6 @@ set_perf_tuning(){
         export VLLM_ZERO_PADDING=true
     fi
 
-    if [ "$disable_fsdpa" == "true" ]; then
-        echo "VLLM_PROMPT_USE_FUSEDSDPA is disabled"
-        export VLLM_PROMPT_USE_FUSEDSDPA=false
-    else
-        echo "VLLM_PROMPT_USE_FUSEDSDPA is enabled"
-        export VLLM_PROMPT_USE_FUSEDSDPA=true
-    fi
-
     # VLLM_FP32_SOFTMAX=false by default, set to true for models with accuracy issues.
     if [[ $model_name_lower == *"deepseek-r1-distill-qwen-7b"* \
             || $model_name_lower == *"qwen2-7b-instruct"* \
