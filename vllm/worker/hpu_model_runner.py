@@ -3090,7 +3090,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # NOTE: the send operation is non-blocking
                 need_send_kv = self.need_send_kv(model_input, kv_caches, warmup_mode)
                 if need_send_kv:
-                    cur_time = time.time()
 
                     def sync_send_kv_caches(hidden_states):
                         get_kv_transfer_group(
@@ -3123,6 +3122,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                   kv_caches,
                                                   hidden_states,
                                                   )
+                        if input_tokens_list is None:
+                            return
                         self.pd_executor_pool.submit(
                             send_kv,
                             input_tokens_list,
@@ -3130,13 +3131,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             hidden_states_list,
                         )
 
-                    if self.use_async_kv_transfer_in_pd:
-                        async_send_kv_caches(hidden_states)
-                    else:
-                        sync_send_kv_caches(hidden_states)
+                    if get_world_group().rank == 0:
+                        cur_time = time.time()
+                        if self.use_async_kv_transfer_in_pd:
+                            async_send_kv_caches(hidden_states)
+                        else:
+                            sync_send_kv_caches(hidden_states)
 
-                    now = time.time()
-                    logger.info("KV send time: %f", now - cur_time)
+                        now = time.time()
+                        logger.info("KV send time: %f", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
@@ -3444,8 +3447,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                              real_out)
         self.has_patched_prev_output = True
 
+    def get_attn_block_indices(self, attn_metadata):
+        slot_mapping = attn_metadata.slot_mapping.flatten()
+        indices = torch.div(slot_mapping, self.block_size, rounding_mode="floor")
+        indices = indices.unflatten(0, (-1, self.block_size))[:, 0]
+        return indices
+
     def fetch_kv_to_host(self, model, model_input, kv_caches,
                          hidden_states):
+        seq_groups_to_sample = \
+            model_input.sampling_metadata.seq_groups
+        if not seq_groups_to_sample:
+            return None, None, None
+
         torch.hpu.synchronize(
         )  # sync here may hurt performance.
         seq_lens = model_input.attn_metadata.seq_lens
@@ -3464,11 +3478,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         # For sequence not do sample, hidden states is missing
         hidden_states_idx = 0
-        seq_groups_to_sample = \
-            model_input.sampling_metadata.seq_groups
 
         # Use block indices for current query
-        block_indices = attn_metadata.block_indices
+        block_indices = self.get_attn_block_indices(attn_metadata)
         max_query_blocks = (attn_metadata.slot_mapping.size(1)
                             + self.block_size - 1
                             ) // self.block_size
@@ -3480,6 +3492,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_lens) if block_list is not None else 0)
         start_context_block = 0
 
+        htorch.core.mark_step()
         for idx, slen in enumerate(seq_lens):
             if slen == 1:
                 hidden_states_idx += 1
@@ -3533,8 +3546,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 key_cache = kv_cache[0]
                 # cache shape for MLA:
                 # (num_blocks, block_size, head_size)
-                key = self.cache_k.fetch_from_cache(
-                    key_cache, block_indices_seq)
+                key = key_cache.index_select(0, block_indices_seq)
                 # reshape to (1, seq_len, head_size)
                 key = key.reshape(1, -1, key.shape[-1])
                 keys.append(key)
