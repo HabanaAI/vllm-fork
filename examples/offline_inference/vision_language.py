@@ -815,13 +815,13 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
 # Ovis2_5
 def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
     model_name = "AIDC-AI/Ovis2.5-2B"
-    
+
     engine_args = EngineArgs(
         model=model_name,
         max_model_len=4096,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="bfloat16",
+        dtype="half",
         limit_mm_per_prompt={modality: 1},
         tensor_parallel_size=1,
         # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},
