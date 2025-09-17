@@ -645,7 +645,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             )
 
             common_args = self.common_attention_args(
-                block_list, key_cache, value_cache, attn_metadata.block_size, self.sinks
+                block_list, key_cache, value_cache, attn_metadata.block_size
             )
 
             if self.sliding_window:
@@ -699,9 +699,6 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                         dtype=self.alibi_slopes.dtype,
                     )
 
-            if self.sinks is not None:
-                self.sinks_decode = self.sinks.reshape(self.sinks.shape[0], 1)
-                self.sinks_decode = torch.nn.functional.pad(self.sinks_decode, (0, attn_metadata.block_size - 1, 0, 0), "constant", -torch.inf)
             output = HPUPagedAttention.forward_decode(
                 query=query,
                 block_mapping=block_mapping,
@@ -709,14 +706,14 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 block_groups=block_groups,
                 position_bias=self.position_bias,
                 **self.common_attention_args(
-                    block_list, key_cache, value_cache, attn_metadata.block_size, self.sinks_decode
+                    block_list, key_cache, value_cache, attn_metadata.block_size
                 ),
             )
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
     def common_attention_args(
-        self, block_list=None, key_cache=None, value_cache=None, block_size=None, sinks = None
+        self, block_list=None, key_cache=None, value_cache=None, block_size=None
     ):
         return {
             "scale": self.scale,
@@ -732,7 +729,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             "key_cache": key_cache,
             "value_cache": value_cache,
             "block_size": block_size,
-            "sinks": sinks,
+            "sinks": self.sinks,
         }
 
     def forward_encoder_decoder(
