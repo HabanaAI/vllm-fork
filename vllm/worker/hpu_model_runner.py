@@ -1090,7 +1090,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     and not self.lora_config)
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
-        self.mm_tokens_per_image = None
+        self.mm_tokens_per_image = 1
 
     def _set_gc_threshold(self) -> None:
         """
@@ -3213,9 +3213,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if graphs:
                 self.graphed_buckets.add(cfg)
             if self.is_mm_run():
-                img_args = (int(seq_len) // self.mm_tokens_per_image) \
-                            if self.mm_tokens_per_image is not None \
-                            else int(seq_len)
+                img_args = int(seq_len) // self.mm_tokens_per_image
             self.warmup_scenario(
                 int(bs),
                 int(seq_len),
