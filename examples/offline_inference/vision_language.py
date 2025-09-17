@@ -823,6 +823,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         trust_remote_code=True,
         dtype="bfloat16",           # half 也行；Gaudi 上 bfloat16 更稳
         limit_mm_per_prompt={modality: 1},
+        tensor_parallel_size=1,
         # ⚠️ 不要在 Ovis 路线下加 Qwen2VL 的 override
         # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},  # 如需强制，可打开这一行（见说明）
 #       mm_processor_kwargs={"use_fast": True},  # 可选：去掉 slow processor 警告
