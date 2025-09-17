@@ -1118,10 +1118,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 prompt_tokens = prompt_tokens[context_len:]
                 prefix_block_tables.append(computed_block_nums)
             elif self.scheduler_config.chunked_prefill_enabled:
-                if seq_group_metadata.block_tables is not None:
+                if (context_len > 0 and
+                        seq_group_metadata.block_tables is not None):
                     # Prefill has chunked before.
+                    # Consider the context length part of the block table
+                    # NOTE: the context length must be multiple of block size
                     block_table = seq_group_metadata.block_tables[seq_id]
-                    prefix_block_tables.append(block_table)
+                    num_context_blocks = (context_len // self.block_size)
+                    context_blocks = block_table[:num_context_blocks]
+                    prefix_block_tables.append(context_blocks)
                 else:
                     # The first prefill.
                     prefix_block_tables.append([])
@@ -1226,7 +1231,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                  seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if any(context_lens):
-            assert not self.scheduler_config.chunked_prefill_enabled
             # prefix caching
 
             max_num_block = max(len(bt) for bt in prefix_block_tables)
@@ -3100,58 +3104,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             hidden_states,
                         )
 
-                    def fetch_kv_to_host(model, model_input, kv_caches,
-                                         hidden_states):
-                        input_tokens_tensor_cpu = model_input.input_tokens.to(
-                            "cpu"
-                        )  # shape: [batch_size, seq_len_padding_to_128]
-                        torch.hpu.synchronize(
-                        )  # sync here may hurt performance.
-                        seq_lens = model_input.attn_metadata.seq_lens
-                        start_layer = model.model.start_layer
-                        end_layer = model.model.end_layer
-                        num_kv_heads = 1
-                        k_v_head_size = 576
-                        kv_caches_send_list = []
-                        hidden_states_list = []
-                        input_tokens_list = []
-                        htorch.core.mark_step()
-                        for idx, slen in enumerate(seq_lens):
-                            if slen == 1:
-                                continue
-                            current_tokens_cpu = input_tokens_tensor_cpu[
-                                idx][:slen]
-                            keys = []
-                            start = 0
-                            padded_total_size = (
-                                slen + self.block_size -
-                                1) // self.block_size * self.block_size
-                            current_slot_mapping = \
-                                model_input.attn_metadata.slot_mapping[
-                                idx][start:padded_total_size]
-                            # ==== graph should start here ======
-                            for layer_id in range(start_layer, end_layer):
-                                kv_cache = kv_caches[layer_id - start_layer]
-                                key_cache = kv_cache[0].reshape(
-                                    -1, num_kv_heads, k_v_head_size)
-
-                                keys.append(
-                                    key_cache.index_select(
-                                        0, current_slot_mapping).unsqueeze(0))
-                            keys = torch.cat(keys, dim=0)
-                            kv_cache_to_sent = keys.cpu()
-                            current_hidden_states = hidden_states[
-                                idx].unsqueeze(0).cpu()
-                            # ==== graph should end here ======
-                            htorch.core.mark_step()
-                            torch.hpu.synchronize()
-                            kv_caches_send_list.append(kv_cache_to_sent)
-                            hidden_states_list.append(current_hidden_states)
-                            input_tokens_list.append(current_tokens_cpu)
-
-                        return (input_tokens_list, kv_caches_send_list,
-                                hidden_states_list)
-
                     def send_kv(input_tokens_list, kv_caches_send_list,
                                 hidden_states_list):
                         cur_time = time.time()
@@ -3166,11 +3118,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         (input_tokens_list,
                          kv_caches_send_list,
                          hidden_states_list) = \
-                            fetch_kv_to_host(self.get_model(),
-                                             model_input,
-                                             kv_caches,
-                                             hidden_states,
-                                             )
+                            self.fetch_kv_to_host(self.get_model(),
+                                                  model_input,
+                                                  kv_caches,
+                                                  hidden_states,
+                                                  )
                         self.pd_executor_pool.submit(
                             send_kv,
                             input_tokens_list,
@@ -3491,3 +3443,116 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 logger.debug('Skip patching with %s as last token is empty',
                              real_out)
         self.has_patched_prev_output = True
+
+    def fetch_kv_to_host(self, model, model_input, kv_caches,
+                         hidden_states):
+        torch.hpu.synchronize(
+        )  # sync here may hurt performance.
+        seq_lens = model_input.attn_metadata.seq_lens
+        start_layer = model.model.start_layer
+        end_layer = model.model.end_layer
+        kv_caches_send_list = []
+        hidden_states_list = []
+        input_tokens_list = []
+        htorch.core.mark_step()
+
+        attn_metadata = model_input.attn_metadata
+        # Need consider the context lens for chunked prefill
+        context_lens_tensor = \
+            model_input.attn_metadata.context_lens_tensor
+        context_lens = context_lens_tensor.cpu().tolist()
+
+        # For sequence not do sample, hidden states is missing
+        hidden_states_idx = 0
+        seq_groups_to_sample = \
+            model_input.sampling_metadata.seq_groups
+
+        # Use block indices for current query
+        block_indices = attn_metadata.block_indices
+        max_query_blocks = (attn_metadata.slot_mapping.size(1)
+                            + self.block_size - 1
+                            ) // self.block_size
+        start_query_block = 0
+
+        # Handle the block list for context (chunked prefill)
+        block_list = attn_metadata.block_list
+        max_context_blocks = (block_list.size(-1) // len(
+            seq_lens) if block_list is not None else 0)
+        start_context_block = 0
+
+        for idx, slen in enumerate(seq_lens):
+            if slen == 1:
+                hidden_states_idx += 1
+                start_query_block += max_query_blocks
+                start_context_block += max_context_blocks
+                continue
+
+            # Only at the last chunk, we get full kv cache
+            seq_group_to_sample = seq_groups_to_sample[idx]
+            if not seq_group_to_sample.do_sample:
+                # If it doesn't sample, the hidden states is
+                # not present, hidden_states_idx is not
+                # incremented
+                start_query_block += max_query_blocks
+                start_context_block += max_context_blocks
+                continue
+
+            context_len = context_lens[idx]
+            query_len = slen - context_len
+
+            # get the full prompt tokens from sampling meta
+            # instead of input tokens considering if chunked
+            seq_ids = list(seq_group_to_sample.seq_data.keys())
+            assert len(seq_ids) == 1
+            seq_data = seq_group_to_sample.seq_data[seq_ids[0]]
+            current_tokens_cpu = seq_data.get_token_ids(
+            )[:slen]
+
+            # First get the block indices for the current query
+            num_blocks = (query_len + self.block_size - 1
+                          ) // self.block_size
+            end_query_block = start_query_block + num_blocks
+            block_indices_seq = block_indices[start_query_block:
+                                              end_query_block]
+            if block_list is not None:
+                # Consider the context blocks
+                # NOTE: context_len must be multiple of block
+                num_context_blocks = (context_len //
+                                      self.block_size)
+                end_context_block = (start_context_block +
+                                     num_context_blocks)
+                context_blocks = block_list[start_context_block:
+                                            end_context_block]
+                block_indices_seq = torch.concat(
+                    (context_blocks, block_indices_seq), dim=0)
+
+            # ==== graph should start here ======
+            keys = []
+            for layer_id in range(start_layer, end_layer):
+                kv_cache = kv_caches[layer_id - start_layer]
+                key_cache = kv_cache[0]
+                # cache shape for MLA:
+                # (num_blocks, block_size, head_size)
+                key = self.cache_k.fetch_from_cache(
+                    key_cache, block_indices_seq)
+                # reshape to (1, seq_len, head_size)
+                key = key.reshape(1, -1, key.shape[-1])
+                keys.append(key)
+
+            keys = torch.cat(keys, dim=0)
+            kv_cache_to_sent = keys.cpu()
+            current_hidden_states = hidden_states[
+                hidden_states_idx].unsqueeze(0).cpu()
+            # ==== graph should end here ======
+            htorch.core.mark_step()
+            torch.hpu.synchronize()
+            kv_caches_send_list.append(kv_cache_to_sent)
+            hidden_states_list.append(current_hidden_states)
+            input_tokens_list.append(current_tokens_cpu)
+
+            hidden_states_idx += 1
+            start_query_block += max_query_blocks
+            start_context_block += max_context_blocks
+
+        return (input_tokens_list, kv_caches_send_list,
+                hidden_states_list)
