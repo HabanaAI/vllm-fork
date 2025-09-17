@@ -21,7 +21,7 @@ from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.multimodal import MULTIMODAL_REGISTRY, NestedTensors
 from vllm.multimodal.inputs import (ImageItem, ModalityData,
                                     MultiModalFieldConfig,
-                                    MultiModalKwargsItems, VideoItem)
+                                    MultiModalKwargs, VideoItem)
 from vllm.multimodal.parse import (DictEmbeddingItems, ModalityDataItems,
                                    MultiModalDataItems, MultiModalDataParser)
 from vllm.multimodal.processing import (PromptReplacement, PromptUpdate,
@@ -347,7 +347,7 @@ class KeyeVL1_5MultiModalProcessor(
         self,
         mm_items: MultiModalDataItems,
         hf_processor_mm_kwargs: Mapping[str, Any],
-        out_mm_kwargs: MultiModalKwargsItems,
+        out_mm_kwargs: MultiModalKwargs,
     ) -> Sequence[PromptUpdate]:
         hf_processor = self.info.get_hf_processor(**hf_processor_mm_kwargs)
         image_processor = self.info.get_image_processor(
@@ -401,8 +401,9 @@ class KeyeVL1_5MultiModalProcessor(
                 modality(str): The modality
             """
             if modality == "image":
-                out_item = out_mm_kwargs[modality][item_idx]
-                grid_thw = out_item[f"{modality}_grid_thw"].data
+                # out_item = out_mm_kwargs[modality][item_idx]
+                # grid_thw = out_item[f"{modality}_grid_thw"].data
+                grid_thw = out_mm_kwargs[f"{modality}_grid_thw"][item_idx]
                 assert isinstance(grid_thw, torch.Tensor)
 
                 num_tokens = int(grid_thw.prod()) // merge_length
