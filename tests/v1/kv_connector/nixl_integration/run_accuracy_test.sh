@@ -12,12 +12,13 @@ MODELS=(
 export VLLM_USE_V1=1
 export VLLM_SKIP_WARMUP="true"
 export PT_HPU_LAZY_MODE=1
-
+#
+LIMIT=1
 # Number of prefill and decode instances to create
 NUM_PREFILL_INSTANCES=${NUM_PREFILL_INSTANCES:-1} # Default to 1
 NUM_DECODE_INSTANCES=${NUM_DECODE_INSTANCES:-1}   # Default to 1
-PREFILLER_TP_SIZE=${PREFILLER_TP_SIZE:-1}
-DECODER_TP_SIZE=${DECODER_TP_SIZE:-1}
+PREFILLER_TP_SIZE=2 #${PREFILLER_TP_SIZE:-1}
+DECODER_TP_SIZE=2 #${DECODER_TP_SIZE:-1}
 
 # Find the git repository root directory
 #GIT_ROOT=$(git rev-parse --show-toplevel)
@@ -94,7 +95,7 @@ run_tests_for_model() {
     echo "Starting prefill instance $i on GPU $GPU_ID, port $PORT"
 
     # Build the command with or without model-specific args
-    BASE_CMD="RANK=0 UCX_TLS=tcp VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
+    BASE_CMD="RANK=0 UCX_TLS=tcp MY_ROLE=PREFILL VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
     --enforce-eager \
     --max_num_batched_tokens 8192 \
@@ -127,7 +128,7 @@ run_tests_for_model() {
     echo "Starting decode instance $i on GPU $GPU_ID, port $PORT"
 
     # Build the command with or without model-specific args
-    BASE_CMD="RANK=1 UCX_TLS=tcp VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
+    BASE_CMD="RANK=1 UCX_TLS=tcp MY_ROLE=DECODE VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT vllm serve $model_name \
     --port $PORT \
     --enforce-eager \
     --max_num_batched_tokens 8192 \
@@ -208,7 +209,9 @@ run_tests_for_model() {
   # Run lm eval for this model
   echo "Running tests for $model_name"
   TEST_MODEL=$model_name python -m pytest -s -x test_accuracy.py
-
+  #lm_eval --model vllm \
+  #--model_args "pretrained=$model_name,tensor_parallel_size=$PREFILLER_TP_SIZE,add_bos_token=true,trust_remote_code=true,max_model_len=4096" \
+  #--tasks gsm8k  --limit "$LIMIT" 
   # Clean up before running next model
   cleanup_instances
   sleep 3

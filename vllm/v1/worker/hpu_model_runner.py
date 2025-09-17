@@ -306,7 +306,7 @@ class HpuModelAdapter(torch.nn.Module):
 
         if attn_metadata.attn_bias is not None:
             return attn_metadata
-
+        #import remote_pdb;remote_pdb.set_trace()
         prefill_metadata = attn_metadata
 
         seq_lens_t = prefill_metadata.seq_lens_tensor
@@ -316,26 +316,17 @@ class HpuModelAdapter(torch.nn.Module):
         max_context_len = (block_list.size(-1) //
                            batch_size if block_list is not None else 0)
         max_context_len = max_context_len * self.block_size
-        past_mask = torch.arange(0,
-                                 max_context_len,
-                                 dtype=torch.int32,
-                                 device=device)
-        past_mask = (past_mask.view(1, -1).expand(batch_size, -1).ge(
-            context_lens_t.view(-1, 1)).view(batch_size, 1, -1).expand(
-                batch_size, seq_len, -1).view(batch_size, 1, seq_len, -1))
+        past_mask = torch.arange(0,max_context_len, dtype=torch.int32, device=device)
+        past_mask = (past_mask.view(1, -1).expand(batch_size, -1).ge(context_lens_t.view(-1, 1)).view(batch_size, 1, -1).expand( batch_size, seq_len, -1).view(batch_size, 1, seq_len, -1))
 
-        len_mask = (torch.arange(0, seq_len, device=device,
-                                 dtype=torch.int32).view(1, seq_len).ge(
-                                     seq_lens_t.unsqueeze(-1)).view(
-                                         batch_size, 1, 1, seq_len))
-        causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),
-                                            device=device,
-                                            dtype=torch.bool),
-                                 diagonal=1)
-        mask = causal_mask.logical_or(len_mask)
-        mask = torch.concat((past_mask, mask), dim=-1)
+        len_mask = (torch.arange(0, seq_len, device=device,dtype=torch.int32).view(1, seq_len).ge(seq_lens_t.unsqueeze(-1)).view(batch_size, 1, seq_len,1))
+        causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),device=device, dtype=torch.bool),diagonal=1)
+        #mask = causal_mask.logical_or(len_mask)
+        mask = torch.concat((past_mask, causal_mask), dim=-1)
+        mask = mask.logical_or(len_mask)
         attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -math.inf))
+            mask, -3E38))
+        logger.info(f"libin set_attn_bias {seq_lens_t=} {context_lens_t=} {max_context_len} {attn_bias.shape=}")
         attn_metadata = custom_tuple_replace(prefill_metadata,
                                              "TrimmedAttentionMetadata",
                                              attn_bias=attn_bias)
@@ -1663,7 +1654,7 @@ class HPUModelRunner:
                 self.event_start = self.profiler.get_timestamp_us()
                 self.profiler.start("internal", "prefill")
                 htorch.core.mark_step()
-                logger.info(f"libin debug prefill  {os.getenv('MY_ROLE')=} {token_ids=}")
+                logger.info(f"libin debug prefill  {os.getenv('MY_ROLE')=} {token_ids.shape=}  {token_ids=}n")
                 prefill_hidden_states_ts, logits_device = \
                     self._execute_model_generic(
                         token_ids, position_ids, attn_metadata, logits_indices,

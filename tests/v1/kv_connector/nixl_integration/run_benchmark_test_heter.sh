@@ -10,11 +10,12 @@ set -xe
 #)
 
 
+#MODELS=(
+#    "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/"
+#)
 MODELS=(
-    "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/"
+    "Qwen/Qwen3-0.6B"
 )
-
-export VLLM_CONTIGUOUS_PA=true
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1000000
 export VLLM_RPC_TIMEOUT=1000000000
 export NIXL_LOG_LEVEL=debug 
@@ -23,21 +24,21 @@ export VLLM_USE_V1=1
 export VLLM_SKIP_WARMUP=True
 export PT_HPU_LAZY_MODE=1
 export VLLM_EXPONENTIAL_BUCKETING=False
-#export VLLM_PROMPT_BS_BUCKET_MIN=1
-#export VLLM_PROMPT_SEQ_BUCKET_MIN=1
+export VLLM_PROMPT_BS_BUCKET_MIN=1
+export VLLM_PROMPT_SEQ_BUCKET_MIN=1
 export VLLM_PROMPT_SEQ_BUCKET_MIN=8192
 export VLLM_PROMPT_SEQ_BUCKET_STEP=8192
 export VLLM_PROMPT_SEQ_BUCKET_MAX=8192
 export VLLM_DECODE_BLOCK_BUCKET_MIN=1024
 export VLLM_DECODE_BLOCK_BUCKET_MAX=1184
 export VLLM_USE_PADDING_AWARE_SCHEDULING=1
-#export DECODER_TP_RATIO=2
+export DECODER_TP_RATIO=1
 
 # Number of prefill and decode instances to create
 NUM_PREFILL_INSTANCES=${NUM_PREFILL_INSTANCES:-1} # Default to 1
 NUM_DECODE_INSTANCES=${NUM_DECODE_INSTANCES:-1}   # Default to 1
-PREFILLER_TP_SIZE=1 #${PREFILLER_TP_SIZE:-1}
-DECODER_TP_SIZE=1 #${DECODER_TP_SIZE:-1}
+PREFILLER_TP_SIZE=2 #${PREFILLER_TP_SIZE:-1}
+DECODER_TP_SIZE=2 #${DECODER_TP_SIZE:-1}
 
 
 # Find the git repository root directory
@@ -213,7 +214,7 @@ run_tests_for_model() {
 curl -X POST -s http://localhost:9111/v1/completions \
         -H "Content-Type: application/json" \
         -d '{
-        "model": "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/",
+        "model": "Qwen/Qwen3-0.6B",
         "prompt": "Mark Elliot Zuckerberg is an American businessman who co-founded the social media service Facebook and its parent company Meta Platforms, of which he is the chairman, chief executive officer, and controlling shareholder. Zuckerberg has been the subject of multiple lawsuits regarding the creation and ownership of the website as well as issues such as user privacy. Born in White Plains, New York, Zuckerberg briefly attended Harvard College, where he launched Facebook in February 2004 with his roommates Eduardo Saverin, Andrew McCollum, Dustin Moskovitz and Chris Hughes. Zuckerberg took the company public in May 2012 with majority shares. He became the worlds youngest self-made billionaire[a] in 2008, at age 23, and has consistently ranked among the worlds wealthiest individuals. According to Forbes, Zuckerbergs estimated net worth stood at US$221.2 billion as of May 2025, making him the second-richest individual in the world.[2] Intel opened its first international manufacturing facility in 1972, in Malaysia, which would host multiple Intel operations, before opening assembly facilities and semiconductor plants in Singapore and Jerusalem in the early 1980s, and manufacturing and development centers in China, India, and Costa Rica in the 1990s.[31] By the early 1980s, its business was dominated by DRAM chips. However, increased competition from Japanese semiconductor manufacturers had, by 1983, dramatically reduced the profitability of this market. The growing success of the IBM personal computer, based on an Intel microprocessor, was among factors that convinced Gordon Moore (CEO since 1975) to shift the companys focus to microprocessors and to change fundamental aspects of that business model. Moores decision to sole-source Intels 386 chip played into the companys continuing success.",
         "max_tokens": 50,
         "temperature": 0

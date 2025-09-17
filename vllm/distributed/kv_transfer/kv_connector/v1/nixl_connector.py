@@ -315,6 +315,7 @@ class NixlConnectorScheduler:
             if full_block_ids:
                 self._reqs_need_save[request.request_id] = \
                     (request, full_block_ids)
+                logger.info(f"libin debug my role {os.getenv('MY_ROLE')=} {request.num_tokens=} transfer blocks with {full_block_ids=}")
         elif params.get("do_remote_prefill"):
             if params.get("remote_block_ids"):
                 if all(p in params for p in ("remote_engine_id", "remote_host",
@@ -327,6 +328,7 @@ class NixlConnectorScheduler:
                     # Get unhashed blocks to pull from remote.
                     self._reqs_need_recv[request.request_id] = (
                         request, local_block_ids)
+                    logger.info(f"libin debug my role {os.getenv('MY_ROLE')=} receive blocks with {local_block_ids=}")
 
                 else:
                     logger.warning(
@@ -1049,7 +1051,9 @@ class NixlConnectorWorker:
                 ",".join(map(str, meta.local_block_ids)))
     def rewrite_kv_based_on_transfer_layout(self, metadata: NixlConnectorMetadata):
         #import torch
+        torch.hpu.synchronize()
 
+        logger.info(f"libin debug rewrite_kv_based_on_transfer_layout done")
         if self.decoder_tp_ratio == 1:
             return
         #if os.getenv('MY_ROLE') == 'PREFILL':
