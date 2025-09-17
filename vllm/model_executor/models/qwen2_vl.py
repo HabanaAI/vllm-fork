@@ -87,7 +87,7 @@ if is_hpu:
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
 
 # For profile run
-_MAX_FRAMES_PER_VIDEO = 16
+_MAX_FRAMES_PER_VIDEO = 600
 
 # === Vision Inputs === #
 
