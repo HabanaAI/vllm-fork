@@ -14,7 +14,6 @@ MODELS=(
     "/root/software/data/pytorch/huggingface/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/"
 )
 
-export VLLM_CONTIGUOUS_PA=true
 export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1000000
 export VLLM_RPC_TIMEOUT=1000000000
 export NIXL_LOG_LEVEL=debug 
