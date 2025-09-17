@@ -286,16 +286,19 @@ class MQLLMEngine:
 
     def _reconstruct_tensors(self, request):
         """Reconstruct tensors from shared memory references"""
-        if hasattr(request, 'tensor_metadata'):
+        if hasattr(request, 'tensor_metadata') and request.tensor_metadata:
             for tensor_id, metadata in request.tensor_metadata.items():
                 # Reconstruct tensor from shared memory
                 tensor = self.tensor_pool.get_tensor(tensor_id, metadata)
-                # Replace the reference with actual tensor
-                if hasattr(request.prompt, 'multi_modal_data'):
-                    for key, value in request.prompt.multi_modal_data.items():
-                        if isinstance(value, tuple) and value[0] == '__shm__':
-                            if value[1] == tensor_id:
-                                request.prompt.multi_modal_data[key] = tensor
+                
+                # Handle dictionary-style prompts and look inside 'mm_kwargs'
+                if isinstance(request.prompt, dict) and 'mm_kwargs' in request.prompt:
+                    mm_kwargs = request.prompt['mm_kwargs']
+                    for key, value in mm_kwargs.items():
+                        # Check if value is a tuple indicating a shared memory reference
+                        if isinstance(value, tuple) and len(value) == 2 and value[0] == '__shm__' and value[1] == tensor_id:
+                            mm_kwargs[key] = tensor # Replace handle with actual tensor
+                            break # Found and replaced the tensor, move to next tensor_id
 
     def handle_new_input(self):
         """Handle new input from the socket"""
@@ -303,14 +306,13 @@ class MQLLMEngine:
             while self.input_socket.poll(timeout=0) != 0:
                 frames = self.input_socket.recv_multipart(copy=False)
                 request = pickle.loads(frames[0].buffer)
-                print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Pickle load {request=}")
+                # print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Pickle load {request=}")
                 if isinstance(request, RPCProcessRequest):
                     # Check for zero-copy tensors
-                    print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Checking if there's zero copy {hasattr(request, '__zero_copy__')=} and {request.__zero_copy__}")
-                    if hasattr(request,
-                               '__zero_copy__') and request.__zero_copy__:
+                    # print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Checking if there's zero copy {request.has_zero_copy=}")
+                    if request.has_zero_copy:
                         # Reconstruct tensors from shared memory
-                        print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Success going to reconstruct tensors for zero copy now")
+                        # print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Success going to reconstruct tensors for zero copy now")
                         self._reconstruct_tensors(request)
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors

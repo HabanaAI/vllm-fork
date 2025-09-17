@@ -27,6 +27,8 @@ IPC_DATA_EXT = "_data_socket"
 class MQEngineDeadError(RuntimeError):
     pass
 
+# print(">>> LOADING RPCProcessRequest FROM:", __file__)
+
 
 @dataclass
 class RPCProcessRequest:
@@ -37,65 +39,48 @@ class RPCProcessRequest:
     trace_headers: Optional[Mapping[str, str]] = None
     prompt_adapter_request: Optional[PromptAdapterRequest] = None
     priority: int = 0
+    has_zero_copy: bool = False
+    tensor_metadata: dict = field(default_factory=dict)
 
-    @overload
-    def __init__(
-        self,
-        prompt: PromptType,
-        params: Union[SamplingParams, PoolingParams],
-        request_id: str,
-        lora_request: Optional[LoRARequest] = None,
-        trace_headers: Optional[Mapping[str, str]] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-        priority: int = 0,
-    ) -> None:
-        ...
-
-    @overload
-    @deprecated("'inputs' will be renamed to 'prompt")
-    def __init__(
-        self,
-        *,
-        inputs: PromptType,
-        params: Union[SamplingParams, PoolingParams],
-        request_id: str,
-        lora_request: Optional[LoRARequest] = None,
-        trace_headers: Optional[Mapping[str, str]] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-        priority: int = 0,
-    ) -> None:
-        ...
-
+    @classmethod
     @deprecate_kwargs(
         "inputs",
         additional_message="Please use the 'prompt' parameter instead.",
     )
-    def __init__(
-            self,
-            prompt: Optional[PromptType] = None,
-            params: Optional[Union[SamplingParams, PoolingParams]] = None,
-            request_id: Optional[str] = None,
-            lora_request: Optional[LoRARequest] = None,
-            trace_headers: Optional[Mapping[str, str]] = None,
-            prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-            priority: int = 0,
-            *,
-            inputs: Optional[PromptType] = None,  # DEPRECATED
-    ) -> None:
+    def create(
+        cls,
+        prompt: Optional[PromptType] = None,
+        params: Optional[Union[SamplingParams, PoolingParams]] = None,
+        request_id: Optional[str] = None,
+        lora_request: Optional[LoRARequest] = None,
+        trace_headers: Optional[Mapping[str, str]] = None,
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        priority: int = 0,
+        has_zero_copy: bool = False,
+        tensor_metadata: Optional[dict] = None,
+        *,
+        inputs: Optional[PromptType] = None,  # DEPRECATED
+    ):
         if inputs is not None:
             prompt = inputs
         assert (prompt is not None and params is not None
                 and request_id is not None)
+        
+        return cls(
+            prompt=prompt,
+            params=params,
+            request_id=request_id,
+            lora_request=lora_request,
+            trace_headers=trace_headers,
+            prompt_adapter_request=prompt_adapter_request,
+            priority=priority,
+            has_zero_copy=has_zero_copy,
+            tensor_metadata=tensor_metadata if tensor_metadata is not None else {}
+        )
 
-        super().__init__()
-
-        self.prompt = prompt
-        self.params = params
-        self.request_id = request_id
-        self.lora_request = lora_request
-        self.trace_headers = trace_headers
-        self.prompt_adapter_request = prompt_adapter_request
-        self.priority = priority
+    # ✅ DELETED manual __init__ — let @dataclass generate it automatically.
+    # Your `create()` classmethod already handles deprecated `inputs` + validation.
+    # No need to duplicate logic or break dataclass behavior.
 
 
 @dataclass

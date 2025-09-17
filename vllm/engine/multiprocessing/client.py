@@ -8,6 +8,7 @@ from contextlib import contextmanager, suppress
 from typing import (Any, AsyncGenerator, Dict, Iterator, List, Mapping,
                     Optional, Union, cast, overload)
 
+import torch
 import cloudpickle
 import psutil
 import zmq
@@ -598,17 +599,23 @@ class MQLLMEngineClient(EngineClient):
     def _prepare_zero_copy(self, prompt):
         """Prepare prompt for zero-copy transfer"""
         tensor_metadata = {}
-        print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: _prepare_zero_copy {hasattr(prompt, 'multi_modal_data')=} and {prompt.multi_modal_data=}")
-        if hasattr(prompt, 'multi_modal_data') and prompt.multi_modal_data:
-            for key, value in prompt.multi_modal_data.items():
-                if isinstance(value, torch.Tensor):
-                    tensor_size = value.numel() * value.element_size()
-                    if tensor_size > self.zero_copy_threshold:
-                        tensor_id, metadata = self.tensor_pool.put_tensor(
-                            value)
-                        prompt.multi_modal_data[key] = ('__shm__', tensor_id)
-                        tensor_metadata[tensor_id] = metadata
-
+        
+        if isinstance(prompt, dict):
+            # Check for mm_kwargs which contains the actual tensor data
+            if 'mm_kwargs' in prompt and prompt['mm_kwargs']:
+                # print(f">>>>>>> Client.py: Found mm_kwargs in dict")
+                mm_kwargs = prompt['mm_kwargs']
+                
+                for key, value in mm_kwargs.items():
+                    if isinstance(value, torch.Tensor):
+                        tensor_size = value.numel() * value.element_size()
+                        # print(f">>>>>>> Client.py: Tensor {key} size: {tensor_size} bytes, threshold: {self.zero_copy_threshold}")
+                        if tensor_size > self.zero_copy_threshold:
+                            tensor_id, metadata = self.tensor_pool.put_tensor(value)
+                            mm_kwargs[key] = ('__shm__', tensor_id) # Replace ref with handle
+                            tensor_metadata[tensor_id] = metadata
+                            # print(f">>>>>>> Client.py: Tensor {key} moved to shared memory with id {tensor_id}")
+        
         return prompt, tensor_metadata
 
     async def _process_request(
@@ -623,6 +630,11 @@ class MQLLMEngineClient(EngineClient):
     ) -> Union[AsyncGenerator[RequestOutput, None], AsyncGenerator[
             PoolingRequestOutput, None]]:
         """Send an RPCGenerateRequest to the RPCServer and stream responses."""
+
+        # print(f">>>>>>> Client.py: Prompt type: {type(prompt)}")
+        # print(f">>>>>>> Client.py: Prompt attributes: {dir(prompt)}")
+        # if isinstance(prompt, dict):
+            # print(f">>>>>>> Client.py: Prompt keys: {prompt.keys()}")
 
         # If already dead, error out.
         if self._errored_with is not None:
@@ -656,9 +668,11 @@ class MQLLMEngineClient(EngineClient):
         try:
             # Process for zero-copy if applicable
             tensor_metadata = {}
-            print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: Processing Zero copy {self.enable_zero_copy=} and {hasattr(prompt, 'multi_modal_data')=}")
-            if self.enable_zero_copy and hasattr(prompt, 'multi_modal_data'):
-                print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: Success, going to call self._prepare_zero_copy(prompt)")
+            # print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: Processing Zero copy {self.enable_zero_copy=} and {hasattr(prompt, 'multi_modal_data')=}")
+
+            # --- FIXED CONDITION ---
+            if self.enable_zero_copy and isinstance(prompt, dict) and 'mm_kwargs' in prompt and prompt['mm_kwargs']:
+                # print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: Success, going to call self._prepare_zero_copy(prompt)")
                 prompt, tensor_metadata = self._prepare_zero_copy(prompt)
 
             # 2) Detach logits processors so that they can be pickled
@@ -679,11 +693,13 @@ class MQLLMEngineClient(EngineClient):
                 trace_headers=trace_headers,
                 prompt_adapter_request=prompt_adapter_request,
                 priority=priority,
+                has_zero_copy=bool(tensor_metadata),  # Set based on whether we have tensors
+                tensor_metadata=tensor_metadata
             )
 
-            if tensor_metadata:
-                request.__zero_copy__ = True
-                request.tensor_metadata = tensor_metadata
+            # if tensor_metadata:
+            #     request.__zero_copy__ = True
+            #     request.tensor_metadata = tensor_metadata
 
             request_bytes = pickle.dumps(request)
 
