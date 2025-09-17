@@ -154,6 +154,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --model "${weights_path}" \
     --dtype "${DATA_TYPE}" \
     --max-num-seqs "${max_num_seqs}" \
+    --max-num-prefill-seqs "${max_num_prefill_seqs}" \
     --max-num-batched-tokens "${max_num_batched_tokens}" \
     --max-seq-len-to-capture "${max_seq_len_to_capture}" \
     --gpu-memory-utilization "${gpu_memory_utilization}" \

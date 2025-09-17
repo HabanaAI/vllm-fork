@@ -170,6 +170,7 @@ python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --dtype "${DATA_TYPE}" \
     "${IO_FLAGS[@]}" \
     --max-num-seqs "${max_num_seqs}" \
+    --max-num-prefill-seqs "${max_num_prefill_seqs}" \
     --max-num-batched-tokens "${max_num_batched_tokens}" \
     --max-seq-len-to-capture "${max_seq_len_to_capture}" \
     --gpu-memory-utilization "${gpu_memory_utilization}" \
