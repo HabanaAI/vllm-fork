@@ -1,4 +1,4 @@
-model_name: "/path/to/internvl/3/5/14b"
+model_name: "/mnt/weka/data/llm/opengvlab/internvl3-14b"
 tasks:
 - name: "gsm8k"
   metrics:
