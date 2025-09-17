@@ -3113,7 +3113,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         seq_lens = model_input.attn_metadata.seq_lens
                         start_layer = model.model.start_layer
                         end_layer = model.model.end_layer
-                        num_kv_heads = 1
                         k_v_head_size = 576
                         kv_caches_send_list = []
                         hidden_states_list = []
@@ -3136,7 +3135,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             for layer_id in range(start_layer, end_layer):
                                 kv_cache = kv_caches[layer_id - start_layer]
                                 key_cache = kv_cache[0].reshape(
-                                    -1, num_kv_heads, k_v_head_size)
+                                    -1, k_v_head_size)
 
                                 keys.append(
                                     key_cache.index_select(
