@@ -146,6 +146,7 @@ class VisualTokenizer(torch.nn.Module):
         print("[vis] grid_thws.shape =", getattr(grid_thws, "shape", None))
         if isinstance(grid_thws, torch.Tensor):
             print("[vis] first grid_thw =", grid_thws[0].tolist())
+            print("[vis] first grid_thw =", grid_thws[1].tolist())
             
         features = self.vit(pixel_values, grid_thws)
         print('\n\n\nfeatures:',features,'\n\n\n')
@@ -491,7 +492,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
                 ],
                 indicator_tokens=flatten_bn(flatten_bn(indicator_tokens),
                                             concat=True),
-                grids=(torch.as_tensor(grids, dtype=torch.long).view(-1, 3)),
+                grids=flatten_bn(flatten_bn(grids), concat=True),
             )
 
         raise AssertionError("This line should be unreachable.")
