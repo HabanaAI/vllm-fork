@@ -598,7 +598,7 @@ class MQLLMEngineClient(EngineClient):
     def _prepare_zero_copy(self, prompt):
         """Prepare prompt for zero-copy transfer"""
         tensor_metadata = {}
-
+        print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: _prepare_zero_copy {hasattr(prompt, 'multi_modal_data')=} and {prompt.multi_modal_data=}")
         if hasattr(prompt, 'multi_modal_data') and prompt.multi_modal_data:
             for key, value in prompt.multi_modal_data.items():
                 if isinstance(value, torch.Tensor):
@@ -656,7 +656,9 @@ class MQLLMEngineClient(EngineClient):
         try:
             # Process for zero-copy if applicable
             tensor_metadata = {}
+            print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: Processing Zero copy {self.enable_zero_copy=} and {hasattr(prompt, 'multi_modal_data')=}")
             if self.enable_zero_copy and hasattr(prompt, 'multi_modal_data'):
+                print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Client.py: Success, going to call self._prepare_zero_copy(prompt)")
                 prompt, tensor_metadata = self._prepare_zero_copy(prompt)
 
             # 2) Detach logits processors so that they can be pickled

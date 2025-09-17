@@ -303,12 +303,14 @@ class MQLLMEngine:
             while self.input_socket.poll(timeout=0) != 0:
                 frames = self.input_socket.recv_multipart(copy=False)
                 request = pickle.loads(frames[0].buffer)
-
+                print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Pickle load {request=}")
                 if isinstance(request, RPCProcessRequest):
                     # Check for zero-copy tensors
+                    print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Checking if there's zero copy {hasattr(request, '__zero_copy__')=} and {request.__zero_copy__}")
                     if hasattr(request,
                                '__zero_copy__') and request.__zero_copy__:
                         # Reconstruct tensors from shared memory
+                        print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>> engine.py: Success going to reconstruct tensors for zero copy now")
                         self._reconstruct_tensors(request)
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors
