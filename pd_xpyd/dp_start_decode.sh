@@ -56,6 +56,9 @@ export HABANA_PROFILE_WRITE_HLTV=1
 export HABANA_PROFILE=profile_api
 
 
+# Control whether to apply numactl bindings (1=enable, 0=disable)
+NUMACTL_ENABLED=${VLLM_USE_NUMACTL:-1}
+
 # Build CPU/NUMA bindings from hl-smi topology if available
 if command -v hl-smi >/dev/null 2>&1; then
   # This sets CPU_BIND_<mod> and MEM_BIND_<mod> shell variables for each module id
@@ -106,26 +109,28 @@ do
     --kv-transfer-config '{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}'
   )
   log_file="$log_dir/log_rank${RANK}_${timestamp}.log"
-  echo "CPU_BIND: $CPU_BIND"
-  echo "MEM_BIND: $MEM_BIND"
-  echo "HLS_MODULE_ID: $MOD_ID"
-  echo "DP_RANK: $RANK"
+  if [ "$NUMACTL_ENABLED" -eq 1 ]; then
+    echo "CPU_BIND: $CPU_BIND"
+    echo "MEM_BIND: $MEM_BIND"
+    echo "HLS_MODULE_ID: $MOD_ID"
+    echo "DP_RANK: $RANK"
+  fi
 
   if [ "$DP_RANK" -ne 1 ]; then
-    if [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
+    if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
       echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]}"
       env HLS_MODULE_ID="$MOD_ID" VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" 2>&1 | tee "$log_file" &
     else
       echo "env HLS_MODULE_ID=$MOD_ID VLLM_DP_RANK=$RANK ${CMD[*]}"
-      env HLS_MODULE_ID="$MOD_ID" VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" 2>&1 | tee "$log_file" &
+      env VLLM_DP_RANK_LOCAL="$i" VLLM_DP_RANK="$RANK" "${CMD[@]}" 2>&1 | tee "$log_file" &
     fi
   else
-    if [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
+    if [ "$NUMACTL_ENABLED" -eq 1 ] && [ -n "$CPU_BIND" ] && [ -n "$MEM_BIND" ]; then
       echo "numactl -C $CPU_BIND -m $MEM_BIND ${CMD[*]}"
       env HLS_MODULE_ID="$MOD_ID" numactl -C "$CPU_BIND" -m "$MEM_BIND" "${CMD[@]}" &
     else
       echo "${CMD[*]}"
-      env HLS_MODULE_ID="$MOD_ID" "${CMD[@]}" &
+      "${CMD[@]}" &
     fi
   fi
 done
