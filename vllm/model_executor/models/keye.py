@@ -46,7 +46,7 @@ from vllm.platforms import _Backend
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import is_list_of
-from vllm.utils.tensor_schema import TensorSchema, TensorShape
+from vllm.utils_tensor_schema import TensorSchema, TensorShape
 
 from .interfaces import (MultiModalEmbeddings, SupportsLoRA,
                          SupportsMultiModal, SupportsPP)

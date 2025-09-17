@@ -26,7 +26,7 @@ from vllm.multimodal.parse import (DictEmbeddingItems, ModalityDataItems,
                                    MultiModalDataItems, MultiModalDataParser)
 from vllm.multimodal.processing import (PromptReplacement, PromptUpdate,
                                         PromptUpdateDetails)
-from vllm.utils.tensor_schema import TensorSchema, TensorShape
+from vllm.utils_tensor_schema import TensorSchema, TensorShape
 
 from .interfaces import SupportsLoRA, SupportsMultiModal, SupportsPP
 from .keye import (BaseKeyeModule, BaseMultiModalProcessor,
