@@ -3214,8 +3214,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.graphed_buckets.add(cfg)
             if self.is_mm_run():
                 img_args = ((int(seq_len) // self.mm_tokens_per_image) \
-                            if (self.is_mm_optimized and \
-                            self.mm_tokens_per_image is not None) \
+                            if self.mm_tokens_per_image is not None) \
                             else int(seq_len))
             self.warmup_scenario(
                 int(bs),
