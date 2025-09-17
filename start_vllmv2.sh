@@ -28,13 +28,8 @@ set_model_config() {
     case "$model_profile" in
     "gemma-27b")
         # --- Core Settings ---
-<<<<<<< Updated upstream
         model_path="/software/data/pytorch/huggingface/hub/gemma-3-27b-it"
         tp_size=2; block_size=128; max_model_len=16384; max_num_seqs=128
-=======
-        model_path="/mnt/weka/llm/gemma-3-27b-it"
-        tp_size=4; block_size=128; max_model_len=16384; max_num_seqs=128
->>>>>>> Stashed changes
         gpu_mem_util=0.98; limit_mm_per_prompt=150
         EXTRA_VLLM_ARGS=(--limit-mm-per-prompt "image=${limit_mm_per_prompt}" --data-parallel-size "2")
 
@@ -203,7 +198,6 @@ done
 # --- Environment and System Setup ---
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
-<<<<<<< Updated upstream
 #if [ -n "$warmup_cache_path" ]; then
 #    echo "HPU recipe cache path: $warmup_cache_path"
 #    mkdir -p "${warmup_cache_path}"
@@ -216,20 +210,6 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 #        export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},False,16384
 #    fi
 #fi
-=======
-# if [ -n "$warmup_cache_path" ]; then
-#     echo "HPU recipe cache path: $warmup_cache_path"
-#     mkdir -p "${warmup_cache_path}"
-
-#     if [ -z "$(ls -A "$warmup_cache_path")" ]; then
-#         echo "Cache directory is empty. Running with RECIPE_CACHE_DELETE=True (rebuild)."
-#         export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},True,16384
-#     else
-#         echo "Cache directory already has recipes. Running with RECIPE_CACHE_DELETE=False (reuse)."
-#         export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},False,16384
-#     fi
-# fi
->>>>>>> Stashed changes
 if [ "$skip_warmup" = "true" ]; then
     echo "VLLM_SKIP_WARMUP is set to True"
     export VLLM_SKIP_WARMUP=True
