@@ -907,14 +907,14 @@ class FusedMoE(torch.nn.Module):
         if self.dp_size > 1:
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
-##
-        #    if self.activation_scheme != "static":
-        #        hidden_states_across_dp = get_forward_context(
-        #        ).dp_metadata.hidden_states_across_dp
-        #        print(f"hidden_states.shape: {hidden_states.shape}, device: {hidden_states.device}, dtype: {hidden_states.dtype}, hidden_states_across_dp.shape: {hidden_states_across_dp.shape}, device: {hidden_states_across_dp.device}, dtype: {hidden_states_across_dp.dtype}")
-        #        hidden_states = self.multicast_fn(hidden_states,
-        #                                          cu_tokens_across_dp_cpu,
-        #                                          hidden_states_across_dp)
+
+            if (self.activation_scheme != "static" and
+                os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0')):
+                hidden_states_across_dp = get_forward_context(
+                ).dp_metadata.hidden_states_across_dp
+                hidden_states = self.multicast_fn(hidden_states,
+                                                  cu_tokens_across_dp_cpu,
+                                                  hidden_states_across_dp)
 
 
         quant_kwargs = {}

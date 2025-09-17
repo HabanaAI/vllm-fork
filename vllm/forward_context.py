@@ -33,6 +33,7 @@ class DPMetadata:
     topk_ids_across_dp: Optional[torch.Tensor] = None
     topk_weights_across_dp: Optional[torch.Tensor] = None
     hidden_states: Optional[torch.Tensor] = None
+    packed_bf16_buf_across_dp: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -118,21 +119,31 @@ def set_forward_context(attn_metadata: Any,
             hidden_size = vllm_config.model_config.get_hidden_size()
             device = attn_metadata.slot_mapping.device
             router_logits_dtype = vllm_config.model_config.dtype
-            #hidden_states_dtype = torch.float8_e4m3fn if activation_scheme == "static" else router_logits_dtype
-            hidden_states_dtype = router_logits_dtype
-            hidden_states_across_dp = torch.empty((request_batch_size * dp_size, padded_seq_length, hidden_size),\
-                device=device, dtype=hidden_states_dtype)
-            topk_ids_across_dp = torch.empty((batchsize * dp_size, num_experts_per_tok),\
-                device=device, dtype=torch.int32)
-            topk_weights_across_dp = torch.empty((batchsize * dp_size, num_experts_per_tok),\
-                device=device, dtype=router_logits_dtype)
+            hidden_states_dtype = torch.float8_e4m3fn if activation_scheme == "static" else router_logits_dtype
+            hidden_states_across_dp = None
+            topk_ids_across_dp = None
+            topk_weights_across_dp = None
+            packed_bf16_buf_across_dp = None
+            if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('true', '1'):
+                per_rank_elems = request_batch_size * padded_seq_length * hidden_size + batchsize * num_experts_per_tok * 2
+                packed_bf16_buf_across_dp = torch.empty((per_rank_elems * dp_size),\
+                    device=device, dtype=hidden_states_dtype)
+            else:
+                hidden_states_across_dp = torch.empty((request_batch_size * dp_size, padded_seq_length, hidden_size),\
+                    device=device, dtype=hidden_states_dtype)
+                topk_ids_across_dp = torch.empty((batchsize * dp_size, num_experts_per_tok),\
+                    device=device, dtype=torch.int32)
+                topk_weights_across_dp = torch.empty((batchsize * dp_size, num_experts_per_tok),\
+                    device=device, dtype=router_logits_dtype)
             hidden_states = torch.empty((batchsize, hidden_size),\
                 device=device, dtype=router_logits_dtype)
+
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu,
                                      hidden_states_across_dp,
                                      topk_ids_across_dp,
                                      topk_weights_across_dp,
-                                     hidden_states)
+                                     hidden_states,
+                                     packed_bf16_buf_across_dp)
         else:
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu)
 

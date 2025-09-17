@@ -10,7 +10,7 @@ from torch.nn.parameter import Parameter
 import vllm.envs as envs
 import os
 from vllm import _custom_ops as ops
-from vllm.distributed import get_tensor_model_parallel_world_size
+from vllm.distributed import (get_tensor_model_parallel_world_size, get_dp_group)
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe import (FusedMoE, FusedMoEMethodBase,
@@ -911,15 +911,16 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         ep_rank=0,
     ):
-        #if self.quant_config.activation_scheme == "static" and layer.dp_size > 1:
-        #    x_scale = layer.w13_input_scale.data
-        #    x = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
-        #    cu_tokens_across_dp_cpu = get_forward_context(
-        #    ).dp_metadata.cu_tokens_across_dp_cpu
-        #    hidden_states_across_dp = get_forward_context(
-        #    ).dp_metadata.hidden_states_across_dp
-        #    x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,\
-        #        hidden_states_across_dp)
+        if self.quant_config.activation_scheme == "static" and layer.dp_size > 1:
+            x_scale = layer.w13_input_scale.data
+            x = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
+            if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0'):
+                cu_tokens_across_dp_cpu = get_forward_context(
+                ).dp_metadata.cu_tokens_across_dp_cpu
+                hidden_states_across_dp = get_forward_context(
+                ).dp_metadata.hidden_states_across_dp
+                x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,\
+                    hidden_states_across_dp)
 
         batch_size, seq_len, hidden_dim = x.shape
         num_experts = layer.local_num_experts
@@ -1157,6 +1158,59 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     final_hidden_states.add_(current_hidden_states)
             return final_hidden_states
 
+        def packed_allgather_bf16(t1_bf16, t2_int32, t3_bf16, recv, dp_size):
+            # Save original shapes for unpacking
+            s1 = t1_bf16.shape
+            s2 = t2_int32.shape
+            s3 = t3_bf16.shape
+
+            # Flatten tensors
+            f1 = t1_bf16.contiguous().reshape(-1)                      # bf16
+            f2 = t2_int32.contiguous().reshape(-1).to(torch.bfloat16)  # cast int32 -> bf16
+            f3 = t3_bf16.contiguous().reshape(-1)                      # bf16
+
+            # Concatenate in bf16
+            packed = torch.cat([f1, f2, f3], dim=0).contiguous()
+
+            # Allocate receive buffer: world_size copies of packed
+            per_rank_elems = packed.numel()
+
+            # Single collective
+            dist.all_gather_into_tensor(recv, packed, group=get_dp_group().device_group)
+
+            # Prepare lists to collect all ranks' tensors
+            all_t1 = []
+            all_t2 = []
+            all_t3 = []
+
+            n1 = f1.numel()
+            n2 = f2.numel()
+            n3 = f3.numel()
+            assert n1 + n2 + n3 == per_rank_elems
+
+            for r in range(dp_size):
+                base = r * per_rank_elems
+
+                # Extract and reshape each tensor
+                seg1 = recv[base : base + n1].reshape(s1)
+                seg2 = recv[base + n1 : base + n1 + n2].reshape(s2)
+                seg3 = recv[base + n1 + n2 : base + per_rank_elems].reshape(s3)
+
+                # Convert seg2 back to int32
+                t2_r = torch.round(seg2.to(torch.float32)).to(torch.int32)
+
+                # Collect tensors from all ranks
+                all_t1.append(seg1)
+                all_t2.append(t2_r)
+                all_t3.append(seg3)
+
+            # Concatenate all ranks' tensors along the first dimension
+            concatenated_t1 = torch.cat(all_t1, dim=0)
+            concatenated_t2 = torch.cat(all_t2, dim=0)
+            concatenated_t3 = torch.cat(all_t3, dim=0)
+
+            return concatenated_t1, concatenated_t2.long(), concatenated_t3
+
         if use_partial_experts:
             w13_weight_fp8 = layer.w13_weight.index_select(0, topk_ids.view(-1))
             w13_weight_scale_inv_fp8 = layer.w13_weight_scale_inv.index_select(0, topk_ids.view(-1))
@@ -1177,6 +1231,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 assert not use_partial_experts, "Partial experts not supported with VLLM_REQUANT_FP8_INC"
 
                 if layer.dp_size > 1:
+<<<<<<< HEAD
                     cu_tokens_across_dp_cpu = get_forward_context(
                     ).dp_metadata.cu_tokens_across_dp_cpu
                     #print("*"*50, "Perform combined 3x allgather for inc path")
@@ -1205,6 +1260,28 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
                 x=x.squeeze(1)
                 #print(f"x.shape: {x.shape}, device: {x.device}, dtype: {x.dtype}, topk_ids.shape: {topk_ids.shape}, device: {topk_ids.device}, dtype: {topk_ids.dtype}, topk_weights.shape: {topk_weights.shape}, device: {topk_weights.device}, dtype: {topk_weights.dtype}")
+=======
+                    if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0'):
+                        cu_tokens_across_dp_cpu = get_forward_context(
+                        ).dp_metadata.cu_tokens_across_dp_cpu
+
+                        topk_ids_across_dp = get_forward_context(
+                        ).dp_metadata.topk_ids_across_dp
+                        topk_ids = layer.multicast_fn(topk_ids.to(torch.int32),
+                                                    cu_tokens_across_dp_cpu,
+                                                    topk_ids_across_dp).long()
+
+                        topk_weights_across_dp = get_forward_context(
+                        ).dp_metadata.topk_weights_across_dp
+                        topk_weights = layer.multicast_fn(topk_weights,
+                                                        cu_tokens_across_dp_cpu,
+                                                        topk_weights_across_dp)
+                    else:
+                        packed_bf16_buf_across_dp = get_forward_context(
+                        ).dp_metadata.packed_bf16_buf_across_dp
+                        x, topk_ids, topk_weights = packed_allgather_bf16(x, topk_ids.to(torch.int32), topk_weights,
+                                             packed_bf16_buf_across_dp, layer.dp_size)
+>>>>>>> 7768d205f1bb25003cff73bb420831ac33adcd52
                 final_hidden_states = layer.moe_op(
                     x,
                     topk_ids.to(torch.int64),
