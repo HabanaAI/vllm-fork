@@ -14,7 +14,9 @@
 #    bash start_vllm.sh -m gemma-27b -l 8192
 #
 # -----------------------------------------------------------------------------------
-
+pip install datasets
+export no_proxy=127.0.0.1,localhost
+export NO_PROXY=127.0.0.1,localhost
 # This function contains all model-specific configurations.
 set_model_config() {
     local model_profile=$1
@@ -26,10 +28,10 @@ set_model_config() {
     case "$model_profile" in
     "gemma-27b")
         # --- Core Settings ---
-        model_path="/mnt/weka/llm/gemma-3-27b-it"
-        tp_size=1; block_size=128; max_model_len=16384; max_num_seqs=128
+        model_path="/software/data/pytorch/huggingface/hub/gemma-3-27b-it"
+        tp_size=2; block_size=128; max_model_len=16384; max_num_seqs=128
         gpu_mem_util=0.98; limit_mm_per_prompt=150
-        EXTRA_VLLM_ARGS=(--limit-mm-per-prompt "image=${limit_mm_per_prompt}" --data-parallel-size "1")
+        EXTRA_VLLM_ARGS=(--limit-mm-per-prompt "image=${limit_mm_per_prompt}" --data-parallel-size "2")
 
         # --- Bucketing Settings ---
         prompt_bs_min=1; prompt_bs_step=8; prompt_bs_max=$(( max_num_seqs > 64 ? 64 : max_num_seqs ))
@@ -40,7 +42,7 @@ set_model_config() {
 
     "gemma-27b-orig")
         # --- Core Settings ---
-        model_path="/mnt/weka/llm/gemma-3-27b-it"
+        model_path="/workdir/vllm-fork/models/gemma-3-27b-it"
         tp_size=8; block_size=128; max_model_len=16384; max_num_seqs=128
         gpu_mem_util=0.98; limit_mm_per_prompt=150
         EXTRA_VLLM_ARGS=(--limit-mm-per-prompt "image=${limit_mm_per_prompt}")
@@ -54,7 +56,7 @@ set_model_config() {
 
     "g318b")
         # --- Core Settings ---
-        model_path="/mnt/weka/llm/granite-3.1-8b-instruct"
+        model_path="/workdir/vllm-fork/models/granite-3.1-8b-instruct"
         tp_size=1; block_size=128; max_model_len=16384; max_num_seqs=128
         gpu_mem_util=0.98
         EXTRA_VLLM_ARGS=()
@@ -68,7 +70,7 @@ set_model_config() {
 
     "qwen2.5-vl-3b")
         # --- Core Settings ---
-        model_path="/mnt/weka/llm/Qwen2.5-VL-3B-Instruct"
+        model_path="/workdir/vllm-fork/models/Qwen2.5-VL-3B-Instruct"
         tp_size=1; block_size=128; max_model_len=16384; max_num_seqs=256
         gpu_mem_util=0.90; limit_mm_per_prompt=150
         EXTRA_VLLM_ARGS=(--limit-mm-per-prompt "image=${limit_mm_per_prompt}")
@@ -82,7 +84,7 @@ set_model_config() {
 
     "llama4-scout")
         # --- Core Settings ---
-        model_path="/mnt/weka/llm/Llama-4-Scout-17B-16E-Instruct"
+        model_path="/workdir/vllm-fork/models/Llama-4-Scout-17B-16E-Instruct"
         tp_size=2; block_size=128; max_model_len=8192; max_num_seqs=64
         gpu_mem_util=0.80; limit_mm_per_prompt=10
         EXTRA_VLLM_ARGS=(--limit-mm-per-prompt "image=${limit_mm_per_prompt}")
@@ -96,7 +98,7 @@ set_model_config() {
 
     "phi4-reasoning-plus")
         # --- Core Settings ---
-        model_path="/mnt/weka/llm/Phi-4-reasoning-plus"
+        model_path="/workdir/vllm-fork/models/Phi-4-reasoning-plus"
         tp_size=1; block_size=128; max_model_len=32768; max_num_seqs=64
         gpu_mem_util=0.80; limit_mm_per_prompt=10
         EXTRA_VLLM_ARGS=(--enable-reasoning --reasoning-parser deepseek_r1)
@@ -196,25 +198,25 @@ done
 # --- Environment and System Setup ---
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 
-if [ -n "$warmup_cache_path" ]; then
-    echo "HPU recipe cache path: $warmup_cache_path"
-    mkdir -p "${warmup_cache_path}"
-
-    if [ -z "$(ls -A "$warmup_cache_path")" ]; then
-        echo "Cache directory is empty. Running with RECIPE_CACHE_DELETE=True (rebuild)."
-        export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},True,16384
-    else
-        echo "Cache directory already has recipes. Running with RECIPE_CACHE_DELETE=False (reuse)."
-        export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},False,16384
-    fi
-fi
+#if [ -n "$warmup_cache_path" ]; then
+#    echo "HPU recipe cache path: $warmup_cache_path"
+#    mkdir -p "${warmup_cache_path}"
+#
+#    if [ -z "$(ls -A "$warmup_cache_path")" ]; then
+#        echo "Cache directory is empty. Running with RECIPE_CACHE_DELETE=True (rebuild)."
+#        export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},True,16384
+#    else
+#        echo "Cache directory already has recipes. Running with RECIPE_CACHE_DELETE=False (reuse)."
+#        export PT_HPU_RECIPE_CACHE_CONFIG=${warmup_cache_path},False,16384
+#    fi
+#fi
 if [ "$skip_warmup" = "true" ]; then
     echo "VLLM_SKIP_WARMUP is set to True"
     export VLLM_SKIP_WARMUP=True
 fi
 if [ "$profile_enabled" = "true" ]; then
     echo "Enabling profiling..."
-    export VLLM_TORCH_PROFILER_DIR="$BASH_DIR/profiler_dir_nic"
+    export VLLM_TORCH_PROFILER_DIR="$BASH_DIR/profiler_dir_gemma"
     # hl-prof-config --use-template profile_api --hw-trace off
     hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on
     export HABANA_PROFILE=1
@@ -223,7 +225,7 @@ fi
 ray stop --force
 
 # --- Key Habana/vLLM Environment Variables ---
-export HABANA_VISIBLE_DEVICES="ALL"
+export HABANA_VISIBLE_DEVICES="0,2,3,5"
 export PT_HPU_ENABLE_LAZY_COLLECTIVES="true"
 export VLLM_RAY_DISABLE_LOG_TO_DRIVER="1"
 export RAY_IGNORE_UNHANDLED_ERRORS="1"
@@ -321,4 +323,4 @@ echo "Server is ready. PID: ${pid}"
     # --distributed-executor-backend ray \
 # Optional: run a benchmark script after launch 
     #     --tensor-parallel-size "8" \
-# ./online-multi-image-benchmark.sh
+./online-multi-image-benchmark.sh 2>&1 | tee client.log
