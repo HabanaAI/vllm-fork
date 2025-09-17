@@ -98,7 +98,8 @@ class Siglip2VisionEmbeddings(nn.Module):
 
         # Apply patch embeddings to already patchified pixel values
         
-        print('grid shape in siglip:', grid_thws.shape)
+        print('grid shape in siglip:', grid_thws.shape, grid_thws)
+        print('pixel shape in siglip:', pixel_values.shape, pixel_values)
         
         target_dtype = self.patch_embedding.weight.dtype
         if isinstance(self.patch_embedding, LinearBase):
@@ -111,6 +112,7 @@ class Siglip2VisionEmbeddings(nn.Module):
             patch_embeds = self.patch_embedding(
                 pixel_values.to(dtype=target_dtype))
             patch_embeds = patch_embeds.reshape(-1, self.embed_dim)
+        print('patch_embeds:', patch_embeds.shape, patch_embeds)
 
         if self.preserve_original_pe:
             assert grid_thws is not None
@@ -135,6 +137,7 @@ class Siglip2VisionEmbeddings(nn.Module):
                 pe = pe.permute(0, 1, 3, 2, 4, 5).reshape(volume, -1)
                 pos_embed_new[cnt:cnt + volume] = pe
                 cnt += volume
+            print('pos_embed:', pos_embed_new.shape, pos_embed_new)
             patch_embeds = patch_embeds + pos_embed_new
 
         return patch_embeds

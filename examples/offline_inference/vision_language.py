@@ -821,12 +821,11 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         max_model_len=4096,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="bfloat16",           # half 也行；Gaudi 上 bfloat16 更稳
+        dtype="bfloat16",
         limit_mm_per_prompt={modality: 1},
         tensor_parallel_size=1,
-        # ⚠️ 不要在 Ovis 路线下加 Qwen2VL 的 override
-        # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},  # 如需强制，可打开这一行（见说明）
-#       mm_processor_kwargs={"use_fast": True},  # 可选：去掉 slow processor 警告
+        # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},
+#       mm_processor_kwargs={"use_fast": True},
     )
     
     # Ovis 占位符：<image>/<video>
@@ -1376,9 +1375,9 @@ def main(args):
     if args.num_prompts == 1:
         # Single inference
         if modality == "image":
-            mm = {"image": [data]}     # ← 包成列表
+            mm = {"image": [data]}     # 包成列表
         elif modality == "video":
-            mm = {"video": [data]}     # ← 同理（你的 data 是帧序列/元组）
+            mm = {"video": [data]}     # 同理（data 是帧序列/元组）
         else:
             raise ValueError("modality must be image or video")
             
