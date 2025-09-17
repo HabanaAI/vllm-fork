@@ -1,5 +1,7 @@
 #!/bin/bash
 # Parse command line arguments
+unset http_porxy https_proxy HTTP_PROXY HTTPS_PROXY
+
 BENCHMARK_MODE=false
 FIRST_TOKEN_FROM_D=false
 KILL_MODE=false

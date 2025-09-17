@@ -911,15 +911,15 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         ep_rank=0,
     ):
-        if self.quant_config.activation_scheme == "static" and layer.dp_size > 1:
-            x_scale = layer.w13_input_scale.data
-            x = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
-            cu_tokens_across_dp_cpu = get_forward_context(
-            ).dp_metadata.cu_tokens_across_dp_cpu
-            hidden_states_across_dp = get_forward_context(
-            ).dp_metadata.hidden_states_across_dp
-            x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,\
-                hidden_states_across_dp)
+        #if self.quant_config.activation_scheme == "static" and layer.dp_size > 1:
+        #    x_scale = layer.w13_input_scale.data
+        #    x = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
+        #    cu_tokens_across_dp_cpu = get_forward_context(
+        #    ).dp_metadata.cu_tokens_across_dp_cpu
+        #    hidden_states_across_dp = get_forward_context(
+        #    ).dp_metadata.hidden_states_across_dp
+        #    x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,\
+        #        hidden_states_across_dp)
 
         batch_size, seq_len, hidden_dim = x.shape
         num_experts = layer.local_num_experts
@@ -1021,6 +1021,13 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 cu_tokens_across_dp_cpu = get_forward_context(
                 ).dp_metadata.cu_tokens_across_dp_cpu
 
+                hidden_states_across_dp = get_forward_context(
+                ).dp_metadata.hidden_states_across_dp
+                cu_tokens_across_dp_cpu = get_forward_context(
+                ).dp_metadata.cu_tokens_across_dp_cpu
+                x_fp8 = layer.multicast_fn(x_fp8, cu_tokens_across_dp_cpu,\
+                    hidden_states_across_dp)
+
                 topk_ids_across_dp = get_forward_context(
                 ).dp_metadata.topk_ids_across_dp
                 topk_ids = layer.multicast_fn(topk_ids.to(torch.int32),
@@ -1032,6 +1039,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 topk_weights = layer.multicast_fn(topk_weights,
                                                   cu_tokens_across_dp_cpu,
                                                   topk_weights_across_dp)
+                
+                x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x_fp8, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
 
             batched_tokens = x.shape[0]
             chunk_size = int(os.environ.get("PT_HPU_MOE_THRESHOLD", 256))
@@ -1170,18 +1179,32 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 if layer.dp_size > 1:
                     cu_tokens_across_dp_cpu = get_forward_context(
                     ).dp_metadata.cu_tokens_across_dp_cpu
+                    #print("*"*50, "Perform combined 3x allgather for inc path")
+                    assert self.quant_config.activation_scheme != "static"
+                    hidden_states_across_dp = get_forward_context(
+                    ).dp_metadata.hidden_states_across_dp
+                    # HACK
+                    topk_ids = topk_ids.repeat(layer.dp_size,1) 
+                    topk_weights = topk_weights.repeat(layer.dp_size,1)
+                    #print(f"x.shape: {x.shape}, device: {x.device}, dtype: {x.dtype}, hidden_states_across_dp.shape: {hidden_states_across_dp.shape}, device: {hidden_states_across_dp.device}, dtype: {hidden_states_across_dp.dtype}")
+                    x = layer.multicast_fn(x,
+                                          cu_tokens_across_dp_cpu,
+                                          hidden_states_across_dp)
 
-                    topk_ids_across_dp = get_forward_context(
-                    ).dp_metadata.topk_ids_across_dp
-                    topk_ids = layer.multicast_fn(topk_ids.to(torch.int32),
-                                                cu_tokens_across_dp_cpu,
-                                                topk_ids_across_dp).long()
+                    #topk_ids_across_dp = get_forward_context(
+                    #).dp_metadata.topk_ids_across_dp
+                    #topk_ids = layer.multicast_fn(topk_ids.to(torch.int32),
+                    #                            cu_tokens_across_dp_cpu,
+                    #                            topk_ids_across_dp).long()
+#
+                    #topk_weights_across_dp = get_forward_context(
+                    #).dp_metadata.topk_weights_across_dp
+                    #topk_weights = layer.multicast_fn(topk_weights,
+                    #                                cu_tokens_across_dp_cpu,
+                    #                                topk_weights_across_dp)
 
-                    topk_weights_across_dp = get_forward_context(
-                    ).dp_metadata.topk_weights_across_dp
-                    topk_weights = layer.multicast_fn(topk_weights,
-                                                    cu_tokens_across_dp_cpu,
-                                                    topk_weights_across_dp)
+                x=x.squeeze(1)
+                #print(f"x.shape: {x.shape}, device: {x.device}, dtype: {x.dtype}, topk_ids.shape: {topk_ids.shape}, device: {topk_ids.device}, dtype: {topk_ids.dtype}, topk_weights.shape: {topk_weights.shape}, device: {topk_weights.device}, dtype: {topk_weights.dtype}")
                 final_hidden_states = layer.moe_op(
                     x,
                     topk_ids.to(torch.int64),

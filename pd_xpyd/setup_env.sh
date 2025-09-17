@@ -6,12 +6,12 @@ pip install colorlog
 echo "2. setting up mooncake mooncake-transfer-engine private build............."
 #Mooncake
 #wget https://github.com/hlin99/Mooncake/releases/download/private_buildv1/mooncake_transfer_engine-0.1.0-cp310-cp310-manylinux2014_x86_64.whl
-#pip install mooncake_transfer_engine-0.1.0-cp310-cp310-manylinux2014_x86_64.whl
-pip install mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.manylinux_2_35_x86_64.whl
+pip install mooncake_transfer_engine-0.1.0-cp310-cp310-manylinux2014_x86_64.whl
+#pip install mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.manylinux_2_35_x86_64.whl
 
 echo "3. setting up RDMA for mooncake ..................."
 #RDMA
-apt remove ibutils libpmix-aws
+apt remove ibutils libpmix-aws -y
 #wget https://www.mellanox.com/downloads/DOCA/DOCA_v2.10.0/host/doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
 dpkg -i doca-host_2.10.0-093000-25.01-ubuntu2204_amd64.deb
 apt-get update

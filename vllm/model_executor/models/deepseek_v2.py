@@ -161,6 +161,9 @@ class DeepseekV2MoE(nn.Module):
         hidden_states = hidden_states.view(-1, hidden_dim)
         num_tokens = hidden_states.shape[0]
         
+        if self.n_shared_experts is not None:
+            final_hidden_states = self.shared_experts(hidden_states)
+            
         # router_logits: (num_tokens, n_experts)
         router_logits, _ = self.gate(hidden_states)
         if is_hpu:
@@ -173,10 +176,14 @@ class DeepseekV2MoE(nn.Module):
                 router_logits=router_logits) * self.routed_scaling_factor
         
         if self.n_shared_experts is not None:
-            final_hidden_states = self.shared_experts(hidden_states)
             final_hidden_states.add_(moe_hidden_states)
         else:
             final_hidden_states = moe_hidden_states
+        #if self.n_shared_experts is not None:
+        #    final_hidden_states = self.shared_experts(hidden_states)
+        #    final_hidden_states.add_(moe_hidden_states)
+        #else:
+        #    final_hidden_states = moe_hidden_states
 
         if self.tp_size > 1:
             final_hidden_states = tensor_model_parallel_all_reduce(

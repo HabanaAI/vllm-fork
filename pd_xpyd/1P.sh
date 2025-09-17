@@ -6,4 +6,4 @@ echo "Being brought to background"
 echo "Log will be redirect to $log_file"
 echo "..."
 echo "-------------------------------------------------------------------"
-bash ./1p_start_prefill.sh G3D-sys03 >> $log_file 2>&1 &
+bash ./1p_start_prefill.sh G3D-sys03 benchmark >> $log_file 2>&1 &

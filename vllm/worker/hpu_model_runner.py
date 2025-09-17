@@ -119,8 +119,13 @@ def subtuple(obj: object,
 
 
 def align_dp_groups(value, op):
-    group = get_dp_group().cpu_group
-    value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
+    from vllm.distributed.parallel_state import get_dp_group
+    from vllm.platforms import current_platform
+    device = current_platform.device_type
+    group = get_dp_group().device_group
+    #group = get_dp_group().cpu_group
+    #value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
+    value_t = torch.tensor(value, device=device, dtype=torch.int32)
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()
 
@@ -130,6 +135,7 @@ def align_tp_groups(value, op):
     world_size = get_tp_group().world_size
     if world_size <= 1:
         return value
+    
     value_t = torch.tensor(value, device='cpu')
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()

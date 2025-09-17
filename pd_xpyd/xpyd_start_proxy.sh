@@ -2,6 +2,8 @@
 BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_env.sh
 
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+
 if [ -z "$1" ]; then
     echo "please input P instance number, D instance number, TP size of D instance, true or false (true for first token from P, default from D), repeat_d_times"
     echo "run with default mode P=1, D=2, TP size=1, false, 127"

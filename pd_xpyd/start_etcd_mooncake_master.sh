@@ -31,8 +31,8 @@ etcd --listen-client-urls http://0.0.0.0:2379 \
      #--advertise-client-urls http://10.112.242.154:2379 \
 
 if [ "$BENCHMARK_MODE" == "1" ]; then
-  mooncake_master -max_threads 64 -port 50001 --v=1 >mooncake_master.log 2>&1 &
+  mooncake_master -max_threads 64 -port 50001 >mooncake_master.log 2>&1 &
 else
-  mooncake_master -enable_gc true -max_threads 64 -port 50001 --v=1 >mooncake_master.log 2>&1 &
+  mooncake_master -enable_gc true -max_threads 64 -port 50001 >mooncake_master.log 2>&1 &
 fi
 
