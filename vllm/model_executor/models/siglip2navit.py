@@ -112,7 +112,7 @@ class Siglip2VisionEmbeddings(nn.Module):
             patch_embeds = self.patch_embedding(
                 pixel_values.to(dtype=target_dtype))
             patch_embeds = patch_embeds.reshape(-1, self.embed_dim)
-        print('patch_embeds:', patch_embeds.shape, patch_embeds)
+        print('patch_embeds:', patch_embeds.shape)
 
         if self.preserve_original_pe:
             assert grid_thws is not None
