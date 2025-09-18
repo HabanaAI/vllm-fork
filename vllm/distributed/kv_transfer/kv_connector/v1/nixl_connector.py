@@ -623,7 +623,6 @@ class NixlConnectorWorker:
         path = make_zmq_path("tcp", host, port + p_remote_rank)
         logger.debug("Querying metadata on path: %s at remote rank %s", path,
                      p_remote_rank)
-
         # Send query for the request.
         with zmq_ctx(zmq.REQ, path) as sock:
             sock.send(GET_META_MSG)
@@ -817,6 +816,7 @@ class NixlConnectorWorker:
         # (roughly 8KB vs 5KB).
         # Conversely for FlashInfer, K and V are transferred in the same tensor
         # to better exploit the memory layout (ie num_blocks is the first dim).
+        
         for cache_or_caches in xfer_buffers.values():
             # Normalize to always be a list of caches
             cache_list = [cache_or_caches] if use_mla \
@@ -873,14 +873,14 @@ class NixlConnectorWorker:
             # select agent_meta.num_blocks instead of self.num_blocks for
             # local descr, and that makes handling regular flow less clean.
             for block_id in range(self.num_blocks * self.block_factor):
-                block_offset = block_id * self.block_len // self.block_factor
+                block_offset = block_id * self.block_len // (self.block_factor)
                 addr = base_addr + block_offset
                 # (addr, len, device id)
                 # TODO: does device_id matter to DRAM?
-                blocks_data.append((addr, self.block_len//self.block_factor, self.tp_rank))
+                blocks_data.append((addr, self.block_len//(self.block_factor), self.tp_rank))
         logger.debug("Created %s blocks for src engine %s and rank %s",
                      len(blocks_data), self.engine_id, self.tp_rank)
-        print(f'buke: {blocks_data[0:10]=}')
+        #print(f'buke: {blocks_data[0:10]=}')
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
                                                  self.nixl_memory_type)
         # NIXL_INIT_AGENT to be used for preparations of local descs.
@@ -1009,7 +1009,7 @@ class NixlConnectorWorker:
         # Only register the remote's descriptors if current rank pulls from it.
         self.kv_caches_base_addr[
             engine_id] = nixl_agent_meta.kv_caches_base_addr
-        rank_offset = self.tp_rank % tp_ratio * self.block_len \
+        rank_offset = self.tp_rank % tp_ratio * nixl_agent_meta.block_len // tp_ratio \
             if not (self.use_mla or is_kv_replicated) else 0
         # Register all remote blocks, but only the corresponding kv heads.
         for base_addr in nixl_agent_meta.kv_caches_base_addr:
@@ -1020,15 +1020,16 @@ class NixlConnectorWorker:
                 # self.block_len == remote_block_len//tp_ratio bytes.
                 addr = base_addr + block_offset + rank_offset
                 # (addr, len, device id)
-                blocks_data.append((addr, nixl_agent_meta.block_len, remote_tp_rank))
+                blocks_data.append((addr, nixl_agent_meta.block_len//tp_ratio, remote_tp_rank))
         logger.debug(
             "Created %s blocks for dst engine %s with remote rank %s and "
             "local rank %s", len(blocks_data), engine_id, remote_tp_rank,
             self.tp_rank)
-
+        logger.debug(f'buke {self.slot_size_bytes=}|{tp_ratio=}|{self.block_len=}|{nixl_agent_meta.block_len=}|{self.tp_rank=}|{self._use_flashinfer=}')
         # Register with NIXL.
         descs = self.nixl_wrapper.get_xfer_descs(blocks_data,
                                                  self.nixl_memory_type)
+        #print('buke register remote:', len(blocks_data), blocks_data[:10],blocks_data[-1],self.nixl_memory_type)
         self.dst_xfer_side_handles[
             engine_id] = self.nixl_wrapper.prep_xfer_dlist(
                 remote_agent_name, descs)
@@ -1100,7 +1101,7 @@ class NixlConnectorWorker:
             #import remote_pdb; remote_pdb.set_trace()
             t2 = time.perf_counter()
             tt = t2-t1
-            print(f'buke permute time:{tt}, {req_id=}|{self._recving_metadata=}')
+            logger.debug(f'buke permute time:{tt}, {req_id=}|{self._recving_metadata=}')
         if self.use_host_buffer:
             for req_id in done_recving:
                 s2 = time.perf_counter()
@@ -1282,11 +1283,11 @@ class NixlConnectorWorker:
         remote_block_descs_ids: list[int] = []
         local_sub_block_ids: list[int] = []
        
-        print('buke: ', remote_block_ids)
+        #print('buke: ', remote_block_ids)
         remote_block_ids = remote_block_ids[:(len(remote_block_ids)//self.block_factor)*self.block_factor]
-        for index in range(0, len(remote_block_ids)):
-            local_sub_block_ids.append(local_block_ids[index//self.block_factor]*self.block_factor + index)
-        print(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
+        for index,remote_block_id in enumerate(remote_block_ids):
+            local_sub_block_ids.append(local_block_ids[index//self.block_factor]*self.block_factor + index%self.block_factor)
+        logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
         if not self.block_window_per_layer:
             # Default case: assume global attention
             remote_block_descs_ids = self._get_block_descs_ids(
@@ -1331,7 +1332,6 @@ class NixlConnectorWorker:
         )
 
         # Begin async xfer.
-        print('buke ->>>> transfer start >>>---')
         self.nixl_wrapper.transfer(handle)
 
         # Use handle to check completion in future step().
@@ -1379,7 +1379,6 @@ def zmq_ctx(socket_type: Any, addr: str) -> Iterator[zmq.Socket]:
 
     if socket_type not in (zmq.ROUTER, zmq.REQ):
         raise ValueError(f"Unexpected socket type: {socket_type}")
-
     ctx: Optional[zmq.Context] = None
     try:
         ctx = zmq.Context()  # type: ignore[attr-defined]
