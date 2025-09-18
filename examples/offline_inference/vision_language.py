@@ -823,7 +823,7 @@ def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
         trust_remote_code=True,
         dtype="half",
         limit_mm_per_prompt={modality: 1},
-        tensor_parallel_size=1,
+        tensor_parallel_size=4,
         # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},
 #       mm_processor_kwargs={"use_fast": True},
     )
