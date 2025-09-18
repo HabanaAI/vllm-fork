@@ -1357,7 +1357,6 @@ class NixlConnectorWorker:
         )
 
         # Begin async xfer.
-        print('buke ->>>> transfer start >>>---')
         self.nixl_wrapper.transfer(handle)
 
         # Use handle to check completion in future step().
