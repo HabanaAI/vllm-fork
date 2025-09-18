@@ -2074,6 +2074,12 @@ class Scheduler:
         # that is dividable by the block size unless it is the last chunk
         remaining_token_budget = (remaining_token_budget // block_size *
                                   block_size)
+        if scheduler_config.prefill_chunk_size:
+            # If prefill_chunk_size is specified, chunk with the specific size
+            # The prefill_chunk_size must be dividable by the block size
+            assert scheduler_config.prefill_chunk_size % block_size == 0
+            remaining_token_budget = min(
+                remaining_token_budget, scheduler_config.prefill_chunk_size)
         num_new_tokens = min(num_new_tokens, remaining_token_budget)
 
         return num_new_tokens

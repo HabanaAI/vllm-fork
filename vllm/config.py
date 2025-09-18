@@ -1541,6 +1541,10 @@ class SchedulerConfig:
     # on the remaining max_num_batched_tokens.
     enable_chunked_prefill: bool = False
 
+    # The chunk size for chunked prefill.
+    # If not specified, the remaining max_num_batched_tokens will be allocated
+    prefill_chunk_size: Optional[int] = None
+
     is_multimodal_model: bool = False
 
     # NOTE: The following multimodal encoder budget will be initialized to
@@ -1638,9 +1642,14 @@ class SchedulerConfig:
         self.encoder_cache_size = self.max_num_batched_tokens
 
         if self.enable_chunked_prefill:
-            logger.info(
-                "Chunked prefill is enabled with max_num_batched_tokens=%d.",
-                self.max_num_batched_tokens)
+            if self.prefill_chunk_size:
+                logger.info(
+                    f"Chunked prefill is enabled with prefill_chunk_size="
+                    f"{self.prefill_chunk_size}.")
+            else:
+                logger.info(
+                    f"Chunked prefill is enabled with max_num_batched_tokens="
+                    f"{self.max_num_batched_tokens}.")
 
         self.chunked_prefill_enabled = self.enable_chunked_prefill
         self._verify_args()

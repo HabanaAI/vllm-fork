@@ -2930,7 +2930,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         hash_hex = hash_object.hexdigest()
                         return int(hash_hex[:16], 16)
 
-                    cur_time = time.time()
                     attn_metadata = self.model.forward_update_meta_only(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.
@@ -3073,11 +3072,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             async_recv_kv_caches(model, model_input,
                                                  attn_metadata, kv_caches)
                     else:
+                        cur_time = time.time()
                         hidden_states, bypass_model_exec = \
                             sync_recv_kv_caches(model, model_input,
                                                 attn_metadata, kv_caches)
-                    now = time.time()
-                    logger.info("KV transfer recv time: %s", now - cur_time)
+                        now = time.time()
+                        logger.info("KV recv time: %s", now - cur_time)
 
                 profiler_args = {
                     'real_seq_len': model_input.seq_lens,
@@ -3203,14 +3203,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         )
 
                     if get_world_group().rank == 0:
-                        cur_time = time.time()
                         if self.use_async_kv_transfer_in_pd:
                             async_send_kv_caches(hidden_states)
                         else:
+                            cur_time = time.time()
                             sync_send_kv_caches(hidden_states)
-
-                        now = time.time()
-                        logger.info("KV send time: %f", now - cur_time)
+                            now = time.time()
+                            logger.info("KV send time: %f", now - cur_time)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(

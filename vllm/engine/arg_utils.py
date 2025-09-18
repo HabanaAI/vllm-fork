@@ -171,6 +171,7 @@ class EngineArgs:
 
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: Optional[bool] = None
+    prefill_chunk_size: Optional[int] = None
 
     guided_decoding_backend: str = 'xgrammar'
     logits_processor_pattern: Optional[str] = None
@@ -764,6 +765,12 @@ class EngineArgs:
             const="True",
             help='If set, the prefill requests can be chunked based on the '
             'max_num_batched_tokens.')
+        parser.add_argument(
+            '--prefill-chunk-size',
+            type=int,
+            default=EngineArgs.prefill_chunk_size,
+            help='The chunk size for chunked prefill. If not specified, '
+                 'the remaining max_num_batched_tokens will be allocated.')
 
         parser.add_argument(
             '--speculative-model',
@@ -1285,6 +1292,7 @@ class EngineArgs:
             num_lookahead_slots=num_lookahead_slots,
             delay_factor=self.scheduler_delay_factor,
             enable_chunked_prefill=self.enable_chunked_prefill,
+            prefill_chunk_size=self.prefill_chunk_size,
             is_multimodal_model=model_config.is_multimodal_model,
             preemption_mode=self.preemption_mode,
             num_scheduler_steps=self.num_scheduler_steps,
