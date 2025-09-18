@@ -231,6 +231,7 @@ class NixlConnector(KVConnectorBase_V1):
         s1 = time.perf_counter()
         assert self.connector_worker is not None
         assert isinstance(self._connector_metadata, NixlConnectorMetadata)
+        self.connector_worker.rewrite_kv_based_on_transfer_layout(self._connector_metadata)
         if self.connector_worker.use_host_buffer and \
            self.connector_worker.copy_blocks:
             self.connector_worker.save_kv_to_host(self._connector_metadata)
@@ -445,6 +446,7 @@ class NixlConnectorWorker:
             raise RuntimeError("NIXL is not available")
         logger.info("Initializing NIXL wrapper")
         logger.info("Initializing NIXL worker %s", engine_id)
+        self.decoder_tp_ratio = int(os.getenv('DECODER_TP_RATIO', 1))
 
         # Config.
         self.vllm_config = vllm_config
@@ -1181,6 +1183,29 @@ class NixlConnectorWorker:
                 done_req_ids.add(req_id)
                 del transfers[req_id]
         return done_req_ids
+
+    def rewrite_kv_based_on_transfer_layout(self, metadata: NixlConnectorMetadata):
+        if self.decoder_tp_ratio == 1:
+            return
+        t = time.perf_counter()
+        for req_id, meta in metadata.reqs_to_save.items():
+            block_ids = meta.local_block_ids
+            for k, v in self.device_kv_caches.items():
+                gb, h, d = v[0].shape
+                indices = torch.tensor(block_ids, device=v[0].device)
+                gbhd = [int(gb/self.block_size), self.block_size, h, d]
+                for i in range(len(self.device_kv_caches[k])):
+                    kv = v[i].reshape(gbhd)
+                    kv_selected  = torch.index_select(kv, 0, indices)
+                    bc, bs, h, d  = kv_selected.shape
+                    shape = int(bs*h/self.decoder_tp_ratio*d)
+                    blocks = torch.chunk(kv_selected, 2, dim=2)
+                    vecs = [b.reshape([bc, shape]) for b in blocks]
+                    kv_selected = torch.concat(vecs, dim=1).reshape(kv_selected.shape)
+                    kv.index_copy_(dim=0, index=indices, source=kv_selected)
+        if len(metadata.reqs_to_save) > 0:
+            torch.hpu.synchronize()
+        logger.debug(f"rewrite_kv_based_on_transfer_layout done time:{time.perf_counter() - t}")
 
     def start_load_kv(self, metadata: NixlConnectorMetadata):
         """
