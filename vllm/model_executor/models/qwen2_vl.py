@@ -93,7 +93,7 @@ _MAX_FRAMES_PER_VIDEO = 16
 class AttentionLongSequence:
 
     @staticmethod
-    def forward(q, k, v, mask, q_block_size, softmax_mode):
+    def forward(q, k, v, mask, q_block_size):
         """
         Support long sequence at prompt phase
         """
@@ -110,7 +110,7 @@ class AttentionLongSequence:
             row_mask = mask[:, :, s:e, :]
             attn_output[:, :,
                         s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
-                                                  False, None, softmax_mode)
+                                                  False, None)
             # TODO: markstep after a couple of iterations
             # need to experiment the optimal number.
             if i % 75 == 0:
