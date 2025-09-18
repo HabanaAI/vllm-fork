@@ -211,7 +211,7 @@ class OpenAIServing:
         *,
         request_logger: Optional[RequestLogger],
         return_tokens_as_token_ids: bool = False,
-        model_configs: Optional[ModelConfig] = None,
+        model_configs: Optional[list[ModelConfig]] = None,
     ):
         super().__init__()
 

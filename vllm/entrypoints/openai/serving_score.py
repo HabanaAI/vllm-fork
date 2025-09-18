@@ -42,7 +42,7 @@ class ServingScores(OpenAIServing):
         models: OpenAIServingModels,
         *,
         request_logger: Optional[RequestLogger],
-        model_configs: Optional[ModelConfig] = None,
+        model_configs: Optional[list[ModelConfig]] = None,
     ) -> None:
         super().__init__(engine_client=engine_client,
                          model_config=model_config,
