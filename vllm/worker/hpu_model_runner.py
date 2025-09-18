@@ -3275,7 +3275,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 if need_send_kv and self.skip_prefill_sampling:
                     # prefill and skip prefill sampling return dummy output
-                    output = self._delayed_sampler_outputs(model_input)
+                    output = self._dummy_sampler_outputs(model_input)
                 else:
                     with self.profiler.record_event(
                             'internal', ('sample_'
@@ -3463,11 +3463,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             seq_ids = seq_group.seq_ids
             seq_outputs = []
             for seq_id in seq_ids:
-                next_token_id = next_token_ids[batch_idx][0]
+                seq_next_token_ids = next_token_ids[batch_idx]
+                batch_idx += 1
+                if not seq_next_token_ids:
+                    continue
+                next_token_id = seq_next_token_ids[0]
                 seq_outputs.append(
                     SequenceOutput(seq_id, next_token_id,
                                    {next_token_id: zero_logprob}))
-                batch_idx += 1
             sampler_outputs.append(
                 CompletionSequenceGroupOutput(seq_outputs, None))
         return SamplerOutput(sampler_outputs)
@@ -3651,3 +3654,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             start_context_block += max_context_blocks
 
         return input_tokens_list, kv_caches_send_list, hidden_states_list
+
+    def _dummy_sampler_outputs(self, model_input):
+        if self.scheduler_config.chunked_prefill_enabled:
+            # Some sequence may not need to sample for chunked prefill
+            next_token_ids = [
+                [DUMMY_TOKEN_ID] if seq_group.do_sample else []
+                for seq_group in model_input.sampling_metadata.seq_groups]
+        else:
+            next_token_ids = [[DUMMY_TOKEN_ID]] * len(
+                model_input.sampling_metadata.seq_groups)
+        sampler_output = self._make_decode_output(
+            next_token_ids, model_input.sampling_metadata.seq_groups)
+        return sampler_output
