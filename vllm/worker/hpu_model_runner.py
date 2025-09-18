@@ -1751,6 +1751,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         is not None and seq_group_metadata.is_prompt:
                     paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
 
+            if (self.scheduler_config.chunked_prefill_enabled and
+                    sampling_metadata.selected_token_indices.shape[0] != len(
+                    paddings)):
+                # Needs to trim the paddings based on whether it need to sample
+                # for cases such as chunked prefill
+                paddings_trimmed = []
+                for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                    if seq_group_metadata.do_sample:
+                        paddings_trimmed.append(paddings[i])
+                paddings = paddings_trimmed
+                assert (sampling_metadata.selected_token_indices.shape[0]
+                        == len(paddings)), ("Selected token indices are not "
+                                            "the same size with paddings.")
+
             paddings = torch.tensor(
                 paddings_prompt_logprobs
                 if paddings_prompt_logprobs else paddings,
