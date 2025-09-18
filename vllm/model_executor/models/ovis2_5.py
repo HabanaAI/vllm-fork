@@ -183,6 +183,9 @@ class Ovis2_5ProcessingInfo(BaseProcessingInfo):
         return self.ctx.get_hf_config()
 
     def get_hf_processor(self, **kwargs):
+        
+        print('\n\n\nkwargs in hf processor:', kwargs, '\n\n\n')
+        
         vit_config = self.get_hf_config().vit_config
         return self.ctx.get_hf_processor(
             Ovis2_5Processor,
@@ -351,6 +354,9 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
         mm_kwargs: Mapping[str, object],
 #       tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
+        
+        print('\n\n\nmm_kwargs:', mm_kwargs, '\n\n\n')
+        
         if not mm_data:
             # Avoid warning from HF logger for text-only input
             tokenizer = self.info.get_tokenizer()
