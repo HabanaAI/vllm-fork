@@ -3522,7 +3522,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
     def get_attn_block_indices(self, attn_metadata):
         slot_mapping = attn_metadata.slot_mapping.flatten()
-        indices = torch.div(slot_mapping, self.block_size, rounding_mode="floor")
+        indices = torch.div(slot_mapping,
+                            self.block_size,
+                            rounding_mode="floor")
         indices = indices.unflatten(0, (-1, self.block_size))[:, 0]
         return indices
 
@@ -3550,8 +3552,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         if not self.has_kv_to_send(model_input):
             return None, None, None
 
-        torch.hpu.synchronize(
-        )  # sync here may hurt performance.
+        torch.hpu.synchronize()  # sync here may hurt performance.
         seq_lens = model_input.attn_metadata.seq_lens
         start_layer = model.model.start_layer
         end_layer = model.model.end_layer
@@ -3571,14 +3572,14 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
         # Use block indices for current query
         block_indices = self.get_attn_block_indices(attn_metadata)
-        max_query_blocks = (attn_metadata.slot_mapping.size(1)
-                            + self.block_size - 1) // self.block_size
+        max_query_blocks = (attn_metadata.slot_mapping.size(1) +
+                            self.block_size - 1) // self.block_size
         start_query_block = 0
 
         # Handle the block list for context (chunked prefill)
         block_list = attn_metadata.block_list
-        max_context_blocks = (block_list.size(-1) // len(
-            seq_lens) if block_list is not None else 0)
+        max_context_blocks = (block_list.size(-1) //
+                              len(seq_lens) if block_list is not None else 0)
         start_context_block = 0
 
         htorch.core.mark_step()
@@ -3614,14 +3615,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             # First get the block indices for the current query
             num_blocks = (query_len + self.block_size - 1) // self.block_size
             end_query_block = start_query_block + num_blocks
-            block_indices_seq = block_indices[start_query_block:end_query_block]
+            block_indices_seq = block_indices[
+                start_query_block:end_query_block]
             if block_list is not None:
                 # Consider the context blocks
                 # NOTE: context_len must be multiple of block
                 num_context_blocks = context_len // self.block_size
                 end_context_block = start_context_block + num_context_blocks
-                context_blocks = block_list[start_context_block:
-                                            end_context_block]
+                context_blocks = block_list[
+                    start_context_block:end_context_block]
                 block_indices_seq = torch.concat(
                     (context_blocks, block_indices_seq), dim=0)
 
@@ -3638,8 +3640,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             keys = torch.cat(keys, dim=0)
             kv_cache_to_sent = keys.cpu()
-            current_hidden_states = hidden_states[
-                hidden_states_idx].unsqueeze(0).cpu()
+            current_hidden_states = hidden_states[hidden_states_idx].unsqueeze(
+                0).cpu()
 
             # ==== graph should end here ======
             htorch.core.mark_step()
@@ -3660,7 +3662,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             # Some sequence may not need to sample for chunked prefill
             next_token_ids = [
                 [DUMMY_TOKEN_ID] if seq_group.do_sample else []
-                for seq_group in model_input.sampling_metadata.seq_groups]
+                for seq_group in model_input.sampling_metadata.seq_groups
+            ]
         else:
             next_token_ids = [[DUMMY_TOKEN_ID]] * len(
                 model_input.sampling_metadata.seq_groups)
