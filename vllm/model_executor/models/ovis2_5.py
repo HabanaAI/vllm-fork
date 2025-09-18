@@ -636,7 +636,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         positions: torch.Tensor,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
-        **kwargs: object,
+        **kwargs: MultiModalKwargs,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         print('\n\n\nkwargs in ovis forward:', kwargs, '\n\n\n')
         
