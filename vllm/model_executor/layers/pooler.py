@@ -11,6 +11,7 @@ from typing_extensions import assert_never
 
 from vllm.config import ModelConfig, PoolerConfig
 from vllm.model_executor.custom_op import CustomOp
+from vllm.model_executor.models.utils import get_input_mask
 from vllm.model_executor.pooling_metadata import (PoolingMetadata,
                                                   PoolingTensors)
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
@@ -390,6 +391,9 @@ class ClassifierPooler(CustomOp):
         # [batch_size, seq_len,hidden_size]
         hidden_states = hidden_states.view(len(prompt_lens), -1,
                                            hidden_states.shape[-1])
+        #set the hidden states to zero where it is padding
+        mask = get_input_mask(hidden_states, prompt_lens)
+        hidden_states = hidden_states * mask.unsqueeze(-1)
         if self.pooler is not None:
             pooled_output = self.pooler(hidden_states)
         else:
