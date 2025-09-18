@@ -443,7 +443,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
 
     @staticmethod
     def _split_scoring_output_hpu(
-        sampler_output: SamplerOutput, 
+        sampler_output: SamplerOutput,
         num_scoring_tokens: int,
         non_spec_indices: List[int],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
