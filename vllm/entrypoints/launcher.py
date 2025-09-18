@@ -9,6 +9,8 @@ from fastapi import FastAPI, Request, Response
 from vllm import envs
 from vllm.engine.async_llm_engine import AsyncEngineDeadError
 from vllm.engine.multiprocessing import MQEngineDeadError
+from vllm.entrypoints.constants import (H11_MAX_HEADER_COUNT_DEFAULT,
+                                        H11_MAX_INCOMPLETE_EVENT_SIZE_DEFAULT)
 from vllm.logger import init_logger
 from vllm.utils import find_process_using_port
 
@@ -16,6 +18,11 @@ logger = init_logger(__name__)
 
 
 async def serve_http(app: FastAPI, **uvicorn_kwargs: Any):
+    """
+    Start a FastAPI app using Uvicorn, with support for custom Uvicorn config
+    options.  Supports http header limits via h11_max_incomplete_event_size and
+    h11_max_header_count.
+    """
     logger.info("Available routes are:")
     for route in app.routes:
         methods = getattr(route, "methods", None)
@@ -26,7 +33,21 @@ async def serve_http(app: FastAPI, **uvicorn_kwargs: Any):
 
         logger.info("Route: %s, Methods: %s", path, ', '.join(methods))
 
+    # Extract header limit options if present
+    h11_max_incomplete_event_size = uvicorn_kwargs.pop(
+        "h11_max_incomplete_event_size", None)
+    h11_max_header_count = uvicorn_kwargs.pop("h11_max_header_count", None)
+
+    # Set safe defaults if not provided
+    if h11_max_incomplete_event_size is None:
+        h11_max_incomplete_event_size = H11_MAX_INCOMPLETE_EVENT_SIZE_DEFAULT
+    if h11_max_header_count is None:
+        h11_max_header_count = H11_MAX_HEADER_COUNT_DEFAULT
+
     config = uvicorn.Config(app, **uvicorn_kwargs)
+    # Set header limits
+    config.h11_max_incomplete_event_size = h11_max_incomplete_event_size
+    config.h11_max_header_count = h11_max_header_count
     server = uvicorn.Server(config)
     _add_shutdown_handlers(app, server)
 
