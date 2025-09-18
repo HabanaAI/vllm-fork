@@ -914,7 +914,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         if self.quant_config.activation_scheme == "static" and layer.dp_size > 1:
             x_scale = layer.w13_input_scale.data
             x = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
-            if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0'):
+            if (os.environ.get('REDUCE_GRAPH_BREAK', '0').lower() in ('false', '0') and
+                os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0')):
                 cu_tokens_across_dp_cpu = get_forward_context(
                 ).dp_metadata.cu_tokens_across_dp_cpu
                 hidden_states_across_dp = get_forward_context(
@@ -1247,6 +1248,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         topk_weights = layer.multicast_fn(topk_weights,
                                                         cu_tokens_across_dp_cpu,
                                                         topk_weights_across_dp)
+                        if os.environ.get('REDUCE_GRAPH_BREAK', '0').lower() in ('true', '1'):
+                            hidden_states_across_dp = get_forward_context(
+                            ).dp_metadata.hidden_states_across_dp
+                            x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,
+                                                hidden_states_across_dp)
                     else:
                         packed_bf16_buf_across_dp = get_forward_context(
                         ).dp_metadata.packed_bf16_buf_across_dp

@@ -909,6 +909,7 @@ class FusedMoE(torch.nn.Module):
             ).dp_metadata.cu_tokens_across_dp_cpu
 
             if (self.activation_scheme != "static" and
+                os.environ.get('REDUCE_GRAPH_BREAK', '0').lower() in ('false', '0') and
                 os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0')):
                 hidden_states_across_dp = get_forward_context(
                 ).dp_metadata.hidden_states_across_dp
