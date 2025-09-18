@@ -638,9 +638,12 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors]:
+        print('\n\n\nkwargs in ovis forward:', kwargs, '\n\n\n')
+        
         if intermediate_tensors is not None:
             inputs_embeds = None
-
+        
+        
         # NOTE: In v1, inputs_embeds is always generated at model runner, this
         # condition is for v0 compatibility.
         elif inputs_embeds is None:
