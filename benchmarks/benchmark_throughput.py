@@ -465,6 +465,10 @@ def get_requests(args, tokenizer):
         "output_len": args.output_len,
     }
 
+    # Add images_per_request if limit_mm_per_prompt is set
+    if hasattr(args, 'limit_mm_per_prompt') and args.limit_mm_per_prompt and 'image' in args.limit_mm_per_prompt:
+        sample_kwargs["images_per_request"] = args.limit_mm_per_prompt['image']
+
     if args.dataset_path is None or args.dataset_name == "random":
         sample_kwargs["range_ratio"] = args.random_range_ratio
         sample_kwargs["prefix_len"] = args.prefix_len
