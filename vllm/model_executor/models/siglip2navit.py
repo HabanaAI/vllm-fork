@@ -665,6 +665,7 @@ class Siglip2VisionTransformer(nn.Module):
         print(pixel_values.shape)
         print(grid_thws.shape)
         print(grid_thws)
+        print('\n\n\nfirst pixel values:', pixel_values)
         
         
         hidden_states = self.embeddings(pixel_values, grid_thws)
