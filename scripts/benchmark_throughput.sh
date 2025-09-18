@@ -145,7 +145,11 @@ fi
 
 set_config
 
-${NUMA_CTL} \
+log_file="${case_name}.log"
+echo -e "\nChanged environment variables:" |& tee "${log_file}"
+echo -e "${changed_env}\n" |& tee -a "${log_file}"
+
+command_string=$(echo ${NUMA_CTL_CMD} \
 python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --backend vllm \
     --device hpu \
@@ -168,5 +172,10 @@ python3 "$BASH_DIR/../benchmarks/benchmark_throughput.py" \
     --use-padding-aware-scheduling \
     --num-scheduler-steps "${scheduler_steps}" \
     --distributed_executor_backend "${dist_backend}" \
-    --gpu-memory-utilization "${VLLM_GPU_MEMORY_UTILIZATION}" \
-    |& tee "${case_name}".log 2>&1
+    --gpu-memory-utilization "${VLLM_GPU_MEMORY_UTILIZATION}")
+
+echo "Benchmark throughput for ${model_name} on Gaudi ${device} with command:" |& tee -a "${log_file}"
+echo -e "${command_string}\n" |& tee -a "${log_file}"
+echo "The log will be saved to ${log_file}"
+
+eval "${command_string}" |& tee -a "${log_file}" 2>&1

@@ -124,14 +124,15 @@ if [ "$input_min" == "$input_max" ]; then
     disable_zero_padding=true
 fi
 
-
-echo "Starting vllm server for ${model_name} from ${model_path} with input_range=[${input_min}, ${input_max}], output_range=[${output_min}, ${output_max}], max_num_seqs=${max_num_seqs}, max_num_batched_tokens=${max_num_batched_tokens}, max_model_len=${max_model_len} using ${num_hpu} HPUs with module_ids=${module_ids}"
-
 case_name=serve_${model_name}_${dtype}_${device}_in${input_min}-${input_max}_out${output_min}-${output_max}_bs${max_num_seqs}_tp${num_hpu}_steps${scheduler_steps}_$(date +%F-%H-%M-%S)
 
 set_config
 
-${NUMA_CTL} \
+log_file="${case_name}.log"
+echo -e "\nChanged environment variables:" |& tee "${log_file}"
+echo -e "${changed_env}\n" |& tee -a "${log_file}"
+
+command_string=$(echo ${NUMA_CTL_CMD} \
 python3 -m vllm.entrypoints.openai.api_server \
     --host "${host}" --port "${port}" \
     --device hpu \
@@ -152,5 +153,10 @@ python3 -m vllm.entrypoints.openai.api_server \
     --use-padding-aware-scheduling \
     --num-scheduler-steps "${scheduler_steps}" \
     --distributed_executor_backend "${dist_backend}" \
-    --gpu-memory-utilization "${VLLM_GPU_MEMORY_UTILIZATION}" \
-    |& tee "${case_name}".log 2>&1
+    --gpu-memory-utilization "${VLLM_GPU_MEMORY_UTILIZATION}")
+
+echo "Start a vLLM server for ${model_name} on Gaudi $device with command:" |& tee -a "${log_file}"
+echo -e "${command_string}\n" |& tee -a "${log_file}"
+echo "The log will be saved to ${log_file}"
+
+eval "${command_string}" |& tee -a "${log_file}" 2>&1
