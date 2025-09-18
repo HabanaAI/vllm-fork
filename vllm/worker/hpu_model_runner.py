@@ -2774,11 +2774,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                         lora_request=None,
                                         img_args=None,
                                         temperature=0,
+                                        presence_penalty=0.0,
                                         ctx=0):
         if self.is_pooler:
             sampling_params = None
         else:
-            sampling_params = SamplingParams(temperature=temperature)
+            sampling_params = SamplingParams(temperature=temperature, presence_penalty=presence_penalty)
         num_blocks = math.ceil(seq_len / self.block_size)
         seq_len = max(seq_len, 1)
         computed_block_nums = None
@@ -2934,6 +2935,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ]
         self.profiler.start('internal', scenario_name)
         times = num_iters if use_graphs or is_pt_profiler_run else 1
+        presence_penalty = 1.0 if os.getenv('VLLM_WARMUP_WITH_PENALTY', '0') == '1' else 0.0
         if is_prompt:
             seqs = [
                 self.create_dummy_seq_group_metadata(
@@ -2944,6 +2946,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if dummy_lora_requests_per_seq else None,
                     img_args=img_args,
                     temperature=temperature,
+                    presence_penalty=presence_penalty,
                     ctx=ctx) for i in range(batch_size)
             ]
         else:
@@ -2957,6 +2960,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     lora_request=dummy_lora_requests_per_seq[i]
                     if dummy_lora_requests_per_seq else None,
                     temperature=temperature,
+                    presence_penalty=presence_penalty,
                     ctx=ctx) for i, b in enumerate(blocks)
             ]
         if not is_dummy_run:
