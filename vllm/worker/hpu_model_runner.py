@@ -693,6 +693,7 @@ class HpuModelAdapter(torch.nn.Module):
 
         kwargs.update({'inputs_embeds': inputs_embeds})
         # done compute the visual tokens and others
+        print('\n\n\nkwargs in func1\n\n\n:', kwargs)
         kwargs.pop('pixel_values', None)
         kwargs.pop("num_crops", None)
         kwargs.pop("graphed_multimodal_buckets", None)
@@ -740,6 +741,7 @@ class HpuModelAdapter(torch.nn.Module):
                     'inputs_embeds': inputs_embeds,
                 })
                 # done compute the visual tokens
+                print('\n\n\nkwargs in func2\n\n\n:', kwargs)
                 kwargs.pop('pixel_values', None)
                 kwargs.pop('image_grid_thw', None)
                 return kwargs
