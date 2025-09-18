@@ -572,6 +572,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
         for input_key in kwargs:
+            print('input_key:', input_key)
             if input_key in ("pixel_values", "indicator_tokens",
                              "grids") and "images" not in modalities:
                 modalities["images"] = self._parse_and_validate_image_input(
