@@ -280,6 +280,10 @@ class GroupCoordinator:
                 self.cpu_group, 1 << 22, 6)
 
         self.force_cpu_for_pp: bool = force_cpu_for_pp
+        # Stores non-blocking isend handles from the previous send_tensor_dict
+        # call (keyed by destination rank). These must be waited on (flushed)
+        # before issuing the next send to the same destination to
+        # avoid potential hangs.
         self.last_send_td_handles: dict[int, list[list[Any]]] = {}
 
         from vllm.platforms import current_platform
@@ -537,6 +541,8 @@ class GroupCoordinator:
         handle_size = torch.distributed.irecv(size_tensor,
                                               src=self.ranks[src],
                                               group=self.cpu_group)
+        # irecv immediately followed by wait is functionally just recv.
+        # However irecv must be used here as recv cant be used with isend.
         handle_size.wait()
 
         # Tensor to receive serialized objects into.
@@ -597,15 +603,6 @@ class GroupCoordinator:
                                                          src=self.ranks[src],
                                                          group=metadata_group,
                                                          async_op=True)
-                elif self.force_cpu_for_pp:
-                    # use metadata_group for CPU tensors
-                    orig_device = tensor.device
-                    tensor = tensor.to('cpu')
-                    handle = torch.distributed.broadcast(tensor,
-                                                         src=self.ranks[src],
-                                                         group=group,
-                                                         async_op=True)
-                    tensor = tensor.to(orig_device)
                 else:
                     # use group for GPU tensors
                     handle = torch.distributed.broadcast(tensor,
@@ -636,16 +633,6 @@ class GroupCoordinator:
                             src=self.ranks[src],
                             group=metadata_group,
                             async_op=True)
-                    elif self.force_cpu_for_pp:
-                        # use metadata_group for CPU tensors
-                        orig_device = tensor.device
-                        tensor = tensor.to('cpu')
-                        handle = torch.distributed.broadcast(
-                            tensor,
-                            src=self.ranks[src],
-                            group=group,
-                            async_op=True)
-                        tensor = tensor.to(orig_device)
                     else:
                         # use group for GPU tensors
                         handle = torch.distributed.broadcast(
