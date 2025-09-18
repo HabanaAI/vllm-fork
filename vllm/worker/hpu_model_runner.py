@@ -756,7 +756,7 @@ class HpuModelAdapter(torch.nn.Module):
                     warmup_mode, **kwargs)
 
     def forward(self, *args, **kwargs):
-        print('\n\n\nHpuModelAdapter forward kwargs:\n\n\n', kwargs)
+        print('\n\n\nHpuModelAdapter forward kwargs:\n\n\n', kwargs.get('pixel_values'))
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'warmup_mode' in kwargs:
