@@ -1945,11 +1945,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_kwargs_list)
         multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
                                                         device=self.device)
+                                                    
+        print('multi_modal_kwargs in hpu_model_runner:', multi_modal_kwargs)
         # --- fix: 强制把视觉像素张量设回浮点 ---
         for k in ("pixel_values", "video_pixel_values"):
             if k in multi_modal_kwargs and isinstance(multi_modal_kwargs[k], torch.Tensor):
                 # 用模型期望的 dtype（通常是 bf16/fp16/fp32 之一）
                 target_dtype = self.model_config.dtype
+                print(target_dtype)
                 if not multi_modal_kwargs[k].dtype.is_floating_point:
                     multi_modal_kwargs[k] = multi_modal_kwargs[k].to(target_dtype)
         # --------------------------------------
