@@ -409,6 +409,8 @@ class Ovis2_5MultiModalProcessor(BaseMultiModalProcessor[Ovis2_5ProcessingInfo]
 
         def get_replacement_ovis(item_idx, modality: str):
             # MultiModalKwargs 正确的取法：先按模态取“这一条”的字段集合
+            print('\n\n\nout mm kwargs:', out_mm_kwargs, '\n\n\n')
+            
             item = out_mm_kwargs.get_item(modality, item_idx)
             print('item:', item)
             if modality == "image":
