@@ -72,6 +72,7 @@ class OvisVideoPatchInputs(TypedDict):
 
 
 def _ovis2_5_field_config():
+    print('\n\n\n\n\n_ovis2_5_field_config',MultiModalFieldConfig.batched("image"))
     return dict(pixel_values=MultiModalFieldConfig.batched("image"),
                 grids=MultiModalFieldConfig.batched("image"),
                 indicator_tokens=MultiModalFieldConfig.batched("image"),
@@ -138,6 +139,7 @@ class VisualTokenizer(torch.nn.Module):
     def tokenize(self, logits: torch.Tensor) -> torch.Tensor:
         tokens = torch.softmax(logits, dim=-1,
                                dtype=torch.float32).to(logits.dtype)
+        print('\n\n\nlogits.dtype:', logits.dtype, '\n\n\n')
         return tokens
 
     def encode(self, pixel_values: torch.Tensor,
@@ -545,6 +547,7 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
             map(lambda x: 2 if x > 1 else x + 2, patches_per_image))
 
         target_dtype = self.visual_tokenizer.dtype
+        print('\n\n\ntarget dtype:', target_dtype, '\n\n\n')
         visual_tokens = self.visual_tokenizer(
             image_patches_flat.to(target_dtype), grid_thws)
 
