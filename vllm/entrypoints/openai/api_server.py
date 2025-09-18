@@ -1156,8 +1156,8 @@ async def init_app_state(
 
     state.engine_client = engine_client
     state.log_stats = not args.disable_log_stats
+    model_configs = []
     if isinstance(vllm_config, list):
-        model_configs = []
         # TODO: Need apply model_configs to other non-score MiG servings
         for cfg in vllm_config:
             model_configs.append(cfg.model_config)
@@ -1233,7 +1233,7 @@ async def init_app_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
     ) if model_config.runner_type == "pooling" else None
-    model_support_embed = False
+    model_support_embed = (model_config.task == "embed")
     for model_config in model_configs:
         if model_config.task == "embed":
             model_support_embed = True
@@ -1246,7 +1246,8 @@ async def init_app_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
     ) if model_support_embed else None
-    model_support_score_embed = False
+    model_support_score_embed = (model_config.task
+                                 in ("score", "embed", "pooling"))
     for model_config in model_configs:
         if model_config.task in ("score", "embed", "pooling"):
             model_support_score_embed = True
@@ -1263,7 +1264,7 @@ async def init_app_state(
         state.openai_serving_models,
         request_logger=request_logger,
     ) if model_config.task == "classify" else None
-    model_support_score = False
+    model_support_score = (model_config.task == "score")
     for model_config in model_configs:
         if model_config.task == "score":
             model_support_score = True
