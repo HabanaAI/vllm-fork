@@ -671,7 +671,13 @@ class HpuModelAdapter(torch.nn.Module):
 
     def compute_input_embeddings_for_mm_optimized(self, warmup_mode, **kwargs):
         input_ids = kwargs['input_ids']
+        pv = kwargs.get("pixel_values", None)
+        if isinstance(pv, torch.Tensor):
+            print("before get_mm_emb:", pv.dtype, pv.shape, pv.min().item(), pv.max().item())
+            
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
+        print('\n\n\nvision_embeddings:', vision_embeddings)
+        
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
 
