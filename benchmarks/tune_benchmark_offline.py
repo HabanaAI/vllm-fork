@@ -109,6 +109,7 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
     first_block = int((decode_bs * args.input_len) / block_size)
     last_block = int((decode_bs * max_model_len) / block_size)
     last_block = last_block + decode_block_step  # add 1 more step size as buffer
+    max_num_seqs = max(prompt_bs_bucket_max, decode_bs)
 
     if print_only:
         if prompt_bs_bucket_step:
@@ -132,7 +133,7 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
         print("  VLLM_DECODE_BLOCK_BUCKET_MIN = " + str(first_block))
         print("  VLLM_DECODE_BLOCK_BUCKET_STEP = " + str(decode_block_step))
         print("  VLLM_DECODE_BLOCK_BUCKET_MAX = " + str(last_block))
-        print("  max-num-seqs = " + str(prompt_bs_bucket_max + decode_bs))
+        print("  max-num-seqs = " + str(max_num_seqs))
     else:
         if prompt_bs_bucket_step:
             os.environ["VLLM_PROMPT_BS_BUCKET_STEP"] = str(prompt_bs_bucket_step)
@@ -189,8 +190,7 @@ def objective(trial, args):
 
     set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max,
                     prompt_seq_step, decode_bs, decode_block_step, block_size, args)
-
-    max_num_seqs = prompt_bs_bucket_max + decode_bs
+    max_num_seqs = max(prompt_bs_bucket_max, decode_bs)
     benchmark_cmd = construct_benchmark_cmd(args, max_num_seqs)
     print(benchmark_cmd)
     log_file = f"tuning_offline_benchmark_{trial.number}.log"
