@@ -147,7 +147,8 @@ class VisualTokenizer(torch.nn.Module):
         if isinstance(grid_thws, torch.Tensor):
             print("[vis] first grid_thw =", grid_thws[0].tolist())
             print("[vis] first grid_thw =", grid_thws[1].tolist())
-            
+        
+        print('\n\n\npv in ovis:',pixel_values,'\n\n\n')
         features = self.vit(pixel_values, grid_thws)
         print('\n\n\nfeatures:',features,'\n\n\n')
         # refer to qwen2.5-vl patchmerger
@@ -469,6 +470,8 @@ class Ovis2_5(nn.Module, SupportsMultiModal, SupportsPP):
     def _parse_and_validate_image_input(
             self, **kwargs: object) -> Optional[OvisImagePatchInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
+        print('\n\n\npixel_values in parse and val:', pixel_values)
+        
         indicator_tokens = kwargs.pop("indicator_tokens", None)
         grids = kwargs.pop("grids", None)
         if pixel_values is None and indicator_tokens is None:
