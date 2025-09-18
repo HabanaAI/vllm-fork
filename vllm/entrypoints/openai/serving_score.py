@@ -267,10 +267,11 @@ class ServingScores(OpenAIServing):
         # WA Current self.model_config is always the first model, which
         # may not be the requested model
         is_cross_encoder = self.model_config.is_cross_encoder
-        for model_cfg in self.model_configs:
-            if model_cfg.model == request.model:
-                is_cross_encoder = model_cfg.is_cross_encoder
-                break
+        if self.model_configs:
+            for model_cfg in self.model_configs:
+                if model_cfg.model == request.model:
+                    is_cross_encoder = model_cfg.is_cross_encoder
+                    break
         if is_cross_encoder:
             return await self._cross_encoding_score(
                 tokenizer=tokenizer,
