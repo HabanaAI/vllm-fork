@@ -757,8 +757,10 @@ class HpuModelAdapter(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         pv = kwargs.get('pixel_values')
-        if pv != None:
+        if pv is not None:
             print('\n\n\nHpuModelAdapter forward kwargs:\n\n\n', pv)
+            print("pixel_values dtype:", pv.dtype)
+            print("pixel_values shape:", tuple(pv.shape))
             flat = pv.flatten()
             print("pixel_values first 10 values:", flat[:10].tolist())
         kwargs = kwargs.copy()
