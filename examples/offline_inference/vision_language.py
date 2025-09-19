@@ -1043,7 +1043,7 @@ def run_qwen2_5_vl(questions: list[str], modality: str) -> ModelRequestData:
             "fps": 1,
         },
         limit_mm_per_prompt={modality: 1},
-        tensor_parallel_size=4,
+        tensor_parallel_size=2,
     )
 
     if modality == "image":
