@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, Optional, TypeVar, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange
+from einops import rearrange, repeat
 from transformers import PretrainedConfig
 from transformers.activations import GELUActivation
 from transformers.feature_extraction_utils import BatchFeature
@@ -42,7 +42,7 @@ from vllm.multimodal.processing import (BaseMultiModalProcessor,
                                         BaseProcessingInfo, PromptReplacement,
                                         PromptUpdate)
 from vllm.multimodal.profiling import BaseDummyInputsBuilder
-from vllm.platforms import _Backend
+from vllm.platforms import _Backend, current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import is_list_of
@@ -57,7 +57,64 @@ from .utils import (AutoWeightsLoader, WeightsMapper,
 from .vision import get_vit_attn_backend
 
 logger = init_logger(__name__)
+is_hpu = current_platform.is_hpu()
 
+if is_hpu:
+    import habana_frameworks.torch.core as htcore
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+
+class AttentionLongSequence:
+
+    @staticmethod
+    def forward(q, k, v, mask, q_block_size, softmax_mode):
+        """
+        Support long sequence at prompt phase
+        """
+        q_len = q.size(-2)
+        assert q_len % q_block_size == 0
+        q_tiles = (q_len //
+                   q_block_size) if (q_len % q_block_size == 0) else math.ceil(
+                       q_len / q_block_size)
+        attn_output = torch.zeros_like(q)
+        row_mask = None
+
+        for i in range(q_tiles):
+            s, e = i * q_block_size, (i + 1) * q_block_size
+            row_q = q[:, :, s:e, :]
+            if mask is not None:
+                row_mask = mask[:, :, s:e, :]
+            # attn_output[:, :,
+            #             s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
+            #                                       False, None, softmax_mode)
+            attn_output[:, :,
+            s:e, :] = FusedSDPA.apply(row_q, k, v, row_mask, 0.0,
+                                        False, None)
+            # TODO: markstep after a couple of iterations
+            # need to experiment the optimal number.
+            # if i % 75 == 0:
+            #     htcore.mark_step()
+            htcore.mark_step()
+        return attn_output
+
+
+def create_block_diagonal_attention_mask_outerprod(indices):
+    maxsize = indices[-1]
+    range_to_max_for_each_img = torch.arange(
+        maxsize,
+        device=indices.device).unsqueeze(0).repeat(indices.shape[0] - 1, 1)
+    lesser = range_to_max_for_each_img < indices[1:].unsqueeze(1)
+    greater_eq = range_to_max_for_each_img >= indices[:-1].unsqueeze(1)
+    range_indices = torch.logical_and(lesser, greater_eq).float()
+    # can reduce sum externally or as batchmatmul
+    if range_indices.shape[-1] > 40000:
+        log_msg = "einsum running on CPU :" + str(range_indices.shape)
+        logger.info(log_msg)
+        range_indices = range_indices.to("cpu")
+        res = torch.einsum('bi,bj->ij', range_indices, range_indices)
+        res = res.to("hpu")
+    else:
+        res = torch.einsum('bi,bj->ij', range_indices, range_indices)
+    return res.bool()
 
 def smart_resize(
     height: int,
@@ -310,7 +367,40 @@ class KeyeVisionEmbeddings(nn.Module):
             raise ValueError("Unsupported pixel_values dimension:"
                              f" {pixel_values.dim()}. Expected 4 or 5.")
 
-
+def rotate_half(x: torch.Tensor, interleaved: bool = False) -> torch.Tensor:
+    if not interleaved:
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat((-x2, x1), dim=-1)
+    else:
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        return rearrange(torch.stack((-x2, x1), dim=-1),
+                         "... d two -> ... (d two)",
+                         two=2)
+        
+def apply_rotary_emb_torch(x: torch.Tensor,
+                           cos: torch.Tensor,
+                           sin: torch.Tensor,
+                           interleaved: bool = False) -> torch.Tensor:
+    """
+    x: (batch_size, seqlen, nheads, headdim)
+    cos, sin: (seqlen, rotary_dim / 2) or (batch_size, seqlen, rotary_dim / 2)
+    """
+    ro_dim = cos.shape[-1] * 2
+    assert ro_dim <= x.shape[-1]
+    cos = repeat(
+        cos,
+        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    sin = repeat(
+        sin,
+        "... d -> ... 1 (2 d)" if not interleaved else "... d -> ... 1 (d 2)")
+    return torch.cat(
+        [
+            x[..., :ro_dim] * cos +
+            rotate_half(x[..., :ro_dim], interleaved) * sin, x[..., ro_dim:]
+        ],
+        dim=-1,
+    )
+    
 def apply_rotary_pos_emb_flashatt(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -320,7 +410,8 @@ def apply_rotary_pos_emb_flashatt(
     cos = cos.chunk(2, dim=-1)[0].contiguous()
     sin = sin.chunk(2, dim=-1)[0].contiguous()
 
-    from vllm.vllm_flash_attn.layers.rotary import apply_rotary_emb
+    #from vllm.vllm_flash_attn.layers.rotary import apply_rotary_emb
+    apply_rotary_emb = apply_rotary_emb_torch
 
     q_embed = apply_rotary_emb(q.float(), cos.float(), sin.float()).type_as(q)
     k_embed = apply_rotary_emb(k.float(), cos.float(), sin.float()).type_as(k)
@@ -375,7 +466,7 @@ class KeyeSiglipAttention(nn.Module):
 
         # Detect attention implementation.
         self.attn_backend: _Backend = get_vit_attn_backend(support_fa=True)
-        if self.attn_backend not in {_Backend.FLASH_ATTN, _Backend.XFORMERS}:
+        if self.attn_backend not in {_Backend.FLASH_ATTN, _Backend.XFORMERS, _Backend.TORCH_SDPA}:
             raise RuntimeError(
                 f"Keye-VL does not support {self.attn_backend} backend now.")
 
@@ -427,7 +518,29 @@ class KeyeSiglipAttention(nn.Module):
                 self.head_dim,
             )
 
-        if self.attn_backend == _Backend.FLASH_ATTN:
+        if is_hpu:
+            outputs = []
+            for i in range(1, len(cu_seqlens)):
+                start_idx = cu_seqlens[i - 1]
+                end_idx = cu_seqlens[i]
+                q_i = q[:, start_idx:end_idx]
+                k_i = k[:, start_idx:end_idx]
+                v_i = v[:, start_idx:end_idx]
+                q_i, k_i, v_i = (rearrange(x, "b s h d -> b h s d")
+                                 for x in [q_i, k_i, v_i])
+
+                htcore.mark_step()
+                if q_i.shape[2] <= 65536:  # need to investigate this crosspoint
+                    output_i = FusedSDPA.apply(q_i, k_i, v_i, None, 0.0, False,
+                                               None)
+                else:
+                    output_i = AttentionLongSequence.forward(
+                        q_i, k_i, v_i, None, int(q_i.shape[2]/4), None)
+                htcore.mark_step()
+                output_i = rearrange(output_i, "b h s d -> b s h d ")
+                outputs.append(output_i)
+            context_layer = torch.cat(outputs, dim=1)
+        elif self.attn_backend == _Backend.FLASH_ATTN:
             from flash_attn import flash_attn_varlen_func
 
             q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
@@ -627,6 +740,7 @@ class KeyeSiglipEncoder(nn.Module):
         assert attention_mask is None
 
         for encoder_layer in self.layers:
+            htcore.mark_step()
             hidden_states = encoder_layer(
                 hidden_states,
                 attention_mask,

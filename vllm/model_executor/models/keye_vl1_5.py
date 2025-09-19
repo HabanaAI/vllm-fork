@@ -359,7 +359,7 @@ class KeyeVL1_5MultiModalProcessor(
         placeholder = {"image": image_token_id, "video": video_token_id}
         merge_length = image_processor.merge_size**2
 
-        out_mm_kwargs_data = out_mm_kwargs.get_data()
+        out_mm_kwargs_data = out_mm_kwargs
         frame_types: list[torch.Tensor] = \
             hf_processor_mm_kwargs.get("frame_types", None)
         timestamps: list[torch.Tensor] = \
@@ -578,7 +578,7 @@ class KeyeVL1_5ForConditionalGeneration(BaseKeyeModule, SupportsMultiModal,
             video_input: KeyeVL1_5VideoInputs) -> tuple[torch.Tensor, ...]:
         video_type = video_input["type"]
         video_grid_thw = split_thw(video_input["video_grid_thw"])
-        pixel_values_videos = video_input.get("pixel_values_videos", None)
+        pixel_values_videos = video_input["pixel_values_videos"]
 
         video_embeds = self._process_video_embeds(video_type, video_grid_thw,
                                                   pixel_values_videos)
