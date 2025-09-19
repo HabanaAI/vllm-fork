@@ -35,20 +35,28 @@ from vllm.compilation.decorators import support_torch_compile
 from vllm.config import VllmConfig
 from vllm.distributed import get_pp_group
 from vllm.logger import init_logger
+from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 
 from .qwen3_moe import Qwen3MoeForCausalLM, Qwen3MoeModel
-from .qwen3_vl import (Qwen3_VisionTransformer, Qwen3VLDummyInputsBuilder,
+from .qwen3_vl import (Qwen3_VisionTransformer,
+                       Qwen3_VisionTransformerStaticShape,
+                       Qwen3VLDummyInputsBuilder,
                        Qwen3VLForConditionalGeneration,
                        Qwen3VLMultiModalProcessor, Qwen3VLProcessingInfo)
 from .utils import is_pp_missing_parameter, maybe_prefix
 
 logger = init_logger(__name__)
+is_hpu = current_platform.is_hpu()
+
+if is_hpu:
+    import habana_frameworks.torch as htorch
 
 
 class Qwen3VLMoeProcessingInfo(Qwen3VLProcessingInfo):
@@ -97,6 +105,8 @@ class Qwen3MoeLLMModel(Qwen3MoeModel):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
+        if is_hpu:
+            htorch.core.mark_step()
         for layer_idx, layer in enumerate(
                 self.layers[self.start_layer:self.end_layer]):
             layer_idx = layer_idx + self.start_layer
@@ -127,14 +137,7 @@ class Qwen3MoeLLMModel(Qwen3MoeModel):
         weight_loader = typing.cast(Callable[..., bool], param.weight_loader)
         for expert_id in range(num_experts):
             curr_expert_weight = loaded_weight[expert_id]
-            success = weight_loader(param,
-                                    curr_expert_weight,
-                                    name,
-                                    shard_id,
-                                    expert_id,
-                                    return_success=True)
-            if not success:
-                return False
+            weight_loader(param, curr_expert_weight, name, shard_id, expert_id)
         return True
 
     def load_weights(self, weights: Iterable[tuple[str,
@@ -153,7 +156,13 @@ class Qwen3MoeLLMModel(Qwen3MoeModel):
                            "_weight_scale", ".input_scale", "_input_scale")
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
-        expert_params_mapping = self.get_expert_mapping()
+        # Params for weights, fp8 weight scales, fp8 activation scales
+        # (param_name, weight_name, expert_id, shard_id)
+        expert_params_mapping = FusedMoE.make_expert_params_mapping(
+            ckpt_gate_proj_name="gate_proj",
+            ckpt_down_proj_name="down_proj",
+            ckpt_up_proj_name="up_proj",
+            num_experts=self.config.num_experts)
         is_fused_expert = False
         fused_expert_params_mapping = [
             ("experts.w13_weight", "experts.gate_up_proj", 0, "w1"),
@@ -215,16 +224,15 @@ class Qwen3MoeLLMModel(Qwen3MoeModel):
                                                                 -2)  # no bias
                         if "experts.gate_up_proj" in name:
                             loaded_weight = loaded_weight.chunk(2, dim=-2)
-                            success_w1 = self.load_fused_expert_weights(
+                            self.load_fused_expert_weights(
                                 name_mapped, params_dict, loaded_weight[0],
                                 "w1", num_experts)
-                            success_w3 = self.load_fused_expert_weights(
+                            self.load_fused_expert_weights(
                                 name_mapped, params_dict, loaded_weight[1],
                                 "w3", num_experts)
-                            success = success_w1 and success_w3
                         else:
                             # down_proj
-                            success = self.load_fused_expert_weights(
+                            self.load_fused_expert_weights(
                                 name_mapped, params_dict, loaded_weight,
                                 shard_id, num_experts)
                     else:
@@ -241,15 +249,13 @@ class Qwen3MoeLLMModel(Qwen3MoeModel):
                         # other available replicas.
                         weight_loader = typing.cast(Callable[..., bool],
                                                     param.weight_loader)
-                        success = weight_loader(param,
-                                                loaded_weight,
-                                                name_mapped,
-                                                shard_id=shard_id,
-                                                expert_id=expert_id,
-                                                return_success=True)
-                    if success:
-                        name = name_mapped
-                        break
+                        weight_loader(param,
+                                      loaded_weight,
+                                      name_mapped,
+                                      shard_id=shard_id,
+                                      expert_id=expert_id)
+                    name = name_mapped
+                    break
                 else:
                     if is_expert_weight:
                         # We've checked that this is an expert weight
@@ -316,7 +322,12 @@ class Qwen3VLMoeForConditionalGeneration(Qwen3VLForConditionalGeneration):
         self.config = config
         self.multimodal_config = multimodal_config
 
-        self.visual = Qwen3_VisionTransformer(
+        if is_hpu:
+            qwen3_visionTransformer = Qwen3_VisionTransformerStaticShape
+        else:
+            qwen3_visionTransformer = Qwen3_VisionTransformer
+
+        self.visual = qwen3_visionTransformer(
             config.vision_config,
             norm_eps=getattr(config, "rms_norm_eps", 1e-6),
             quant_config=self._maybe_ignore_quant_config(quant_config),
