@@ -1314,11 +1314,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     if config.measure:
                         self.model = prepare(self.model, config)
                     elif config.quantize:
-                        if self.parallel_config.pipeline_parallel_size > 1:
-                            os.environ["INC_ENABLE_TP_RANK_INFO"] = "1"
-                            logger.info_once(
-                                "Set INC_ENABLE_TP_RANK_INFO=1 for pipeline "
-                                "parallelism with INC on HPU.")
                         self.model = convert(self.model, config)
                     if config.scale_format.lower(
                     ) == 'const' and not disable_mark_scales_as_const:
