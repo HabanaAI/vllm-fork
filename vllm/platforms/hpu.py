@@ -128,7 +128,7 @@ class HpuPlatform(Platform):
             logger.info("Pin memory is supported on HPU.")
             return True
         else:
-            logger.warn("Pin memory is not supported on HPU.")
+            logger.warning("Pin memory is not supported on HPU.")
             return True
 
     @classmethod
