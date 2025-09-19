@@ -787,7 +787,7 @@ def run_nvlm_d(questions: list[str], modality: str) -> ModelRequestData:
 def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
 
-    model_name = "AIDC-AI/Ovis2-1B"
+    model_name = "/home/disk7/HF_MODELS/Ovis2-1B"
 
     engine_args = EngineArgs(
         model=model_name,
