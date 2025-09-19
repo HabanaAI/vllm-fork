@@ -448,12 +448,19 @@ def _merge_multimodal_embeddings(
     # skip check for HPU, the number of tokens is a cpu fallback during HPU lazy
     if current_platform.is_hpu():
         htcore.mark_step()
-        flattened = _flatten_embeddings(multimodal_embeddings)
-        #TODO dynamic? is a list of varying length
-        # still.. torch.where might be faster than boolean indexing?
-        inputs_embeds[is_multimodal] = flattened
-        return inputs_embeds
+        is_multimodal = is_multimodal.reshape(-1)
+        batch_size, seq_length, hidden_size = inputs_embeds.shape
+        inputs_embeds = inputs_embeds.reshape(-1, hidden_size)
+        if isinstance(multimodal_embeddings, torch.Tensor):
+            flattened = multimodal_embeddings.reshape(-1, hidden_size)
+            inputs_embeds[is_multimodal] = flattened
+        else:
+            flattened = _flatten_embeddings(multimodal_embeddings)
+            inputs_embeds[is_multimodal] = flattened
+        inputs_embeds = inputs_embeds.reshape(batch_size, seq_length,
+                                              hidden_size)
 
+        return inputs_embeds
     num_expected_tokens = is_multimodal.sum().item()
     assert isinstance(num_expected_tokens, int)
 
