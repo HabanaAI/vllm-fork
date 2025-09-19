@@ -271,7 +271,7 @@ set_linear_bucketing(){
 
     prompt_bs_step=1
     prompt_bs_min=1
-    prompt_bs_max=$(( $max_num_batched_tokens / $(ceil $input_min $block_size) ))
+    prompt_bs_max=$(( $PREFERED_SEQ_LEN_TO_CAPTURE / $(ceil $input_min $block_size) ))
     prompt_bs_max=$( ceil $prompt_bs_max $prompt_bs_step )
     prompt_bs_max=$( min $prompt_bs_max $max_num_seqs )
     if [ -n "$max_num_prefill_seqs" ]; then
