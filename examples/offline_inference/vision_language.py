@@ -787,14 +787,14 @@ def run_nvlm_d(questions: list[str], modality: str) -> ModelRequestData:
 def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
 
-    model_name = "AIDC-AI/Ovis2-1B"
+    model_name = "/home/disk7/HF_MODELS/Ovis2-1B"
 
     engine_args = EngineArgs(
         model=model_name,
         max_model_len=4096,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="half",
+        dtype="bfloat16",
         limit_mm_per_prompt={modality: 1},
     )
 
@@ -811,6 +811,38 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
         prompts=prompts,
     )
 
+
+# Ovis2_5
+def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
+    model_name = "/home/disk7/HF_MODELS/Ovis2.5-2B"
+
+    engine_args = EngineArgs(
+        model=model_name,
+        max_model_len=4096,
+        max_num_seqs=2,
+        trust_remote_code=True,
+        dtype="bfloat16",
+        limit_mm_per_prompt={modality: 1},
+#       tensor_parallel_size=4,
+        # hf_overrides={"architectures": ["Ovis2_5ForCausalLM"]},
+#       mm_processor_kwargs={"use_fast": True},
+    )
+    
+    # Ovis 占位符：<image>/<video>
+    if modality == "image":
+        placeholder = "<image>"
+    elif modality == "video":
+        placeholder = "<video>"
+    else:
+        raise ValueError("modality must be image or video")
+        
+    prompts = [f"{placeholder}\n{q}" for q in questions]
+    
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
+    
 
 # PaliGemma
 def run_paligemma(questions: list[str], modality: str) -> ModelRequestData:
@@ -999,7 +1031,7 @@ def run_qwen2_vl(questions: list[str], modality: str) -> ModelRequestData:
 
 # Qwen2.5-VL
 def run_qwen2_5_vl(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
+    model_name = "/home/disk6/HF_models/Qwen2.5-VL-72B-Instruct"
 
     engine_args = EngineArgs(
         model=model_name,
@@ -1011,6 +1043,7 @@ def run_qwen2_5_vl(questions: list[str], modality: str) -> ModelRequestData:
             "fps": 1,
         },
         limit_mm_per_prompt={modality: 1},
+        tensor_parallel_size=8,
     )
 
     if modality == "image":
@@ -1137,6 +1170,7 @@ model_example_map = {
     "molmo": run_molmo,
     "NVLM_D": run_nvlm_d,
     "ovis": run_ovis,
+    "ovis2_5": run_ovis2_5,
     "paligemma": run_paligemma,
     "paligemma2": run_paligemma2,
     "phi3_v": run_phi3v,
@@ -1310,6 +1344,7 @@ def main(args):
     questions = mm_input["questions"]
 
     req_data = model_example_map[model](questions, modality)
+    print('\nreq_data:',req_data)
 
     # Disable other modalities to save memory
     default_limits = {"image": 0, "video": 0, "audio": 0}
@@ -1329,6 +1364,7 @@ def main(args):
         if args.use_different_prompt_per_request
         else [req_data.prompts[0]]
     )
+    print('\nprompts:',prompts)
 
     # We set temperature to 0.2 so that outputs can be different
     # even when all prompts are identical when running batch inference.
@@ -1339,10 +1375,14 @@ def main(args):
     assert args.num_prompts > 0
     if args.num_prompts == 1:
         # Single inference
-        inputs = {
-            "prompt": prompts[0],
-            "multi_modal_data": {modality: data},
-        }
+        if modality == "image":
+            mm = {"image": [data]}     # 包成列表
+        elif modality == "video":
+            mm = {"video": [data]}     # 同理（data 是帧序列/元组）
+        else:
+            raise ValueError("modality must be image or video")
+            
+        inputs = {"prompt": prompts[0], "multi_modal_data": mm}
     else:
         # Batch inference
         if args.image_repeat_prob is not None:
@@ -1353,13 +1393,12 @@ def main(args):
         else:
             # Use the same image for all prompts
             inputs = [
-                {
-                    "prompt": prompts[i % len(prompts)],
-                    "multi_modal_data": {modality: data},
-                }
+                {"prompt": prompts[i % len(prompts)],
+                "multi_modal_data": {"image": [data]} if modality=="image" else {"video": [data]}}
                 for i in range(args.num_prompts)
             ]
-
+    print('\ninputs:',inputs)
+    
     # Add LoRA request if applicable
     lora_request = (
         req_data.lora_requests * args.num_prompts if req_data.lora_requests else None
@@ -1382,3 +1421,4 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args()
     main(args)
+    
