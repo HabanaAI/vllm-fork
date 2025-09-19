@@ -1030,7 +1030,7 @@ class Ernie4_5VLMultiModalProcessor(
         prompt: str,
         mm_data: Mapping[str, object],
         mm_kwargs: Mapping[str, object],
-        tok_kwargs: Mapping[str, object],
+        tok_kwargs: Optional[Mapping[str, object]] = None,
     ) -> BatchFeature:
         # when the prompt is not empty but the multimodal data is empty,
         # directly invoke the tokenizer.
@@ -1045,6 +1045,8 @@ class Ernie4_5VLMultiModalProcessor(
             mm_data["images"] = []
         if "videos" not in mm_data:
             mm_data["videos"] = []
+        if tok_kwargs is None:
+            tok_kwargs = {}
         processor_output = self.info.ctx.call_hf_processor(
             self.info.get_hf_processor(**mm_kwargs),
             dict(text=[prompt],
@@ -1104,8 +1106,7 @@ class Ernie4_5VLMultiModalProcessor(
         merge_length = hf_processor.spatial_conv_size**2
 
         def get_replacement_ernie45vl(item_idx: int, modality: str):
-            out_item = out_mm_kwargs[modality][item_idx]
-            grid_thw = out_item[f"{modality}_grid_thw"].data
+            grid_thw = out_mm_kwargs[f"{modality}_grid_thw"].data
             assert isinstance(grid_thw, torch.Tensor)
             if modality == "video":
                 num_tokens = int(grid_thw.prod(
