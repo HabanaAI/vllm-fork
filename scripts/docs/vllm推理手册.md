@@ -419,16 +419,112 @@ bash start_gaudi_vllm_server.sh \
     -c /data/8B_warmup_cache
 ```
 
-### 3.3 多模态模型
+#### 3.3.2 安装和启动 vLLM
+
+安装 vLLM  
+[参照 1.4 章节](#14-安装-vllm) 使用 vLLM aice/v1.21.0 版本安装到容器里。
+
+对于 Qwen3-Coder-480B-A35B-Instruct-FP8, 需要使用 INC 来进行模型转换，使用下面的命令来安装。
+
+```bash
+git clone https://github.com/intel/neural-compressor.git inc
+cd inc/
+python setup.py pt develop
+```
+
+启动 vLLM  
+进入启动脚本目录，启动 vLLM。
+
+Qwen2.5-7B-Instruct 模型单卡最大并发 32 部署可使用如下命令启动：
+
+```bash
+cd vllm-fork/scripts
+bash start_gaudi_vllm_server.sh \
+    -w "/data/hf_models/Qwen2.5-7B-Instruct" \
+    -n 1 \
+    -m 0 \
+    -b 32 \
+    -i 800,4096 \
+    -o 800,2048 \
+    -l 8192 \
+    -t 8192 \
+    -d bfloat16 \
+    -p 30001 \
+    -c /data/7B_warmup_cache
+```
+
+QwQ-32B 模型 2 卡最大并发 32 部署可使用如下命令启动：
+
+```bash
+cd vllm-fork/scripts
+bash start_gaudi_vllm_server.sh \
+    -w "/data/hf_models/QwQ-32B" \
+    -n 2 \
+    -m 0,1 \
+    -b 32 \
+    -i 800,4096 \
+    -o 800,2048 \
+    -l 8192 \
+    -t 8192 \
+    -d bfloat16 \
+    -p 30001 \
+    -c /data/32B_warmup_cache
+```
+
+Qwen3-8B 模型 2 卡最大并发 32 部署可使用如下命令启动：
+
+```bash
+cd vllm-fork/scripts
+bash start_gaudi_vllm_server.sh \
+    -w "/data/hf_models/Qwen3-8B" \
+    -n 2 \
+    -m 0,1 \
+    -b 32 \
+    -i 800,4096 \
+    -o 800,2048 \
+    -l 8192 \
+    -t 8192 \
+    -d bfloat16 \
+    -p 30001 \
+    -c /data/8B_warmup_cache
+```
+
+对于 Qwen3-Coder-480B-A35B-Instruct-FP8，需要使用脚本来对原始权重进行转换，可以从下面链接获得相关的脚本。
+
+- https://github.com/HabanaAI/vllm-fork/blob/deepseek_r1/scripts/convert_for_g2.py
+- https://github.com/HabanaAI/vllm-fork/blob/deepseek_r1/scripts/run_inc_calib.sh
+- https://github.com/HabanaAI/vllm-fork/tree/deepseek_r1/scripts/quickstart
+
+获得相应的脚本之后，可以使用下面的命令来进行模型权重转换。
+
+```bash
+#转换模型
+cd /root/vllm-fork
+export HF_ENDPOINT="https://hf-mirror.com"
+python scripts/convert_for_g2.py -i /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8 -o /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8-G2
+bash scripts/run_inc_calib.sh --model /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8-G2
+```
+
+Qwen3-Coder-480B-A35B-Instruct-FP8-G2 模型部署可使用如下命令启动：
+
+```bash
+export VLLM_DISABLE_MARK_SCALES_AS_CONST=true
+bash scripts/quickstart/start_vllm.sh -w /data/hf_models/Qwen3-Coder-480B-A35B-Instruct-FP8-G2 -q
+```
+
+### 3.4 多模态模型
 
 如果要做音频处理，需要安装音频相关的库。
+
 ```bash
 pip install vllm[audio]
 ```
 
-#### 3.3.1 Qwen系列多模态模型
+#### 3.4.1 Qwen 系列多模态模型
+
 **启动服务**\
 **Qwen2-VL**: Support Image and Video inputs
+
 ```bash
 PT_HPU_LAZY_MODE=1 vllm serve \
     Qwen/Qwen2-VL-7B-Instruct \
@@ -437,7 +533,9 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --dtype bfloat16 \
     --limit-mm-per-prompt '{"video":5, "image":5}'
 ```
+
 **Qwen2-Audio**: Support Audio inputs
+
 ```bash
 PT_HPU_LAZY_MODE=1 vllm serve \
     Qwen/Qwen2-Audio-7B-Instruct \
@@ -446,7 +544,9 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --dtype bfloat16 \
     --limit-mm-per-prompt '{"audio":5}'
 ```
+
 **Qwen2.5-VL**: Support Image and Video inputs
+
 ```bash
 PT_HPU_LAZY_MODE=1 vllm serve \
     Qwen/Qwen2.5-VL-7B-Instruct \
@@ -455,7 +555,9 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --dtype bfloat16 \
     --limit-mm-per-prompt '{"video":5, "image":5}'
 ```
+
 **Qwen2.5-Omni**: Support Image, Video and Audio inputs
+
 ```bash
 PT_HPU_LAZY_MODE=1 vllm serve \
     Qwen/Qwen2.5-Omni-7B \
@@ -464,13 +566,15 @@ PT_HPU_LAZY_MODE=1 vllm serve \
     --dtype bfloat16 \
     --limit-mm-per-prompt '{"audio":5, "video":5, "image":5}'
 ```
-- `--limit-mm-per-prompt` 设置每个prompt中每种多模态数据的最大个数
 
-#### 3.3.2 client 端请求格式样例
-多模态client端请求格式可以参考脚本
-    [openai_chat_completion_client_for_multimodal.py](../examples/online_serving/openai_chat_completion_client_for_multimodal.py)
+- `--limit-mm-per-prompt` 设置每个 prompt 中每种多模态数据的最大个数
+
+#### 3.4.2 client 端请求格式样例
+
+多模态 client 端请求格式可以参考脚本 [openai_chat_completion_client_for_multimodal.py](../examples/online_serving/openai_chat_completion_client_for_multimodal.py)
 
 脚本使用命令：
+
 ```bash
 python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
     -c multi-image
@@ -480,10 +584,7 @@ python examples/online_serving/openai_chat_completion_client_for_multimodal.py \
     -c audio
 ```
 
-#### 3.3.3 问题解答
-- 如果server端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT`
-`VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为5/30/10
-- 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization`
-（默认0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的
-图像分辨率最高达到7952x5304,这会导致server端推理出错。
-可以通过设置`--gpu-memory-utilization`至0.6~0.7来解决。
+#### 3.4.3 问题解答
+
+- 如果 server 端出现获取图像音视频超时错误，可以通过设置环境变量`VLLM_IMAGE_FETCH_TIMEOUT` `VLLM_VIDEO_FETCH_TIMEOUT` `VLLM_AUDIO_FETCH_TIMEOUT` 来提高超时时间。默认为 5/30/10
+- 过大的输入图像要求更多的设备内存，可以通过设置更小的参数`--gpu-memory-utilization` （默认 0.9）来解决。例如参考脚本`openai_chat_completion_client_for_multimodal.py`中的图像分辨率最高达到 7952x5304,这会导致 server 端推理出错。可以通过设置`--gpu-memory-utilization`至 0.6~0.7 来解决。
