@@ -672,11 +672,11 @@ class HpuModelAdapter(torch.nn.Module):
     def compute_input_embeddings_for_mm_optimized(self, warmup_mode, **kwargs):
         input_ids = kwargs['input_ids']
         pv = kwargs.get("pixel_values", None)
-        if isinstance(pv, torch.Tensor):
-            print("before get_mm_emb:", pv.dtype, pv.shape, pv.min().item(), pv.max().item())
+#       if isinstance(pv, torch.Tensor):
+#           print("before get_mm_emb:", pv.dtype, pv.shape, pv.min().item(), pv.max().item())
             
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
-        print('\n\n\nvision_embeddings:', vision_embeddings)
+#       print('\n\n\nvision_embeddings:', vision_embeddings)
         
         inputs_embeds = self.model.get_input_embeddings(
             input_ids, vision_embeddings)
@@ -699,7 +699,7 @@ class HpuModelAdapter(torch.nn.Module):
 
         kwargs.update({'inputs_embeds': inputs_embeds})
         # done compute the visual tokens and others
-        print('\n\n\nkwargs in func1\n\n\n:', kwargs)
+#       print('\n\n\nkwargs in func1\n\n\n:', kwargs)
         kwargs.pop('pixel_values', None)
         kwargs.pop("num_crops", None)
         kwargs.pop("graphed_multimodal_buckets", None)
@@ -747,7 +747,7 @@ class HpuModelAdapter(torch.nn.Module):
                     'inputs_embeds': inputs_embeds,
                 })
                 # done compute the visual tokens
-                print('\n\n\nkwargs in func2\n\n\n:', kwargs)
+#               print('\n\n\nkwargs in func2\n\n\n:', kwargs)
                 kwargs.pop('pixel_values', None)
                 kwargs.pop('image_grid_thw', None)
                 return kwargs
@@ -1955,7 +1955,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         multi_modal_kwargs = MultiModalKwargs.as_kwargs(multi_modal_kwargs,
                                                         device=self.device)
                                                     
-        print('multi_modal_kwargs in hpu_model_runner:', multi_modal_kwargs)
+#       print('multi_modal_kwargs in hpu_model_runner:', multi_modal_kwargs)
 
         return PreparePromptMetadata(
             input_tokens=input_tokens_tensor,
@@ -3750,7 +3750,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             return None
         if self.model_is_mrope:
             pixel_values_list = model_input.multi_modal_kwargs['pixel_values']
-            print('\n\n\npixel_values_list\n\n\n', pixel_values_list)
+#           print('\n\n\npixel_values_list\n\n\n', pixel_values_list)
             
             if isinstance(pixel_values_list, torch.Tensor):
                 pixel_values_list = [pixel_values_list]
