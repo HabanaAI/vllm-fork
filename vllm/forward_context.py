@@ -33,7 +33,7 @@ class DPMetadata:
     topk_ids_across_dp: Optional[torch.Tensor] = None
     topk_weights_across_dp: Optional[torch.Tensor] = None
     hidden_states: Optional[torch.Tensor] = None
-    packed_bf16_buf_across_dp: Optional[torch.Tensor] = None
+    packed_uint8_buf_across_dp: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -123,12 +123,16 @@ def set_forward_context(attn_metadata: Any,
             hidden_states_across_dp = None
             topk_ids_across_dp = None
             topk_weights_across_dp = None
-            packed_bf16_buf_across_dp = None
+            packed_uint8_buf_across_dp = None
             import os
             if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('true', '1'):
-                per_rank_elems = request_batch_size * padded_seq_length * hidden_size + batchsize * num_experts_per_tok * 2
-                packed_bf16_buf_across_dp = torch.empty((per_rank_elems * dp_size),\
-                    device=device, dtype=hidden_states_dtype)
+                if hidden_states_dtype == torch.float8_e4m3fn:
+                    per_rank_bytes = request_batch_size * padded_seq_length * hidden_size + batchsize * num_experts_per_tok * 2 * 2
+                else:
+                    per_rank_bytes = request_batch_size * padded_seq_length * hidden_size * 2 + batchsize * num_experts_per_tok * 2 * 2
+
+                packed_uint8_buf_across_dp = torch.empty((per_rank_bytes * dp_size),\
+                    device=device, dtype=torch.uint8)
             else:
                 hidden_states_across_dp = torch.empty((request_batch_size * dp_size, padded_seq_length, hidden_size),\
                     device=device, dtype=hidden_states_dtype)
@@ -144,7 +148,7 @@ def set_forward_context(attn_metadata: Any,
                                      topk_ids_across_dp,
                                      topk_weights_across_dp,
                                      hidden_states,
-                                     packed_bf16_buf_across_dp)
+                                     packed_uint8_buf_across_dp)
         else:
             dp_metadata = DPMetadata(cu_tokens_across_dp_cpu)
 
