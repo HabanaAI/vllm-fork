@@ -1,4 +1,4 @@
-model_name: "/root/software/data/pytorch/huggingface/hub/models--google--gemma-3-4b-it/snapshots/093f9f388b31de276ce2de164bdc2081324b9767/"
+model_name: "/mnt/weka/llm/google/gemma-3-4b-it"
 dtype: "bfloat16"
 max_model_len: 32768
 max_num_seqs: 32
