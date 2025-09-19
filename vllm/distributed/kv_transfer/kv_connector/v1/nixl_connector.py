@@ -451,8 +451,10 @@ class NixlConnectorWorker:
         # Config.
         self.vllm_config = vllm_config
         self.block_size = vllm_config.cache_config.block_size
-        self.block_factor = 8 # A100.block_size/G2.block_size
+        # block_factor = G2.block_size/remote_hw.block_size
+        self.block_factor = int(os.getenv('PT_HPU_BLOCK_SIZE_FACTOR', '1'))
         self.block_shape = None
+        self.is_hetero = os.getenv('PT_HPU_ENABLE_RESTORE_KV_LAYOUT', '0') == '1'
         # Agent.
         self.nixl_wrapper = NixlWrapper(str(uuid.uuid4()), None)
         # Map of engine_id -> {rank0: agent_name0, rank1: agent_name1..}.
@@ -818,7 +820,7 @@ class NixlConnectorWorker:
         # (roughly 8KB vs 5KB).
         # Conversely for FlashInfer, K and V are transferred in the same tensor
         # to better exploit the memory layout (ie num_blocks is the first dim).
-        
+
         for cache_or_caches in xfer_buffers.values():
             # Normalize to always be a list of caches
             cache_list = [cache_or_caches] if use_mla \
@@ -915,14 +917,14 @@ class NixlConnectorWorker:
         blocks from remote.
 
         In particular, handle both homogeneous and heterogeneous TP. The former
-        requires local rank_i to read from remote rank_i. 
-        The latter, assuming D.world_size > P.world_size, requires that two or 
+        requires local rank_i to read from remote rank_i.
+        The latter, assuming D.world_size > P.world_size, requires that two or
         more local TP worker share the xfer from a single TP worker.
 
         Here's an example:
 
         rank_offset     p_remote_tp_rank
-        (kv split no)    
+        (kv split no)
         --------------------------------
             0                 0      Worker0  ---- 1st half of KV ----> Worker0  [ KV Cache ]
                                                                         /
@@ -935,14 +937,14 @@ class NixlConnectorWorker:
 
                                 Decoder TP workers                     Prefix TP workers
                                   (world_size=4)                         (world_size=2)
-                                                 tp_ratio = 4 // 2 = 2                  
-                                
-        Considering the KV Caches, if P-Worker_i has cache size [2, num_blocksP, kv_heads, block_size, head_dim]  
+                                                 tp_ratio = 4 // 2 = 2
+
+        Considering the KV Caches, if P-Worker_i has cache size [2, num_blocksP, kv_heads, block_size, head_dim]
         then D-Worker_j has [2, num_blocksD, kv_heads//tp_ratio, block_size, head_dim]. Mind the "HND" layout format.
-        Assuming num_blocksD >= num_blocksP, D-Worker0 reads from P-Worker0 by preparing the kv_heads//tp_ratio 
+        Assuming num_blocksD >= num_blocksP, D-Worker0 reads from P-Worker0 by preparing the kv_heads//tp_ratio
         first heads from all the slots of all the blocks. D-Worker1 will do the same, but reading the second split
-        along the kv_heads dimension, and so forth until "tp_ratio" D TP workers have pulled from P-Worker0.   
-        
+        along the kv_heads dimension, and so forth until "tp_ratio" D TP workers have pulled from P-Worker0.
+
         Note that the above will also hold true for the homogeneous TP case, where tp_ratio evaluates to 1.
 
         Regarding MLA case, the cache is replicated across TP workers so the rank_offset will just always be 0
@@ -1086,24 +1088,26 @@ class NixlConnectorWorker:
                 "Rank %s, get_finished: %s requests done sending "
                 "and %s requests done recving", self.tp_rank,
                 len(done_sending), len(done_recving))
-        #import remote_pdb; remote_pdb.set_trace()
-        t1 = time.perf_counter()
-        remote_block_size = self.block_size // self.block_factor
-        block_size, n_kv_heads, head_dim = self.block_shape
-        for req_id in done_recving:
-            #print(req_id, self._recving_metadata)
-            meta = self._recving_metadata.pop(req_id)
-            for k, v in self.device_kv_caches.values():
-                local_block_ids = meta.local_block_ids
-                #print(f'buke {local_block_ids=}|{k.shape=}')
-                for block_idx in local_block_ids:
-                    #import remote_pdb; remote_pdb.set_trace() 
-                    k[block_idx*self.block_size: (1+block_idx)*self.block_size] = k[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
-                    v[block_idx*self.block_size: (1+block_idx)*self.block_size] = v[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
+        if self.is_hetero:
             #import remote_pdb; remote_pdb.set_trace()
-            t2 = time.perf_counter()
-            tt = t2-t1
-            logger.debug(f'buke permute time:{tt}, {req_id=}|{self._recving_metadata=}')
+            t1 = time.perf_counter()
+            remote_block_size = self.block_size // self.block_factor
+            block_size, n_kv_heads, head_dim = self.block_shape
+            for req_id in done_recving:
+                #print(req_id, self._recving_metadata)
+                meta = self._recving_metadata.pop(req_id)
+                for k, v in self.device_kv_caches.values():
+                    local_block_ids = meta.local_block_ids
+                    #print(f'buke {local_block_ids=}|{k.shape=}')
+                    for block_idx in local_block_ids:
+                        #import remote_pdb; remote_pdb.set_trace()
+                        k[block_idx*self.block_size: (1+block_idx)*self.block_size] = k[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
+                        v[block_idx*self.block_size: (1+block_idx)*self.block_size] = v[block_idx*self.block_size: (1+block_idx)*self.block_size].reshape(self.block_factor, n_kv_heads, remote_block_size, head_dim).permute(0,2,1,3).contiguous().reshape(self.block_size,n_kv_heads,head_dim)
+                #import remote_pdb; remote_pdb.set_trace()
+                t2 = time.perf_counter()
+                tt = t2-t1
+                logger.debug(f'buke permute time:{tt}, {req_id=}|{self._recving_metadata=}')
+
         if self.use_host_buffer:
             for req_id in done_recving:
                 s2 = time.perf_counter()
@@ -1224,8 +1228,7 @@ class NixlConnectorWorker:
                 "Num local_block_ids: %s. Num remote_block_ids: %s. ", req_id,
                 remote_engine_id, len(meta.local_block_ids),
                 len(meta.remote_block_ids))
-            is_hetero = True
-            if is_hetero or self.use_host_buffer:
+            if self.is_hetero or self.use_host_buffer:
                 self._recving_metadata[req_id] = meta
             if remote_engine_id not in self._remote_agents:
                 # Initiate handshake with remote engine to exchange metadata.
@@ -1307,7 +1310,7 @@ class NixlConnectorWorker:
         local_block_descs_ids: list[int] = []
         remote_block_descs_ids: list[int] = []
         local_sub_block_ids: list[int] = []
-       
+
         #print('buke: ', remote_block_ids)
         remote_block_ids = remote_block_ids[:(len(remote_block_ids)//self.block_factor)*self.block_factor]
         for index,remote_block_id in enumerate(remote_block_ids):
