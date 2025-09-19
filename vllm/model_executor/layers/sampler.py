@@ -208,6 +208,11 @@ class Sampler(nn.Module):
         decodes of the same sequences.
         """
         _, vocab_size = logits.shape
+        
+        # Get the tensor cache from sampling metadata cache  
+        tensor_cache = None  
+        if hasattr(sampling_metadata, 'cache') and sampling_metadata.cache:  
+            tensor_cache = sampling_metadata.cache.get_sampling_tensor_cache()
 
         # First free any existing stored sampling tensors.
         # This is necessary because some sampling tensors may
@@ -217,7 +222,7 @@ class Sampler(nn.Module):
         # Initialize new sampling tensors
         (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
          top_k_scalar, top_p_scalar) = SamplingTensors.from_sampling_metadata(
-             sampling_metadata, vocab_size, logits.device, logits.dtype)
+             sampling_metadata, vocab_size, logits.device, logits.dtype, cache=tensor_cache)
 
         self._sampling_tensors = sampling_tensors
         self._do_penalties = do_penalties

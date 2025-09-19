@@ -53,7 +53,7 @@ from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
-from vllm.model_executor import SamplingMetadata
+from vllm.model_executor import SamplingMetadata, SamplingMetadataCache
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.layers.sampler import (SampleResultArgsType,
@@ -1048,6 +1048,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
+        self.sampling_metadata_cache: SamplingMetadataCache = \
+              SamplingMetadataCache() \
+                if self.parallel_config.pipeline_parallel_size == 1 else None
         self.inc_initialized_successfully = False
 
         # Profiler stats
@@ -2403,7 +2406,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 query_lens,
                 'cpu',
                 self.pin_memory,
-                generators=generators)
+                generators=generators,
+                cache=self.sampling_metadata_cache)
             selected_token_indices = \
                 sampling_metadata.selected_token_indices
             categorized_sample_indices = \
@@ -3858,7 +3862,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bool(model_input.multi_modal_kwargs and \
                        ('pixel_values')in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
-
+                #logger.info(f"libin debug execute_model {real_batch_size=} {execute_model_kwargs['input_ids'].shape=}")
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if ('pixel_values') in execute_model_kwargs and \
