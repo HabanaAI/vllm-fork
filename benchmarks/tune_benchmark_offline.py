@@ -191,7 +191,7 @@ def objective(trial, args):
                               step=args.decode_bs_range[2])
     # currently only fixed block size: 128, 256 are supported
     max_num_seqs = max(prompt_bs_bucket_max, decode_bs) if prompt_bs_bucket_max else decode_bs
-    trial.set_user_attr("max_num_seqs", decode_block_step)
+    trial.set_user_attr("max_num_seqs", max_num_seqs)
     set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max,
                     prompt_seq_step, decode_bs, decode_block_step, block_size, max_num_seqs, args)
     benchmark_cmd = construct_benchmark_cmd(args, benchmark_cmd_list, max_num_seqs, block_size)
