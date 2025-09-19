@@ -1055,6 +1055,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.max_model_len = self.scheduler_config.max_model_len
         self.max_num_batched_tokens = \
             self.scheduler_config.max_num_batched_tokens
+        self.max_seq_len_to_capture = self.model_config.max_seq_len_to_capture
         self.block_size = self.cache_config.block_size
         self.use_merged_prefill = get_config().merged_prefill
         assert not (self.scheduler_config.use_padding_aware_scheduling
@@ -1485,8 +1486,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             return self.model.model
         return self.model
 
-    def _use_graphs(self):
-        return not self.enforce_eager
+    def _use_graphs(self, batch_size, seq_len):
+        if self.enforce_eager:
+            return False
+        return batch_size * seq_len <= self.max_seq_len_to_capture
 
     def _is_valid_bucket(self, bucket):
         return bucket[0] * bucket[1] <= self.max_num_batched_tokens
@@ -2983,7 +2986,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         align_worker=False,
                         is_dummy_run=False) -> None:
         phase = 'prompt' if is_prompt else 'decode'
-        use_graphs = is_dummy_run or self._use_graphs()
+        use_graphs = is_dummy_run or self._use_graphs(batch_size, seq_len)
 
         scenario_name = ("warmup_"
                          f"{phase}_"
@@ -3870,7 +3873,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not warmup_mode:
                     ctx_blocks = seq_len
                 seq_len = 1
-            use_graphs = self._use_graphs()
+            use_graphs = self._use_graphs(batch_size_padded, seq_len)
             self._check_config(batch_size, seq_len, ctx_blocks, attn_metadata,
                                warmup_mode)
             lora_mask: torch.Tensor = None
