@@ -1031,7 +1031,7 @@ def run_qwen2_vl(questions: list[str], modality: str) -> ModelRequestData:
 
 # Qwen2.5-VL
 def run_qwen2_5_vl(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
+    model_name = "/home/disk6/HF_models/Qwen2.5-VL-72B-Instruct"
 
     engine_args = EngineArgs(
         model=model_name,
