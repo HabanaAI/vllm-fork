@@ -757,9 +757,9 @@ class HpuModelAdapter(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         pv = kwargs.get('pixel_values')
-        print('\n\n\nHpuModelAdapter forward kwargs:\n\n\n', pv)
-        flat = pv.flatten()
-        if flat != None:
+        if pv != None:
+            print('\n\n\nHpuModelAdapter forward kwargs:\n\n\n', pv)
+            flat = pv.flatten()
             print("pixel_values first 10 values:", flat[:10].tolist())
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
