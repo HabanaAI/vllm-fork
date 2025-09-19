@@ -103,37 +103,31 @@ def calculate_warmup_time(lines):
 
 def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step,
                     decode_bs, decode_block_step,
-                    block_size, args, print_only=False):
+                    block_size, max_num_seqs, args, print_only=False):
     # calculate prompt and decode related configs
     max_model_len = args.input_len + (args.output_len * args.n)
     first_block = int((decode_bs * args.input_len) / block_size)
     last_block = int((decode_bs * max_model_len) / block_size)
     last_block = last_block + decode_block_step  # add 1 more step size as buffer
-    max_num_seqs = max(prompt_bs_bucket_max, decode_bs)
 
     if print_only:
-        if prompt_bs_bucket_step:
-            print("  VLLM_PROMPT_BS_BUCKET_STEP = " + str(prompt_bs_bucket_step))
-        else:
-            print("  VLLM_PROMPT_BS_BUCKET_STEP = " + str(os.getenv("VLLM_PROMPT_BS_BUCKET_STEP", 32)))  # default:32
-        if prompt_bs_bucket_max:
-            print("  VLLM_PROMPT_BS_BUCKET_MAX = " + str(prompt_bs_bucket_max))
-        else:
-            print("  VLLM_PROMPT_BS_BUCKET_MAX = " + str(os.getenv("VLLM_PROMPT_BS_BUCKET_MAX", 204)))   # default:204
-        os.environ["VLLM_PROMPT_SEQ_BUCKET_MIN"] = str(args.input_len)
+        print(f"\t VLLM_PROMPT_SEQ_BUCKET_MIN={args.input_len}")
         if prompt_seq_step:
-            print("  VLLM_PROMPT_SEQ_BUCKET_STEP = " + str(prompt_seq_step))
-        else:
-            print("  VLLM_PROMPT_SEQ_BUCKET_STEP = " + str(os.getenv("VLLM_PROMPT_SEQ_BUCKET_STEP", 128)))  # default:128
-        print("  VLLM_PROMPT_SEQ_BUCKET_MAX = " + str(max_model_len))
+            print(f"\t VLLM_PROMPT_SEQ_BUCKET_STEP={prompt_seq_step}")
+        print(f"\t VLLM_PROMPT_SEQ_BUCKET_MAX={max_model_len}")
 
-        print("  VLLM_DECODE_BS_BUCKET_MIN = " + str(decode_bs))
-        print("  VLLM_DECODE_BS_BUCKET_STEP = " + str(decode_bs))
-        print("  VLLM_DECODE_BS_BUCKET_MAX = " + str(decode_bs))
-        print("  VLLM_DECODE_BLOCK_BUCKET_MIN = " + str(first_block))
-        print("  VLLM_DECODE_BLOCK_BUCKET_STEP = " + str(decode_block_step))
-        print("  VLLM_DECODE_BLOCK_BUCKET_MAX = " + str(last_block))
-        print("  max-num-seqs = " + str(max_num_seqs))
+        if prompt_bs_bucket_step:
+            print(f"\t VLLM_PROMPT_BS_BUCKET_STEP={prompt_bs_bucket_step}")
+        if prompt_bs_bucket_max:
+            print(f"\t VLLM_PROMPT_BS_BUCKET_MAX={prompt_bs_bucket_max}")
+
+        print(f"\t VLLM_DECODE_BS_BUCKET_MIN={decode_bs}")
+        print(f"\t VLLM_DECODE_BS_BUCKET_STEP={decode_bs}")
+        print(f"\t VLLM_DECODE_BS_BUCKET_MAX={decode_bs}")
+        print(f"\t VLLM_DECODE_BLOCK_BUCKET_MIN={first_block}")
+        print(f"\t VLLM_DECODE_BLOCK_BUCKET_STEP={decode_block_step}")
+        print(f"\t VLLM_DECODE_BLOCK_BUCKET_MAX={last_block}")
+        print(f"\t --max-num-seqs {max_num_seqs}")
     else:
         if prompt_bs_bucket_step:
             os.environ["VLLM_PROMPT_BS_BUCKET_STEP"] = str(prompt_bs_bucket_step)
@@ -153,6 +147,15 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
 
 
 def objective(trial, args):
+
+    benchmark_cmd_list = args.benchmark_throughput_cmd.split()
+    if "--block-size" in benchmark_cmd_list:
+        index = benchmark_cmd_list.index("--block-size")
+        block_size = int(benchmark_cmd_list[index + 1])
+        trial.set_user_attr("block_size", block_size)
+    else:
+        block_size = trial.suggest_int('block_size', 128, 256, step=128)
+
     if args.prompt_bs_bucket_step_range:
         prompt_bs_bucket_step = trial.suggest_int('prompt_bs_bucket_step',
                                                  args.prompt_bs_bucket_step_range[0],
@@ -180,18 +183,18 @@ def objective(trial, args):
                                               args.decode_block_bucket_step_range[1],
                                               step=args.decode_block_bucket_step_range[2])
     else:
-        decode_block_step = None
+        decode_block_step = int(os.getenv("VLLM_DECODE_BLOCK_BUCKET_STEP", block_size))
+        trial.set_user_attr("decode_block_step", decode_block_step)
     decode_bs = trial.suggest_int('decode_bs',
                               args.decode_bs_range[0],
                               args.decode_bs_range[1],
                               step=args.decode_bs_range[2])
     # currently only fixed block size: 128, 256 are supported
-    block_size = trial.suggest_int('block_size', 128, 256, step=128)
-
+    max_num_seqs = max(prompt_bs_bucket_max, decode_bs) if prompt_bs_bucket_max else decode_bs
+    trial.set_user_attr("max_num_seqs", decode_block_step)
     set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max,
-                    prompt_seq_step, decode_bs, decode_block_step, block_size, args)
-    max_num_seqs = max(prompt_bs_bucket_max, decode_bs)
-    benchmark_cmd = construct_benchmark_cmd(args, max_num_seqs)
+                    prompt_seq_step, decode_bs, decode_block_step, block_size, max_num_seqs, args)
+    benchmark_cmd = construct_benchmark_cmd(args, benchmark_cmd_list, max_num_seqs, block_size)
     print(benchmark_cmd)
     log_file = f"tuning_offline_benchmark_{trial.number}.log"
     benchmark_cmd = benchmark_cmd + " 2>&1 | tee " + log_file
@@ -221,40 +224,39 @@ def objective(trial, args):
     return throughput, warmup_time
 
 
-def update_cmd_args(benchmark_cmd, throughput_args_list, cmd_arg, cmd_arg_value):
-    if cmd_arg in throughput_args_list:  # update cmd_arg value in benchmark_throughput_args
-        index = throughput_args_list.index(cmd_arg)
-        if index < len(throughput_args_list) - 1:
-            throughput_args_list[index + 1] = cmd_arg_value
+def update_cmd_args(benchmark_cmd, cmd_arg, cmd_arg_value):
+    if cmd_arg in benchmark_cmd:  # update cmd_arg value in benchmark_throughput_args
+        index = benchmark_cmd.index(cmd_arg)
+        if index < len(benchmark_cmd) - 1:
+            benchmark_cmd[index + 1] = cmd_arg_value
     else:
         benchmark_cmd.extend([cmd_arg, cmd_arg_value])
-    return benchmark_cmd, throughput_args_list
+    return benchmark_cmd
 
 
-def construct_benchmark_cmd(args, max_num_seqs):
-    benchmark_cmd = ["python", "benchmark_throughput.py"]
-    throughput_args_list = args.benchmark_throughput_args.split()
-
+def construct_benchmark_cmd(args, benchmark_cmd_list, max_num_seqs, block_size):
     if hasattr(args, "input_len"):
-        benchmark_cmd, throughput_args_list = \
-            update_cmd_args(benchmark_cmd, throughput_args_list, "--input-len", str(args.input_len))
+        benchmark_cmd_list = \
+            update_cmd_args(benchmark_cmd_list, "--input-len", str(args.input_len))
     if hasattr(args, "output_len"):
-        benchmark_cmd, throughput_args_list = \
-            update_cmd_args(benchmark_cmd, throughput_args_list, "--output-len", str(args.output_len))
+        benchmark_cmd_list = \
+            update_cmd_args(benchmark_cmd_list, "--output-len", str(args.output_len))
     if hasattr(args, "n"):
-        benchmark_cmd, throughput_args_list = \
-            update_cmd_args(benchmark_cmd, throughput_args_list, "--n", str(args.n))
+        benchmark_cmd_list = \
+            update_cmd_args(benchmark_cmd_list, "--n", str(args.n))
     # add max_num_seqs
-    benchmark_cmd, throughput_args_list = \
-        update_cmd_args(benchmark_cmd, throughput_args_list, "--max-num-seqs", str(max_num_seqs))
+    benchmark_cmd_list = \
+        update_cmd_args(benchmark_cmd_list, "--max-num-seqs", str(max_num_seqs))
+    # add block_size
+    benchmark_cmd_list = \
+        update_cmd_args(benchmark_cmd_list, "--block-size", str(block_size))
 
-    benchmark_cmd.extend(throughput_args_list)
-    return " ".join(benchmark_cmd)
+    return " ".join(benchmark_cmd_list)
 
 
 def validate_args(args):
     # args.prompt_seq_step_range max should be less than total-model-len (input_len +
-    if args.prompt_seq_step_range[1] > (args.input_len + (args.output_len * args.n)):
+    if args.prompt_seq_step_range and args.prompt_seq_step_range[1] > (args.input_len + (args.output_len * args.n)):
         raise ValueError("--prompt-seq-step-range max should be less than total model context length.")
 
 
@@ -293,8 +295,8 @@ if __name__ == "__main__":
         "--decode-block-bucket-step-range",
         nargs=3,
         type=int,
-        required=True,
-        help="Tuning range for VLLM_DECODE_BLOCK_STEP in format of min max step. Suggest a factor of 128.",
+        required=False,
+        help="Tuning range for VLLM_DECODE_BLOCK_BUCKET_STEP in format of min max step. Suggest a factor of 128.",
     )
     parser.add_argument(
         "--decode-bs-range",
@@ -342,10 +344,10 @@ if __name__ == "__main__":
 
     # other benchmark_throughput cmd-line args
     parser.add_argument(
-        "--benchmark-throughput-args",
+        "--benchmark-throughput-cmd",
         type=str,
         required=True,
-        help="Other command-line args for benchmark_throughput.py",
+        help="Full benchmark throughput command starting with 'python benchmark_throughput.py'",
     )
 
     args = parser.parse_args()
@@ -374,16 +376,18 @@ if __name__ == "__main__":
     print("Number of finished trials: ", len(study.trials))
 
     for i, best_trial in enumerate(study.best_trials):
-        print("The {}-th Pareto solution was found at Trial#{}.".format(i, best_trial.number))
-        print("  Params: {}".format(best_trial.params))
+        print(f"The {i}-th Pareto solution was found at Trial# {best_trial.number}")
+        print(f"\t Params: {best_trial.params}")
         set_trial_value(best_trial.params.get("prompt_bs_bucket_step"),
                         best_trial.params.get("prompt_bs_bucket_max"),
                         best_trial.params.get("prompt_seq_step"),
                         best_trial.params.get("decode_bs"),
-                        best_trial.params.get("decode_block_step"),
-                        best_trial.params.get("block_size"), args, print_only=True)
+                        best_trial.params.get("decode_block_step", best_trial.user_attrs.get("decode_block_step")),
+                        best_trial.params.get("block_size", best_trial.user_attrs.get("block_size")),
+                        best_trial.params.get("max_num_seqs", best_trial.user_attrs.get("max_num_seqs")),
+                        args, print_only=True)
         best_values = best_trial.values
-        print("  [Throughput(tokens/s), Warmup-Time(sec)]: {}".format(best_values))
+        print(f"\t [Throughput(tokens/s), Warmup-Time(sec)]: {best_values}")
 
     exit(0)
 
