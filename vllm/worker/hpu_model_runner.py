@@ -1091,6 +1091,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.use_delayed_sampling = get_config(
         ).use_delayed_sampling and can_use_delayed_sampling
         self.mm_tokens_per_image = 1
+        self.image_token_id = 0
 
     def _set_gc_threshold(self) -> None:
         """
@@ -1515,8 +1516,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.is_mm_optimized = is_mm_optimized(self.model)
         if self.model_is_mrope or self.is_mm_optimized:
             if hasattr(self.model.model.config, 'mm_tokens_per_image'):
-                self.image_token_id = self.model.config.image_token_id
+                self.mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
+                self.image_token_id = self.model.model.config.image_token_id
             elif 'InternVLChatModel' in str(type(self.model.model)):
+                self.image_token_id = 151667
                 self.mm_tokens_per_image = self.model.model.num_image_token
             self.model.model.vision_buckets = VisionBuckets(self.model.model)
 
@@ -2733,19 +2736,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     "num_crops": torch.zeros([img_args], dtype=torch.int32),
                 }
             elif 'InternVLChatModel' in str(type(self.model.model)):
-                image_token_id = 151667
                 multi_modal_data = {
                     "pixel_values_flat":
                     pixel_values.to(torch.bfloat16),
                     "image_num_patches":
                     torch.tensor([pixel_values.shape[0]], dtype=torch.int32),
                     "image_token_id":
-                    torch.tensor([image_token_id], dtype=torch.int64),
+                    torch.tensor([self.image_token_id], dtype=torch.int64),
                 }
             else:
                 logger.warning("No support for other models yet")
             num_image_tokens = self.mm_tokens_per_image * img_args
-        prompt_token_ids = [image_token_id] * num_image_tokens
+        prompt_token_ids = [self.image_token_id] * num_image_tokens
         prompt_token_ids_array = array('l', prompt_token_ids)  # noqa: F821
         placeholders_by_modality = {
             'image':
