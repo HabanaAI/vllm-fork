@@ -312,7 +312,7 @@ set_linear_bucketing(){
 set_perf_tuning(){
     if [ "$cache_path" != "" ]; then
         echo "HPU recipe cache will be saved to $cache_path"
-        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,40960,false
+        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,40960
         mkdir -p "${cache_path}"
     fi
 
