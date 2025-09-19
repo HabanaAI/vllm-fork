@@ -647,7 +647,7 @@ class HpuModelAdapter(torch.nn.Module):
         # attn_metadata, so we can reuse HPU graph without running
         # the whole vision tower.
         if vision_embeddings is not None or (
-            warmup_mode and kwargs['attn_metadata'].is_prompt):
+                warmup_mode and kwargs['attn_metadata'].is_prompt):
             if hasattr(self.model, 'prepare_attn_masks'):
                 input_ids = kwargs['input_ids']
                 positions = kwargs['positions']
