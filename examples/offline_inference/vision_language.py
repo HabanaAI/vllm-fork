@@ -814,7 +814,7 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
 
 # Ovis2_5
 def run_ovis2_5(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "AIDC-AI/Ovis2.5-2B"
+    model_name = "/home/disk7/HF_MODELS/Ovis2.5-2B"
 
     engine_args = EngineArgs(
         model=model_name,
