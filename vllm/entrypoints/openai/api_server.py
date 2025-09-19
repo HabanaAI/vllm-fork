@@ -264,7 +264,7 @@ async def build_async_engine_client_from_engine_args(
             target=run_mp_engine,
             args=(vllm_config, UsageContext.OPENAI_API_SERVER, ipc_path,
                   engine_args.disable_log_stats,
-                  engine_args.disable_log_requests, engine_alive))
+                  engine_args.disable_log_requests, engine_alive, engine_args))
         engine_process.start()
         engine_pid = engine_process.pid
         assert engine_pid is not None, "Engine process failed to start."
@@ -1125,6 +1125,11 @@ def build_app(args: Namespace) -> FastAPI:
     return app
 
 
+def additional_preparation(served_model_names, base_model_paths,
+                           args: Namespace):
+    return served_model_names, base_model_paths, args
+
+
 async def init_app_state(
     engine_client: EngineClient,
     vllm_config: VllmConfig,
@@ -1146,8 +1151,18 @@ async def init_app_state(
         for name in served_model_names
     ]
 
+    served_model_names, base_model_paths, args = additional_preparation(
+        served_model_names, base_model_paths, args)
+
     state.engine_client = engine_client
     state.log_stats = not args.disable_log_stats
+    model_configs = []
+    if isinstance(vllm_config, list):
+        # TODO: Need apply model_configs to other non-score MiG servings
+        for cfg in vllm_config:
+            model_configs.append(cfg.model_config)
+        # WA always use the first model
+        vllm_config = vllm_config[0]
     state.vllm_config = vllm_config
     model_config = vllm_config.model_config
 
@@ -1218,6 +1233,11 @@ async def init_app_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
     ) if model_config.runner_type == "pooling" else None
+    model_support_embed = (model_config.task == "embed")
+    for model_config in model_configs:
+        if model_config.task == "embed":
+            model_support_embed = True
+            break
     state.openai_serving_embedding = OpenAIServingEmbedding(
         engine_client,
         model_config,
@@ -1225,25 +1245,37 @@ async def init_app_state(
         request_logger=request_logger,
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
-    ) if model_config.task == "embed" else None
+    ) if model_support_embed else None
+    model_support_score_embed = (model_config.task
+                                 in ("score", "embed", "pooling"))
+    for model_config in model_configs:
+        if model_config.task in ("score", "embed", "pooling"):
+            model_support_score_embed = True
+            break
     state.openai_serving_scores = ServingScores(
         engine_client,
         model_config,
         state.openai_serving_models,
-        request_logger=request_logger) if model_config.task in (
-            "score", "embed", "pooling") else None
+        request_logger=request_logger,
+        model_configs=model_configs) if model_support_score_embed else None
     state.openai_serving_classification = ServingClassification(
         engine_client,
         model_config,
         state.openai_serving_models,
         request_logger=request_logger,
     ) if model_config.task == "classify" else None
+    model_support_score = (model_config.task == "score")
+    for model_config in model_configs:
+        if model_config.task == "score":
+            model_support_score = True
+            break
     state.jinaai_serving_reranking = ServingScores(
         engine_client,
         model_config,
         state.openai_serving_models,
-        request_logger=request_logger
-    ) if model_config.task == "score" else None
+        request_logger=request_logger,
+        model_configs=model_configs,
+    ) if model_support_score else None
     state.openai_serving_tokenization = OpenAIServingTokenization(
         engine_client,
         model_config,
