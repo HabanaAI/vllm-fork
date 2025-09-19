@@ -413,9 +413,9 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         mixed_qkv = torch.cat((query, key, value), dim=-1)
 
         # 2. Convolution sequence transformation
-        print("!!!!!!!!!!!!!  self.conv1d.weight.shape: " + str(self.conv1d.weight.shape))
-        conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0),
-                                               self.conv1d.weight.size(2))
+#        print("!!!!!!!!!!!!!  self.conv1d.weight.shape: " + str(self.conv1d.weight.shape))
+#        conv_weights = self.conv1d.weight.view(self.conv1d.weight.size(0),
+#                                               self.conv1d.weight.size(2))
         print("!!!!!!!!!!!!!  mixed_qkv shape: " + str(mixed_qkv.shape))
 
         if torch.distributed.get_rank() == 0:
@@ -426,27 +426,20 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         if attn_metadata.is_prompt:
             # - "cache_indices" updates the conv_state cache in positions
             #   pointed to by "mamba_cache_params.state_indices_tensor"
-            bs, seq, _ = hidden_states.shape
+            bs, seq_len, _ = hidden_states.shape
             conv_state_indices = attn_metadata.conv_state_indices
             for idx in range(bs):
-#                print("??????????????????  mixed_qkv[idx] shape: " + str(mixed_qkv[idx].shape) + "  conv_state_indices[idx]: " + str(conv_state_indices[idx]) + "  conv_state[idx] shape: " + str(conv_state[idx].shape))
                 prefill_conv_state = torch.index_select(mixed_qkv[idx], dim=0, index=conv_state_indices[idx])
-#                print("?????????????????? prefill_conv_state shape: " + str(prefill_conv_state.shape))
                 conv_state[idx].copy_(prefill_conv_state)
+
+            mixed_qkv_non_spec = F.conv1d(mixed_qkv.transpose(1, 2).contiguous(), self.conv1d.weight, bias=None, padding=self.conv_kernel_size - 1, groups=(self.conv_dim//self.tp_size))
+            mixed_qkv_non_spec = F.silu(mixed_qkv_non_spec)
+            print("!!!!!!!!!! mixed_qkv_non_spec shape1: " + str(mixed_qkv_non_spec.shape))
+            mixed_qkv_non_spec = mixed_qkv_non_spec[:, :, :seq_len].transpose(1, 2)
+            print("!!!!!!!!!! mixed_qkv_non_spec shape2: " + str(mixed_qkv_non_spec.shape))
             exit()
 
-
-            mixed_qkv_non_spec = causal_conv1d_fn(
-                mixed_qkv_non_spec.transpose(0, 1),
-                conv_weights,
-                self.conv1d.bias,
-                activation=self.activation,
-                conv_states=conv_state,
-                has_initial_state=has_initial_state,
-                cache_indices=non_spec_state_indices_tensor,
-                query_start_loc=non_spec_query_start_loc,
-            ).transpose(0, 1)
-        elif attn_metadata.num_decodes > 0:
+        else:
             mixed_qkv_non_spec = causal_conv1d_update(
                 mixed_qkv_non_spec,
                 conv_state,
@@ -457,8 +450,6 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                                                                  .num_decodes],
                 validate_data=True,
             )
-        else:
-            mixed_qkv_non_spec = None
 
         query_non_spec, key_non_spec, value_non_spec = self.rearrange_mixed_qkv(
             mixed_qkv_non_spec)
