@@ -638,8 +638,7 @@ class HpuModelAdapter(torch.nn.Module):
         input_ids = kwargs['input_ids']
         vision_embeddings = self.model.get_multimodal_embeddings(**kwargs)
         inputs_embeds = self.model.get_input_embeddings(
-            input_ids, vision_embeddings)
-    
+            input_ids, vision_embeddings)   
         # TODO: In warmup, we need to warmup the model with dummy image data for
         # multimodal model for prompt, here instead of generating a dummy image,
         # we are just generating attn_mask for the images and pass with
