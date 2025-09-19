@@ -794,7 +794,7 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
         max_model_len=4096,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="half",
+        dtype="bfloat16",
         limit_mm_per_prompt={modality: 1},
     )
 
