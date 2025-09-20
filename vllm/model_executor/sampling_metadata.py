@@ -6,14 +6,16 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-
+from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (PyObjectCache, async_tensor_h2d,
                         is_pin_memory_available, make_tensor_with_pad,
-                        make_tensor_with_pad_align, SamplingTensorCache)
+                        make_tensor_with_pad_align, SamplingTensorPool)
+import time
+logger = init_logger(__name__)
 _SAMPLING_EPS = 1e-5
 
 @dataclass
@@ -79,24 +81,25 @@ class SamplingMetadataCache:
 
     def __init__(self):
         self._seq_group_to_sample_cache: dict[int, PyObjectCache] = {}
+        self._sampling_tensor_pool: Optional[SamplingTensorPool] = None  
 
     def get_cached_seq_group_to_sample(self, num_seqs):
         if num_seqs not in self._seq_group_to_sample_cache:
             self._seq_group_to_sample_cache[num_seqs] = PyObjectCache(
                 gen_seq_group_to_sample_builder(num_seqs))
-        self._sampling_tensor_cache = SamplingTensorCache()
 
         obj = self._seq_group_to_sample_cache[num_seqs].get_object()
         return obj
     
-    def get_sampling_tensor_cache(self) -> SamplingTensorCache:  
-        """Get the sampling tensor cache"""  
-        return self._sampling_tensor_cache  
-
-    def reset(self):
-        for cache in self._seq_group_to_sample_cache.values():
-            cache.reset()
-        self._sampling_tensor_cache.reset()
+    def get_sampling_tensor_pool(self) -> Optional[SamplingTensorPool]:  
+        """Get the sampling tensor pool for HPU optimization"""  
+        return self._sampling_tensor_pool  
+  
+    def reset(self):  
+        for cache in self._seq_group_to_sample_cache.values():  
+            cache.reset()  
+        if self._sampling_tensor_pool is not None:  
+            self._sampling_tensor_pool.reset()
 
 class SamplingMetadata:
     """Metadata for input sequences. Used in sampler.
@@ -142,6 +145,7 @@ class SamplingMetadata:
         skip_sampler_cpu_output: bool = False,
         reuse_sampling_tensors: bool = False,
         skip_softmax_for_greedy: bool = False,
+        cache: Optional[SamplingMetadataCache] = None,  # Add cache attribute  
     ) -> None:
         self.seq_groups = seq_groups
         self.selected_token_indices = selected_token_indices
@@ -150,6 +154,30 @@ class SamplingMetadata:
         self.skip_sampler_cpu_output = skip_sampler_cpu_output
         self.reuse_sampling_tensors = reuse_sampling_tensors
         self.skip_softmax_for_greedy = skip_softmax_for_greedy
+        self.cache = cache
+
+                
+    def get_tensor(  
+        self,   
+        tensor_type: str,   
+        shape: tuple[int, ...],   
+        dtype: torch.dtype,   
+        device: str = "cpu",   
+        pin_memory: bool = False  
+    ) -> Optional[torch.Tensor]:  
+        """Get a cached tensor from the sampling tensor pool if available"""  
+        if self.cache is not None:  
+            tensor_pool = self.cache.get_sampling_tensor_pool()  
+            if tensor_pool is not None:  
+                return tensor_pool.get_tensor(tensor_type, shape, dtype, device, pin_memory)  
+        return None  
+  
+    def has_tensor_cache(self) -> bool:  
+        """Check if tensor caching is available""" 
+
+        return (self.cache is not None and   
+                hasattr(self.cache, 'get_sampling_tensor_pool') and  
+                self.cache.get_sampling_tensor_pool() is not None)
 
     @staticmethod
     def prepare(
@@ -192,6 +220,7 @@ class SamplingMetadata:
             categorized_sample_indices=categorized_sample_indices,
             num_prompts=num_prompts,
             skip_softmax_for_greedy=skip_softmax_for_greedy,
+            cache=cache
         )
         return sampling_metadata
 
@@ -273,7 +302,6 @@ def _prepare_seq_groups(
 
             sample_obj.prompt_logprob_indices.clear()
             sample_obj.sample_indices.clear()
-
         sampling_params = seq_group_metadata.sampling_params
         is_prompt = seq_group_metadata.is_prompt
         generator: Optional[torch.Generator] = None
@@ -422,7 +450,6 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
-        cache: Optional[SamplingTensorCache] = None, 
     ) -> tuple["SamplingTensors", bool, bool, bool, Optional[int],
                Optional[float]]:
         prompt_tokens: list[array] = []
@@ -437,7 +464,7 @@ class SamplingTensors:
         do_penalties = False
         do_top_p_top_k = False
         do_min_p = False
-
+      
         assert sampling_metadata.seq_groups is not None
         for seq_group in sampling_metadata.seq_groups:
             seq_ids = seq_group.seq_ids
@@ -530,7 +557,7 @@ class SamplingTensors:
             vocab_size,
             device,
             dtype,
-            cache=cache,
+            sampling_metadata=sampling_metadata,
         )
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
                 top_k_scalar, top_p_scalar)
@@ -550,69 +577,94 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
-        cache: Optional[SamplingTensorCache] = None,  
+        sampling_metadata: Optional["SamplingMetadata"] = None,  
     ) -> "SamplingTensors":
         # Note that the performance will be very bad without
         # pinned memory.
-        pin_memory = is_pin_memory_available()
+        pin_memory = True #is_pin_memory_available()
 
         do_penalties = prompt_tokens or output_tokens
-        if cache is not None:  
-            # Use cached tensors when available  
+        t1 = time.perf_counter()
+        if sampling_metadata and sampling_metadata.has_tensor_cache():
+             # Use cached tensors for penalty tokens  
             if do_penalties:  
-                # Calculate tensor shapes for prompt/output tokens  
                 max_prompt_len = max(len(tokens) for tokens in prompt_tokens) if prompt_tokens else 0  
                 max_output_len = max(len(tokens) for tokens in output_tokens) if output_tokens else 0  
                 
                 if current_platform.is_hpu():  
-                    # Apply HPU alignment optimization  
                     prompt_shape = (len(prompt_tokens), ((max_prompt_len + 1023) // 1024) * 1024)  
                     output_shape = (len(output_tokens), ((max_output_len + 1023) // 1024) * 1024)  
                 else:  
                     prompt_shape = (len(prompt_tokens), max_prompt_len)  
                     output_shape = (len(output_tokens), max_output_len)  
                 
-                # Get cached padded tensors  
-                prompt_t = cache.get_tensor('padded_2d', prompt_shape, torch.int64, "cpu", pin_memory)  
-                output_t = cache.get_tensor('padded_2d', output_shape, torch.int64, "cpu", pin_memory)  
+                prompt_t = sampling_metadata.get_tensor('padded_2d', prompt_shape, torch.int64, "cpu", pin_memory)  
+                output_t = sampling_metadata.get_tensor('padded_2d', output_shape, torch.int64, "cpu", pin_memory)  
                 
-                # Fill tensors with actual data (similar to make_tensor_with_pad logic)  
-                prompt_t.fill_(-1)  # Initialize with padding value  
-                output_t.fill_(-1)  
-                
-                for i, tokens in enumerate(prompt_tokens):  
-                    prompt_t[i, :len(tokens)] = torch.tensor(tokens, dtype=torch.int64)  
-                
-                for i, tokens in enumerate(output_tokens):  
-                    output_t[i, :len(tokens)] = torch.tensor(tokens, dtype=torch.int64)  
+                if prompt_t is not None and output_t is not None:  
+                    # Fill with actual data  
+                    prompt_t.fill_(-1)  
+                    output_t.fill_(-1)  
+                    for i, tokens in enumerate(prompt_tokens):  
+                        prompt_t[i, :len(tokens)] = torch.tensor(tokens, dtype=torch.int64)  
+                    for i, tokens in enumerate(output_tokens):  
+                        output_t[i, :len(tokens)] = torch.tensor(tokens, dtype=torch.int64)  
+                else:  
+                    # Fall back to original creation if cache miss  
+                    prompt_t, output_t = _create_penalty_tensors_fallback(  
+                        prompt_tokens, output_tokens, vocab_size, pin_memory)  
             else:  
-                # Use cached empty tensors  
-                prompt_t = cache.get_tensor('empty', (0,), torch.long, str(device), False)  
-                output_t = cache.get_tensor('empty', (0,), torch.long, str(device), False)  
+                prompt_t = sampling_metadata.get_tensor('empty', (0,), torch.long, str(device), False)  
+                output_t = sampling_metadata.get_tensor('empty', (0,), torch.long, str(device), False)  
+                if prompt_t is None or output_t is None:  
+                    empty_tensor = torch.empty(0, device=device, dtype=torch.long)  
+                    prompt_t = empty_tensor  
+                    output_t = empty_tensor  
             
-            # Get cached scalar tensors and populate them  
+            # Use cached tensors for scalar parameters  
             scalar_shape = (len(temperatures),)  
             
-            temperatures_t = cache.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
-            temperatures_t[:] = torch.tensor(temperatures, dtype=dtype)  
+            temperatures_t = sampling_metadata.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
+            if temperatures_t is not None:  
+                temperatures_t[:] = torch.tensor(temperatures, dtype=dtype)  
+            else:  
+                temperatures_t = torch.tensor(temperatures, device="cpu", dtype=dtype, pin_memory=pin_memory)  
             
-            top_ps_t = cache.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
-            top_ps_t[:] = torch.tensor(top_ps, dtype=dtype)  
+            # Similar for other scalar tensors...  
+            top_ps_t = sampling_metadata.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
+            if top_ps_t is not None:  
+                top_ps_t[:] = torch.tensor(top_ps, dtype=dtype)  
+            else:  
+                top_ps_t = torch.tensor(top_ps, device="cpu", dtype=dtype, pin_memory=pin_memory)
+            top_ks_t = sampling_metadata.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
+            if top_ks_t is not None:  
+                top_ks_t[:] = torch.tensor(top_ps, dtype=dtype)  
+            else:  
+                top_ks_t = torch.tensor(top_ps, device="cpu", dtype=dtype, pin_memory=pin_memory)    
+                
+            min_ps_t = sampling_metadata.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
+            if min_ps_t is not None:  
+                min_ps_t[:] = torch.tensor(top_ps, dtype=dtype)  
+            else:  
+                min_ps_t = torch.tensor(top_ps, device="cpu", dtype=dtype, pin_memory=pin_memory)
+                
+            presence_penalties_t = sampling_metadata.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
+            if presence_penalties_t is not None:  
+                presence_penalties_t[:] = torch.tensor(top_ps, dtype=dtype)  
+            else:  
+                presence_penalties_t = torch.tensor(top_ps, device="cpu", dtype=dtype, pin_memory=pin_memory)
+                
+            frequency_penalties_t = sampling_metadata.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
+            if frequency_penalties_t is not None:  
+                frequency_penalties_t[:] = torch.tensor(top_ps, dtype=dtype)  
+            else:  
+                frequency_penalties_t = torch.tensor(top_ps, device="cpu", dtype=dtype, pin_memory=pin_memory)
             
-            min_ps_t = cache.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
-            min_ps_t[:] = torch.tensor(min_ps, dtype=dtype)  
-            
-            presence_penalties_t = cache.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
-            presence_penalties_t[:] = torch.tensor(presence_penalties, dtype=dtype)  
-            
-            frequency_penalties_t = cache.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
-            frequency_penalties_t[:] = torch.tensor(frequency_penalties, dtype=dtype)  
-            
-            repetition_penalties_t = cache.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
-            repetition_penalties_t[:] = torch.tensor(repetition_penalties, dtype=dtype)  
-            
-            top_ks_t = cache.get_tensor('scalar', scalar_shape, torch.int, "cpu", pin_memory)  
-            top_ks_t[:] = torch.tensor(top_ks, dtype=torch.int)  
+            repetition_penalties_t = sampling_metadata.get_tensor('scalar', scalar_shape, dtype, "cpu", pin_memory)  
+            if repetition_penalties_t is not None:  
+                repetition_penalties_t[:] = torch.tensor(top_ps, dtype=dtype)  
+            else:  
+                repetition_penalties_t = torch.tensor(top_ps, device="cpu", dtype=dtype, pin_memory=pin_memory)
             
         else:  
             # Fall back to original implementation when no cache is provided  
@@ -645,7 +697,7 @@ class SamplingTensors:
             frequency_penalties_t = torch.tensor(frequency_penalties, device="cpu", dtype=dtype, pin_memory=pin_memory)  
             repetition_penalties_t = torch.tensor(repetition_penalties, device="cpu", dtype=dtype, pin_memory=pin_memory)  
             top_ks_t = torch.tensor(top_ks, device="cpu", dtype=torch.int, pin_memory=pin_memory)  
-    
+        logger.info(f"libin debug from_list {time.perf_counter() - t1} {sampling_metadata.has_tensor_cache()=}")
         # Return the SamplingTensors with non-blocking transfers  
         return cls(  
             temperatures=temperatures_t.to(device=device, non_blocking=True),  

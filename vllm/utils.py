@@ -3021,8 +3021,7 @@ def is_torch_equal_or_newer(target: str) -> bool:
         # Fallback to PKG-INFO to load the package info, needed by the doc gen.
         return Version(importlib.metadata.version('torch')) >= Version(target)
 
-
-@dataclass  
+@dataclass(frozen=True)  # Add frozen=True to make it hashable  
 class TensorCacheKey:  
     """Key for identifying cached tensors"""  
     tensor_type: str  # 'scalar', 'padded_2d', 'empty'  
@@ -3030,77 +3029,91 @@ class TensorCacheKey:
     dtype: torch.dtype  
     device: str  
     pin_memory: bool  
-  
-class SamplingTensorCache:  
-    """Cache for pre-allocated tensors used in SamplingTensors.from_lists  
       
-    Manages tensors of common sizes and dtypes to avoid repeated allocations  
-    during sampling operations, similar to PyObjectCache for objects.  
-    """  
+    def __hash__(self) -> int:  
+        # Custom hash implementation for better performance  
+        return hash((
+            self.tensor_type,  
+            self.shape,  
+            str(self.dtype),  # Convert dtype to string for hashing  
+            self.device,  
+            self.pin_memory  
+        ))
+
+class SamplingTensorPool:  
+    """Thread-safe tensor pool optimized for HPU sampling operations"""  
       
-    def __init__(self, initial_cache_size: int = 128):  
+    def __init__(self, initial_cache_size: int = 128, max_batch_size: int = 256,   
+                 device_type: str = 'hpu'):  
         self._tensor_caches: Dict[TensorCacheKey, List[torch.Tensor]] = {}  
         self._cache_indices: Dict[TensorCacheKey, int] = {}  
+        self._locks: Dict[TensorCacheKey, threading.Lock] = {}  
+        self._global_lock = threading.Lock()  
         self._initial_cache_size = initial_cache_size  
+        self._max_batch_size = max_batch_size  
+        self._device_type = device_type  
+          
+        # HPU-specific alignment for optimal performance  
+        self._hpu_alignment = 1024 if device_type == 'hpu' else 1  
       
+    def get_tensor(self, tensor_type: str, shape: Tuple[int, ...],   
+                   dtype: torch.dtype, device: str = "cpu",   
+                   pin_memory: bool = False) -> torch.Tensor:  
+        """Get cached tensor with HPU-specific optimizations"""  
+        # Apply HPU alignment to tensor shapes if needed  
+        if self._device_type == 'hpu' and tensor_type == 'padded_2d':  
+            aligned_shape = self._apply_hpu_alignment(shape)  
+            shape = aligned_shape  
+              
+        key = TensorCacheKey(tensor_type, shape, dtype, device, pin_memory)  
+          
+        # Thread-safe tensor retrieval with per-key locking  
+        with self._global_lock:  
+            if key not in self._tensor_caches:  
+                self._tensor_caches[key] = []  
+                self._cache_indices[key] = 0  
+                self._locks[key] = threading.Lock()  
+                # Pre-allocate tensors  
+                for _ in range(self._initial_cache_size):  
+                    tensor = self._create_tensor_for_key(key)  
+                    self._tensor_caches[key].append(tensor)  
+          
+        with self._locks[key]:  
+            if self._cache_indices[key] >= len(self._tensor_caches[key]):  
+                self._grow_cache(key)  
+              
+            tensor = self._tensor_caches[key][self._cache_indices[key]]  
+            self._cache_indices[key] += 1  
+            return tensor  
     def _create_tensor_for_key(self, key: TensorCacheKey) -> torch.Tensor:  
         """Create a new tensor based on the cache key"""  
         if key.tensor_type == 'scalar':  
             # For scalar tensors like temperatures, top_ps, etc.  
             tensor = torch.empty(key.shape, dtype=key.dtype, device="cpu",   
-                               pin_memory=key.pin_memory)  
+                            pin_memory=key.pin_memory)  
         elif key.tensor_type == 'padded_2d':  
             # For 2D padded tensors like prompt_tokens, output_tokens  
             tensor = torch.empty(key.shape, dtype=key.dtype, device="cpu",  
-                               pin_memory=key.pin_memory)  
+                            pin_memory=key.pin_memory)  
         elif key.tensor_type == 'empty':  
             # For empty tensors when no penalties are applied  
             tensor = torch.empty(0, dtype=key.dtype, device=key.device)  
         else:  
             raise ValueError(f"Unknown tensor type: {key.tensor_type}")  
-          
-        return tensor  
-      
-    def _grow_cache(self, key: TensorCacheKey) -> None:  
-        """Double the cache size for a specific key"""  
-        current_size = len(self._tensor_caches[key])  
-        for _ in range(current_size):  
-            tensor = self._create_tensor_for_key(key)  
-            self._tensor_caches[key].append(tensor)  
-      
-    def get_tensor(self, tensor_type: str, shape: Tuple[int, ...],   
-                   dtype: torch.dtype, device: str = "cpu",   
-                   pin_memory: bool = False) -> torch.Tensor:  
-        """Get a cached tensor or create new cache entry"""  
-        key = TensorCacheKey(tensor_type, shape, dtype, device, pin_memory)  
-          
-        if key not in self._tensor_caches:  
-            # Initialize cache for this key  
-            self._tensor_caches[key] = []  
-            self._cache_indices[key] = 0  
-            for _ in range(self._initial_cache_size):  
-                tensor = self._create_tensor_for_key(key)  
-                self._tensor_caches[key].append(tensor)  
-          
-        # Check if we need to grow the cache  
-        if self._cache_indices[key] >= len(self._tensor_caches[key]):  
-            self._grow_cache(key)  
-          
-        # Get tensor from cache  
-        tensor = self._tensor_caches[key][self._cache_indices[key]]  
-        self._cache_indices[key] += 1  
-          
-        return tensor  
-      
+        
+        return tensor 
+    def _apply_hpu_alignment(self, shape: Tuple[int, ...]) -> Tuple[int, ...]:  
+        """Apply HPU-specific alignment to tensor shapes"""  
+        if len(shape) >= 2:  
+            # Align the last dimension to HPU requirements  
+            aligned_last_dim = ((shape[-1] + self._hpu_alignment - 1)   
+                               // self._hpu_alignment) * self._hpu_alignment  
+            return shape[:-1] + (aligned_last_dim,)  
+        return shape
+    
     def reset(self) -> None:  
-        """Reset all cache indices to make tensors available for reuse"""  
-        for key in self._cache_indices:  
-            self._cache_indices[key] = 0  
-      
-    def get_memory_usage(self) -> int:  
-        """Get total memory usage of cached tensors in bytes"""  
-        total_bytes = 0  
-        for key, tensors in self._tensor_caches.items():  
-            for tensor in tensors:  
-                total_bytes += tensor.numel() * tensor.element_size()  
-        return total_bytes
+        """Thread-safe reset of all cache indices"""  
+        with self._global_lock:  
+            for key in self._cache_indices:  
+                with self._locks[key]:  
+                    self._cache_indices[key] = 0

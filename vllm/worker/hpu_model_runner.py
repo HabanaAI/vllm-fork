@@ -76,7 +76,7 @@ from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
 from vllm.transformers_utils.config import uses_mrope
 from vllm.utils import (bind_kv_cache, is_fake_hpu, is_pin_memory_available,
                         make_mrope_positions_tensor_with_pad,
-                        make_tensor_with_pad)
+                        make_tensor_with_pad, SamplingTensorPool)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -1048,9 +1048,20 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Lazy initialization
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
-        self.sampling_metadata_cache: SamplingMetadataCache = \
-              SamplingMetadataCache() \
-                if self.parallel_config.pipeline_parallel_size == 1 else None
+         # Initialize sampling metadata cache with tensor pool  
+        if (self.scheduler_config.max_num_batched_tokens <=
+            self.scheduler_config.max_model_len):  
+            self.sampling_metadata_cache = SamplingMetadataCache()  
+            # Add tensor pool to the cache  
+            self.sampling_metadata_cache._sampling_tensor_pool = SamplingTensorPool(  
+                initial_cache_size=128,  
+                max_batch_size=self.max_num_seqs,  
+                device_type='hpu'  
+            )  
+        else:  
+            self.sampling_metadata_cache = None
+        self.sampling_metadata_cache = None
+        logger.info(f"libin debug create {self.sampling_metadata_cache=} {self.scheduler_config.max_num_batched_tokens=} {self.scheduler_config.max_model_len=}")
         self.inc_initialized_successfully = False
 
         # Profiler stats
@@ -2408,6 +2419,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.pin_memory,
                 generators=generators,
                 cache=self.sampling_metadata_cache)
+            logger.info(f"libin debug prepare pass cache {self.sampling_metadata_cache=}")
             selected_token_indices = \
                 sampling_metadata.selected_token_indices
             categorized_sample_indices = \
@@ -3373,6 +3385,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     """
     _model_input_cls: Type[ModelInputForHPUWithSamplingMetadata] = (
         ModelInputForHPUWithSamplingMetadata)
+
 
     def make_model_input_from_broadcasted_tensor_dict(
         self,
