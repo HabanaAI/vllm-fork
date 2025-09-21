@@ -11,6 +11,7 @@ from vllm.attention import Attention, AttentionType
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import VllmConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
+from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.linear import (QKVParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.pooler import ClassifierPooler
@@ -252,7 +253,8 @@ class ModernBertModel(nn.Module):
         return norm_outputs
 
 
-class ModernBertPooler(nn.Module):
+@CustomOp.register("modernbert_pooler")
+class ModernBertPooler(CustomOp):
 
     def __init__(self, config: ModernBertConfig):
         super().__init__()
@@ -263,8 +265,14 @@ class ModernBertPooler(nn.Module):
                                  eps=config.norm_eps,
                                  bias=config.norm_bias)
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward_native(self, hidden_states: torch.Tensor) -> torch.Tensor:
         pooled_output = hidden_states
+        pooled_output = pooled_output.mean(dim=0, keepdim=False)
+        pooled_output = self.norm(self.act(self.dense(pooled_output)))
+        return pooled_output
+
+    def forward_hpu(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        pooled_output = hidden_states.permute(1, 0, 2)
         pooled_output = pooled_output.mean(dim=0, keepdim=False)
         pooled_output = self.norm(self.act(self.dense(pooled_output)))
         return pooled_output
