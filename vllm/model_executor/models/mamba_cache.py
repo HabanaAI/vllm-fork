@@ -36,11 +36,11 @@ class MambaCacheManager(ConstantSizeCache):
 
         self.device = device
 
-        conv_state = torch.empty(size=(num_mamba_layers, self.max_batch_size + 64) +
+        conv_state = torch.empty(size=(num_mamba_layers, self.max_batch_size + 32) +
                                  conv_state_shape,
                                  dtype=dtype,
                                  device=self.device)
-        temporal_state = torch.empty(size=(num_mamba_layers, self.max_batch_size + 64) +
+        temporal_state = torch.empty(size=(num_mamba_layers, self.max_batch_size + 32) +
                                      temporal_state_shape,
                                      dtype=dtype,
                                      device=self.device)

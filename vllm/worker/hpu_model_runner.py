@@ -896,20 +896,17 @@ TModelInputForHPU = TypeVar('TModelInputForHPU', bound="ModelInputForHPU")
 
 def FindMambaIndexForPrefill(
     mamba_dict: Dict[int, int],
-    seq_list: List[int],
+    seq_id: int,
     max_concurrency: int,
 ):
-    if mamba_dict is not None:
+    if len(mamba_dict) > 0:
         mamba_cache_list = list(range(max_concurrency))
         diff = list(set(mamba_cache_list) - set(mamba_dict.values()))
         new_prefill_idx = diff[0]
     else:
         new_prefill_idx = 0
     
-    if mamba_dict.get(seq_list[0]) is None:
-        mamba_dict.update({seq_list[0]: new_prefill_idx})
-    else:
-        return None
+    mamba_dict.update({seq_id: new_prefill_idx})
     return new_prefill_idx
 
 
@@ -1625,7 +1622,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     ) -> PreparePromptMetadata:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
-        conv_state_indices: List[List[int]] = []
+        conv_state_indices_list: List[List[int]] = []
         mamba_prefill_indices: List[int] = []
         input_mrope_positions: List[List[List[int]]] = []
         slot_mapping: List[List[int]] = []
@@ -1656,9 +1653,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_id = seq_ids[0]
 
             mamba_prefill_index = FindMambaIndexForPrefill(
-                self.mamba_cache_table, seq_ids, self.max_num_seqs + 64)
-            if mamba_prefill_index is not None:
-                mamba_prefill_indices.append(mamba_prefill_index)
+                self.mamba_cache_table, seq_id, self.max_num_seqs + 32)
+            mamba_prefill_indices.append(mamba_prefill_index)
 
             computed_block_nums = seq_group_metadata.computed_block_nums
             if (self.scheduler_config is not None
@@ -1710,8 +1706,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # NOTE(woosuk): Here we assume that the first token in the prompt
             # is always the first token in the sequence.
             input_positions.append(list(range(context_len, seq_len)))
+
+            # TODO: if seq_len < conv_kernel_dim, padding token should be masked in the prompt stage
             if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
-                conv_state_indices.append(list(range(seq_len + 1 - self.vllm_config.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
+                conv_state_indices_list.append(list(range(seq_len + 1 - self.vllm_config.model_config.hf_config.linear_conv_kernel_dim, seq_len)))
 
             token_types_ids = seq_group_metadata.token_type_ids
             token_types.append(token_types_ids) if token_types_ids else []
@@ -1896,11 +1894,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                               flat=self.use_merged_prefill)
 
         if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
-            conv_state_indices = make_cpu_tensor(conv_state_indices,
-                                                 max_len=self.vllm_config.model_config.hf_config.linear_conv_kernel_dim - 1,
-                                                 pad=0,
-                                                 dtype=torch.long,
-                                                 flat=self.use_merged_prefill)
+            input_stride = input_tokens_tensor.size(-1)
+            conv_state_indices = conv_state_indices_list[0]
+            for idx in range(1, len(conv_state_indices_list)):
+                conv_state_indices = conv_state_indices + [item + input_stride * idx for item in conv_state_indices_list[idx]]
+            conv_state_indices = torch.tensor(conv_state_indices,
+                                              dtype=torch.long,
+                                              device='cpu')
 
         slot_mapping = make_cpu_tensor(slot_mapping,
                                        max_len=max_prompt_len,
@@ -1924,7 +1924,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = None
         context_lens_tensor = None
 
-        if 0 < len(mamba_prefill_indices) > 0:
+        if len(mamba_prefill_indices) > 0:
             if len(mamba_prefill_indices) < input_tokens_tensor.size(0):
                 padding_len = input_tokens_tensor.size(0) - len(mamba_prefill_indices)
                 mamba_prefill_indices = mamba_prefill_indices + list(range(max(mamba_prefill_indices) + 1, max(mamba_prefill_indices) + 1 + padding_len))
@@ -1976,6 +1976,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         if hasattr(self.vllm_config.model_config.hf_config, "linear_conv_kernel_dim"):
             conv_state_indices = self.move_to_device(conv_state_indices)
+        else:
+            conv_state_indices = None
 
         if mamba_cache_prefill_indices is not None:
             mamba_cache_prefill_indices = self.move_to_device(mamba_cache_prefill_indices)
@@ -2502,8 +2504,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_ids, request_ids_seq_ids_mapping = get_all_seq_ids_and_request_ids(
             seq_group_metadata_list)
 
-        print("!!!!!!!!!!!!!!!! seq_ids = " + str(seq_ids) + "   request_ids_seq_ids_mapping:" + str(request_ids_seq_ids_mapping))
-
         input_tokens = None
         input_positions = None
         lora_mapping = None
@@ -2557,9 +2557,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_slot_mapping,
             decode_lora_ids,
         ) = self._prepare_decode(decode_reqs, total_seq_ids=seq_ids, align_worker=align_worker)
-
-        if torch.distributed.get_rank() == 0:
-            print("*************************** self.mamba_cache_table: " + str(self.mamba_cache_table))
 
         selected_token_indices = None
         if not self.is_pooler:

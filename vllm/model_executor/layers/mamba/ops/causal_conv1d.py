@@ -7,10 +7,12 @@
 from typing import Optional
 
 import torch
+import torch.nn.functional as F
 
 from vllm import _custom_ops as ops
 from vllm.attention.backends.utils import PAD_SLOT_ID
 
+import habana_frameworks.torch as htorch
 
 def causal_conv1d_fn(x: torch.Tensor,
                      weight: torch.Tensor,
@@ -68,12 +70,11 @@ def causal_conv1d_update(x: torch.Tensor,
                          bias: Optional[torch.Tensor] = None,
                          activation: Optional[str] = None,
                          cache_seqlens: Optional[torch.Tensor] = None,
-                         conv_state_indices: Optional[torch.Tensor] = None,
-                         pad_slot_id: int = PAD_SLOT_ID):
+                         conv_state_indices: Optional[torch.Tensor] = None):
     """
-    x: (batch, dim) or (batch, dim, seqlen)
+    x: (batch, dim) or (batch, seq, dim)
     conv_state: (batch, dim, state_len), where state_len >= width - 1
-    weight: (dim, width)
+    weight: (width, dim)
     bias: (dim,)
     cache_seqlens: (batch,), dtype int32.
         If not None, the conv_state is treated as a circular buffer.
@@ -90,16 +91,19 @@ def causal_conv1d_update(x: torch.Tensor,
             for example: cache_indices = [pad_slot_id, 1 ,20 ,pad_slot_id] 
             in this case, the kernel will not process entries at 
             indices 0 and 3
-    out: (batch, dim) or (batch, dim, seqlen)
+    out: (batch, dim) or (batch, seq, dim)
     """
     if activation not in [None, "silu", "swish"]:
         raise NotImplementedError("activation must be None, silu, or swish")
     activation_val = activation in ["silu", "swish"]
-    unsqueeze = x.dim() == 2
-    if unsqueeze:
-        x = x.unsqueeze(-1)
-    ops.causal_conv1d_update(x, conv_state, weight, bias, activation_val,
-                             cache_seqlens, conv_state_indices, pad_slot_id)
-    if unsqueeze:
-        x = x.squeeze(-1)
-    return x
+
+    prev_conv_state = torch.index_select(conv_state, dim=0, index=conv_state_indices)
+    new_conv_state = torch.concat([prev_conv_state, x], dim=1)
+    conv_state.index_copy_(dim=0, index=conv_state_indices, source=new_conv_state[:, 1:, :])
+
+    output = (new_conv_state * weight.squeeze(1).transpose(0, 1).unsqueeze(0)).sum(dim=1)
+    if bias is not None:
+        output.add_(bias)
+    output = F.silu(output).unsqueeze(1)
+
+    return output
