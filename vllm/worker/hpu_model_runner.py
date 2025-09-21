@@ -64,7 +64,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.model_loader import get_model
 from vllm.model_executor.models import supports_multimodal
-from vllm.model_executor.sampling_metadata import SequenceGroupToSample
+from vllm.model_executor.sampling_metadata import SequenceGroupToSample, HPUSamplingTensorPool
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalKwargs, MultiModalPlaceholderMap,
                              MultiModalRegistry)
@@ -1103,6 +1103,17 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.mm_tokens_per_image = 1
         self.image_token_id = 0
 
+        self.hpu_tensor_pool = HPUSamplingTensorPool(  
+            max_batch_size=self.max_num_seqs,  
+            max_seq_len=self.max_model_len,
+            device=self.device,  
+            dtype=self.model_config.dtype  
+        )
+        '''
+        self.hpu_tensor_pool = None
+        '''
+
+    
     def _set_gc_threshold(self) -> None:
         """
         Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -1239,7 +1250,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     max_position_embeddings,
                 )
                 self.model = self.lora_manager.create_lora_manager(self.model)
-
             if self._is_quant_with_inc():
                 logger.info("Preparing model with INC..")
                 with HabanaMemoryProfiler() as m_inc:
@@ -3622,6 +3632,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         is_dummy_run: bool = False,
         is_pt_profiler_run: bool = False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
+        t1 = time.perf_counter()
         self.has_patched_prev_output = False
         use_delayed_sampling = self.use_delayed_sampling and not warmup_mode
         assert not (use_delayed_sampling and num_steps != 1), \
@@ -3691,7 +3702,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 input_tokens = model_input.input_tokens
             input_positions = model_input.input_positions
             attn_metadata = model_input.attn_metadata
+
             sampling_metadata = model_input.sampling_metadata
+            if hasattr(self, 'hpu_tensor_pool'):
+                sampling_metadata.hpu_tensor_pool = self.hpu_tensor_pool  
             real_batch_size = model_input.real_batch_size
             batch_size_padded = model_input.batch_size_padded
             assert input_tokens is not None
@@ -3783,6 +3797,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     {"bypass_hpu_graphs": not use_graphs})
 
             htorch.core.mark_step()
+            t2 = time.perf_counter()
             if self.is_driver_worker:
                 model_event_name = ("model_"
                                     f"{phase}_"
@@ -3858,7 +3873,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bool(model_input.multi_modal_kwargs and \
                        ('pixel_values')in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
-
+                input_id_s = execute_model_kwargs['input_ids'].shape
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if ('pixel_values') in execute_model_kwargs and \
@@ -3945,6 +3960,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                        sampling_metadata)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+                t3 = time.perf_counter()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     continue
@@ -3980,6 +3996,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_inputs.append(model_input)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+                t4 = time.perf_counter()
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
                     model_input.async_callback()
@@ -4086,13 +4103,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     if model_input.is_prompt:
                         output.prefill_hidden_states = hidden_states
                     output.hidden_states = hidden_states
-
+                t5 = time.perf_counter()
+                logger.info(f"libin debug execute_mode total {t5-t1=} {is_prompt=} {input_id_s=} after_sample:{t5-t4} sample: {t4-t3} main:{t3-t2} before:{t2-t1}")
                 if use_delayed_sampling:
                     if self.is_driver_worker:
                         return [fake_output]
                     else:
                         return []
-
                 return [output] if self.is_driver_worker else []
             else:
                 return []

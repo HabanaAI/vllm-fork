@@ -5,7 +5,7 @@ from array import array
 from dataclasses import dataclass
 from typing import Optional
 
-import torch
+import torch, time
 
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams, SamplingType
@@ -14,9 +14,9 @@ from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData,
 from vllm.utils import (PyObjectCache, async_tensor_h2d,
                         is_pin_memory_available, make_tensor_with_pad,
                         make_tensor_with_pad_align)
-
+from vllm.logger import init_logger
 _SAMPLING_EPS = 1e-5
-
+logger = init_logger(__name__)
 
 @dataclass
 class SequenceGroupToSample:
@@ -130,7 +130,7 @@ class SamplingMetadata:
             it is mainly used for multi-step decode.
 
     """
-
+    hpu_tensor_pool: Optional["HPUSamplingTensorPool"] = None
     def __init__(
         self,
         seq_groups: list[SequenceGroupToSample],
@@ -420,6 +420,7 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
+        hpu_tensor_pool: Optional["HPUSamplingTensorPool"] = None,  
     ) -> tuple["SamplingTensors", bool, bool, bool, Optional[int],
                Optional[float]]:
         prompt_tokens: list[array] = []
@@ -513,7 +514,8 @@ class SamplingTensors:
             k == top_ks[0] for k in top_ks) else None
         top_p_scalar = top_ps[0] if do_top_p_top_k and all(
             p == top_ps[0] for p in top_ps) else None
-
+        hpu_tensor_pool = getattr(sampling_metadata, 'hpu_tensor_pool', None)
+        logger.info(f"libin debug from list with {hpu_tensor_pool=}")
         sampling_tensors = SamplingTensors.from_lists(
             temperatures,
             top_ps,
@@ -527,10 +529,54 @@ class SamplingTensors:
             vocab_size,
             device,
             dtype,
+            hpu_tensor_pool=hpu_tensor_pool,  # Pass the pool  
         )
+
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
                 top_k_scalar, top_p_scalar)
-
+    def create_hpu_token_tensors_only(  
+        prompt_tokens: list[array],  
+        output_tokens: list[array],   
+        vocab_size: int,  
+        device: torch.device  
+    ) -> tuple[torch.Tensor, torch.Tensor]:  
+        """Create only prompt_tokens and output_tokens directly on HPU device."""  
+        
+        if not (prompt_tokens or output_tokens):  
+            empty_tensor = torch.empty(0, device=device, dtype=torch.long)  
+            return empty_tensor, empty_tensor  
+        
+        # Create prompt_tokens directly on HPU  
+        if prompt_tokens:  
+            max_prompt_len = max(len(tokens) for tokens in prompt_tokens)  
+            max_prompt_len_align = ((max_prompt_len + 1023) // 1024) * 1024  
+            
+            prompt_t = torch.zeros(len(prompt_tokens), max_prompt_len_align,   
+                                device=device, dtype=torch.long)  
+            
+            for i, tokens in enumerate(prompt_tokens):  
+                if tokens:  
+                    token_tensor = torch.tensor(list(tokens), device=device, dtype=torch.long)  
+                    prompt_t[i, :len(tokens)] = token_tensor  
+        else:  
+            prompt_t = torch.empty(0, device=device, dtype=torch.long)  
+        
+        # Create output_tokens directly on HPU    
+        if output_tokens:  
+            max_output_len = max(len(tokens) for tokens in output_tokens)  
+            max_output_len_align = ((max_output_len + 1023) // 1024) * 1024  
+            
+            output_t = torch.zeros(len(output_tokens), max_output_len_align,  
+                                device=device, dtype=torch.long)  
+            
+            for i, tokens in enumerate(output_tokens):  
+                if tokens:  
+                    token_tensor = torch.tensor(list(tokens), device=device, dtype=torch.long)  
+                    output_t[i, :len(tokens)] = token_tensor  
+        else:  
+            output_t = torch.empty(0, device=device, dtype=torch.long)  
+        
+        return prompt_t, output_t
     @classmethod
     def from_lists(
         cls,
@@ -546,15 +592,31 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
+        hpu_tensor_pool: Optional["HPUSamplingTensorPool"] = None, 
     ) -> "SamplingTensors":
         # Note that the performance will be very bad without
         # pinned memory.
+        re = None
+        t1 = time.perf_counter()
+
+        if (hpu_tensor_pool is not None and   
+            current_platform.is_hpu() and   
+            str(device).startswith('hpu')):  
+            re = hpu_tensor_pool.create_sampling_tensors_on_hpu(  
+                temperatures, top_ps, top_ks, min_ps,  
+                presence_penalties, frequency_penalties, repetition_penalties,  
+                prompt_tokens, output_tokens  
+            )
+            logger.info(f"libin debug from_lists time : {time.perf_counter() - t1}")
+            return re
+        t1 = time.perf_counter()
         pin_memory = is_pin_memory_available()
 
         do_penalties = prompt_tokens or output_tokens
 
         if do_penalties:
             if current_platform.is_hpu():
+
                 prompt_t = make_tensor_with_pad_align(
                     prompt_tokens,
                     vocab_size,
@@ -563,6 +625,7 @@ class SamplingTensors:
                     pin_memory=pin_memory,
                     max_len_align=1024,
                 )
+                t11 = time.perf_counter()
                 output_t = make_tensor_with_pad_align(
                     output_tokens,
                     vocab_size,
@@ -571,6 +634,9 @@ class SamplingTensors:
                     pin_memory=pin_memory,
                     max_len_align=1024,
                 )
+                t12 = time.perf_counter()
+                #prompt_t, output_t = SamplingTensors.create_hpu_token_tensors_only(  
+                #    prompt_tokens, output_tokens, vocab_size, device)  
             else:
                 prompt_t = make_tensor_with_pad(
                     prompt_tokens,
@@ -635,18 +701,144 @@ class SamplingTensors:
         )
         # Because the memory is pinned, we can do non-blocking
         # transfer to device.
-
-        return cls(
-            temperatures=temperatures_t.to(device=device, non_blocking=True),
-            top_ps=top_ps_t.to(device=device, non_blocking=True),
-            top_ks=top_ks_t.to(device=device, non_blocking=True),
-            min_ps=min_ps_t.to(device=device, non_blocking=True),
+        t2 = time.perf_counter()
+        if True:
+            temperatures=temperatures_t.to(device=device, non_blocking=True)
+            t3 = time.perf_counter()
+            top_ps=top_ps_t.to(device=device, non_blocking=True)
+            t4 = time.perf_counter()
+            top_ks=top_ks_t.to(device=device, non_blocking=True)
+            t5 = time.perf_counter()
+            min_ps=min_ps_t.to(device=device, non_blocking=True)
+            t6 = time.perf_counter()
             presence_penalties=presence_penalties_t.to(device=device,
-                                                       non_blocking=True),
+                                                       non_blocking=True)
+            t7 = time.perf_counter()
             frequency_penalties=frequency_penalties_t.to(device=device,
-                                                         non_blocking=True),
+                                                         non_blocking=True)
+            t8 = time.perf_counter()
             repetition_penalties=repetition_penalties_t.to(device=device,
-                                                           non_blocking=True),
-            prompt_tokens=prompt_t.to(device=device, non_blocking=True),
-            output_tokens=output_t.to(device=device, non_blocking=True),
-        )
+                                                           non_blocking=True)
+            t9 = time.perf_counter()
+            prompt_tokens=prompt_t.to(device=device, non_blocking=True)
+            t10 = time.perf_counter()
+            output_tokens=output_t.to(device=device, non_blocking=True)
+            t11 = time.perf_counter()
+        logger.info(f"libin debug from list {temperatures_t=} {top_ps_t=} {top_ks_t=} {min_ps_t=} {presence_penalties_t=} {frequency_penalties_t=} {repetition_penalties_t=} {prompt_t=} {output_t=}")    
+        cls_ret =  cls(temperatures=temperatures,
+                        top_ps=top_ps,
+                        top_ks=top_ks,
+                        min_ps=min_ps,
+                        presence_penalties=presence_penalties,
+                        frequency_penalties=frequency_penalties,
+                        repetition_penalties=repetition_penalties,
+                        prompt_tokens=prompt_tokens,
+                        output_tokens=output_tokens)
+        t12 = time.perf_counter()
+        logger.info(f"libin debug {cls_ret=}")
+
+        logger.info(f"libin debug from_list total {time.perf_counter()-t1}")
+        logger.info(f"libin debug {t11-t1=} {t12-t11=} {t2-t12=} {prompt_tokens.shape=} {t10-t9} {output_tokens.shape=} {t11-t10} {t12-t11=} {t3-t2=} {t4-t3=} {t5-t4=} {t6-t5=} {t7-t6=} {t8-t7=} {t9-t8=}")
+        return cls_ret 
+
+class HPUSamplingTensorPool:  
+    """HPU-optimized tensor pool that avoids CPU-to-HPU transfers."""  
+      
+    def __init__(self, max_batch_size: int, max_seq_len: int, 
+                    device: torch.device, dtype: torch.dtype):  
+            self.device = device  
+            self.dtype = dtype  
+            self.max_batch_size = max_batch_size  
+            self.max_seq_len = max_seq_len  
+            
+            # Pre-allocate all tensors directly on HPU device  
+            self._temperatures = torch.ones(max_batch_size, device=device, dtype=dtype)  
+            self._top_ps = torch.ones(max_batch_size, device=device, dtype=dtype)  
+            self._top_ks = torch.full((max_batch_size,), -1, device=device, dtype=torch.int)  
+            self._min_ps = torch.zeros(max_batch_size, device=device, dtype=dtype)  
+            self._presence_penalties = torch.zeros(max_batch_size, device=device, dtype=dtype)  
+            self._frequency_penalties = torch.zeros(max_batch_size, device=device, dtype=dtype)  
+            self._repetition_penalties = torch.ones(max_batch_size, device=device, dtype=dtype)  
+            
+            # Pre-allocate token tensors directly on HPU  
+            self._prompt_tokens = torch.zeros(  
+                (max_batch_size, max_seq_len),   
+                device=device,   
+                dtype=torch.int64  
+            )  
+            self._output_tokens = torch.zeros(  
+                (max_batch_size, max_seq_len),   
+                device=device,   
+                dtype=torch.int64  
+            )  
+        
+    def create_sampling_tensors_on_hpu(  
+            self,  
+            temperatures: list[float],  
+            top_ps: list[float],  
+            top_ks: list[int],  
+            min_ps: list[float],  
+            presence_penalties: list[float],  
+            frequency_penalties: list[float],  
+            repetition_penalties: list[float],  
+            prompt_tokens: list[array],  
+            output_tokens: list[array],  
+        ) -> "SamplingTensors":  
+            """Create sampling tensors directly on HPU without CPU transfers."""  
+            batch_size = len(temperatures)  
+            
+            # Update scalar tensors directly on HPU device  
+            self._temperatures[:batch_size] = torch.tensor(temperatures, device=self.device, dtype=self.dtype)  
+            self._top_ps[:batch_size] = torch.tensor(top_ps, device=self.device, dtype=self.dtype)  
+            self._top_ks[:batch_size] = torch.tensor(top_ks, device=self.device, dtype=torch.int)  
+            self._min_ps[:batch_size] = torch.tensor(min_ps, device=self.device, dtype=self.dtype)  
+            self._presence_penalties[:batch_size] = torch.tensor(presence_penalties, device=self.device, dtype=self.dtype)  
+            self._frequency_penalties[:batch_size] = torch.tensor(frequency_penalties, device=self.device, dtype=self.dtype)  
+            self._repetition_penalties[:batch_size] = torch.tensor(repetition_penalties, device=self.device, dtype=self.dtype)  
+            
+            # Handle token tensors  
+            prompt_t = self._create_token_tensor_on_hpu(prompt_tokens, batch_size)  
+            output_t = self._create_token_tensor_on_hpu(output_tokens, batch_size) 
+            logger.info(f"libin create sampling tensor {self._temperatures[:batch_size]=} {self._top_ps[:batch_size]=} {self._top_ks[:batch_size]=} {self._min_ps[:batch_size]=}")
+            
+            return SamplingTensors(  
+                temperatures=self._temperatures[:batch_size],  
+                top_ps=self._top_ps[:batch_size],  
+                top_ks=self._top_ks[:batch_size],  
+                min_ps=self._min_ps[:batch_size],  
+                presence_penalties=self._presence_penalties[:batch_size],  
+                frequency_penalties=self._frequency_penalties[:batch_size],  
+                repetition_penalties=self._repetition_penalties[:batch_size],  
+                prompt_tokens=prompt_t,  
+                output_tokens=output_t,  
+            )  
+        
+    def _create_token_tensor_on_hpu(self, token_arrays: list[array], batch_size: int) -> torch.Tensor:  
+            """Create token tensor directly on HPU with proper padding."""  
+            if not token_arrays:  
+                return torch.empty(0, 0, device=self.device, dtype=torch.long)  
+            
+            max_len = max(len(tokens) for tokens in token_arrays)  
+            # Apply HPU-specific alignment (1024 alignment as in original code)  
+            max_len_align = ((max_len + 1023) // 1024) * 1024  
+
+            # Use pre-allocated tensor or create new one if needed  
+            if max_len_align <= self.max_seq_len:  
+                result = self._prompt_tokens[:batch_size, :max_len_align].clone()  
+                result.zero_()  
+            else:  
+                result = torch.zeros(batch_size, max_len_align, device=self.device, dtype=torch.long)  
+            
+            # Fill tensor directly on HPU  
+            for i, token_array in enumerate(token_arrays):  
+                if len(token_array) > 0:  
+                    token_tensor = torch.tensor(  
+                        list(token_array),   
+                        device=self.device,   
+                        dtype=torch.long  
+                    )  
+                    result[i, :len(token_array)] = token_tensor  
+            
+            return result
+   
+    

@@ -197,6 +197,8 @@ class Sampler(nn.Module):
         # speculative decoding and when prompt embeddings are specified.
         self.include_gpu_probs_tensor = False
         self.should_modify_greedy_probs_inplace = False
+        # Add HPU tensor pool storage  
+        self.hpu_tensor_pool: Optional[HPUSamplingTensorPool] = None
 
     def _init_sampling_tensors(
         self,
