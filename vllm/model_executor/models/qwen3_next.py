@@ -67,7 +67,7 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 
-import habana_frameworks.torch as htorch
+import habana_frameworks.torch.core as htcore
 
 logger = init_logger(__name__)
 
@@ -336,6 +336,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
     def __init__(
         self,
+        vllm_config: VllmConfig,
         config: Qwen3NextConfig,
         model_config: Optional[ModelConfig] = None,
         cache_config: Optional[CacheConfig] = None,
@@ -404,6 +405,24 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                     value_settings,
                 ], self.tp_size, self.tp_rank)
             })
+
+        conv_state_shape = (
+            vllm_config.scheduler_config.max_num_seqs + 32,
+            self.conv_kernel_size - 1,
+            divide(self.conv_dim, self.tp_size),
+        )
+        temporal_state_shape = (
+            vllm_config.scheduler_config.max_num_seqs + 32,
+            divide(self.num_v_heads, self.tp_size),
+            self.head_k_dim, self.head_v_dim
+        )
+
+        self.conv_state = torch.empty(conv_state_shape,
+                                 dtype=self.conv1d.weight.dtype,
+                                 device=self.conv1d.weight.device)
+        self.ssm_state = torch.empty(temporal_state_shape,
+                                     dtype=self.conv1d.weight.dtype,
+                                     device=self.conv1d.weight.device)
 
         # selective projection used to make dt, B and C input dependant
 
@@ -512,7 +531,6 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        mamba_cache_params: MambaCacheParams,
         is_dummy_run = None,
     ):
         forward_context = get_forward_context()
@@ -521,8 +539,8 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
         if is_dummy_run:
             return hidden_states
 
-        conv_state = mamba_cache_params[0][0][self.fla_layer_idx]
-        ssm_state = mamba_cache_params[0][1][self.fla_layer_idx]
+        conv_state = self.conv_state
+        ssm_state = self.ssm_state
 
         projected_states, _ = self.in_proj(hidden_states)
         projected_states_qkvz, projected_states_ba = torch.split(
@@ -558,7 +576,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
             mixed_qkv_non_spec = mixed_qkv_non_spec[:, :, :seq_len].transpose(1, 2)
 
         else:
-            mixed_qkv_non_spec = causal_conv1d_update(
+            mixed_qkv_non_spec, cur_conv_state = causal_conv1d_update(
                 mixed_qkv,
                 conv_state,
                 self.conv1d.weight,
@@ -566,6 +584,7 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
                 self.activation,
                 conv_state_indices=mamba_cache_decode_indices,
             )
+            conv_state.index_copy_(0, mamba_cache_decode_indices, cur_conv_state)
 
         query, key, value = torch.split(
             mixed_qkv_non_spec,
@@ -753,6 +772,7 @@ class Qwen3NextDecoderLayer(nn.Module):
 
     def __init__(
         self,
+        vllm_config: VllmConfig,
         config: Qwen3NextConfig,
         layer_type: str,
         model_config: Optional[ModelConfig] = None,
@@ -769,6 +789,7 @@ class Qwen3NextDecoderLayer(nn.Module):
 
         if self.layer_type == "linear_attention":
             self.linear_attn = Qwen3NextGatedDeltaNet(
+                vllm_config,
                 config,
                 model_config=model_config,
                 cache_config=cache_config,
@@ -831,7 +852,6 @@ class Qwen3NextDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
         positions: torch.Tensor = None,
-        mamba_cache_params: MambaCacheParams = None,
         is_dummy_run = None,
         **kwargs: object,
     ):
@@ -845,7 +865,6 @@ class Qwen3NextDecoderLayer(nn.Module):
         if self.layer_type == "linear_attention":
             self_attention_output = self.linear_attn(
                 hidden_states=hidden_states,
-                mamba_cache_params=mamba_cache_params,
                 is_dummy_run=is_dummy_run,
             )
         elif self.layer_type == "full_attention":
@@ -911,6 +930,7 @@ class Qwen3NextModel(nn.Module):
 
         def get_layer(prefix: str):
             return Qwen3NextDecoderLayer(
+                vllm_config,
                 config,
                 layer_type=config.layer_types[extract_layer_index(prefix)],
                 model_config=model_config,
@@ -936,7 +956,6 @@ class Qwen3NextModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        mamba_cache_params: MambaCacheParams,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         is_dummy_run = None,
@@ -957,7 +976,6 @@ class Qwen3NextModel(nn.Module):
                 hidden_states=hidden_states,
                 residual=residual,
                 positions=positions,
-                mamba_cache_params=mamba_cache_params,
                 is_dummy_run=is_dummy_run
             )
 
@@ -1098,8 +1116,6 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
             if not lora_config else lora_config.lora_vocab_padding_size,
         )
 
-        self.mamba_cache: Optional[MambaCacheManager] = None
-
         self.logits_processor = LogitsProcessor(self.unpadded_vocab_size,
                                                 config.vocab_size)
         self.make_empty_intermediate_tensors = (
@@ -1178,18 +1194,8 @@ class Qwen3NextForCausalLM(nn.Module, HasInnerState, SupportsLoRA, SupportsPP,
     ):
         is_dummy_run = kwargs.get('is_dummy_run')
 
-        if self.mamba_cache is None:
-            num_mamba_layers = self.model_config.get_num_layers_by_block_type(
-                self.vllm_config.parallel_config, LayerBlockType.mamba)
-
-            self.mamba_cache = MambaCacheManager(
-                self.vllm_config, self.lm_head.weight.dtype, self.lm_head.weight.device, num_mamba_layers,
-                *self.get_mamba_state_shape_from_config(self.vllm_config))
-
-        mamba_cache_params = self.mamba_cache.get_seqlen_agnostic_capture_inputs()
-
-        hidden_states = self.model(input_ids, positions, mamba_cache_params,
-                                   intermediate_tensors, inputs_embeds, is_dummy_run)
+        hidden_states = self.model(input_ids, positions, intermediate_tensors,
+                inputs_embeds, is_dummy_run)
 
         return hidden_states
 
