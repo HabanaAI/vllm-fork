@@ -390,7 +390,7 @@ if __name__ == "__main__":
 
     for i, best_trial in enumerate(study.best_trials):
         print(f"The {i}-th Pareto solution was found at Trial# {best_trial.number}")
-        print(f"\t Params: {best_trial.params}")
+        print(f"\t Params: {best_trial.params}, {best_trial.user_attrs}")
         set_trial_value(best_trial.params.get("prompt_bs_bucket_step"),
                         best_trial.params.get("prompt_bs_bucket_max"),
                         best_trial.params.get("prompt_seq_step"),
