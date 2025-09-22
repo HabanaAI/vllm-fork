@@ -2698,8 +2698,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def create_dummy_multi_modal_seq_group_metadata(self, group_id, img_args,
                                                     sampling_params,
                                                     lora_request, seq_len):
-        assert self.model_is_mrope or self.is_mm_optimized, \
-            ("Warmup compatible with Qwen2vl/Gemma3/InternVLChatModel models")
         if img_args == UNSET_IMG_ARGS:
             # Using the largest bucket
             img_args = self.get_model().vision_buckets.multimodal_buckets[-1]
