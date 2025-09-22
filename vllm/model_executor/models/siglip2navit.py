@@ -661,7 +661,7 @@ class Siglip2VisionTransformer(nn.Module):
         
         last_hidden_state = self.post_layernorm(last_hidden_state)
         print('last_hidden_state:',last_hidden_state.shape, last_hidden_state)
-        
+
         return last_hidden_state
 
 
@@ -720,4 +720,3 @@ class Siglip2NavitModel(torch.nn.Module):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
-    
