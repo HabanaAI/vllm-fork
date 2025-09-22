@@ -556,14 +556,7 @@ class Siglip2Encoder(nn.Module):
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
         cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
-        # 相邻去重（不使用 unique_consecutive，避免 CPU fallback）
-#       if cu_window_seqlens.numel() > 1:
-#           keep = torch.ones_like(cu_window_seqlens, dtype=torch.bool, device=cu_window_seqlens.device)
-#           keep[1:] = cu_window_seqlens[1:] != cu_window_seqlens[:-1]
-#           cu_window_seqlens = cu_window_seqlens[keep]
-        
-#       print('cu_window_seqlens_after_numel:',cu_window_seqlens)
-        
+
         seq_len, _ = inputs_embeds.size()
         print('inputs_embeds:', inputs_embeds, inputs_embeds.shape)
         inputs_embeds = inputs_embeds.reshape(
@@ -584,7 +577,7 @@ class Siglip2Encoder(nn.Module):
         print('emb:',emb.shape)
         position_embeddings = (emb.cos(), emb.sin())
         print('position_embeddings:',position_embeddings)
-        
+
         print('grid_thws', grid_thws)
         cu_seqlens = torch.repeat_interleave(
             grid_thws[:, 1] * grid_thws[:, 2], grid_thws[:, 0]
@@ -598,7 +591,6 @@ class Siglip2Encoder(nn.Module):
             # for more information
             dtype=grid_thws.dtype if torch.jit.is_tracing() else torch.int32,
         )
-        cu_seqlens = torch.tensor([ 8140, 16280],dtype=torch.int32)
         print('cu_seqlens:', cu_seqlens)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
         print('cu_seqlens_after_pad:', cu_seqlens)
@@ -614,9 +606,6 @@ class Siglip2Encoder(nn.Module):
                 cu_seqlens_tmp = cu_seqlens
             else:
                 cu_seqlens_tmp = cu_window_seqlens
-            
-#           print('cu_seqlens_tmp:', cu_seqlens_tmp)
-            
             hidden_states = block(hidden_states, cu_seqlens_tmp,
                                   position_embeddings)
 
