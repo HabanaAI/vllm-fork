@@ -1844,7 +1844,7 @@ class LLMEngine:
                 if isinstance(profile_targets, list):
                     allowed_roles = set(str(x).upper() for x in profile_targets)
                 else:
-                    role_single = current_profile_cfg.get("role")
+                    role_single = current_profile_cfg.get("profile_targets")
                     if isinstance(role_single, str):
                         allowed_roles = {role_single.upper()}
             except Exception:
@@ -1953,11 +1953,15 @@ class LLMEngine:
             elif conditions_met and warmup_conditions_met and current_warmup_steps_left > 0:
                 # Warmup in progress - decrement counter
                 current_warmup_steps_left -= 1
-                print(
-                    f"[Profiler Warmup] Conditions met, warmup steps remaining: {current_warmup_steps_left}"
-                , flush=True)
-                # Return without starting profiler, continue warmup
-                return profile_started, 0, current_profile_cfg, current_profile_cfg_mtime_ns, current_warmup_steps_left, current_warmup_conditions_met
+                if current_warmup_steps_left > 0:
+                    print(
+                        f"[Profiler Warmup] Conditions met, warmup steps remaining: {current_warmup_steps_left}"
+                    , flush=True)
+                    # Return without starting profiler, continue warmup
+                    return profile_started, 0, current_profile_cfg, current_profile_cfg_mtime_ns, current_warmup_steps_left, current_warmup_conditions_met
+                else:
+                    # Warmup just completed; do not return. Fall through to start profiler this iteration.
+                    print("[Profiler Warmup] Warmup complete; starting profiler this iteration", flush=True)
 
             elif not conditions_met and warmup_conditions_met:
                 # Conditions no longer met during warmup - reset warmup state

@@ -79,6 +79,15 @@ if command -v hl-smi >/dev/null 2>&1; then
   ')"
 fi
 
+# Optional debug of parsed topology
+if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
+  echo "[DEBUG] hl-smi topo -c -N output:"
+  hl-smi topo -c -N | sed 's/^/[DEBUG] /'
+  for mid in 0 1 2 3 4 5 6 7; do
+    eval "echo [DEBUG] MOD $mid CPU_BIND=\${CPU_BIND_$mid} MEM_BIND=\${MEM_BIND_$mid}"
+  done
+fi
+
 for ((i=0; i<$DP_RANK; i++))
 do
   RANK=$((DP_INDEX * DP_RANK + i))
@@ -90,6 +99,59 @@ do
   MEM_BIND_VAR="MEM_BIND_${MOD_ID}"
   CPU_BIND="${!CPU_BIND_VAR}"
   MEM_BIND="${!MEM_BIND_VAR}"
+
+  # Optional: split CPU binding into non-overlapping subgroups per module
+  # Enable with VLLM_SPLIT_CPU_BIND=1. Assumes CPU_BIND has comma-separated
+  # subgroups that can be allocated distinctly to modules on the same NUMA.
+  if [ "${VLLM_SPLIT_CPU_BIND:-0}" -eq 1 ] && [ -n "$CPU_BIND" ]; then
+    IFS=',' read -r -a __cpu_chunks <<< "$(echo "$CPU_BIND" | tr -d ' ')"
+    __num_chunks=${#__cpu_chunks[@]}
+    if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
+      echo "[DEBUG] MOD ${MOD_ID} original CPU_BIND='$CPU_BIND' chunks(${__num_chunks})='${__cpu_chunks[*]}'"
+    fi
+    if [ $__num_chunks -lt 1 ]; then
+      echo "[ERROR] Cannot split CPU_BIND (empty) for module ${MOD_ID}" >&2
+      exit 1
+    fi
+    # Special case: two large ranges shared among 4 modules on a NUMA. Split into 4 subranges.
+    if [ $__num_chunks -eq 2 ]; then
+      __r0="${__cpu_chunks[0]}"; __r1="${__cpu_chunks[1]}"
+      __a0=${__r0%-*}; __b0=${__r0#*-}
+      __a1=${__r1%-*}; __b1=${__r1#*-}
+      # ensure integers
+      __mid0=$(( (__a0 + __b0) / 2 ))
+      __mid1=$(( (__a1 + __b1) / 2 ))
+      __sub0="${__a0}-${__mid0}"
+      __sub1="$((__mid0+1))-${__b0}"
+      __sub2="${__a1}-${__mid1}"
+      __sub3="$((__mid1+1))-${__b1}"
+      __four_chunks=("$__sub0" "$__sub1" "$__sub2" "$__sub3")
+      __idx=$(( MOD_ID % 4 ))
+      __sel_chunk="${__four_chunks[$__idx]}"
+      if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
+        echo "[DEBUG] MOD ${MOD_ID} split 2-ranges into 4: '${__four_chunks[*]}', pick idx ${__idx} -> '$__sel_chunk'"
+      fi
+      CPU_BIND="$__sel_chunk"
+      unset __r0 __r1 __a0 __b0 __a1 __b1 __mid0 __mid1 __sub0 __sub1 __sub2 __sub3 __four_chunks __idx
+    else
+      __idx=$(( MOD_ID % __num_chunks ))
+      if [ $__num_chunks -le $__idx ]; then
+        echo "[ERROR] Not enough CPU subgroups in CPU_BIND='$CPU_BIND' for module ${MOD_ID}" >&2
+        exit 1
+      fi
+      __sel_chunk="${__cpu_chunks[$__idx]}"
+      if [ -z "$__sel_chunk" ]; then
+        echo "[ERROR] Selected CPU subgroup is empty for module ${MOD_ID} from '$CPU_BIND'" >&2
+        exit 1
+      fi
+      if [ "${VLLM_DEBUG_TOPO:-0}" -eq 1 ]; then
+        echo "[DEBUG] MOD ${MOD_ID} select chunk index ${__idx} -> '$__sel_chunk'"
+      fi
+      CPU_BIND="$__sel_chunk"
+      unset __idx __sel_chunk
+    fi
+    unset __cpu_chunks __num_chunks
+  fi
 
   CMD=(
     python3 -m vllm.entrypoints.openai.api_server

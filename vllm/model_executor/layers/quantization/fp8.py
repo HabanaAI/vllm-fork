@@ -923,6 +923,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,\
                     hidden_states_across_dp)
 
+
         batch_size, seq_len, hidden_dim = x.shape
         num_experts = layer.local_num_experts
         n_expert_slice = num_experts // self.moe_n_slice
@@ -959,9 +960,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             s3 = t3_bf16.shape
 
             # Flatten tensors
-            f1 = t1.contiguous().reshape(-1)                           # bf16
-            f2 = t2_int32.contiguous().reshape(-1).to(torch.bfloat16)  # cast int32 -> bf16
-            f3 = t3_bf16.contiguous().reshape(-1)                      # bf16
+            f1 = t1.contiguous().reshape(-1)         # bf16
+            f2 = t2_int32.contiguous().reshape(-1)   # int32
+            f3 = t3_bf16.contiguous().reshape(-1)    # bf16
 
             # Concatenate in uint8
             packed = torch.cat([
@@ -975,6 +976,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
             from torch import distributed as dist
             # Single collective
+            #print(f"packed: {packed.shape}, recv.shape: {recv.shape}")
             dist.all_gather_into_tensor(recv, packed, group=get_dp_group().device_group)
 
             # Prepare lists to collect all ranks' tensors
@@ -990,25 +992,15 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             for r in range(dp_size):
                 base = r * per_rank_elems
 
-                # Extract and reshape each tensor
-                seg1 = recv[base : base + n1].view(t1.dtype).reshape(s1)
-                seg2 = recv[base + n1 : base + n1 + n2].view(t3_bf16.dtype).reshape(s2)
-                seg3 = recv[base + n1 + n2 : base + per_rank_elems].view(t3_bf16.dtype).reshape(s3)
+                seg1 = recv[base:base + n1].view(t1.dtype).reshape(s1)
+                seg2 = recv[base + n1:base + n1 + n2].view(t2_int32.dtype).reshape(s2)  # <-- direct int32
+                seg3 = recv[base + n1 + n2:base + per_rank_elems].view(t3_bf16.dtype).reshape(s3)
 
-                # Convert seg2 back to int32
-                t2_r = torch.round(seg2.to(torch.float32)).to(torch.int32)
-
-                # Collect tensors from all ranks
                 all_t1.append(seg1)
-                all_t2.append(t2_r)
+                all_t2.append(seg2)
                 all_t3.append(seg3)
 
-            # Concatenate all ranks' tensors along the first dimension
-            concatenated_t1 = torch.cat(all_t1, dim=0)
-            concatenated_t2 = torch.cat(all_t2, dim=0)
-            concatenated_t3 = torch.cat(all_t3, dim=0)
-
-            return concatenated_t1, concatenated_t2.long(), concatenated_t3
+            return torch.cat(all_t1, dim=0), torch.cat(all_t2, dim=0), torch.cat(all_t3, dim=0)
 
         def do_static_moe_with_dynamic_scaling(x, topk_ids, topk_weights, w13_weight_fp8, w2_weight_fp8, total_num_experts, num_experts, w13_weight_scale_inv_fp8=None, w2_weight_scale_inv_fp8=None):
             x_fp8, x_scale = dynamic_quant(x)
@@ -1074,8 +1066,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             x_scale = layer.w13_input_scale.data
             if layer.dp_size == 1:
                 x_fp8 = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
-            else:
-                x_fp8 = x
+            #else:
+            #    x_fp8 = x
             
             if layer.dp_size > 1:
                 if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0'):
@@ -1098,11 +1090,13 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                         ).dp_metadata.hidden_states_across_dp
                         x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,
                                             hidden_states_across_dp)
+                    x_fp8 = x
                 else:
                     packed_uint8_buf_across_dp = get_forward_context(
                     ).dp_metadata.packed_uint8_buf_across_dp
                     x, topk_ids, topk_weights = packed_allgather(x, topk_ids.to(torch.int32), topk_weights,
                                             packed_uint8_buf_across_dp, layer.dp_size)
+                    x_fp8 = x
 
             batched_tokens = x.shape[0]
             chunk_size = int(os.environ.get("PT_HPU_MOE_THRESHOLD", 256))

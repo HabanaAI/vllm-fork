@@ -118,7 +118,7 @@ def subtuple(obj: object,
     return _TYPE_CACHE[typename](**values)
 
 
-def align_dp_groups(value, op):
+def align_dp_groups_hpu(value, op):
     from vllm.distributed.parallel_state import get_dp_group
     from vllm.platforms import current_platform
     device = current_platform.device_type
@@ -128,6 +128,32 @@ def align_dp_groups(value, op):
     value_t = torch.tensor(value, device=device, dtype=torch.int32)
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()
+
+def align_dp_groups(value, op):
+    from vllm.distributed.parallel_state import get_dp_group
+    from vllm.platforms import current_platform
+    device = current_platform.device_type
+    group = get_dp_group().cpu_group
+    value_t = torch.tensor(value, device="cpu", dtype=torch.int32)
+    torch.distributed.all_reduce(value_t, op=op, group=group)
+    return value_t.item()
+
+
+def align_dp_groups_async(value, op):
+    from vllm.distributed.parallel_state import get_dp_group
+    from vllm.platforms import current_platform
+    device = current_platform.device_type
+    group = get_dp_group().device_group
+    value_t = torch.tensor(value, device=device, dtype=torch.int32)
+    s = torch.hpu.Stream()
+    with torch.hpu.stream(s):
+        work = torch.distributed.all_reduce(value_t, op=op, group=group, async_op=True)
+    return work, value_t
+
+
+def align_dp_groups_finish(work, value_t) -> int:
+    work.wait()
+    return int(value_t.item())
 
 
 def align_tp_groups(value, op):
@@ -976,11 +1002,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.dp_awared_padding and (self.vllm_config.kv_transfer_config
                                        is None or not is_prompt):
             if self.is_driver_worker:
+                #_dp_work, _dp_val = align_dp_groups(
                 batch_size_padded = align_dp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
             if align_worker:
                 batch_size_padded = align_tp_groups(
                     batch_size_padded, torch.distributed.ReduceOp.MAX)
+            #if self.is_driver_worker:
+            #    batch_size_padded = align_dp_groups_finish(_dp_work, _dp_val)
         batch_size_padding = batch_size_padded - real_batch_size
 
         seq_group_metadata_list = seq_group_metadata_list.copy()
@@ -1477,11 +1506,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_bucket_size)
             if self.dp_awared_padding:
                 if self.is_driver_worker:
+                    #_dp_work, _dp_val = align_dp_groups(
                     block_bucket_size = align_dp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
                 if align_worker:
                     block_bucket_size = align_tp_groups(
                         block_bucket_size, torch.distributed.ReduceOp.MAX)
+                #if self.is_driver_worker:
+                #    block_bucket_size = align_dp_groups_finish(_dp_work, _dp_val)
             indices: List[Any]
             indices = [None] * block_bucket_size
             for i, bid in enumerate(block_list):

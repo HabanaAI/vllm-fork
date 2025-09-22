@@ -8,6 +8,8 @@ source "$BASH_DIR"/pd_env.sh
 export ENABLE_PACKED_ALLGATHER=1
 export ENABLE_PRE_SHARED_EXPERT=1
 export VLLM_USE_NUMACTL=1
+export VLLM_SPLIT_CPU_BIND=0
+export VLLM_DEBUG_TOPO=1
 
 # This is to avoid logic in torch.distributed.hccl.__init__.py _setup_module_id overwriting
 # this env var incorrectly
@@ -32,9 +34,9 @@ export VLLM_DELAYED_SAMPLING="true"
 
 model_len=40960
 max_num_batched_tokens=40960
-max_num_seqs=64
-input_min=3500
-input_max=3500
+max_num_seqs=16
+input_min=3000
+input_max=4000
 output_max=1000
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX

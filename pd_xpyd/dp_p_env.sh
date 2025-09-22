@@ -10,11 +10,15 @@ export VLLM_GPU_MEMORY_UTILIZATION=0.8
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
-model_len=32768
-max_num_batched_tokens=16384
-max_num_seqs=16
-input_min=3500
-input_max=3500
+model_len=16384
+# reduce this value to accelerate prefill profile run
+max_num_batched_tokens=16384 #4*4096
+#max_num_batched_tokens=20480 #5*4096
+#max_num_batched_tokens=32768 #8*4096
+#max_num_seqs=8
+max_num_seqs=4
+input_min=1500
+input_max=4000
 output_max=1000
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
