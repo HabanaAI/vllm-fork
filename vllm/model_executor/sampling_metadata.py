@@ -5,7 +5,7 @@ from array import array
 from dataclasses import dataclass
 from typing import Optional
 
-import torch
+import torch, time
 
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams, SamplingType
@@ -14,10 +14,10 @@ from vllm.sequence import (VLLM_TOKEN_ID_ARRAY_TYPE, SequenceData,
 from vllm.utils import (PyObjectCache, async_tensor_h2d,
                         is_pin_memory_available, make_tensor_with_pad,
                         make_tensor_with_pad_align)
-
+from vllm.logger import init_logger
 _SAMPLING_EPS = 1e-5
 
-
+logger = init_logger(__name__)
 @dataclass
 class SequenceGroupToSample:
     # |---------- N-1 iteration --------|
@@ -420,8 +420,10 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
+        prompt_tokens_cache: torch.tensor,
+        past_seq_ids: set,
     ) -> tuple["SamplingTensors", bool, bool, bool, Optional[int],
-               Optional[float]]:
+               Optional[float], Optional[torch.tensor]]:
         prompt_tokens: list[array] = []
         output_tokens: list[array] = []
         top_ks: list[int] = []
@@ -434,7 +436,7 @@ class SamplingTensors:
         do_penalties = False
         do_top_p_top_k = False
         do_min_p = False
-
+        current_seq_ids = set()
         assert sampling_metadata.seq_groups is not None
         for seq_group in sampling_metadata.seq_groups:
             seq_ids = seq_group.seq_ids
@@ -489,7 +491,7 @@ class SamplingTensors:
                 presence_penalties += [p] * sample_lens
                 frequency_penalties += [f] * sample_lens
                 repetition_penalties += [r] * sample_lens
-
+        prompt_tokens_cache_key = None
         if do_penalties:
             for seq_group in sampling_metadata.seq_groups:
                 seq_ids = seq_group.seq_ids
@@ -503,11 +505,15 @@ class SamplingTensors:
                     output_tokens.extend(
                         array(VLLM_TOKEN_ID_ARRAY_TYPE)
                         for _ in range(prefill_len))
-                if seq_group.do_sample:
+                if seq_group.do_sample:  
                     for seq_id in seq_ids:
                         seq_data = seq_group.seq_data[seq_id]
                         prompt_tokens.append(seq_data.prompt_token_ids_array)
                         output_tokens.append(seq_data.output_token_ids_array)
+                        current_seq_ids.update(seq_ids)
+            if current_seq_ids != past_seq_ids:
+                prompt_tokens_cache = None
+                logger.info(f"libin debug reset  prompt_tokens_cache as {current_seq_ids=} {past_seq_ids=}")
 
         top_k_scalar = top_ks[0] if do_top_p_top_k and all(
             k == top_ks[0] for k in top_ks) else None
@@ -527,9 +533,10 @@ class SamplingTensors:
             vocab_size,
             device,
             dtype,
+            prompt_tokens_cache,
         )
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
-                top_k_scalar, top_p_scalar)
+                top_k_scalar, top_p_scalar, current_seq_ids)
 
     @classmethod
     def from_lists(
@@ -546,46 +553,57 @@ class SamplingTensors:
         vocab_size: int,
         device: torch.device,
         dtype: torch.dtype,
+        prompt_tokens_cache: torch.tensor,
     ) -> "SamplingTensors":
         # Note that the performance will be very bad without
         # pinned memory.
+
+        t1 = time.perf_counter()
         pin_memory = is_pin_memory_available()
 
         do_penalties = prompt_tokens or output_tokens
 
         if do_penalties:
-            if current_platform.is_hpu():
-                prompt_t = make_tensor_with_pad_align(
-                    prompt_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                    max_len_align=1024,
-                )
-                output_t = make_tensor_with_pad_align(
-                    output_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                    max_len_align=1024,
-                )
+
+            logger.info(f"libin debug try to find prompt {prompt_tokens_cache=} ")
+            if (prompt_tokens_cache is not None and 
+                prompt_tokens_cache.device == device):  
+                # Reuse cached prompt_tokens already on HPU  
+                prompt_t = prompt_tokens_cache
+                logger.info(f"libin debug found cache for prompt {prompt_t=}")
             else:
-                prompt_t = make_tensor_with_pad(
-                    prompt_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                )
-                output_t = make_tensor_with_pad(
-                    output_tokens,
-                    vocab_size,
-                    device="cpu",
-                    dtype=torch.int64,
-                    pin_memory=pin_memory,
-                )
+                if current_platform.is_hpu():
+                    prompt_t = make_tensor_with_pad_align(
+                        prompt_tokens,
+                        vocab_size,
+                        device="cpu",
+                        dtype=torch.int64,
+                        pin_memory=pin_memory,
+                        max_len_align=1024,
+                    )
+                    output_t = make_tensor_with_pad_align(
+                        output_tokens,
+                        vocab_size,
+                        device="cpu",
+                        dtype=torch.int64,
+                        pin_memory=pin_memory,
+                        max_len_align=1024,
+                    )
+                else:
+                    prompt_t = make_tensor_with_pad(
+                        prompt_tokens,
+                        vocab_size,
+                        device="cpu",
+                        dtype=torch.int64,
+                        pin_memory=pin_memory,
+                    )
+                    output_t = make_tensor_with_pad(
+                        output_tokens,
+                        vocab_size,
+                        device="cpu",
+                        dtype=torch.int64,
+                        pin_memory=pin_memory,
+                    )
         else:
             empty_tensor = torch.empty(0, device=device, dtype=torch.long)
             prompt_t = empty_tensor
@@ -635,8 +653,8 @@ class SamplingTensors:
         )
         # Because the memory is pinned, we can do non-blocking
         # transfer to device.
-
-        return cls(
+        t2 = time.perf_counter()
+        ret = cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
             top_ks=top_ks_t.to(device=device, non_blocking=True),
@@ -647,6 +665,9 @@ class SamplingTensors:
                                                          non_blocking=True),
             repetition_penalties=repetition_penalties_t.to(device=device,
                                                            non_blocking=True),
-            prompt_tokens=prompt_t.to(device=device, non_blocking=True),
+            prompt_tokens=prompt_t.to(device=device, non_blocking=True) if prompt_t.device == device else prompt_t,
             output_tokens=output_t.to(device=device, non_blocking=True),
         )
+        t3 = time.perf_counter()
+        logger.info(f"libin debug from_lists total:{t3-t1} {t3-t2=}")
+        return ret

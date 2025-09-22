@@ -3856,7 +3856,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         bool(model_input.multi_modal_kwargs and \
                        ('pixel_values')in model_input.multi_modal_kwargs))
                     execute_model_kwargs['attn_metadata'] = attn_metadata
-
+                logger.info(f"libin debug execute_model {execute_model_kwargs['input_ids'].shape=}")
                 if not bypass_model_exec:
                     if self.model_is_mrope or self.is_mm_optimized:
                         if ('pixel_values') in execute_model_kwargs and \
@@ -3978,6 +3978,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_inputs.append(model_input)
                 if self.do_mark_step:
                     htorch.core.mark_step()
+
+                if hasattr(self.model.sampler, '_sampling_tensors') and self.model.sampler._sampling_tensors is not None:
+                    #import remote_pdb;remote_pdb.set_trace()
+                    sampling_tensors = self.model.sampler._sampling_tensors  
+                    if sampling_tensors.prompt_tokens.numel() > 0:  
+                        # Cache the prompt_tokens tensor that's already on HPU  
+                        self.model.sampler._prompt_tokens_hpu_cache = sampling_tensors.prompt_tokens  
+                        logger.info(f"libin execute_mode assign hpu_cache {self.model.sampler._prompt_tokens_hpu_cache=}")
+
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:
                     model_input.async_callback()
