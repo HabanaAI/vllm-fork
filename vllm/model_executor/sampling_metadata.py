@@ -495,7 +495,6 @@ class SamplingTensors:
                 presence_penalties += [p] * sample_lens
                 frequency_penalties += [f] * sample_lens
                 repetition_penalties += [r] * sample_lens
-        prompt_tokens_cache_key = None
         if do_penalties:
             for seq_group in sampling_metadata.seq_groups:
                 seq_ids = seq_group.seq_ids
@@ -517,7 +516,7 @@ class SamplingTensors:
                         current_seq_ids.update(seq_ids)
             if current_seq_ids != past_seq_ids:
                 prompt_tokens_cache = None
-                logger.info(f"libin debug reset  prompt_tokens_cache as {current_seq_ids=} {past_seq_ids=}")
+                logger.info(f"libin debug from_sampling_metadata reset  prompt_tokens_cache as {current_seq_ids=} {past_seq_ids=}")
 
         top_k_scalar = top_ks[0] if do_top_p_top_k and all(
             k == top_ks[0] for k in top_ks) else None
@@ -539,6 +538,7 @@ class SamplingTensors:
             dtype,
             prompt_tokens_cache,
         )
+        logger.info(f"libin debug from_sampling_metadata {do_penalties=}")
         return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p,
                 top_k_scalar, top_p_scalar, current_seq_ids)
 

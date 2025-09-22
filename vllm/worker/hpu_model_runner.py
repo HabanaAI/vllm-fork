@@ -3986,7 +3986,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         # Cache the prompt_tokens tensor that's already on HPU  
                         self.model.sampler._prompt_tokens_hpu_cache = sampling_tensors.prompt_tokens
                         self.model.sampler._prompt_mask_hpu_cache = self.model.sampler._last_prompt_mask
-                        #logger.info(f"libin execute_mode assign hpu_cache {self.model.sampler._prompt_tokens_hpu_cache=}")
+                        
+                        #logger.info(f"libin execute_mode assign hpu_cache {self.model.sampler._last_prompt_mask =}")
 
                 if use_delayed_sampling \
                    and model_input.async_callback is not None:

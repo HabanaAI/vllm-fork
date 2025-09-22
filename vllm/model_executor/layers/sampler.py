@@ -290,14 +290,15 @@ class Sampler(nn.Module):
         do_min_p = self._do_min_p
 
         logits = _apply_min_tokens_penalty(logits, sampling_metadata)
-
+        #import remote_pdb;remote_pdb.set_trace()
         # Apply presence and frequency penalties.
         if do_penalties:
             logits = apply_penalties(logits, sampling_tensors.prompt_tokens,
                                      sampling_tensors.output_tokens,
                                      sampling_tensors.presence_penalties,
                                      sampling_tensors.frequency_penalties,
-                                     sampling_tensors.repetition_penalties)
+                                     sampling_tensors.repetition_penalties,
+                                     self._prompt_mask_hpu_cache, self._last_prompt_mask)
 
         # Use float32 to apply temperature scaling.
         # Use in-place division to avoid creating a new tensor.
@@ -562,12 +563,8 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
                      frequency_penalties: torch.Tensor,
                      repetition_penalties: torch.Tensor) -> torch.Tensor:
     num_seqs, vocab_size = logits.shape
-    if self._prompt_masks_hpu_cache is None:
-        _, prompt_mask = _get_bin_counts_and_mask(prompt_tokens_tensor, vocab_size,
+    _, prompt_mask = _get_bin_counts_and_mask(prompt_tokens_tensor, vocab_size,
                                                 num_seqs)
-    else:
-        prompt_mask = self._prompt_masks_hpu_cache
-    self._last_prompt_mask = prompt_mask
     output_bin_counts, output_mask = _get_bin_counts_and_mask(
         output_tokens_tensor, vocab_size, num_seqs)
 
