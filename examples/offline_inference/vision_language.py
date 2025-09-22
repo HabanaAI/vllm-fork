@@ -787,14 +787,14 @@ def run_nvlm_d(questions: list[str], modality: str) -> ModelRequestData:
 def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
     assert modality == "image"
 
-    model_name = "/home/disk7/HF_MODELS/Ovis2-1B"
+    model_name = "AIDC-AI/Ovis2-1B"
 
     engine_args = EngineArgs(
         model=model_name,
         max_model_len=4096,
         max_num_seqs=2,
         trust_remote_code=True,
-        dtype="float32",
+        dtype="bfloat16",
         limit_mm_per_prompt={modality: 1},
         tensor_parallel_size=1,
     )
@@ -1032,7 +1032,7 @@ def run_qwen2_vl(questions: list[str], modality: str) -> ModelRequestData:
 
 # Qwen2.5-VL
 def run_qwen2_5_vl(questions: list[str], modality: str) -> ModelRequestData:
-    model_name = "/home/disk6/HF_models/Qwen2.5-VL-72B-Instruct"
+    model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
 
     engine_args = EngineArgs(
         model=model_name,
@@ -1044,7 +1044,6 @@ def run_qwen2_5_vl(questions: list[str], modality: str) -> ModelRequestData:
             "fps": 1,
         },
         limit_mm_per_prompt={modality: 1},
-        tensor_parallel_size=8,
     )
 
     if modality == "image":
