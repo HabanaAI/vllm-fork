@@ -18,6 +18,9 @@ from vllm.logger import init_logger
 _SAMPLING_EPS = 1e-5
 
 logger = init_logger(__name__)
+
+pin_memory = is_pin_memory_available()
+is_hpu = current_platform.is_hpu()   
 @dataclass
 class SequenceGroupToSample:
     # |---------- N-1 iteration --------|
@@ -286,7 +289,7 @@ def _prepare_seq_groups(
 
         if seq_group_metadata.is_prompt:
             if sampling_params.seed is not None:
-                if current_platform.is_hpu():
+                if is_hpu:
                     import habana_frameworks.torch.hpu.random as htrandom
                     generator = \
                         htrandom.default_generators[
@@ -412,6 +415,7 @@ class SamplingTensors:
     repetition_penalties: torch.Tensor
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
+
 
     @classmethod
     def from_sampling_metadata(
@@ -558,21 +562,18 @@ class SamplingTensors:
         # Note that the performance will be very bad without
         # pinned memory.
 
-        t1 = time.perf_counter()
-        pin_memory = is_pin_memory_available()
-
+        t0 = time.perf_counter()
         do_penalties = prompt_tokens or output_tokens
-
+        t1= time.perf_counter()
         if do_penalties:
-
-            logger.info(f"libin debug try to find prompt {prompt_tokens_cache=} ")
-            if (prompt_tokens_cache is not None and 
-                prompt_tokens_cache.device == device):  
-                # Reuse cached prompt_tokens already on HPU  
-                prompt_t = prompt_tokens_cache
-                logger.info(f"libin debug found cache for prompt {prompt_t=}")
-            else:
-                if current_platform.is_hpu():
+            if is_hpu:
+                logger.info(f"libin debug try to find prompt {time.perf_counter()-t0=} ")
+                if (prompt_tokens_cache is not None and 
+                    prompt_tokens_cache.device == device):  
+                    # Reuse cached prompt_tokens already on HPU  
+                    prompt_t = prompt_tokens_cache
+                    #logger.info(f"libin debug found cache for prompt {prompt_t=}")
+                else:
                     prompt_t = make_tensor_with_pad_align(
                         prompt_tokens,
                         vocab_size,
@@ -581,34 +582,36 @@ class SamplingTensors:
                         pin_memory=pin_memory,
                         max_len_align=1024,
                     )
-                    output_t = make_tensor_with_pad_align(
-                        output_tokens,
-                        vocab_size,
-                        device="cpu",
-                        dtype=torch.int64,
-                        pin_memory=pin_memory,
-                        max_len_align=1024,
-                    )
-                else:
-                    prompt_t = make_tensor_with_pad(
-                        prompt_tokens,
-                        vocab_size,
-                        device="cpu",
-                        dtype=torch.int64,
-                        pin_memory=pin_memory,
-                    )
-                    output_t = make_tensor_with_pad(
-                        output_tokens,
-                        vocab_size,
-                        device="cpu",
-                        dtype=torch.int64,
-                        pin_memory=pin_memory,
-                    )
+                    logger.info(f"libin debug not found cache for prompt {prompt_t=}")
+                t1 =  time.perf_counter()
+                output_t = make_tensor_with_pad_align(
+                    output_tokens,
+                    vocab_size,
+                    device="cpu",
+                    dtype=torch.int64,
+                    pin_memory=pin_memory,
+                    max_len_align=1024,
+                )
+            else:
+                prompt_t = make_tensor_with_pad(
+                    prompt_tokens,
+                    vocab_size,
+                    device="cpu",
+                    dtype=torch.int64,
+                    pin_memory=pin_memory,
+                )
+                output_t = make_tensor_with_pad(
+                    output_tokens,
+                    vocab_size,
+                    device="cpu",
+                    dtype=torch.int64,
+                    pin_memory=pin_memory,
+                )
         else:
             empty_tensor = torch.empty(0, device=device, dtype=torch.long)
             prompt_t = empty_tensor
             output_t = empty_tensor
-
+        t2 =  time.perf_counter()
         temperatures_t = torch.tensor(
             temperatures,
             device="cpu",
@@ -653,7 +656,8 @@ class SamplingTensors:
         )
         # Because the memory is pinned, we can do non-blocking
         # transfer to device.
-        t2 = time.perf_counter()
+        t3 = time.perf_counter()
+        logger.info(f"libin debug found cache for prompt {prompt_t.device=} {device=}")
         ret = cls(
             temperatures=temperatures_t.to(device=device, non_blocking=True),
             top_ps=top_ps_t.to(device=device, non_blocking=True),
@@ -665,9 +669,9 @@ class SamplingTensors:
                                                          non_blocking=True),
             repetition_penalties=repetition_penalties_t.to(device=device,
                                                            non_blocking=True),
-            prompt_tokens=prompt_t.to(device=device, non_blocking=True) if prompt_t.device == device else prompt_t,
+            prompt_tokens=prompt_t.to(device=device, non_blocking=True) if prompt_t.device != device else prompt_t,
             output_tokens=output_t.to(device=device, non_blocking=True),
         )
-        t3 = time.perf_counter()
-        logger.info(f"libin debug from_lists total:{t3-t1} {t3-t2=}")
+        t4 = time.perf_counter()
+        logger.info(f"libin debug from_lists total:{t4-t0} prompt:{t1-t0=} decode: {t2-t1}: others:{t3-t2}, cls {t4-t3}")
         return ret

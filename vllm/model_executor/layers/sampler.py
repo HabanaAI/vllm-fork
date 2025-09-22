@@ -198,8 +198,11 @@ class Sampler(nn.Module):
         self.include_gpu_probs_tensor = False
         self.should_modify_greedy_probs_inplace = False
         # Add HPU cache class variables  
-        self._prompt_tokens_hpu_cache = None  
-        self._cached_seq_ids = None
+        self._prompt_tokens_hpu_cache: Optional[torch.Tensor] = None  
+        self._prompt_mask_hpu_cache: Optional[torch.Tensor] = None  
+        self._cached_seq_ids: Optional[set] = None
+        self._last_prompt_mask: Optional[torch.Tensor] = None
+        
 
     def _init_sampling_tensors(
         self,
@@ -235,9 +238,9 @@ class Sampler(nn.Module):
         # After tensors are created, update cache
         logger.info(f"libin debug init_sampling {self._cached_seq_ids=} {current_seq_ids}")
         if self._cached_seq_ids != current_seq_ids:
-            
             self._prompt_tokens_hpu_cache = None
             self._cached_seq_ids = current_seq_ids
+            self._prompt_mask_hpu_cache = None
 
             
 
@@ -268,7 +271,7 @@ class Sampler(nn.Module):
         """
         assert logits is not None
         _, vocab_size = logits.shape
-
+        #import remote_pdb;remote_pdb.set_trace()
         # Prepare sampling tensors with pinned memory to avoid blocking.
         if not sampling_metadata.reuse_sampling_tensors:
             self._init_sampling_tensors(logits, sampling_metadata)
@@ -559,8 +562,12 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
                      frequency_penalties: torch.Tensor,
                      repetition_penalties: torch.Tensor) -> torch.Tensor:
     num_seqs, vocab_size = logits.shape
-    _, prompt_mask = _get_bin_counts_and_mask(prompt_tokens_tensor, vocab_size,
-                                              num_seqs)
+    if self._prompt_masks_hpu_cache is None:
+        _, prompt_mask = _get_bin_counts_and_mask(prompt_tokens_tensor, vocab_size,
+                                                num_seqs)
+    else:
+        prompt_mask = self._prompt_masks_hpu_cache
+    self._last_prompt_mask = prompt_mask
     output_bin_counts, output_mask = _get_bin_counts_and_mask(
         output_tokens_tensor, vocab_size, num_seqs)
 
