@@ -788,9 +788,12 @@ class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
         if padding_len <= 0:
             return pixel_values, image_grid_thw
 
-        logger.info(
-            f"[MM_BUCKETING] Padding current number pixel {pixel_values.shape[0]} to {desired_number_of_pixels}"
-        )
+        logger_msg = "Padding current number pixel " \
+            + str(pixel_values.shape[0]) \
+            + " to " \
+            + str(desired_number_of_pixels)
+        logger.debug(logger_msg)
+
         constant_value = -100
         pixel_values = torch.cat([
             pixel_values,
