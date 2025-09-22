@@ -796,6 +796,7 @@ def run_ovis(questions: list[str], modality: str) -> ModelRequestData:
         trust_remote_code=True,
         dtype="float32",
         limit_mm_per_prompt={modality: 1},
+        tensor_parallel_size=1,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
