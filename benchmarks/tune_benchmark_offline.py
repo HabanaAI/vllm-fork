@@ -111,15 +111,25 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
     last_block = last_block + decode_block_step  # add 1 more step size as buffer
 
     if print_only:
+        # although we don't tune VLLM_PROMPT_BS_BUCKET_MIN, still print out the value here
+        print("\t VLLM_PROMPT_BS_BUCKET_MIN=" + str(os.getenv("VLLM_PROMPT_BS_BUCKET_MIN", 1)))  # default:1
+        if prompt_bs_bucket_step:
+            print(f"\t VLLM_PROMPT_BS_BUCKET_STEP={prompt_bs_bucket_step}")
+        else:
+            print("\t VLLM_PROMPT_BS_BUCKET_STEP = " + str(os.getenv("VLLM_PROMPT_BS_BUCKET_STEP", 32)))  # default:32
+        if prompt_bs_bucket_max:
+            print(f"\t VLLM_PROMPT_BS_BUCKET_MAX={prompt_bs_bucket_max}")
+        else:
+            print("\t VLLM_PROMPT_BS_BUCKET_MAX = " + str(
+                os.getenv("VLLM_PROMPT_BS_BUCKET_MAX", max_num_seqs)))  # default:max_num_seqs
         print(f"\t VLLM_PROMPT_SEQ_BUCKET_MIN={args.input_len}")
         if prompt_seq_step:
             print(f"\t VLLM_PROMPT_SEQ_BUCKET_STEP={prompt_seq_step}")
+        else:
+            print(
+                "\t VLLM_PROMPT_SEQ_BUCKET_STEP = " + str(
+                    os.getenv("VLLM_PROMPT_SEQ_BUCKET_STEP", block_size)))  # default: block_size
         print(f"\t VLLM_PROMPT_SEQ_BUCKET_MAX={max_model_len}")
-
-        if prompt_bs_bucket_step:
-            print(f"\t VLLM_PROMPT_BS_BUCKET_STEP={prompt_bs_bucket_step}")
-        if prompt_bs_bucket_max:
-            print(f"\t VLLM_PROMPT_BS_BUCKET_MAX={prompt_bs_bucket_max}")
 
         print(f"\t VLLM_DECODE_BS_BUCKET_MIN={decode_bs}")
         print(f"\t VLLM_DECODE_BS_BUCKET_STEP={decode_bs}")
@@ -133,10 +143,12 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
             os.environ["VLLM_PROMPT_BS_BUCKET_STEP"] = str(prompt_bs_bucket_step)
         if prompt_bs_bucket_max:
             os.environ["VLLM_PROMPT_BS_BUCKET_MAX"] = str(prompt_bs_bucket_max)
+
         os.environ["VLLM_PROMPT_SEQ_BUCKET_MIN"] = str(args.input_len)
         if prompt_seq_step:
             os.environ["VLLM_PROMPT_SEQ_BUCKET_STEP"] = str(prompt_seq_step)
         os.environ["VLLM_PROMPT_SEQ_BUCKET_MAX"] = str(max_model_len)
+
         os.environ["VLLM_DECODE_BS_BUCKET_MIN"] = str(decode_bs)
         os.environ["VLLM_DECODE_BS_BUCKET_STEP"] = str(decode_bs)
         os.environ["VLLM_DECODE_BS_BUCKET_MAX"] = str(decode_bs)
@@ -147,7 +159,6 @@ def set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max, prompt_seq_step
 
 
 def objective(trial, args):
-
     benchmark_cmd_list = args.benchmark_throughput_cmd.split()
     if "--block-size" in benchmark_cmd_list:
         index = benchmark_cmd_list.index("--block-size")
@@ -194,6 +205,7 @@ def objective(trial, args):
     trial.set_user_attr("max_num_seqs", max_num_seqs)
     set_trial_value(prompt_bs_bucket_step, prompt_bs_bucket_max,
                     prompt_seq_step, decode_bs, decode_block_step, block_size, max_num_seqs, args)
+
     benchmark_cmd = construct_benchmark_cmd(args, benchmark_cmd_list, max_num_seqs, block_size)
     print(benchmark_cmd)
     log_file = f"tuning_offline_benchmark_{trial.number}.log"
@@ -255,18 +267,19 @@ def construct_benchmark_cmd(args, benchmark_cmd_list, max_num_seqs, block_size):
 
 
 def validate_args(args):
-    # args.prompt_seq_step_range max should be less than total-model-len (input_len +
-    if args.prompt_seq_step_range and args.prompt_seq_step_range[1] > (args.input_len + (args.output_len * args.n)):
+    # args.prompt_seq_step_range max should be less than total-model-len
+    if args.prompt_seq_step_range and \
+            args.prompt_seq_step_range[1] > (args.input_len + (args.output_len * args.n)):
         raise ValueError("--prompt-seq-step-range max should be less than total model context length.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Bucket Tune")
+    parser = argparse.ArgumentParser(description="Tune Offline Benchmark")
 
     parser.add_argument(
         "--task-name",
         type=str,
-        default="bucket_tuning_offline",
+        default="tune_benchmark_offline",
         help="Study name for Optuna. To continue previous interrupted tuning, re-use the name. "
              "To start tuning from beginning, use a different task name.",
     )
