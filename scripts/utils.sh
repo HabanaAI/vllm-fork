@@ -271,9 +271,12 @@ set_linear_bucketing(){
 
     prompt_bs_step=1
     prompt_bs_min=1
-    prompt_bs_max=$(( $max_num_batched_tokens / $(ceil $input_min $block_size) ))
+    prompt_bs_max=$(( $PREFERED_SEQ_LEN_TO_CAPTURE / $(ceil $input_min $block_size) ))
     prompt_bs_max=$( ceil $prompt_bs_max $prompt_bs_step )
-    prompt_bs_max=$( min $prompt_bs_max $max_num_seqs ) # consider max_num_prefill_seqs
+    prompt_bs_max=$( min $prompt_bs_max $max_num_seqs )
+    if [ -n "$max_num_prefill_seqs" ]; then
+        prompt_bs_max=$( min $prompt_bs_max $max_num_prefill_seqs )
+    fi
     prompt_bs_max=$( max $prompt_bs_max 1 )
     export VLLM_PROMPT_BS_BUCKET_MIN=${VLLM_PROMPT_BS_BUCKET_MIN:-$prompt_bs_min}
     export VLLM_PROMPT_BS_BUCKET_STEP=${VLLM_PROMPT_BS_BUCKET_STEP:-$prompt_bs_step}
@@ -296,10 +299,10 @@ set_linear_bucketing(){
 
     decode_block_step=$block_size
     decode_block_min=$( ceil_div $input_min $block_size )
-    decode_block_min=$( ceil_div $decode_block_min $decode_block_step )
+    decode_block_min=$( max $decode_block_min $decode_block_step )
     max_context_len=$(( $input_max + $output_max ))
-    max_context_blocks=$(( $(ceil_div $max_context_len $block_size) + 1 )) # todo: check if must +1
-    decode_block_max=$(( $max_context_blocks * $decode_bs_max))
+    max_context_blocks=$( ceil_div $max_context_len $block_size )
+    decode_block_max=$(( $max_context_blocks * $decode_bs_max ))
     decode_block_max=$( ceil $decode_block_max $decode_block_step )
     export VLLM_DECODE_BLOCK_BUCKET_MIN=${VLLM_DECODE_BLOCK_BUCKET_MIN:-$decode_block_min}
     export VLLM_DECODE_BLOCK_BUCKET_STEP=${VLLM_DECODE_BLOCK_BUCKET_STEP:-$decode_block_step}
@@ -309,7 +312,7 @@ set_linear_bucketing(){
 set_perf_tuning(){
     if [ "$cache_path" != "" ]; then
         echo "HPU recipe cache will be saved to $cache_path"
-        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,40960,false
+        export PT_HPU_RECIPE_CACHE_CONFIG=${cache_path},false,40960
         mkdir -p "${cache_path}"
     fi
 
@@ -332,14 +335,6 @@ set_perf_tuning(){
     else
         echo "VLLM_ZERO_PADDING is enabled"
         export VLLM_ZERO_PADDING=true
-    fi
-
-    if [ "$disable_fsdpa" == "true" ]; then
-        echo "VLLM_PROMPT_USE_FUSEDSDPA is disabled"
-        export VLLM_PROMPT_USE_FUSEDSDPA=false
-    else
-        echo "VLLM_PROMPT_USE_FUSEDSDPA is enabled"
-        export VLLM_PROMPT_USE_FUSEDSDPA=true
     fi
 
     # VLLM_FP32_SOFTMAX=false by default, set to true for models with accuracy issues.

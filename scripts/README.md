@@ -197,6 +197,7 @@ usage: calibrate_model.sh <options>
   -t    - tensor parallel size to run at (default: 1); NOTE: if t > 8 then we need a multi-node setup
   -r    - rank of unified measurements, it should be smaller than original rank number and should be a factor of the original rank number
   -u    - use expert parallelism (default: False), expert parallelism unification rule is unique, card 1 expert measurement will be extended to card 0 if unified to x from 2x cards number
+  -x    - expand measurement files to specific world size (default: not set)
   -e    - set this flag to enable enforce_eager execution
 ```
 
@@ -209,7 +210,7 @@ HPU_SIZE=2
 ./calibrate_model.sh \
      -m $MODEL \
      -d NeelNanda/pile-10k \
-     -o quantization
+     -o quantization \
      -t $HPU_SIZE
 ```
 
@@ -220,7 +221,17 @@ bash calibrate_model.sh \
      -m /models/Qwen3-235B-A22B \
      -d NeelNanda/pile-10k \
      -o quantization \
-     -t 8 -b 256 -r 4 -u
+     -t 8 -r 4 -u
+```
+
+The `-x <TP_SIZE_WITH_PP>` must set to run the model with pipeline parallelism (PP), with the `TP_SIZE_WITH_PP` means the TP size when PP is enabled. Take GLM-4.5-FP8 with TP=4 and PP=2 as an example:
+
+``` bash
+bash calibrate_model.sh \
+     -m /models/GLM-4.5-FP8 \
+     -d NeelNanda/pile-10k \
+     -o quantization \
+     -t 8 -x 4 -u
 ```
 
 Then the resault measurement data from the calibration could be used to run fp8 inference with 8 or 4 HPUs.
