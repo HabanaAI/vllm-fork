@@ -1520,7 +1520,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.is_mm_optimized = is_mm_optimized(self.model)
         if self.model_is_mrope or self.is_mm_optimized:
             if hasattr(self.model.model.config, 'mm_tokens_per_image'):
-                self.mm_tokens_per_image = self.model.model.config.mm_tokens_per_image
+                self.mm_tokens_per_image = \
+                    self.model.model.config.mm_tokens_per_image
                 self.image_token_id = self.model.model.config.image_token_id
             elif 'InternVLChatModel' in str(type(self.model.model)):
                 self.image_token_id = 151667
