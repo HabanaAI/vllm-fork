@@ -85,11 +85,12 @@ if is_hpu:
     import habana_frameworks.torch as htorch
     import habana_frameworks.torch.core as htcore
     from habana_frameworks.torch.hpex.kernels import FusedSDPA
-    
+
 # For profile run
 _MAX_FRAMES_PER_VIDEO = 16
 
 # === Vision Inputs === #
+
 
 class AttentionLongSequence:
 
@@ -137,6 +138,7 @@ def create_block_diagonal_attention_mask_outerprod(indices):
     else:
         res = torch.einsum('bi,bj->ij', range_indices, range_indices)
     return res.bool()
+
 
 class Qwen2VLImagePixelInputs(TypedDict):
     type: Literal["pixel_values"]
@@ -765,6 +767,7 @@ class Qwen2VisionTransformer(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
+
 class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
     """
     Here we overwrite some of the methods of Qwen2_5_VisionTransformer
@@ -841,7 +844,6 @@ class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
 
         return hidden_states
 
-
     def get_image_embeds(
         self,
         pixel_values: torch.Tensor,
@@ -875,7 +877,7 @@ class Qwen2VisionTransformerStaticShape(Qwen2VisionTransformer):
                     (cu_seqlens)
             assert pixel_values_curr_img_padded.shape[0] == \
                 rot_pos_emb.shape[0]
-                
+
             extra_forward_kwargs = {}
             if htorch.utils.internal.is_lazy():
                 padded_len = pixel_values_curr_img_padded.shape[0]
