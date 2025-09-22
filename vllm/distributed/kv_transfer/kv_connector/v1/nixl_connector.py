@@ -1309,19 +1309,26 @@ class NixlConnectorWorker:
         # Get descs ids.
         local_block_descs_ids: list[int] = []
         remote_block_descs_ids: list[int] = []
-        local_sub_block_ids: list[int] = []
 
+        if self.block_factor > 1:
+            local_sub_block_ids = [b for x in local_block_ids for b in range(x * self.block_factor, (x + 1) * self.block_factor)]
+            valid_len = min(len(local_sub_block_ids), len(remote_block_ids))
+            logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{valid_len=} |{len(remote_block_ids)}')
+            #remote_block_ids = truncate_remote_blocks(remote_block_ids, len(local_sub_block_ids), self.block_factor)
+            remote_block_ids = remote_block_ids[:valid_len]
+            local_block_ids = local_sub_block_ids[:valid_len]
+            logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
         #print('buke: ', remote_block_ids)
-        remote_block_ids = remote_block_ids[:(len(remote_block_ids)//self.block_factor)*self.block_factor]
-        for index,remote_block_id in enumerate(remote_block_ids):
-            local_sub_block_ids.append(local_block_ids[index//self.block_factor]*self.block_factor + index%self.block_factor)
-        logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
+        #remote_block_ids = remote_block_ids[:(len(remote_block_ids)//self.block_factor)*self.block_factor]
+        #for index,remote_block_id in enumerate(remote_block_ids):
+        #    local_sub_block_ids.append(local_block_ids[index//self.block_factor]*self.block_factor + index%self.block_factor)
+        #logger.debug(f'buke {local_block_ids=} |{remote_block_ids=} |{local_sub_block_ids=}')
         if not self.block_window_per_layer:
             # Default case: assume global attention
             remote_block_descs_ids = self._get_block_descs_ids(
                 dst_engine_id, remote_block_ids)
             local_block_descs_ids = self._get_block_descs_ids(
-                self.engine_id, local_sub_block_ids)
+                self.engine_id, local_block_ids)
         else:
             # TODO(mgoin): remove this once we have hybrid memory allocator
             # Optimization for models with local attention (Llama 4)
