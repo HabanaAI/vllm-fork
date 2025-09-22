@@ -122,8 +122,6 @@ class Siglip2VisionEmbeddings(nn.Module):
                 -1).unsqueeze(0).permute(0, 3, 1, 2)
             cnt = 0
             for t, h, w in grid_thws:
-                # t, h, w = int(t_), int(h_), int(w_)
-                print('t, h, w:', t, h, w)
                 volume = t * h * w
                 pe = F.interpolate(positional_embeddings,
                                    size=(h, w),
@@ -450,8 +448,7 @@ class Siglip2Encoder(nn.Module):
     # copied from qwen2.5_vl
     def rot_pos_emb(self, grid_thw):
         pos_ids = []
-        for t_, h_, w_ in grid_thw:
-            t, h, w = int(t_), int(h_), int(w_)
+        for t, h, w in grid_thw:
             hpos_ids = torch.arange(h).unsqueeze(1).expand(-1, w)
             hpos_ids = hpos_ids.reshape(
                 h // self.hidden_stride,
